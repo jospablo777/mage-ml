@@ -4,8 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mage-ai"
-# NOTE: when you change this, change the value of VERSION in the following file:
-# mage_ai/server/constants.py
 version = "0.9.79"
 description = "Mage is a tool for building and deploying data pipelines."
 readme = "README.md"
