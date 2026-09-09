@@ -47,8 +47,9 @@ The layout is:
 - `[dependency-groups] dev` holds the development tooling that Poetry used to own, plus
   `pytest-xdist`.
 
-`setup.py` and `poetry.lock` are removed. `MANIFEST.in` and the setuptools build backend stay, so
-the sdist and the wheel keep the same contents.
+`setup.py`, `poetry.lock`, and `dev.requirements.txt` are removed. `dev.requirements.txt` held
+`flake8-bugbear`, which the dev group now carries. `MANIFEST.in` and the setuptools build backend
+stay, so the sdist and the wheel keep the same contents.
 
 The `all` extra now references the other extras instead of repeating their pins. That is what let it
 drift on `oracledb` and `kafka-python`, and a reference cannot drift.

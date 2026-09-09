@@ -20,4 +20,4 @@ git diff --name-only master...HEAD --diff-filter=d | \
   grep -v '^mage_ai/server/frontend_dist/' | \
   grep -v '^mage_ai/server/frontend_dist_base_path_template/' | \
   grep -E '\.(py)$' | \
-  xargs poetry run pre-commit run --show-diff-on-failure --files
+  xargs uv run pre-commit run --show-diff-on-failure --files

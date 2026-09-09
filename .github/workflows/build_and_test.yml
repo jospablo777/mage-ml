@@ -7,14 +7,14 @@ on:
       - "mage_integrations/**"
       - "pyproject.toml"
       - "requirements.txt"
-      - "setup.py"
+      - "uv.lock"
   pull_request:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
       - "pyproject.toml"
       - "requirements.txt"
-      - "setup.py"
+      - "uv.lock"
 
 env:
   ENV: test_mage
