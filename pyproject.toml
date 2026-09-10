@@ -229,7 +229,7 @@ all = [
   "mage-ml[spark]",
   "mage-ml[streaming]",
   "aws-secretsmanager-caching==1.1.1.5",
-  "duckdb==1.4.3",
+  "duckdb>=1.5.5",
   "google-api-core>=2.30.0",
   "google-api-python-client~=2.70.0",
   "google-cloud-iam>=2.20.0",

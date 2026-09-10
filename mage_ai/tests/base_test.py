@@ -8,9 +8,22 @@ from pathlib import Path
 from faker import Faker
 
 from mage_ai.data_preparation.repo_manager import init_project_uuid
-from mage_ai.orchestration.db import TEST_DB, db_connection
+from mage_ai.orchestration.db import TEST_DB, db_connection, engine
 from mage_ai.orchestration.db.database_manager import database_manager
 from mage_ai.settings.repo import get_variables_dir, set_repo_path
+
+
+def drop_test_db():
+    """
+    Every DB-backed class deletes test.db when it finishes. The engine keeps a
+    pooled connection to the old file, so the next class runs its migrations
+    against a stale handle and later queries hit missing tables. Disposing the
+    engine forces a new connection against a new file.
+    """
+    engine.dispose()
+    if Path(TEST_DB).is_file():
+        Path(TEST_DB).unlink()
+
 
 if sys.version_info.major <= 3 and sys.version_info.minor <= 7:
     class AsyncDBTestCase():
@@ -50,9 +63,7 @@ else:
             if os.path.exists(self.repo_path):
                 shutil.rmtree(self.repo_path)
             db_connection.close_session()
-
-            if Path(TEST_DB).is_file():
-                Path(TEST_DB).unlink()
+            drop_test_db()
 
             super().tearDownClass()
 
@@ -83,9 +94,7 @@ class DBTestCase(unittest.TestCase):
         except Exception:
             pass
         db_connection.close_session()
-
-        if Path(TEST_DB).is_file():
-            Path(TEST_DB).unlink()
+        drop_test_db()
 
         super().tearDownClass()
 

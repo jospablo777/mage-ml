@@ -75,6 +75,20 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
@@ -94,7 +108,7 @@ jobs:
           UV_PROJECT_ENVIRONMENT: ${{ env.pythonLocation }}
         run: |
           sudo apt-get install -y freetds-dev
-          uv sync --locked --group dev --inexact
+          uv sync --locked --group dev --extra postgres --inexact
           uv pip install --system "git+https://github.com/mage-ai/sqlglot#egg=sqlglot"
           uv pip install --system "git+https://github.com/mage-ai/singer-python.git#egg=singer-python"
           uv pip install --system mage_integrations/
@@ -105,6 +119,17 @@ jobs:
           python3 -m pytest \
             mage_ai/tests/data_preparation/git \
             mage_ai/tests/data_preparation/sync
+      # Skips itself when the variables are unset, so it stays green on forks
+      # without the service container.
+      - name: Run PostgreSQL integration tests
+        run: |
+          python3 -m pytest mage_ai/tests/io/test_postgres_integration.py -v
+        env:
+          MAGE_TEST_POSTGRES_DBNAME: test
+          MAGE_TEST_POSTGRES_HOST: 127.0.0.1
+          MAGE_TEST_POSTGRES_PASSWORD: test
+          MAGE_TEST_POSTGRES_PORT: 5432
+          MAGE_TEST_POSTGRES_USER: postgres
       - name: Run unit tests
         run: |
           python3 -m unittest discover -s mage_ai --failfast
