@@ -13,8 +13,8 @@ Mage reaches this path in `mage_ai/data_preparation/git/__init__.py`:
     safe.directory           <- written into the *global* ~/.gitconfig
     .gitmodules sections     <- rewritten during submodule sync
 
-These tests pin the fixed behaviour so a future downgrade or a resolver drift
-back below 3.1.59 fails CI instead of shipping.
+These tests pin the fixed behavior. A downgrade or a resolver drift below
+3.1.59 fails CI here.
 """
 import os
 import subprocess
@@ -84,8 +84,8 @@ class GitPythonConfigInjectionTest(unittest.TestCase):
 
     def test_rewrite_does_not_activate_dormant_multiline_value(self):
         # A quoted value spanning lines is inert until something rewrites the
-        # file. An unrelated write must re-escape it rather than flatten it into
-        # new directives.
+        # file. An unrelated write must re-escape it. Flattening it would
+        # create new directives.
         with open(self.config_path, 'w') as f:
             f.write('[user]\n\tname = "harmless\\n[core]\\n\\thooksPath = /tmp/evil"\n')
 
@@ -96,7 +96,7 @@ class GitPythonConfigInjectionTest(unittest.TestCase):
 
         parser = GitConfigParser(self.config_path, read_only=True)
         try:
-            # The value survives the round trip unchanged instead of being split.
+            # The value survives the round trip unchanged.
             self.assertEqual(
                 parser.get_value('user', 'name'),
                 'harmless\n[core]\n\thooksPath = /tmp/evil',

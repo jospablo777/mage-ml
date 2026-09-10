@@ -1,6 +1,5 @@
 FROM python:3.10-bookworm
 LABEL description="Deploy Mage on ECS"
-ARG FEATURE_BRANCH
 USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -41,7 +40,7 @@ RUN \
   curl https://raw.githubusercontent.com/jupyter-incubator/sparkmagic/master/sparkmagic/example_config.json > ~/.sparkmagic/config.json && \
   sed -i 's/localhost:8998/host.docker.internal:9999/g' ~/.sparkmagic/config.json && \
   jupyter-kernelspec install --user "$(uv pip show sparkmagic | grep Location | cut -d' ' -f2)/sparkmagic/kernels/pysparkkernel"
-# Mage integrations and other related packages
+# Packages that are not resolved from uv.lock.
 RUN \
   uv pip install --system --no-cache-dir "git+https://github.com/wbond/oscrypto.git@d5f3437ed24257895ae1edd9e503cfb352e635a8" && \
   uv pip install --system --no-cache-dir "git+https://github.com/dremio-hub/arrow-flight-client-examples.git#egg=dremio-flight&subdirectory=python/dremio-flight" && \
@@ -49,22 +48,26 @@ RUN \
   uv pip install --system --no-cache-dir "git+https://github.com/mage-ai/dbt-mysql.git#egg=dbt-mysql" && \
   uv pip install --system --no-cache-dir "git+https://github.com/mage-ai/sqlglot#egg=sqlglot" && \
   # faster-fifo is not supported on Windows: https://github.com/alex-petrenko/faster-fifo/issues/17
-  uv pip install --system --no-cache-dir faster-fifo && \
-  if [ -z "$FEATURE_BRANCH" ] || [ "$FEATURE_BRANCH" = "null" ]; then \
-  uv pip install --system --no-cache-dir "git+https://github.com/mage-ai/mage-ai.git#egg=mage-integrations&subdirectory=mage_integrations"; \
-  else \
-  uv pip install --system --no-cache-dir "git+https://github.com/mage-ai/mage-ai.git@$FEATURE_BRANCH#egg=mage-integrations&subdirectory=mage_integrations"; \
-  fi
+  uv pip install --system --no-cache-dir faster-fifo
 
-# Mage
-COPY ./mage_ai/server/constants.py /tmp/constants.py
-RUN if [ -z "$FEATURE_BRANCH" ] || [ "$FEATURE_BRANCH" = "null" ] ; then \
-  tag=$(tail -n 1 /tmp/constants.py) && \
-  VERSION=$(echo "$tag" | tr -d "'") && \
-  uv pip install --system --no-cache-dir "mage-ai[all]==$VERSION"; \
-  else \
-  uv pip install --system --no-cache-dir "git+https://github.com/mage-ai/mage-ai.git@$FEATURE_BRANCH#egg=mage-ai[all]"; \
-  fi
+# Mage integrations, installed from this build context.
+COPY mage_integrations /tmp/mage_integrations
+RUN \
+  uv pip install --system --no-cache-dir /tmp/mage_integrations && \
+  rm -rf /tmp/mage_integrations
+
+# Mage, built from this build context with dependencies resolved from uv.lock.
+# The image must carry this fork so the container scan covers shipped code.
+# --inexact preserves the packages installed above, which the lockfile omits.
+# --no-deps on the project install: the sync already placed its dependencies.
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
+COPY pyproject.toml uv.lock README.md MANIFEST.in /tmp/mage/
+COPY mage_ai /tmp/mage/mage_ai
+RUN \
+  uv sync --project /tmp/mage --locked --no-install-project --inexact --no-cache \
+  --extra all --extra integrations && \
+  uv pip install --system --no-cache-dir --no-deps /tmp/mage && \
+  rm -rf /tmp/mage
 
 
 ## Startup Script

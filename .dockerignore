@@ -1,0 +1,27 @@
+# Without this file the whole working tree is sent to the daemon as build
+# context, including .venv and every node_modules tree. The frontend source
+# stays in context because dev.Dockerfile runs yarn install against it.
+
+.git/
+.github/
+
+# Local environments and caches
+.venv/
+venv3/
+**/node_modules/
+**/__pycache__/
+**/*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# Local only, never part of an image
+do_not_commit/
+test_project/
+.env
+*.db

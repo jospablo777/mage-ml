@@ -249,8 +249,6 @@ all = [
 dev = [
   "black",
   "commitizen",
-  "flake8",
-  "flake8-bugbear",
   "interrogate",
   "isort",
   "mypy",
@@ -259,6 +257,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
+  "ruff",
 ]
 
 [tool.uv]
@@ -280,13 +279,22 @@ addopts = "--import-mode=importlib"
 [tool.isort]
 profile = "black"
 
-[tool.ruff.lint]
+[tool.ruff]
+# E501 threshold.
+line-length = 100
+# Block templates are Jinja with a .py suffix. A top-level exclude drops them
+# at file discovery. lint.exclude applies after parsing and reports their
+# syntax errors.
 exclude = [
   "mage_ai/data_preparation/templates",
   "mage_ai/orchestration/db/migrations/versions",
 ]
-ignore = []
-select = ["E", "F", "W"]
+
+[tool.ruff.lint]
+# B is bugbear. B904 and B905 are the opinionated B9xx checks and stay off,
+# which keeps the violation baseline in line with what the tree already had.
+ignore = ["B006", "B904", "B905", "E203", "W605"]
+select = ["B", "E", "F", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 "mage_ai/orchestration/pipeline_scheduler.py" = ["F401", "F403"]

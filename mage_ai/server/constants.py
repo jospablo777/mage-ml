@@ -1,4 +1,4 @@
-# flake8: noqa
+# ruff: noqa
 import os
 
 SERVER_HOST = os.getenv('HOST', 'localhost')

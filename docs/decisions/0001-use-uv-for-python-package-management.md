@@ -48,7 +48,7 @@ The layout is:
   `pytest-xdist`.
 
 `setup.py`, `poetry.lock`, and `dev.requirements.txt` are removed. `dev.requirements.txt` held
-`flake8-bugbear`, which the dev group now carries. `MANIFEST.in` and the setuptools build backend
+a lint plugin that the dev group now covers through `ruff`. `MANIFEST.in` and the setuptools build backend
 stay, so the sdist and the wheel keep the same contents.
 
 The `all` extra now references the other extras instead of repeating their pins. That is what let it

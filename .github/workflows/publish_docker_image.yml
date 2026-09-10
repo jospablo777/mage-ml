@@ -24,6 +24,10 @@ jobs:
   push_to_registry:
     name: Push Docker image to Docker Hub
     runs-on: ubuntu-latest
+    # Disabled in this fork. Every tag below points at the upstream `mageai`
+    # Docker Hub namespace, and the fork has no credentials for it. Remove this
+    # line once the target namespace and the registry secrets are set.
+    if: false
     steps:
       - name: Check out the repo
         uses: actions/checkout@v5

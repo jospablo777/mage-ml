@@ -1,1 +1,2 @@
-flake8 --ignore E121,E126,W503,W504 --exclude mage_ai/data_preparation/templates,mage_ai/orchestration/db/migrations/versions/ --max-line-length 100 mage_ai
+# Rules, line length and exclusions all come from [tool.ruff] in pyproject.toml.
+ruff check mage_ai

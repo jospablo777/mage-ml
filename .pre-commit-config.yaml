@@ -31,10 +31,12 @@ repos:
     # assumes isort is installed in local virtual environment as dev dependency
     language: system
     types: [python]
-  - id: flake8
-    name: flake8
-    entry: flake8
-    # assumes flake8 is installed in local virtual environment as dev dependency
+  - id: ruff
+    name: ruff
+    # --force-exclude applies the exclude list in pyproject.toml when
+    # pre-commit passes file paths explicitly.
+    entry: ruff check --force-exclude
+    # assumes ruff is installed in local virtual environment as dev dependency
     language: system
     types: [python]
     exclude: "mage_integrations\/mage_integrations\/sources\/.*\/tap_.*\/*|mage_integrations\/mage_integrations\/destinations\/.*\/target_.*\/*"

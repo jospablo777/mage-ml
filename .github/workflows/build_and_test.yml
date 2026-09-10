@@ -6,69 +6,105 @@ on:
       - "mage_ai/**"
       - "mage_integrations/**"
       - "pyproject.toml"
-      - "requirements.txt"
       - "uv.lock"
+      - ".github/workflows/build_and_test.yml"
   pull_request:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
       - "pyproject.toml"
-      - "requirements.txt"
       - "uv.lock"
+      - ".github/workflows/build_and_test.yml"
 
 env:
   ENV: test_mage
+  # Keep in step with ARG UV_VERSION in the Dockerfiles so CI and the images
+  # resolve dependencies the same way.
+  UV_VERSION: "0.11.29"
 
 jobs:
-  # check-code-quality:
+  lint:
+    name: Lint changed files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
+      - name: Install dev tooling
+        run: uv sync --locked --only-group dev
+      - id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files: "**/*.py"
+      # Only changed files. The tree carries pre-existing violations that
+      # predate the fork, so a repo-wide gate would fail on the first run.
+      - name: Run pre-commit
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          uv run --no-sync pre-commit run --show-diff-on-failure \
+            --files ${{ steps.changed-files.outputs.all_changed_files }}
 
-  #   runs-on: ubuntu-latest
-  #   name: Check Code Quality
-  #   steps:
-  #     - name: Check out source repository
-  #       uses: actions/checkout@v5
-  #       with:
-  #         fetch-depth: 0
-  #     # https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#caching-packages
-  #     - name: Install Poetry
-  #       run: pipx install poetry
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v6
-  #       with:
-  #         python-version: "3.10"
-  #         cache: 'poetry'
-  #     - name: Install Python dev dependencies
-  #       run: |
-  #         poetry install --no-interaction --only dev
-  #         poetry run pre-commit install
-  #     - id: changed-files
-  #       uses: tj-actions/changed-files@v36
-  #       with:
-  #         files_ignore: |
-  #           requirements.txt
-  #     - name: Run pre-commit hooks
-  #       run: poetry run pre-commit run --show-diff-on-failure --files ${{ steps.changed-files.outputs.all_changed_files }}
+  packaging:
+    name: Packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
+      - name: Lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Build sdist and wheel
+        run: uv build
 
   test_backend:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-    # needs: check-code-quality
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
+      - name: Install uv
         run: |
-          sudo apt-get install freetds-dev
-          python -m pip install --upgrade pip uv
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
+      # Sync into the setup-python interpreter. `python3 -m unittest` below and
+      # the Playwright web server both resolve packages from it. --inexact
+      # preserves the three packages installed after the sync, which the
+      # lockfile omits.
+      - name: Install dependencies
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ env.pythonLocation }}
+        run: |
+          sudo apt-get install -y freetds-dev
+          uv sync --locked --group dev --inexact
           uv pip install --system "git+https://github.com/mage-ai/sqlglot#egg=sqlglot"
           uv pip install --system "git+https://github.com/mage-ai/singer-python.git#egg=singer-python"
-          uv pip install --system -r requirements.txt
           uv pip install --system mage_integrations/
+      # Runs first because it is fast and covers the Git subsystem, including
+      # the GitPython config-injection regression tests.
+      - name: Run focused Git tests
+        run: |
+          python3 -m pytest \
+            mage_ai/tests/data_preparation/git \
+            mage_ai/tests/data_preparation/sync
       - name: Run unit tests
         run: |
           python3 -m unittest discover -s mage_ai --failfast
@@ -113,27 +149,31 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10"]
-    # needs: check-code-quality
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
       # Run Playwright web UI tests only run once per workflow (Python 3.10).
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
           node-version: "20.15.1"
+      # playwright-windows.config.ci.ts activates venv3/Scripts before it starts
+      # the server, so the environment has to be created at that path.
       - name: Create Mage test project
+        env:
+          UV_PROJECT_ENVIRONMENT: venv3
         run: |
           Start-Process -Wait -FilePath "C:\Program Files\Git\unins000.exe" -ArgumentList "/SILENT"
-          python -m venv venv3
-          venv3/Scripts/Activate.ps1
+          uv sync --locked
           $env:PYTHONPATH = "${env:PYTHONPATH};${pwd}"
-          python -m pip install --upgrade pip uv
-          uv pip install -r requirements.txt
-          python mage_ai/cli/main.py init test_project
+          uv run --no-sync python mage_ai/cli/main.py init test_project
       - name: Build frontend, start server, and run Playwright tests
         run: |
           yarn install &&

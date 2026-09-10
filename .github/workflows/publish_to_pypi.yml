@@ -12,6 +12,11 @@ on:
 jobs:
   build_and_publish:
     runs-on: ubuntu-latest
+    # Disabled in this fork. The project is now published as `mage-ml`, and the
+    # PyPI secrets referenced below still belong to the upstream `mage-ai`
+    # project. Remove this line once the fork has its own PyPI project and
+    # tokens.
+    if: false
 
     steps:
     - uses: actions/checkout@master
