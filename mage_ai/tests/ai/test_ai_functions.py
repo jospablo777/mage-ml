@@ -21,8 +21,10 @@ class AIFunctionTest(TestCase):
         self.error = None
         try:
             self.wizard = LLMPipelineWizard()
-            self.pipeline = Pipeline.create('test_pipeline', repo_path='test')
-            self.block = Block.create(name="test_block", block_type="data_loader", repo_path="test")
+            self.pipeline = Pipeline.create('test_pipeline', repo_path=self.repo_path)
+            self.block = Block.create(
+                name="test_block", block_type="data_loader", repo_path=self.repo_path,
+            )
             self.pipeline.add_block(self.block)
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)

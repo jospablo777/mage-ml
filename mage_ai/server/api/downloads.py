@@ -31,10 +31,11 @@ class ApiDownloadHandler(BaseHandler):
                 ).first()
                 if oauth_client:
                     oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
-                    user = oauth_token.user
                     authenticated = valid and \
                         oauth_token and \
                         oauth_token.user
+                    if authenticated:
+                        user = oauth_token.user
             if not authenticated:
                 raise Exception('Unauthorized access to download block output.')
 
@@ -78,29 +79,28 @@ class ApiResourceDownloadHandler(BaseHandler):
 
     def get(self, token):
         try:
-            decoded_payload = jwt.decode(token, JWT_DOWNLOAD_SECRET, algorithms=['HS256'])
+            decoded_payload = jwt.decode(
+                token, JWT_DOWNLOAD_SECRET, algorithms=['HS256'], options={'require': ['exp']},
+            )
 
             file_name = decoded_payload['file_name']
             file_list = decoded_payload['file_list']
             self.ignore_folder_structure = decoded_payload['ignore_folder_structure']
 
-            self.abs_repo_path = os.path.abspath(get_repo_path())
+            self.abs_repo_path = os.path.realpath(get_repo_path())
 
             relative_file_list = list(map(self.relative_path_mapping, file_list))
 
             try:
-                file_pointer = self.get_file_pointer(file_list, relative_file_list)
-
-                while True:
-                    _buffer = file_pointer.read(4096)
-                    if not _buffer:
-                        break
-                    self.write(_buffer)
+                with self.get_file_pointer(file_list, relative_file_list) as file_pointer:
+                    while True:
+                        _buffer = file_pointer.read(4096)
+                        if not _buffer:
+                            break
+                        self.write(_buffer)
             except Exception as e:
                 self.set_status(400)
                 self.write(f'Error fetching file {file_name}.\n{e}')
-            finally:
-                file_pointer.close()
 
             self.set_header('Content-Type', 'application/force-download')
             self.set_header('Content-Disposition', f'attachment; filename={file_name}')
@@ -108,20 +108,17 @@ class ApiResourceDownloadHandler(BaseHandler):
         except jwt.exceptions.ExpiredSignatureError:
             self.set_status(400)
             self.write('Download token is expired.')
-        except (jwt.exceptions.InvalidSignatureError, jwt.exceptions.DecodeError):
+        except jwt.exceptions.InvalidTokenError:
             self.set_status(400)
             self.write('Download token is invalid.')
         except ValueError as e:
             self.set_status(400)
-            self.write(f'Attepmt at fetching file outside of project folder: {e}')
+            self.write(f'Attempt at fetching file outside of project folder: {e}')
 
     # file pointer points to either a singular file or a temporary zip
     def get_file_pointer(self, file_list, relative_file_list):
         if len(file_list) == 1:
-            if file_list[0].endswith('.xlsx'):  # Check if it's an XLSX file
-                return open(file_list[0], 'rb')  # Open in binary mode for XLSX
-            else:
-                return open(file_list[0])
+            return open(file_list[0], 'rb')
         return self.zip_files(file_list, relative_file_list)
 
     # creates a temporary zip and returns the (open) file pointer
@@ -134,7 +131,7 @@ class ApiResourceDownloadHandler(BaseHandler):
         return zip_file
 
     def relative_path_mapping(self, path):
-        abs_path = os.path.abspath(path)
+        abs_path = os.path.realpath(path)
         common_ground = os.path.commonpath([self.abs_repo_path, abs_path])
 
         # trying to access files outside of the project folder

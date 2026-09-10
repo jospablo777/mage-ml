@@ -2072,7 +2072,7 @@ class Pipeline:
         elif conditional_block_uuids is not None:
             conditional_blocks = []
             for conditional_block_uuid in conditional_block_uuids:
-                conditional_block = self.callbacks_by_uuid.get(conditional_block_uuid)
+                conditional_block = self.conditionals_by_uuid.get(conditional_block_uuid)
                 if not conditional_block:
                     raise Exception(
                         f'Conditional block {conditional_block_uuid}'

@@ -3,10 +3,9 @@ from typing import Dict, List, Union
 import yaml
 
 try:
-    # Speed up yaml load performance with CLoader
-    from yaml import CLoader as Loader
-except Exception:
-    from yaml import FullLoader as Loader
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader
 
 
 def trim_strings(data: Union[Dict, List, str]) -> Union[Dict, List, str]:

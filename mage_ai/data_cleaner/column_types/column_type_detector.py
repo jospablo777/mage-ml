@@ -142,7 +142,7 @@ def infer_column_type(series, column_name, dtype, kwargs):
         mdtype = ColumnType.DATETIME
     elif is_string_dtype(dtype):
         mdtype = infer_object_type(series, column_name, kwargs)
-    elif dtype == "bool":
+    elif pd.api.types.is_bool_dtype(dtype):
         mdtype = ColumnType.TRUE_OR_FALSE
     elif is_numpy_subdtype(dtype, np.floating) or is_numpy_subdtype(dtype, np.integer):
         mdtype = infer_number_type(series, column_name, dtype)

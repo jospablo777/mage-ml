@@ -118,13 +118,11 @@ class LocalStorage(BaseStorage):
             await file.write(fcontent)
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:
-        return pd.read_parquet(file_path, engine='pyarrow')
+        kwargs.setdefault('engine', 'pyarrow')
+        return pd.read_parquet(file_path, **kwargs)
 
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
-        try:
-            return pl.read_parquet(file_path, use_pyarrow=True)
-        except Exception:
-            return pl.read_parquet(file_path)
+        return pl.read_parquet(file_path, **kwargs)
 
     def write_csv(self, df: pd.DataFrame, file_path: str) -> None:
         File.create_parent_directories(file_path)

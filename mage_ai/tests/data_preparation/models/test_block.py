@@ -1,8 +1,8 @@
+import asyncio
 import os
 from unittest.mock import patch
 
 import pandas as pd
-from async_timeout import asyncio
 
 # from faker import Faker
 from pandas.testing import assert_frame_equal
@@ -264,7 +264,7 @@ def union_datasets(df1, df2):
         data = variable_manager.get_variable(
             pipeline.uuid, block3.uuid, 'output_0', variable_type='dataframe'
         )
-        analysis = variable_manager.get_variable(
+        _analysis = variable_manager.get_variable(
             pipeline.uuid,
             block3.uuid,
             'output_0',
@@ -277,7 +277,6 @@ def union_datasets(df1, df2):
 
         assert_frame_equal(data, df_final)
 
-        analysis
         # TODO (Xiaoyou Wang): uncomment this one serialization of block output is fixed.
         # self.assertEqual(
         #     analysis['metadata']['column_types'],

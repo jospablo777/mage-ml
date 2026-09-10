@@ -1,5 +1,4 @@
 from jupyter_client import KernelManager
-from jupyter_client.session import Session
 
 from mage_ai.data_preparation.models.constants import PipelineType
 from mage_ai.shared.enum import StrEnum
@@ -23,11 +22,8 @@ DEFAULT_KERNEL_NAME = KernelName.PYTHON3
 
 
 kernel_managers = dict(
-    python3=KernelManager(
-        session=Session(key=bytes()),
-    ),
+    python3=KernelManager(),
     pysparkkernel=KernelManager(
         kernel_name='pysparkkernel',
-        session=Session(key=bytes()),
     ),
 )

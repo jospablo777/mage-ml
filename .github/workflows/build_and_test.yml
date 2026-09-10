@@ -18,8 +18,7 @@ on:
 
 env:
   ENV: test_mage
-  # Keep in step with ARG UV_VERSION in the Dockerfiles so CI and the images
-  # resolve dependencies the same way.
+  # Match ARG UV_VERSION in the Dockerfiles.
   UV_VERSION: "0.11.29"
 
 jobs:
@@ -40,17 +39,30 @@ jobs:
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dev tooling
         run: uv sync --locked --only-group dev
-      - id: changed-files
-        uses: tj-actions/changed-files@v47
-        with:
-          files: "**/*.py"
-      # Only changed files. The tree carries pre-existing violations that
-      # predate the fork, so a repo-wide gate would fail on the first run.
       - name: Run pre-commit
-        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          uv run --no-sync pre-commit run --show-diff-on-failure \
-            --files ${{ steps.changed-files.outputs.all_changed_files }}
+          python - <<'PY'
+          import os
+          import subprocess
+
+          base = os.environ['BASE_SHA']
+          if not base or set(base) == {'0'}:
+              base = subprocess.check_output(
+                  ['git', 'hash-object', '-t', 'tree', '/dev/null'], text=True,
+              ).strip()
+          output = subprocess.check_output([
+              'git', 'diff', '--name-only', '-z', '--diff-filter=ACMR',
+              base, 'HEAD', '--', '*.py',
+          ])
+          files = [f'./{os.fsdecode(path)}' for path in output.split(b'\0') if path]
+          if files:
+              subprocess.run([
+                  'uv', 'run', '--no-sync', 'pre-commit', 'run',
+                  '--show-diff-on-failure', '--files', *files,
+              ], check=True)
+          PY
 
   packaging:
     name: Packaging
@@ -99,10 +111,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
-      # Sync into the setup-python interpreter. `python3 -m unittest` below and
-      # the Playwright web server both resolve packages from it. --inexact
-      # preserves the three packages installed after the sync, which the
-      # lockfile omits.
+      # Tests and the Playwright server use the setup-python interpreter.
       - name: Install dependencies
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.pythonLocation }}
@@ -112,15 +121,12 @@ jobs:
           uv pip install --system "git+https://github.com/mage-ai/sqlglot#egg=sqlglot"
           uv pip install --system "git+https://github.com/mage-ai/singer-python.git#egg=singer-python"
           uv pip install --system mage_integrations/
-      # Runs first because it is fast and covers the Git subsystem, including
-      # the GitPython config-injection regression tests.
+          uv pip check --system
       - name: Run focused Git tests
         run: |
           python3 -m pytest \
             mage_ai/tests/data_preparation/git \
             mage_ai/tests/data_preparation/sync
-      # Skips itself when the variables are unset, so it stays green on forks
-      # without the service container.
       - name: Run PostgreSQL integration tests
         run: |
           python3 -m pytest mage_ai/tests/io/test_postgres_integration.py -v
@@ -132,14 +138,14 @@ jobs:
           MAGE_TEST_POSTGRES_USER: postgres
       - name: Run unit tests
         run: |
-          python3 -m unittest discover -s mage_ai --failfast
+          python3 -m pytest mage_ai/tests
         env:
           OPENAI_API_KEY: abcdefg
       - name: Run mage integrations unit tests
         run: |
           cd mage_integrations && python3 -m unittest discover mage_integrations.tests
 
-      # Run Playwright web UI tests only run once per workflow (Python 3.10).
+      # Run Playwright once per matrix.
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
@@ -184,7 +190,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
-      # Run Playwright web UI tests only run once per workflow (Python 3.10).
       - name: Set up Node
         uses: actions/setup-node@v6
         with:

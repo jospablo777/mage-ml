@@ -34,12 +34,12 @@ dependencies = [
   "freezegun==1.2.2",
   "httpx>=0.27.0",
   "inflection==0.5.1",
-  "ipykernel==6.15.0",
-  "ipython==8.10.0",
+  "ipykernel>=6.30,<8",
+  "ipython>=8.37,<10",
   "itsdangerous~=1.1.0",
   "joblib>=1.1.0",
   "jupyter-server>=2.20.0",
-  "jupyter_client==7.4.4",
+  "jupyter-client>=8.6,<9",
   "ldap3==2.9.1",
   "memory_profiler",
   "newrelic==8.8.0",
@@ -56,6 +56,7 @@ dependencies = [
   "pyyaml~=6.0",
   "redis~=5.0.1",
   "requests>=2.33.0",
+  "urllib3>=2.7,<3",
   "rich>=13.9.4",
   "ruamel.yaml==0.17.17",
   "scikit-learn<1.8",
@@ -65,6 +66,7 @@ dependencies = [
   "six>=1.15.0",
   "sqlalchemy>2.0.0",
   "sqlglot[rs]",
+  "sqlparse>=0.6,<1",
   "terminado==0.17.1",
   "thefuzz[speedup]==0.19.0",
   "tornado>=6.5.7",
@@ -75,8 +77,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mage-ai/mage-ai"
-Repository = "https://github.com/mage-ai/mage-ai"
+Homepage = "https://github.com/jospablo777/mage-ml"
+Repository = "https://github.com/jospablo777/mage-ml"
 
 [project.scripts]
 mage = "mage_ai.cli.main:app"
@@ -84,9 +86,11 @@ mage = "mage_ai.cli.main:app"
 [project.optional-dependencies]
 ai = [
   "astor>=0.8.1",
-  # 0.2.x caps numpy below 2.
-  "langchain>=0.3,<1",
-  "langchain_community>=0.3,<1",
+  "langchain-classic>=1.0,<2",
+  "langchain-core>=1.2.22,<2",
+  "langchain-openai>=1.0,<2",
+  "langchain-text-splitters>=1.1.2,<2",
+  "langsmith>=0.8.18",
   "openai>=1.82.0",
 ]
 airtable = [
@@ -94,7 +98,7 @@ airtable = [
 ]
 azure = [
   "azure-eventhub==5.11.2",
-  "azure-identity==1.12.0",
+  "azure-identity>=1.16.1,<2",
   "azure-keyvault-secrets==4.6.0",
   "azure-keyvault-certificates==4.6.0",
   "azure-mgmt-containerinstance==10.1.0",
@@ -111,25 +115,26 @@ clickhouse = [
   "clickhouse-connect>=0.10.0",
 ]
 dbt = [
-  "dbt-adapters==1.22.5",
-  "dbt-bigquery==1.10.3",
-  "dbt-clickhouse==1.10.0",
-  "dbt-core==1.10.20",
-  "dbt-duckdb==1.10.1",
-  "dbt-postgres==1.10.0",
-  "dbt-redshift==1.10.1",
-  "dbt-snowflake==1.10.7",
-  "dbt-spark==1.10.1",
-  "dbt-sqlserver==1.9.0",
-  "dbt-synapse==1.8.4",
-  "dbt-trino==1.10.1",
+  "dbt-adapters>=1.22.5,<2",
+  "dbt-bigquery>=1.10.3,<2",
+  "google-cloud-aiplatform>=1.133,<2",
+  "dbt-clickhouse>=1.9,<2",
+  "dbt-core>=1.11,<2",
+  "dbt-duckdb>=1.10.1,<2",
+  "dbt-postgres>=1.10.0,<2",
+  "dbt-redshift>=1.10.1,<2",
+  "dbt-snowflake>=1.10.7,<2",
+  "dbt-spark>=1.10.1,<2",
+  "dbt-sqlserver>=1.9.0,<2",
+  "dbt-synapse>=1.8.4,<2",
+  "dbt-trino>=1.10.1,<2",
   "trino~=0.326",
 ]
 great-expectations = [
   "great-expectations>=1.0",
 ]
 google-cloud-storage = [
-  "google-cloud-storage==2.5.0",
+  "google-cloud-storage>=2.10,<4",
   "gspread==5.7.2",
 ]
 hdf5 = [
@@ -138,7 +143,7 @@ hdf5 = [
 ]
 mysql = [
   "mysql-connector-python~=8.4.0; python_version < '3.11'",
-  "mysql-connector-python~=9.0.0; python_version >= '3.11'",
+  "mysql-connector-python>=9.1,<10",
 ]
 oracle = [
   "oracledb==1.3.1; python_version < '3.12'",
@@ -149,40 +154,40 @@ postgres = [
   "sshtunnel>=0.4.0",
 ]
 qdrant = [
-  "qdrant-client==1.6.9",
-  "sentence-transformers==2.2.2",
+  "qdrant-client>=1.9,<2",
+  "sentence-transformers>=5.0,<6",
+  "transformers>=5.10,<6",
 ]
 redshift = [
-  "boto3==1.26.60",
-  "redshift-connector>=2.1.8",
-  "lxml==4.9.4",
+  "boto3>=1.42,<2",
+  "redshift-connector>=2.1.14,<3",
+  "lxml>=6.1,<7",
 ]
 s3 = [
-  "boto3==1.26.60",
-  "botocore==1.29.60",
+  "boto3>=1.42,<2",
+  "botocore>=1.42,<2",
 ]
 snowflake = [
   "snowflake-connector-python>=4.0.0",
 ]
 spark = [
-  "boto3==1.26.60",
-  "botocore==1.29.60",
+  "boto3>=1.42,<2",
+  "botocore>=1.42,<2",
 ]
 streaming = [
   "confluent-avro~=1.8.0",
   "elasticsearch==8.15.1",
   "influxdb_client==1.36.1",
-  "kafka-python==2.3.0",
+  "kafka-python>=2.3.2,<3",
   "nats-py==2.6.0",
   "nkeys~=0.2.0",
-  "opensearch-py==2.0.0",
+  "opensearch-py>=2.8,<4",
   "pika==1.3.1",
-  "pymongo==4.3.3",
+  "pymongo>=4.6.3,<5",
   "requests_aws4auth==1.1.2",
   "stomp.py==8.1.0",
 ]
-# Runtime packages needed by the mage-integrations sources and destinations that
-# run inside a Mage pipeline. mage-integrations itself is installed separately.
+# Runtime dependencies for separately installed mage-integrations connectors.
 integrations = [
   "async-timeout==4.0.3",
   "attrs==22.2.0; python_version < '3.12'",
@@ -201,7 +206,7 @@ integrations = [
   "python-magic==0.4.27",
   "requests_mock==1.10.0",
   "simple_salesforce~=1.12.5",
-  "singer_sdk~=0.34.1",
+  "singer-sdk>=0.50,<1",
   "stripe==5.5.0",
   "terminaltables==3.1.10",
   "twitter-ads==11.0.0",
@@ -210,9 +215,7 @@ integrations = [
   "xmltodict==0.13.0",
   "zenpy==2.0.25",
 ]
-# Convenience extra used by the published container image. It reuses the
-# extras above instead of repeating their pins, which is what let `all` and
-# `oracle` drift apart on oracledb.
+# Dependency profile used by the container image.
 all = [
   "mage-ml[ai]",
   "mage-ml[airtable]",
@@ -241,11 +244,10 @@ all = [
   "opentelemetry-exporter-prometheus>=0.61b0",
   "opentelemetry-instrumentation-sqlalchemy>=0.61b0",
   "opentelemetry-instrumentation-tornado>=0.61b0",
-  "pinotdb==5.6.0",
+  "pinotdb>=5.7,<6",
   "prometheus_client>=0.18.0",
   "pydruid==0.6.5",
-  "pyodbc==4.0.35; python_version < '3.12'",
-  "pyodbc==5.0.1; python_version >= '3.12'",
+  "pyodbc>=5.2,<6",
 ]
 
 [dependency-groups]
@@ -260,13 +262,13 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
+  "pip-audit>=2.10,<3",
   "ruff",
 ]
 
 [tool.uv]
 required-version = ">=0.9.0"
-# pyopenssl 22 is the newest release with no upper bound on cryptography, so a
-# cryptography floor alone drags it backwards. This holds it forward.
+# Prevent resolution to pyOpenSSL 22, which does not bound cryptography.
 constraint-dependencies = [
   "pyopenssl>=25.1.0",
 ]
@@ -290,17 +292,14 @@ profile = "black"
 [tool.ruff]
 # E501 threshold.
 line-length = 100
-# Block templates are Jinja with a .py suffix. A top-level exclude drops them
-# at file discovery. lint.exclude applies after parsing and reports their
-# syntax errors.
+# Exclude Jinja templates before Python parsing.
 exclude = [
   "mage_ai/data_preparation/templates",
   "mage_ai/orchestration/db/migrations/versions",
 ]
 
 [tool.ruff.lint]
-# B is bugbear. B904 and B905 are the opinionated B9xx checks and stay off,
-# which keeps the violation baseline in line with what the tree already had.
+# Preserve the existing bugbear exception and zip policies.
 ignore = ["B006", "B904", "B905", "E203", "W605"]
 select = ["B", "E", "F", "W"]
 

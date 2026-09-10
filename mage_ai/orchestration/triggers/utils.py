@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta
-from time import sleep
+from time import monotonic, sleep
 from typing import Dict, List, Optional, Union
 
 from mage_ai.data_preparation.models.block.remote.models import RemoteBlock
@@ -18,9 +17,13 @@ def check_pipeline_run_status(
     poll_timeout: Optional[float] = None,
     verbose: bool = True,
 ) -> PipelineRun:
+    if poll_interval < 0:
+        raise ValueError('poll_interval must be nonnegative')
+    if poll_timeout is not None and poll_timeout < 0:
+        raise ValueError('poll_timeout must be nonnegative')
     pipeline_uuid = pipeline_run.pipeline_uuid
 
-    poll_start = datetime.now()
+    poll_start = monotonic()
     while True:
         db_connection.session.refresh(pipeline_run)
         status = pipeline_run.status.value
@@ -41,17 +44,17 @@ def check_pipeline_run_status(
         ]:
             break
 
-        if (
-            poll_timeout
-            and datetime.now()
-            > poll_start + timedelta(seconds=poll_timeout)
-        ):
-            raise Exception(
-                f'Pipeline run {pipeline_run.id} for pipeline {pipeline_uuid}: time out after '
-                f'{datetime.now() - poll_start}. Last status was {status}.'
-            )
-
-        sleep(poll_interval)
+        sleep_duration = poll_interval
+        if poll_timeout is not None:
+            elapsed = monotonic() - poll_start
+            remaining = poll_timeout - elapsed
+            if remaining <= 0:
+                raise TimeoutError(
+                    f'Pipeline run {pipeline_run.id} for pipeline {pipeline_uuid}: time out after '
+                    f'{elapsed:.3f} seconds. Last status was {status}.'
+                )
+            sleep_duration = min(sleep_duration, remaining)
+        sleep(sleep_duration)
 
     return pipeline_run
 

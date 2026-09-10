@@ -9,9 +9,11 @@ def is_model_sklearn(data: Any) -> bool:
     try:
         from sklearn.base import BaseEstimator, is_classifier, is_regressor
 
-        return (
-            is_classifier(data) or is_regressor(data) or isinstance(data, BaseEstimator)
-        )
+        if isinstance(data, BaseEstimator):
+            return True
+        if callable(getattr(data, '__sklearn_tags__', None)):
+            return is_classifier(data) or is_regressor(data)
+        return getattr(data, '_estimator_type', None) in ('classifier', 'regressor')
     except ImportError as err:
         print(f"Error importing sklearn: {err}")
         return False

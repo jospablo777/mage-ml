@@ -93,6 +93,30 @@ class GreatExpectationsExtensionTest(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertFalse(result.results[0].get('success', True))
 
+    def test_positional_arguments_return_validation_result(self):
+        validator, _ = self._build()[0]
+
+        result = validator.expect_column_values_to_be_between('id', 1, 2)
+
+        self.assertFalse(result.success)
+        self.assertFalse(validator.validate().success)
+
+    def test_duplicate_positional_and_keyword_arguments_raise(self):
+        validator, _ = self._build()[0]
+
+        with self.assertRaises(TypeError):
+            validator.expect_column_values_to_be_between('id', column='name')
+
+    def test_current_configuration_format_retains_metadata(self):
+        validator, _ = self._build(expectations=[{
+            'type': 'expect_column_values_to_not_be_null',
+            'kwargs': {'column': 'id'},
+            'meta': {'owner': 'data-team'},
+        }])[0]
+
+        self.assertTrue(validator.validate().success)
+        self.assertEqual(validator.suite.expectations[0].meta, {'owner': 'data-team'})
+
     def test_unknown_expectation_raises(self):
         validator, _uuid = self._build()[0]
 

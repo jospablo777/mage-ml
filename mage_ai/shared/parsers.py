@@ -19,11 +19,14 @@ from mage_ai.shared.complex import is_model_sklearn, is_model_xgboost
 
 
 def is_numpy_subdtype(dtype, numpy_type) -> bool:
-    """
-    np.issubdtype raises on pandas extension dtypes. pandas 3 gives string
-    columns a StringDtype, so every call site has to skip non-numpy dtypes.
-    """
-    return isinstance(dtype, np.dtype) and np.issubdtype(dtype, numpy_type)
+    """Compare NumPy types and the storage types of pandas extension dtypes."""
+    if dtype is None:
+        return False
+    dtype = getattr(dtype, 'numpy_dtype', dtype)
+    try:
+        return np.issubdtype(dtype, numpy_type)
+    except TypeError:
+        return False
 
 
 def is_string_dtype(dtype) -> bool:
@@ -72,9 +75,9 @@ def encode_complex(obj):
         return obj.isoformat()
     elif isinstance(obj, INTS):
         return int(obj)
-    elif isinstance(obj, (np.float64, np.float16, np.float32, np.float64, np.floating)):
+    elif isinstance(obj, np.floating):
         return float(obj)
-    elif isinstance(obj, (np.complex128, np.complex64, np.complex128)):
+    elif isinstance(obj, np.complexfloating):
         return {'real': obj.real, 'imag': obj.imag}
     elif isinstance(obj, (np.ndarray,)):
         # np.array is a function

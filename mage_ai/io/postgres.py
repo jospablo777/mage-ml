@@ -1,4 +1,3 @@
-import traceback
 from typing import IO, List, Union
 
 import numpy as np
@@ -6,14 +5,13 @@ import pandas as pd
 import simplejson
 from pandas import DataFrame, Series
 from psycopg2 import _psycopg, connect
-from sshtunnel import SSHTunnelForwarder
 
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import BadConversionError, PandasTypes
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.parsers import encode_complex
-from mage_ai.shared.utils import is_port_in_use
+from mage_ai.shared.ssh import SSHTunnelForwarder
 
 
 class Postgres(BaseSQL):
@@ -108,24 +106,19 @@ class Postgres(BaseSQL):
                 else:
                     ssh_setting['ssh_password'] = self.settings['ssh_password']
 
-                # Find an available local port
-                local_port = port
-                max_local_port = local_port + 100
-                while is_port_in_use(local_port):
-                    if local_port > max_local_port:
-                        raise Exception(
-                            'Unable to find an open port, please clear your running processes '
-                            'if possible.'
-                        )
-                    local_port += 1
                 self.ssh_tunnel = SSHTunnelForwarder(
-                    (self.settings['ssh_host'], self.settings['ssh_port']),
-                    remote_bind_address=(host, port),
-                    local_bind_address=('', local_port),
+                    (self.settings['ssh_host'], int(self.settings['ssh_port'] or 22)),
+                    remote_bind_address=(host, int(port or 5432)),
+                    local_bind_address=('127.0.0.1', 0),
                     **ssh_setting,
                 )
-                self.ssh_tunnel.start()
-                self.ssh_tunnel._check_is_started()
+                try:
+                    self.ssh_tunnel.start()
+                    self.ssh_tunnel._check_is_started()
+                except Exception:
+                    self.ssh_tunnel.stop()
+                    self.ssh_tunnel = None
+                    raise
 
                 host = '127.0.0.1'
                 port = self.ssh_tunnel.local_bind_port
@@ -165,7 +158,7 @@ class Postgres(BaseSQL):
                 if self.ssh_tunnel is not None:
                     self.ssh_tunnel.stop()
                     self.ssh_tunnel = None
-                traceback.print_exc()
+                raise
 
     def close(self) -> None:
         """

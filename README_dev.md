@@ -1,18 +1,8 @@
 # Setting up a Development Environment
 
-We'd love to have your contribution, but first you'll need to configure your local environment first. In this guide, we'll walk through:
+Run these commands from the repository root unless a different directory is specified.
 
-1. Installing uv
-2. Installing dependencies
-3. Installing Git hooks
-4. Installing pre-commit hooks
-5. Building the Mage Docker image
-6. Running dev!
-
-> [!WARNING]
-> _All commands below, without any notes, assume you are at the root of the repo._
-
-Mage server requires Python `>=3.10,<3.14`, as declared in `pyproject.toml`. The Docker images [use Python 3.10](./Dockerfile).
+Mage server requires Python `>=3.11,<3.14`, as declared in `pyproject.toml`. The Docker images [use Python 3.12](./Dockerfile).
 
 Python dependencies are managed with [uv](https://docs.astral.sh/uv/). `pyproject.toml` declares them and `uv.lock` pins the resolved versions. Both files are committed.
 
@@ -25,7 +15,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Then clone the repo:
 
 ```bash
-git clone https://github.com/mage-ai/mage-ai mage-ai
+git clone https://github.com/jospablo777/mage-ml mage-ai
 cd mage-ai
 ```
 
@@ -50,8 +40,8 @@ make dev_env_all
 Run commands against the environment with `uv run`:
 
 ```bash
-uv run python mage_ai/server/server.py
-uv run pytest mage_ai/tests/data_preparation/git -v
+uv run --no-sync python mage_ai/server/server.py
+uv run --no-sync pytest mage_ai/tests/data_preparation/git -v
 ```
 
 You can also activate `.venv` and use it like any other virtual environment:
@@ -68,29 +58,28 @@ The optional dependency groups in `pyproject.toml` map to the integrations Mage 
 uv sync --locked --extra postgres --extra dbt --group dev
 ```
 
-Two extras cover larger sets. `all` is what the published container image installs. `integrations` covers the packages the mage-integrations sources and destinations need at runtime.
+The Dockerfiles select `all` and `integrations`. The separate `mage_integrations` package has dependency conflicts with this profile; see [the audit report](docs/development/fork-audit.md).
 
 ### Adding or changing a dependency
 
-Edit `pyproject.toml`, then refresh the lockfile and the requirements export:
+Edit `pyproject.toml`, then refresh the lockfile:
 
 ```bash
 uv lock
-make requirements
 ```
 
-Commit `pyproject.toml`, `uv.lock`, and `requirements.txt` in the same change. CI fails when the three disagree.
+Commit `pyproject.toml` and `uv.lock` together. CI checks that the lockfile matches the declared dependencies.
 
-`requirements.txt` is generated from `uv.lock` and kept for tooling that still expects a pip requirements file. Edit `pyproject.toml` instead of editing it directly.
+`make requirements` generates an untracked requirements export for pip tooling. Edit `pyproject.toml` to change dependencies.
 
 ### Running the tests
 
-pytest is the test runner for local development. It executes the existing `unittest` suites without any changes to them:
+pytest runs the Python tests, including the `unittest` classes. Synchronize the required extras before running it; `--no-sync` preserves that environment.
 
 ```bash
 make test
-uv run pytest mage_ai/tests/data_preparation/git -v
-uv run pytest --cov=mage_ai --cov-report=term-missing
+uv run --no-sync pytest mage_ai/tests/data_preparation/git -v
+uv run --no-sync pytest --cov=mage_ai --cov-report=term-missing
 ```
 
 ## Mage frontend

@@ -6,6 +6,8 @@ the environment variable documentation at docs/development/variables/environment
 
 import os
 
+from mage_ai.shared.environments import is_debug
+
 from .secret_generation import generate_jwt_secret
 
 
@@ -36,7 +38,7 @@ def get_int_value(value: str) -> int:
 # Debugging and Environment Settings
 # ----------------------------------
 
-DEBUG = os.getenv('DEBUG', False)
+DEBUG = is_debug()
 DEBUG_MEMORY = str(os.getenv('DEBUG_MEMORY', 0) or 0) in ['1', 'true', 'True']
 DEBUG_FILE_IO = str(os.getenv('DEBUG_FILE_IO', 0) or 0) in ['1', 'true', 'True']
 HIDE_ENV_VAR_VALUES = int(os.getenv('HIDE_ENV_VAR_VALUES', 1) or 1) == 1

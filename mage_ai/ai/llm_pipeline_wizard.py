@@ -6,8 +6,8 @@ from typing import Dict, List
 
 import astor
 from jinja2.exceptions import TemplateNotFound
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
+from langchain_classic.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
 
 from mage_ai.ai.hugging_face_client import HuggingFaceClient
 from mage_ai.ai.openai_client import OpenAIClient

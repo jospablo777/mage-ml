@@ -1,7 +1,7 @@
+import ast
 import asyncio
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple, Union
 
@@ -46,30 +46,21 @@ DatasetMetadata = Dict[
 
 
 async def run_in_executor(func, *args):
-    executor = ThreadPoolExecutor()
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(executor, func, *args)
+    return await asyncio.to_thread(func, *args)
 
 
 def create_filter(*args) -> ds.Expression:
-    """
-    Dynamically creates a filter expression for a given column, value, and comparison operation.
-    Args:
-    - column_name (str): The name of the column to filter on.
-    - value (Any): The value to compare against.
-    - comparison (str): Type of comparison ('==', '!=', '<', '<=', '>', '>=')
-    Returns:
-    - ds.Expression: A PyArrow dataset filter expression.
-    Raises:
-    - ValueError: If an unsupported comparison type is provided.
-    """
     expression = args[0] if len(args) == 1 else args
     if isinstance(expression, str):
-        column_name, comparison, value = [s.strip() for s in expression.split(' ')]
+        column_name, comparison, value = expression.split(maxsplit=2)
+        try:
+            value = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            pass
     else:
         column_name, comparison, value = expression
 
-    value = FilterComparison(value) if isinstance(value, str) else value
+    comparison = FilterComparison(comparison)
 
     schema_field = ds.field(column_name)
     if FilterComparison.EQUAL == comparison:
@@ -124,7 +115,7 @@ def read_metadata(
     total_byte_size = 0  # Initialize total byte size
 
     # List all Parquet files in the directory
-    parquet_files = []
+    parquet_files = [directory] if os.path.isfile(directory) else []
     for root, _dirs, files in os.walk(directory):
         for file in files:
             if file.endswith('.parquet') and not file.startswith('sample'):
@@ -362,10 +353,10 @@ def __builder_scanner_generator_configurations(
             settings = BatchSettings.load(**settings)
     else:
         settings = BatchSettings()
-    batch_size = settings.items.minimum or settings.items.maximum
+    batch_size = settings.items.maximum or settings.items.minimum
 
     def __create_filter(chunk_query: str, dataset=dataset):
-        column, value = chunk_query.split('=')
+        column, value = chunk_query.split('=', 1)
         # Find the actual data type of the column in the dataset
         actual_type = dataset.schema.field(column).type
 
@@ -407,13 +398,13 @@ def __builder_scanner_generator_configurations(
     if filters:
 
         def __create_filters(filters_strings: List[str]) -> ds.Expression:
-            return reduce(lambda a, b: create_filter(a) & create_filter(b), filters_strings)
+            return reduce(lambda a, b: a & b, [create_filter(item) for item in filters_strings])
 
         filters_list.append(
-            reduce(lambda a, b: __create_filters(a) | __create_filters(b), filters),
+            reduce(lambda a, b: a | b, [__create_filters(group) for group in filters]),
         )
 
-    if filter:
+    if filter is not None:
         filters_list.append(filter)
 
     expression = None
@@ -462,67 +453,59 @@ def scan_dataset_parts(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
     **kwargs,
-) -> Any:
-    dataset, scanner_settings, metadatas = __builder_scanner_generator_configurations(
-        *args, **kwargs
+) -> RecordBatchGenerator:
+    return scan_batch_datasets_generator(
+        *args, deserialize=deserialize, limit=limit, offset=offset, **kwargs,
     )
 
-    num_rows = 0
-    if len(metadatas) >= 1:
-        num_rows = metadatas[0]['num_rows']
-        if not isinstance(num_rows, int):
-            num_rows = 0
 
-    offset = offset or 0
-    limit = limit or num_rows
-
-    total_rows_scanned = 0
-    start_row = offset or 0
-    rows_to_process = limit
-
-    generator = dataset.scanner(**scanner_settings).scan_batches()
-
-    for batch in generator:
-        if not batch:
-            break
-
-        if hasattr(batch, 'record_batch'):
-            batch = batch.record_batch
-
-        num_rows_in_batch = batch.num_rows
-        if total_rows_scanned + num_rows_in_batch < start_row:
-            # Entire batch is before the start_row; skip it.
-            total_rows_scanned += num_rows_in_batch
+def _slice_batches(generator, offset: int, limit: Optional[int], scan: bool):
+    if limit == 0:
+        return
+    for item in generator:
+        batch = item.record_batch if scan else item
+        if offset >= batch.num_rows:
+            offset -= batch.num_rows
             continue
-
-        # Calculate the slice of the current batch that is within [start_row, end_row].
-        offset_within_batch = max(start_row - total_rows_scanned, 0)
-        length_within_batch = min(rows_to_process, num_rows_in_batch - offset_within_batch)
-
-        if length_within_batch > 0:
-            object_metadata = get_series_object_metadata(metadatas=metadatas)
-            sliced_batch = batch.slice(offset=offset_within_batch, length=length_within_batch)
-            record_batch = RecordBatch(sliced_batch, object_metadata=object_metadata)
-            yield record_batch.deserialize() if deserialize else record_batch
-            rows_to_process -= length_within_batch
-
-        total_rows_scanned += num_rows_in_batch
-        if rows_to_process <= 0:
-            # Processed all rows in the range; exit loop.
-            break
+        count = batch.num_rows - offset
+        if limit is not None:
+            count = min(count, limit)
+        if offset or count != batch.num_rows:
+            batch = batch.slice(offset, count)
+            item = ds.TaggedRecordBatch(batch, item.fragment) if scan else batch
+        yield item
+        offset = 0
+        if limit is not None:
+            limit -= count
+            if limit == 0:
+                return
 
 
 def scan_batch_datasets_generator(
-    *args, deserialize: Optional[bool] = None, scan: Optional[bool] = False, **kwargs
+    *args,
+    deserialize: Optional[bool] = None,
+    scan: Optional[bool] = False,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    **kwargs,
 ) -> RecordBatchGenerator:
+    if limit is not None and limit < 0:
+        raise ValueError('limit must be nonnegative')
+    if offset is not None and offset < 0:
+        raise ValueError('offset must be nonnegative')
     dataset, scanner_settings, metadatas = __builder_scanner_generator_configurations(
         *args, **kwargs
     )
+    if limit is not None and limit > 0:
+        scanner_settings['batch_size'] = min(scanner_settings.get('batch_size', limit), limit)
+        scanner_settings['batch_readahead'] = 0
+        scanner_settings['fragment_readahead'] = 0
 
     if scan:
         generator = dataset.scanner(**scanner_settings).scan_batches()
     else:
         generator = dataset.to_batches(**scanner_settings)
+    generator = _slice_batches(generator, offset or 0, limit, bool(scan))
 
     return __wrap_generator(
         generator,
@@ -535,11 +518,15 @@ def scan_batch_datasets_generator(
 async def scan_batch_datasets_generator_async(
     source: Union[List[str], str], **kwargs
 ) -> AsyncRecordBatchGenerator:
-    generator = scan_batch_datasets_generator(source, **kwargs)
+    generator = await asyncio.to_thread(scan_batch_datasets_generator, source, **kwargs)
 
     async def async_generator_wrapper():
-        for item in generator:
-            yield await run_in_executor(lambda item=item: item)
+        end = object()
+        while True:
+            item = await run_in_executor(next, generator, end)
+            if item is end:
+                return
+            yield item
 
     return async_generator_wrapper()
 
@@ -570,18 +557,11 @@ def sample_batch_datasets(
     settings: Optional[BatchSettings] = None,
     **kwargs,
 ) -> Optional[ScanBatchDatasetResult]:
-    settings = settings if settings else BatchSettings()
-    if sample_count:
-        settings.items.maximum = sample_count
-
+    if sample_count is not None:
+        limit = kwargs.get('limit')
+        kwargs['limit'] = sample_count if limit is None else min(limit, sample_count)
     generator = scan_batch_datasets_generator(source, **kwargs, settings=settings)
-
-    try:
-        batch = next(generator)
-        if batch is not None:
-            return batch
-    except StopIteration:
-        pass
+    return next(generator, None)
 
 
 async def sample_batch_datasets_async(
@@ -590,13 +570,6 @@ async def sample_batch_datasets_async(
     settings: Optional[BatchSettings] = None,
     **kwargs,
 ) -> Optional[ScanBatchDatasetResult]:
-    settings = settings if settings else BatchSettings()
-    if sample_count:
-        settings.items.maximum = sample_count
-
-    generator = await scan_batch_datasets_generator_async(source, **kwargs, settings=settings)
-
-    async for batch in generator:
-        if batch is not None:
-            return batch
-            break
+    return await asyncio.to_thread(
+        sample_batch_datasets, source, sample_count=sample_count, settings=settings, **kwargs,
+    )

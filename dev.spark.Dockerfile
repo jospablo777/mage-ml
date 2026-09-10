@@ -9,8 +9,9 @@ RUN echo 'deb http://deb.debian.org/debian bullseye main' > /etc/apt/sources.lis
 
 ## System Packages
 RUN \
-  curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-  curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+  curl -fsSL https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -o /tmp/packages-microsoft-prod.deb && \
+  dpkg -i /tmp/packages-microsoft-prod.deb && \
+  rm /tmp/packages-microsoft-prod.deb && \
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
   NODE_MAJOR=20 && \
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
@@ -53,7 +54,7 @@ RUN \
   mkdir ~/.sparkmagic && \
   curl https://raw.githubusercontent.com/jupyter-incubator/sparkmagic/master/sparkmagic/example_config.json > ~/.sparkmagic/config.json && \
   sed -i 's/localhost:8998/host.docker.internal:9999/g' ~/.sparkmagic/config.json && \
-  jupyter-kernelspec install --user "$(uv pip show sparkmagic | grep Location | cut -d' ' -f2)/sparkmagic/kernels/pysparkkernel"
+  jupyter-kernelspec install --user "$(uv pip show --system sparkmagic | grep Location | cut -d' ' -f2)/sparkmagic/kernels/pysparkkernel"
 # Mage integrations and other related packages
 RUN \
   uv pip install --system --no-cache-dir "git+https://github.com/wbond/oscrypto.git@d5f3437ed24257895ae1edd9e503cfb352e635a8" && \
@@ -71,6 +72,7 @@ COPY pyproject.toml uv.lock /tmp/mage/
 RUN \
   uv sync --project /tmp/mage --locked --no-install-project --inexact --no-cache \
   --extra all --extra integrations --group dev && \
+  uv pip check --system && \
   rm -rf /tmp/mage
 
 ## Mage Frontend

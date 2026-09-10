@@ -10,12 +10,9 @@ from mage_ai.data_preparation.logging.logger import DictLogger
 from mage_ai.data_preparation.logging.logger_manager_factory import LoggerManagerFactory
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
-from mage_ai.server.logger import Logger
 from mage_ai.shared.hash import merge_dict
 from mage_ai.usage_statistics.constants import EventNameType, EventObjectType
 from mage_ai.usage_statistics.logger import UsageStatisticLogger
-
-logger = Logger().new_server_logger(__name__)
 
 
 class PipelineExecutor:
@@ -43,23 +40,36 @@ class PipelineExecutor:
         update_status: bool = False,
         **kwargs,
     ) -> None:
-        """
-        Executes the pipeline, handling block runs and logging.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError('Use await PipelineExecutor.execute_async() inside an event loop.')
+        return asyncio.run(self.execute_async(
+            allow_blocks_to_fail=allow_blocks_to_fail,
+            analyze_outputs=analyze_outputs,
+            global_vars=global_vars,
+            pipeline_run_id=pipeline_run_id,
+            run_sensors=run_sensors,
+            run_tests=run_tests,
+            update_status=update_status,
+            **kwargs,
+        ))
 
-        Args:
-            allow_blocks_to_fail (bool): Whether to allow blocks to fail during execution.
-            analyze_outputs (bool): Whether to analyze block outputs during execution.
-            global_vars (Dict): Global variables accessible to block executions.
-            pipeline_run_id (int): Identifier of the pipeline run.
-            run_sensors (bool): Whether to run sensors during execution.
-            run_tests (bool): Whether to run tests during execution.
-            update_status (bool): Whether to update the execution status.
-            **kwargs: Additional keyword arguments.
-        """
-        # Create the async task to execute
-        async def _execute_task():
+    async def execute_async(
+        self,
+        allow_blocks_to_fail: bool = False,
+        analyze_outputs: bool = False,
+        global_vars: Dict = None,
+        pipeline_run_id: int = None,
+        run_sensors: bool = True,
+        run_tests: bool = True,
+        update_status: bool = False,
+        **kwargs,
+    ) -> None:
+        try:
             if pipeline_run_id is None:
-                # Execute the pipeline without block runs
                 await self.pipeline.execute(
                     analyze_outputs=analyze_outputs,
                     global_vars=global_vars,
@@ -68,7 +78,6 @@ class PipelineExecutor:
                     update_status=update_status,
                 )
             else:
-                # Supported pipeline types: Standard batch pipeline
                 pipeline_run = PipelineRun.query.get(pipeline_run_id)
                 if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
                     return
@@ -77,19 +86,8 @@ class PipelineExecutor:
                     allow_blocks_to_fail=allow_blocks_to_fail,
                     global_vars=global_vars,
                 )
-        # Execute the task based on current context
-        try:
-            loop = asyncio.get_running_loop()
-            logger.info(f'[PipelineExecutor] Found running loop {loop}')
-            # We're in an async context, use create_task
-            task = asyncio.create_task(_execute_task())
-            loop.run_until_complete(task)
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            logger.info('[PipelineExecutor] No running loop, using asyncio.run')
-            asyncio.run(_execute_task())
-
-        self.logger_manager.output_logs_to_destination()
+        finally:
+            self.logger_manager.output_logs_to_destination()
 
     async def __run_blocks(
         self,
@@ -97,14 +95,6 @@ class PipelineExecutor:
         allow_blocks_to_fail: bool = False,
         global_vars: Dict = None
     ):
-        """
-        Runs blocks asynchronously within a pipeline run.
-
-        Args:
-            pipeline_run (PipelineRun): The current pipeline run.
-            allow_blocks_to_fail (bool): Whether to allow blocks to fail during execution.
-            global_vars (Dict): Global variables accessible to block executions.
-        """
         if global_vars is None:
             global_vars = dict()
 
@@ -113,6 +103,9 @@ class PipelineExecutor:
             block_run_outputs_cache: Dict[str, List],
         ) -> asyncio.Task:
             async def execute_block() -> None:
+                pipeline_run.refresh()
+                if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
+                    return
                 executor_kwargs = dict(
                     pipeline=self.pipeline,
                     block_uuid=block_run.block_uuid,
@@ -147,13 +140,19 @@ class PipelineExecutor:
                         resource_parent_id=self.pipeline.uuid if self.pipeline else None,
                     )
 
-                    raise error
+                    raise
 
             return asyncio.create_task(execute_block())
 
         block_run_outputs_cache = dict()
 
-        while not pipeline_run.all_blocks_completed(allow_blocks_to_fail):
+        while True:
+            pipeline_run.refresh()
+            if (
+                pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING
+                or pipeline_run.all_blocks_completed(allow_blocks_to_fail)
+            ):
+                return
             # Update the statuses of the block runs to CONDITION_FAILED or UPSTREAM_FAILED.
             pipeline_run.update_block_run_statuses(pipeline_run.initial_block_runs)
             executable_block_runs = pipeline_run.executable_block_runs(
@@ -164,11 +163,14 @@ class PipelineExecutor:
             block_run_tasks = [
                 create_block_task(b, block_run_outputs_cache=block_run_outputs_cache)
                 for b in executable_block_runs]
-            block_run_outputs = await asyncio.gather(*block_run_tasks)
+            block_run_outputs = await asyncio.gather(
+                *block_run_tasks, return_exceptions=allow_blocks_to_fail,
+            )
             if self.pipeline.cache_block_output_in_memory:
                 for idx, block_run in enumerate(executable_block_runs):
-                    block_run_outputs_cache[block_run.block_uuid] = \
-                        block_run_outputs[idx].get('output', [])
+                    result = block_run_outputs[idx]
+                    if isinstance(result, dict):
+                        block_run_outputs_cache[block_run.block_uuid] = result.get('output', [])
 
     def build_tags(self, **kwargs):
         default_tags = dict(
@@ -184,20 +186,13 @@ class PipelineExecutor:
         pipeline_run_id: int = None,
         **kwargs,
     ) -> List[str]:
-        """
-        Run the commands for the pipeline.
-
-        Args:
-            global_vars: Global variables for the block execution.
-            pipeline_run_id: The ID of the pipeline run.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            A list of command arguments.
-        """
-        cmd = f'/app/run_app.sh '\
-              f'mage run {self.pipeline.repo_config.repo_path} '\
-              f'{self.pipeline.uuid}'
+        cmd = [
+            '/app/run_app.sh',
+            'mage',
+            'run',
+            self.pipeline.repo_config.repo_path,
+            self.pipeline.uuid,
+        ]
         options = [
             '--executor-type',
             'local_python',
@@ -212,4 +207,4 @@ class PipelineExecutor:
                 '--pipeline-run-id',
                 f'{pipeline_run_id}',
             ]
-        return cmd.split(' ') + options
+        return cmd + options

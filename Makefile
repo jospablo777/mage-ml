@@ -19,7 +19,7 @@ lock-check:
 	$(UV) lock --check
 
 test:
-	$(UV) run pytest
+	$(UV) run --no-sync pytest
 
 requirements:
 	$(UV) export --frozen --no-hashes --no-annotate --no-emit-project \

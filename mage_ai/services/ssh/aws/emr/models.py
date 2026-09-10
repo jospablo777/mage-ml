@@ -3,8 +3,6 @@ import os
 import socket
 from typing import Dict
 
-from sshtunnel import SSHTunnelForwarder
-
 from mage_ai.data_preparation.models.project import Project
 from mage_ai.services.compute.aws.models import Cluster
 from mage_ai.services.compute.constants import SSH_PORT
@@ -13,6 +11,7 @@ from mage_ai.services.spark.api.constants import SPARK_UI_HOST
 from mage_ai.services.ssh.aws.emr.constants import SSH_DEFAULTS
 from mage_ai.services.ssh.aws.emr.utils import file_path, should_tunnel
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.ssh import SSHTunnelForwarder
 from mage_ai.shared.utils import is_port_in_use
 
 

@@ -6,8 +6,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ## System Packages
 RUN \
-  curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-  curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+  curl -fsSL https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -o /tmp/packages-microsoft-prod.deb && \
+  dpkg -i /tmp/packages-microsoft-prod.deb && \
+  rm /tmp/packages-microsoft-prod.deb && \
   apt-get -y update && \
   ACCEPT_EULA=Y apt-get -y install --no-install-recommends \
   # NFS dependencies
@@ -39,7 +40,7 @@ RUN \
   mkdir ~/.sparkmagic && \
   curl https://raw.githubusercontent.com/jupyter-incubator/sparkmagic/master/sparkmagic/example_config.json > ~/.sparkmagic/config.json && \
   sed -i 's/localhost:8998/host.docker.internal:9999/g' ~/.sparkmagic/config.json && \
-  jupyter-kernelspec install --user "$(uv pip show sparkmagic | grep Location | cut -d' ' -f2)/sparkmagic/kernels/pysparkkernel"
+  jupyter-kernelspec install --user "$(uv pip show --system sparkmagic | grep Location | cut -d' ' -f2)/sparkmagic/kernels/pysparkkernel"
 # Packages that are not resolved from uv.lock.
 RUN \
   uv pip install --system --no-cache-dir "git+https://github.com/wbond/oscrypto.git@d5f3437ed24257895ae1edd9e503cfb352e635a8" && \
@@ -64,9 +65,10 @@ ENV UV_PROJECT_ENVIRONMENT=/usr/local
 COPY pyproject.toml uv.lock README.md MANIFEST.in /tmp/mage/
 COPY mage_ai /tmp/mage/mage_ai
 RUN \
-  uv sync --project /tmp/mage --locked --no-install-project --inexact --no-cache \
+  uv sync --project /tmp/mage --locked --no-install-project --inexact --no-cache --no-default-groups \
   --extra all --extra integrations && \
   uv pip install --system --no-cache-dir --no-deps /tmp/mage && \
+  uv pip check --system && \
   rm -rf /tmp/mage
 
 

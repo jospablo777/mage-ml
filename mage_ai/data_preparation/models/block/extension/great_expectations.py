@@ -5,8 +5,7 @@ import pandas as pd
 
 from mage_ai.data_preparation.models.constants import BlockLanguage
 
-# Built once. gx.expectations exposes CamelCase classes, block code calls the
-# snake_case names the 0.18 Validator had.
+# Map legacy Validator method names to expectation classes.
 EXPECTATION_CLASSES = {
     name.lower(): getattr(gx.expectations, name)
     for name in dir(gx.expectations)
@@ -20,13 +19,7 @@ def expectation_class(method_name: str):
 
 
 class Validator:
-    """
-    Stands in for the Validator that great_expectations 0.18 returned.
-
-    Block code calls validator.expect_*(...) and then validate(). 1.x builds a
-    suite and validates a batch instead, so the expect_* calls collect
-    expectations and validate() runs them in one pass.
-    """
+    """Register and evaluate expectations through the legacy Validator interface."""
 
     def __init__(self, batch, suite):
         self.batch = batch
@@ -41,9 +34,16 @@ class Validator:
             raise AttributeError(f'{name} is not a great_expectations expectation')
 
         def add_expectation(*args, **kwargs):
-            expectation = klass(*args, **kwargs)
+            names = klass.args_keys
+            if len(args) > len(names):
+                raise TypeError(f'{name} accepts at most {len(names)} positional arguments')
+            for key, value in zip(names, args):
+                if key in kwargs:
+                    raise TypeError(f'{name} got multiple values for {key}')
+                kwargs[key] = value
+            expectation = klass(**kwargs)
             self.suite.add_expectation(expectation)
-            return expectation
+            return self.batch.validate(expectation)
 
         return add_expectation
 
@@ -96,13 +96,16 @@ class GreatExpectations():
         return validators
 
     def build_expectation(self, expectation):
-        """Config saved by the extension is a dict, block code passes objects."""
+        """Accept saved expectation configurations and expectation objects."""
         if not isinstance(expectation, dict):
             return expectation
 
-        method_name = expectation.get('expectation_type')
+        method_name = expectation.get('expectation_type') or expectation.get('type')
         klass = expectation_class(method_name or '')
         if klass is None:
             raise ValueError(f'{method_name} is not a great_expectations expectation')
 
-        return klass(**(expectation.get('kwargs') or {}))
+        kwargs = dict(expectation.get('kwargs') or {})
+        if 'meta' in expectation:
+            kwargs['meta'] = expectation['meta']
+        return klass(**kwargs)

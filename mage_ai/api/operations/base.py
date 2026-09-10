@@ -257,7 +257,8 @@ class BaseOperation:
             if settings.DEBUG:
                 raise err
 
-        db_connection.stop_cache()
+        finally:
+            db_connection.stop_cache()
 
         return response
 

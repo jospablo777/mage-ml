@@ -77,12 +77,12 @@ class Qdrant(BaseIO):
         # Assume collection is already created and exists.
         collection_name = collection_name or self.collection
 
-        hitted_results = self.client.search(
+        hitted_results = self.client.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit_results,
             with_vectors=True,
-        )
+        ).points
 
         output_df = {}
         output_df['id'] = [hit.id for hit in hitted_results]

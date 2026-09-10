@@ -1,125 +1,36 @@
-# Mage OSS
+# Mage ML
 
-### Build modern data pipelines locally — fast, visual, and production-ready.
+A fork of [Mage OSS](https://github.com/mage-ai/mage-ai) for building and running data pipelines. This fork updates Python dependencies, uses uv for package management, and maintains the `mage_ai` import namespace and `mage` command.
 
-<br />
+The runtime supports Python 3.11–3.13 and uses pandas 3, NumPy 2, Polars 1, and SQLAlchemy 2. Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
 
-Mage OSS is a self-hosted development environment designed to help teams create production-grade data pipelines with confidence.
-
-Ideal for automating ETL tasks, architecting data flow, or orchestrating transformations — all in a fast, notebook-style interface powered by modular code.
-
-When it’s time to scale, [Mage Pro](https://mage.ai) — our core platform — unlocks enterprise orchestration, collaboration, and AI-powered workflows.
-
-<br />
-
-<a href="https://mage.ai"><img alt="Mage AI GitHub repo stars" src="https://img.shields.io/github/stars/mage-ai/mage-ai?style=for-the-badge&logo=github&labelColor=000000&logoColor=FFFFFF&label=stars&color=0500ff" /></a>
-<a href="https://hub.docker.com/r/mageai/mageai"><img alt="Mage AI Docker downloads" src="https://img.shields.io/docker/pulls/mageai/mageai?style=for-the-badge&logo=docker&labelColor=000000&logoColor=FFFFFF&label=pulls&color=6A35FF" /></a>
-<a href="https://github.com/mage-ai/mage-ai/blob/master/LICENSE"><img alt="Mage AI license" src="https://img.shields.io/github/license/mage-ai/mage-ai?style=for-the-badge&logo=codeigniter&labelColor=000000&logoColor=FFFFFF&label=license&color=FFCC19" /></a>
-<a href="https://www.mage.ai/chat"><img alt="Join the Mage AI community" src="https://img.shields.io/badge/Join%20the%20community-black.svg?style=for-the-badge&logo=lightning&labelColor=000000&logoColor=FFFFFF&label=&color=DD55FF&logoWidth=20" /></a>
-
-<br />
-
-## What you can do with Mage OSS
-
-- Build pipelines locally with Python, SQL, or R in a modular notebook-style UI
-
-- Run jobs manually or on a schedule (cron supported)
-
-- Connect to databases, APIs, and cloud storage with prebuilt connectors
-
-- Debug visually with logs, live previews, and step-by-step execution
-
-- Set up quickly with Docker, pip, or conda — no cloud account required
-
-- Your go-to workspace for local pipeline development — fully in your control.
-  
-<img width="100%" alt="mage" src="https://github.com/user-attachments/assets/75992872-20a6-4120-8bf0-9c22a3d66450" />
-
-
-<br /><br />
-
-## Start local. Scale when you're ready.
-
-Use Mage OSS to build and run pipelines on your machine. When you're ready for advanced tooling, performance, and AI-assisted productivity, Mage Pro is just one click away.
-
-[**Try Mage Pro free →**](https://mage.ai)
-
-<br />
-
-### Quickstart
-
-Install using Docker (recommended):
+## Install from source
 
 ```bash
-docker pull mageai/mageai:latest
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+uv sync --locked --no-default-groups --extra postgres
+uv run --no-sync mage init my_project
+uv run --no-sync mage start my_project
 ```
 
-Or with pip:
+Select additional integrations with `--extra`, for example `--extra s3` or `--extra dbt`. A subsequent `uv sync` removes extras that are not selected. Use `uv run --no-sync` when running an environment already synchronized with the required extras.
+
+The `all` extra selects the container dependency profile. The `integrations` extra supplies connector dependencies; the separate `mage_integrations` package still requires its own installation.
+
+## Development
 
 ```bash
-pip install mage-ai
+make dev_env
+make test
 ```
 
-Or with conda:
-
-```bash
-conda install -c conda-forge mage-ai
-```
-
-Full setup guide and docs: [docs.mage.ai](https://docs.mage.ai/getting-started/setup#%E2%9B%B5%EF%B8%8F-mage-oss-overview)
-
-<br />
-
-## Core Features
-
-| Feature | Description |
-| :- | :- |
-| Modular pipelines | Build pipelines block-by-block using Python, SQL, or R |
-| Notebook UI | Interactive editor for writing and documenting logic |
-| Data integrations | Prebuilt connectors to databases, APIs, and cloud storage |
-| Scheduling | Trigger pipelines manually or on a schedule |
-| Visual debugging | Step-by-step logs, data previews, and error handling |
-| dbt support | Build and run dbt models directly inside Mage |
-
-<br />
-
-## Example Use Cases
-
-- Move data from Google Sheets to Snowflake with a Python transform
-- Schedule a daily SQL pipeline to clean and aggregate product data
-- Develop dbt models in a visual notebook-style interface
-- Run simple ETL/ELT jobs locally with full transparency
-
-<br />
+See [the development guide](README_dev.md) for extras, frontend development, and dependency changes. See [the fork audit](docs/development/fork-audit.md) for validation results and remaining release blockers.
 
 ## Documentation
 
-Looking for how-to guides, examples, or advanced configuration?
+The [upstream documentation](https://docs.mage.ai) describes pipeline configuration, scheduling, connectors, and the user interface. Upstream installation commands and container images install Mage OSS rather than this fork.
 
-Explore our full documentation at [docs.mage.ai](https://docs.mage.ai).
+## License
 
-
-<br />
-
-## Contributing
-
-We welcome contributions of all kinds — bug fixes, docs, new features, or community examples.
-
-Start with our [contributing guide](https://docs.mage.ai/contributing/overview), check out open issues, or suggest improvements.
-
-<br />
-
-## Ready to scale? Mage Pro has you covered.
-
-Mage Pro is a powered-up platform built for teams.
-It adds everything you need for production pipelines, at scale.
-
-- Magical AI-assisted development and debugging
-- Multi-environment orchestration
-- Role-based access control
-- Real-time monitoring & alerts
-- Powerful CI/CD & version control
-- Powerful enterprise features
-- Available fully managed, hybrid, or on-premises
-
-[**Try Mage Pro free →**](https://mage.ai)
+[Apache License 2.0](LICENSE).

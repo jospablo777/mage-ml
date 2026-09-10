@@ -2081,18 +2081,19 @@ def schedule_with_event(event: Dict = None):
     logger.info(f'Schedule with event {event}')
     all_event_matchers = EventMatcher.active_event_matchers()
 
-    matched_pipeline_schedules = []
+    matched_pipeline_schedules = {}
     for e in all_event_matchers:
         if e.match(event):
             logger.info(f'Event matched with {e}')
-            matched_pipeline_schedules.extend(e.active_pipeline_schedules())
+            for pipeline_schedule in e.active_pipeline_schedules():
+                matched_pipeline_schedules[pipeline_schedule.id] = pipeline_schedule
         else:
             logger.info(f'Event not matched with {e}')
 
     if len(matched_pipeline_schedules) > 0:
         from mage_ai.orchestration.triggers.utils import create_and_start_pipeline_run
 
-        for p in matched_pipeline_schedules:
+        for p in matched_pipeline_schedules.values():
             payload = dict(
                 execution_date=datetime.now(tz=pytz.UTC),
                 pipeline_schedule_id=p.id,

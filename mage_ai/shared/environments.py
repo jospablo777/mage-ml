@@ -15,7 +15,7 @@ def is_deus_ex_machina():
 
 
 def is_debug():
-    return int(os.getenv('DEBUG', 0) or 0) == 1
+    return os.getenv('DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def is_dev():

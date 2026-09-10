@@ -3,9 +3,9 @@ import os
 from typing import Dict
 
 import openai
-from langchain.chains import LLMChain
-from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
+from langchain_classic.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import OpenAI
 from openai import OpenAI as OpenAILib
 
 from mage_ai.ai.ai_client import AIClient

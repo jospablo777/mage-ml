@@ -157,7 +157,7 @@ def as_scalar(x, str_encoding='utf-8'):
         return x
     elif isinstance(x, tuple(NUMPY_SCALAR_TYPES)):
         return x.item()
-    elif isinstance(x, (np.bytes_, np.bytes_)):
+    elif isinstance(x, np.bytes_):
         return x.item().decode(str_encoding)
     else:
         raise ValueError('Unknown type {}'.format(str(type(x))))

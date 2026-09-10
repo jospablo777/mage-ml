@@ -3,6 +3,7 @@ import re
 import warnings
 
 import numpy as np
+import pandas as pd
 
 from mage_ai.shared.array import subtract
 from mage_ai.shared.parsers import is_numpy_subdtype, is_string_dtype
@@ -115,7 +116,7 @@ def infer_column_types(df, **kwargs):
                         zip_code_feature_names.append(col_name)
                     else:
                         non_number_feature_names.append(col_name)
-        elif col_type == 'bool':
+        elif pd.api.types.is_bool_dtype(col_type):
             binary_feature_names.append(col_name)
         elif is_numpy_subdtype(col_type, np.floating):
             float_feature_names.append(col_name)

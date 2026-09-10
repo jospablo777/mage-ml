@@ -1,7 +1,9 @@
+from unittest import mock
+
+from typer.testing import CliRunner
+
 from mage_ai.cli.main import app
 from mage_ai.tests.base_test import TestCase
-from typer.testing import CliRunner
-from unittest import mock
 
 runner = CliRunner()
 
@@ -12,7 +14,9 @@ class InitTests(TestCase):
     def test_init_project_with_path(self, mock_getcwd, mock_init_repo):
         mock_getcwd.return_value = 'home'
         result = runner.invoke(app, ['init', 'my_mage_project'])
-        mock_init_repo.assert_called_once_with('home/my_mage_project')
+        mock_init_repo.assert_called_once_with(
+            'home/my_mage_project', project_type='standalone', cluster_type=None, project_uuid=None,
+        )
         assert result.exit_code == 0
         assert 'Initialized Mage project' in result.output
 

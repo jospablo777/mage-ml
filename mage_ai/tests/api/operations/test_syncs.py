@@ -1,4 +1,5 @@
 import os
+from unittest.mock import patch
 
 import inflection
 
@@ -21,7 +22,9 @@ class SyncOperationTests(BaseApiTestCase):
     @classmethod
     def setUpClass(self):
         super().setUpClass()
-        os.environ[MAGE_DATA_DIR_ENV_VAR] = self.repo_path
+        data_directory = patch.dict(os.environ, {MAGE_DATA_DIR_ENV_VAR: self.repo_path})
+        data_directory.start()
+        self.addClassCleanup(data_directory.stop)
 
     async def asyncTearDown(self):
         # super().asyncTearDown()
