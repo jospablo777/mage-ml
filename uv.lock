@@ -4198,7 +4198,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mage-ai"
+name = "mage-ml"
 version = "0.9.79"
 source = { editable = "." }
 dependencies = [
@@ -4555,20 +4555,20 @@ requires-dist = [
     { name = "langchain-community", marker = "extra == 'ai'", specifier = "==0.2.5" },
     { name = "ldap3", specifier = "==2.9.1" },
     { name = "lxml", marker = "extra == 'redshift'", specifier = "==4.9.4" },
-    { name = "mage-ai", extras = ["ai"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["airtable"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["azure"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["bigquery"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["clickhouse"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["dbt"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["oracle"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["postgres"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["redshift"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["s3"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["snowflake"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["spark"], marker = "extra == 'all'" },
-    { name = "mage-ai", extras = ["streaming"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["ai"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["airtable"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["azure"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["bigquery"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["clickhouse"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["dbt"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["postgres"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["redshift"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["s3"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["snowflake"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["spark"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["streaming"], marker = "extra == 'all'" },
     { name = "memory-profiler" },
     { name = "mysql-connector-python", marker = "python_full_version >= '3.11' and extra == 'mysql'", specifier = "~=9.0.0" },
     { name = "mysql-connector-python", marker = "python_full_version < '3.11' and extra == 'mysql'", specifier = "~=8.4.0" },
