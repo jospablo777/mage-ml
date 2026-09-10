@@ -10,7 +10,7 @@ from mage_ai.tests.api.endpoints.mixins import (
 def get_resource_id(self) -> str:
     block = list(self.pipeline.blocks_by_uuid.values())[0]
     pk = block.file_path.replace(f'{self.pipeline.repo_path}/', '')
-    return urllib.parse.quote_plus(pk)
+    return urllib.parse.quote(pk)
 
 
 def get_model_before_update(self):

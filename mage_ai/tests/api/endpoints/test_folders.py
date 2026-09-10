@@ -15,7 +15,7 @@ from mage_ai.tests.shared.mixins import ProjectPlatformMixin
 def get_resource_id(self) -> str:
     block = list(self.pipeline.blocks_by_uuid.values())[0]
     dir_name = os.path.dirname(block.file_path)
-    return urllib.parse.quote_plus(dir_name)
+    return urllib.parse.quote(dir_name)
 
 
 def get_model_before_update(self):
