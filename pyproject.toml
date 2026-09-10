@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mage-ai"
+name = "mage-ml"
 version = "0.9.79"
 description = "Mage is a tool for building and deploying data pipelines."
 readme = "README.md"
