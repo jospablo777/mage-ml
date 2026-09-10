@@ -1,6 +1,12 @@
+import json
+
 from mage_ai.data_cleaner.shared.utils import is_spark_dataframe
 from mage_ai.data_cleaner.transformer_actions import column, row
-from mage_ai.data_cleaner.transformer_actions.constants import ActionType, Axis, VariableType
+from mage_ai.data_cleaner.transformer_actions.constants import (
+    ActionType,
+    Axis,
+    VariableType,
+)
 from mage_ai.data_cleaner.transformer_actions.dependency_resolution import (
     default_resolution,
 )
@@ -9,7 +15,6 @@ from mage_ai.data_cleaner.transformer_actions.variable_replacer import (
     interpolate,
     replace_true_false,
 )
-import json
 
 try:
     from mage_ai.data_cleaner.transformer_actions.spark.transformers import (
@@ -149,7 +154,9 @@ class BaseAction:
             return pdf
 
         groupby_columns = action['action_arguments']
-        return df.groupby(groupby_columns).apply(
+        # pandas 3 drops the grouping columns from the frame passed to apply.
+        # Selecting every column back keeps them available to the child actions.
+        return df.groupby(groupby_columns, group_keys=False)[df.columns.tolist()].apply(
             lambda x: __transform_partition(x, action['child_actions'])
         )
 

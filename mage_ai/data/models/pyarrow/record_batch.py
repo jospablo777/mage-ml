@@ -1,9 +1,8 @@
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import pyarrow as pa
 import pyarrow.dataset as ds
-from pandas.io.formats.style_render import Union
 
 from mage_ai.data.models.generator import DataGenerator
 from mage_ai.data.models.pyarrow.shared import Base

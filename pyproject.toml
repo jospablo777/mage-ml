@@ -7,7 +7,7 @@ name = "mage-ml"
 version = "0.9.79"
 description = "Mage is a tool for building and deploying data pipelines."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 authors = [{ name = "Mage", email = "eng@mage.ai" }]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -16,38 +16,37 @@ classifiers = [
 ]
 dependencies = [
   "cachetools",
-  "click<8.2.0",
+  "click>=8.3.3",
   "Faker==4.14.0",
   "GitPython==3.1.62",
   "Jinja2>=3.1.6",
-  "Pillow==10.3.0",
+  "Pillow>=12.3.0",
   "PyGithub==1.59.0",
-  "PyJWT==2.6.0",
+  "PyJWT>=2.13.0",
   "aiofiles==22.1.0",
-  "aiohttp==3.10.0",
+  "aiohttp>=3.14.3",
   "alembic>=1.7.5",
   "bcrypt==4.0.1",
   "cron-converter==1.2.1",
-  "cryptography==42.0.4",
+  "cryptography>=50.0.0",
   "dask[dataframe]>=2022.2.0",
   "datadog==0.44.0",
   "freezegun==1.2.2",
-  "great-expectations==0.18.12",
   "httpx>=0.27.0",
   "inflection==0.5.1",
   "ipykernel==6.15.0",
   "ipython==8.10.0",
   "itsdangerous~=1.1.0",
   "joblib>=1.1.0",
-  "jupyter-server==2.14.1",
+  "jupyter-server>=2.20.0",
   "jupyter_client==7.4.4",
   "ldap3==2.9.1",
   "memory_profiler",
   "newrelic==8.8.0",
-  "numpy>=1.22.0",
-  "pandas>=2.1,<3",
-  "paramiko==3.5.1",
-  "polars==1.30.0",
+  "numpy>=2.0",
+  "pandas>=3.0",
+  "paramiko>=5.0.0",
+  "polars>=1.44.2",
   "protobuf>=6.0,<7",
   "psutil==5.9.8",
   "pyairtable>=2.3.3",
@@ -56,22 +55,23 @@ dependencies = [
   "pytz>=2022.2.1",
   "pyyaml~=6.0",
   "redis~=5.0.1",
-  "requests~=2.31.0",
+  "requests>=2.33.0",
+  "rich>=13.9.4",
   "ruamel.yaml==0.17.17",
   "scikit-learn<1.8",
-  "sentry-sdk>=2.0.0,<3.0.0",
-  "setuptools==70.0.0",
+  "sentry-sdk>=2.8.0,<3.0.0",
+  "setuptools>=83.0.0",
   "simplejson",
   "six>=1.15.0",
   "sqlalchemy>2.0.0",
   "sqlglot[rs]",
   "terminado==0.17.1",
   "thefuzz[speedup]==0.19.0",
-  "tornado==6.4.2",
-  "typer[all]==0.9.0",
-  "typing_extensions==4.11.0",
+  "tornado>=6.5.7",
+  "typer>=0.18",
+  "typing_extensions>=4.13.2",
   "watchdog==4.0.0",
-  "Werkzeug==3.0.3",
+  "Werkzeug>=3.1.6",
 ]
 
 [project.urls]
@@ -84,9 +84,10 @@ mage = "mage_ai.cli.main:app"
 [project.optional-dependencies]
 ai = [
   "astor>=0.8.1",
-  "langchain==0.2.5",
-  "langchain_community==0.2.5",
-  "openai==1.82.0",
+  # 0.2.x caps numpy below 2.
+  "langchain>=0.3,<1",
+  "langchain_community>=0.3,<1",
+  "openai>=1.82.0",
 ]
 airtable = [
   "pyairtable>=2.3.3",
@@ -124,6 +125,9 @@ dbt = [
   "dbt-trino==1.10.1",
   "trino~=0.326",
 ]
+great-expectations = [
+  "great-expectations>=1.0",
+]
 google-cloud-storage = [
   "google-cloud-storage==2.5.0",
   "gspread==5.7.2",
@@ -141,9 +145,8 @@ oracle = [
   "oracledb==2.4.1; python_version >= '3.12'",
 ]
 postgres = [
-  "psycopg2==2.9.3",
-  "psycopg2-binary==2.9.3",
-  "sshtunnel==0.4.0",
+  "psycopg2-binary>=2.9.10",
+  "sshtunnel>=0.4.0",
 ]
 qdrant = [
   "qdrant-client==1.6.9",
@@ -262,6 +265,11 @@ dev = [
 
 [tool.uv]
 required-version = ">=0.9.0"
+# pyopenssl 22 is the newest release with no upper bound on cryptography, so a
+# cryptography floor alone drags it backwards. This holds it forward.
+constraint-dependencies = [
+  "pyopenssl>=25.1.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

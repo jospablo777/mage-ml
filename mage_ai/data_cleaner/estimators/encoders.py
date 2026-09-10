@@ -6,6 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 from mage_ai.data_cleaner.estimators.base import BaseEstimator
 from mage_ai.shared.conversions import fd_to_df, np_to_fd
 from mage_ai.shared.multi import execute_parallel
+from mage_ai.shared.parsers import is_numpy_subdtype
 
 
 class CustomLabelEncoder(BaseEstimator):
@@ -42,9 +43,9 @@ class CustomLabelEncoder(BaseEstimator):
 
         if unknown_found:
             # TODO(christhetree): why are these multiplied by 2?
-            if np.issubdtype(X.dtype, np.floating):
+            if is_numpy_subdtype(X.dtype, np.floating):
                 self.unknown_class = float(self.label_values[-1] * 2)
-            elif np.issubdtype(X.dtype, np.integer):
+            elif is_numpy_subdtype(X.dtype, np.integer):
                 self.unknown_class = int(self.label_values[-1] * 2)
             else:
                 self.unknown_class = 'unknown_class_'

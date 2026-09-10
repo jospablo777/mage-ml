@@ -1,9 +1,10 @@
+import numpy as np
+import pandas as pd
+
 from mage_ai.data_cleaner.transformer_actions.base import BaseAction
 from mage_ai.shared.hash import merge_dict
 from mage_ai.tests.base_test import TestCase
 from mage_ai.tests.data_cleaner.transformer_actions.shared import TEST_ACTION
-import numpy as np
-import pandas as pd
 
 
 def build_df():
@@ -220,7 +221,7 @@ class BaseActionTests(TestCase):
             ['b', '2020-01-04', 990, 'Store B'],
             ['a', '2020-01-02', 1100, 'Store A'],
             ['b', '2020-01-03', 1200, 'Store B'],
-            ['c', '2020-01-07', 1250, np.NaN],
+            ['c', '2020-01-07', 1250, np.nan],
         ])
         self.assertEqual(df_new.columns.to_list(), [
             'store', 'date', 'sold', 'store_description',
@@ -286,7 +287,7 @@ class BaseActionTests(TestCase):
             ['b', '2020-01-04', 990, 'Store B', '2020-02-02'],
             ['a', '2020-01-02', 1100, 'Store A', '2020-02-01'],
             ['b', '2020-01-03', 1200, 'Store B', '2020-02-02'],
-            ['c', '2020-01-07', 1250, np.NaN, np.NaN],
+            ['c', '2020-01-07', 1250, np.nan, np.nan],
         ])
         self.assertEqual(df_new.columns.to_list(), [
             'store', 'date', 'sold', 'store_description', 'date_1',
@@ -350,7 +351,7 @@ class BaseActionTests(TestCase):
             ['b', '2020-01-04', 990, 'b', 'Store B', '2020-02-02'],
             ['a', '2020-01-02', 1100, 'a', 'Store A', '2020-02-01'],
             ['b', '2020-01-03', 1200, 'b', 'Store B', '2020-02-02'],
-            ['c', '2020-01-07', 1250, np.NaN, np.NaN, np.NaN],
+            ['c', '2020-01-07', 1250, np.nan, np.nan, np.nan],
         ])
         self.assertEqual(df_new.columns.to_list(), [
             'store', 'date', 'sold', 'store_1', 'description', 'date_1',
@@ -395,7 +396,7 @@ class BaseActionTests(TestCase):
             ['2', '2020-01-04', 990, 'Store B'],
             ['1', '2020-01-02', 1100, 'Store A'],
             ['2', '2020-01-03', 1200, 'Store B'],
-            ['3', '2020-01-07', 1250, np.NaN],
+            ['3', '2020-01-07', 1250, np.nan],
         ])
         self.assertEqual(df_new.columns.to_list(), [
             'store', 'date', 'sold', 'store_description',

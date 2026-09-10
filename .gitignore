@@ -191,5 +191,8 @@ package.json
 test.py
 test/
 test_data*
+test_project/
+/data_loaders/
+.ssh_tunnel/
 
 do_not_commit/

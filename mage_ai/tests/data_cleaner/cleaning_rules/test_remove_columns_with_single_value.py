@@ -1,9 +1,10 @@
+import numpy as np
+import pandas as pd
+
 from mage_ai.data_cleaner.cleaning_rules.remove_columns_with_single_value import (
     RemoveColumnsWithSingleValue,
 )
 from mage_ai.tests.base_test import TestCase
-import pandas as pd
-import numpy as np
 
 
 class RemoveColumnWithSingleValueTests(TestCase):
@@ -12,9 +13,9 @@ class RemoveColumnWithSingleValueTests(TestCase):
             [
                 [1, '2022-01-01', True],
                 [2, '2022-01-02', True],
-                [3, np.NaN, True],
-                [4, np.NaN, True],
-                [5, np.NaN, True],
+                [3, np.nan, True],
+                [4, np.nan, True],
+                [5, np.nan, True],
             ],
             columns=['id', 'deleted_at', 'is_active'],
         )

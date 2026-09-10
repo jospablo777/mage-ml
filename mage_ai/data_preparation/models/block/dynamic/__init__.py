@@ -1,7 +1,5 @@
 import os
-from typing import Any, Dict, List, Tuple
-
-from pandas.core.construction import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def all_variable_uuids(

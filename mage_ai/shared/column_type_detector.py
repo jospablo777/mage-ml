@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 
 from mage_ai.shared.array import subtract
+from mage_ai.shared.parsers import is_numpy_subdtype, is_string_dtype
 
 DATETIME_MATCHES_THRESHOLD = 0.5
 MAXIMUM_WORD_LENGTH_FOR_CATEGORY_FEATURES = 40
@@ -72,7 +73,7 @@ def infer_column_types(df, **kwargs):
         col_name = df.columns[idx]
         if 'datetime64' in str(col_type):
             datetime_feature_names.append(col_name)
-        elif col_type == 'object':
+        elif is_string_dtype(col_type):
             df_sub = df[col_name].copy()
             df_sub = df_sub.replace(r'^\s+$', np.nan, regex=True)
             df_sub = df_sub.dropna()
@@ -116,9 +117,9 @@ def infer_column_types(df, **kwargs):
                         non_number_feature_names.append(col_name)
         elif col_type == 'bool':
             binary_feature_names.append(col_name)
-        elif np.issubdtype(col_type, np.floating):
+        elif is_numpy_subdtype(col_type, np.floating):
             float_feature_names.append(col_name)
-        elif np.issubdtype(col_type, np.integer):
+        elif is_numpy_subdtype(col_type, np.integer):
             df_sub = df[col_name].copy()
             df_sub = df_sub.dropna()
             if df_sub.min() >= 100 and df_sub.max() <= 99999 and 'zip' in col_name.lower():

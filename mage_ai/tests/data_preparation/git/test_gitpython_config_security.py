@@ -1,20 +1,18 @@
 """
 Regression and compatibility tests for the GitPython 3.1.62 upgrade.
 
-Security context: CVE-2026-78676 (CVSS 9.3) covers GitPython <= 3.1.58, where
-git-config values were written without escaping. A value holding a newline was
-serialized verbatim, so the text after the newline became a live config
-directive. Setting `core.hooksPath` that way gives arbitrary code execution the
-next time git runs a hook.
+CVE-2026-78676 covers GitPython <= 3.1.58, which wrote git-config values
+without escaping. A value holding a newline was serialized verbatim, so the
+text after it became a live directive. core.hooksPath set that way runs
+arbitrary code on the next hook.
 
-Mage reaches this path in `mage_ai/data_preparation/git/__init__.py`:
+Mage reaches this in mage_ai/data_preparation/git/__init__.py:
 
-    user.name / user.email   <- taken from the user's Git settings
-    safe.directory           <- written into the *global* ~/.gitconfig
-    .gitmodules sections     <- rewritten during submodule sync
+    user.name / user.email   from the user's Git settings
+    safe.directory           written into the global ~/.gitconfig
+    .gitmodules sections     rewritten during submodule sync
 
-These tests pin the fixed behavior. A downgrade or a resolver drift below
-3.1.59 fails CI here.
+A downgrade below 3.1.59 fails here.
 """
 import os
 import subprocess
@@ -29,8 +27,7 @@ HOOKS_PATH_PAYLOAD = 'Josep\n[core]\n\thooksPath = /tmp/mage_should_not_run'
 
 
 def _git(*args, cwd):
-    # Pin identity on the command line so the test never reads or writes the
-    # developer's real global config.
+    # Identity on the command line, so the test never touches the real global config.
     subprocess.run(
         ['git', '-c', 'user.name=t', '-c', 'user.email=t@t.t', *args],
         cwd=cwd, check=True, capture_output=True,

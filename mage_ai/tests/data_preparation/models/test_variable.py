@@ -69,8 +69,8 @@ class VariableTest(DBTestCase):
                 )
                 df2 = pd.DataFrame(
                     [
-                        [1, 'test', 3.123, np.NaN],
-                        [2, 'test2', 4.321, np.NaN],
+                        [1, 'test', 3.123, np.nan],
+                        [2, 'test2', 4.321, np.nan],
                     ],
                     columns=['col1', 'col2', 'col3', 'col4'],
                 )

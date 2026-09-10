@@ -158,8 +158,8 @@ class StandardizeCapitalizationSubRule(ReformatValuesSubRule):
 
 
 class ConvertCurrencySubRule(ReformatValuesSubRule):
-    CURR_PREFIX = r'(?:[\$\€\¥\₹\£]|(?:Rs)|(?:CAD))'
-    CURR_SUFFIX = r'(?:[\元\€\$]|(?:CAD))'
+    CURR_PREFIX = r'(?:[$€¥₹£]|(?:Rs)|(?:CAD))'
+    CURR_SUFFIX = r'(?:[元€$]|(?:CAD))'
     NUMBER_PATTERN = r'[0-9]*\.{0,1}[0-9]+'
     CURRENCY_BODY = rf'(?:{CURR_PREFIX}\s*{NUMBER_PATTERN}|{NUMBER_PATTERN}\s*{CURR_SUFFIX})'
     CURRENCY_PATTERN = re.compile(rf'^\s*(?:\-*\s*{CURRENCY_BODY}|{CURRENCY_BODY}\s*)\s*$')
@@ -229,7 +229,7 @@ class ReformatDateSubRule(ReformatValuesSubRule):
         dtype = self.column_types[column]
         if dtype not in self.DATE_TYPES:
             return
-        if not self.exact_dtypes[column] is str:
+        if self.exact_dtypes[column] is not str:
             return
         clean_col = self.strip_column_for_date_parsing(column)
         clean_col = pd.to_datetime(clean_col, format='mixed', errors='coerce')

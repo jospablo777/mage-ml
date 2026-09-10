@@ -177,7 +177,7 @@ class MSSQL(BaseSQL):
             df_[col] = df_[col].apply(
                 lambda x: x.strip('"') if x and isinstance(x, str) else x
             )
-        df_.replace({np.NaN: None}, inplace=True)
+        df_.replace({np.nan: None}, inplace=True)
         for _, row in df_.iterrows():
             values.append(tuple(row))
 

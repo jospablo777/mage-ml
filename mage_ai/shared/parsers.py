@@ -17,6 +17,20 @@ from mage_ai.data_preparation.models.variables.constants import VariableType
 from mage_ai.orchestration.db.models.base import BaseModel
 from mage_ai.shared.complex import is_model_sklearn, is_model_xgboost
 
+
+def is_numpy_subdtype(dtype, numpy_type) -> bool:
+    """
+    np.issubdtype raises on pandas extension dtypes. pandas 3 gives string
+    columns a StringDtype, so every call site has to skip non-numpy dtypes.
+    """
+    return isinstance(dtype, np.dtype) and np.issubdtype(dtype, numpy_type)
+
+
+def is_string_dtype(dtype) -> bool:
+    """object under pandas 2, StringDtype under pandas 3."""
+    return pd.api.types.is_object_dtype(dtype) or isinstance(dtype, pd.StringDtype)
+
+
 INTS = (
     np.int16,
     np.int32,
@@ -58,9 +72,9 @@ def encode_complex(obj):
         return obj.isoformat()
     elif isinstance(obj, INTS):
         return int(obj)
-    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64, np.floating)):
+    elif isinstance(obj, (np.float64, np.float16, np.float32, np.float64, np.floating)):
         return float(obj)
-    elif isinstance(obj, (np.complex_, np.complex64, np.complex128)):
+    elif isinstance(obj, (np.complex128, np.complex64, np.complex128)):
         return {'real': obj.real, 'imag': obj.imag}
     elif isinstance(obj, (np.ndarray,)):
         # np.array is a function

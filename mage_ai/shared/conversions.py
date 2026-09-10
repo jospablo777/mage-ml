@@ -3,8 +3,9 @@ Useful conversion functions between Pandas DataFrames, numpy NDArrays, and order
 dictionaries
 """
 
-from collections import OrderedDict
 import logging
+from collections import OrderedDict
+
 import numpy as np
 import pandas as pd
 import scipy
@@ -140,7 +141,7 @@ def as_scalar(x, str_encoding='utf-8'):
 
     :param x: The scalar object to convert
     :param str_encoding: The encoding to use for converting fixed-width
-    numpy strings (np.string_)
+    numpy strings (np.bytes_)
     """
 
     # types which need no further conversion
@@ -156,7 +157,7 @@ def as_scalar(x, str_encoding='utf-8'):
         return x
     elif isinstance(x, tuple(NUMPY_SCALAR_TYPES)):
         return x.item()
-    elif isinstance(x, (np.string_, np.bytes_)):
+    elif isinstance(x, (np.bytes_, np.bytes_)):
         return x.item().decode(str_encoding)
     else:
         raise ValueError('Unknown type {}'.format(str(type(x))))

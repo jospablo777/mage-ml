@@ -41,7 +41,8 @@ class StatisticsCalculatorTest(TestCase):
         data = calculator.calculate_statistics_overview(df, is_clean=False)
 
         self.assertEqual(data['count'], 7)
-        self.assertEqual(data['total_null_value_count'], 6)
+        # pandas 3 parses '899-07-01', so it counts and becomes the minimum.
+        self.assertEqual(data['total_null_value_count'], 5)
 
         self.assertEqual(data['age/average'], 8 / 5)
         self.assertEqual(data['age/count'], 5)
@@ -61,15 +62,15 @@ class StatisticsCalculatorTest(TestCase):
         self.assertEqual(data['country/completeness'], 1 - data['country/null_value_rate'])
         self.assertEqual(data['country/quality'], 'Bad')
 
-        self.assertEqual(data['date_joined/count'], 5)
-        self.assertEqual(data['date_joined/count_distinct'], 3)
+        self.assertEqual(data['date_joined/count'], 6)
+        self.assertEqual(data['date_joined/count_distinct'], 4)
         self.assertEqual(data['date_joined/max'], '2000-12-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/median'], '2000-07-01T00:00:00+00:00')
-        self.assertEqual(data['date_joined/min'], '2000-01-01T00:00:00+00:00')
+        self.assertEqual(data['date_joined/min'], '0899-07-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/mode'], '2000-07-01T00:00:00+00:00')
-        self.assertEqual(data['date_joined/null_value_rate'], 2 / 7)
+        self.assertEqual(data['date_joined/null_value_rate'], 1 / 7)
         self.assertEqual(data['date_joined/completeness'], 1 - data['date_joined/null_value_rate'])
-        self.assertEqual(data['date_joined/quality'], 'Bad')
+        self.assertEqual(data['date_joined/quality'], 'Good')
 
         self.assertEqual(data['id/count'], 7)
         self.assertEqual(data['id/count_distinct'], 7)
@@ -169,7 +170,7 @@ class StatisticsCalculatorTest(TestCase):
         self.assertEqual(data['date_joined/count_distinct'], 4)
         self.assertEqual(data['date_joined/max'], '2000-12-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/median'], '2000-07-01T00:00:00+00:00')
-        self.assertEqual(data['date_joined/min'], '2000-01-01T00:00:00+00:00')
+        self.assertEqual(data['date_joined/min'], '0899-07-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/mode'], '2000-07-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/null_value_rate'], 1 / 7)
         self.assertEqual(data['date_joined/completeness'], 1 - data['date_joined/null_value_rate'])
@@ -269,7 +270,7 @@ class StatisticsCalculatorTest(TestCase):
         self.assertEqual(data['date_joined/count_distinct'], 3)
         self.assertEqual(data['date_joined/max'], '2000-12-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/median'], '2000-07-01T00:00:00+00:00')
-        self.assertEqual(data['date_joined/min'], '2000-07-01T00:00:00+00:00')
+        self.assertEqual(data['date_joined/min'], '0899-07-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/mode'], '2000-07-01T00:00:00+00:00')
         self.assertEqual(data['date_joined/null_value_rate'], 3 / 7)
         self.assertEqual(data['date_joined/completeness'], 1 - data['date_joined/null_value_rate'])

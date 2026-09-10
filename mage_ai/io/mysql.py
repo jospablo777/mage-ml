@@ -150,7 +150,7 @@ class MySQL(BaseSQL):
             # Remove extraneous surrounding double quotes
             # that get added while performing conversion to string.
             df_[col] = df_[col].apply(lambda x: x.strip('"') if x and isinstance(x, str) else x)
-        df_.replace({np.NaN: None}, inplace=True)
+        df_.replace({np.nan: None}, inplace=True)
 
         for _, row in df_.iterrows():
             values.append(tuple([str(val) if type(val) is pd.Timestamp else val for val in row]))

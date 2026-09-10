@@ -384,7 +384,7 @@ WHERE table_id = '{table_name}'
         column_types = self.get_column_types(schema, table_name)
 
         if df is not None:
-            df.fillna(value=np.NaN, inplace=True)
+            df.fillna(value=np.nan, inplace=True)
             for col in df.columns:
                 col_type = column_types.get(col)
                 if not col_type:

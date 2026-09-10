@@ -156,7 +156,7 @@ class RowTests(TestCase):
         self.assertEqual(len(string_rows), 2)
         self.assertEqual(string_rows[0][0], 1.0)
         self.assertEqual(string_rows[0][1], False)
-        self.assertEqual(string_rows[0][2], None)
+        self.assertTrue(pd.isna(string_rows[0][2]))
         self.assertEqual(string_rows[1][0], 3.0)
         self.assertEqual(string_rows[1][1], False)
         self.assertEqual(string_rows[1][2], '')
@@ -240,7 +240,7 @@ class RowTests(TestCase):
             [
                 ['fsdijfosidjfiosfj'],
                 ['abc@123.com'],
-                [np.NaN],
+                [np.nan],
                 ['fsdfsdfdsfdsf'],
                 ['xyz@456.com'],
             ],
@@ -271,7 +271,7 @@ class RowTests(TestCase):
     def test_filter_row_not_contains_string(self):
         df = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['sfc@mailnet.com', True],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
@@ -299,7 +299,7 @@ class RowTests(TestCase):
         df_new4 = filter_rows(df, action4, original_df=df).reset_index(drop=True)
         df_expected1 = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
                 ['eeeeasdf', True],
@@ -307,12 +307,12 @@ class RowTests(TestCase):
             columns=['email', 'subscription'],
         )
         df_expected2 = pd.DataFrame(
-            [[np.NaN, False], ['fsdfsdfdsfdsf', False], ['eeeeasdf', True]],
+            [[np.nan, False], ['fsdfsdfdsfdsf', False], ['eeeeasdf', True]],
             columns=['email', 'subscription'],
         )
         df_expected3 = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['sfc@mailnet.com', True],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
@@ -332,8 +332,8 @@ class RowTests(TestCase):
         df = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
-                [np.NaN, 'brand2', None, 18],
+                [250, 'brand1', False, np.nan],
+                [np.nan, 'brand2', None, 18],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
                 [None, 'company3', False, 23],
@@ -361,7 +361,7 @@ class RowTests(TestCase):
         )
         df_expected2 = pd.DataFrame(
             [
-                [np.NaN, 'brand2', None, 18],
+                [np.nan, 'brand2', None, 18],
                 [50, 'brand1', True, 13],
             ],
             columns=['value', 'brand', 'discounted', 'inventory'],
@@ -369,21 +369,21 @@ class RowTests(TestCase):
         df_expected3 = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
-                [np.NaN, 'brand2', None, 18],
+                [250, 'brand1', False, np.nan],
+                [np.nan, 'brand2', None, 18],
                 [75, '', '', 80],
             ],
             columns=['value', 'brand', 'discounted', 'inventory'],
         )
         df_expected4 = pd.DataFrame(
             [
-                [250, 'brand1', False, np.NaN],
+                [250, 'brand1', False, np.nan],
             ],
             columns=['value', 'brand', 'discounted', 'inventory'],
         )
         df_expected5 = pd.DataFrame(
             [
-                [250, 'brand1', False, np.NaN],
+                [250, 'brand1', False, np.nan],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
                 [None, 'company3', False, 23],
@@ -413,8 +413,8 @@ class RowTests(TestCase):
         df = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
-                [np.NaN, 'brand2', None, 18],
+                [250, 'brand1', False, np.nan],
+                [np.nan, 'brand2', None, 18],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
                 [None, 'company3', False, 23],
@@ -441,7 +441,7 @@ class RowTests(TestCase):
         df_expected = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
+                [250, 'brand1', False, np.nan],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
             ],
@@ -454,8 +454,8 @@ class RowTests(TestCase):
         df = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
-                [np.NaN, 'brand2', None, 18],
+                [250, 'brand1', False, np.nan],
+                [np.nan, 'brand2', None, 18],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
                 [None, 'company3', False, 23],
@@ -486,7 +486,7 @@ class RowTests(TestCase):
         )
         df_expected2 = pd.DataFrame(
             [
-                [np.NaN, 'brand2', None, 18],
+                [np.nan, 'brand2', None, 18],
                 [50, 'brand1', True, 13],
             ],
             columns=['Val ue', 'bra  23423  nd', 'dis>>> ??cou nted', 'invVe nTory'],
@@ -494,21 +494,21 @@ class RowTests(TestCase):
         df_expected3 = pd.DataFrame(
             [
                 [100, None, '', 10],
-                [250, 'brand1', False, np.NaN],
-                [np.NaN, 'brand2', None, 18],
+                [250, 'brand1', False, np.nan],
+                [np.nan, 'brand2', None, 18],
                 [75, '', '', 80],
             ],
             columns=['Val ue', 'bra  23423  nd', 'dis>>> ??cou nted', 'invVe nTory'],
         )
         df_expected4 = pd.DataFrame(
             [
-                [250, 'brand1', False, np.NaN],
+                [250, 'brand1', False, np.nan],
             ],
             columns=['Val ue', 'bra  23423  nd', 'dis>>> ??cou nted', 'invVe nTory'],
         )
         df_expected5 = pd.DataFrame(
             [
-                [250, 'brand1', False, np.NaN],
+                [250, 'brand1', False, np.nan],
                 [50, 'brand1', True, 13],
                 [75, '', '', 80],
                 [None, 'company3', False, 23],
@@ -581,7 +581,7 @@ class RowTests(TestCase):
     def test_filter_row_dirty_columns_two(self):
         df = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['sfc@mailnet.com', True],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
@@ -609,7 +609,7 @@ class RowTests(TestCase):
         df_new4 = filter_rows(df, action4, original_df=df).reset_index(drop=True)
         df_expected1 = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
                 ['eeeeasdf', True],
@@ -617,12 +617,12 @@ class RowTests(TestCase):
             columns=['e e e e e e email', 'subs crip tion'],
         )
         df_expected2 = pd.DataFrame(
-            [[np.NaN, False], ['fsdfsdfdsfdsf', False], ['eeeeasdf', True]],
+            [[np.nan, False], ['fsdfsdfdsfdsf', False], ['eeeeasdf', True]],
             columns=['e e e e e e email', 'subs crip tion'],
         )
         df_expected3 = pd.DataFrame(
             [
-                [np.NaN, False],
+                [np.nan, False],
                 ['sfc@mailnet.com', True],
                 ['fdss@emailserver.net', True],
                 ['fsdfsdfdsfdsf', False],
@@ -642,13 +642,13 @@ class RowTests(TestCase):
         # tests edge cases for when columns with the special prefixes "orig_" and "tf_" are given
         # as input
         df = pd.DataFrame(
-            [[0, 1, None], [1, 2, np.NaN], [np.NaN, 3, 4], [3, None, 5]],
+            [[0, 1, None], [1, 2, np.nan], [np.nan, 3, 4], [3, None, 5]],
             columns=['col', 'orig_col', 'tf_col'],
         )
         df_expected = pd.DataFrame(
             [
                 [0, 1, None],
-                [1, 2, np.NaN],
+                [1, 2, np.nan],
             ],
             columns=['col', 'orig_col', 'tf_col'],
         )

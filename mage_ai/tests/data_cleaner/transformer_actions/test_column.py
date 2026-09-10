@@ -35,6 +35,14 @@ TEST_DATAFRAME = pd.DataFrame(
 )
 
 
+def records_with_none(df):
+    """pandas 3 returns nan for missing values in to_dict."""
+    return [
+        {k: (None if pd.api.types.is_scalar(v) and pd.isna(v) else v) for k, v in row.items()}
+        for row in df.to_dict(orient='records')
+    ]
+
+
 class ColumnTests(TestCase):
     def setUp(self):
         seed(42)
@@ -57,7 +65,7 @@ class ColumnTests(TestCase):
 
         df_new = remove_column(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     integer=0,
@@ -74,7 +82,7 @@ class ColumnTests(TestCase):
 
         df_new = remove_column(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     string='a',
@@ -224,7 +232,7 @@ class ColumnTests(TestCase):
         )
         df_new = add_column(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     boolean=False,
@@ -263,7 +271,7 @@ class ColumnTests(TestCase):
         )
         df_new = add_column(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     created_at='2021-08-31',
@@ -391,7 +399,7 @@ class ColumnTests(TestCase):
         df_new = add_column(df, action)
         df_new['distance'] = df_new['distance'].round(3)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     lat1=26.05308,
@@ -505,7 +513,7 @@ class ColumnTests(TestCase):
     #         ),
     #         dict(
     #             properties='',
-    #             property_country=np.NaN,
+    #             property_country=np.nan,
     #         ),
     #     ])
     #     action2 = dict(
@@ -577,7 +585,7 @@ class ColumnTests(TestCase):
     #         ),
     #         dict(
     #             properties='',
-    #             property_country=np.NaN,
+    #             property_country=np.nan,
     #         ),
     #     ])
     #     action2 = dict(
@@ -638,7 +646,7 @@ class ColumnTests(TestCase):
         )
         df_new = add_column(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     created_at='2019-04-10 08:20:58',
@@ -676,7 +684,7 @@ class ColumnTests(TestCase):
         )
         df_new = add_column(df, action, original_df=df)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     converted_at='2019-04-10 08:20:58',
@@ -717,7 +725,7 @@ class ColumnTests(TestCase):
         )
         df_new = add_column(df, action, original_df=df)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     converted_at='2019-04-10 08:20:58',
@@ -959,7 +967,7 @@ class ColumnTests(TestCase):
         )
         df_new = count(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -1006,7 +1014,7 @@ class ColumnTests(TestCase):
         )
         df_new = count_distinct(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -1061,7 +1069,7 @@ class ColumnTests(TestCase):
         )
         df_new = count(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -1358,7 +1366,7 @@ class ColumnTests(TestCase):
         )
         df_new = first(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -1532,7 +1540,8 @@ class ColumnTests(TestCase):
                 'date_but_correct_type',
             ],
         )
-        assert_frame_equal(new_df, expected_df)
+        expected_df['date'] = expected_df['date'].where(expected_df['date'].notna(), np.nan)
+        assert_frame_equal(new_df, expected_df, check_dtype=False)
 
     def test_impute(self):
         from mage_ai.data_cleaner.transformer_actions.column import impute
@@ -1541,8 +1550,8 @@ class ColumnTests(TestCase):
             [
                 ['2020-01-01', 1000, '       ', 800],
                 ['2020-01-03', '', 1200, 700],
-                ['2020-01-05', 1200, np.NaN, 900],
-                ['2020-01-02', np.NaN, '  ', 700],
+                ['2020-01-05', 1200, np.nan, 900],
+                ['2020-01-02', np.nan, '  ', 700],
                 ['2020-01-04', 1700, 1300, 800],
             ],
             columns=[
@@ -1894,9 +1903,9 @@ class ColumnTests(TestCase):
             [
                 ['2020-01-01', 1000, '       ', 800],
                 ['2020-01-02', '', None, 700],
-                ['2020-01-03', 1200, np.NaN, 900],
-                ['2020-01-04', np.NaN, '  ', 700],
-                ['2020-01-05', 1700, np.NaN, 800],
+                ['2020-01-03', 1200, np.nan, 900],
+                ['2020-01-04', np.nan, '  ', 700],
+                ['2020-01-05', 1700, np.nan, 800],
             ],
             columns=[
                 'date',
@@ -2483,7 +2492,7 @@ class ColumnTests(TestCase):
         )
         df_new = last(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -3078,8 +3087,9 @@ class ColumnTests(TestCase):
         df_new2 = reformat(df, action2).reset_index(drop=True)
         assert_frame_equal(df_new2, df)
         df_new3 = reformat(df, action3).reset_index(drop=True)
-        df_new3['notdate'] = df_new3['notdate'].astype('datetime64[ns]')
-        df_new3['mostlydate'] = df_new3['mostlydate'].astype('datetime64[ns]')
+        for column in ['notdate', 'mostlydate']:
+            df_new3[column] = df_new3[column].astype('datetime64[ns]')
+            expected_df[column] = expected_df[column].astype('datetime64[ns]')
         assert_frame_equal(df_new3, expected_df)
 
     def test_remove_outliers(self):
@@ -3364,7 +3374,7 @@ class ColumnTests(TestCase):
         action = dict(action_arguments=['group_id'])
         df_new = select(df, action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,
@@ -3510,7 +3520,7 @@ class ColumnTests(TestCase):
         action = self.__groupby_agg_action('total_amount')
         df_new = sum(TEST_DATAFRAME.copy(), action)
         self.assertEqual(
-            df_new.to_dict(orient='records'),
+            records_with_none(df_new),
             [
                 dict(
                     group_id=1,

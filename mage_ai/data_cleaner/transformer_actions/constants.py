@@ -19,7 +19,7 @@ CONSTANT_IMPUTATION_DEFAULTS = {
     ColumnType.PHONE_NUMBER: 'missing',
     ColumnType.ZIP_CODE: 'missing',
 }
-CURRENCY_SYMBOLS = re.compile(r'(?:[\$\€\¥\₹\元\£]|(?:Rs)|(?:CAD))')
+CURRENCY_SYMBOLS = re.compile(r'(?:[$€¥₹元£]|(?:Rs)|(?:CAD))')
 INVALID_VALUE_PLACEHOLDERS = {
     ColumnType.CATEGORY: 'invalid',
     ColumnType.CATEGORY_HIGH_CARDINALITY: 'invalid',

@@ -8,6 +8,7 @@ from pandas.core.indexes.frozen import FrozenList
 from mage_ai.data_cleaner.column_types.constants import NUMBER_TYPES, ColumnType
 from mage_ai.data_cleaner.transformer_actions.constants import CURRENCY_SYMBOLS
 from mage_ai.shared.custom_types import FrozenDict
+from mage_ai.shared.parsers import is_string_dtype
 
 COLUMN_NAME_QUOTE_CHARS = '+=-*&^%$! ?~|<>(){}[],.'
 LIST_SPLIT = re.compile(r'\s*,\s*')
@@ -18,7 +19,7 @@ PAREN_LIKE_CLOSE = frozenset([']', ')'])
 
 
 def clean_series(series, column_type, dropna=True):
-    if series.dtype == 'object':
+    if is_string_dtype(series.dtype):
         series_cleaned = series.apply(lambda x: x.strip(' \'\"') if type(x) is str else x)
         series_cleaned = series_cleaned.map(
             lambda x: x if (not isinstance(x, str) or x != '') else np.nan
@@ -52,7 +53,9 @@ def clean_series(series, column_type, dropna=True):
         if is_percent:
             series_cleaned /= 100
     elif column_type == ColumnType.DATETIME:
-        series_cleaned = pd.to_datetime(series_cleaned, errors='coerce', format='mixed')
+        series_cleaned = pd.to_datetime(
+            series_cleaned, errors='coerce', format='mixed', utc=True
+        )
     elif column_type == ColumnType.PHONE_NUMBER and dtype is not str:
         series_cleaned = series_cleaned.astype(str)
         series_cleaned = series_cleaned.str.replace(r'\.\d*', '', regex=True)

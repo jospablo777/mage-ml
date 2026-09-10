@@ -12,7 +12,11 @@ from mage_ai.data_cleaner.transformer_actions.constants import (
     INVALID_VALUE_PLACEHOLDERS,
 )
 from mage_ai.shared.multi import run_parallel_multiple_args
-from mage_ai.shared.parsers import convert_matrix_to_dataframe
+from mage_ai.shared.parsers import (
+    convert_matrix_to_dataframe,
+    is_numpy_subdtype,
+    is_string_dtype,
+)
 
 DATETIME_MATCHES_THRESHOLD = 0.5
 MAXIMUM_WORD_LENGTH_FOR_CATEGORY_FEATURES = 40
@@ -67,15 +71,15 @@ def find_syntax_errors(series, column_type):
         pattern = REGEX_ZIP_CODE
     elif (
         column_type in NUMBER_TYPES
-        and not np.issubdtype(dtype, np.integer)
-        and not np.issubdtype(dtype, np.floating)
+        and not is_numpy_subdtype(dtype, np.integer)
+        and not is_numpy_subdtype(dtype, np.floating)
     ):
         str_series = str_series.astype(str)
         pattern = REGEX_NUMBER
     elif column_type == ColumnType.DATETIME:
         if type(dtype) is pd.core.dtypes.dtypes.DatetimeTZDtype:
             dtype = dtype.base
-        if not (np.issubdtype(dtype, np.datetime64) or dtype is pd.Timestamp):
+        if not (is_numpy_subdtype(dtype, np.datetime64) or dtype is pd.Timestamp):
             str_series = str_series.astype(str)
             pattern = REGEX_DATETIME
         else:
@@ -115,7 +119,7 @@ def infer_number_type(series, column_name, dtype):
         ):
             mdtype = ColumnType.PHONE_NUMBER
         else:
-            if np.issubdtype(dtype, np.integer):
+            if is_numpy_subdtype(dtype, np.integer):
                 if (
                     clean_series.min() >= 100
                     and clean_series.max() <= 99999
@@ -124,7 +128,7 @@ def infer_number_type(series, column_name, dtype):
                     mdtype = ColumnType.ZIP_CODE
                 else:
                     mdtype = ColumnType.NUMBER
-            elif np.issubdtype(dtype, np.floating):
+            elif is_numpy_subdtype(dtype, np.floating):
                 if all(is_integer):
                     mdtype = ColumnType.NUMBER
                 else:
@@ -136,11 +140,11 @@ def infer_column_type(series, column_name, dtype, kwargs):
     mdtype = None
     if "datetime64" in str(dtype):
         mdtype = ColumnType.DATETIME
-    elif dtype == "object":
+    elif is_string_dtype(dtype):
         mdtype = infer_object_type(series, column_name, kwargs)
     elif dtype == "bool":
         mdtype = ColumnType.TRUE_OR_FALSE
-    elif np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
+    elif is_numpy_subdtype(dtype, np.floating) or is_numpy_subdtype(dtype, np.integer):
         mdtype = infer_number_type(series, column_name, dtype)
     if mdtype in NUMBER_TYPES and series.nunique(dropna=False) == 2:
         mdtype = ColumnType.TRUE_OR_FALSE
@@ -161,7 +165,7 @@ def infer_object_type(series, column_name, kwargs):
 
     series_nunique = series.nunique(dropna=False)
     clean_series_nunique = clean_series.nunique()
-    if np.issubdtype(exact_dtype, np.bool_):
+    if is_numpy_subdtype(exact_dtype, np.bool_):
         if clean_series_nunique <= 2:
             return ColumnType.TRUE_OR_FALSE
         else:

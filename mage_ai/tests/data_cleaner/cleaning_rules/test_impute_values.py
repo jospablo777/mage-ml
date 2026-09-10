@@ -1,8 +1,9 @@
+import numpy as np
+import pandas as pd
+
 from mage_ai.data_cleaner.cleaning_rules.impute_values import ImputeValues
 from mage_ai.data_cleaner.shared.utils import clean_dataframe
 from mage_ai.tests.base_test import TestCase
-import numpy as np
-import pandas as pd
 
 
 class ImputeValuesTest(TestCase):
@@ -18,7 +19,7 @@ class ImputeValuesTest(TestCase):
                 [21, None],
                 [25, None],
                 [None, None],
-                [np.NaN, None],
+                [np.nan, None],
                 [31, None],
                 [25, 9],
                 [21, 99],
@@ -84,11 +85,11 @@ class ImputeValuesTest(TestCase):
         age_arr = self.rng.integers(0, 110, size=(150,)).astype(float)
         indices = np.arange(0, 150)
         self.rng.shuffle(indices)
-        age_arr[indices[:49]] = np.NaN
+        age_arr[indices[:49]] = np.nan
 
         num_years_arr = self.rng.integers(0, 110, size=(150,)).astype(float)
         self.rng.shuffle(indices)
-        num_years_arr[indices[:50]] = np.NaN
+        num_years_arr[indices[:50]] = np.nan
         df = pd.DataFrame({'age': age_arr, 'number_of_years': num_years_arr})
         column_types = {'age': 'number', 'number_of_years': 'number'}
         statistics = {
@@ -154,7 +155,7 @@ class ImputeValuesTest(TestCase):
                 [52.3, None],
                 [-2.3, None],
                 [None, None],
-                [np.NaN, None],
+                [np.nan, None],
                 [-1.4, None],
                 [-1.6, 9],
                 [-4.3, 9],
@@ -306,9 +307,9 @@ class ImputeValuesTest(TestCase):
                 [90.5, 3],
                 [None, ''],
                 ['', None],
-                [np.NaN, None],
+                [np.nan, None],
                 [None, None],
-                [np.NaN, None],
+                [np.nan, None],
                 [-1.4, None],
                 [-1.6, 9],
             ],
@@ -370,7 +371,7 @@ class ImputeValuesTest(TestCase):
         dest_ids[dest_idxs_seq] = ''
         dest_ids[dest_idxs_rand] = ''
         df = pd.DataFrame({'source': source_ids, 'dest': dest_ids})
-        cleaned_df = df.applymap(
+        cleaned_df = df.map(
             lambda x: x if (not isinstance(x, str) or (len(x) > 0 and not x.isspace())) else np.nan
         )
 

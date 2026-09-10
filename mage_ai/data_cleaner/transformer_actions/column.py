@@ -261,7 +261,7 @@ def remove_outliers(df, action, **kwargs):
     for column in numeric_df.columns:
         dtype = action['action_variables'][column]['feature']['column_type']
         if dtype in NUMBER_TYPES:
-            numeric_df.loc[:, column] = numeric_df.loc[:, column].astype(float)
+            numeric_df[column] = numeric_df[column].astype(float)
         else:
             numeric_df.drop(column, axis=1, inplace=True)
     outlier_mask = numeric_df.notna().all(axis=1)

@@ -1,9 +1,10 @@
+import numpy as np
+import pandas as pd
+
 from mage_ai.data_cleaner.cleaning_rules.remove_columns_with_high_empty_rate import (
     RemoveColumnsWithHighEmptyRate,
 )
 from mage_ai.tests.base_test import TestCase
-import numpy as np
-import pandas as pd
 
 
 class RemoveColumnWithHighEmptyRateTests(TestCase):
@@ -64,11 +65,11 @@ class RemoveColumnWithHighEmptyRateTests(TestCase):
     def __create_test_data(self):
         df = pd.DataFrame(
             [
-                [1, np.NaN, '2022-01-01'],
-                [2, 'US', np.NaN],
-                [3, 'US', np.NaN],
-                [4, np.NaN, np.NaN],
-                [5, np.NaN, np.NaN],
+                [1, np.nan, '2022-01-01'],
+                [2, 'US', np.nan],
+                [3, 'US', np.nan],
+                [4, np.nan, np.nan],
+                [5, np.nan, np.nan],
             ],
             columns=['id', 'country', 'deleted_at'],
         )
