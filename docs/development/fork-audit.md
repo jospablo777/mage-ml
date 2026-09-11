@@ -100,7 +100,7 @@ The final Mage and language-server images stop in 0.51 and 0.58 seconds with exi
 
 Source and wheel builds passed for all three workspace packages. Archive inspection found no database files, bytecode, or frontend node_modules files. The main environment and installed helper environments pass `uv pip check`. The Linux language-server, Kubernetes startup, and optional Spark NLP images build. The language server passes WebSocket initialization, unsaved-file syntax diagnostics, and protocol shutdown. The Spark image passes a local JVM job and pandas conversion. Spark NLP model loading and its bundled Java dependencies have not been validated or audited here.
 
-A prior separate run passed ten integration tests against PostgreSQL 16. SQL Server validation here covers imports and unit tests, not a connection to a live SQL Server. Office-specific connector credentials and workloads were not available. Python 3.11 and 3.13 remain CI matrix targets without a local full-suite run.
+A prior separate run passed ten integration tests against PostgreSQL 16. SQL Server validation here covers imports and unit tests, not a connection to a live SQL Server. Office-specific connector credentials and workloads were not available. CI later narrowed to Python 3.12 only.
 
 ### Block, flow, and trigger verification
 
@@ -159,3 +159,9 @@ behaviours these corrections depend on.
 
 The PostgreSQL round trips in `mage_ai/tests/io/test_postgres_integration.py` need a
 server; they skip when `MAGE_TEST_POSTGRES_*` is unset.
+
+The backend test matrix now builds Python 3.12 only, on Linux and on Windows. freezegun
+moved from 1.2.2 to 1.5.5; the pinned release read `uuid._load_system_functions`, which
+Python 3.13 removed, and that stopped collection for every module importing it.
+`requires-python` still admits 3.11 through 3.13, so those interpreters are installable
+but no longer built.
