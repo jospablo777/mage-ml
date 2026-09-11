@@ -6,11 +6,17 @@ the resolver can move and the APIs Mage depends on need coverage.
 
 Web server coverage lives in mage_ai/tests/server/test_server_http_smoke.py.
 """
+import re
 import unittest
 from datetime import datetime, timedelta
 from importlib.metadata import version
 
 from packaging.version import Version
+
+# rich renders the help in color whenever it believes it is attached to a
+# terminal, and it treats GitHub Actions as one. Colored output splits an option
+# name across escape sequences, so "--host" arrives as "-", an escape, "-host".
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
 
 # Versions below these carry known CVEs. The downstream service used to enforce
 # them with override-dependencies.
@@ -24,7 +30,7 @@ SECURITY_FLOORS = {
     'PyJWT': '2.13.0',
     'requests': '2.33.0',
     'setuptools': '83.0.0',
-    'tornado': '6.5.7',
+    'tornado': '6.5.8',
     'typer': '0.18',
     'Werkzeug': '3.1.6',
 }
@@ -57,11 +63,15 @@ class CliContractTest(unittest.TestCase):
         self.command_names = list(typer.main.get_command(app).commands)
         self.runner = CliRunner()
 
-    def test_root_help_succeeds(self):
-        result = self.runner.invoke(self.app, ['--help'])
+    def help_for(self, *arguments):
+        result = self.runner.invoke(self.app, [*arguments, '--help'])
 
-        self.assertEqual(result.exit_code, 0)
-        self.assertIn('Usage', result.output)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+        return ANSI_ESCAPE.sub('', result.output)
+
+    def test_root_help_succeeds(self):
+        self.assertIn('Usage', self.help_for())
 
     def test_command_names_are_stable(self):
         # These are the public CLI surface. Renaming one breaks every caller.
@@ -76,17 +86,15 @@ class CliContractTest(unittest.TestCase):
         # declaration and parsing without starting a server.
         for name in self.command_names:
             with self.subTest(command=name):
-                result = self.runner.invoke(self.app, [name, '--help'])
-                self.assertEqual(result.exit_code, 0, result.output)
+                self.help_for(name)
 
     def test_start_accepts_its_options(self):
         # The options every deployment passes.
-        result = self.runner.invoke(self.app, ['start', '--help'])
+        output = self.help_for('start')
 
-        self.assertEqual(result.exit_code, 0)
         for option in ['--host', '--port', '--manage-instance', '--instance-type']:
             with self.subTest(option=option):
-                self.assertIn(option, result.output)
+                self.assertIn(option, output)
 
     def test_typer_group_subclass_still_works(self):
         # mage_ai/cli/main.py subclasses TyperGroup to control command order.

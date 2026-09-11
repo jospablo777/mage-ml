@@ -49,21 +49,47 @@ jobs:
       - name: Run pre-commit
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           python - <<'PY'
           import os
           import subprocess
 
-          base = os.environ['BASE_SHA']
-          if not base or set(base) == {'0'}:
-              base = subprocess.check_output(
-                  ['git', 'hash-object', '-t', 'tree', '/dev/null'], text=True,
-              ).strip()
-          output = subprocess.check_output([
-              'git', 'diff', '--name-only', '-z', '--diff-filter=ACMR',
-              base, 'HEAD', '--', '*.py',
-          ])
-          files = [f'./{os.fsdecode(path)}' for path in output.split(b'\0') if path]
+
+          def resolve(revision):
+              try:
+                  return subprocess.check_output(
+                      ['git', 'rev-parse', '--verify', '--quiet', f'{revision}^{{commit}}'],
+                      text=True,
+                  ).strip()
+              except subprocess.CalledProcessError:
+                  return None
+
+
+          base = os.environ.get('BASE_SHA') or ''
+          if not base or set(base) == {'0'} or not resolve(base):
+              # A tag push has no previous ref. Comparing against the merge base
+              # keeps this to the commits that are not on the default branch yet,
+              # instead of expanding to every file in the repository.
+              default_branch = os.environ.get('DEFAULT_BRANCH') or 'master'
+              try:
+                  base = subprocess.check_output(
+                      ['git', 'merge-base', f'origin/{default_branch}', 'HEAD'], text=True,
+                  ).strip()
+              except subprocess.CalledProcessError:
+                  base = resolve('HEAD~1')
+
+          if base:
+              output = subprocess.check_output([
+                  'git', 'diff', '--name-only', '-z', '--diff-filter=ACMR',
+                  base, 'HEAD', '--', '*.py',
+              ])
+              files = [f'./{os.fsdecode(path)}' for path in output.split(b'\0') if path]
+          else:
+              files = []
+
+          print(f'Linting {len(files)} changed file(s) against {base or "nothing"}.')
+
           if files:
               subprocess.run([
                   'uv', 'run', '--no-sync', 'pre-commit', 'run',
