@@ -108,6 +108,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python ${{ matrix.python-version }}
@@ -142,6 +151,12 @@ jobs:
           MAGE_TEST_POSTGRES_PASSWORD: test
           MAGE_TEST_POSTGRES_PORT: 5432
           MAGE_TEST_POSTGRES_USER: postgres
+      - name: Run scheduler lock integration tests
+        run: |
+          python3 -m pytest \
+            mage_ai/tests/orchestration/utils/test_distributed_lock_integration.py -v
+        env:
+          MAGE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
       - name: Run unit tests
         run: |
           python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests
