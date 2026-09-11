@@ -184,14 +184,10 @@ def convert_matrix_to_dataframe(csr_matrix: scipy.sparse.csr_matrix) -> pd.DataF
 
 
 def polars_to_dict_split(df: pl.DataFrame) -> Dict:
-    # Extract column names
-    columns = df.columns
-
-    # Extract rows as list of lists
-    data = df.to_numpy().tolist()
-
-    # Construct and return the dictionary
-    return dict(columns=columns, data=data)
+    # rows() keeps each column's own Python type. Going through numpy first fails on a
+    # frame mixing datetimes with numbers, because numpy 2 refuses to promote them into
+    # one array.
+    return dict(columns=df.columns, data=[list(row) for row in df.rows()])
 
 
 def object_to_hash(obj: Any) -> str:

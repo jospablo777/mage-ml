@@ -414,13 +414,13 @@ def create_upstream_block_tables(
                 )
 
             no_data = False
-            if type(df) is DataFrame:
+            if isinstance(df, DataFrame):
                 if len(df.index) == 0:
                     no_data = True
-            elif type(df) is dict and len(df) == 0:
-                no_data = True
-            elif type(df) is list and len(df) == 0:
-                no_data = True
+            elif hasattr(df, '__len__'):
+                # Covers dicts, lists, Series, arrays and polars frames, whose
+                # truthiness raises instead of answering.
+                no_data = len(df) == 0
             elif not df:
                 no_data = True
 

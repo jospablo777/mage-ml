@@ -72,6 +72,7 @@ import {
 import { getModelAttributes } from '@utils/models/dbt';
 import { onSuccess } from '@api/utils/response';
 import { pauseEvent } from '@utils/events';
+import { recenterCanvas } from './recenter';
 
 export const Canvas = dynamic(
   async () => {
@@ -480,7 +481,7 @@ function DependencyGraph({
        * added to the Canvas component. This centers it if it is not already.
        */
       if (canvasRef?.current?.containerRef?.current?.scrollTop === 0) {
-        canvasRef?.current?.fitCanvas?.();
+        recenterCanvas(canvasRef);
       }
     }, 1000);
   }, [canvasRef]);
@@ -1767,7 +1768,7 @@ function DependencyGraph({
 
       <GraphContainerStyle
         height={containerHeight}
-        onDoubleClick={() => canvasRef?.current?.fitCanvas?.()}
+        onDoubleClick={() => recenterCanvas(canvasRef)}
       >
         <ZoomControls
           canvasRef={canvasRef}

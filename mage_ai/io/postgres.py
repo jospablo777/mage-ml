@@ -5,13 +5,51 @@ import pandas as pd
 import simplejson
 from pandas import DataFrame, Series
 from psycopg2 import _psycopg, connect
+from psycopg2.extensions import adapt as psycopg2_adapt
+from psycopg2.extensions import register_adapter
 
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import BadConversionError, PandasTypes
 from mage_ai.io.sql import BaseSQL
+from mage_ai.shared.pandas_utils import integer_bit_width
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.ssh import SSHTunnelForwarder
+
+
+def _adapt_numpy_scalar(value):
+    """Hand psycopg2 the equivalent Python scalar."""
+    return psycopg2_adapt(value.item())
+
+
+def register_numpy_adapters() -> None:
+    """
+    Teach psycopg2 how to bind numpy scalars.
+
+    psycopg2 rejects numpy integers and booleans outright. numpy floats reach the
+    float adapter through inheritance, and numpy 2 changed their repr, so they used
+    to be bound as the literal text "np.float64(0.5)".
+    """
+    types = [
+        np.bool_,
+        np.float16,
+        np.float32,
+        np.float64,
+        np.int8,
+        np.int16,
+        np.int32,
+        np.int64,
+        np.uint8,
+        np.uint16,
+        np.uint32,
+        np.uint64,
+    ]
+
+    for numpy_type in types:
+        register_adapter(numpy_type, _adapt_numpy_scalar)
+
+
+register_numpy_adapters()
 
 
 class Postgres(BaseSQL):
@@ -268,10 +306,10 @@ class Postgres(BaseSQL):
         elif dtype in (PandasTypes.FLOATING, PandasTypes.DECIMAL, PandasTypes.MIXED_INTEGER_FLOAT):
             return 'double precision'
         elif dtype == PandasTypes.INTEGER or dtype == PandasTypes.INT64:
-            max_int, min_int = column.max(), column.min()
-            if np.int16(max_int) == max_int and np.int16(min_int) == min_int:
+            bits = integer_bit_width(column.min(), column.max())
+            if bits == 16:
                 return 'smallint'
-            elif np.int32(max_int) == max_int and np.int32(min_int) == min_int:
+            elif bits == 32:
                 return 'integer'
             else:
                 return 'bigint'
@@ -346,22 +384,27 @@ class Postgres(BaseSQL):
 
         for col in columns:
             df_col_dropna = df_[col].dropna()
-            if df_col_dropna.count() == 0:
+            if df_col_dropna.empty:
                 continue
             if dtypes[col] == PandasTypes.OBJECT \
                     or (df_[col].dtype == PandasTypes.OBJECT and not
                         isinstance(df_col_dropna.iloc[0], str)):
                 df_[col] = df_[col].apply(lambda x: serialize_obj(x))
-        df_.replace({np.nan: None}, inplace=True)
+
+        if use_insert_command:
+            # Bound parameters need None, not NaN. This widens every column holding a
+            # missing value to object, so the COPY path below skips it: to_csv writes
+            # the same bytes for NaN and None through na_rep.
+            df_.replace({np.nan: None}, inplace=True)
 
         insert_columns = ', '.join([f'"{col}"'for col in columns])
 
         if use_insert_command:
             # Use INSERT command
             values_placeholder = ', '.join(["%s" for i in range(len(columns))])
-            values = []
-            for _, row in df_.iterrows():
-                values.append(tuple(row))
+            # itertuples avoids building a Series per row. Values arrive as numpy
+            # scalars, which register_numpy_adapters teaches psycopg2 to bind.
+            values = list(df_.itertuples(index=False, name=None))
             commands = [
                 f'INSERT INTO {full_table_name} ({insert_columns})',
                 f'VALUES ({values_placeholder})',

@@ -126,3 +126,36 @@ uvx pip-audit==2.10.1 --disable-pip --no-deps \
 ```
 
 Run backend tests in a disposable checkout with the required extras synchronized. The shared test classes now allocate temporary projects, but individual legacy tests also manipulate files and global application settings.
+
+## Later corrections: pandas 3 block data handling
+
+Date: 2026-09-11.
+
+Pipelines that load a dataframe, join several of them, and export to PostgreSQL hit
+these on pandas 3 and numpy 2. Each one now has a regression test.
+
+| Area | Correction |
+| --- | --- |
+| Block output rendering | Stop importing `SettingWithCopyWarning`, removed in pandas 3. The suppression is now a no-op when the class is absent. |
+| Dataframe profiling | Correlate numeric columns only. `corr` raises on text columns, and the exception left every dataframe with a text column without statistics, insights or column types. |
+| Dataframe profiling | Skip histograms for empty and all-null columns instead of subtracting `None` bounds. |
+| Dataframe profiling | Select the scatter-plot categories with a list. A set is no longer a column indexer, which removed the overview for every frame with a datetime column. |
+| Time series charts | Convert datetimes to epoch seconds through their own resolution. `Series.view` is gone, and dividing the integer form by a billion is only correct for nanosecond columns. |
+| SQL export | Convert timedelta and period columns without `Series.view`. |
+| SQL export | Choose the integer column width by range comparison. numpy 2 raises `OverflowError` when narrowing a Python integer that does not fit, which broke export for object and Arrow-backed integer columns. The same dead narrowing was removed from the DuckDB, MSSQL, MySQL and Oracle exporters. |
+| PostgreSQL | Register adapters for numpy scalars. psycopg2 rejected numpy integers and booleans, and numpy floats bound as the literal text `np.float64(0.5)`. |
+| PostgreSQL | Build insert rows with `itertuples`, and replace missing values only on that path. The COPY path writes the same bytes without widening every column to object. |
+| Polars output | Build the preview rows with `rows()`. Going through numpy raised `DTypePromotionError` for a frame mixing datetimes with numbers. |
+| Variable storage | Encode JSON before opening the file. A value that could not be encoded left a zero-byte variable behind, and the next block failed while reading it rather than where it was produced. |
+| SQL blocks | Test upstream emptiness by length. Series, arrays and polars frames raise on a truth test. |
+| Update badge | Compare versions with PEP 440 and check the distribution this build publishes. The badge compared strings against the upstream package, so a local version that is ahead always looked out of date. `MAGE_UPDATE_CHECK_PACKAGE` and `MAGE_UPDATE_CHECK_ENABLED` configure it. |
+| Dependencies | Floor tornado at 6.5.8 and constrain it, for CVE-2026-82397, GHSA-wwv5-g3v4-889x and GHSA-8423-8fgw-73vq. It arrives through ipykernel, jupyter-client, jupyter-server and terminado. |
+
+`mage_ai/tests/orchestration/test_block_data_handling.py` runs pipelines whose block
+outputs match the shapes above: a cursor dictionary holding a timestamp, four frames
+merged one to one, an empty frame used as a branch signal, a fitted model, and a
+scored frame. `mage_ai/tests/test_stack_contracts.py` pins the pandas 3 and numpy 2
+behaviours these corrections depend on.
+
+The PostgreSQL round trips in `mage_ai/tests/io/test_postgres_integration.py` need a
+server; they skip when `MAGE_TEST_POSTGRES_*` is unset.

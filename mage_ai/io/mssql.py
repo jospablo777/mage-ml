@@ -299,13 +299,9 @@ class MSSQL(BaseSQL):
         ):
             return 'decimal'
         elif dtype == PandasTypes.INTEGER:
-            max_int, min_int = column.max(), column.min()
-            if np.int16(max_int) == max_int and np.int16(min_int) == min_int:
-                return 'bigint'
-            elif np.int32(max_int) == max_int and np.int32(min_int) == min_int:
-                return 'bigint'
-            else:
-                return 'bigint'
+            # Every width mapped to the same type, and numpy 2 raises OverflowError
+            # when narrowing a Python int that does not fit.
+            return 'bigint'
         elif dtype == PandasTypes.BOOLEAN:
             return 'char(52)'
         elif dtype in (

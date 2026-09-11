@@ -22,7 +22,10 @@ members = [
     "mage-ml",
     "singer-python",
 ]
-constraints = [{ name = "pyopenssl", specifier = ">=25.1.0" }]
+constraints = [
+    { name = "pyopenssl", specifier = ">=25.1.0" },
+    { name = "tornado", specifier = ">=6.5.8" },
+]
 
 [[package]]
 name = "agate"
@@ -4520,7 +4523,7 @@ requires-dist = [
     { name = "tables", marker = "python_full_version < '3.11' and extra == 'hdf5'", specifier = "==3.7.0" },
     { name = "terminado", specifier = "==0.17.1" },
     { name = "thefuzz", extras = ["speedup"], specifier = "==0.19.0" },
-    { name = "tornado", specifier = ">=6.5.7" },
+    { name = "tornado", specifier = ">=6.5.8" },
     { name = "transformers", marker = "extra == 'qdrant'", specifier = ">=5.10,<6" },
     { name = "trino", marker = "extra == 'dbt'", specifier = "~=0.326" },
     { name = "typer", specifier = ">=0.18" },

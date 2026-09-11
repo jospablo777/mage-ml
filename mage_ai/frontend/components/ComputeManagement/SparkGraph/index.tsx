@@ -20,6 +20,7 @@ import {
   ZOOMABLE_CANVAS_SIZE,
 } from '@components/DependencyGraph/constants';
 import { GraphContainerStyle } from '@components/DependencyGraph/index.style';
+import { recenterCanvas } from '@components/DependencyGraph/recenter';
 import { SparkStageAttemptType, SparkJobType, SparkSQLType } from '@interfaces/SparkType';
 import { getNodeHeight, getNodeWidth } from './utils';
 import { indexBy, groupBy } from '@utils/array';
@@ -137,7 +138,7 @@ function SparkGraph({
     if (!disableGraph) {
       setTimeout(() => {
         if (canvasRef?.current?.containerRef?.current?.scrollTop === 0) {
-          canvasRef?.current?.fitCanvas?.();
+          recenterCanvas(canvasRef);
         }
       }, 1000);
     }
@@ -194,7 +195,7 @@ function SparkGraph({
   return (
     <GraphContainerStyle
       height={containerHeight}
-      onDoubleClick={() => canvasRef?.current?.fitCanvas?.()}
+      onDoubleClick={() => recenterCanvas(canvasRef)}
     >
       <Canvas
         arrow={null}

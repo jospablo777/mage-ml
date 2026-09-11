@@ -94,27 +94,35 @@ class LocalStorage(BaseStorage):
         if not os.path.isdir(dirname):
             os.makedirs(dirname, exist_ok=True)
 
-        with open(file_path, 'w') as file:
-            try:
-                simplejson.dump(
-                    data,
-                    file,
-                    default=encode_complex,
-                    ignore_nan=True,
-                )
-            except ValueError as err:
-                if is_debug():
-                    raise err
-                else:
-                    print(f'[ERROR] LocalStorage.write_json_file: {err}')
-
-    async def write_json_file_async(self, file_path: str, data) -> None:
-        async with aiofiles.open(file_path, mode='w') as file:
-            fcontent = simplejson.dumps(
+        # Serialize before opening the file. Dumping straight into the handle left a
+        # truncated file behind when encoding failed, and the next read of that
+        # variable failed with a JSON decode error far from the cause.
+        try:
+            contents = simplejson.dumps(
                 data,
                 default=encode_complex,
                 ignore_nan=True,
             )
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f'Cannot write {file_path}: a value of type {type(data).__name__} is '
+                'not JSON serializable. Store it as a dataframe, a model or another '
+                'supported variable type.'
+            ) from err
+
+        with open(file_path, 'w') as file:
+            file.write(contents)
+
+    async def write_json_file_async(self, file_path: str, data) -> None:
+        # Same ordering as write_json_file: opening the file truncates it, so encode
+        # first and never leave a partial file behind.
+        fcontent = simplejson.dumps(
+            data,
+            default=encode_complex,
+            ignore_nan=True,
+        )
+
+        async with aiofiles.open(file_path, mode='w') as file:
             await file.write(fcontent)
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:

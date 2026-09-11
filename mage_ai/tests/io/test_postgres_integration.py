@@ -187,5 +187,174 @@ class PostgresIntegrationTest(unittest.TestCase):
         self.assertEqual(len(empty), 0)
 
 
+    def test_feature_batch_round_trip_with_conflict_handling(self):
+        """
+        The shape an incremental feature job exports: a big integer key, a UTC
+        timestamp at microsecond resolution, boolean indicators widened to integers,
+        and a unique constraint that makes a rerun a no-op.
+        """
+        from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_IGNORE
+
+        opened_at = pd.to_datetime(
+            ['2026-07-20 18:15:34.258586+00:00'] * 3,
+            utc=True,
+        )
+        df = pd.DataFrame({
+            'id': pd.Series([345038, 345039, 345040], dtype='int64'),
+            'opened_at': opened_at,
+            'flag': pd.Series([True, False, True], dtype='bool').astype('int16'),
+            'total_order': pd.Series([0, 1, 0], dtype='int64'),
+        })
+
+        for _ in range(2):
+            self.loader.export(
+                df,
+                SCHEMA,
+                self.table,
+                if_exists='append',
+                index=False,
+                verbose=False,
+                unique_constraints=['id', 'opened_at'],
+                unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,
+            )
+            self.loader.conn.commit()
+
+        loaded = self._load()
+
+        self.assertEqual(len(loaded), 3, 'the second export should have been ignored')
+        self.assertEqual(loaded['id'].tolist(), [345038, 345039, 345040])
+        self.assertEqual(loaded['flag'].tolist(), [1, 0, 1])
+        self.assertEqual(
+            loaded['opened_at'].iloc[0],
+            pd.Timestamp('2026-07-20 18:15:34.258586+00:00'),
+        )
+
+    def test_microseconds_survive_the_copy_path(self):
+        # No unique constraint means the COPY path, which serializes through CSV.
+        df = pd.DataFrame({
+            'id': [1],
+            'seen_at': pd.to_datetime(['2026-07-20 18:15:34.258586+00:00'], utc=True),
+        })
+
+        self._export(df)
+
+        self.assertEqual(
+            self._load()['seen_at'].iloc[0],
+            pd.Timestamp('2026-07-20 18:15:34.258586+00:00'),
+        )
+
+    def test_large_keys_do_not_get_a_smallint_column(self):
+        self._export(pd.DataFrame({'id': pd.Series([345038, 345039], dtype='int64')}))
+
+        self.assertEqual(self._load()['id'].tolist(), [345038, 345039])
+
+    def test_query_parameters_bind_by_name(self):
+        """A cursor dictionary from a previous block is bound as query parameters."""
+        self._export(pd.DataFrame({'id': [1, 2, 3]}))
+
+        loaded = self.loader.load(
+            'SELECT * FROM %s.%s WHERE id > %%(low)s AND id <= %%(high)s ORDER BY id'
+            % (SCHEMA, self.table),
+            params=dict(low=1, high=3),
+            verbose=False,
+        )
+
+        self.assertEqual(loaded['id'].tolist(), [2, 3])
+
+    def test_numpy_scalars_bind_as_query_parameters(self):
+        # A cursor dictionary read off a dataframe can still carry numpy scalars.
+        self._export(pd.DataFrame({'id': [1, 2, 3]}))
+
+        loaded = self.loader.load(
+            'SELECT * FROM %s.%s WHERE id > %%(low)s ORDER BY id' % (SCHEMA, self.table),
+            params=dict(low=np.int64(1)),
+            verbose=False,
+        )
+
+        self.assertEqual(loaded['id'].tolist(), [2, 3])
+
+    def test_timedelta_column_exports_as_nanoseconds(self):
+        df = pd.DataFrame({
+            'id': [1, 2],
+            'elapsed': pd.to_timedelta(['1 days', '0 days 00:00:01.5']),
+        })
+
+        self._export(df)
+
+        self.assertEqual(self._load()['elapsed'].tolist(), [86400000000000, 1500000000])
+
+    def test_float_predictions_keep_their_value(self):
+        # numpy 2's repr made a float bind as the literal text "np.float64(0.5)".
+        df = pd.DataFrame({
+            'id': pd.Series([1, 2], dtype='int64'),
+            'prediction': pd.Series([0.125, 0.875], dtype='float64'),
+        })
+
+        self.loader.export(
+            df,
+            SCHEMA,
+            self.table,
+            if_exists='replace',
+            index=False,
+            verbose=False,
+            unique_constraints=['id'],
+            unique_conflict_method='IGNORE',
+        )
+        self.loader.conn.commit()
+
+        self.assertEqual(self._load()['prediction'].tolist(), [0.125, 0.875])
+
+
+    def test_nulls_round_trip_through_the_insert_path(self):
+        """
+        A unique constraint switches the exporter from COPY to bound INSERT
+        parameters, which need None rather than NaN.
+        """
+        df = pd.DataFrame({
+            'id': pd.Series([1, 2, 3], dtype='int64'),
+            'label': pd.Series(['alpha', None, 'gamma']),
+            'amount': pd.Series([1.5, np.nan, 3.5], dtype='float64'),
+            'seen_at': pd.to_datetime(['2026-01-01', None, '2026-01-03'], utc=True),
+        })
+
+        self.loader.export(
+            df,
+            SCHEMA,
+            self.table,
+            if_exists='replace',
+            index=False,
+            verbose=False,
+            unique_constraints=['id'],
+            unique_conflict_method='IGNORE',
+        )
+        self.loader.conn.commit()
+
+        loaded = self._load()
+
+        self.assertEqual(loaded['label'].tolist()[0], 'alpha')
+        for column in ('label', 'amount', 'seen_at'):
+            with self.subTest(column=column):
+                self.assertTrue(pd.isna(loaded.loc[1, column]))
+
+    def test_nulls_round_trip_through_the_copy_path(self):
+        """The COPY path writes NaN and None as the same empty CSV field."""
+        df = pd.DataFrame({
+            'id': pd.Series([1, 2, 3], dtype='int64'),
+            'label': pd.Series(['alpha', None, 'gamma']),
+            'amount': pd.Series([1.5, np.nan, 3.5], dtype='float64'),
+            'seen_at': pd.to_datetime(['2026-01-01', None, '2026-01-03'], utc=True),
+        })
+
+        self._export(df)
+
+        loaded = self._load()
+
+        self.assertEqual(loaded['label'].tolist()[0], 'alpha')
+        self.assertEqual(loaded['amount'].tolist()[2], 3.5)
+        for column in ('label', 'amount', 'seen_at'):
+            with self.subTest(column=column):
+                self.assertTrue(pd.isna(loaded.loc[1, column]))
+
+
 if __name__ == '__main__':
     unittest.main()

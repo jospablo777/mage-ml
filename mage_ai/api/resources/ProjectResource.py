@@ -2,7 +2,6 @@ import os
 import subprocess
 import uuid
 
-import aiohttp
 import yaml
 
 from mage_ai.api.resources.GenericResource import GenericResource
@@ -17,7 +16,7 @@ from mage_ai.data_preparation.repo_manager import (
     init_repo,
 )
 from mage_ai.orchestration.db import safe_db_query
-from mage_ai.server.constants import VERSION
+from mage_ai.server.version_check import get_latest_version as fetch_latest_version
 from mage_ai.settings.platform import (
     activate_project,
     project_platform_activated,
@@ -31,18 +30,7 @@ from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 @async_ttl_cache(maxsize=1, ttl=600)
 async def get_latest_version() -> str:
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                'https://pypi.org/pypi/mage-ai/json',
-                timeout=3,
-            ) as response:
-                response_json = await response.json()
-                latest_version = response_json.get('info', {}).get('version', None)
-    except Exception:
-        latest_version = VERSION
-
-    return latest_version
+    return await fetch_latest_version()
 
 
 async def build_project(

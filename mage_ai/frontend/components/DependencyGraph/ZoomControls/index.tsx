@@ -9,6 +9,7 @@ import { ICON_SIZE_MEDIUM } from '@oracle/styles/units/icons';
 import { Recenter, ZoomIn, ZoomOut } from '@oracle/icons';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { ZoomControlsStyle, ZoomDisplayStyle } from './index.style';
+import { recenterCanvas } from '../recenter';
 
 type ZoomControlProps = {
   canvasRef?: { current?: CanvasRef };
@@ -61,7 +62,7 @@ function ZoomControls({ canvasRef, containerRef, zoomLevel }: ZoomControlProps) 
             <Button 
               {...SHARED_BUTTON_PROPS}
               borderRadius={`${BORDER_RADIUS_PILL}px 0 0 ${BORDER_RADIUS_PILL}px`}
-              onClick={() => canvasRef?.current?.fitCanvas?.()}
+              onClick={() => recenterCanvas(canvasRef)}
               padding={`${UNIT * 1.5}px ${UNIT * 1.875}px ${UNIT * 1.5}px ${UNIT * 3.25}px`}
             >
               <Recenter {...SHARED_ICON_PROPS} />

@@ -12,6 +12,7 @@ from mage_ai.io.export_utils import (
     gen_table_creation_query,
     infer_dtypes,
 )
+from mage_ai.shared.pandas_utils import timedelta_to_nanoseconds
 
 
 class BaseSQL(BaseSQLConnection):
@@ -394,7 +395,11 @@ class BaseSQL(BaseSQLConnection):
         """
         if dtype == PandasTypes.CATEGORICAL:
             return column.astype(str)
-        elif dtype in (PandasTypes.TIMEDELTA, PandasTypes.TIMEDELTA64, PandasTypes.PERIOD):
-            return column.view(int)
+        elif dtype in (PandasTypes.TIMEDELTA, PandasTypes.TIMEDELTA64):
+            # Series.view was removed in pandas 3, and timedelta columns no longer
+            # default to nanosecond resolution.
+            return timedelta_to_nanoseconds(column)
+        elif dtype == PandasTypes.PERIOD:
+            return column.astype('int64')
         else:
             return column

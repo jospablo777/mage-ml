@@ -15,6 +15,7 @@ from mage_ai.data_cleaner.analysis.constants import (
 )
 from mage_ai.data_cleaner.column_types.constants import ColumnType
 from mage_ai.data_cleaner.estimators.encoders import MultipleColumnLabelEncoder
+from mage_ai.shared.pandas_utils import datetime_to_epoch_seconds
 from mage_ai.shared.parsers import convert_matrix_to_dataframe
 
 DD_KEY = "lambda.analysis_charts"
@@ -77,8 +78,14 @@ def build_histogram_data(col1, series, column_type):
     if not isinstance(series, pd.Series):
         series = convert_matrix_to_dataframe(series)
 
-    max_value = series.max() if len(series) >= 1 else None
-    min_value = series.min() if len(series) >= 1 else None
+    if len(series) == 0:
+        return
+
+    max_value = series.max()
+    min_value = series.min()
+
+    if pd.isna(min_value) or pd.isna(max_value):
+        return
 
     buckets, bucket_interval = build_buckets(min_value, max_value, BUCKETS, column_type)
 
@@ -114,7 +121,7 @@ def build_histogram_data(col1, series, column_type):
 
 def build_correlation_data(df):
     charts = dict()
-    df_corr = df.corr()
+    df_corr = df.corr(numeric_only=True)
     columns = df_corr.columns
     for col1 in columns:
         x = []
@@ -158,7 +165,7 @@ def build_time_series_data(df, features, datetime_column):
     y_dict = dict()
 
     df_copy = df.copy()
-    df_copy[datetime_column] = datetimes.view(int) / 10**9
+    df_copy[datetime_column] = datetime_to_epoch_seconds(datetimes)
 
     for bucket in buckets:
         max_value = bucket["max_value"]
@@ -264,7 +271,7 @@ def build_overview_data(
         df_copy[datetime_column] = pd.to_datetime(
             df[datetime_column], format='mixed', errors="coerce"
         )
-        df_copy[datetime_column] = df_copy[datetime_column].view(int) / 10**9
+        df_copy[datetime_column] = datetime_to_epoch_seconds(df_copy[datetime_column])
 
         min_value1 = df_copy[datetime_column].min()
         max_value1 = df_copy[datetime_column].max()
@@ -327,7 +334,8 @@ def build_overview_data(
     1. unique count <= SCATTER_PLOT_CATEGORY_LIMIT and unique count > 1
     2. count > SCATTER_PLOT_SAMPLE_COUNT / 2
     """
-    non_numeric_features = list(set(df.columns) - set(numeric_features))
+    numeric_feature_set = set(numeric_features)
+    non_numeric_features = [c for c in df.columns if c not in numeric_feature_set]
     non_numeric_nuniques = df_sample[non_numeric_features].nunique()
     non_numeric_nuniques_filtered = non_numeric_nuniques[
         (non_numeric_nuniques <= SCATTER_PLOT_CATEGORY_LIMIT)
@@ -338,9 +346,11 @@ def build_overview_data(
     non_numeric_counts_filtered = non_numeric_counts[
         non_numeric_counts > sample_count / 2
     ]
-    eligible_category_features = set(non_numeric_nuniques_filtered.index) & set(
+    # pandas rejects a set as an indexer, so keep the frame's column order.
+    eligible = set(non_numeric_nuniques_filtered.index) & set(
         non_numeric_counts_filtered.index
     )
+    eligible_category_features = [c for c in non_numeric_features if c in eligible]
     if len(eligible_category_features) > 0:
         encoder = MultipleColumnLabelEncoder(input_type=str)
         df_sample_category = encoder.fit_transform(

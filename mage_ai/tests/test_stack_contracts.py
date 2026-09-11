@@ -7,6 +7,7 @@ downgrade or a partial revert fails in CI instead of in a pipeline.
 import pathlib
 import re
 import unittest
+import warnings
 from importlib.metadata import version
 
 import numpy as np
@@ -194,6 +195,91 @@ class ColumnTypeDetectionTest(unittest.TestCase):
         })
 
         self.assertNotIn(None, infer_column_types(df).values())
+
+
+class DatetimeResolutionTest(unittest.TestCase):
+    """
+    pandas 3 infers the resolution from the input instead of always using
+    nanoseconds. Anything that converted a datetime column to an integer and divided
+    by 1e9 now reads a thousand times too small.
+    """
+
+    def test_parsing_no_longer_defaults_to_nanoseconds(self):
+        self.assertEqual(str(pd.to_datetime(['2026-01-01 00:00:00']).dtype), 'datetime64[us]')
+        self.assertEqual(str(pd.date_range('2026-01-01', periods=2).dtype), 'datetime64[us]')
+        self.assertEqual(str(pd.to_timedelta(['1 days']).dtype), 'timedelta64[us]')
+
+    def test_the_integer_representation_follows_the_resolution(self):
+        microseconds = pd.Series(pd.to_datetime(['2026-01-01'], utc=True))
+        nanoseconds = pd.Series(pd.to_datetime(['2026-01-01'], utc=True).as_unit('ns'))
+
+        self.assertNotEqual(
+            microseconds.astype('int64').iloc[0],
+            nanoseconds.astype('int64').iloc[0],
+        )
+
+    def test_the_shared_helper_is_resolution_independent(self):
+        from mage_ai.shared.pandas_utils import datetime_to_epoch_seconds
+
+        for unit in ('s', 'ms', 'us', 'ns'):
+            with self.subTest(unit=unit):
+                series = pd.Series(pd.to_datetime(['2026-01-01'], utc=True).as_unit(unit))
+
+                self.assertEqual(datetime_to_epoch_seconds(series).iloc[0], 1767225600.0)
+
+    def test_series_view_is_gone(self):
+        self.assertFalse(hasattr(pd.Series([1]), 'view'))
+
+
+class NumpyNarrowingTest(unittest.TestCase):
+    """numpy 2 raises instead of wrapping when a Python int does not fit."""
+
+    def test_narrowing_a_python_int_raises(self):
+        with self.assertRaises(OverflowError):
+            np.int16(345100)
+
+    def test_the_shared_helper_uses_range_checks(self):
+        from mage_ai.shared.pandas_utils import integer_bit_width
+
+        self.assertEqual(integer_bit_width(0, 345100), 32)
+
+
+class CopyOnWriteTest(unittest.TestCase):
+    def test_chained_assignment_does_not_reach_the_original(self):
+        df = pd.DataFrame({'a': [1, 2, 3]})
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            df[df['a'] > 1]['a'] = 99
+
+        self.assertEqual(df['a'].tolist(), [1, 2, 3])
+
+    def test_a_slice_is_safe_to_write_to(self):
+        df = pd.DataFrame({'a': [1, 2, 3]})
+
+        subset = df[df['a'] > 1]
+        subset['a'] = 99
+
+        self.assertEqual(df['a'].tolist(), [1, 2, 3])
+        self.assertEqual(subset['a'].tolist(), [99, 99])
+
+
+class AggregationTest(unittest.TestCase):
+    def test_corr_rejects_text_columns_unless_they_are_excluded(self):
+        df = pd.DataFrame({'a': [1.0, 2.0], 'label': ['x', 'y']})
+
+        with self.assertRaises(ValueError):
+            df.corr()
+
+        self.assertEqual(df.corr(numeric_only=True).columns.tolist(), ['a'])
+
+    def test_a_set_is_not_a_column_indexer(self):
+        df = pd.DataFrame({'a': [1], 'b': [2]})
+
+        with self.assertRaises(TypeError):
+            df[{'a', 'b'}]
+
+        self.assertEqual(df[['a', 'b']].columns.tolist(), ['a', 'b'])
 
 
 class PolarsTest(unittest.TestCase):

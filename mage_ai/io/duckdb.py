@@ -3,7 +3,6 @@ import logging
 from typing import IO, List, Union
 
 import duckdb
-import numpy as np
 from pandas import DataFrame, Series
 
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
@@ -125,13 +124,9 @@ class DuckDB(BaseSQL):
         elif dtype in (PandasTypes.FLOATING, PandasTypes.DECIMAL, PandasTypes.MIXED_INTEGER_FLOAT):
             return 'DECIMAL'
         elif dtype == PandasTypes.INTEGER:
-            max_int, min_int = column.max(), column.min()
-            if np.int16(max_int) == max_int and np.int16(min_int) == min_int:
-                return 'BIGINT'
-            elif np.int32(max_int) == max_int and np.int32(min_int) == min_int:
-                return 'BIGINT'
-            else:
-                return 'BIGINT'
+            # Every width mapped to the same type, and numpy 2 raises OverflowError
+            # when narrowing a Python int that does not fit.
+            return 'BIGINT'
         elif dtype == PandasTypes.BOOLEAN:
             return 'CHAR(52)'
         elif dtype in (PandasTypes.TIMEDELTA, PandasTypes.TIMEDELTA64, PandasTypes.PERIOD):
