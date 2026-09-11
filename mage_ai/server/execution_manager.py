@@ -1,10 +1,11 @@
-from mage_ai.data_preparation.models.constants import PIPELINE_CONFIG_FILE
-from mage_ai.data_preparation.models.pipeline import Pipeline
-from typing import Callable
 import asyncio
 import multiprocessing
 import os
 import shutil
+from typing import Callable
+
+from mage_ai.data_preparation.models.constants import PIPELINE_CONFIG_FILE
+from mage_ai.data_preparation.models.pipeline import Pipeline
 
 
 class PipelineExecution:

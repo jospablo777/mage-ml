@@ -85,7 +85,8 @@ COPY . /home/src
 RUN uv sync --locked --extra all --extra integrations --group dev && \
     uv pip check --python /opt/mage/bin/python
 WORKDIR /home/src/mage_ai/frontend
-RUN yarn install --frozen-lockfile --non-interactive
+RUN yarn install --frozen-lockfile --non-interactive && \
+    yarn cache clean
 WORKDIR /home/src
 
 FROM development AS spark

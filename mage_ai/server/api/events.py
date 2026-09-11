@@ -1,7 +1,9 @@
-from .base import BaseDetailHandler, BaseHandler
+import json
+
 from mage_ai.orchestration.db.models.schedules import EventMatcher, PipelineSchedule
 from mage_ai.orchestration.triggers.event_trigger import EventTrigger
-import json
+
+from .base import BaseDetailHandler, BaseHandler
 
 
 class ApiEventHandler(BaseHandler):

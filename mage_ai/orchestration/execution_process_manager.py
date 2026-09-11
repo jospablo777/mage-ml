@@ -1,5 +1,6 @@
-from mage_ai.orchestration.db.models.schedules import PipelineRun
 import multiprocessing
+
+from mage_ai.orchestration.db.models.schedules import PipelineRun
 
 
 class ExecutionProcessManager:
