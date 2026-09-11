@@ -4511,7 +4511,7 @@ requires-dist = [
     { name = "simplejson" },
     { name = "six", specifier = ">=1.15.0" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=4.0.0" },
-    { name = "sqlalchemy", specifier = ">2.0.0" },
+    { name = "sqlalchemy", specifier = ">2.0.0,<3" },
     { name = "sqlglot", extras = ["rs"] },
     { name = "sqlparse", specifier = ">=0.6,<1" },
     { name = "sshtunnel", marker = "extra == 'postgres'", specifier = ">=0.4.0" },

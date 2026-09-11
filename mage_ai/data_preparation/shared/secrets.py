@@ -244,6 +244,37 @@ def delete_secret(
         print(f'WARNING: Could not find secret {name}')
 
 
+def _restrict_permissions(path: str) -> None:
+    """
+    Drops group and other permissions from a key file created before keys were
+    restricted to their owner.
+    """
+    try:
+        mode = os.stat(path).st_mode & 0o777
+        if mode & 0o077:
+            os.chmod(path, mode & 0o700)
+    except OSError:
+        pass
+
+
+def _write_key_file(key_file: str) -> str:
+    """
+    Writes a new encryption key that only its owner can read. When another process
+    creates the file first, its key is returned.
+    """
+    key = Fernet.generate_key().decode('utf-8')
+    try:
+        descriptor = os.open(key_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        with open(key_file, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as f:
+        f.write(key)
+
+    return key
+
+
 def _create_key_files(secrets_dir: str) -> Tuple[str, str]:
     """
     Creates key files in the secrets_dir directory if they do not exist. Returns the key
@@ -259,15 +290,14 @@ def _create_key_files(secrets_dir: str) -> Tuple[str, str]:
     uuid_file = os.path.join(secrets_dir, 'uuid')
 
     if not os.path.exists(secrets_dir):
-        os.makedirs(secrets_dir)
+        os.makedirs(secrets_dir, mode=0o700)
 
     if os.path.exists(key_file):
+        _restrict_permissions(key_file)
         with open(key_file, 'r', encoding='utf-8') as f:
             key = f.read()
     else:
-        key = Fernet.generate_key().decode('utf-8')
-        with open(key_file, 'w', encoding='utf-8') as f:
-            f.write(key)
+        key = _write_key_file(key_file)
 
     if os.path.exists(uuid_file):
         with open(uuid_file, 'r', encoding='utf-8') as f:

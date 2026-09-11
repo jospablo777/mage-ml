@@ -17,15 +17,21 @@ class ContainerStartupTest(unittest.TestCase):
         self.commands = self.root / 'commands.jsonl'
         self.bin = self.root / 'bin'
         self.bin.mkdir()
+        # The interpreter is passed through the environment because an interpreter
+        # path containing spaces cannot be used in a shebang.
+        recorder = (
+            'import json, os, sys\n'
+            'argv = sys.argv[1:]\n'
+            'with open(os.environ["STARTUP_COMMANDS"], "a") as output:\n'
+            '    output.write(json.dumps(argv) + "\\n")\n'
+            'sys.exit(int(os.environ.get("STARTUP_EXIT_" + '
+            'os.path.basename(argv[0]).upper(), "0")))\n'
+        )
         for name in ('uv', 'mage'):
             executable = self.bin / name
             executable.write_text(
-                f'#!{sys.executable}\n'
-                'import json, os, sys\n'
-                "with open(os.environ['STARTUP_COMMANDS'], 'a') as output:\n"
-                "    output.write(json.dumps(sys.argv) + '\\n')\n"
-                "sys.exit(int(os.environ.get('STARTUP_EXIT_' + "
-                "os.path.basename(sys.argv[0]).upper(), '0')))\n"
+                '#!/bin/sh\n'
+                f'exec "$STARTUP_PYTHON" -c \'{recorder}\' "$0" "$@"\n'
             )
             executable.chmod(0o755)
         self.script = Path(__file__).resolve().parents[2] / 'scripts' / 'run_app.sh'
@@ -33,6 +39,7 @@ class ContainerStartupTest(unittest.TestCase):
             'PATH': f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
             'USER_CODE_PATH': str(self.project),
             'STARTUP_COMMANDS': str(self.commands),
+            'STARTUP_PYTHON': sys.executable,
         }
 
     def run_startup(self, *args):

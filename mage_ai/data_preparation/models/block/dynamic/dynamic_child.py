@@ -67,7 +67,7 @@ class DynamicChildBlockFactory:
 
         if not self._block_run:
             try:
-                self._block_run = BlockRun.query.get(self.block_run_id)
+                self._block_run = BlockRun.get_by_id(self.block_run_id)
             except AttributeError as err:
                 if not is_test():
                     raise err

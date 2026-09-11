@@ -330,12 +330,12 @@ build_update_endpoint_tests(
     build_payload=lambda self: dict(
         pipeline_run_action='retry_blocks',
     ),
-    get_model_before_update=lambda self: BlockRun.query.get(self.block_run.id),
+    get_model_before_update=lambda self: BlockRun.get_by_id(self.block_run.id),
     assert_after_update=lambda
     self,
     result,
     model: BlockRun.BlockRunStatus.CANCELLED == model.status and
-    BlockRun.BlockRunStatus.INITIAL == BlockRun.query.get(self.block_run.id).status,
+    BlockRun.BlockRunStatus.INITIAL == BlockRun.get_by_id(self.block_run.id).status,
 )
 
 

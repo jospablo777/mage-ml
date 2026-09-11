@@ -64,7 +64,7 @@ dependencies = [
   "setuptools>=83.0.0",
   "simplejson",
   "six>=1.15.0",
-  "sqlalchemy>2.0.0",
+  "sqlalchemy>2.0.0,<3",
   "sqlglot[rs]",
   "sqlparse>=0.6,<1",
   "terminado==0.17.1",

@@ -188,7 +188,7 @@ class DatabaseResourceTest(BaseApiTestCase):
 
         UserResource(self.user, None).delete()
 
-        self.assertIsNone(User.query.get(user_id))
+        self.assertIsNone(User.get_by_id(user_id))
         self.assertEqual(len(User.query.all()), len(self.users) - 1)
 
         self.cleanup()
@@ -202,7 +202,7 @@ class DatabaseResourceTest(BaseApiTestCase):
             resource = UserResource(self.user, None)
             await resource.process_update(dict(username=username_new))
 
-            self.assertEqual(User.query.get(self.user.id).username, username_new)
+            self.assertEqual(User.get_by_id(self.user.id).username, username_new)
             mock_on_callback.assert_called_once_with(resource=resource)
 
         self.cleanup()
@@ -222,7 +222,7 @@ class DatabaseResourceTest(BaseApiTestCase):
                 error = True
 
             self.assertTrue(error)
-            self.assertEqual(User.query.get(self.user.id).username, username_old)
+            self.assertEqual(User.get_by_id(self.user.id).username, username_old)
             mock_on_failure_callback.assert_called_once_with(resource=resource)
 
         self.cleanup()
@@ -241,7 +241,7 @@ class DatabaseResourceTest(BaseApiTestCase):
             username=username_new,
         ))
 
-        user = User.query.get(self.user.id)
+        user = User.get_by_id(self.user.id)
         self.assertEqual(user.first_name, first_name)
         self.assertEqual(user.last_name, last_name)
         self.assertEqual(user.username, username_new)

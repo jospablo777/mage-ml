@@ -36,7 +36,7 @@ class WorkspaceResource(GenericResource):
         if user_id:
             user_id = user_id[0]
             if user_id:
-                query_user = User.query.get(user_id)
+                query_user = User.get_by_id(user_id)
 
         namespaces = query_arg.get('namespace[]', [])
         if namespaces and len(namespaces) == 1:

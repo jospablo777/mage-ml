@@ -16,7 +16,7 @@ class ApiTriggerPipelineHandler(BaseHandler):
 
     @safe_db_query
     def post(self, pipeline_schedule_id, token: str = None):
-        pipeline_schedule = PipelineSchedule.query.get(int(pipeline_schedule_id))
+        pipeline_schedule = PipelineSchedule.get_by_id(int(pipeline_schedule_id))
         if not pipeline_schedule:
             raise ApiError(ApiError.RESOURCE_NOT_FOUND)
 

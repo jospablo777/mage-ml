@@ -72,7 +72,7 @@ class K8sBlockExecutor(BlockExecutor):
             return job_name_prefix
 
         if '{trigger_name}' in job_name_prefix:
-            block_run = BlockRun.query.get(block_run_id)
+            block_run = BlockRun.get_by_id(block_run_id)
             trigger = block_run.pipeline_run.pipeline_schedule
             job_name_prefix = job_name_prefix.format(
                 trigger_name=clean_name(trigger.name).replace('_', '-'))

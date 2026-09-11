@@ -170,7 +170,7 @@ build_update_endpoint_tests(
             self.permission2.id,
         ],
     ),
-    get_model_before_update=lambda self: RolePermission.query.get(self.role_permission.id),
+    get_model_before_update=lambda self: RolePermission.get_by_id(self.role_permission.id),
     assert_after_update=_assert_after_update_permissions_ids,
     authentication_accesses=[PermissionAccess.ADMIN],
     permission_settings=[
@@ -210,7 +210,7 @@ build_update_endpoint_tests(
             self.user2.id,
         ],
     ),
-    get_model_before_update=lambda self: UserRole.query.get(self.user_role.id),
+    get_model_before_update=lambda self: UserRole.get_by_id(self.user_role.id),
     assert_after_update=_assert_after_update_user_ids,
     authentication_accesses=[PermissionAccess.ADMIN],
     permission_settings=[

@@ -4,10 +4,10 @@ import json
 import multiprocessing
 import os
 import re
+import shutil
 import traceback
 import uuid
 from datetime import datetime, timedelta
-from distutils.file_util import copy_file
 from typing import Dict, List
 
 import simplejson
@@ -593,7 +593,7 @@ db_connection.start_session()
                     pipeline_copy,
                 )
                 os.makedirs(new_pipeline_directory, exist_ok=True)
-                copy_file(
+                shutil.copy2(
                     os.path.join(pipeline.dir_path, PIPELINE_CONFIG_FILE),
                     os.path.join(new_pipeline_directory, PIPELINE_CONFIG_FILE),
                 )

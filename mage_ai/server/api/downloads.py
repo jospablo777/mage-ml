@@ -46,7 +46,7 @@ class ApiDownloadHandler(BaseHandler):
         pipeline_run_id = self.get_argument('pipeline_run_id', None)
         execution_partition = None
         if pipeline_run_id is not None:
-            pipeline_run = PipelineRun.query.get(pipeline_run_id)
+            pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
             execution_partition = pipeline_run.execution_partition
 
         if block is None:

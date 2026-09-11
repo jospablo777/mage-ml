@@ -178,16 +178,16 @@ class BaseApiHandler(BaseHandler, OAuthMiddleware):
 
 class BaseDetailHandler(BaseHandler):
     def get(self, model_id, **kwargs):
-        model = self.model_class.query.get(int(model_id))
+        model = self.model_class.get_by_id(int(model_id))
         self.write_model(model, **kwargs)
 
     def put(self, model_id, payload=None):
-        model = self.model_class.query.get(int(model_id))
+        model = self.model_class.get_by_id(int(model_id))
         payload = payload or self.get_payload()
         model.update(**payload)
         self.write_model(model)
 
     def delete(self, model_id):
-        model = self.model_class.query.get(int(model_id))
+        model = self.model_class.get_by_id(int(model_id))
         model.delete()
         self.write_model(model)

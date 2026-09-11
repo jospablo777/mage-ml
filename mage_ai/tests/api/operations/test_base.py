@@ -117,7 +117,7 @@ class BaseApiTestCase(AsyncDBTestCase):
         if 'error' in response:
             raise Exception(response['error'])
 
-        self.assertIsNone(self.model_class.query.get(pk))
+        self.assertIsNone(self.model_class.get_by_id(pk))
 
         return response
 

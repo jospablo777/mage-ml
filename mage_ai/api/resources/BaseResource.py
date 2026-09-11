@@ -244,7 +244,7 @@ class BaseResource(Resource, ResultSetMixIn):
     @classmethod
     async def get_model(cls, pk, **kwargs) -> Optional[Any]:
         if cls.model_class:
-            return cls.model_class.query.get(pk)
+            return cls.model_class.get_by_id(pk)
 
     def delete(self, **kwargs):
         """

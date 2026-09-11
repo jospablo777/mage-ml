@@ -63,6 +63,8 @@ To separate the web server and scheduler, you can override the container command
 
 To run multiple schedulers simultaneously, you will need to specify the `REDIS_URL` environment variable in your container. The Redis storage is used to coordinate the job scheduling between multiple containers to resolve race conditions. Here is an example Redis URL format: `redis://redis:6379/0`
 
+While `REDIS_URL` is set and Redis does not respond, schedulers stop creating runs. They retry the connection every 10 seconds, which `REDIS_LOCK_RECONNECT_INTERVAL` overrides. Without `REDIS_URL` there is no coordination, so run a single scheduler.
+
 ## Autoscaling
 
 Do you want to run your pipelines at any scale without having to deal with infrastructure setup,

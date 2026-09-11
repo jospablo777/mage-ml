@@ -283,7 +283,7 @@ class StreamingPipelineExecutor(PipelineExecutor):
     ):
         if not pipeline_run_id or not status:
             return
-        pipeline_run = PipelineRun.query.get(pipeline_run_id)
+        pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
         pipeline_run.update(
             status=status,
             completed_at=datetime.now(tz=pytz.UTC),

@@ -938,7 +938,7 @@ def on_pipeline_run_cancelled(
     pipeline_run_id: int,
     cancelled_block_run_ids: List,
 ):
-    job = GenericJob.query.get(job_id)
+    job = GenericJob.get_by_id(job_id)
     if job.status not in [
         GenericJob.JobStatus.INITIAL,
         GenericJob.JobStatus.QUEUED,
@@ -964,7 +964,7 @@ def on_pipeline_run_cancelled(
 
     try:
         # Run callback blocks for cancelled block runs
-        pipeline_run = PipelineRun.query.get(pipeline_run_id)
+        pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
         if not pipeline_run:
             raise Exception(f'Fail to retrieve pipeline run with id {pipeline_run_id}')
         pipeline_schedule = pipeline_run.pipeline_schedule
@@ -980,7 +980,7 @@ def on_pipeline_run_cancelled(
             )
             return
         for block_run_id in cancelled_block_run_ids:
-            block_run = BlockRun.query.get(block_run_id)
+            block_run = BlockRun.get_by_id(block_run_id)
             if not block_run:
                 continue
             if block_run.status != BlockRun.BlockRunStatus.CANCELLED:
@@ -1039,7 +1039,7 @@ def run_integration_stream(
         pipeline_run_id (int): The ID of the pipeline run.
         variables (Dict): A dictionary of variables.
     """
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     pipeline = pipeline_scheduler.pipeline
     data_loader_block = pipeline.data_loader
@@ -1264,11 +1264,11 @@ def run_block(
         Any: The result of executing the block.
     """
 
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
         return {}
 
-    block_run = BlockRun.query.get(block_run_id)
+    block_run = BlockRun.get_by_id(block_run_id)
     if block_run.status not in [
         BlockRun.BlockRunStatus.INITIAL,
         BlockRun.BlockRunStatus.QUEUED,
@@ -1339,7 +1339,7 @@ def run_pipeline(
     tags: Dict,
     allow_blocks_to_fail: bool = False,
 ):
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     pipeline = pipeline_scheduler.pipeline
     pipeline_scheduler.logger.info(

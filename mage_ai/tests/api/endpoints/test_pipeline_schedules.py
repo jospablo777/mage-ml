@@ -327,7 +327,7 @@ def _build_payload_update(self) -> Dict:
 
 def _assert_after_update(self, _result, model_before_update) -> bool:
     payload = _build_payload_update(self)
-    model_after_update = PipelineSchedule.query.get(self.pipeline_schedule.id)
+    model_after_update = PipelineSchedule.get_by_id(self.pipeline_schedule.id)
 
     validations_on_model_before_update = []
     validations_on_model_after_update = []
@@ -350,7 +350,7 @@ build_update_endpoint_tests(
     resource='pipeline_schedule',
     get_resource_id=lambda self: self.pipeline_schedule.id,
     build_payload=_build_payload_update,
-    get_model_before_update=lambda self: PipelineSchedule.query.get(self.pipeline_schedule.id),
+    get_model_before_update=lambda self: PipelineSchedule.get_by_id(self.pipeline_schedule.id),
     assert_after_update=_assert_after_update,
 )
 

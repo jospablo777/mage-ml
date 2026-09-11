@@ -133,7 +133,7 @@ def is_original_dynamic_child_block(
     def __get_block_run(block_run_id=block_run_id):
         from mage_ai.orchestration.db.models.schedules import BlockRun
 
-        return BlockRun.query.get(block_run_id)
+        return BlockRun.get_by_id(block_run_id)
 
     if block:
         if not block_run_block_uuid and block_run_id:

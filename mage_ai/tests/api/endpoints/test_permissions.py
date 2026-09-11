@@ -119,7 +119,7 @@ build_update_endpoint_tests(
     resource='permissions',
     get_resource_id=lambda self: self.permissions_fetched[0].id,
     build_payload=lambda self: dict(access=999),
-    get_model_before_update=lambda self: Permission.query.get(self.permissions_fetched[0].id),
+    get_model_before_update=lambda self: Permission.get_by_id(self.permissions_fetched[0].id),
     assert_after_update=lambda self, result, model: model.access != result['access'],
     authentication_accesses=[PermissionAccess.ADMIN],
     permission_settings=[
@@ -151,7 +151,7 @@ build_update_endpoint_tests(
             self.role2.id,
         ],
     ),
-    get_model_before_update=lambda self: RolePermission.query.get(self.role_permission.id),
+    get_model_before_update=lambda self: RolePermission.get_by_id(self.role_permission.id),
     assert_after_update=_assert_after_update,
     authentication_accesses=[PermissionAccess.ADMIN],
     permission_settings=[

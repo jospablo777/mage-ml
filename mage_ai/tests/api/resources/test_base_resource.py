@@ -5,7 +5,6 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BaseResource import BaseResource
 from mage_ai.api.result_set import ResultSet
 from mage_ai.orchestration.db.errors import DoesNotExistError
-from mage_ai.orchestration.db.models.base import classproperty
 from mage_ai.shared.hash import extract
 from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 
@@ -14,9 +13,9 @@ class GenericObject:
     def __init__(self, **kwargs):
         self.uuid = secrets.token_urlsafe()
 
-    @classproperty
-    def query(pk):
-        return dict(model=1)
+    @classmethod
+    def get_by_id(cls, pk):
+        return dict(model=1).get(pk)
 
     def on_callback(resource):
         return resource

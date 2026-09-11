@@ -1,64 +1,68 @@
 name: Build and publish Docker image
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
-      dockerfile_branch:
-        description: 'Dockerfile branch'
-        required: true
-        default: master
-      feature_branch:
-        description: 'Feature branch'
-        required: false
-        default: null
-      name:
-        description: 'Docker image name'
-        required: true
-        default: mageai
       tag:
-        description: 'Docker image tag'
+        description: 'Image tag'
         required: true
         default: latest
+      platforms:
+        description: 'Target platforms'
+        required: true
+        default: linux/amd64
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
   push_to_registry:
-    name: Push Docker image to Docker Hub
+    name: Push Docker image to the GitHub container registry
     runs-on: ubuntu-latest
-    # Disabled in this fork. Every tag below points at the upstream `mageai`
-    # Docker Hub namespace, and the fork has no credentials for it. Remove this
-    # line once the target namespace and the registry secrets are set.
-    if: false
     steps:
       - name: Check out the repo
         uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.dockerfile_branch }}
 
-      - name: Log in to Docker Hub
+      - name: Log in to the container registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: mageai/${{ github.event.inputs.name }}:${{ github.event.inputs.tag }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
+      # arm64 is emulated on GitHub runners and takes hours for this image. Pass it
+      # through the workflow input only when the build has time to finish.
       - name: Set up QEMU
+        if: contains(github.event.inputs.platforms, 'arm64')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event.inputs.platforms || 'linux/amd64' }}
           push: true
-          tags: mageai/${{ github.event.inputs.name }}:${{ github.event.inputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            FEATURE_BRANCH=${{ github.event.inputs.feature_branch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

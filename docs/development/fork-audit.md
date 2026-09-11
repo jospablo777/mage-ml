@@ -20,7 +20,7 @@ The production dependency profiles resolve without conflicts. The Linux producti
 | Request state | Stop the database query cache when a request raises an exception. Parse DEBUG consistently, including `DEBUG=0`. |
 | Packaging | Exclude local databases, environment files, bytecode, and frontend dependency directories from distributions. Build all workspace packages together. |
 | CI | Pass changed filenames as subprocess arguments, run pytest, check installed dependency consistency, and audit Python and frontend dependencies. |
-| Tests | Allocate a temporary project per test class. Teardown removes the directory allocated during setup and rejects checkout paths and symlinks. |
+| Tests | Allocate a temporary project per test class. Teardown removes the directory allocated during setup and rejects checkout paths and symlinks. Startup stubs read the interpreter from the environment so a checkout path with spaces still runs them. |
 | Pipeline execution | Provide an awaited async entry point, reject nested synchronous execution before starting blocks, and flush logs on failure. Preserve spaces in project paths passed to external executors. |
 | Failure and cancellation | Finish independent branches when `allow_blocks_to_fail` is enabled, retain the failed run status, and check cancellation before starting another block. |
 | Conditions | Resolve conditional block updates through the conditional registry instead of the callback registry. |
@@ -37,6 +37,13 @@ The production dependency profiles resolve without conflicts. The Linux producti
 | Container processes | Run Mage, the language server, and custom Spark under tini to forward termination signals and reap child processes. Retry connections closed before the HTTP server is ready. |
 | Language server | Remove pyls-memestra, which aborted diagnostics for unsaved files. |
 | Spark image | Start outside the installed PySpark directory so its pandas submodule cannot shadow pandas. |
+| Scheduler coordination | Deny locks while a configured Redis is unreachable, reconnect on an interval, and release only the lock the caller still holds. |
+| Workspace images | Resolve the workspace image from the server pod or `MAGE_CONTAINER_IMAGE`. The upstream image is no longer a default. |
+| Database access | Replace `Query.get`, legacy since SQLAlchemy 2.0, with `Session.get`. Import the declarative base from `sqlalchemy.orm` and cap SQLAlchemy below 3. |
+| Secrets | Create the secrets directory and the encryption key readable by their owner only, and keep the key written by whichever process created it first. |
+| File copies | Replace `distutils` with `shutil` and with a local boolean parser. The module is absent from Python 3.12 and resolved only through setuptools. |
+| Releases | Publish images to the GitHub container registry on tags, and attach the workspace distributions to the tagged release. |
+| Dependency updates | Add Dependabot for the Python workspaces, the frontend, the actions, and the container base. |
 
 The old shared test teardown called `shutil.rmtree(get_variables_dir())` after tests had changed the global project path. That could delete the checkout. Cleanup no longer derives its target from mutable application settings. Git fixtures remain inside the allocated temporary directory.
 
@@ -80,6 +87,8 @@ Pip 26.2.1 bundles affected msgpack and setuptools versions. The production imag
 Validation used macOS arm64, Python 3.12.11, and uv 0.11.29. The lockfile consistency check, installed Python dependency check, and changed-file Python lint checks passed. Source and wheel builds passed; the resulting archives excluded local database files.
 
 The full backend and connector run passed **5,516 tests and 135 subtests**, with **ten skips**, after the metadata cache corrections. It includes the previously failing integration scheduler test, SQL Server collection, Singer tests, queue fallbacks, startup argument handling, the nonblocking Jupyter subscriber, and file cache invalidation. Native unixODBC and libmagic were built in temporary directories for the macOS run.
+
+Later regression tests cover the scheduler lock while Redis is unreachable, schedules skipped when the lock is denied, workspace image resolution, encryption key permissions, and primary key lookups on the base model. `mage_ai/tests/test_deployment_contracts.py` scans the repository for the library calls, image references, disabled publishing workflows, and uv version drift that produced these corrections.
 
 Both Next.js static exports build on Linux, and the Storybook build passed on macOS. Eight chart browser tests passed. All six application browser tests pass against the production Linux container, covering authentication, pipeline creation and deletion, a triggered loader-transformer-exporter run, and navigation across the main pages. Login under `/office` passes without browser exceptions or failed asset requests, including fonts. Docker and CI give the frontend compiler a 4 GB heap after a build exceeded Node's default limit.
 

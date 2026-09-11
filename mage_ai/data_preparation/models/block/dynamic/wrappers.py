@@ -43,7 +43,7 @@ class DynamicBlockWrapperBase:
         if self._block_run:
             return self._block_run
 
-        self._block_run = BlockRun.query.get(self.block_run_id)
+        self._block_run = BlockRun.get_by_id(self.block_run_id)
 
         return self._block_run
 

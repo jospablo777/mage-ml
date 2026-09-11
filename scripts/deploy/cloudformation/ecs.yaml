@@ -12,6 +12,10 @@ Parameters:
     MaxValue: 65535
   VpcID:
     Type: String
+  ContainerImage:
+    Type: String
+    Description: Image to run the Mage server from
+    Default: ghcr.io/jospablo777/mage-ml:latest
 Resources:
   Cluster:
     Type: AWS::ECS::Cluster
@@ -129,7 +133,7 @@ Resources:
       ExecutionRoleArn: !Ref ExecutionRole
       ContainerDefinitions:
         - Name: mage-data-preparation
-          Image: mageai/mageai:latest
+          Image: !Ref ContainerImage
           MountPoints:
             - ReadOnly: false
               ContainerPath: /home/src

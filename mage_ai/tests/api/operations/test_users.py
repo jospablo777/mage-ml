@@ -24,7 +24,7 @@ class UserOperationTests(BaseApiTestCase):
             password_confirmation='water_lightning',
             roles_new=[Role.get_role('Owner').id],
         ))
-        self.assertEqual(User.query.get(response['user']['id']).email, email)
+        self.assertEqual(User.get_by_id(response['user']['id']).email, email)
 
     async def test_execute_create_unauthorized(self):
         async def _func():
@@ -94,7 +94,7 @@ class UserOperationTests(BaseApiTestCase):
             user=owner,
         )
 
-        admin = User.query.get(find(lambda x: x['email'] == email2, response['users'])['id'])
+        admin = User.get_by_id(find(lambda x: x['email'] == email2, response['users'])['id'])
 
         await self.base_test_execute_list(
             None,

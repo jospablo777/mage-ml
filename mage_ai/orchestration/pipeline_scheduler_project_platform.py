@@ -905,7 +905,7 @@ def run_integration_stream(
         pipeline_run_id (int): The ID of the pipeline run.
         variables (Dict): A dictionary of variables.
     """
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     pipeline = pipeline_scheduler.pipeline
     data_loader_block = pipeline.data_loader
@@ -1128,11 +1128,11 @@ def run_block(
         Any: The result of executing the block.
     """
 
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
         return {}
 
-    block_run = BlockRun.query.get(block_run_id)
+    block_run = BlockRun.get_by_id(block_run_id)
     if block_run.status not in [
         BlockRun.BlockRunStatus.INITIAL,
         BlockRun.BlockRunStatus.QUEUED,
@@ -1204,7 +1204,7 @@ def run_pipeline(
     tags: Dict,
     allow_blocks_to_fail: bool = False,
 ):
-    pipeline_run = PipelineRun.query.get(pipeline_run_id)
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     pipeline = pipeline_scheduler.pipeline
     pipeline_scheduler.logger.info(

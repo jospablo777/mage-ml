@@ -161,7 +161,7 @@ class BlockExecutor:
             )
             and not self.block
         ):
-            block_run = BlockRun.query.get(block_run_id) if block_run_id else None
+            block_run = BlockRun.get_by_id(block_run_id) if block_run_id else None
             self.block_run = block_run
             if block_run and block_run.metrics and block_run.metrics.get('hook'):
                 from mage_ai.data_preparation.models.block.hook.block import HookBlock
@@ -197,9 +197,9 @@ class BlockExecutor:
                 on_start(self.block_uuid)
 
             if not block_run:
-                block_run = BlockRun.query.get(block_run_id) if block_run_id else None
+                block_run = BlockRun.get_by_id(block_run_id) if block_run_id else None
                 self.block_run = block_run
-            pipeline_run = PipelineRun.query.get(pipeline_run_id) if pipeline_run_id else None
+            pipeline_run = PipelineRun.get_by_id(pipeline_run_id) if pipeline_run_id else None
 
             # Data integration block
             is_original_block = self.block.uuid == self.block_uuid
@@ -768,7 +768,7 @@ class BlockExecutor:
         finally:
             # The code below causes error when running blocks in pipeline_executor
             # if not self.block_run and block_run_id:
-            #     self.block_run = BlockRun.query.get(block_run_id)
+            #     self.block_run = BlockRun.get_by_id(block_run_id)
             # if self.block_run:
             #     asyncio.run(UsageStatisticLogger().block_run_ended(self.block_run))
             self.logger_manager.output_logs_to_destination()
@@ -1283,7 +1283,7 @@ class BlockExecutor:
         upstream_block_uuids_override = []
         if is_dynamic_block_child(self.block):
             if not self.block_run and block_run_id:
-                self.block_run = BlockRun.query.get(block_run_id)
+                self.block_run = BlockRun.get_by_id(block_run_id)
             if self.block_run:
                 upstream_block_uuids_override.append(self.block_run.block_uuid)
 
@@ -1393,7 +1393,7 @@ class BlockExecutor:
             if not block_run_id:
                 block_run_id = int(callback_url.split('/')[-1])
 
-            block_run = BlockRun.query.get(block_run_id)
+            block_run = BlockRun.get_by_id(block_run_id)
             update_kwargs = dict(status=status)
 
             if status == BlockRun.BlockRunStatus.COMPLETED:

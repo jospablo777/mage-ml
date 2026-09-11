@@ -6,6 +6,7 @@ from uuid import uuid4
 import yaml
 
 from mage_ai.data_preparation.shared.secrets import (
+    _create_key_files,
     _get_encryption_key,
     create_secret,
     delete_secret,
@@ -22,6 +23,26 @@ from mage_ai.tests.shared.mixins import ProjectPlatformMixin
 
 
 class SecretTests(DBTestCase):
+    def test_key_files_are_readable_by_their_owner_only(self):
+        secrets_dir = os.path.join(self.repo_path, 'secrets', uuid4().hex)
+
+        key, _key_uuid = _create_key_files(secrets_dir)
+        key_file = os.path.join(secrets_dir, 'key')
+
+        self.assertEqual(os.stat(secrets_dir).st_mode & 0o077, 0)
+        self.assertEqual(os.stat(key_file).st_mode & 0o777, 0o600)
+        self.assertEqual(_create_key_files(secrets_dir)[0], key)
+
+    def test_key_file_permissions_are_restricted_on_read(self):
+        secrets_dir = os.path.join(self.repo_path, 'secrets', uuid4().hex)
+
+        key, _key_uuid = _create_key_files(secrets_dir)
+        key_file = os.path.join(secrets_dir, 'key')
+        os.chmod(key_file, 0o644)
+
+        self.assertEqual(_create_key_files(secrets_dir)[0], key)
+        self.assertEqual(os.stat(key_file).st_mode & 0o777, 0o600)
+
     @patch('mage_ai.data_preparation.shared.secrets.get_data_dir')
     def test_create_secret(self, mock_data_dir):
         mock_data_dir.return_value = os.path.join(self.repo_path, 'data')

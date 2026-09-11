@@ -78,7 +78,7 @@ class PipelineExecutor:
                     update_status=update_status,
                 )
             else:
-                pipeline_run = PipelineRun.query.get(pipeline_run_id)
+                pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
                 if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
                     return
                 await self.__run_blocks(

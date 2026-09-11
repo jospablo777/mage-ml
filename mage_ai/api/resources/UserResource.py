@@ -231,7 +231,7 @@ class UserResource(DatabaseResource):
         missing_ids = []
         roles_new = []
         for role_id in role_ids:
-            role = Role.query.get(int(role_id))
+            role = Role.get_by_id(int(role_id))
             if role is None:
                 missing_ids.append(role_id)
             else:

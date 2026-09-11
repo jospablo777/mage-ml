@@ -1,8 +1,9 @@
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from kubernetes import client
 
+from mage_ai.cluster_manager.constants import MAGE_CONTAINER_IMAGE_ENV_VAR
 from mage_ai.cluster_manager.errors import ConfigurationError
 from mage_ai.cluster_manager.kubernetes.workload_manager import WorkloadManager
 from mage_ai.tests.base_test import TestCase
@@ -181,3 +182,31 @@ def wrong_function_name(config):
             mock_ingress.spec.rules[0].http.paths[0].backend.service.name,
             'other-service',
         )
+
+    def test_get_container_image_from_the_server_pod(self):
+        self.workload_manager.pod_config = client.V1Pod(
+            spec=client.V1PodSpec(
+                containers=[client.V1Container(name='mage-server', image='registry/mage:1.2.3')],
+            ),
+        )
+
+        self.assertEqual(
+            self.workload_manager.get_container_image(),
+            'registry/mage:1.2.3',
+        )
+
+    def test_get_container_image_from_the_environment(self):
+        self.workload_manager.pod_config = None
+
+        with patch.dict(os.environ, {MAGE_CONTAINER_IMAGE_ENV_VAR: 'registry/mage:4.5.6'}):
+            self.assertEqual(
+                self.workload_manager.get_container_image(),
+                'registry/mage:4.5.6',
+            )
+
+    def test_get_container_image_without_a_source(self):
+        self.workload_manager.pod_config = None
+
+        with patch.dict(os.environ, {MAGE_CONTAINER_IMAGE_ENV_VAR: ''}):
+            with self.assertRaises(ConfigurationError):
+                self.workload_manager.get_container_image()

@@ -23,6 +23,7 @@ from mage_ai.cluster_manager.constants import (
     KUBE_NAMESPACE,
     KUBE_SERVICE_GCP_BACKEND_CONFIG,
     KUBE_SERVICE_TYPE,
+    MAGE_CONTAINER_IMAGE_ENV_VAR,
     NODE_PORT_SERVICE_TYPE,
     SERVICE_ACCOUNT_CREDENTIAL_FILE_PATH,
     SERVICE_ACCOUNT_SECRETS_NAME,
@@ -195,6 +196,29 @@ class WorkloadManager:
 
         return workloads_list
 
+    def get_container_image(self) -> str:
+        """
+        Resolve the image workspaces run from. The image of the server pod is used
+        first so that workspaces run the same build as the server that creates them.
+        """
+        container_image = None
+        if self.pod_config:
+            try:
+                container_image = self.pod_config.spec.containers[0].image
+            except Exception:
+                pass
+
+        if not container_image:
+            container_image = os.getenv(MAGE_CONTAINER_IMAGE_ENV_VAR)
+
+        if not container_image:
+            raise ConfigurationError(
+                'Could not resolve the image for the workspace container. Run the server '
+                f'in a pod that declares its image, or set {MAGE_CONTAINER_IMAGE_ENV_VAR}.'
+            )
+
+        return container_image
+
     def create_workload(
         self,
         name: str,
@@ -281,13 +305,7 @@ class WorkloadManager:
                     },
                 }
 
-        container_image = 'mageai/mageai:latest'
-        if self.pod_config:
-            try:
-                container = self.pod_config.spec.containers[0]
-                container_image = container.image
-            except Exception:
-                pass
+        container_image = self.get_container_image()
 
         mage_container_config = {
             'name': f'{name}-container',

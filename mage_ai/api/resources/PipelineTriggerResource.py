@@ -40,7 +40,7 @@ class PipelineTriggerResource(GenericResource):
 
         trigger = None
         if pipeline_schedule_id:
-            pipeline_schedule = PipelineSchedule.query.get(pipeline_schedule_id)
+            pipeline_schedule = PipelineSchedule.get_by_id(pipeline_schedule_id)
             trigger = Trigger(
                 description=pipeline_schedule.description,
                 last_enabled_at=pipeline_schedule.last_enabled_at,

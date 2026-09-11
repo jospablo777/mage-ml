@@ -40,7 +40,7 @@ metadata:
 spec:
   containers:
   - name: mage-server
-    image: mageai/mageai:latest
+    image: ghcr.io/jospablo777/mage-ml:latest
     ports:
     - containerPort: 6789
     volumeMounts:

@@ -188,7 +188,7 @@ class FlowExecutionTest(DBTestCase):
             from mage_ai.orchestration.db.models.schedules import PipelineRun
             @data_loader
             def load(**kwargs):
-                run = PipelineRun.query.get(kwargs['pipeline_run_id'])
+                run = PipelineRun.get_by_id(kwargs['pipeline_run_id'])
                 run.update(status=PipelineRun.PipelineRunStatus.CANCELLED)
                 return 42
         ''')

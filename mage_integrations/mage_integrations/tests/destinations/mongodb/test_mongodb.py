@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from mage_integrations.destinations.mongodb import MongoDb
+from mage_integrations.destinations.mongodb.target_mongodb.sinks import strtobool
 from mage_integrations.tests.destinations.test_base import BaseDestinationTests
 
 
@@ -43,3 +44,24 @@ class MongoDbDestinationTests(unittest.TestCase, BaseDestinationTests):
                 connectTimeoutMS=2000
             )
             mock_client.list_database_names.assert_called_once()
+
+
+class StrtoboolTests(unittest.TestCase):
+    """
+    Boolean records went through distutils.util.strtobool, which needs an import
+    of distutils.util that the module never made.
+    """
+
+    def test_true_values(self):
+        for value in ['1', 'on', 't', 'TRUE', ' yes ', 'Y']:
+            with self.subTest(value=value):
+                self.assertIs(strtobool(value), True)
+
+    def test_false_values(self):
+        for value in ['0', 'off', 'f', 'FALSE', ' no ', 'N']:
+            with self.subTest(value=value):
+                self.assertIs(strtobool(value), False)
+
+    def test_unparseable_value(self):
+        with self.assertRaises(ValueError):
+            strtobool('maybe')

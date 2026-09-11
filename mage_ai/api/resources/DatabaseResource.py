@@ -123,7 +123,7 @@ class DatabaseResource(BaseResource):
         except Exception:
             db_connection.session.rollback()
 
-        model = self.model_class.query.get(pk)
+        model = self.model_class.get_by_id(pk)
         if not model:
             raise DoesNotExistError(f'{self.model_class.__name__} {pk} does not exist.')
         return self(model, user, **kwargs)

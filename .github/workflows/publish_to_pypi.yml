@@ -1,45 +1,60 @@
-name: Build and publish to PyPI
+name: Build and publish distributions
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Dry Run'
+      publish_to_pypi:
+        description: 'Publish to PyPI'
         required: true
-        default: true
+        default: false
         type: boolean
+
+permissions:
+  contents: write
+
+env:
+  UV_VERSION: "0.11.29"
 
 jobs:
   build_and_publish:
     runs-on: ubuntu-latest
-    # Disabled in this fork. The project is now published as `mage-ml`, and the
-    # PyPI secrets referenced below still belong to the upstream `mage-ai`
-    # project. Remove this line once the fork has its own PyPI project and
-    # tokens.
-    if: false
 
     steps:
-    - uses: actions/checkout@master
+    - uses: actions/checkout@v5
     - name: Set up Python 3.12
       uses: actions/setup-python@v6
       with:
         python-version: "3.12"
-    - name: Install dependencies
-      run: python -m pip install --upgrade pip uv
-    - name: Build stable distribution
+    - name: Install uv
       run: |
-        rm -rf dist/*
-        uv build
-    - name: Publish distribution to Test PyPI
-      if: github.event.inputs.dry_run == 'true'
-      uses: pypa/gh-action-pypi-publish@release/v1
+        python -m pip install --upgrade pip
+        pip install "uv==${{ env.UV_VERSION }}"
+    # mage_integrations and the vendored singer package are installed alongside
+    # mage-ml, so every workspace member is built here.
+    - name: Build distributions
+      run: |
+        rm -rf dist
+        uv build --all-packages
+    - uses: actions/upload-artifact@v4
       with:
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        repository-url: https://test.pypi.org/legacy/
-        verbose: true
-        skip-existing: true
-    - name: Publish distribution to PyPI
-      if: github.event.inputs.dry_run == 'false'
+        name: distributions
+        path: dist/
+        retention-days: 14
+    - name: Attach distributions to the release
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1 ||
+          gh release create "${GITHUB_REF_NAME}" --generate-notes
+        gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+    # Requires a PyPI project for mage-ml and a PYPI_API_TOKEN secret. The step is
+    # skipped while the secret is unset.
+    - name: Publish distributions to PyPI
+      if: ${{ github.event.inputs.publish_to_pypi == 'true' && secrets.PYPI_API_TOKEN != '' }}
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}

@@ -238,7 +238,7 @@ def run(
             default_variables = get_global_variables(pipeline_uuid)
             global_vars = merge_dict(default_variables, runtime_variables)
         else:
-            pipeline_run = PipelineRun.query.get(pipeline_run_id)
+            pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
             global_vars = pipeline_run.get_variables(extra_variables=runtime_variables)
 
         if template_runtime_configuration is not None:

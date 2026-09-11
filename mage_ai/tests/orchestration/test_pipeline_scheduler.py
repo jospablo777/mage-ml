@@ -13,6 +13,7 @@ from mage_ai.data_preparation.models.triggers import (
     ScheduleType,
 )
 from mage_ai.data_preparation.preferences import get_preferences
+from mage_ai.orchestration import pipeline_scheduler_original
 from mage_ai.orchestration.backfills.service import start_backfill
 from mage_ai.orchestration.db.models.schedules import (
     Backfill,
@@ -306,6 +307,29 @@ class PipelineSchedulerTests(DBTestCase):
             ).count(),
             1,
         )
+
+    @freeze_time('2023-10-11 12:13:14')
+    def test_schedule_all_skips_schedules_without_the_lock(self):
+        """
+        A denied lock means another scheduler owns the schedule, or Redis is
+        unreachable. Creating a run in either case duplicates it.
+        """
+        pipeline_schedule = PipelineSchedule.create(
+            name='trigger',
+            pipeline_uuid='test_pipeline',
+            schedule_interval=ScheduleInterval.HOURLY,
+            schedule_type=ScheduleType.TIME,
+            status=ScheduleStatus.ACTIVE,
+            start_time=datetime(2023, 10, 10, 13, 13, 20),
+        )
+
+        with patch.object(
+            pipeline_scheduler_original.lock, 'try_acquire_lock', return_value=False
+        ):
+            with patch.object(PipelineScheduler, 'schedule'):
+                schedule_all()
+
+        self.assertEqual(0, pipeline_schedule.pipeline_runs_count)
 
     @freeze_time('2023-10-11 12:13:14')
     def test_schedule_all_for_pipeline_schedules_with_landing_time_with_previous_runs(

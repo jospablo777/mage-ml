@@ -101,7 +101,7 @@ class K8sPipelineExecutor(PipelineExecutor):
             return job_name_prefix
 
         if '{trigger_name}' in job_name_prefix:
-            pipeline_run = PipelineRun.query.get(pipeline_run_id)
+            pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
             trigger = pipeline_run.pipeline_schedule
             job_name_prefix = job_name_prefix.format(
                 trigger_name=clean_name(trigger.name).replace('_', '-'))

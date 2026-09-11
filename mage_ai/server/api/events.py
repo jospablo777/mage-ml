@@ -21,7 +21,7 @@ class ApiEventMatcherDetailHandler(BaseDetailHandler):
         super().get(event_matcher_id, include_attributes=include_attributes)
 
     def put(self, event_matcher_id):
-        event_matcher = self.model_class.query.get(int(event_matcher_id))
+        event_matcher = self.model_class.get_by_id(int(event_matcher_id))
         payload = self.get_payload()
         pipeline_schedule_ids = payload.pop('pipeline_schedule_ids', None)
         if pipeline_schedule_ids is not None:

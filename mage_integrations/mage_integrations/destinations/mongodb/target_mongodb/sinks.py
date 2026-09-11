@@ -1,7 +1,6 @@
 """MongoDB target stream class, which handles writing streams."""
 
 import ast
-import distutils
 import json
 import urllib.parse
 
@@ -18,6 +17,18 @@ from mage_integrations.destinations.constants import (
     COLUMN_TYPE_STRING,
 )
 from mage_integrations.destinations.sink import BatchSink
+
+TRUE_VALUES = {'1', 'on', 't', 'true', 'y', 'yes'}
+FALSE_VALUES = {'0', 'off', 'f', 'false', 'n', 'no'}
+
+
+def strtobool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    raise ValueError(f'Invalid boolean value: {value}')
 
 
 class MongoDbSink(BatchSink):
@@ -48,8 +59,7 @@ class MongoDbSink(BatchSink):
                 if type_name == COLUMN_TYPE_ARRAY and type_value is not list:
                     record[key] = ast.literal_eval(value)
                 elif type_name == COLUMN_TYPE_BOOLEAN and type_value is not bool:
-                    # distutils is depreciated at 3.12+
-                    record[key] = bool(distutils.util.strtobool(value))
+                    record[key] = strtobool(value)
                 elif type_name == COLUMN_TYPE_INTEGER and type_value is not int:
                     record[key] = int(value)
                 elif type_name == COLUMN_TYPE_NUMBER and type_value is not float:

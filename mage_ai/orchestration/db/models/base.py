@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Dict
 
 from sqlalchemy import Column, DateTime, Integer
-from sqlalchemy.ext.declarative import declarative_base, declared_attr
+from sqlalchemy.orm import declarative_base, declared_attr
 from sqlalchemy.orm.collections import InstrumentedList
 from sqlalchemy.sql import func
 
@@ -61,8 +61,12 @@ class BaseModel(Base):
 
     @classmethod
     @safe_db_query
+    def get_by_id(cls, pk):
+        return db_connection.session.get(cls, pk)
+
+    @classmethod
     def get(self, uuid):
-        return self.query.get(uuid)
+        return self.get_by_id(uuid)
 
     def save(self, commit=True) -> None:
         # Validate decorator isn’t invoked if value for column is empty.

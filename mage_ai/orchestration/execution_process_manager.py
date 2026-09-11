@@ -60,7 +60,7 @@ class ExecutionProcessManager:
                 del self.block_processes[pipeline_run_id]
                 continue
             # TODO: Improve perf by batch fetching the pipeline runs
-            pipeline_run = PipelineRun.query.get(pipeline_run_id)
+            pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
             if pipeline_run.status == PipelineRun.PipelineRunStatus.CANCELLED:
                 for block_run_id in list(block_run_procs.keys()):
                     proc = block_run_procs[block_run_id]
@@ -80,7 +80,7 @@ class ExecutionProcessManager:
             if not pipeline_run_proc.is_alive():
                 del self.pipeline_processes[pipeline_run_id]
             else:
-                pipeline_run = PipelineRun.query.get(pipeline_run_id)
+                pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
                 if pipeline_run and pipeline_run.status == PipelineRun.PipelineRunStatus.CANCELLED:
                     pipeline_run_proc.terminate()
                     del self.pipeline_processes[pipeline_run_id]
