@@ -1,9 +1,11 @@
 name: Build and publish distributions
 
+# Nothing is published automatically. Run this by hand when a release should go
+# out, and restore the tag trigger here to make it automatic again:
+#   push:
+#     tags:
+#       - "v*"
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       publish_to_pypi:
@@ -21,6 +23,10 @@ env:
 jobs:
   build_and_publish:
     runs-on: ubuntu-latest
+    # The secrets context is rejected in a step's if condition, so the token is
+    # read here and the condition tests the environment instead.
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
 
     steps:
     - uses: actions/checkout@v5
@@ -54,9 +60,9 @@ jobs:
     # Requires a PyPI project for mage-ml and a PYPI_API_TOKEN secret. The step is
     # skipped while the secret is unset.
     - name: Publish distributions to PyPI
-      if: ${{ github.event.inputs.publish_to_pypi == 'true' && secrets.PYPI_API_TOKEN != '' }}
+      if: ${{ github.event.inputs.publish_to_pypi == 'true' && env.PYPI_API_TOKEN != '' }}
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
+        password: ${{ env.PYPI_API_TOKEN }}
         verbose: true
         skip-existing: true

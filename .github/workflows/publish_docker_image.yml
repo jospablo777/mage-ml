@@ -1,9 +1,11 @@
 name: Build and publish Docker image
 
+# Nothing is published automatically. Run this by hand when an image should go
+# out, and restore the tag trigger here to make it automatic again:
+#   push:
+#     tags:
+#       - "v*"
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:

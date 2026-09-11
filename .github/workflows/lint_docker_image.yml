@@ -50,7 +50,7 @@ jobs:
           # action fails at info severity, so the rule has to be listed.
           ignore: DL3002,DL3008,DL3013,DL3016,DL3066
       - name: Annotate Pull Request
-        uses: actions/github-script@v6
+        uses: actions/github-script@v8
         if: github.event_name == 'pull_request' && failure()
         with:
           script: |
