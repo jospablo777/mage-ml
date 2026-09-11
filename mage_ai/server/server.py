@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import stat
 import traceback
@@ -225,7 +226,11 @@ def replace_base_path(base_path: str) -> str:
                 with open(filepath, encoding='utf-8') as f:
                     s = f.read()
                 s = s.replace(BASE_PATH_PLACEHOLDER, base_path)
-                s = s.replace("src: url('/fonts", f"src:url('/{base_path}/fonts")
+                s = re.sub(
+                    r'''(url\(\s*['"]?)/fonts/''',
+                    lambda match: f'{match[1]}/{base_path}/fonts/',
+                    s,
+                )
                 s = s.replace('href="/favicon.ico"', f'href="/{base_path}/favicon.ico"')
                 # replace favicon
                 with open(filepath, 'w', encoding='utf-8') as f:
@@ -742,15 +747,11 @@ async def main(
     observer.schedule(event_handler, path=metadata_file)
     observer.start()
 
-    get_messages(
+    await get_messages(
         lambda content: WebSocketServer.send_message(
             parse_output_message(content),
         ),
     )
-
-    await asyncio.Event().wait()
-    # Used for the magic kernel
-    tornado.ioloop.IOLoop.current().start()
 
 
 def start_server(

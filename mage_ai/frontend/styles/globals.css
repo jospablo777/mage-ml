@@ -187,8 +187,6 @@ audio,
 canvas,
 video {
   display: inline-block;
-  *display: inline;
-  *zoom: 1;
   max-width: 100%;
 }
 
@@ -294,7 +292,6 @@ legend {
   padding: 0;
   white-space: normal;
   /* 2 */
-  *margin-left: -7px;
   /* 3 */
 }
 
@@ -315,7 +312,6 @@ textarea {
   /* 2 */
   vertical-align: baseline;
   /* 3 */
-  *vertical-align: middle;
   /* 3 */
 }
 
@@ -360,7 +356,6 @@ input[type="submit"] {
   /* 2 */
   cursor: pointer;
   /* 3 */
-  *overflow: visible;
   /* 4 */
 }
 
@@ -388,9 +383,7 @@ input[type='radio'] {
   /* 1 */
   padding: 0;
   /* 2 */
-  *height: 13px;
   /* 3 */
-  *width: 13px;
   /* 3 */
 }
 
@@ -582,13 +575,6 @@ textarea {
 }
 
 @font-face {
-  font-family: 'Fira Code Regular Italic';
-  src: url('/fonts/Fira_Code/ttf/FiraCode-RegularItalic.ttf') format('truetype');
-  font-weight: 400;
-  font-style: italic;
-}
-
-@font-face {
   font-family: 'Fira Code Medium';
   src: url('/fonts/Fira_Code/ttf/FiraCode-Medium.ttf') format('truetype');
   font-weight: 500;
@@ -607,13 +593,6 @@ textarea {
   src: url('/fonts/Fira_Code/ttf/FiraCode-Bold.ttf') format('truetype');
   font-weight: 700;
   font-style: normal;
-}
-
-@font-face {
-  font-family: 'Fira Code Bold Italic';
-  src: url('/fonts/Fira_Code/ttf/FiraCode-BoldItalic.ttf') format('truetype');
-  font-weight: 700;
-  font-style: italic;
 }
 
 @font-face {

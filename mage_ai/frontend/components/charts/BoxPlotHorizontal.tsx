@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import { BoxPlot } from '@visx/stats';
 import { ThemeContext } from 'styled-components';
 import {
@@ -7,7 +7,7 @@ import {
   defaultStyles as tooltipStyles,
   withTooltip,
 } from '@visx/tooltip';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { findClosestNum } from '@utils/array';
 import { localPoint } from '@visx/event';
 import { scaleLinear } from '@visx/scale';

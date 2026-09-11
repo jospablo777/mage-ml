@@ -129,7 +129,7 @@ function SidekickHeader({
 
     el = (
       <FlexContainer>
-        <NextLink
+        <NextLink legacyBehavior
           as={`/pipelines/${pipelineUUID}/edit?${VIEW_QUERY_PARAM}=${ViewKeyEnum.EXTENSIONS}`}
           href={'/pipelines/[pipeline]/edit'}
           passHref
@@ -149,7 +149,7 @@ function SidekickHeader({
   } else if (showAddonDetails) {
     el = (
       <FlexContainer>
-        <NextLink
+        <NextLink legacyBehavior
           as={`/pipelines/${pipelineUUID}/edit?${VIEW_QUERY_PARAM}=${ViewKeyEnum.ADDON_BLOCKS}`}
           href={'/pipelines/[pipeline]/edit'}
           passHref

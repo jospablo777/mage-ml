@@ -1,0 +1,16 @@
+[project]
+name = "mage-lsp"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "python-lsp-server[all,websockets]",
+  "pylsp-mypy",
+  "pylsp-rope",
+  "python-lsp-black",
+  "python-lsp-isort",
+  "python-lsp-ruff",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.9.0"

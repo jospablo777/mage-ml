@@ -1,0 +1,24 @@
+[project]
+name = "mage-custom-spark"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pyspark==3.5.9",
+  "setuptools>=83",
+  "spark-nlp==6.4.1",
+  "pandas>=2.3,<3",
+  "numpy>=1.26.4,<2",
+  "matplotlib",
+  "seaborn",
+  "scipy",
+  "jupyter",
+  "importlib-metadata",
+  "requests>=2.33.0",
+  "urllib3>=2.7,<3",
+  "tornado>=6.5.7",
+  "jupyter-server>=2.20.0",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.9.0"

@@ -252,7 +252,7 @@ function PipelineTemplateDetail({
             {pipelineUUID && (
               <Spacing mt={PADDING_UNITS} px={PADDING_UNITS}>
                 <Text default>
-                  This pipeline template will be based off the pipeline <NextLink
+                  This pipeline template will be based off the pipeline <NextLink legacyBehavior
                     as={`/pipelines/${pipelineUUID}`}
                     href={'/pipelines/[pipeline]'}
                     passHref

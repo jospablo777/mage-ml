@@ -174,7 +174,7 @@ function BookmarkValues({
                     <Divider light />
 
                     <SetupSectionRow {...SHARED_ROW_PROPS} title="Trigger">
-                      <NextLink
+                      <NextLink legacyBehavior
                         as={`/pipelines/${pipeline?.uuid}/triggers/${pipelineSchedule?.id}`}
                         href={'/pipelines/[pipeline]/triggers/[...slug]'}
                         passHref

@@ -9,8 +9,8 @@ dev_env:
 	$(UV) sync --locked --group dev
 
 dev_env_all:
-	@echo "Creating the uv environment with every extra and dev dependencies"
-	$(UV) sync --locked --all-extras --group dev
+	@echo "Creating the uv environment with production extras and dev dependencies"
+	$(UV) sync --locked --extra all --extra integrations --group dev
 
 lock:
 	$(UV) lock
@@ -22,7 +22,7 @@ test:
 	$(UV) run --no-sync pytest
 
 requirements:
-	$(UV) export --frozen --no-hashes --no-annotate --no-emit-project \
+	$(UV) export --locked --no-hashes --no-annotate --no-emit-workspace \
 		--no-default-groups --extra all --extra integrations \
 		--output-file requirements.txt
 

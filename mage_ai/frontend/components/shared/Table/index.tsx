@@ -532,7 +532,7 @@ function Table({
 
     if (linkProps) {
       return (
-        <NextLink
+        <NextLink legacyBehavior
           {...linkProps}
           key={`${uuid}-row-link-${rowIndex}`}
           passHref

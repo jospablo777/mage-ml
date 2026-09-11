@@ -2,20 +2,14 @@ import { expect, test } from './base';
 
 test('ensure all main pages load properly', async ({ page }) => {
   async function navigateToAndWaitTilLoaded(name: string) {
-    await page.locator('div[class*="indexstyle__VerticalNavigationStyleComponent"] > div').hover();
+    await page.getByTestId('navigation_sidebar').hover();
     await page.getByRole('link', { name })
       .and(page.getByTestId('navigation_link'))
       .click();
     await page.waitForLoadState();
 
-    /*
-     * There are multiple elements with the page title text, so we want to
-     * get the one in the header's breadcrumbs specifically since that will
-     * change when navigating from page to page.
-     */
-    const headerBreadcrumbTitleNode = page
-        .locator('div[class*="indexstyle__HeaderStyle"] > div > div > div > div > p')
-        .filter({ hasText: name });
+    const headerBreadcrumbTitleNode = page.getByTestId('page_header')
+      .getByText(name, { exact: true });
     await expect(headerBreadcrumbTitleNode).toBeVisible();
   }
 

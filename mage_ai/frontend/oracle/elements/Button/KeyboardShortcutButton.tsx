@@ -579,7 +579,7 @@ function KeyboardShortcutButton({
 
         if ((asHref || linkHref) && !disabled && !mutedDisabled) {
           return (
-            <NextLink
+            <NextLink legacyBehavior
               {...linkProps}
               passHref
             >

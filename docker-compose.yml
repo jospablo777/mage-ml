@@ -2,7 +2,8 @@ x-server_settings: &server_settings
   image: mage/data
   build:
     context: .
-    dockerfile: ./dev.Dockerfile
+    dockerfile: ./Dockerfile
+    target: development
   command: "python mage_ai/server/server.py --host ${HOST} --port ${PORT} --project ${PROJECT} --manage-instance ${MANAGE_INSTANCE}"
   environment:
     - AUTHENTICATION_MODE=$AUTHENTICATION_MODE
@@ -72,8 +73,8 @@ x-server_settings: &server_settings
   stdin_open: true # used for interactive debugging
   tty: true # used for interactive debugging
 x-app_settings: &app_settings
-  image: node:18-alpine
-  command: sh -c "yarn install && yarn cache clean && npx next dev"
+  image: node:24-bookworm-slim
+  command: sh -c "yarn install --frozen-lockfile && yarn dev"
   ports:
     - 3000:3000
   volumes:
@@ -90,13 +91,15 @@ services:
     image: mage/data_spark
     build:
       context: .
-      dockerfile: ./dev.spark.Dockerfile
+      dockerfile: ./Dockerfile
+      target: spark
   app_spark:
     <<: *app_settings
     image: mage/data_spark
     build:
       context: .
-      dockerfile: ./dev.spark.Dockerfile
+      dockerfile: ./Dockerfile
+      target: spark
     depends_on:
       - server_spark
   py:
@@ -111,7 +114,7 @@ services:
     environment:
       - PORT=8765
     ports:
-      - 8765:8765
+      - 127.0.0.1:8765:8765
     networks:
       - app-network
   database:

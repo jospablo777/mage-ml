@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "singer-python"
+version = "5.13.0+mage.1"
+description = "Singer protocol utilities used by Mage connectors."
+requires-python = ">=3.11,<3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+  "pytz>=2018.4",
+  "jsonschema>=4.25,<5",
+  "simplejson>=3.19,<5",
+  "python-dateutil>=2.8,<3",
+  "backoff>=2.2,<3",
+  "ciso8601>=2.3,<3",
+]
+
+[tool.setuptools.packages.find]
+include = ["singer*"]
+
+[tool.setuptools.package-data]
+singer = ["logging.conf"]

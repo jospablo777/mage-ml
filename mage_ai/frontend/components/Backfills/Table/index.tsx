@@ -141,7 +141,7 @@ function BackfillsTable({
           >
             {status || 'inactive'}
           </Text>,
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${pipelineUUID}/backfills/${id}`}
             href={'/pipelines/[pipeline]/backfills/[...slug]'}
             key={`name_${idx}`}

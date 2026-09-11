@@ -31,7 +31,7 @@ make dev_env
 
 That runs `uv sync --locked --group dev`. It creates `.venv` in the repo root and installs the versions recorded in `uv.lock`.
 
-To install every optional integration as well (dbt, cloud SDKs, streaming clients, database drivers):
+To install the production profile with dbt, cloud SDKs, streaming clients, database drivers, and connectors:
 
 ```bash
 make dev_env_all
@@ -58,7 +58,26 @@ The optional dependency groups in `pyproject.toml` map to the integrations Mage 
 uv sync --locked --extra postgres --extra dbt --group dev
 ```
 
-The Dockerfiles select `all` and `integrations`. The separate `mage_integrations` package has dependency conflicts with this profile; see [the audit report](docs/development/fork-audit.md).
+The production image selects `all` and `integrations`. Mage, `mage_integrations`, and the local Singer compatibility package share one uv workspace and lockfile. Install the connector package through `--extra integrations` from the repository root.
+
+The production image uses Debian 13 slim. Compilers and development headers stay in the Python build stage; the runtime receives the installed environments and required native libraries. Docker excludes local environment files and databases at every directory depth.
+
+The image uses uv for package installation and omits pip's bundled dependency copies. Add project requirements through `requirements.txt`; startup applies the runtime constraints before installation.
+
+The `development` and `spark` targets live in `Dockerfile`:
+
+```bash
+docker build --target development -t mage-dev .
+docker build --target spark -t mage-spark .
+```
+
+Sparkmagic runs in `/opt/mage-livy` with its own lockfile and pandas 2. The main environment uses pandas 3. The local Spark target installs `runtimes/local-spark` into `/opt/mage-spark`. Run local jobs with `/opt/mage-spark/bin/spark-submit`; keep pandas conversion inside that environment. The image no longer includes the dbt MySQL adapter: its dependency constraints conflict with the current dbt stack. MySQL source and destination connectors remain available.
+
+The language-server and Kubernetes startup images use the `runtimes/lsp` and `runtimes/pre-start` locks. The optional Spark NLP image uses `runtimes/custom-spark`; its pandas 2 and NumPy 1 constraints are separate from Mage.
+
+Build all three workspace distributions with `uv build --all-packages`. Install or distribute the resulting Singer and connector wheels together with Mage when using pip.
+
+On Linux, SQL Server tests require `unixodbc-dev`; file detection requires `libmagic1`. On macOS, install `unixodbc` and `libmagic` before running those tests.
 
 ### Adding or changing a dependency
 
@@ -95,10 +114,10 @@ The Mage frontend is a Next.js project
 cd mage_ai/frontend/
 ```
 
-that uses Yarn.
+that uses Node 24 and Yarn 1.22.22. Mage serves the production static exports. Build them with `yarn export_prod` and `yarn export_prod_base_path`; `next start` does not serve this export configuration.
 
 ```bash
-yarn install && yarn dev
+yarn install --frozen-lockfile && yarn dev
 ```
 
 ## Git Hooks
@@ -175,7 +194,7 @@ Please report any other build errors in our Slack.
 If there were added new libraries you should manually handle new dependencies. It can be done in 2 ways:
 
 1. `docker-compose build` from project root will fully rebuild an image with new dependencies - it can take lots of time
-2. `uv pip install x` from inside the container will only install the required dependency - it should be much faster
+2. Add the dependency to the project requirements. Container startup checks it against the locked runtime constraints and stops if installation fails.
 
 ## Monaco Editor features
 

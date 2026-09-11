@@ -110,7 +110,7 @@ function GlobalDataProducts({
           <Text default key="objectType" monospace>
             {objectType}
           </Text>,
-          <NextLink as={linkProps?.as} href={linkProps?.href || ''} key="objectUUID" passHref>
+          <NextLink legacyBehavior as={linkProps?.as} href={linkProps?.href || ''} key="objectUUID" passHref>
             <Link
               default
               monospace

@@ -168,7 +168,7 @@ function PipelineRunsMonitor({
                     </Text>
                   </GradientTextStyle>
                 </Spacing>
-                <NextLink
+                <NextLink legacyBehavior
                   as={`/pipelines/${pipelineUUID}/triggers/${pipelineSchedule?.id}`}
                   href="/pipelines/[pipeline]/triggers/[...slug]"
                   passHref

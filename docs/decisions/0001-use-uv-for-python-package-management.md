@@ -112,3 +112,11 @@ mage_integrations stays a separate install.
 
 **Delete requirements.txt.** Nothing inside the repo reads it after this change. External tooling and
 existing deployment scripts do, so it stays as a generated export.
+
+## Follow-up: dependency and container audit, 2026-09-10
+
+Python now requires `>=3.11,<3.14`. The connector package and vendored Singer compatibility package are workspace members. Their dependencies resolve with the main runtime in `uv.lock`.
+
+Production, development, and local Spark builds use targets in the same Dockerfile. Python packages install through `uv sync --locked`; the former Git branch installations were removed. Sparkmagic has a separate locked environment under `runtimes/livy` because it requires pandas 2. The main environment retains pandas 3. The unsupported dbt MySQL adapter is not installed.
+
+CI runs pytest for Mage, connectors, and the Singer compatibility package. Requirements exports remain generated files. Package builds include every workspace member with `uv build --all-packages`.

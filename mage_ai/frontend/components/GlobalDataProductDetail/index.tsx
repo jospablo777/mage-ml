@@ -200,7 +200,7 @@ function GlobalDataProductDetail({ globalDataProduct, isNew }: GlobalDataProduct
                 <Spacing mt={1}>
                   <Text muted small>
                     View pipeline{' '}
-                    <NextLink
+                    <NextLink legacyBehavior
                       as={`/pipelines/${objectAttributes?.object_uuid}/edit`}
                       href={'/pipelines/[pipeline]/edit'}
                       passHref

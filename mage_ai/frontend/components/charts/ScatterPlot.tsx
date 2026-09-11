@@ -5,13 +5,13 @@ import { Bar, Circle } from '@visx/shape';
 import { GridColumns, GridRows } from '@visx/grid';
 import { Group } from '@visx/group';
 import { Tooltip, withTooltip } from '@visx/tooltip';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { localPoint } from '@visx/event';
 import { scaleLinear } from '@visx/scale';
 import { voronoi } from '@visx/voronoi';
 
 import FlexContainer from '@oracle/components/FlexContainer';
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';

@@ -482,7 +482,7 @@ const Button = ({
 
   if (asHref || linkHref) {
     return (
-      <NextLink
+      <NextLink legacyBehavior
         {...linkProps}
         passHref
       >

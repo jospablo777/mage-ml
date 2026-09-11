@@ -1016,13 +1016,13 @@ function TriggerDetail({
                 {saveInCodeAutomaticallyToggled && (
                   <Text default>
                     This trigger will automatically be persisted in code.
-                    To change this behavior, update the <NextLink
+                    To change this behavior, update the <NextLink legacyBehavior
                       as={`/pipelines/${pipelineUUID}/settings`}
                       href={'/pipelines/[pipeline]/settings'}
                       passHref
                     >
                       <Link openNewWindow>pipeline’s settings</Link>
-                    </NextLink> or <NextLink
+                    </NextLink> or <NextLink legacyBehavior
                       as="/settings/workspace/preferences"
                       href="/settings/workspace/preferences"
                       passHref

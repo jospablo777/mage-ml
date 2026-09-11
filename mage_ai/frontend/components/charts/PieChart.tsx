@@ -1,5 +1,5 @@
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
-import Pie, { ProvidedProps, PieArcDatum } from '@visx/shape/lib/shapes/Pie';
+import { ParentSize } from '@visx/responsive';
+import { Pie, PieProvidedProps as ProvidedProps } from '@visx/shape';
 import React, { useContext, useState } from 'react';
 import { Group } from '@visx/group';
 import { ThemeContext } from 'styled-components';
@@ -45,6 +45,8 @@ export type PieChartProps = PieProps & {
 
 // react-spring transition definitions
 type AnimatedStyles = { startAngle: number; endAngle: number; opacity: number };
+
+type PieArcDatum<Datum> = ProvidedProps<Datum>['arcs'][number];
 
 const fromLeaveTransition = ({ endAngle }: PieArcDatum<any>) => ({
   endAngle: endAngle > Math.PI ? 2 * Math.PI : 0,

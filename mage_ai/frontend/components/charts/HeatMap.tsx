@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import styled, { ThemeContext } from 'styled-components';
 import { Group } from '@visx/group';
 import { HeatmapRect } from '@visx/heatmap';

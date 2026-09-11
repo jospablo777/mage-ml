@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/opt/mage-livy/bin/python",
+    "-m",
+    "sparkmagic.kernels.pysparkkernel.pysparkkernel",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "PySpark (Livy)",
+  "language": "python"
+}

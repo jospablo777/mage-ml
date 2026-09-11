@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useMemo } from 'react';
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import { ThemeContext } from 'styled-components';
 import { AxisLeft, AxisBottom } from '@visx/axis';
 import { Bar, Line, LinePath } from '@visx/shape';
@@ -8,7 +8,7 @@ import { Group } from '@visx/group';
 import { LegendOrdinal, LegendItem, LegendLabel } from '@visx/legend';
 import { Threshold } from '@visx/threshold';
 import { Tooltip, defaultStyles, withTooltip } from '@visx/tooltip';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { curveBasis } from '@visx/curve';
 import { localPoint } from '@visx/event';
 import { range } from 'lodash';

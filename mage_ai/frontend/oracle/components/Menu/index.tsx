@@ -97,7 +97,7 @@ function Menu({
 
             if (linkProps) {
               linkEl = (
-                <NextLink
+                <NextLink legacyBehavior
                   {...linkProps}
                   key={key}
                   passHref

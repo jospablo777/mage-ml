@@ -6,7 +6,7 @@ MAGE_PROJECT_TYPE="standalone"
 
 if [[ ! -z "${FILESTORE_IP_ADDRESS}" && ! -z "${FILE_SHARE_NAME}" ]]; then
     echo "Mounting Cloud Filestore ${FILESTORE_IP_ADDRESS}:/${FILE_SHARE_NAME}"
-    mount -o nolock $FILESTORE_IP_ADDRESS:/$FILE_SHARE_NAME /home/src
+    mount -o nolock "$FILESTORE_IP_ADDRESS:/$FILE_SHARE_NAME" /home/src
     echo "Mounting completed."
 fi
 
@@ -20,19 +20,20 @@ fi
 
 if [[ ! -z "${ULIMIT_NO_FILE}" ]]; then
     echo "Setting ulimit -n  to $ULIMIT_NO_FILE"
-    ulimit -n $ULIMIT_NO_FILE
+    ulimit -n "$ULIMIT_NO_FILE"
 fi
 
 REQUIREMENTS_FILE="${PROJECT_PATH}/requirements.txt"
 if [ -f "$REQUIREMENTS_FILE" ]; then
     echo "$REQUIREMENTS_FILE exists."
 
-    # Run pip install and handle errors gracefully
-    if ! pip3 install -r "$REQUIREMENTS_FILE"; then
-        echo "Warning: Failed to install requirements from $REQUIREMENTS_FILE" >&2
-    else
-        echo "Requirements installed successfully."
+    dependency_options=()
+    if [[ -n "${MAGE_RUNTIME_CONSTRAINTS}" ]]; then
+        dependency_options+=(--constraint "$MAGE_RUNTIME_CONSTRAINTS")
     fi
+    uv pip install --python "$(command -v python3)" \
+        "${dependency_options[@]}" --requirement "$REQUIREMENTS_FILE"
+    uv pip check --python "$(command -v python3)"
 fi
 
 mage_args=()
@@ -45,15 +46,14 @@ if [[ ! -z "${CLUSTER_TYPE}" ]]; then
 fi
 
 if [ "$#" -gt 0 ]; then
-    echo "Execute command: ${@}"
-    "$@"
+    exec "$@"
 else
     echo "Starting project at ${PROJECT_PATH}, project type ${MAGE_PROJECT_TYPE}"
     if [[ ! -z "${DBT_DOCS_INSTANCE}" ]]; then
-        mage start $PROJECT_PATH --dbt-docs-instance 1
+        exec mage start "$PROJECT_PATH" --dbt-docs-instance 1
     elif [[ ! -z "${MANAGE_INSTANCE}" ]]; then
-        mage start $PROJECT_PATH --manage-instance 1
+        exec mage start "$PROJECT_PATH" --manage-instance 1
     else
-        mage start $PROJECT_PATH --project-type $MAGE_PROJECT_TYPE "${mage_args[@]}"
+        exec mage start "$PROJECT_PATH" --project-type "$MAGE_PROJECT_TYPE" "${mage_args[@]}"
     fi
 fi

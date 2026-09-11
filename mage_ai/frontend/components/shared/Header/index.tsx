@@ -281,7 +281,7 @@ function Header({
     }
 
     return (
-      <NextLink
+      <NextLink legacyBehavior
         as="/"
         href="/"
         passHref
@@ -436,7 +436,7 @@ function Header({
   }, []);
 
   return (
-    <HeaderStyle>
+    <HeaderStyle data-testid="page_header">
       <ClientOnly>
         <FlexContainer
           alignItems="center"

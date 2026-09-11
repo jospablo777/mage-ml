@@ -105,7 +105,7 @@ function GlobalHooksList({
           const pipelineUUID = pipeline?.uuid;
           const pipelineEl = pipelineUUID
             ? (
-              <NextLink
+              <NextLink legacyBehavior
                 as={`/pipelines/${pipelineUUID}/edit`}
                 href={'/pipelines/[pipeline]/edit'}
                 key="pipeline"
@@ -149,7 +149,7 @@ function GlobalHooksList({
                     );
                   }
                   outputsEls.push(
-                    <NextLink
+                    <NextLink legacyBehavior
                       as={`/pipelines/${pipelineUUID}/edit?block_uuid=${block?.uuid}`}
                       href={'/pipelines/[pipeline]/edit'}
                       key={`${block?.uuid}-${idx}-link`}

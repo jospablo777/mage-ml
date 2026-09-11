@@ -6,10 +6,10 @@ const BOLD = 'Roboto Bold';
 const FONT_FAMILY_BASE = 'Helvetica Neue, Helvetica, sans-serif';
 
 const MONO_REGULAR: 'Fira Code Regular' = 'Fira Code Regular';
-const MONO_REGULAR_ITALIC: 'Fira Code Regular Italic' = 'Fira Code Regular Italic';
+const MONO_REGULAR_ITALIC = MONO_REGULAR;
 const MONO_MEDIUM: 'Fira Code Medium' = 'Fira Code Medium';
 const MONO_BOLD: 'Fira Code Bold' = 'Fira Code Bold';
-const MONO_BOLD_ITALIC: 'Fira Code Bold Italic' = 'Fira Code Bold Italic';
+const MONO_BOLD_ITALIC = MONO_BOLD;
 const MONO_FONT_FAMILY_BASE: string = 'monospace';
 
 export const FONT_FAMILY_BOLD: string = `${BOLD}, ${FONT_FAMILY_BASE}`;

@@ -39,6 +39,10 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+coverage/
+test-results/
+test-reports/
+/junit*.xml
 .tox/
 .nox/
 .coverage
@@ -50,6 +54,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 
 # Translations
 *.mo
@@ -175,6 +180,11 @@ scratch*
 
 # Playwright test automation
 playwright-report/
+blob-report/
+playwright/.cache/
+
+# Container vulnerability report
+/trivy-results.sarif
 
 # Testing files
 !mage_ai/test/

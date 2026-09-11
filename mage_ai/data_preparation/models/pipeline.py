@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import tempfile
-import time
 import zipfile
 from datetime import datetime, timezone
 from io import BytesIO
@@ -16,7 +15,7 @@ from jinja2 import Template
 
 from mage_ai.authentication.permissions.constants import EntityName
 from mage_ai.cache.block import BlockCache
-from mage_ai.cache.mem_lru import read_yaml_file, read_yaml_file_async
+from mage_ai.cache.mem_lru import file_cache, read_yaml_file, read_yaml_file_async
 from mage_ai.cache.pipeline import PipelineCache
 from mage_ai.data.constants import InputDataType
 from mage_ai.data.tabular.models import BatchSettings
@@ -2333,10 +2332,6 @@ class Pipeline:
         extension_uuid: str = None,
         widget: bool = False,
     ):
-        # Introduce a small delay to prevent multiple changes from generating
-        # identical timestamps for the pipeline YAML file
-        time.sleep(0.0005)
-
         blocks_current = sorted([b.uuid for b in self.blocks_by_uuid.values()])
 
         if block_uuid is not None:
@@ -2388,6 +2383,7 @@ class Pipeline:
         content = yaml.dump(pipeline_dict, allow_unicode=True)
 
         safe_write(self.config_path, content)
+        file_cache.pop(self.config_path, None)
 
         File.create(
             PIPELINE_CONFIG_FILE,
@@ -2485,6 +2481,7 @@ class Pipeline:
                 raise Exception('Invalid pipeline metadata.yaml content, please try saving again.')
 
         await safe_write_async(self.config_path, content)
+        file_cache.pop(self.config_path, None)
 
         await File.create_async(
             PIPELINE_CONFIG_FILE,

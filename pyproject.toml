@@ -187,34 +187,7 @@ streaming = [
   "requests_aws4auth==1.1.2",
   "stomp.py==8.1.0",
 ]
-# Runtime dependencies for separately installed mage-integrations connectors.
-integrations = [
-  "async-timeout==4.0.3",
-  "attrs==22.2.0; python_version < '3.12'",
-  "attrs==24.2.0; python_version >= '3.12'",
-  "backoff",
-  "clickhouse_sqlalchemy",
-  "deltalake==0.20.2",
-  "facebook_business==22.0.2",
-  "gnupg==2.3.1",
-  "google-analytics-data>=0.20.0",
-  "google-cloud-bigquery-storage==2.36.2",
-  "httpx[http2]>=0.27.0",
-  "pendulum==2.1.0; python_version < '3.12'",
-  "pendulum==3.0.0; python_version >= '3.12'",
-  "pymongo_schema==0.4.1",
-  "python-magic==0.4.27",
-  "requests_mock==1.10.0",
-  "simple_salesforce~=1.12.5",
-  "singer-sdk>=0.50,<1",
-  "stripe==5.5.0",
-  "terminaltables==3.1.10",
-  "twitter-ads==11.0.0",
-  "tzlocal==4.2",
-  "xlsx2csv==0.8.1",
-  "xmltodict==0.13.0",
-  "zenpy==2.0.25",
-]
+integrations = ["mage-integrations"]
 # Dependency profile used by the container image.
 all = [
   "mage-ml[ai]",
@@ -233,6 +206,7 @@ all = [
   "mage-ml[streaming]",
   "aws-secretsmanager-caching==1.1.1.5",
   "duckdb>=1.5.5",
+  "faster-fifo>=1.5.2,<2; sys_platform != 'win32'",
   "google-api-core>=2.30.0",
   "google-api-python-client~=2.70.0",
   "google-cloud-iam>=2.20.0",
@@ -273,9 +247,18 @@ constraint-dependencies = [
   "pyopenssl>=25.1.0",
 ]
 
+[tool.uv.workspace]
+members = ["mage_integrations", "vendor/singer-python"]
+exclude = ["runtimes/*"]
+
+[tool.uv.sources]
+mage-integrations = { workspace = true }
+singer-python = { workspace = true }
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mage_ai*"]
+exclude = ["mage_ai.frontend*"]
 
 [tool.setuptools]
 include-package-data = true

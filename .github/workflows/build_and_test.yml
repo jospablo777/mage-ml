@@ -5,6 +5,9 @@ on:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
+      - "vendor/**"
+      - "runtimes/**"
+      - "scripts/run_app.sh"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/build_and_test.yml"
@@ -12,13 +15,17 @@ on:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
+      - "vendor/**"
+      - "runtimes/**"
+      - "scripts/run_app.sh"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/build_and_test.yml"
 
 env:
   ENV: test_mage
-  # Match ARG UV_VERSION in the Dockerfiles.
+  NODE_OPTIONS: --max-old-space-size=4096
+  # Match the uv image tag in Dockerfile.
   UV_VERSION: "0.11.29"
 
 jobs:
@@ -80,7 +87,7 @@ jobs:
       - name: Lockfile matches pyproject.toml
         run: uv lock --check
       - name: Build sdist and wheel
-        run: uv build
+        run: uv build --all-packages
 
   test_backend:
     runs-on: ubuntu-latest
@@ -116,11 +123,10 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.pythonLocation }}
         run: |
-          sudo apt-get install -y freetds-dev
-          uv sync --locked --group dev --extra postgres --inexact
-          uv pip install --system "git+https://github.com/mage-ai/sqlglot#egg=sqlglot"
-          uv pip install --system "git+https://github.com/mage-ai/singer-python.git#egg=singer-python"
-          uv pip install --system mage_integrations/
+          sudo apt-get update
+          sudo apt-get install -y freetds-dev unixodbc-dev libmagic1 libkrb5-dev
+          uv sync --locked --group dev --extra all --extra integrations \
+            --extra great-expectations --extra qdrant
           uv pip check --system
       - name: Run focused Git tests
         run: |
@@ -138,39 +144,37 @@ jobs:
           MAGE_TEST_POSTGRES_USER: postgres
       - name: Run unit tests
         run: |
-          python3 -m pytest mage_ai/tests
+          python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests
         env:
           OPENAI_API_KEY: abcdefg
-      - name: Run mage integrations unit tests
-        run: |
-          cd mage_integrations && python3 -m unittest discover mage_integrations.tests
-
       # Run Playwright once per matrix.
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "18.18.0"
-        if: matrix.python-version == '3.11'
+          node-version: "24"
+        if: matrix.python-version == '3.12'
       - name: Create Mage test project
         run: |
           python mage_ai/cli/main.py init test_project
         env:
           PYTHONPATH: ${{ env.pythonLocation }}:.
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.12'
       - name: Build frontend, start server, and run Playwright tests
         run: |
-          yarn install &&
+          yarn install --frozen-lockfile --non-interactive &&
           yarn export_prod &&
-          yarn playwright install chromium &&
-          yarn playwright test -c playwright.config.ci.ts
+          yarn playwright install --with-deps chromium &&
+          yarn playwright test -c playwright.config.ci.ts &&
+          yarn build-storybook &&
+          yarn test:storybook
         working-directory: mage_ai/frontend/
         env:
           PYTHONPATH: ${{ env.pythonLocation }}:. # Playwright tests on CI depend on the Python web server
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.12'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report
+          name: playwright-report-${{ runner.os }}-${{ matrix.python-version }}
           path: mage_ai/frontend/playwright-report/
           retention-days: 3
           overwrite: true
@@ -193,7 +197,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "20.15.1"
+          node-version: "24"
       # playwright-windows.config.ci.ts activates venv3/Scripts before it starts
       # the server, so the environment has to be created at that path.
       - name: Create Mage test project
@@ -206,14 +210,14 @@ jobs:
           uv run --no-sync python mage_ai/cli/main.py init test_project
       - name: Build frontend, start server, and run Playwright tests
         run: |
-          yarn install &&
+          yarn install --frozen-lockfile --non-interactive &&
           yarn export_prod &&
-          yarn playwright install chromium &&
+          yarn playwright install --with-deps chromium &&
           yarn playwright test -c playwright-windows.config.ci.ts
         working-directory: mage_ai/frontend/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report
+          name: playwright-report-${{ runner.os }}-${{ matrix.python-version }}
           path: mage_ai/frontend/playwright-report/
           retention-days: 3

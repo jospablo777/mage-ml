@@ -27,7 +27,7 @@ function RowDivider({
   }), [onDrop]);
 
   return (
-    <div ref={drop} style={{ width }}>
+    <div ref={node => { drop(node); }} style={{ width }}>
       <Spacing p={PADDING_UNITS}>
         {children}
 

@@ -1,8 +1,8 @@
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import { AxisBottom, AxisLeft } from '@visx/axis';
 import { Bar, BarGroupHorizontal, BarStackHorizontal, Line } from '@visx/shape';
 import { Group } from '@visx/group';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { defaultStyles as tooltipStyles, TooltipWithBounds, withTooltip } from '@visx/tooltip';
 
 import FlexContainer from '@oracle/components/FlexContainer';
@@ -238,7 +238,7 @@ const BarChartHorizontal = withTooltip<BarStackHorizontalProps, TooltipData>(
                         valueToDisplay !== null &&
                         isNumeric(valueToDisplay)
                       ) {
-                        valueToDisplay = valueToDisplay?.toFixed(4);
+                        valueToDisplay = Number(valueToDisplay).toFixed(4);
                       }
                     }
                   }

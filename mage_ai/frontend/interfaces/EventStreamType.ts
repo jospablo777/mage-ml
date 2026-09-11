@@ -49,6 +49,7 @@ export interface ProcessDetailsType {
 }
 
 export interface ExecutionResultType {
+  type?: ResultType;
   error?: ErrorDetailsType;
   output?: any;
   output_text?: string;

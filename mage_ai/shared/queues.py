@@ -3,8 +3,8 @@ import queue
 
 from mage_ai.settings.server import KERNEL_MAGIC
 
-EmptyModule = None
-QueueModule = None
+EmptyModule = queue.Empty
+QueueModule = multiprocessing.Queue
 
 try:
     if KERNEL_MAGIC:
@@ -13,8 +13,7 @@ try:
         EmptyModule = faster_fifo.Empty
         QueueModule = faster_fifo.Queue
 except ImportError:
-    EmptyModule = queue.Empty
-    QueueModule = multiprocessing.Queue
+    pass
 
 
 Empty = EmptyModule

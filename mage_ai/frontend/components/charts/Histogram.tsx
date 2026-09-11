@@ -1,10 +1,10 @@
 import React, { useCallback, useContext } from 'react';
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import { AxisBottom, AxisLeft } from '@visx/axis';
 import { Bar } from '@visx/shape';
 import { Group } from '@visx/group';
 import { ThemeContext } from 'styled-components';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { defaultStyles, TooltipWithBounds, withTooltip } from '@visx/tooltip';
 import {
   TooltipData as TooltipDataBase,

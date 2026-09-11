@@ -144,7 +144,7 @@ function WorkspacePage() {
         Object.entries({
           ...queryFinal,
           ...filtersQuery,
-        } || {}).forEach(([k, v]) => {
+        }).forEach(([k, v]) => {
           if (typeof v !== 'undefined' && v !== null) {
             queryFinal[k] = v;
           }

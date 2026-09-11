@@ -403,7 +403,7 @@ function FlyoutMenu({
 
           if (linkProps && !linkProps?.openNewWindow) {
             el = (
-              <NextLink
+              <NextLink legacyBehavior
                 {...linkProps}
                 key={`${uuid}-${idx0}`}
                 passHref

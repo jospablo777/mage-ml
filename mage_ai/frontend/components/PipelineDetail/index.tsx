@@ -901,7 +901,7 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
                   {FeatureUUIDEnum.ADD_NEW_BLOCK_V2}
                 </Text>{' '}
                 in your{' '}
-                <NextLink href="/settings/workspace/preferences" passHref>
+                <NextLink legacyBehavior href="/settings/workspace/preferences" passHref>
                   <Link muted underline>
                     <Text bold inline muted small>
                       project settings
@@ -986,11 +986,7 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
 
   const codeEditorMappingRef = useRef({});
 
-  const codeBlocks: {
-    block: BlockType;
-    element: Element;
-    index: number;
-  }[] = useMemo(() => {
+  const codeBlocks = useMemo(() => {
     const arr = [];
     const blocksCount = blocksFiltered?.length || 0;
 

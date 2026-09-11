@@ -279,9 +279,9 @@ function BlockLayoutItem({
         <div
           onMouseEnter={() => setIsHovering(true)}
           onMouseLeave={() => setIsHovering(false)}
-          ref={drop}
+          ref={node => { drop(node); }}
         >
-          <ItemStyle {...collected} ref={disableDrag ? null : drag}>
+          <ItemStyle {...collected} ref={disableDrag ? null : node => { drag(node); }}>
             <Spacing mb={1}>
               <FlexContainer alignContent="center" justifyContent="space-between">
                 <Spacing py={1}>

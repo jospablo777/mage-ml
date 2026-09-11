@@ -91,13 +91,13 @@ function HiddenBlock({
   const isDBT = useMemo(() => BlockTypeEnum.DBT === block?.type, [block]);
 
   return (
-    <Spacing pb={1} ref={drop}>
+    <Spacing pb={1} ref={(node: HTMLDivElement | null) => { drop(node); }}>
       <HiddenBlockContainerStyle
         {...{
           ...borderColorShareProps,
           ...collected,
         }}
-        ref={drag}
+        ref={node => { drag(node); }}
       >
         <Link
           noHoverUnderline

@@ -1428,7 +1428,7 @@ function CodeBlock(
             <Text monospace muted small>
               {capitalize(gdp?.object_type || '')}
             </Text>
-            <NextLink
+            <NextLink legacyBehavior
               as={`/pipelines/${gdp?.object_uuid}/edit`}
               href={'/pipelines/[pipeline]/edit'}
               passHref
@@ -2356,7 +2356,7 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
         className="code-block-header-sticky"
         noSticky={sideBySideEnabled}
         onClick={() => onClickSelectBlock()}
-        ref={disableDrag ? null : drag}
+        ref={disableDrag ? null : node => { drag(node); }}
         zIndex={!sideBySideEnabled ? blocksLength + 1 - (blockIdx || 0) : null}
       >
         {childrenInner}
@@ -3617,7 +3617,7 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
     () => (
       <CodeBlockV1WrapperStyle ref={ref}>
         <div
-          ref={drop}
+          ref={node => { drop(node); }}
           style={{
             zIndex: blockIdx === addNewBlockMenuOpenIdx ? blocksLength + 9 : null,
           }}

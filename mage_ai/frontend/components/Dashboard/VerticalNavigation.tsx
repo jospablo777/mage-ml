@@ -366,7 +366,7 @@ function VerticalNavigation({
     );
     if (linkProps && !linkProps?.target) {
       clickEl = (
-        <NextLink
+        <NextLink legacyBehavior
           {...linkProps}
           passHref
         >

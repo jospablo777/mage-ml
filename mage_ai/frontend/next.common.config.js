@@ -1,48 +1,35 @@
+const path = require('node:path');
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
-const TerserPlugin = require('terser-webpack-plugin');
-const path = require('path');
-const removeImports = require('next-remove-imports')();
 
-module.exports = removeImports({
+module.exports = {
+  output: process.env.NODE_ENV === 'production' ? 'export' : undefined,
+  basePath: process.env.MAGE_FRONTEND_BASE_PATH || '',
+  transpilePackages: ['monaco-editor'],
+  compiler: { styledComponents: { ssr: true, displayName: true } },
   eslint: {
     ignoreDuringBuilds: true,
-  },
-  experimental: {
-    esmExternals: true,
   },
   images: {
     unoptimized: true,
   },
-  // If your application is running in development mode and wrapped with `<React.StrictMode>`,
-  // React deliberately double-invokes lifecycle methods
-  // (including `useState`, `useEffect`, and others) to help identify side effects.
-  // This does not happen in production builds.
   reactStrictMode: String(process.env.NEXT_PUBLIC_REACT_STRICT_MODE) !== '0',
   webpack: (config, options) => {
+    // monaco-themes 0.4.8 omits its theme JSON directory from package exports.
+    config.resolve.alias['monaco-themes/themes'] = path.resolve(
+      path.dirname(require.resolve('monaco-themes')), '../themes',
+    );
     if (!options?.isServer) {
-      config.optimization.minimizer = [
-        new TerserPlugin({
-          exclude: /node_modules\/next\/dist\/compiled\/terser\/bundle\.min\.js/,
-        }),
-      ];
-
-      // This is responsible for the Monaco editor web worker.
       config.module.rules.push({
         loader: 'worker-loader',
         options: {
-          name: 'static/[hash].worker.js',
-          publicPath: '/_next/',
+          filename: 'static/[contenthash].worker.js',
+          publicPath: `${process.env.MAGE_FRONTEND_BASE_PATH || ''}/_next/`,
         },
         test: /\.worker\.ts$/,
       });
 
-      // If you move this out of !isServer, you’ll get:
-      // Conflict: Multiple assets emit different content to the same filename ../main.js.nft.json
       config.plugins.push(
         new MonacoWebpackPlugin({
-          // https://github.com/nicoabie/monaco-editor-webpack-plugin/blob
-          // /97fa344ed9dfb3cb529cd44348cccc2a6e0fb7a4/README.md#options
-          // features: ['!accessibilityHelp'],
           languages: ['json', 'python', 'r', 'sql', 'typescript', 'yaml'],
         }),
       );
@@ -79,4 +66,4 @@ module.exports = removeImports({
 
     return config;
   },
-});
+};

@@ -241,7 +241,7 @@ function BlockRunsTable({
           >
             <Logs default size={2 * UNIT} />
           </Button>,
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${pipelineUUID}/edit?block_uuid=${blockUUID}`}
             href={'/pipelines/[pipeline]/edit'}
             key={`${id}_block_uuid`}
@@ -284,7 +284,7 @@ function BlockRunsTable({
           >
             {id}
           </Text>,
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${pipelineUUID}/triggers/${pipelineScheduleId}`}
             href={'/pipelines/[pipeline]/triggers/[...slug]'}
             key={`${id}_trigger`}

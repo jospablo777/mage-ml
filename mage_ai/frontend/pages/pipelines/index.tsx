@@ -376,7 +376,7 @@ function PipelineListPage() {
         Object.entries({
           ...queryFinal,
           ...filtersQuery,
-        } || {}).forEach(([k, v]) => {
+        }).forEach(([k, v]) => {
           if (typeof v !== 'undefined' && v !== null) {
             queryFinal[k] = v;
           }
@@ -1249,7 +1249,7 @@ function PipelineListPage() {
               : schedulesCount >= 1 ? ScheduleStatusEnum.INACTIVE : 'no schedules'
             }
           </Text>,
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${uuid}`}
             href="/pipelines/[pipeline]"
             key={`pipeline_name_${idx}`}

@@ -11,6 +11,7 @@ import uuid
 from gzip import GzipFile
 from gzip import open as gzip_open
 from types import MappingProxyType
+from typing import final
 
 from dateutil import parser
 from jsonschema import Draft7Validator, FormatChecker
@@ -20,12 +21,11 @@ from singer_sdk.helpers._batch import (
     BatchFileFormat,
     StorageTarget,
 )
-from singer_sdk.helpers._compat import final
 from singer_sdk.helpers._typing import (
-    DatetimeErrorTreatmentEnum,
     get_datelike_property_type,
     handle_invalid_timestamp_in_record,
 )
+from singer_sdk.helpers.conform import DatetimeErrorTreatmentEnum
 
 if t.TYPE_CHECKING:
     from singer_sdk.plugin_base import PluginBase

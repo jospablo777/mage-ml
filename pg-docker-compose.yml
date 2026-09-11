@@ -13,7 +13,8 @@ services:
     image: mage/data
     build:
       context: .
-      dockerfile: ./dev.Dockerfile
+      dockerfile: ./Dockerfile
+      target: development
     command: "python mage_ai/server/server.py --host ${HOST} --port ${PORT} --project ${PROJECT} --manage-instance ${MANAGE_INSTANCE}"
     environment:
       - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
@@ -51,15 +52,16 @@ services:
     image: mage/data
     build:
       context: .
-      dockerfile: ./dev.Dockerfile
+      dockerfile: ./Dockerfile
+      target: development
     depends_on:
       - server
-    command: ./scripts/install_and_run.sh
+    command: sh -c "yarn install --frozen-lockfile && yarn dev"
     ports:
       - 3000:3000
     volumes:
-      - ./mage_ai/frontend/.babelrc:/home/src/mage_ai/frontend/.babelrc
-      - ./mage_ai/frontend/.eslintrc.js:/home/src/mage_ai/frontend/.eslintrc.js
+      - ./mage_ai/frontend/eslint.config.mjs:/home/src/mage_ai/frontend/eslint.config.mjs
+      - ./mage_ai/frontend/eslint.legacy.cjs:/home/src/mage_ai/frontend/eslint.legacy.cjs
       - ./mage_ai/frontend/api:/home/src/mage_ai/frontend/api
       - ./mage_ai/frontend/components:/home/src/mage_ai/frontend/components
       - ./mage_ai/frontend/context:/home/src/mage_ai/frontend/context

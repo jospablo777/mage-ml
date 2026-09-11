@@ -5,6 +5,9 @@ on:
     paths:
       - pyproject.toml
       - uv.lock
+      - mage_integrations/pyproject.toml
+      - vendor/singer-python/pyproject.toml
+      - runtimes/**
       - mage_ai/frontend/package.json
       - mage_ai/frontend/yarn.lock
       - .github/workflows/dependency_audit.yml
@@ -13,6 +16,9 @@ on:
     paths:
       - pyproject.toml
       - uv.lock
+      - mage_integrations/pyproject.toml
+      - vendor/singer-python/pyproject.toml
+      - runtimes/**
       - mage_ai/frontend/package.json
       - mage_ai/frontend/yarn.lock
       - .github/workflows/dependency_audit.yml
@@ -38,11 +44,34 @@ jobs:
       - name: Export production dependencies
         run: >-
           uv export --locked --extra all --extra integrations --no-default-groups
-          --no-hashes --no-emit-project --output-file /tmp/mage-runtime-requirements.txt
+          --no-hashes --no-emit-workspace --output-file /tmp/mage-runtime-requirements.txt
       - name: Check published advisories
         run: >-
           uv run --no-sync pip-audit --disable-pip --no-deps
           --requirement /tmp/mage-runtime-requirements.txt
+
+  runtime_helpers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [livy, lsp, pre-start, local-spark, custom-spark]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv and audit tooling
+        run: |
+          python -m pip install uv==0.11.29
+          uv sync --locked --only-group dev
+      - name: Export locked runtime
+        run: >-
+          uv export --project runtimes/${{ matrix.runtime }} --locked --no-default-groups
+          --no-hashes --output-file /tmp/mage-helper-requirements.txt
+      - name: Check published advisories
+        run: >-
+          uv run --no-sync pip-audit --disable-pip --no-deps
+          --requirement /tmp/mage-helper-requirements.txt
 
   frontend:
     runs-on: ubuntu-latest
@@ -55,4 +84,6 @@ jobs:
         run: npm install --global yarn@1.22.22
       - name: Check frontend advisories
         working-directory: mage_ai/frontend
-        run: yarn audit --groups dependencies
+        run: |
+          yarn install --frozen-lockfile --ignore-scripts --non-interactive
+          yarn audit

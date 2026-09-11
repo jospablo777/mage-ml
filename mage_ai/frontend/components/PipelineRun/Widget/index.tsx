@@ -76,7 +76,7 @@ function Widget({
     <RowDataTable
       footer={
         <FlexContainer alignItems="center" justifyContent="center">
-          <NextLink
+          <NextLink legacyBehavior
             as={`${workspacePrefix}/pipeline-runs?status=failed`}
             href={`${workspacePrefix}/pipeline-runs`}
             passHref
@@ -137,7 +137,7 @@ function Widget({
               {workspaceFormatting
                 ? <Text monospace small>{pipelineUUID}</Text>
                 : (
-                  <NextLink
+                  <NextLink legacyBehavior
                     as={`/pipelines/${pipelineUUID}`}
                     href="/pipelines/[pipeline]"
                     passHref
@@ -161,7 +161,7 @@ function Widget({
                     }
                   </Text>
                 ) : (
-                  <NextLink
+                  <NextLink legacyBehavior
                     as={`/pipelines/${pipelineUUID}/runs/${pipelineRunId}`}
                     href="/pipelines/[pipeline]/runs/[run]"
                     passHref

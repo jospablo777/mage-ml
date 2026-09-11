@@ -341,7 +341,7 @@ function GlobalHookDetail({
       let blockUUIDEl;
       if (block) {
         blockUUIDEl = (
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${pipeline?.uuid}/edit?block_uuid=${block?.uuid}`}
             href={'/pipelines/[pipeline]/edit'}
             passHref
@@ -772,7 +772,7 @@ function GlobalHookDetail({
             >
               {attributes?.pipeline?.uuid && (
                 <Spacing mr={2}>
-                  <NextLink
+                  <NextLink legacyBehavior
                     as={`/pipelines/${attributes?.pipeline?.uuid}/edit`}
                     href={'/pipelines/[pipeline]/edit'}
                     passHref

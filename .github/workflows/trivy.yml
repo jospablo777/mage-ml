@@ -3,7 +3,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: trivy
+name: Container validation
 
 on:
   push:
@@ -18,6 +18,43 @@ permissions:
   contents: read
 
 jobs:
+  helpers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runtime: lsp
+            dockerfile: lsp.Dockerfile
+          - runtime: pre-start
+            dockerfile: scripts/pre-start/pre-start.Dockerfile
+          - runtime: spark-nlp
+            dockerfile: integrations/custom_spark/Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build helper image
+        run: docker build -f ${{ matrix.dockerfile }} -t mage-helper:${{ matrix.runtime }} .
+      - name: Check language-server diagnostics
+        if: matrix.runtime == 'lsp'
+        run: |
+          docker run --detach --name mage-lsp-check \
+            --mount "type=bind,source=$PWD/scripts/verify_lsp.py,target=/tmp/verify_lsp.py,readonly" \
+            mage-helper:lsp
+          trap 'docker logs mage-lsp-check; docker rm --force mage-lsp-check' EXIT
+          docker exec mage-lsp-check /opt/lsp/bin/python /tmp/verify_lsp.py ws://127.0.0.1:8765
+          docker exec mage-lsp-check uv pip check --python /opt/lsp/bin/python
+      - name: Check Kubernetes startup imports
+        if: matrix.runtime == 'pre-start'
+        run: |
+          docker run --rm --entrypoint uv mage-helper:pre-start pip check --python /opt/pre-start/bin/python
+          docker run --rm --entrypoint /opt/pre-start/bin/python mage-helper:pre-start \
+            -c 'import kubernetes, jinja2'
+      - name: Check Spark execution and pandas conversion
+        if: matrix.runtime == 'spark-nlp'
+        run: |
+          docker run --rm --entrypoint uv mage-helper:spark-nlp pip check --python /opt/spark-env/bin/python
+          docker run --rm --entrypoint /opt/spark-env/bin/python mage-helper:spark-nlp -c \
+            'import pandas, sparknlp; from pyspark.sql import SparkSession; spark = SparkSession.builder.master("local[1]").config("spark.ui.enabled", "false").getOrCreate(); assert spark.range(5).count() == 5; assert spark.range(3).toPandas()["id"].tolist() == [0, 1, 2]; spark.stop()'
+
   build:
     permissions:
       contents: read # for actions/checkout to fetch code
@@ -33,12 +70,74 @@ jobs:
         run: |
           docker build -t mageml:${{ github.sha }} .
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
+      - name: Check installed Python environments
+        run: |
+          docker run --rm --entrypoint uv mageml:${{ github.sha }} pip check --python /opt/mage/bin/python
+          docker run --rm --entrypoint uv mageml:${{ github.sha }} pip check --python /opt/mage-livy/bin/python
+          docker run --rm --entrypoint /opt/mage/bin/python mageml:${{ github.sha }} -c \
+            'import pandas, pyodbc, magic, singer; import mage_integrations.sources; assert pandas.__version__.startswith("3."); assert "ASCII" in magic.from_buffer(b"test")'
+          docker run --rm --entrypoint /opt/mage-livy/bin/python mageml:${{ github.sha }} -c \
+            'import pandas; import sparkmagic.kernels.pysparkkernel.pysparkkernel; assert pandas.__version__.startswith("2.")'
+
+      - name: Check execution in the production environment
+        run: |
+          docker run --rm --env ENV=test_mage --workdir /tmp/mage-checks \
+            --mount "type=bind,source=$PWD/mage_ai/tests,target=/opt/mage/lib/python3.12/site-packages/mage_ai/tests,readonly" \
+            --entrypoint /opt/mage/bin/python mageml:${{ github.sha }} -m unittest \
+            mage_ai.tests.cache.test_mem_lru \
+            mage_ai.tests.data_preparation.models.test_pipeline.PipelineTest.test_save_invalidates_metadata_cache_without_timestamp_change \
+            mage_ai.tests.orchestration.test_flow_execution \
+            mage_ai.tests.orchestration.test_pipeline_scheduler \
+            mage_ai.tests.orchestration.triggers.test_polling \
+            mage_ai.tests.data.test_batch_reader \
+            mage_ai.tests.io.create_table.test_mssql \
+            mage_ai.tests.server.test_kernel_execution \
+            mage_ai.tests.server.test_subscriber \
+            mage_ai.tests.shared.test_queues
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
         with:
+          node-version: "24"
+
+      - name: Install browser test dependencies
+        working-directory: mage_ai/frontend
+        run: |
+          yarn install --frozen-lockfile --non-interactive
+          yarn playwright install --with-deps chromium
+
+      - name: Check application startup and browser workflows
+        run: |
+          image=mageml:${{ github.sha }}
+          container=mage-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          docker run --detach --name "$container" --publish 127.0.0.1:16789:6789 \
+            --env REQUIRE_USER_AUTHENTICATION=1 --env DISABLE_AUTO_BROWSER_OPEN=1 "$image"
+          trap 'docker logs "$container"; docker rm --force "$container"' EXIT
+          python scripts/verify_server.py http://127.0.0.1:16789
+          MAGE_TEST_SERVER_URL=http://127.0.0.1:16789 \
+            yarn --cwd mage_ai/frontend playwright test -c playwright.config.ci.ts
+          docker stop --time 10 "$container"
+          case "$(docker inspect --format '{{.State.ExitCode}}' "$container")" in
+            0|143) ;;
+            *) echo 'Container did not stop cleanly'; exit 1 ;;
+          esac
+
+      - name: Upload browser test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-container
+          path: mage_ai/frontend/playwright-report/
+          retention-days: 3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.74.0'
           image-ref: 'mageml:${{ github.sha }}'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
+          format: 'sarif'
+          scanners: 'vuln'
+          timeout: '15m'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
 
@@ -46,3 +145,9 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
+
+      - name: Reject fixable high and critical vulnerabilities
+        run: |
+          trivy image --cache-dir .cache/trivy --scanners vuln --skip-db-update \
+            --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 --timeout 15m \
+            mageml:${{ github.sha }}

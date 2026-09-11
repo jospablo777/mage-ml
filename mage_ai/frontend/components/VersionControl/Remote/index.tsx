@@ -571,7 +571,7 @@ function Remote({
 
                     <Spacing mr={PADDING_UNITS} />
 
-                    <NextLink
+                    <NextLink legacyBehavior
                       href={`/version-control?tab=${TAB_BRANCHES.uuid}`}
                       passHref
                     >

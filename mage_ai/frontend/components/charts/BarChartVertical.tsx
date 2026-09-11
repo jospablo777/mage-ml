@@ -1,8 +1,8 @@
-import ParentSize from '@visx/responsive/lib/components/ParentSize';
+import { ParentSize } from '@visx/responsive';
 import { AxisBottom, AxisLeft } from '@visx/axis';
 import { Bar, BarGroup, Line } from '@visx/shape';
 import { Group } from '@visx/group';
-import { WithTooltipProvidedProps } from '@visx/tooltip/lib/enhancers/withTooltip';
+import { WithTooltipProvidedProps } from '@visx/tooltip';
 import { defaultStyles as tooltipStyles, TooltipWithBounds, withTooltip } from '@visx/tooltip';
 
 import FlexContainer from '@oracle/components/FlexContainer';
@@ -214,7 +214,7 @@ const BarChartVertical = withTooltip<BarChartVerticalProps, TooltipData>(
                   } else {
                     if (isNumeric(valueToDisplay)) {
                       if (String(valueToDisplay).split('.').length >= 2) {
-                        valueToDisplay = valueToDisplay.toFixed(4);
+                        valueToDisplay = Number(valueToDisplay).toFixed(4);
                       }
                     }
 

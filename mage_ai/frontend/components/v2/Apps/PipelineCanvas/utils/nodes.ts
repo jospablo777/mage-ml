@@ -75,7 +75,7 @@ export function updateModelsAndRelationships(
     {
       ...itemsRef.current,
       ...itemMapping,
-    } ?? {},
+    },
   ).forEach((item: DragItem) => {
     const arr = [];
 

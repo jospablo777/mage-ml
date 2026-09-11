@@ -183,7 +183,7 @@ function LogsTable({
 
       idEl = (
         <FlexContainer alignItems="center">
-          <NextLink
+          <NextLink legacyBehavior
             as={`/pipelines/${pipelineUUID}/edit?block_uuid=${blockUUID}`}
             href="/pipelines/[pipeline]/edit"
             passHref

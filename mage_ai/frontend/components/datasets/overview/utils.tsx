@@ -287,7 +287,7 @@ export function buildRenderColumnHeader({
                   {columns[columnIndex]}
                 </Text>
               :
-                <NextLink
+                <NextLink legacyBehavior
                   as={createDatasetTabRedirectLink(TAB_VISUALIZATIONS, columnIndex)}
                   href="/datasets/[...slug]"
                   passHref

@@ -425,7 +425,7 @@ function TriggersTable({
                     alignItems="center"
                     key={`trigger_name_${idx}`}
                   >
-                    <NextLink
+                    <NextLink legacyBehavior
                       as={`/pipelines/${finalPipelineUUID}/triggers/${id}`}
                       href={'/pipelines/[pipeline]/triggers/[...slug]'}
                       passHref

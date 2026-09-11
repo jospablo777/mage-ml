@@ -1,8 +1,8 @@
 # Fork audit
 
-Date: 2026-09-10. Base commit: `2e16452c423d6eb9cd75cd978c9e7aeb245754f6`.
+Date: 2026-09-10. Base commit: `0cb12047e`.
 
-The connector dependency conflicts and frontend findings below still prevent a production release. The Python lockfile audit does not cover the complete container image.
+The production dependency profiles resolve without conflicts. The Linux production image builds and passes execution and browser checks. Native package advisories without reported fixes remain open.
 
 ## Changes
 
@@ -18,7 +18,7 @@ The connector dependency conflicts and frontend findings below still prevent a p
 | Great Expectations | Map positional arguments to the current expectation API and return validation results; preserve saved expectation metadata. |
 | Optional clients | Update LangChain imports and Qdrant queries for the selected dependency versions. |
 | Request state | Stop the database query cache when a request raises an exception. Parse DEBUG consistently, including `DEBUG=0`. |
-| Packaging | Exclude local databases, environment files, and bytecode from distributions. Exclude development dependencies from the production sync. |
+| Packaging | Exclude local databases, environment files, bytecode, and frontend dependency directories from distributions. Build all workspace packages together. |
 | CI | Pass changed filenames as subprocess arguments, run pytest, check installed dependency consistency, and audit Python and frontend dependencies. |
 | Tests | Allocate a temporary project per test class. Teardown removes the directory allocated during setup and rejects checkout paths and symlinks. |
 | Pipeline execution | Provide an awaited async entry point, reject nested synchronous execution before starting blocks, and flush logs on failure. Preserve spaces in project paths passed to external executors. |
@@ -26,6 +26,17 @@ The connector dependency conflicts and frontend findings below still prevent a p
 | Conditions | Resolve conditional block updates through the conditional registry instead of the callback registry. |
 | Triggers | Create one run per schedule when several matchers accept the same event. Use a monotonic polling deadline and bound each sleep by the remaining timeout. |
 | Parquet reads | Apply filters, projection, offsets, and row limits; include every source in multipart reads; preserve sample settings. Move async dataset construction and batch reads to the shared thread pool. |
+| Runtime dependencies | Resolve Mage, connectors, and the Singer compatibility package in one workspace. Install Sparkmagic in a separate locked environment. |
+| Frontend | Upgrade Next.js, React, Axios, charts, Markdown rendering, Storybook, and transitive dependencies. Build both static exports. |
+| Server responsiveness | Await kernel output through a dedicated reader thread so the Jupyter subscriber does not block Tornado's event loop. |
+| Startup | Stop on dependency installation errors, apply runtime constraints, preserve argument boundaries, and forward process signals. |
+| Queues | Export the standard multiprocessing queue when the magic kernel is disabled or faster-fifo is unavailable. |
+| URL prefixes | Rewrite font URLs in both formatted and minified CSS. |
+| Metadata cache | Track file identity, nanosecond timestamps, and size. Invalidate pipeline metadata after synchronous and asynchronous saves. Remove the timestamp delay and correct memory accounting on cache replacement and clearing. |
+| Container runtime | Use Debian 13 slim, apply native updates, and keep compilers in the build stage. Exclude nested databases and environment files. Use uv without pip's vulnerable bundled dependencies. |
+| Container processes | Run Mage, the language server, and custom Spark under tini to forward termination signals and reap child processes. Retry connections closed before the HTTP server is ready. |
+| Language server | Remove pyls-memestra, which aborted diagnostics for unsaved files. |
+| Spark image | Start outside the installed PySpark directory so its pandas submodule cannot shadow pandas. |
 
 The old shared test teardown called `shutil.rmtree(get_variables_dir())` after tests had changed the global project path. That could delete the checkout. Cleanup no longer derives its target from mutable application settings. Git fixtures remain inside the allocated temporary directory.
 
@@ -36,37 +47,49 @@ The lock retains pandas 3, NumPy 2, Polars 1, and SQLAlchemy 2. Updated packages
 | Profile | Result |
 | --- | --- |
 | Initial Python lock, every extra | 59 advisory entries across 17 packages. |
-| Updated Python lock, `all` and `integrations` | 380 packages checked; no published advisories reported. |
-| Updated Python lock, every extra | Five advisory entries for Chroma 1.5.9, representing four distinct advisories. No fixed version reported. |
-| Existing frontend production dependency graph | 142 distinct advisories: 5 critical, 74 high, 47 moderate, 16 low. |
+| Updated Python lock, `all` and `integrations` | 385 packages checked; no published advisories reported. |
+| Separate Livy environment | 112 packages checked; no published advisories reported. |
+| Language server and Kubernetes startup helpers | 46 and 21 packages checked; no published advisories reported. |
+| Separate local Spark environment | Nine packages checked; no published advisories reported. |
+| Optional Spark NLP Python environment | 115 packages checked; no published Python advisories reported. Local JVM execution and pandas conversion pass. |
+| Updated frontend, including development tools | 1,204 dependencies checked; no published advisories reported. |
+| Optional Chroma extra | Four distinct advisories without a reported fixed release. Excluded from the production profile. |
 
-Python results use pip-audit 2.10.1. The frontend result uses Yarn 1.22.22 with `--groups dependencies`; this includes build tools declared as production dependencies, such as Storybook. An advisory match does not establish that the affected code is reachable in the deployed application.
+Python results use pip-audit 2.10.1. Frontend results use Yarn 1.22.22 without a dependency-group filter. These checks cover published package advisories, not native operating-system packages or application logic.
 
-## Release blockers
+## Deployment constraints
 
-1. **Connector installation bypasses the lock.** `mage_integrations/requirements.txt` pins Paramiko 3.5.1 and Requests 2.31.x, conflicting with the root project's patched versions. It also retains psycopg2 2.9.3, clickhouse-sqlalchemy 0.2.x, and Singer SDK 0.34.x. The Dockerfiles and backend CI install these requirements separately. The new `uv pip check` step fails on incompatible installed dependencies.
+Mage, `mage_integrations`, and `vendor/singer-python` share `uv.lock`. The Singer source comes from the Mage fork at commit `0540a699c0e2fd8ba64c3245b5fa9aa87ae0538c`; its local build metadata permits current jsonschema, simplejson, and backoff. Tests replace the removed `assertEquals` alias. Distribute the local Singer wheel with the other workspace wheels.
 
-2. **Singer and dbt require incompatible jsonschema versions.** The referenced `mage-ai/singer-python` fork at `0540a699c0e2fd8ba64c3245b5fa9aa87ae0538c` requires jsonschema 4.17.0, while the patched dbt dependency set requires a newer version. Singer also pins old simplejson and backoff releases. Resolve these constraints in a maintained Singer package or isolate the connector runtime before combining it with dbt. Installing with `--no-deps` does not resolve the conflict.
+The language-server, Kubernetes startup, local Spark, and optional custom Spark images also use separate lockfiles under `runtimes`. The obsolete branch-testing Dockerfile was removed because it fetched upstream packages instead of building the fork.
 
-3. **The frontend remains unpatched.** Its lock contains Next.js 12.3.4, Axios 0.27.2, and affected transitive dependencies. The production Python server serves exported static assets; several Next.js advisories concern server features. Review the affected paths, upgrade the frontend dependency graph, rebuild both asset exports, and run the browser tests. The existing bundles have not been rebuilt during this audit. The frontend audit job currently fails on these findings.
+The production Docker target installs `all` and `integrations` through `uv sync --locked`. Development and local Spark use targets in the same Dockerfile. Unlocked Git installations have been removed. Sparkmagic requires pandas 2, so its kernel runs from `/opt/mage-livy` using `runtimes/livy/uv.lock`; Mage retains pandas 3 in `/opt/mage`. Local Spark 4.2 jobs use `/opt/mage-spark`: the [Spark SQL dependency constraints](https://spark.apache.org/docs/4.2.0/api/python/getting_started/install.html) require pandas below 3. Native PySpark is not installed into the Mage environment; use Livy for Mage Spark pipelines.
 
-4. **Optional Chroma has unresolved advisories.** The auditor reports GHSA-f4j7-r4q5-qw2c, GHSA-36p7-vc44-83pf, GHSA-xph7-9rjv-w5fr, and GHSA-2wm9-hf6c-p5cr without a fixed release. Chroma is outside the `all` container profile. Do not include it in an approved profile until its use and remediation are resolved.
+The dbt MySQL adapter is no longer installed because its constraints conflict with the patched dbt stack. MySQL source and destination connectors remain available. `dbt-clickhouse` remains at 1.9.3 because 1.10.0 caps dbt-adapters below the selected range. Validate office pipelines that depend on these adapters before deployment.
 
-5. **Several container dependencies remain outside uv.lock.** These include Git installations of Singer, dbt-mysql, SQLGlot, and Dremio tooling, plus additional PyPI installations. Unpinned branches also prevent repeatable builds. The container dependency graph must be resolved and scanned after those installations, including native packages.
+Optional Chroma remains outside `all`. Its unresolved findings are GHSA-f4j7-r4q5-qw2c, GHSA-36p7-vc44-83pf, GHSA-xph7-9rjv-w5fr, and GHSA-2wm9-hf6c-p5cr.
 
-6. **dbt-clickhouse resolves to 1.9.3.** Version 1.10.0 caps dbt-adapters below the range required by the patched dbt stack. The lock therefore selects 1.9.3. Validate the ClickHouse pipelines in use before accepting this adapter change.
+The initial Linux build failed while Docker's 98 GB filesystem had no free space. Approved removal of unused build cache reclaimed 51.3 GB. Existing containers and volumes were preserved. After validation, temporary audit containers and unused build cache were removed, leaving 52 GiB available. The production image now builds on Linux arm64. Moving from the full Debian 12 image to Debian 13 slim reduced the image from 4.30 GB to 3.16 GB.
+
+The final Trivy scan reports no advisories for the installed Python, JavaScript, or uv components, and no native findings with a reported fixed version. It still reports **14 critical and 98 high native package entries**, covering **44 distinct advisories, five critical**. These counts include repeated advisories across packages built from the same source. They do not establish exploitability in Mage. The [advisory snapshot](container-advisories.json) records affected packages and versions. CI publishes these findings and rejects fixable high or critical vulnerabilities. The fork should not receive an unconditional production approval while these findings and office-specific deployment checks remain open.
+
+Pip 26.2.1 bundles affected msgpack and setuptools versions. The production image omits pip and installs project requirements through uv with the exported runtime constraints. This avoids shipping those bundled copies; it does not suppress scanner findings.
 
 ## Validation
 
 Validation used macOS arm64, Python 3.12.11, and uv 0.11.29. The lockfile consistency check, installed Python dependency check, and changed-file Python lint checks passed. Source and wheel builds passed; the resulting archives excluded local database files.
 
-The final backend run in a disposable checkout passed **5,304 tests and 109 subtests**, with **one failure, ten skips, and one collection error**. It includes the CLI, downloads, signed kernel execution, SSH, nullable dtypes, YAML, debug flags, query-cache cleanup, temporary-directory regressions, and the flow and reader cases below.
+The full backend and connector run passed **5,516 tests and 135 subtests**, with **ten skips**, after the metadata cache corrections. It includes the previously failing integration scheduler test, SQL Server collection, Singer tests, queue fallbacks, startup argument handling, the nonblocking Jupyter subscriber, and file cache invalidation. Native unixODBC and libmagic were built in temporary directories for the macOS run.
 
-A separate run passed 20 PostgreSQL and directory-cleanup tests, including ten integration tests against PostgreSQL 16. Fourteen Great Expectations tests passed. A core-only environment constructed the Tornado application successfully.
+Both Next.js static exports build on Linux, and the Storybook build passed on macOS. Eight chart browser tests passed. All six application browser tests pass against the production Linux container, covering authentication, pipeline creation and deletion, a triggered loader-transformer-exporter run, and navigation across the main pages. Login under `/office` passes without browser exceptions or failed asset requests, including fonts. Docker and CI give the frontend compiler a 4 GB heap after a build exceeded Node's default limit.
 
-The remaining scheduling test failure could not import the separately packaged `mage_integrations.sources`. SQL Server test collection requires the native unixODBC library, which is absent from this host. The lock now uses pyodbc 5.3.0; that package still requires the native library.
+The installed Linux production environment passes **80 focused tests** for metadata caching, block execution, scheduler behavior, triggers, Parquet reads, SQL Server handling, queues, and signed Jupyter kernels. The test fixtures are mounted read-only; application imports use the installed package. The image includes Microsoft ODBC Driver 18 for SQL Server and passes libmagic and Livy import checks.
 
-Python 3.11 and 3.13, Linux images, frontend exports, and browser tests have not been validated locally. A complete container build was unavailable because the local Docker storage was full; no existing Docker data was removed.
+The final Mage and language-server images stop in 0.51 and 0.58 seconds with exit status 143 after SIGTERM. Previously, Docker force-killed Mage after ten seconds. CI checks startup and termination. This verifies signal delivery and process termination; draining active pipeline runs during deployment remains untested.
+
+Source and wheel builds passed for all three workspace packages. Archive inspection found no database files, bytecode, or frontend node_modules files. The main environment and installed helper environments pass `uv pip check`. The Linux language-server, Kubernetes startup, and optional Spark NLP images build. The language server passes WebSocket initialization, unsaved-file syntax diagnostics, and protocol shutdown. The Spark image passes a local JVM job and pandas conversion. Spark NLP model loading and its bundled Java dependencies have not been validated or audited here.
+
+A prior separate run passed ten integration tests against PostgreSQL 16. SQL Server validation here covers imports and unit tests, not a connection to a live SQL Server. Office-specific connector credentials and workloads were not available. Python 3.11 and 3.13 remain CI matrix targets without a local full-suite run.
 
 ### Block, flow, and trigger verification
 
@@ -86,7 +109,7 @@ Reproduce the Python advisory check from the repository root:
 
 ```bash
 uv export --locked --extra all --extra integrations --no-default-groups \
-  --no-hashes --no-emit-project --output-file /tmp/mage-runtime-requirements.txt
+  --no-hashes --no-emit-workspace --output-file /tmp/mage-runtime-requirements.txt
 uvx pip-audit==2.10.1 --disable-pip --no-deps \
   --requirement /tmp/mage-runtime-requirements.txt
 ```

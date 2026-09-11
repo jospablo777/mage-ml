@@ -56,30 +56,26 @@ const monacoThemes = {
   zenburnesque: 'Zenburnesque',
 };
 
-export const defineTheme = theme => new Promise<boolean>((loaded) => {
-  Promise.all([
-    loader.init(),
-    import(`monaco-themes/themes/${monacoThemes[theme]}.json`),
-  ]).then(([monaco, themeData]) => {
-    `
-      {
-        "editor.foreground": "#F8F8F8",
-        "editor.background": "#141414",
-        "editor.selectionBackground": "#DDF0FF33",
-        "editor.lineHighlightBackground": "#FFFFFF08",
-        "editorCursor.foreground": "#A7A7A7",
-        "editorWhitespace.foreground": "#FFFFFF40"
-      }
-    `;
-    themeData.colors['editor.background'] = '#000000';
-    themeData.colors['editor.foreground'] = '#FFFFFF';
-    monaco.editor.defineTheme(theme, themeData);
-    // @ts-ignore
-    loaded(true);
-  }).catch(() => {
-    loaded(false);
-  });
-});
+export async function defineTheme(theme: string): Promise<boolean> {
+  try {
+    const [monaco, themeModule] = await Promise.all([
+      loader.init(),
+      import(`monaco-themes/themes/${monacoThemes[theme]}.json`),
+    ]);
+    const themeData = themeModule.default || themeModule;
+    monaco.editor.defineTheme(theme, {
+      ...themeData,
+      colors: {
+        ...themeData.colors,
+        'editor.background': '#000000',
+        'editor.foreground': '#FFFFFF',
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function calculateHeightFromContent(content: string) {
   const lines = content.split('\n').length;

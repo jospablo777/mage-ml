@@ -596,7 +596,7 @@ function PipelineRunsTable({
                 <Text center default key="row_id" monospace muted>
                   {pipelineRun?.id}
                 </Text>,
-                <NextLink
+                <NextLink legacyBehavior
                   as={`/pipelines/${pipelineUUID}/runs/${id}`}
                   href={'/pipelines/[pipeline]/runs/[run]'}
                   key="row_block_runs"
@@ -727,7 +727,7 @@ function PipelineRunsTable({
                 <Text center default key="row_id" monospace muted>
                   {pipelineRun?.id}
                 </Text>,
-                <NextLink
+                <NextLink legacyBehavior
                   as={`/pipelines/${pipelineUUID}/runs/${id}`}
                   href={'/pipelines/[pipeline]/runs/[run]'}
                   key="row_block_runs"
@@ -764,7 +764,7 @@ function PipelineRunsTable({
 
               if (!hideTriggerColumn) {
                 arr.push(
-                  <NextLink
+                  <NextLink legacyBehavior
                     as={`/pipelines/${pipelineUUID}/triggers/${pipelineScheduleId}`}
                     href={'/pipelines/[pipeline]/triggers/[...slug]'}
                     key="row_trigger"

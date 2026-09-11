@@ -2,7 +2,7 @@ import copy
 import os
 import sys
 import traceback
-from datetime import datetime
+from functools import wraps
 
 import aiofiles
 from cachetools import LRUCache
@@ -25,48 +25,52 @@ class MemorySizeLRUCache(LRUCache):
         if size > self.max_memory_size:
             raise ValueError('Item size exceeds cache maximum memory size')
 
+        if key in self:
+            del self[key]
+
         while self.current_memory_size + size > self.max_memory_size:
             self.popitem()
 
-        self.current_memory_size += size
         super().__setitem__(key, value)
+        self.current_memory_size += size
 
     def __delitem__(self, key):
         value = self[key]
         self.current_memory_size -= self._get_size(value)
         super().__delitem__(key)
 
+    def clear(self):
+        super().clear()
+        self.current_memory_size = 0
+
     def _get_size(self, value):
         return sys.getsizeof(value['content'])
 
 
+def file_version(file_path):
+    info = os.stat(file_path)
+    return info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size
+
+
 def cache_file_read(cache):
     def decorator(func):
+        @wraps(func)
         def wrapper(file_path, *args, **kwargs):
-            if not os.path.exists(file_path):
+            try:
+                version = file_version(file_path)
+            except FileNotFoundError:
+                cache.pop(file_path, None)
                 return None
-
-            file_updated_at = datetime.fromtimestamp(
-                os.path.getmtime(file_path),
-                tz=datetime.utcnow().astimezone().tzinfo,
-            )
 
             if file_path in cache:
                 cache_entry = cache[file_path]
-                cached_updated_at = cache_entry.get('updated_at')
-                if cached_updated_at >= file_updated_at:
-                    # print(f'cache hit {file_path} {cached_updated_at} {file_updated_at}')
+                if cache_entry.get('version') == version:
                     return copy.deepcopy(cache_entry['content'])
-                # else:
-                #     print(f'cache miss {file_path} {cached_updated_at} {file_updated_at}')
 
-            # print(f'cache new item {file_path}')
             try:
                 content = func(file_path, *args, **kwargs)
-                cache[file_path] = {
-                    'content': content,
-                    'updated_at': file_updated_at,
-                }
+                if file_version(file_path) == version:
+                    cache[file_path] = {'content': content, 'version': version}
                 return copy.deepcopy(content)
             except Exception:
                 traceback.print_exc()
@@ -77,31 +81,23 @@ def cache_file_read(cache):
 
 def async_cache_file_read(cache):
     def decorator(func):
+        @wraps(func)
         async def wrapper(file_path, *args, **kwargs):
-            if not os.path.exists(file_path):
+            try:
+                version = file_version(file_path)
+            except FileNotFoundError:
+                cache.pop(file_path, None)
                 return None
-
-            file_updated_at = datetime.fromtimestamp(
-                os.path.getmtime(file_path),
-                tz=datetime.utcnow().astimezone().tzinfo,
-            )
 
             if file_path in cache:
                 cache_entry = cache[file_path]
-                cached_updated_at = cache_entry.get('updated_at')
-                if cached_updated_at >= file_updated_at:
-                    # print(f'async cache hit {file_path} {cached_updated_at} {file_updated_at}')
+                if cache_entry.get('version') == version:
                     return copy.deepcopy(cache_entry['content'])
-                # else:
-                #     print(f'async cache miss {file_path} {cached_updated_at} {file_updated_at}')
 
-            # print(f'async cache new item {file_path}')
             try:
                 content = await func(file_path, *args, **kwargs)
-                cache[file_path] = {
-                    'content': content,
-                    'updated_at': file_updated_at,
-                }
+                if file_version(file_path) == version:
+                    cache[file_path] = {'content': content, 'version': version}
                 return copy.deepcopy(content)
             except Exception:
                 traceback.print_exc()

@@ -102,7 +102,7 @@ function Breadcrumb({
         {!href && !onClick && buildEl(true)}
 
         {href && !onClick && (
-          <NextLink as={as} href={href} passHref>
+          <NextLink legacyBehavior as={as} href={href} passHref>
             <Link
               {...sharedLinkProps}
             >

@@ -101,7 +101,7 @@ function FlexTable({
     if (buildLinkProps) {
       const linkProps = buildLinkProps(rowIndex)
       return (
-        <NextLink
+        <NextLink legacyBehavior
           {...linkProps}
           key={`row-${rowIndex}`}
           passHref

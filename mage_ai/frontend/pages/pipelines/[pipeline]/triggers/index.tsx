@@ -255,7 +255,7 @@ function PipelineSchedules({
 
               {!isViewerRole &&
                 <Spacing mt={1}>
-                  <NextLink
+                  <NextLink legacyBehavior
                     as={`/pipelines/${pipelineUUID}/edit?sideview=variables`}
                     href={'/pipelines/[pipeline]/edit'}
                     passHref

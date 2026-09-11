@@ -98,7 +98,7 @@ function OutdatedStartingAtField({
               onClick={() => setSelected(!selected)}
             />,
             <div key={`block-uuid-${uuid}`}>
-              <NextLink
+              <NextLink legacyBehavior
                 as={`/pipelines/${objectAttributes?.object_uuid}/edit?block_uuid=${uuid}`}
                 href={'/pipelines/[pipeline]/edit'}
                 passHref

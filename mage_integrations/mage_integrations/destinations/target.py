@@ -8,12 +8,12 @@ import json
 import sys
 import time
 import typing as t
+from typing import final
 
 from joblib import Parallel, delayed, parallel_backend
 from singer_sdk.exceptions import RecordsWithoutSchemaException
 from singer_sdk.helpers._batch import BaseBatchFileEncoding
 from singer_sdk.helpers._classproperty import classproperty
-from singer_sdk.helpers._compat import final
 from singer_sdk.helpers.capabilities import (
     TARGET_SCHEMA_CONFIG,
     CapabilitiesEnum,

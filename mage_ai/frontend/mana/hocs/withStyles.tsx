@@ -83,7 +83,7 @@ export function withStyles<P extends object = WithStylesProp>(styles: any, props
   } = propsHOC || ({} as HOCProps);
 
   return React.forwardRef<any, P & WithStylesProp>(function StyledComponent(
-    { children, className, id, uuid, ...props }: P & WithStylesProp,
+    { children, className, id, uuid, ...props },
     ref: any,
   ) {
     const divRef = useRef<HTMLDivElement>(null);

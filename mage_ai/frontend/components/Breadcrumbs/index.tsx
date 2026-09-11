@@ -142,7 +142,7 @@ function Breadcrumbs({
 
     if (linkProps) {
       el = (
-        <NextLink
+        <NextLink legacyBehavior
           {...linkProps}
           key={`breadcrumb-link-${title}`}
           passHref

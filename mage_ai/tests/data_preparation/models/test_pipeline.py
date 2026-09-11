@@ -9,6 +9,7 @@ from unittest.mock import patch
 import yaml
 from freezegun import freeze_time
 
+from mage_ai.cache.mem_lru import file_version
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.constants import PipelineType
 from mage_ai.data_preparation.models.pipeline import InvalidPipelineError, Pipeline
@@ -20,6 +21,32 @@ from mage_ai.tests.shared.mixins import ProjectPlatformMixin
 
 
 class PipelineTest(AsyncDBTestCase):
+    async def test_save_invalidates_metadata_cache_without_timestamp_change(self):
+        pipeline = Pipeline.create('cache invalidation', repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        version = file_version(pipeline.config_path)
+
+        def unchanged_metadata_version(path):
+            return version if path == pipeline.config_path else file_version(path)
+
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous), patch(
+                'mage_ai.cache.mem_lru.file_version', side_effect=unchanged_metadata_version,
+            ):
+                pipeline.description = 'old'
+                pipeline.save()
+                self.assertEqual(
+                    Pipeline.get(pipeline.uuid, repo_path=self.repo_path).description, 'old',
+                )
+                pipeline.description = 'new'
+                if asynchronous:
+                    await pipeline.save_async()
+                else:
+                    pipeline.save()
+                self.assertEqual(
+                    Pipeline.get(pipeline.uuid, repo_path=self.repo_path).description, 'new',
+                )
+
     def test_create(self):
         pipeline = Pipeline.create(
             'test pipeline',

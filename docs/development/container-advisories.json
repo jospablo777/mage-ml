@@ -1,0 +1,819 @@
+{
+  "scanned_at": "2026-09-10T20:55:14.081664-06:00",
+  "scanner": "Trivy 0.74.0",
+  "image_id": "sha256:41bf460b3e9ef875f111e78e52fab9e373327580d56ce85738bb01ea668d55db",
+  "platform": "linux/arm64",
+  "os": "Debian 13.6",
+  "native_package_count": 251,
+  "native_package_advisory_counts": {
+    "LOW": 155,
+    "HIGH": 98,
+    "MEDIUM": 132,
+    "UNKNOWN": 47,
+    "CRITICAL": 14
+  },
+  "fixable_native_entries": 0,
+  "library_advisories": [],
+  "high_and_critical_advisories": [
+    {
+      "id": "CVE-2026-13221",
+      "severity": "CRITICAL",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-13221"
+    },
+    {
+      "id": "CVE-2026-42496",
+      "severity": "CRITICAL",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-42496"
+    },
+    {
+      "id": "CVE-2026-58016",
+      "severity": "CRITICAL",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58016"
+    },
+    {
+      "id": "CVE-2026-60002",
+      "severity": "CRITICAL",
+      "packages": [
+        {
+          "name": "openssh-client",
+          "version": "1:10.0p1-7+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-60002"
+    },
+    {
+      "id": "CVE-2026-8376",
+      "severity": "CRITICAL",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-8376"
+    },
+    {
+      "id": "CVE-2022-4055",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "xdg-utils",
+          "version": "1.2.1-2"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2022-4055"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libncursesw6",
+          "version": "6.5+20250216-2"
+        },
+        {
+          "name": "libtinfo6",
+          "version": "6.5+20250216-2"
+        },
+        {
+          "name": "ncurses-base",
+          "version": "6.5+20250216-2"
+        },
+        {
+          "name": "ncurses-bin",
+          "version": "6.5+20250216-2"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2025-69720"
+    },
+    {
+      "id": "CVE-2026-11822",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libsqlite3-0",
+          "version": "3.46.1-7+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-11822"
+    },
+    {
+      "id": "CVE-2026-11824",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libsqlite3-0",
+          "version": "3.46.1-7+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-11824"
+    },
+    {
+      "id": "CVE-2026-12064",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "curl",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl3t64-gnutls",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl4t64",
+          "version": "8.14.1-2+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-12064"
+    },
+    {
+      "id": "CVE-2026-16742",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libsystemd0",
+          "version": "257.13-1~deb13u1"
+        },
+        {
+          "name": "libudev1",
+          "version": "257.13-1~deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-16742"
+    },
+    {
+      "id": "CVE-2026-36849",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libtiff6",
+          "version": "4.7.0-3+deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-36849"
+    },
+    {
+      "id": "CVE-2026-41992",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "gzip",
+          "version": "1.13-1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-41992"
+    },
+    {
+      "id": "CVE-2026-42497",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-42497"
+    },
+    {
+      "id": "CVE-2026-48962",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-48962"
+    },
+    {
+      "id": "CVE-2026-52490",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libtiff6",
+          "version": "4.7.0-3+deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-52490"
+    },
+    {
+      "id": "CVE-2026-54369",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libacl1",
+          "version": "2.3.2-2+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-54369"
+    },
+    {
+      "id": "CVE-2026-57432",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-57432"
+    },
+    {
+      "id": "CVE-2026-57433",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-57433"
+    },
+    {
+      "id": "CVE-2026-58010",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58010"
+    },
+    {
+      "id": "CVE-2026-58011",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58011"
+    },
+    {
+      "id": "CVE-2026-58012",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58012"
+    },
+    {
+      "id": "CVE-2026-58013",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58013"
+    },
+    {
+      "id": "CVE-2026-58014",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58014"
+    },
+    {
+      "id": "CVE-2026-58015",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libglib2.0-0t64",
+          "version": "2.84.4-3~deb13u3"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58015"
+    },
+    {
+      "id": "CVE-2026-58050",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libssh2-1t64",
+          "version": "1.11.1-1+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-58050"
+    },
+    {
+      "id": "CVE-2026-59999",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "openssh-client",
+          "version": "1:10.0p1-7+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-59999"
+    },
+    {
+      "id": "CVE-2026-60000",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "openssh-client",
+          "version": "1:10.0p1-7+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-60000"
+    },
+    {
+      "id": "CVE-2026-63382",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63382"
+    },
+    {
+      "id": "CVE-2026-63383",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63383"
+    },
+    {
+      "id": "CVE-2026-63384",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63384"
+    },
+    {
+      "id": "CVE-2026-63385",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63385"
+    },
+    {
+      "id": "CVE-2026-63387",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63387"
+    },
+    {
+      "id": "CVE-2026-63388",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libevent-core-2.1-7t64",
+          "version": "2.1.12-stable-10+b1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-63388"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "bsdutils",
+          "version": "1:2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libblkid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "liblastlog2-2",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libmount1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libsmartcols1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libuuid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "login",
+          "version": "1:4.16.0-2+really2.41.5-0+deb13u1"
+        },
+        {
+          "name": "mount",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "util-linux",
+          "version": "2.41.5-0+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-76642"
+    },
+    {
+      "id": "CVE-2026-76956",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libexpat1",
+          "version": "2.8.3-1~deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-76956"
+    },
+    {
+      "id": "CVE-2026-76957",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libexpat1",
+          "version": "2.8.3-1~deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-76957"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "bsdutils",
+          "version": "1:2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libblkid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "liblastlog2-2",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libmount1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libsmartcols1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libuuid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "login",
+          "version": "1:4.16.0-2+really2.41.5-0+deb13u1"
+        },
+        {
+          "name": "mount",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "util-linux",
+          "version": "2.41.5-0+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-78408"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "bsdutils",
+          "version": "1:2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libblkid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "liblastlog2-2",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libmount1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libsmartcols1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libuuid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "login",
+          "version": "1:4.16.0-2+really2.41.5-0+deb13u1"
+        },
+        {
+          "name": "mount",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "util-linux",
+          "version": "2.41.5-0+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-78409"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "bsdutils",
+          "version": "1:2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libblkid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "liblastlog2-2",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libmount1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libsmartcols1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "libuuid1",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "login",
+          "version": "1:4.16.0-2+really2.41.5-0+deb13u1"
+        },
+        {
+          "name": "mount",
+          "version": "2.41.5-0+deb13u1"
+        },
+        {
+          "name": "util-linux",
+          "version": "2.41.5-0+deb13u1"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-78410"
+    },
+    {
+      "id": "CVE-2026-8286",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "curl",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl3t64-gnutls",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl4t64",
+          "version": "8.14.1-2+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-8286"
+    },
+    {
+      "id": "CVE-2026-8458",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "curl",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl3t64-gnutls",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl4t64",
+          "version": "8.14.1-2+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-8458"
+    },
+    {
+      "id": "CVE-2026-8927",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "curl",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl3t64-gnutls",
+          "version": "8.14.1-2+deb13u4"
+        },
+        {
+          "name": "libcurl4t64",
+          "version": "8.14.1-2+deb13u4"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-8927"
+    },
+    {
+      "id": "CVE-2026-9538",
+      "severity": "HIGH",
+      "packages": [
+        {
+          "name": "libperl5.40",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-base",
+          "version": "5.40.1-6"
+        },
+        {
+          "name": "perl-modules-5.40",
+          "version": "5.40.1-6"
+        }
+      ],
+      "fixed_version": null,
+      "url": "https://avd.aquasec.com/nvd/cve-2026-9538"
+    }
+  ]
+}

@@ -1668,7 +1668,7 @@ function Edit({
               <Text default>
                 This pipeline has no runtime variables.
               </Text>
-              <NextLink
+              <NextLink legacyBehavior
                 as={`/pipelines/${pipelineUUID}/edit?sideview=variables`}
                 href={'/pipelines/[pipeline]/edit'}
                 passHref
@@ -2068,13 +2068,13 @@ function Edit({
                   <Text default xsmall>
                     This trigger will automatically be persisted in code.
                     <br />
-                    To change this behavior, update the <NextLink
+                    To change this behavior, update the <NextLink legacyBehavior
                       as={`/pipelines/${pipelineUUID}/settings`}
                       href={'/pipelines/[pipeline]/settings'}
                       passHref
                     >
                       <Link openNewWindow xsmall>pipeline’s settings</Link>
-                    </NextLink> or <NextLink
+                    </NextLink> or <NextLink legacyBehavior
                       as="/settings/workspace/preferences"
                       href="/settings/workspace/preferences"
                       passHref

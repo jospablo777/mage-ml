@@ -572,7 +572,7 @@ const PipelineBuilder: React.FC<PipelineBuilderProps> = ({
             } else {
               if (isReverse) {
               } else {
-                rect.top = (item?.top ?? 0) + (port?.top - item?.top ?? 0);
+                rect.top = port?.top ?? item?.top ?? 0;
 
                 if (isReverse) {
                 } else {

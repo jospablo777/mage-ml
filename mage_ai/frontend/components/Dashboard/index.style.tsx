@@ -87,6 +87,7 @@ export function VerticalNavigationStyle({
 
   return (
     <VerticalNavigationStyleComponent
+      data-testid="navigation_sidebar"
       aligned={aligned}
       borderless={borderless && !visible}
       onMouseEnter={showMore

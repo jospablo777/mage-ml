@@ -468,7 +468,7 @@ function SyncData() {
           </Spacing>
         )}
         <Text bold>
-          We recommend using the <NextLink
+          We recommend using the <NextLink legacyBehavior
             as="/version-control"
             href="/version-control"
           >

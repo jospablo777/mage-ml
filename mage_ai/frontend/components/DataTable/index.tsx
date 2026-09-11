@@ -568,7 +568,7 @@ function Table({ ...props }: TableProps) {
                       </Text>
                     )}
                     {isInvalid && (
-                      <NextLink
+                      <NextLink legacyBehavior
                         as={createDatasetTabRedirectLink(TAB_REPORTS, columnIndex)}
                         href="/datasets/[...slug]"
                         passHref
