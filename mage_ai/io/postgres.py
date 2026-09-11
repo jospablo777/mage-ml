@@ -7,6 +7,7 @@ from pandas import DataFrame, Series
 from psycopg2 import _psycopg, connect
 from psycopg2.extensions import adapt as psycopg2_adapt
 from psycopg2.extensions import register_adapter
+from psycopg2.extras import execute_values
 
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
@@ -15,6 +16,10 @@ from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.pandas_utils import integer_bit_width
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.ssh import SSHTunnelForwarder
+
+
+# Rows per INSERT statement when a unique constraint rules out COPY.
+INSERT_PAGE_SIZE = 1000
 
 
 def _adapt_numpy_scalar(value):
@@ -345,6 +350,7 @@ class Postgres(BaseSQL):
         auto_clean_name: bool = True,
         buffer: Union[IO, None] = None,
         case_sensitive: bool = False,
+        insert_page_size: int = INSERT_PAGE_SIZE,
         unique_conflict_method: str = None,
         unique_constraints: List[str] = None,
         **kwargs,
@@ -401,13 +407,13 @@ class Postgres(BaseSQL):
 
         if use_insert_command:
             # Use INSERT command
-            values_placeholder = ', '.join(["%s" for i in range(len(columns))])
             # itertuples avoids building a Series per row. Values arrive as numpy
             # scalars, which register_numpy_adapters teaches psycopg2 to bind.
             values = list(df_.itertuples(index=False, name=None))
+            # execute_values fills this single placeholder with a page of rows.
             commands = [
                 f'INSERT INTO {full_table_name} ({insert_columns})',
-                f'VALUES ({values_placeholder})',
+                'VALUES %s',
             ]
 
             cleaned_unique_constraints = []
@@ -438,7 +444,15 @@ class Postgres(BaseSQL):
                 )
             else:
                 commands.append('DO NOTHING')
-            cursor.executemany('\n'.join(commands), values)
+
+            # psycopg2's executemany sends one statement per row, so a batch costs one
+            # network round trip per row. execute_values sends a page of rows in one.
+            execute_values(
+                cursor,
+                '\n'.join(commands),
+                values,
+                page_size=insert_page_size,
+            )
         else:
             # Use COPY command
             df_.to_csv(

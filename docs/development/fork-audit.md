@@ -145,6 +145,7 @@ these on pandas 3 and numpy 2. Each one now has a regression test.
 | SQL export | Choose the integer column width by range comparison. numpy 2 raises `OverflowError` when narrowing a Python integer that does not fit, which broke export for object and Arrow-backed integer columns. The same dead narrowing was removed from the DuckDB, MSSQL, MySQL and Oracle exporters. |
 | PostgreSQL | Register adapters for numpy scalars. psycopg2 rejected numpy integers and booleans, and numpy floats bound as the literal text `np.float64(0.5)`. |
 | PostgreSQL | Build insert rows with `itertuples`, and replace missing values only on that path. The COPY path writes the same bytes without widening every column to object. |
+| PostgreSQL | Send insert rows in pages through `execute_values`. `executemany` issues one statement per row, so a batch cost one network round trip per row. A 10,000-row batch went from 10,000 statements to 10, and from 3.30s to 0.20s on a loopback connection. Remote databases gain far more, because the saving is round trips. `insert_page_size` sets the page, default 1000. |
 | Polars output | Build the preview rows with `rows()`. Going through numpy raised `DTypePromotionError` for a frame mixing datetimes with numbers. |
 | Variable storage | Encode JSON before opening the file. A value that could not be encoded left a zero-byte variable behind, and the next block failed while reading it rather than where it was produced. |
 | SQL blocks | Test upstream emptiness by length. Series, arrays and polars frames raise on a truth test. |

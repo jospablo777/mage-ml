@@ -19,10 +19,12 @@ CI sets the same variables from a service container.
 """
 import os
 import unittest
+import unittest.mock
 import uuid
 
 import numpy as np
 import pandas as pd
+from psycopg2.extras import execute_values
 
 CONNECTION = dict(
     dbname=os.getenv('MAGE_TEST_POSTGRES_DBNAME'),
@@ -354,6 +356,60 @@ class PostgresIntegrationTest(unittest.TestCase):
         for column in ('label', 'amount', 'seen_at'):
             with self.subTest(column=column):
                 self.assertTrue(pd.isna(loaded.loc[1, column]))
+
+
+    def test_a_large_batch_is_sent_in_few_round_trips(self):
+        """
+        The insert path used to issue one statement per row, which made a batch cost
+        one network round trip per row.
+        """
+        rows = 5000
+        df = pd.DataFrame({
+            'id': pd.Series(range(rows), dtype='int64'),
+            'seen_at': pd.to_datetime(['2026-07-20 18:15:34.258586+00:00'] * rows, utc=True),
+            'amount': pd.Series([1.5] * rows, dtype='float64'),
+        })
+
+        with unittest.mock.patch(
+            'mage_ai.io.postgres.execute_values', wraps=execute_values,
+        ) as sender:
+            self.loader.export(
+                df,
+                SCHEMA,
+                self.table,
+                if_exists='replace',
+                index=False,
+                verbose=False,
+                unique_constraints=['id'],
+                unique_conflict_method='IGNORE',
+            )
+            self.loader.conn.commit()
+
+        self.assertEqual(len(self._load()), rows)
+        # One call, which pages internally. Anything per-row would be 5000 statements.
+        self.assertEqual(sender.call_count, 1)
+        self.assertEqual(sender.call_args.kwargs['page_size'], 1000)
+
+    def test_conflict_update_overwrites_the_stored_row(self):
+        keys = dict(id=pd.Series([1, 2], dtype='int64'))
+
+        for amount in (1.5, 9.5):
+            self.loader.export(
+                pd.DataFrame(dict(**keys, amount=pd.Series([amount] * 2, dtype='float64'))),
+                SCHEMA,
+                self.table,
+                if_exists='append',
+                index=False,
+                verbose=False,
+                unique_constraints=['id'],
+                unique_conflict_method='UPDATE',
+            )
+            self.loader.conn.commit()
+
+        loaded = self._load()
+
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded['amount'].tolist(), [9.5, 9.5])
 
 
 if __name__ == '__main__':

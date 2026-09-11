@@ -6,9 +6,12 @@ import numpy as np
 import pandas as pd
 from psycopg2 import OperationalError
 
-from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_IGNORE
+from mage_ai.io.constants import (
+    UNIQUE_CONFLICT_METHOD_IGNORE,
+    UNIQUE_CONFLICT_METHOD_UPDATE,
+)
 from mage_ai.io.export_utils import infer_dtypes
-from mage_ai.io.postgres import Postgres
+from mage_ai.io.postgres import INSERT_PAGE_SIZE, Postgres
 
 
 class PostgresConnectionTest(unittest.TestCase):
@@ -103,18 +106,14 @@ class NumpyAdapterTest(unittest.TestCase):
 
 class FakeCursor:
     def __init__(self):
-        self.executemany_calls = []
         self.copy_calls = []
-
-    def executemany(self, query, values):
-        self.executemany_calls.append((query, list(values)))
 
     def copy_expert(self, query, buffer):
         self.copy_calls.append((query, buffer.getvalue()))
 
 
 class UploadDataframeTest(unittest.TestCase):
-    """The rows the exporter hands to psycopg2 for a validated feature batch."""
+    """What the exporter hands to psycopg2 for a validated feature batch."""
 
     def setUp(self):
         self.loader = Postgres(
@@ -134,46 +133,56 @@ class UploadDataframeTest(unittest.TestCase):
             cursor, self.df, {}, self.dtypes, 'feature_store.case_features', **kwargs,
         )
 
-    def test_conflict_clause_uses_the_unique_constraint(self):
-        cursor = FakeCursor()
-
-        self.upload(
-            cursor,
+    def insert(self, **kwargs):
+        """Run the insert path with execute_values captured."""
+        options = dict(
             unique_constraints=['case_id', 'opened_at'],
             unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,
         )
+        options.update(kwargs)
 
-        query, _ = cursor.executemany_calls[0]
+        with patch('mage_ai.io.postgres.execute_values') as execute:
+            self.upload(FakeCursor(), **options)
+
+        return execute.call_args
+
+    def test_rows_go_out_in_pages_rather_than_one_statement_each(self):
+        """
+        psycopg2's executemany sends one statement per row, so a batch costs one
+        network round trip per row. execute_values sends a page of rows in one.
+        """
+        call = self.insert()
+
+        self.assertIn('VALUES %s', call.args[1])
+        self.assertEqual(call.kwargs['page_size'], INSERT_PAGE_SIZE)
+        self.assertEqual(len(call.args[2]), 2)
+
+    def test_the_page_size_is_configurable(self):
+        self.assertEqual(self.insert(insert_page_size=25).kwargs['page_size'], 25)
+
+    def test_conflict_clause_uses_the_unique_constraint(self):
+        query = self.insert().args[1]
+
         self.assertIn('ON CONFLICT ("case_id", "opened_at")', query)
         self.assertIn('DO NOTHING', query)
+
+    def test_conflict_update_assigns_every_column(self):
+        query = self.insert(unique_conflict_method=UNIQUE_CONFLICT_METHOD_UPDATE).args[1]
+
+        self.assertIn('DO UPDATE SET', query)
+        self.assertIn('"note" = EXCLUDED."note"', query)
 
     def test_every_bound_value_is_adaptable(self):
         from psycopg2.extensions import adapt
 
-        cursor = FakeCursor()
-
-        self.upload(
-            cursor,
-            unique_constraints=['case_id'],
-            unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,
-        )
-
-        for row in cursor.executemany_calls[0][1]:
+        for row in self.insert().args[2]:
             for value in row:
                 if value is None:
                     continue
                 adapt(value).getquoted()
 
     def test_missing_values_become_null(self):
-        cursor = FakeCursor()
-
-        self.upload(
-            cursor,
-            unique_constraints=['case_id'],
-            unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,
-        )
-
-        self.assertIsNone(cursor.executemany_calls[0][1][1][-1])
+        self.assertIsNone(self.insert().args[2][1][-1])
 
     def test_copy_path_writes_microsecond_timestamps(self):
         cursor = FakeCursor()
