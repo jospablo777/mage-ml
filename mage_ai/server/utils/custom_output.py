@@ -2,8 +2,6 @@ INTERNAL_PREFIX = '__internal_output__'
 
 
 def __custom_output():
-    import warnings
-
     import pandas as pd
     import polars as pl
     import simplejson
@@ -21,6 +19,7 @@ def __custom_output():
     from mage_ai.data_preparation.models.variable import VariableType
     from mage_ai.presenters.utils import render_output_tags
     from mage_ai.server.kernel_output_parser import DataType
+    from mage_ai.shared.pandas_utils import ignore_setting_with_copy_warning
     from mage_ai.shared.parsers import (
         convert_matrix_to_dataframe,
         encode_complex,
@@ -28,12 +27,7 @@ def __custom_output():
         sample_output,
     )
 
-    if pd.__version__ < '1.5.0':
-        from pandas.core.common import SettingWithCopyWarning
-    else:
-        from pandas.errors import SettingWithCopyWarning
-
-    warnings.simplefilter(action='ignore', category=SettingWithCopyWarning)
+    ignore_setting_with_copy_warning()
 
     pipeline = Pipeline.get('{pipeline_uuid}', repo_path='{repo_path}')
     block = pipeline.get_block(
