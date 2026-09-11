@@ -4108,7 +4108,7 @@ requires-dist = [
 
 [[package]]
 name = "mage-ml"
-version = "0.9.79"
+version = "0.9.79+ml.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
