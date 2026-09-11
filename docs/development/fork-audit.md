@@ -44,6 +44,8 @@ The production dependency profiles resolve without conflicts. The Linux producti
 | File copies | Replace `distutils` with `shutil` and with a local boolean parser. The module is absent from Python 3.12 and resolved only through setuptools. |
 | Releases | Publish images to the GitHub container registry on tags, and attach the workspace distributions to the tagged release. |
 | Dependency updates | Add Dependabot for the Python workspaces, the frontend, the actions, and the container base. |
+| Network filesystem | Remove `nfs-common` and the Cloud Filestore mount from startup. The client served that one caller and brought six of the native advisories through libevent. |
+| Inventory | Publish a CycloneDX SBOM for the production image as a CI artifact. |
 
 The old shared test teardown called `shutil.rmtree(get_variables_dir())` after tests had changed the global project path. That could delete the checkout. Cleanup no longer derives its target from mutable application settings. Git fixtures remain inside the allocated temporary directory.
 

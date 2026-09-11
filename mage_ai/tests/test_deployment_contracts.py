@@ -104,6 +104,26 @@ class ContainerImageTest(unittest.TestCase):
         self.assertIn('os.getenv(MAGE_CONTAINER_IMAGE_ENV_VAR)', text)
 
 
+class NfsClientTest(unittest.TestCase):
+    """
+    `nfs-common` served one caller, the Cloud Filestore mount in the startup
+    script. Both were removed. Either one alone is dead weight or a broken mount.
+    """
+
+    def test_the_client_and_the_mount_stay_together(self):
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+        startup = (REPO_ROOT / 'scripts/run_app.sh').read_text(encoding='utf-8')
+
+        installs_client = 'nfs-common' in dockerfile
+        mounts_share = re.search(r'^\s*mount\b', startup, re.MULTILINE) is not None
+
+        self.assertEqual(
+            installs_client,
+            mounts_share,
+            'the startup script mounts a share without the client, or the reverse',
+        )
+
+
 class PublishWorkflowTest(unittest.TestCase):
     """
     Both workflows were disabled because they pushed to upstream namespaces. A

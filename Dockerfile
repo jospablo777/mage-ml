@@ -21,7 +21,7 @@ RUN apt-get update && apt-get upgrade -y && \
     rm /tmp/packages-microsoft-prod.deb && \
     apt-get update && \
     ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
-      tini nfs-common msodbcsql18 libodbc2 libmagic1 libgssapi-krb5-2 libgomp1 \
+      tini msodbcsql18 libodbc2 libmagic1 libgssapi-krb5-2 libgomp1 \
       graphviz postgresql-client r-base && \
     uv pip uninstall --system pip && \
     rm -rf /var/lib/apt/lists/*

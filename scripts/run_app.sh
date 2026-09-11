@@ -4,12 +4,6 @@ set -eo pipefail
 PROJECT_PATH="default_repo"
 MAGE_PROJECT_TYPE="standalone"
 
-if [[ ! -z "${FILESTORE_IP_ADDRESS}" && ! -z "${FILE_SHARE_NAME}" ]]; then
-    echo "Mounting Cloud Filestore ${FILESTORE_IP_ADDRESS}:/${FILE_SHARE_NAME}"
-    mount -o nolock "$FILESTORE_IP_ADDRESS:/$FILE_SHARE_NAME" /home/src
-    echo "Mounting completed."
-fi
-
 if [[ ! -z "${USER_CODE_PATH}" ]]; then
     PROJECT_PATH=$USER_CODE_PATH
 fi

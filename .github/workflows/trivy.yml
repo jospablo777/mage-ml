@@ -141,6 +141,23 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
 
+      - name: Generate an SBOM for the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.74.0'
+          image-ref: 'mageml:${{ github.sha }}'
+          format: 'cyclonedx'
+          scanners: 'license'
+          timeout: '15m'
+          output: 'mageml-sbom.cdx.json'
+
+      - name: Archive the SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: mageml-sbom.cdx.json
+          retention-days: 90
+
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
         with:
