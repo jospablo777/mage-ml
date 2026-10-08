@@ -1,4 +1,3 @@
-import io
 import unittest
 from unittest.mock import patch
 
@@ -10,7 +9,6 @@ from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
-from mage_ai.io.export_utils import infer_dtypes
 from mage_ai.io.postgres import INSERT_PAGE_SIZE, Postgres
 
 
@@ -105,20 +103,59 @@ class NumpyAdapterTest(unittest.TestCase):
 
 
 class FakeCursor:
-    def __init__(self):
-        self.copy_calls = []
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, query, params=None):
+        self.connection.statements.append(query)
 
     def copy_expert(self, query, buffer):
-        self.copy_calls.append((query, buffer.getvalue()))
+        self.connection.copy_calls.append((query, buffer.getvalue()))
 
 
-class UploadDataframeTest(unittest.TestCase):
+class FakeConnection:
+    closed = False
+
+    def __init__(self):
+        self.statements = []
+        self.copy_calls = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self, *args, **kwargs):
+        return FakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+TABLE_TYPES = {
+    'case_id': 'bigint',
+    'opened_at': 'timestamp with time zone',
+    'flag': 'boolean',
+    'total_order': 'smallint',
+    'note': 'text',
+}
+
+
+class ExportTest(unittest.TestCase):
     """What the exporter hands to psycopg2 for a validated feature batch."""
 
     def setUp(self):
         self.loader = Postgres(
             dbname='test', user='mage', password='password', host='db.internal', verbose=False,
         )
+        self.connection = FakeConnection()
+        self.loader._ctx = self.connection
         self.df = pd.DataFrame({
             'case_id': pd.Series([345038, 345039], dtype='int64'),
             'opened_at': pd.to_datetime(['2026-07-20 18:15:34.258586+00:00'] * 2, utc=True),
@@ -126,12 +163,18 @@ class UploadDataframeTest(unittest.TestCase):
             'total_order': pd.Series([0, 1], dtype='int16'),
             'note': pd.Series(['first', None]),
         })
-        self.dtypes = infer_dtypes(self.df)
 
-    def upload(self, cursor, **kwargs):
-        self.loader.upload_dataframe(
-            cursor, self.df, {}, self.dtypes, 'feature_store.case_features', **kwargs,
-        )
+    def export(self, **kwargs):
+        with patch.object(Postgres, 'table_exists', return_value=True), \
+                patch.object(Postgres, '_table_column_types', return_value=TABLE_TYPES):
+            self.loader.export(
+                self.df,
+                schema_name='feature_store',
+                table_name='case_features',
+                if_exists='append',
+                verbose=False,
+                **kwargs,
+            )
 
     def insert(self, **kwargs):
         """Run the insert path with execute_values captured."""
@@ -142,7 +185,7 @@ class UploadDataframeTest(unittest.TestCase):
         options.update(kwargs)
 
         with patch('mage_ai.io.postgres.execute_values') as execute:
-            self.upload(FakeCursor(), **options)
+            self.export(**options)
 
         return execute.call_args
 
@@ -172,6 +215,14 @@ class UploadDataframeTest(unittest.TestCase):
         self.assertIn('DO UPDATE SET', query)
         self.assertIn('"note" = EXCLUDED."note"', query)
 
+    def test_each_value_is_cast_to_its_column_type(self):
+        template = self.insert().kwargs['template']
+
+        self.assertEqual(
+            template,
+            '(%s::bigint, %s::timestamp with time zone, %s::boolean, %s::smallint, %s::text)',
+        )
+
     def test_every_bound_value_is_adaptable(self):
         from psycopg2.extensions import adapt
 
@@ -185,11 +236,23 @@ class UploadDataframeTest(unittest.TestCase):
         self.assertIsNone(self.insert().args[2][1][-1])
 
     def test_copy_path_writes_microsecond_timestamps(self):
-        cursor = FakeCursor()
+        self.export()
 
-        self.upload(cursor, buffer=io.StringIO())
+        query, contents = self.connection.copy_calls[0]
+        self.assertIn('COPY feature_store.case_features', query)
+        self.assertEqual(
+            contents.splitlines()[1],
+            '345039\t2026-07-20 18:15:34.258586+00:00\tfalse\t1\t\\N',
+        )
+        self.assertEqual(self.connection.commits, 1)
 
-        contents = cursor.copy_calls[0][1]
-        self.assertIn('2026-07-20 18:15:34.258586+00:00', contents)
-        # na_rep='' plus FORCE_NULL turns the empty field into NULL.
-        self.assertTrue(contents.endswith(',False,1,\n'))
+    def test_a_failed_export_rolls_back(self):
+        with patch('mage_ai.io.postgres.execute_values', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                self.export(
+                    unique_constraints=['case_id'],
+                    unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,
+                )
+
+        self.assertEqual(self.connection.rollbacks, 1)
+        self.assertEqual(self.connection.commits, 0)
