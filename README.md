@@ -2,7 +2,7 @@
 
 A fork of [Mage OSS](https://github.com/mage-ai/mage-ai) for building and running data pipelines. This fork updates Python dependencies, uses uv for package management, and maintains the `mage_ai` import namespace and `mage` command.
 
-The runtime supports Python 3.11–3.13 and uses pandas 3, NumPy 2, Polars 1, and SQLAlchemy 2. Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
+The runtime supports Python 3.11–3.13 and uses pandas 3, NumPy 2, Polars 2, and SQLAlchemy 2. Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
 
 ## Install from source
 

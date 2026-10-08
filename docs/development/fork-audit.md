@@ -170,3 +170,79 @@ moved from 1.2.2 to 1.5.5; the pinned release read `uuid._load_system_functions`
 Python 3.13 removed, and that stopped collection for every module importing it.
 `requires-python` still admits 3.11 through 3.13, so those interpreters are installable
 but no longer built.
+
+## Dependency update, 2026-10-08
+
+Base `ce912e7`. Pins and floors were raised in `pyproject.toml` and `mage_integrations/pyproject.toml`, then `uv lock --upgrade` updated 213 packages, added 9 and removed 13. `itsdangerous` and `cron-converter` left the dependencies; nothing imports them. `vendor/singer-python` needed no changes. `requires-python` is unchanged.
+
+pip-audit 2.10.1 on the `all` and `integrations` profile found 26 known vulnerabilities in 7 packages on the previous lock (PyJWT 14, pymongo 3, tornado 3, urllib3 3, multidict 1, oauthlib 1, Werkzeug 1) and none on the new lock.
+
+| Package | Before | After |
+| --- | --- | --- |
+| bcrypt | 4.0.1 | 5.0.0 |
+| dbt-core | 1.11.15 | 1.12.5 (mashumaro 3.14 to 3.17) |
+| GitPython | 3.1.62 | 3.2.0 |
+| kubernetes | 33.1.0 | 36.0.3 |
+| newrelic | 8.8.0 | 13.6.1 |
+| oracledb | 2.4.1, and 1.3.1 on Python 3.11 | 26.0.1 |
+| pendulum | 3.0.0, and 2.1.0 on Python 3.11 | 3.2.0 |
+| psutil | 5.9.8 | 7.2.2 |
+| PyGithub | 1.59.0 | 2.10.0 |
+| PyJWT | 2.13.0 | 2.15.1 |
+| python-dateutil | 2.8.2 | 2.9.0.post0 |
+| redis | 5.0.8 | 8.1.0 |
+| ruamel.yaml | 0.17.17 | 0.19.1 |
+| scikit-learn | 1.7.2 | 1.9.1 |
+| tornado | 6.5.8 | 6.5.10 |
+| tzlocal | 4.2 | 5.4.4 |
+| urllib3 | 2.7.0 | 2.8.0 |
+| watchdog | 4.0.0 | 6.0.0 |
+
+| Area | Change |
+| --- | --- |
+| Passwords | bcrypt 5 raises `ValueError` for input longer than 72 bytes, where bcrypt 4 hashed the first 72. `mage_ai/authentication/passwords.py` truncates to 72 bytes before hashing and verifying, so hashes made by bcrypt 4 keep verifying. |
+| MongoDB source | tzlocal 5 returns `zoneinfo.ZoneInfo`, which has no `localize()`. The three call sites use `localize_naive`, which attaches the local zone to a naive datetime and raises `ValueError` for an aware one, as pytz did. A time inside a daylight saving transition of the server's zone now resolves to its first occurrence. Servers on UTC are unaffected. |
+| Facebook Ads source | pendulum 3 has no `utcnow()`. The leads sync raised `AttributeError` on Python 3.12 and later before this update, and would have on 3.11 after it. It calls `pendulum.now("UTC")`. A test scans `mage_integrations` for `pendulum.<name>` references that pendulum does not provide. |
+| Kernel processes | psutil 7 deprecates `Process.connections()`. The kernel process listing calls `net_connections()`. |
+| Kubernetes executor | kubernetes 36 reads `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` when it creates a client configuration. In a pod with an outbound proxy, calls to the API server go through that proxy unless `NO_PROXY` lists the API server host. Two job manager tests patched `os.getenv` for the whole process, which made the client read `pod_name` as its proxy URL. They now set the two variables the job manager reads, and a test pins the proxy behavior. |
+| GitPython test | The version guard required 3.1.x. It now requires at least 3.1.59, the fix for CVE-2026-78676. |
+
+### Verification
+
+| Run | Passed | Failed |
+| --- | --- | --- |
+| macOS, Python 3.11.15 | 5,684 | 2 |
+| macOS, Python 3.12.11 | 5,684 | 2 |
+| macOS, Python 3.13.14 | 5,684 | 2 |
+| Linux arm64 container, Python 3.12, `python:3.12-slim-trixie` | 5,684 | 3 |
+
+macOS skips the new file watcher test, described below. The two failures in every run are the publish workflow contracts in `test_deployment_contracts.py` (`KeyError: 'push'`), which fail on `ce912e7` too. The Linux run also fails `test_pipeline_triggers.py::test_create_endpoint_with_parent_pipeline`, which fails on Linux before the update as well and passes on macOS. The same container on the previous lock gave the same three failures. The scheduler lock integration tests pass against Redis 7.4.11 and 8.10.2 with redis-py 8.1.0 and 5.0.8.
+
+New backend tests cover the changes above: `mage_ai/tests/authentication/test_passwords.py` (passwords over 72 bytes, hashes made by bcrypt 4), `mage_integrations/mage_integrations/tests/sources/mongodb/test_common.py` (naive and aware datetimes at the three converted call sites), `mage_integrations/mage_integrations/tests/test_dependency_contracts.py` (pendulum names), `mage_ai/tests/kernels/default/test_utils.py` (process listing without deprecation warnings), `mage_ai/tests/server/test_file_observer.py` (a real observer on `metadata.yaml`) and the proxy tests in `mage_ai/tests/services/k8s/test_job_manager.py`.
+
+An in-place upgrade ran end to end. A project, its users and a loader-transformer pipeline were created on the previous lock and code (bcrypt 4.0.1, redis 5.0.8), and the pipeline ran once through an `@once` trigger. The server then restarted on the new lock with the same database. The default owner, a user with a 120-byte password and a user with a short password signed in; a wrong password was rejected. The output written before the upgrade read back through the API, and a new triggered run completed with one block run per block. Nullable `Int64`, `category` and UTC datetime columns reached the transformer with those dtypes.
+
+The browser suite gained four tests in `mage_ai/frontend/tests`: a wrong password on the sign-in page, a shell command in the terminal (terminado 0.18), a block run in the notebook editor with its output table, and the output of a block run started by a trigger. The last two create their own pipeline through the API and need no network access. All ten browser tests passed twice in a row against the old and the new server.
+
+The production frontend build and ESLint give the same results on Node 24.21 and Node 26.11, and `tsc --noEmit` passes on Node 26.11. Node 26 becomes LTS on 2026-10-28 and Node 24 stays supported until 2028-04-30, so CI, the Dockerfile and `engines` stay on Node 24.
+
+### Held back by other packages
+
+| Package | Resolved | Latest | Constraint |
+| --- | --- | --- | --- |
+| sqlalchemy | 2.0.54 | 2.1.4 | clickhouse-sqlalchemy 0.3.2 requires `sqlalchemy<2.1`. |
+| kubernetes | 36.0.3 | 37.0.0 | kubernetes 37 requires `certifi>=2026.7.22`; dbt-snowflake requires `certifi<2025.4.26`. |
+| redshift-connector | 2.1.17 | 2.2.0 | dbt-redshift 1.11.1 requires `redshift-connector<2.2`. |
+| google-cloud-storage | 3.1.1 | 3.17.0 | dbt-bigquery requires `google-cloud-storage<3.2`. |
+| protobuf | 6.33.6 | 7.36.2 | google-ads 30.0.0 requires `protobuf<7`. |
+
+### Follow-ups
+
+- Not updated, each needs a port or a deployment decision: deltalake 0.20.2 (the Delta Lake writer imports private APIs), stripe 5.5.0, facebook-business 22.0.2 and google-ads 30.0.0 (API versions retire on a schedule), elasticsearch 8.x (the 9.x client targets Elasticsearch 9 servers), gspread 5.x, stomp.py 8.x, kafka-python 2.x, mysql-connector-python 9.x, pinotdb 5.x, sentence-transformers 5.x and google-cloud-aiplatform 1.x.
+- certifi stays at 2025.1.31 because dbt-snowflake requires `certifi<2025.4.26`, and requests and urllib3 verify HTTPS with that bundle. Setting `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` to `/etc/ssl/certs/ca-certificates.crt` in the image would use the Debian bundle that `apt-get` keeps current.
+- On macOS, FSEvents reports no events for a watch on a single file with watchdog 4 or 6. The server watches `metadata.yaml` directly, so editing it on macOS does not reload settings. Linux uses inotify and is unaffected.
+- A dbt model outside any dbt project makes Mage call `dbt list --project-dir None`. dbt 1.12 raises while parsing that flag, and Mage falls back to a block without upstream dbt dependencies.
+- In one browser run, the scheduler dispatched the last block of a run four minutes late, and logged two ticks in that period where ten-second ticks give about 24. Forty later browser tests on both versions did not reproduce it.
+- The notebook shows "The kernel has restarted" when the first kernel usage poll returns a process ID while a block is running. The frontend code for it is unchanged here. It appeared in one of seven editor runs on the new version and in none of five on the old version.
+- Faker is a runtime dependency, but only tests import it.
+- Mage sends usage statistics to `api.mage.ai` by default.
