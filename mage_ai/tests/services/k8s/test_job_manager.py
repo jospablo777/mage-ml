@@ -19,12 +19,20 @@ from kubernetes.client import (
 )
 
 from mage_ai.services.k8s.config import K8sExecutorConfig
+from mage_ai.services.k8s.constants import (
+    KUBE_POD_NAME_ENV_VAR,
+    KUBE_POD_NAMESPACE_ENV_VAR,
+)
 from mage_ai.services.k8s.job_manager import (
     JobManager,
     filter_used_volumes,
     merge_containers,
 )
 from mage_ai.tests.base_test import TestCase
+
+# Only the variables the job manager reads. Patching os.getenv replaced it for the whole
+# process, and the kubernetes client reads HTTPS_PROXY and HTTP_PROXY through it.
+POD_ENV = {KUBE_POD_NAME_ENV_VAR: 'pod_name', KUBE_POD_NAMESPACE_ENV_VAR: 'pod_name'}
 
 MOCK_POD_CONFIG = V1Pod(
     spec=V1PodSpec(
@@ -244,10 +252,8 @@ class JobManagerTests(TestCase):
         )
 
     @patch('mage_ai.services.k8s.job_manager.client.CoreV1Api')
-    @patch('mage_ai.services.k8s.job_manager.os.getenv')
-    def test_create_job_object_with_container_config(self, mock_getenv, mock_core_api_client):
-        mock_getenv.return_value = 'pod_name'
-
+    @patch.dict(os.environ, POD_ENV)
+    def test_create_job_object_with_container_config(self, mock_core_api_client):
         job_manager = JobManager(
             job_name='test_job_name',
             namespace='test_namespace',
@@ -286,8 +292,8 @@ class JobManagerTests(TestCase):
 
     @patch('mage_ai.services.k8s.job_manager.client.CoreV1Api')
     @patch.object(K8sExecutorConfig, 'load_extra_config')
-    @patch('mage_ai.services.k8s.job_manager.os.getenv')
-    def test_create_job_object_with_config_file(self, mock_getenv, mock_load_extra_config,
+    @patch.dict(os.environ, POD_ENV)
+    def test_create_job_object_with_config_file(self, mock_load_extra_config,
                                                 mock_core_api_client):
         mock_config = {
             'metadata': {
@@ -369,8 +375,6 @@ class JobManagerTests(TestCase):
                 'ttl_seconds_after_finished': 100
             }
         }
-        mock_getenv.return_value = 'pod_name'
-
         job_manager = JobManager(
             job_name='test_job_name',
             namespace='test_namespace',
@@ -491,3 +495,26 @@ class JobManagerTests(TestCase):
             namespace='test_namespace',
             body=mock_delete_options
         )
+
+
+class KubernetesClientProxyTest(TestCase):
+    # kubernetes 36 reads the proxy variables when a Configuration is created. Calls to the
+    # API server then go through HTTPS_PROXY unless NO_PROXY covers the API server host.
+    @patch.dict(os.environ, {'HTTPS_PROXY': 'http://proxy.internal:3128'}, clear=False)
+    def test_configuration_reads_https_proxy(self):
+        for key in ('https_proxy', 'HTTP_PROXY', 'http_proxy'):
+            os.environ.pop(key, None)
+
+        configuration = client.Configuration()
+
+        self.assertEqual(configuration.proxy, 'http://proxy.internal:3128')
+
+    @patch.dict(
+        os.environ,
+        {'HTTPS_PROXY': 'http://proxy.internal:3128', 'NO_PROXY': 'kubernetes.default.svc'},
+        clear=False,
+    )
+    def test_configuration_reads_no_proxy(self):
+        configuration = client.Configuration()
+
+        self.assertEqual(configuration.no_proxy, 'kubernetes.default.svc')
