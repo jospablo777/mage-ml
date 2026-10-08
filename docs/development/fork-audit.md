@@ -51,7 +51,7 @@ The old shared test teardown called `shutil.rmtree(get_variables_dir())` after t
 
 ## Dependency audit
 
-The lock retains pandas 3, NumPy 2, Polars 1, and SQLAlchemy 2. Updated packages include urllib3, sqlparse, Azure Identity, Kafka, MongoDB, MySQL Connector, Redshift Connector, LangChain, LangSmith, Transformers, Jupyter, and pyodbc.
+The lock retains pandas 3, NumPy 2, Polars 2, and SQLAlchemy 2. Updated packages include urllib3, sqlparse, Azure Identity, Kafka, MongoDB, MySQL Connector, Redshift Connector, LangChain, LangSmith, Transformers, Jupyter, and pyodbc.
 
 | Profile | Result |
 | --- | --- |
@@ -151,6 +151,8 @@ these on pandas 3 and numpy 2. Each one now has a regression test.
 | SQL blocks | Test upstream emptiness by length. Series, arrays and polars frames raise on a truth test. |
 | Update badge | Compare versions with PEP 440 and check the distribution this build publishes. The badge compared strings against the upstream package, so a local version that is ahead always looked out of date. `MAGE_UPDATE_CHECK_PACKAGE` and `MAGE_UPDATE_CHECK_ENABLED` configure it. |
 | Dependencies | Floor tornado at 6.5.8 and constrain it, for CVE-2026-82397, GHSA-wwv5-g3v4-889x and GHSA-8423-8fgw-73vq. It arrives through ipykernel, jupyter-client, jupyter-server and terminado. |
+| Polars 2 | Require Polars 2.0 and below 3. Mage code builds no LazyFrame, so the streaming engine default changes nothing in it. Lazy joins, `group_by` and `unpivot` in user blocks no longer keep row order unless they pass `maintain_order=True`; `POLARS_ENGINE_AFFINITY=in-memory` restores the 1.x engine. Parquet and Arrow map columns load as `Map`, and output previews show each map value as a dict. |
+| API source | Name headerless CSV columns from `column_1`. Polars 2 starts at `column_0`, which would rename the columns of existing streams. The gzip branch passed `sepr` to `read_csv` and raised `TypeError`. |
 
 `mage_ai/tests/orchestration/test_block_data_handling.py` runs pipelines whose block
 outputs match the shapes above: a cursor dictionary holding a timestamp, four frames

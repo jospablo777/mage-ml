@@ -1,7 +1,9 @@
+import gzip
 import unittest
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
-from mage_integrations.sources.api import Api
+from mage_integrations.sources.api import Api, read_csv_to_pandas
 
 
 def csv_catalog_example():
@@ -219,6 +221,44 @@ def json_catalog_example():
             }
         ]
     }
+
+
+class ApiCsvTest(unittest.TestCase):
+    def load(self, content: bytes, mime_type: str, **config) -> list:
+        source = Api(config=dict(url='https://example.com/data', **config))
+        response = MagicMock(content=content)
+        with patch.object(source, '_Api__build_response', return_value=response), \
+                patch.object(source, '_check_response_type', return_value=mime_type):
+            return [row for rows in source.load_data() for row in rows]
+
+    def test_headerless_columns_are_numbered_from_1(self):
+        df = read_csv_to_pandas(StringIO('1,a\n2,b\n'), ',', False)
+        self.assertEqual(df.columns.tolist(), ['column_1', 'column_2'])
+        self.assertEqual(df['column_1'].tolist(), [1, 2])
+
+    def test_header_names_are_kept(self):
+        df = read_csv_to_pandas(StringIO('id,name\n1,a\n'), ',', True)
+        self.assertEqual(df.columns.tolist(), ['id', 'name'])
+
+    def test_load_data_headerless_csv(self):
+        rows = self.load(b'1,a\n2,b\n', 'text/csv')
+        self.assertEqual(rows, [
+            dict(column_1=1, column_2='a'),
+            dict(column_1=2, column_2='b'),
+        ])
+
+    def test_load_data_csv_with_header_and_separator(self):
+        rows = self.load(b'id;name\n1;a\n', 'text/plain', has_header=True, separator=';')
+        self.assertEqual(rows, [dict(id=1, name='a')])
+
+    def test_load_data_gzip_csv(self):
+        content = gzip.compress(b'id;name\n1;a\n2;b\n')
+        rows = self.load(content, 'application/gzip', has_header=True, separator=';')
+        self.assertEqual(rows, [dict(id=1, name='a'), dict(id=2, name='b')])
+
+    def test_load_data_headerless_gzip_csv(self):
+        rows = self.load(gzip.compress(b'1,a\n'), 'application/gzip')
+        self.assertEqual(rows, [dict(column_1=1, column_2='a')])
 
 
 class ApiTest(unittest.TestCase):

@@ -23,6 +23,15 @@ from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
 from mage_integrations.utils.dictionary import dig
 
 
+def read_csv_to_pandas(source, separator: str, has_header: bool) -> pd.DataFrame:
+    df = polars.read_csv(source, separator=separator, has_header=has_header)
+    if not has_header:
+        # Polars 2 names headerless columns from column_0. Streams keep the column_1
+        # numbering so existing catalogs and destination tables match.
+        df.columns = [f'column_{i}' for i in range(1, df.width + 1)]
+    return df.to_pandas()
+
+
 class Api(Source):
     @property
     def http_method(self):
@@ -95,13 +104,9 @@ class Api(Source):
         url = self.config['url']
 
         if url.endswith('output=csv'):
-            df = polars.read_csv(StringIO(response.content.decode()), separator=separator,
-                                 has_header=header).to_pandas()
-            return df
+            return read_csv_to_pandas(StringIO(response.content.decode()), separator, header)
         elif url.endswith('output=tsv'):
-            df = polars.read_csv(StringIO(response.content.decode()), separator='\t',
-                                 has_header=header).to_pandas()
-            return df
+            return read_csv_to_pandas(StringIO(response.content.decode()), '\t', header)
         elif url.endswith('output=xlsx'):
             df = pd.read_excel(BytesIO(response.content), header=0 if header else None)
             return df
@@ -189,8 +194,7 @@ class Api(Source):
         checked_type = self._check_response_type(response)
 
         if checked_type == 'text/plain' or checked_type == 'text/csv':
-            df = polars.read_csv(StringIO(response.content.decode()), separator=separator,
-                                 has_header=header).to_pandas()
+            df = read_csv_to_pandas(StringIO(response.content.decode()), separator, header)
             yield df.to_dict(orient='records')
 
         elif checked_type == 'google_sheets':
@@ -198,9 +202,7 @@ class Api(Source):
             yield df.to_dict(orient='records')
 
         elif checked_type == 'application/gzip':
-            df = polars.read_csv(BytesIO(response.content),
-                                 sepr=separator,
-                                 has_header=header,).to_pandas()
+            df = read_csv_to_pandas(BytesIO(response.content), separator, header)
             yield df.to_dict(orient='records')
 
         elif checked_type == 'application/json':

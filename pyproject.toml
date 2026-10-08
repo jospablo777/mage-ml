@@ -46,7 +46,7 @@ dependencies = [
   "numpy>=2.0",
   "pandas>=3.0",
   "paramiko>=5.0.0",
-  "polars>=1.44.2",
+  "polars>=2.0.0,<3",
   "protobuf>=6.0,<7",
   "psutil==5.9.8",
   "pyairtable>=2.3.3",

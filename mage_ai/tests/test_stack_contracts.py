@@ -1,9 +1,10 @@
 """
-Contracts for the pandas 3 / numpy 2 / polars migration.
+Contracts for the pandas 3 / numpy 2 / polars 2 migration.
 
 Each test here maps to something that broke during the upgrade. They exist so a
 downgrade or a partial revert fails in CI instead of in a pipeline.
 """
+import io
 import pathlib
 import re
 import unittest
@@ -13,6 +14,8 @@ from importlib.metadata import version
 import numpy as np
 import pandas as pd
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 from packaging.version import Version
 
 from mage_ai.shared.parsers import is_numpy_subdtype, is_string_dtype
@@ -20,7 +23,7 @@ from mage_ai.shared.parsers import is_numpy_subdtype, is_string_dtype
 FLOORS = {
     'pandas': '3.0',
     'numpy': '2.0',
-    'polars': '1.44.2',
+    'polars': '2.0.0',
 }
 
 # Removed in numpy 2. The migration replaced every use.
@@ -295,6 +298,44 @@ class PolarsTest(unittest.TestCase):
         for attr in ['DataFrame', 'LazyFrame', 'Series', 'concat', 'from_pandas', 'read_parquet']:
             with self.subTest(attr=attr):
                 self.assertTrue(hasattr(pl, attr))
+
+    def test_parquet_reads_from_a_new_bytes_buffer(self):
+        # S3 and GCS storage wrap downloaded bytes in a new BytesIO. Polars 2 reads from the
+        # buffer's current position, so a buffer left at its end reads as an empty file.
+        df = pl.DataFrame({'a': [1, 2], 'b': ['x', 'y']})
+        buffer = io.BytesIO()
+        df.write_parquet(buffer)
+
+        for use_pyarrow in (False, True):
+            with self.subTest(use_pyarrow=use_pyarrow):
+                back = pl.read_parquet(io.BytesIO(buffer.getvalue()), use_pyarrow=use_pyarrow)
+                self.assertEqual(back.to_dicts(), df.to_dicts())
+
+        with self.assertRaises(pl.exceptions.ComputeError):
+            pl.read_parquet(buffer)
+
+    def test_from_arrow_on_a_table_returns_a_dataframe(self):
+        # mage_ai.data.tabular.utils converts pyarrow tables with from_arrow.
+        table = pa.table({'a': [1, 2], 'b': ['x', 'y']})
+
+        self.assertIsInstance(pl.from_arrow(table), pl.DataFrame)
+
+    def test_parquet_map_columns_load_as_map(self):
+        # Output previews call to_dicts, which returns a dict per map value.
+        map_type = pa.map_(pa.string(), pa.int64())
+        buffer = io.BytesIO()
+        pq.write_table(pa.table({'m': pa.array([[('k', 1)]], type=map_type)}), buffer)
+
+        df = pl.read_parquet(io.BytesIO(buffer.getvalue()), use_pyarrow=True)
+
+        self.assertEqual(df.schema['m'], pl.Map(pl.String, pl.Int64))
+        self.assertEqual(df.to_dicts(), [{'m': {'k': 1}}])
+
+    def test_headerless_csv_columns_start_at_zero(self):
+        # The API source renames these to column_1 onward.
+        df = pl.read_csv(io.StringIO('1,a\n'), has_header=False)
+
+        self.assertEqual(df.columns, ['column_0', 'column_1'])
 
 
 if __name__ == '__main__':

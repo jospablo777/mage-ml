@@ -220,6 +220,21 @@ class VariableTest(DBTestCase):
         assert_polars_frame_equal(variable2.read_data(), df2)
         assert_polars_frame_equal(variable2.read_data(sample=True, sample_count=1), df2.head(1))
 
+    def test_write_and_read_polars_dataframe_with_map_column(self):
+        pipeline = self.__create_pipeline('test pipeline polars map')
+        variable = Variable('polars_map', pipeline.dir_path, 'block1')
+        df = pl.DataFrame(
+            {'id': [1, 2], 'attrs': [{'a': 1}, {'b': 2, 'c': 3}]},
+            schema={'id': pl.Int64, 'attrs': pl.Map(pl.String, pl.Int64)},
+        )
+
+        variable.write_data(df)
+
+        back = variable.read_data()
+        self.assertEqual(back.schema['attrs'], pl.Map(pl.String, pl.Int64))
+        assert_polars_frame_equal(back, df)
+        assert_polars_frame_equal(variable.read_data(sample=True, sample_count=1), df.head(1))
+
     def test_write_statistics_for_pandas_dataframe(self):
         with patch('mage_ai.data.models.manager.DataManager.writeable', return_value=False):
             data = build_pandas()
