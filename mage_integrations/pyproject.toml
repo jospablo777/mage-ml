@@ -18,6 +18,7 @@ dependencies = [
   "deltalake==0.20.2",
   "elasticsearch==8.15.1",
   "facebook_business==22.0.2",
+  "fastjsonschema>=2.19,<3",
   "gnupg==2.3.1",
   "google-ads==30.0.0",
   "google-analytics-data>=0.20.0",

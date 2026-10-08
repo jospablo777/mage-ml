@@ -7,11 +7,11 @@ import sys
 import traceback
 from abc import ABC, abstractmethod
 from os.path import isfile
-from typing import Dict, List
+from typing import Callable, Dict, List
 
+import fastjsonschema
 import singer
 import yaml
-from jsonschema.validators import Draft4Validator
 
 from mage_integrations.destinations.constants import (
     COLUMN_TYPE_ARRAY,
@@ -48,6 +48,64 @@ from mage_integrations.utils.logger.constants import (
 
 LOGGER = singer.get_logger()
 MAXIMUM_BATCH_SIZE_MB = 100
+JSON_SCHEMA_DRAFT_04 = 'http://json-schema.org/draft-04/schema#'
+
+
+def compile_json_schema(definition: Dict) -> Callable[[Dict], Dict]:
+    # Draft 4 regardless of the schema's own $schema. Formats are not checked and
+    # defaults are not written into the record.
+    return fastjsonschema.compile(
+        {**definition, '$schema': JSON_SCHEMA_DRAFT_04},
+        use_default=False,
+        use_formats=False,
+    )
+
+
+def build_record_validator(schema: Dict) -> Callable[[Dict], None]:
+    """
+    Compile one validator for a stream schema. A value in an object column passes when it is
+    a dict or list, and a value in an array column passes when it is a list. Other values in
+    those columns are validated against the column schema. Every column must be in the schema.
+    Raises fastjsonschema.JsonSchemaValueException.
+    """
+    properties = schema['properties']
+    columns = frozenset(properties)
+
+    container_types = {}
+    for col, column_properties in properties.items():
+        column_types = column_properties.get('type', [])
+        if COLUMN_TYPE_OBJECT in column_types:
+            container_types[col] = (dict, list)
+        elif COLUMN_TYPE_ARRAY in column_types:
+            container_types[col] = (list,)
+
+    root = {}
+    if 'definitions' in schema:
+        root['definitions'] = schema['definitions']
+    container_validators = {
+        col: compile_json_schema({**root, 'properties': {col: properties[col]}})
+        for col in container_types
+    }
+    validate_record = compile_json_schema({
+        **schema,
+        'properties': {
+            col: {} if col in container_types else column_properties
+            for col, column_properties in properties.items()
+        },
+    })
+
+    def validate(record: Dict) -> None:
+        if not record.keys() <= columns:
+            unknown = sorted(record.keys() - columns)
+            raise fastjsonschema.JsonSchemaValueException(
+                f'Columns {unknown} are not in the stream schema.',
+            )
+        for col, types in container_types.items():
+            if col in record and type(record[col]) not in types:
+                container_validators[col]({col: record[col]})
+        validate_record(record)
+
+    return validate
 
 
 class Destination(ABC):
@@ -318,7 +376,8 @@ class Destination(ABC):
 
         self.unique_conflict_methods[stream] = row.get(KEY_UNIQUE_CONFLICT_METHOD)
         self.unique_constraints[stream] = row.get(KEY_UNIQUE_CONSTRAINTS)
-        self.validators[stream] = Draft4Validator(schema)
+        # Compiled on the first record that needs validation.
+        self.validators.pop(stream, None)
 
     def process_state(self, row: Dict, tags: Dict = None) -> None:
         if not tags:
@@ -494,7 +553,7 @@ class Destination(ABC):
 
             if self.batch_processing:
                 if record_data:
-                    current_byte_size += sys.getsizeof(json.dumps(record_data))
+                    current_byte_size += len(line.encode('utf-8'))
 
                     if current_byte_size >= self.config.get(
                             'maximum_batch_size_mb', MAXIMUM_BATCH_SIZE_MB) * 1024 * 1024:
@@ -711,23 +770,13 @@ class Destination(ABC):
         tags: dict = None,
     ) -> Dict:
         record_adjusted = self.__prepare_record(stream, schema, row, tags or {})
-        schema_properties = schema['properties']
 
         if not self.disable_column_type_check.get(stream, False):
-            for col, value in record_adjusted.items():
-                column_properties = schema_properties[col]
-                column_types = column_properties.get('type', [])
-
-                valid = False
-                if COLUMN_TYPE_OBJECT in column_types:
-                    valid = type(value) is dict or type(value) is list
-                elif COLUMN_TYPE_ARRAY in column_types:
-                    valid = type(value) is list
-
-                if not valid:
-                    self.validators[stream].validate({
-                        col: value,
-                    })
+            validate = self.validators.get(stream)
+            if validate is None:
+                validate = build_record_validator(schema)
+                self.validators[stream] = validate
+            validate(record_adjusted)
 
         return record_adjusted
 
