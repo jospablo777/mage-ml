@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pg_pandas_transform
+  language: python
+  name: pg_pandas_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: pg_pandas_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pg_pandas_export
+  language: python
+  name: pg_pandas_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - pg_pandas_load
+  uuid: pg_pandas_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: pg_pandas_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - pg_pandas_transform
+  uuid: pg_pandas_export
+name: postgres_pandas
+type: python
+uuid: postgres_pandas
