@@ -56,23 +56,27 @@ POLARS_CAST_TYPE_COLUMN_TYPES = {
 }
 
 
-def serialize_columns(row: pd.Series, column_types: Dict) -> pd.Series:
+def serialize_json_value(value: Any) -> Any:
+    if value is None:
+        return value
+    return simplejson.dumps(value, default=encode_complex, ignore_nan=True, use_decimal=True)
+
+
+def serialize_string_value(value: Any) -> Any:
+    return value if value is None else str(value)
+
+
+def serialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
+    """
+    Replace dict and list columns with JSON strings and ObjectId columns with strings.
+    Other columns are left untouched. Modifies and returns df.
+    """
     for column, column_type in column_types.items():
         if column_type in JSON_SERIALIZABLE_COLUMN_TYPES:
-            val = row[column]
-            if val is not None:
-                row[column] = simplejson.dumps(
-                    val,
-                    default=encode_complex,
-                    ignore_nan=True,
-                    use_decimal=True,
-                )
+            df[column] = df[column].map(serialize_json_value)
         elif column_type in STRING_SERIALIZABLE_COLUMN_TYPES:
-            val = row[column]
-            if val is not None:
-                row[column] = str(val)
-
-    return row
+            df[column] = df[column].map(serialize_string_value)
+    return df
 
 
 def cast_column_types(df: pd.DataFrame, column_types: Dict):
@@ -99,18 +103,32 @@ def cast_column_types_polars(df: pl.DataFrame, column_types: Dict):
     return df
 
 
-def deserialize_columns(row: pd.Series, column_types: Dict) -> pd.Series:
+def deserialize_json_value(value: Any) -> Any:
+    return simplejson.loads(value) if isinstance(value, str) else value
+
+
+def deserialize_list_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return simplejson.loads(value)
+    if isinstance(value, np.ndarray):
+        return list(value)
+    return value
+
+
+def deserialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
+    """
+    Parse the JSON strings in dict and list columns, and turn the numpy arrays pyarrow
+    returns for list columns into lists. Columns missing from df, such as those cut from
+    a sample file, are skipped. Modifies and returns df.
+    """
     for column, column_type in column_types.items():
-        if column_type not in JSON_SERIALIZABLE_COLUMN_TYPES:
+        if column not in df.columns:
             continue
-
-        val = row[column]
-        if val is not None and isinstance(val, str):
-            row[column] = simplejson.loads(val)
-        elif val is not None and isinstance(val, np.ndarray) and column_type == list.__name__:
-            row[column] = list(val)
-
-    return row
+        if column_type == dict.__name__:
+            df[column] = df[column].map(deserialize_json_value)
+        elif column_type == list.__name__:
+            df[column] = df[column].map(deserialize_list_value)
+    return df
 
 
 # def dask_from_pandas(df: pd.DataFrame) -> dd:
@@ -124,14 +142,6 @@ def deserialize_columns(row: pd.Series, column_types: Dict) -> pd.Series:
 # def apply_transform(ddf: dd, apply_function) -> dd:
 #     res = ddf.apply(apply_function, axis=1, meta=ddf)
 #     return res.compute()
-
-
-def apply_transform_pandas(df: pd.DataFrame, apply_function) -> pd.DataFrame:
-    return df.apply(apply_function, axis=1)
-
-
-def apply_transform_polars(df: pl.DataFrame, apply_function) -> pl.DataFrame:
-    return df.apply(apply_function, axis=1)
 
 
 def should_serialize_pandas(column_types: Dict) -> bool:

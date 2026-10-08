@@ -24,6 +24,7 @@ FLOORS = {
     'pandas': '3.0',
     'numpy': '2.0',
     'polars': '2.0.0',
+    'pyarrow': '25.0.1',
 }
 
 # Removed in numpy 2. The migration replaced every use.

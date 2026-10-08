@@ -27,7 +27,6 @@ from mage_ai.data_preparation.models.constants import (
 from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     AMBIGUOUS_COLUMN_TYPES,
     STRING_SERIALIZABLE_COLUMN_TYPES,
-    apply_transform_pandas,
     cast_column_types,
     cast_column_types_polars,
     deserialize_columns,
@@ -1162,10 +1161,7 @@ class Variable:
 
             # ddf = dask_from_pandas(df)
             if should_deserialize_pandas(column_types):
-                df = apply_transform_pandas(
-                    df,
-                    lambda row: deserialize_columns(row, column_types),
-                )
+                df = deserialize_columns(df, column_types)
             df = cast_column_types(df, column_types)
 
         if self.variable_type == VariableType.SERIES_PANDAS:
@@ -1283,7 +1279,9 @@ class Variable:
 
     def __get_column_types(self, data: pd.DataFrame) -> Tuple[Dict, pd.DataFrame]:
         column_types = {}
-        df_output = data.copy()
+        # Columns are replaced on this frame and never modified in place, so a shallow copy
+        # leaves data unchanged under copy-on-write.
+        df_output = data.copy(deep=False)
         # Clean up data types since parquet doesn't support mixed data types
         for c in df_output.columns:
             df_col = df_output[c]
@@ -1394,10 +1392,7 @@ class Variable:
                     pass
 
             # ddf = dask_from_pandas(df_output)
-            df_output_serialized = apply_transform_pandas(
-                df_output,
-                lambda row: serialize_columns(row, column_types_to_test),
-            )
+            df_output_serialized = serialize_columns(df_output, column_types_to_test)
         else:
             df_output_serialized = df_output
 

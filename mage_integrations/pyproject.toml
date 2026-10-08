@@ -38,7 +38,7 @@ dependencies = [
   "pendulum==3.0.0; python_version >= \"3.12\"",
   "protobuf<7,>=6.0",
   "psycopg2-binary>=2.9.10",
-  "pyarrow>=14.0.1",
+  "pyarrow>=25.0.1",
   "pymongo>=4.6.3,<5",
   "pymongo_schema==0.4.1",
   "python-dateutil==2.8.2",

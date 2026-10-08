@@ -103,6 +103,72 @@ class VariableTest(DBTestCase):
                 assert_frame_equal(variable2.read_data(), df2)
                 assert_frame_equal(variable2.read_data(sample=True, sample_count=1), df2.iloc[:1])
 
+    def write_and_read(self, name: str, df: pd.DataFrame, **read_kwargs):
+        with patch('mage_ai.data.models.manager.DataManager.writeable', return_value=False):
+            with patch('mage_ai.data.models.manager.DataManager.readable', return_value=False):
+                pipeline = self.__create_pipeline(f'test pipeline {name}')
+                variable = Variable(name, pipeline.dir_path, 'block1')
+                variable.write_data(df)
+                return variable.read_data(**read_kwargs)
+
+    def json_frame(self) -> pd.DataFrame:
+        return pd.DataFrame({
+            'ni': pd.array([1, None, 3], dtype='Int64'),
+            'cat': pd.Categorical(['x', 'y', 'x']),
+            'tz': pd.to_datetime(['2024-01-01', '2024-01-02', '2024-01-03']).tz_localize('UTC'),
+            'd': [{'a': 1}, {'a': 2}, {'a': 3}],
+            'l': [[1, 2], [3], [4, 5]],
+        })
+
+    def test_dataframe_with_json_columns_keeps_other_dtypes(self):
+        df = self.json_frame()
+
+        back = self.write_and_read('json_dtypes', df)
+
+        self.assertEqual(back['ni'].dtype, pd.Int64Dtype())
+        self.assertIsInstance(back['cat'].dtype, pd.CategoricalDtype)
+        self.assertEqual(str(back['tz'].dtype), str(df['tz'].dtype))
+        self.assertEqual(back['d'].tolist(), df['d'].tolist())
+        self.assertEqual(back['l'].tolist(), df['l'].tolist())
+
+    def test_dataframe_with_json_columns_and_custom_index(self):
+        # A non-range index skips the polars writer and serializes the JSON columns.
+        df = pd.DataFrame(
+            {'n': [1, 2], 'd': [{'a': 1}, None], 'l': [[1], [2, 3]]},
+            index=[10, 20],
+        )
+
+        back = self.write_and_read('json_index', df)
+
+        self.assertEqual(back.index.tolist(), [10, 20])
+        self.assertEqual(back['d'].tolist()[0], {'a': 1})
+        self.assertTrue(pd.isna(back['d'].tolist()[1]))
+        self.assertEqual(back['l'].tolist(), [[1], [2, 3]])
+
+    def test_write_data_leaves_the_input_frame_unchanged(self):
+        df = pd.DataFrame({
+            0: [1, 2],
+            'mixed': pd.Series([1, 'a'], dtype=object),
+            'd': [{'a': 1}, None],
+        }, index=[5, 6])
+        original = df.copy()
+
+        self.write_and_read('unchanged', df)
+
+        assert_frame_equal(df, original)
+        self.assertEqual(df.columns.tolist(), [0, 'mixed', 'd'])
+
+    def test_sample_read_skips_json_columns_cut_from_the_sample(self):
+        df = pd.DataFrame({'a': [1, 2], 'b': [3, 4], 'd': [{'x': 1}, {'x': 2}]})
+
+        with patch(
+            'mage_ai.data_preparation.models.variable.DATAFRAME_SAMPLE_MAX_COLUMNS', 2,
+        ):
+            sample = self.write_and_read('sample_cut', df, sample=True)
+
+        self.assertEqual(sample.columns.tolist(), ['a', 'b'])
+        self.assertEqual(sample['a'].tolist(), [1, 2])
+
     def test_write_and_read_dataframe_analysis(self):
         pipeline = self.__create_pipeline('test pipeline 3')
         variable = Variable(
