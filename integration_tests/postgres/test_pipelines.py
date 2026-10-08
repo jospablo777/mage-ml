@@ -6,6 +6,7 @@ its @test functions, the transformer adds columns that SQL can compute the same 
 the exporter writes every column back. Values cross Mage's variable storage between the
 blocks. The expected table is built from the source with the same transformation in SQL.
 """
+
 import logging
 import shutil
 import types
@@ -16,8 +17,15 @@ import pytest
 from integration_tests.data import postgres_dataset
 
 PROJECT = Path(__file__).resolve().parents[1] / 'project'
-DERIVED_COLUMNS = ['text_len', 'not_bool', 'int_diff', 'date_year', 'int_array_len',
-                   'json_kind', 'bytea_len']
+DERIVED_COLUMNS = [
+    'text_len',
+    'not_bool',
+    'int_diff',
+    'date_year',
+    'int_array_len',
+    'json_kind',
+    'bytea_len',
+]
 EXPECTED_SQL = """
 CREATE TABLE {schema}.expected AS
 SELECT
@@ -68,7 +76,9 @@ def run_pipeline(pipeline_uuid, **variables):
     run = trigger_pipeline(pipeline_uuid, variables=variables)
     scheduler = PipelineScheduler(run)
     scheduler.start(should_schedule=False)
-    PipelineExecutor(Pipeline.get(pipeline_uuid), execution_partition=run.execution_partition).execute(
+    PipelineExecutor(
+        Pipeline.get(pipeline_uuid), execution_partition=run.execution_partition
+    ).execute(
         pipeline_run_id=run.id,
         global_vars=run.get_variables(),
         allow_blocks_to_fail=False,

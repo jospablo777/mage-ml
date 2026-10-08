@@ -162,8 +162,8 @@ merged one to one, an empty frame used as a branch signal, a fitted model, and a
 scored frame. `mage_ai/tests/test_stack_contracts.py` pins the pandas 3 and numpy 2
 behaviours these corrections depend on.
 
-The PostgreSQL round trips in `mage_ai/tests/io/test_postgres_integration.py` need a
-server; they skip when `MAGE_TEST_POSTGRES_*` is unset.
+The PostgreSQL round trips moved to `integration_tests/postgres/test_client.py`. They need a
+server and skip when `MAGE_TEST_POSTGRES_*` is unset; see `integration_tests/README.md`.
 
 The backend test matrix now builds Python 3.12 only, on Linux and on Windows. freezegun
 moved from 1.2.2 to 1.5.5; the pinned release read `uuid._load_system_functions`, which

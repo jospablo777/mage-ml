@@ -5,17 +5,7 @@ Everything else under mage_ai/tests/io mocks the driver, so nothing exercised
 the export and load path until now. Reads MAGE_TEST_POSTGRES_* and skips when
 they are unset, so a plain checkout still runs the suite.
 
-Local run:
-
-    docker run -d --rm --name mage-test-pg -p 5433:5432 \\
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test postgres:16-alpine
-
-    MAGE_TEST_POSTGRES_HOST=127.0.0.1 MAGE_TEST_POSTGRES_PORT=5433 \\
-      MAGE_TEST_POSTGRES_DBNAME=test MAGE_TEST_POSTGRES_USER=postgres \\
-      MAGE_TEST_POSTGRES_PASSWORD=test \\
-      uv run pytest mage_ai/tests/io/test_postgres_integration.py
-
-CI sets the same variables from a service container.
+Run it with `make -C integration_tests test-postgres`.
 """
 import os
 import unittest

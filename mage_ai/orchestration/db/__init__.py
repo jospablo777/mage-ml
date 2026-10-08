@@ -17,7 +17,8 @@ from mage_ai.settings.repo import get_variables_dir
 from mage_ai.shared.environments import is_debug, is_test_mage
 
 DB_RETRY_COUNT = 2
-TEST_DB = 'test.db'
+# Each pytest-xdist worker gets its own file, so parallel runs do not share migrations.
+TEST_DB = f"test{os.getenv('PYTEST_XDIST_WORKER', '')}.db"
 
 db_connection_url = os.getenv(DATABASE_CONNECTION_URL_ENV_VAR)
 db_kwargs = dict(
