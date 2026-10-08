@@ -6,8 +6,13 @@ values. pandas 3 and numpy 2 changed what those columns look like: strings carry
 StringDtype, temporal columns keep their source resolution, Series.view is gone, and
 narrowing a Python int that does not fit now raises instead of wrapping.
 """
-import pandas as pd
+import datetime
+import decimal
 
+import pandas as pd
+import pyarrow as pa
+
+from mage_ai.io import postgres_types
 from mage_ai.io.export_utils import PandasTypes, clean_df_for_export, infer_dtypes
 from mage_ai.io.postgres import Postgres
 from mage_ai.tests.base_test import TestCase
@@ -44,23 +49,29 @@ class InferDtypesTests(TestCase):
 
 
 class PostgresTypeMappingTests(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.loader = loader()
-
     def get_type(self, series):
-        return self.loader.get_type(series, infer_dtypes(pd.DataFrame({'c': series}))['c'])
+        return postgres_types.pandas_column_type(series)
 
-    def test_integer_width_follows_the_value_range(self):
+    def test_integer_width_follows_the_dtype(self):
+        """
+        The width used to follow the values of the batch being written, so a table
+        created from small keys rejected larger keys on a later append.
+        """
         cases = [
-            ([0, 1], 'smallint'),
-            ([-32768, 32767], 'smallint'),
-            ([0, 345100], 'integer'),
-            ([0, 2**40], 'bigint'),
+            ('int8', 'smallint'),
+            ('int16', 'smallint'),
+            ('Int16', 'smallint'),
+            ('uint8', 'smallint'),
+            ('int32', 'integer'),
+            ('uint16', 'integer'),
+            ('int64', 'bigint'),
+            ('Int64', 'bigint'),
+            ('uint32', 'bigint'),
+            ('uint64', 'numeric(20, 0)'),
         ]
-        for values, expected in cases:
-            with self.subTest(values=values):
-                self.assertEqual(self.get_type(pd.Series(values, dtype='int64')), expected)
+        for dtype, expected in cases:
+            with self.subTest(dtype=dtype):
+                self.assertEqual(self.get_type(pd.Series([0, 1], dtype=dtype)), expected)
 
     def test_integer_columns_that_hold_python_ints(self):
         """
@@ -69,22 +80,46 @@ class PostgresTypeMappingTests(TestCase):
         """
         for dtype in ('object', 'int64[pyarrow]', 'Int64'):
             with self.subTest(dtype=dtype):
-                series = pd.Series([1, 345100], dtype=dtype)
+                series = pd.Series([1, 2**62], dtype=dtype)
 
-                self.assertEqual(self.get_type(series), 'integer')
+                self.assertEqual(self.get_type(series), 'bigint')
 
     def test_remaining_column_types(self):
         cases = [
             (pd.Series(['CR', 'US']), 'text'),
+            (pd.Series(['CR'], dtype='string[pyarrow]'), 'text'),
             (pd.Series([True, False]), 'boolean'),
+            (pd.Series([True, None], dtype='boolean'), 'boolean'),
             (pd.Series([0.5, 1.5]), 'double precision'),
+            (pd.Series([0.5], dtype='Float32'), 'real'),
+            (pd.Series([0.5], dtype='double[pyarrow]'), 'double precision'),
             (pd.Series(pd.to_datetime(['2026-01-01'])), 'timestamp'),
             (pd.Series(pd.to_datetime(['2026-01-01'], utc=True)), 'timestamptz'),
+            (
+                pd.Series(pd.to_datetime(['2026-01-01']).tz_localize('America/Costa_Rica')),
+                'timestamptz',
+            ),
             (pd.Series(['a'], dtype='category'), 'text'),
-            (pd.Series(pd.to_timedelta(['1 days'])), 'bigint'),
+            (pd.Series(pd.to_timedelta(['1 days'])), 'interval'),
+            (pd.Series([1, 2.5], dtype=object), 'double precision'),
+            (pd.Series([1, 'a'], dtype=object), 'text'),
         ]
         for series, expected in cases:
             with self.subTest(dtype=str(series.dtype)):
+                self.assertEqual(self.get_type(series), expected)
+
+    def test_arrow_backed_columns(self):
+        cases = [
+            (pa.date32(), [datetime.date(2026, 1, 1)], 'date'),
+            (pa.decimal128(10, 2), [decimal.Decimal('1.50')], 'numeric'),
+            (pa.list_(pa.int64()), [[1, 2]], 'bigint[]'),
+            (pa.timestamp('us', 'UTC'), [pd.Timestamp('2026-01-01', tz='UTC')], 'timestamptz'),
+            (pa.binary(), [b'\x00'], 'bytea'),
+        ]
+        for arrow_type, values, expected in cases:
+            with self.subTest(arrow_type=str(arrow_type)):
+                series = pd.Series(values, dtype=pd.ArrowDtype(arrow_type))
+
                 self.assertEqual(self.get_type(series), expected)
 
 
