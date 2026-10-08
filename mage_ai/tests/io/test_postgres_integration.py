@@ -275,15 +275,19 @@ class PostgresIntegrationTest(unittest.TestCase):
 
         self.assertEqual(loaded['id'].tolist(), [2, 3])
 
-    def test_timedelta_column_exports_as_nanoseconds(self):
+    def test_timedelta_column_exports_as_interval(self):
+        # Earlier releases created a bigint column of nanoseconds and wrote a missing
+        # value as -9223372036854775808.
         df = pd.DataFrame({
-            'id': [1, 2],
-            'elapsed': pd.to_timedelta(['1 days', '0 days 00:00:01.5']),
+            'id': [1, 2, 3],
+            'elapsed': pd.to_timedelta(['1 days', '0 days 00:00:01.5', None]),
         })
 
         self._export(df)
 
-        self.assertEqual(self._load()['elapsed'].tolist(), [86400000000000, 1500000000])
+        elapsed = self._load()['elapsed'].tolist()
+        self.assertEqual(elapsed[:2], [pd.Timedelta('1 days'), pd.Timedelta('1.5s')])
+        self.assertIs(elapsed[2], pd.NaT)
 
     def test_float_predictions_keep_their_value(self):
         # numpy 2's repr made a float bind as the literal text "np.float64(0.5)".
