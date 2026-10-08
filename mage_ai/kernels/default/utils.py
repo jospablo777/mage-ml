@@ -110,7 +110,7 @@ def get_process_info(pid: int, check_active_status: bool = False) -> Optional[Di
             'cpu_times': process.cpu_times(),
             'memory_info': process.memory_info(),
             'open_files': process.open_files(),
-            'connections': process.connections(),
+            'connections': process.net_connections(),
             'num_threads': process.num_threads(),
         }
 
