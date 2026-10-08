@@ -201,9 +201,8 @@ class GitPythonCompatibilityTest(unittest.TestCase):
 
     def test_installed_version_is_patched(self):
         # CVE-2026-78676 is fixed in 3.1.59. Guard against a resolver drift.
-        major, minor, patch = (int(p) for p in git.__version__.split('.')[:3])
-        self.assertEqual((major, minor), (3, 1))
-        self.assertGreaterEqual(patch, 59)
+        version = tuple(int(p) for p in git.__version__.split('.')[:3])
+        self.assertGreaterEqual(version, (3, 1, 59))
 
 
 if __name__ == '__main__':
