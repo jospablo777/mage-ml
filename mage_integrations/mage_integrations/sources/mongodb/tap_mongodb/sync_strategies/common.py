@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 import base64
 import datetime
+import decimal
 import time
 import uuid
-import decimal
+
 import bson
-from bson import objectid, timestamp, datetime as bson_datetime
+import pytz
 import singer
-from singer import utils, metadata
+import tzlocal
+from bson import datetime as bson_datetime
+from bson import objectid, timestamp
+from singer import metadata, utils
+
 # from terminaltables import AsciiTable
 
-import pytz
-import tzlocal
 
 INCLUDE_SCHEMAS_IN_DESTINATION_STREAM_NAME = False
 UPDATE_BOOKMARK_PERIOD = 1000
@@ -19,6 +22,17 @@ COUNTS = {}
 TIMES = {}
 SCHEMA_COUNT = {}
 SCHEMA_TIMES = {}
+
+
+def localize_naive(value):
+    """Attach the local timezone to a naive datetime.
+
+    Raises ValueError for aware datetimes, matching pytz localize(). tzlocal 5 returns
+    a zoneinfo.ZoneInfo, which has no localize() method.
+    """
+    if value.tzinfo is not None:
+        raise ValueError('Not naive datetime (tzinfo is already set)')
+    return value.replace(tzinfo=tzlocal.get_localzone())
 
 class InvalidProjectionException(Exception):
     """Raised if projection blacklists _id"""
@@ -57,8 +71,7 @@ def get_stream_version(tap_stream_id, state):
 
 def class_to_string(bookmark_value, bookmark_type):
     if bookmark_type == 'datetime':
-        timezone = tzlocal.get_localzone()
-        local_datetime = timezone.localize(bookmark_value)
+        local_datetime = localize_naive(bookmark_value)
         utc_datetime = local_datetime.astimezone(pytz.UTC)
         return utils.strftime(utc_datetime)
     if bookmark_type == 'Timestamp':
@@ -96,9 +109,8 @@ def string_to_class(str_value, type_value):
                                                  .format(type_value))
 
 def safe_transform_datetime(value, path):
-    timezone = tzlocal.get_localzone()
     try:
-        local_datetime = timezone.localize(value)
+        local_datetime = localize_naive(value)
         utc_datetime = local_datetime.astimezone(pytz.UTC)
     except Exception as ex:
         if str(ex) == "year is out of range" and value.year == 0:
@@ -139,8 +151,7 @@ def transform_value(value, path):
         # Return the original base64 encoded string
         return base64.b64encode(value).decode('utf-8')
     if isinstance(value, datetime.datetime):
-        timezone = tzlocal.get_localzone()
-        local_datetime = timezone.localize(value)
+        local_datetime = localize_naive(value)
         utc_datetime = local_datetime.astimezone(pytz.UTC)
         return utils.strftime(utc_datetime)
     if isinstance(value, bson.decimal128.Decimal128):

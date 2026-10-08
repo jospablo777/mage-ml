@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
 
+import json
+import os
+import os.path
+import sys
+import time
 from datetime import timezone
-from singer import utils, metadata
-from singer import SingerConfigurationError, SingerDiscoveryError, SingerSyncError
-from singer import Transformer
-from mage_integrations.sources.catalog import Catalog, CatalogEntry
-from facebook_business import FacebookAdsApi
-from facebook_business.exceptions import FacebookError, FacebookRequestError, FacebookBadObjectError
-from requests.exceptions import ConnectionError, Timeout
-from mage_integrations.sources.messages import write_schema
+
 import attr
 import backoff
 import dateutil
 import facebook_business.adobjects.user as fb_user
-import json
-import os
-import os.path
 import pendulum
 import singer
 import singer.metrics as metrics
-import sys
-import time
+from facebook_business import FacebookAdsApi
+from facebook_business.exceptions import (
+    FacebookBadObjectError,
+    FacebookError,
+    FacebookRequestError,
+)
+from requests.exceptions import ConnectionError, Timeout
+from singer import (
+    SingerConfigurationError,
+    SingerDiscoveryError,
+    SingerSyncError,
+    Transformer,
+    metadata,
+    utils,
+)
+
+from mage_integrations.sources.catalog import Catalog, CatalogEntry
+from mage_integrations.sources.messages import write_schema
 
 API = None
 
@@ -546,7 +557,7 @@ class Leads(Stream):
             )
 
     def sync(self):
-        start_time = pendulum.utcnow()
+        start_time = pendulum.now("UTC")
         previous_start_time = self.state.get("bookmarks", {}).get("leads", {}).get(
             self.replication_key,
             CONFIG.get('start_date'),
