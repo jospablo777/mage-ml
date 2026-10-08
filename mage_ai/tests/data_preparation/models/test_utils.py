@@ -1,4 +1,8 @@
+import datetime
+import decimal
+import math
 import unittest
+import uuid
 from unittest.mock import patch
 
 import numpy as np
@@ -87,17 +91,6 @@ class TestModelUtils(TestCase):
         self.assertEqual(variable_type_use, VariableType.ITERABLE)
 
 
-def serialize_row(row: pd.Series, column_types: dict) -> pd.Series:
-    # Reference rules: the per-row serializer that ran through DataFrame.apply.
-    for column, column_type in column_types.items():
-        val = row[column]
-        if column_type in ('dict', 'list') and val is not None:
-            row[column] = simplejson.dumps(val, ignore_nan=True, use_decimal=True)
-        elif column_type == 'ObjectId' and val is not None:
-            row[column] = str(val)
-    return row
-
-
 def deserialize_row(row: pd.Series, column_types: dict) -> pd.Series:
     # Reference rules: the per-row deserializer that ran through DataFrame.apply.
     for column, column_type in column_types.items():
@@ -122,19 +115,82 @@ class ColumnSerializationTest(unittest.TestCase):
             'oid': [7, None, 'abc'],
         })
 
-    def test_serialize_matches_row_rules(self):
+    def test_serialize_writes_json_and_strings(self):
         column_types = {'d': 'dict', 'l': 'list', 'nan_d': 'dict', 'oid': 'ObjectId'}
-        expected = self.frame().apply(lambda row: serialize_row(row, column_types), axis=1)
 
         actual = serialize_columns(self.frame(), column_types)
 
-        for column in column_types:
-            with self.subTest(column=column):
-                self.assertEqual(
-                    [None if pd.isna(v) else v for v in actual[column]],
-                    [None if pd.isna(v) else v for v in expected[column]],
-                )
-        self.assertEqual(actual['nan_d'].tolist()[1], 'null')
+        self.assertEqual(actual['d'].tolist(), ['{"a": 1}', None, '{"b": [1, 2.5]}'])
+        self.assertEqual(actual['l'].tolist(), ['[1, 2]', None, '[]'])
+        # A NaN in place of the whole value is the missing marker and is stored as NULL.
+        self.assertEqual(actual['nan_d'].tolist(), ['{"a": 1}', None, None])
+        self.assertEqual(actual['oid'].tolist(), ['7', None, 'abc'])
+
+    def test_json_columns_round_trip(self):
+        column_types = {'d': 'dict', 'l': 'list', 'nan_d': 'dict'}
+        original = self.frame()
+
+        back = deserialize_columns(serialize_columns(self.frame(), column_types), column_types)
+
+        self.assertEqual(back['d'].tolist(), original['d'].tolist())
+        self.assertEqual(back['l'].tolist(), original['l'].tolist())
+        self.assertEqual(back['nan_d'].tolist(), [{'a': 1}, None, None])
+
+    def test_values_without_a_json_type_round_trip_inside_dicts_and_lists(self):
+        values = [
+            decimal.Decimal('123456789012345678901234567890.123456789'),
+            datetime.datetime(2024, 1, 2, 3, 4, 5, 6),
+            datetime.datetime(2024, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc),
+            datetime.date(1, 1, 1),
+            datetime.time(23, 59, 59, 999999),
+            datetime.timedelta(days=-3, microseconds=1),
+            b'\x00\xff\x00',
+            uuid.UUID(int=7),
+            float('nan'),
+            float('inf'),
+            None,
+        ]
+        df = pd.DataFrame({
+            'l': pd.Series([values, None], dtype=object),
+            'd': pd.Series([{'k': values}, None], dtype=object),
+        })
+        column_types = {'l': 'list', 'd': 'dict'}
+
+        back = deserialize_columns(serialize_columns(df, column_types), column_types)
+
+        restored = back['l'].tolist()[0]
+        self.assertEqual(restored[:8], values[:8])
+        self.assertTrue(math.isnan(restored[8]))
+        self.assertEqual(restored[9:], values[9:])
+        self.assertEqual(back['d'].tolist()[0]['k'][:8], values[:8])
+        self.assertIsNone(back['l'].tolist()[1])
+
+    def test_json_written_before_the_type_tags_reads_the_same(self):
+        df = pd.DataFrame({'d': ['{"a": 1.5, "when": "2024-01-01"}', None]})
+
+        back = deserialize_columns(df, {'d': 'dict'})
+
+        self.assertEqual(back['d'].tolist(), [{'a': 1.5, 'when': '2024-01-01'}, None])
+
+    def test_text_column_types_round_trip(self):
+        offset = datetime.timezone(datetime.timedelta(hours=-6))
+        df = pd.DataFrame({
+            'dec': pd.Series(
+                [decimal.Decimal('1E-50'), None, decimal.Decimal('NaN')], dtype=object,
+            ),
+            'f': pd.Series([1.5, float('nan'), None], dtype=object),
+            'tz': pd.Series([datetime.time(12, 0, tzinfo=offset), None, None], dtype=object),
+        })
+        column_types = {'dec': 'Decimal', 'f': 'float_with_nan', 'tz': 'timetz'}
+
+        back = deserialize_columns(serialize_columns(df.copy(), column_types), column_types)
+
+        self.assertEqual(back['dec'].tolist()[:2], [decimal.Decimal('1E-50'), None])
+        self.assertTrue(back['dec'].tolist()[2].is_nan())
+        self.assertEqual(back['f'].tolist()[0], 1.5)
+        self.assertTrue(math.isnan(back['f'].tolist()[1]))
+        self.assertIsNone(back['f'].tolist()[2])
+        self.assertEqual(back['tz'].tolist(), [datetime.time(12, 0, tzinfo=offset), None, None])
 
     def test_serialize_leaves_other_columns_untouched(self):
         df = serialize_columns(self.frame(), {'d': 'dict'})

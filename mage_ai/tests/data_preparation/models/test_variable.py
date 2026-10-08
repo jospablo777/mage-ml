@@ -1,4 +1,7 @@
+import datetime
+import decimal
 import json
+import math
 import os
 from unittest.mock import patch
 
@@ -168,6 +171,41 @@ class VariableTest(DBTestCase):
 
         self.assertEqual(sample.columns.tolist(), ['a', 'b'])
         self.assertEqual(sample['a'].tolist(), [1, 2])
+
+    def test_exact_values_survive_the_variable_round_trip(self):
+        """
+        Values an exact PostgreSQL load returns, which Parquet alone changes: decimals of
+        mixed magnitude, bytes ending in zero bytes, times with an offset, NaN next to
+        NULL in a float column, and decimals and dates inside lists.
+        """
+        offset = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        df = pd.DataFrame({
+            'id': pd.array([1, 2, 3], dtype='Int64'),
+            'dec': pd.Series([
+                decimal.Decimal('123456789012345678901234567890123456789012345.6789'),
+                decimal.Decimal('-1E-50'),
+                None,
+            ], dtype=object),
+            'raw': pd.Series([b'\x00\xff\x10binary\x00', b'', None], dtype=object),
+            'tz': pd.Series([datetime.time(12, 0, tzinfo=offset), None, None], dtype=object),
+            'f': pd.Series([1.5, float('nan'), None], dtype=object),
+            'decs': pd.Series([[decimal.Decimal('1.10'), None], [], None], dtype=object),
+            'dates': pd.Series([[datetime.date(2000, 1, 1)], [], None], dtype=object),
+            'doc': pd.Series([{'a': 1}, {'b': [1, None]}, None], dtype=object),
+        })
+
+        back = self.write_and_read('exact_values', df)
+
+        self.assertEqual(back['dec'].tolist(), df['dec'].tolist())
+        self.assertEqual(back['raw'].tolist(), df['raw'].tolist())
+        self.assertEqual(back['tz'].tolist(), df['tz'].tolist())
+        self.assertEqual(back['f'].tolist()[0], 1.5)
+        self.assertTrue(math.isnan(back['f'].tolist()[1]))
+        self.assertIsNone(back['f'].tolist()[2])
+        self.assertEqual(back['decs'].tolist(), df['decs'].tolist())
+        self.assertIsInstance(back['decs'].tolist()[0][0], decimal.Decimal)
+        self.assertEqual(back['dates'].tolist(), df['dates'].tolist())
+        self.assertEqual(back['doc'].tolist(), df['doc'].tolist())
 
     def test_write_and_read_dataframe_analysis(self):
         pipeline = self.__create_pipeline('test pipeline 3')

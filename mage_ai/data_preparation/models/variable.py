@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import decimal
 import os
 import traceback
 from contextlib import contextmanager
@@ -11,7 +13,6 @@ import pandas as pd
 import polars as pl
 import scipy
 from pandas.api.types import infer_dtype, is_object_dtype
-from pandas.core.indexes.range import RangeIndex
 
 from mage_ai.data.constants import InputDataType, VariableType
 from mage_ai.data.models.manager import DataManager
@@ -26,7 +27,10 @@ from mage_ai.data_preparation.models.constants import (
 )
 from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     AMBIGUOUS_COLUMN_TYPES,
+    DECIMAL_COLUMN_TYPE,
+    FLOAT_COLUMN_TYPE,
     STRING_SERIALIZABLE_COLUMN_TYPES,
+    TIMETZ_COLUMN_TYPE,
     cast_column_types,
     cast_column_types_polars,
     deserialize_columns,
@@ -1291,10 +1295,38 @@ class Variable:
             if not is_object_dtype(c_dtype):
                 column_types[c] = str(c_dtype)
             else:
+                present = [v for v in df_col.tolist() if v is not None and v is not pd.NA]
+                if present and all(isinstance(v, (float, np.floating)) for v in present) and any(
+                    v != v for v in present
+                ):
+                    # Parquet stores NaN and NULL as one null in a float column.
+                    column_types[c] = FLOAT_COLUMN_TYPE
+                    continue
                 series_non_null = df_col.dropna()
                 if len(series_non_null) > 0:
                     sample_element = series_non_null.iloc[0]
                     coltype = type(sample_element)
+                    if all(isinstance(v, decimal.Decimal) for v in series_non_null):
+                        # Arrow needs one precision for a decimal column, at most 76 digits,
+                        # so a wide range of values fails to write. The values go to Parquet
+                        # as their exact text and come back as Decimal.
+                        column_types[c] = DECIMAL_COLUMN_TYPE
+                        continue
+                    if all(
+                        isinstance(v, datetime.time) and v.tzinfo is not None
+                        for v in series_non_null
+                    ):
+                        # Parquet times have no time zone, so the offset would be dropped.
+                        column_types[c] = TIMETZ_COLUMN_TYPE
+                        continue
+                    if all(isinstance(v, (bytes, bytearray, memoryview)) for v in series_non_null):
+                        # astype(bytes) makes fixed width numpy bytes, which drop trailing
+                        # zero bytes. Parquet stores the bytes objects as binary.
+                        df_output[c] = df_col.map(
+                            lambda v: bytes(v) if isinstance(v, (bytearray, memoryview)) else v,
+                        )
+                        column_types[c] = bytes.__name__
+                        continue
                     coltype_inferred = infer_dtype(series_non_null)
                     if is_object_dtype(series_non_null.dtype):
                         if coltype.__name__ in STRING_SERIALIZABLE_COLUMN_TYPES:
@@ -1373,25 +1405,8 @@ class Variable:
         )
 
         if should_serialize_pandas(column_types_to_test):
-            # Try using Polars to write the dataframe to improve performance
-            if (
-                type(df_output.index) is RangeIndex
-                and df_output.index.start == 0
-                and df_output.index.stop == df_output.shape[0]
-                and df_output.index.step == 1
-            ):
-                # Polars ignores any index
-                try:
-                    pl_df = pl.from_pandas(df_output)
-                    self.__write_polars_dataframe(pl_df)
-                    # Test read dataframe from parquet
-                    self.__read_parquet(sample=True, raise_exception=True)
-
-                    return
-                except Exception:
-                    pass
-
-            # ddf = dask_from_pandas(df_output)
+            # Polars turned dict columns into structs, which adds every other row's keys to
+            # each value, so JSON-like columns are serialized as text.
             df_output_serialized = serialize_columns(df_output, column_types_to_test)
         else:
             df_output_serialized = df_output

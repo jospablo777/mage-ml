@@ -1,15 +1,18 @@
+import base64
+import decimal
 import importlib
 import inspect
+import json
 import os
 import traceback
-from datetime import datetime
+import uuid
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 from warnings import warn
 
 import numpy as np
 import pandas as pd
 import polars as pl
-import simplejson
 import yaml
 from pandas import DataFrame
 from sklearn.utils import estimator_html_repr
@@ -37,6 +40,10 @@ JSON_SERIALIZABLE_COLUMN_TYPES = {
 STRING_SERIALIZABLE_COLUMN_TYPES = {
     'ObjectId',
 }
+# Column types of object columns stored as text and read back as their type.
+DECIMAL_COLUMN_TYPE = 'Decimal'
+FLOAT_COLUMN_TYPE = 'float_with_nan'
+TIMETZ_COLUMN_TYPE = 'timetz'
 
 AMBIGUOUS_COLUMN_TYPES = {
     'mixed-integer',
@@ -56,26 +63,111 @@ POLARS_CAST_TYPE_COLUMN_TYPES = {
 }
 
 
+# Values inside dict and list columns that JSON has no type for are written as
+# {"__mage_type__": name, "value": text} and restored on read. Variables written before
+# the tags existed read the same as before.
+TYPE_TAG = '__mage_type__'
+
+
+def _tag(name: str, value: Any) -> Dict:
+    return {TYPE_TAG: name, 'value': value}
+
+
+def _encode_tagged(value: Any) -> Any:
+    if isinstance(value, decimal.Decimal):
+        return _tag('decimal', str(value))
+    if isinstance(value, datetime):
+        return _tag('datetime', value.isoformat())
+    if isinstance(value, date):
+        return _tag('date', value.isoformat())
+    if isinstance(value, time):
+        return _tag('time', value.isoformat())
+    if isinstance(value, timedelta):
+        return _tag('timedelta', [value.days, value.seconds, value.microseconds])
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return _tag('bytes', base64.b64encode(bytes(value)).decode('ascii'))
+    if isinstance(value, uuid.UUID):
+        return _tag('uuid', str(value))
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    return encode_complex(value)
+
+
+DECODERS = {
+    'decimal': decimal.Decimal,
+    'datetime': datetime.fromisoformat,
+    'date': date.fromisoformat,
+    'time': time.fromisoformat,
+    'timedelta': lambda parts: timedelta(days=parts[0], seconds=parts[1], microseconds=parts[2]),
+    'bytes': base64.b64decode,
+    'uuid': uuid.UUID,
+}
+
+
+def _decode_tagged(obj: Dict) -> Any:
+    if len(obj) == 2 and obj.get(TYPE_TAG) in DECODERS and 'value' in obj:
+        return DECODERS[obj[TYPE_TAG]](obj['value'])
+    return obj
+
+
 def serialize_json_value(value: Any) -> Any:
-    if value is None:
-        return value
-    return simplejson.dumps(value, default=encode_complex, ignore_nan=True, use_decimal=True)
+    # A NaN in place of the whole value is pandas' missing marker.
+    if _is_missing(value):
+        return None
+    # The json module hands bytes and Decimal to the default function; simplejson decodes
+    # bytes as UTF-8 first. NaN and infinity are written as tokens loads accepts.
+    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
 
 
 def serialize_string_value(value: Any) -> Any:
     return value if value is None else str(value)
 
 
+def _is_missing(value: Any) -> bool:
+    if value is None or value is pd.NA or value is pd.NaT:
+        return True
+    return isinstance(value, float) and value != value
+
+
+# Object columns stored as text and parsed back, keyed by their recorded column type.
+TEXT_COLUMN_TYPES = {
+    DECIMAL_COLUMN_TYPE: (str, decimal.Decimal),
+    # Floats with NaN: stored as text, so NaN and NULL stay apart.
+    FLOAT_COLUMN_TYPE: (repr, float),
+    # Times with an offset: Parquet times have no time zone.
+    TIMETZ_COLUMN_TYPE: (lambda value: value.isoformat(), time.fromisoformat),
+}
+
+
 def serialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
     """
-    Replace dict and list columns with JSON strings and ObjectId columns with strings.
-    Other columns are left untouched. Modifies and returns df.
+    Replace dict and list columns with JSON strings, ObjectId columns with strings, and
+    the columns in TEXT_COLUMN_TYPES with their text. Other columns are left untouched.
+    Modifies and returns df.
     """
     for column, column_type in column_types.items():
+        # Object columns keep None. Series.map would infer the str dtype, which stores NaN.
         if column_type in JSON_SERIALIZABLE_COLUMN_TYPES:
-            df[column] = df[column].map(serialize_json_value)
+            df[column] = pd.Series(
+                [serialize_json_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
         elif column_type in STRING_SERIALIZABLE_COLUMN_TYPES:
-            df[column] = df[column].map(serialize_string_value)
+            df[column] = pd.Series(
+                [serialize_string_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
+        elif column_type in TEXT_COLUMN_TYPES:
+            to_text = TEXT_COLUMN_TYPES[column_type][0]
+            df[column] = pd.Series(
+                [None if v is None else to_text(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
     return df
 
 
@@ -104,30 +196,48 @@ def cast_column_types_polars(df: pl.DataFrame, column_types: Dict):
 
 
 def deserialize_json_value(value: Any) -> Any:
-    return simplejson.loads(value) if isinstance(value, str) else value
+    if isinstance(value, str):
+        return json.loads(value, object_hook=_decode_tagged)
+    return None if _is_missing(value) else value
 
 
 def deserialize_list_value(value: Any) -> Any:
     if isinstance(value, str):
-        return simplejson.loads(value)
+        return json.loads(value, object_hook=_decode_tagged)
     if isinstance(value, np.ndarray):
         return list(value)
-    return value
+    return None if _is_missing(value) else value
 
 
 def deserialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
     """
-    Parse the JSON strings in dict and list columns, and turn the numpy arrays pyarrow
-    returns for list columns into lists. Columns missing from df, such as those cut from
-    a sample file, are skipped. Modifies and returns df.
+    Parse the JSON strings in dict and list columns, turn the numpy arrays pyarrow
+    returns for list columns into lists, and parse the columns in TEXT_COLUMN_TYPES.
+    Missing values come back as None. Columns missing from df, such as those cut from a
+    sample file, are skipped. Modifies and returns df.
     """
     for column, column_type in column_types.items():
         if column not in df.columns:
             continue
         if column_type == dict.__name__:
-            df[column] = df[column].map(deserialize_json_value)
+            df[column] = pd.Series(
+                [deserialize_json_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
         elif column_type == list.__name__:
-            df[column] = df[column].map(deserialize_list_value)
+            df[column] = pd.Series(
+                [deserialize_list_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
+        elif column_type in TEXT_COLUMN_TYPES:
+            parse = TEXT_COLUMN_TYPES[column_type][1]
+            df[column] = pd.Series(
+                [parse(v) if isinstance(v, str) else None for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
     return df
 
 
@@ -151,6 +261,7 @@ def should_serialize_pandas(column_types: Dict) -> bool:
         if (
             column_type in JSON_SERIALIZABLE_COLUMN_TYPES
             or column_type in STRING_SERIALIZABLE_COLUMN_TYPES
+            or column_type in TEXT_COLUMN_TYPES
         ):
             return True
     return False
@@ -160,7 +271,7 @@ def should_deserialize_pandas(column_types: Dict) -> bool:
     if not column_types:
         return False
     for _, column_type in column_types.items():
-        if column_type in JSON_SERIALIZABLE_COLUMN_TYPES:
+        if column_type in JSON_SERIALIZABLE_COLUMN_TYPES or column_type in TEXT_COLUMN_TYPES:
             return True
     return False
 
