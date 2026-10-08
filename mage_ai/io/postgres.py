@@ -23,6 +23,7 @@ from mage_ai.io.constants import (
 )
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.ssh import SSHTunnelForwarder
+from mage_ai.shared.utils import clean_name
 
 # Rows per INSERT statement when a unique constraint rules out COPY.
 INSERT_PAGE_SIZE = 1000
@@ -496,19 +497,23 @@ class Postgres(BaseSQL):
                 case_sensitive=case_sensitive,
             )
 
-        if auto_clean_name:
-            mapping = {column: clean(column) for column in frame.columns}
-            if isinstance(frame, pl.DataFrame):
-                frame = frame.rename(mapping)
-            else:
-                frame = frame.rename(columns=mapping)
-        columns = [str(column) for column in frame.columns]
-        key_columns = [clean(column) for column in (unique_constraints or [])]
+        originals = list(frame.columns)
+        keys = list(unique_constraints or [])
 
-        if method == UNIQUE_CONFLICT_METHOD_UPDATE:
-            self._raise_on_duplicate_keys(frame, key_columns)
+        def candidates(column) -> List[str]:
+            """
+            Names a frame column may have in an existing table. Mage prefixes names on its
+            reserved word list with an underscore, which covers common names such as name,
+            date, value and status. Tables Mage created have the prefixed name; tables
+            created elsewhere usually have the plain one.
+            """
+            names = [clean(column), str(column)]
+            if auto_clean_name:
+                names.append(clean_name(str(column), case_sensitive=case_sensitive))
+            return list(dict.fromkeys(names))
 
         def __process():
+            nonlocal frame
             with self.conn.cursor() as cursor:
                 if schema_name:
                     cursor.execute(self.build_create_schema_command(schema_name))
@@ -529,6 +534,30 @@ class Postgres(BaseSQL):
                             cursor.execute(f'DELETE FROM {full_table_name}')
 
                 if create_table:
+                    names = {column: clean(column) for column in originals}
+                else:
+                    target_types = self._table_column_types(full_table_name)
+                    names = {}
+                    for column in originals:
+                        match = next((n for n in candidates(column) if n in target_types), None)
+                        if match is None:
+                            raise ValueError(
+                                f'Column {column!r} is not in table {full_table_name}, which '
+                                f'has {sorted(target_types)}. Tried {candidates(column)}.'
+                            )
+                        names[column] = match
+
+                if isinstance(frame, pl.DataFrame):
+                    frame = frame.rename({str(k): v for k, v in names.items()})
+                else:
+                    frame = frame.rename(columns=names)
+                columns = [names[column] for column in originals]
+                key_columns = [names.get(key, clean(key)) for key in keys]
+
+                if method == UNIQUE_CONFLICT_METHOD_UPDATE:
+                    self._raise_on_duplicate_keys(frame, key_columns)
+
+                if create_table:
                     if isinstance(frame, pl.DataFrame):
                         target_types = {
                             column: postgres_types.polars_column_type(frame.schema[column])
@@ -540,24 +569,17 @@ class Postgres(BaseSQL):
                             for column in columns
                         }
                     # gen_table_creation_query applies overwrite_types to this mapping.
+                    # The keys are passed already cleaned, so they match the column names.
                     cursor.execute(self.build_create_table_command(
                         target_types,
                         schema_name,
                         table_name,
-                        auto_clean_name=auto_clean_name,
+                        auto_clean_name=False,
                         case_sensitive=case_sensitive,
-                        unique_constraints=unique_constraints,
+                        unique_constraints=key_columns,
                         overwrite_types=overwrite_types,
                         skip_semicolon_at_end=skip_semicolon_at_end,
                     ))
-                else:
-                    target_types = self._table_column_types(full_table_name)
-                    missing = [column for column in columns if column not in target_types]
-                    if missing:
-                        raise ValueError(
-                            f'Columns {missing} are not in table {full_table_name}, which has '
-                            f'{sorted(target_types)}.'
-                        )
 
                 rendered = postgres_types.render_columns(frame, columns, target_types)
                 insert_columns = ', '.join(f'"{column}"' for column in columns)
@@ -603,7 +625,7 @@ class Postgres(BaseSQL):
         except errors.InvalidColumnReference as err:
             self._rollback()
             raise ValueError(
-                f'ON CONFLICT ({", ".join(key_columns)}) needs a unique index or constraint on '
+                f'ON CONFLICT ({", ".join(map(str, keys))}) needs a unique index or constraint on '
                 f'exactly those columns of {full_table_name}. PostgreSQL reported: {err}'
             ) from err
         except Exception:
