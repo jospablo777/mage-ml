@@ -253,6 +253,29 @@ def frame_from_cursor(cursor, polars: bool = False):
     return pd.concat(series, axis=1)
 
 
+def with_float_numbers(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    A frame from frame_from_cursor with numeric and float columns as float, as pandas
+    read_sql returns them, for SQL blocks, whose users expect read_sql's types. A column
+    with both NULL and NaN keeps Python floats, since pandas stores both as one value in
+    float64.
+    """
+    for column in frame.columns:
+        series = frame[column]
+        if isinstance(series.dtype, pd.Float64Dtype):
+            frame[column] = series.astype('float64')
+        elif series.dtype == object and any(isinstance(v, decimal.Decimal) for v in series):
+            values = [float(v) if isinstance(v, decimal.Decimal) else v for v in series]
+            has_null = any(v is None for v in values)
+            has_nan = any(isinstance(v, float) and v != v for v in values)
+            frame[column] = pd.Series(
+                values,
+                index=series.index,
+                dtype=object if has_null and has_nan else 'float64',
+            )
+    return frame
+
+
 # ---------------------------------------------------------------------------------------
 # Choosing column types for new tables
 # ---------------------------------------------------------------------------------------
@@ -372,6 +395,9 @@ def polars_column_type(dtype: pl.DataType) -> str:
         return 'bigint'
     if dtype == pl.UInt64:
         return 'numeric(20, 0)'
+    if dtype in (pl.Int128, pl.UInt128):
+        # 39 digits hold every 128-bit integer.
+        return 'numeric(39, 0)'
     if dtype == pl.Float32:
         return 'real'
     if dtype == pl.Float64:

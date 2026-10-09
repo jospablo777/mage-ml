@@ -1,3 +1,4 @@
+import inspect
 import re
 from os import path
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -457,6 +458,11 @@ def create_upstream_block_tables(
             )
             if database:
                 kwargs['database'] = database
+            # The block's SQL refers to the frame's columns by their names. Exporters
+            # prefixed names on their reserved word list, such as date, name and text,
+            # with an underscore, so SELECT date FROM {{ df_1 }} failed.
+            if 'allow_reserved_words' in inspect.signature(loader.export).parameters:
+                kwargs['allow_reserved_words'] = True
 
             loader.export(df, **kwargs)
 

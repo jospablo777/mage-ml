@@ -478,11 +478,7 @@ def execute_sql_code(
 
                 if should_query:
                     return [
-                        loader.load(
-                            f'SELECT * FROM {schema}.{table_name}',
-                            limit=limit,
-                            verbose=False,
-                        ),
+                        load_result(loader, f'SELECT * FROM {schema}.{table_name}', limit),
                     ]
     elif DataSource.REDSHIFT.value == data_provider:
         from mage_ai.io.redshift import Redshift
@@ -729,6 +725,18 @@ def execute_raw_sql(
         return [results[-1]]
 
     return []
+
+
+def load_result(loader, query: str, limit: int):
+    """
+    Load the result of a PostgreSQL SQL block. pandas read_sql turned integer columns
+    with NULLs into float64, which rounds values above 2**53: 9223372036854775807 became
+    9.223372036854776e18. Integer columns stay integers, as nullable Int64; numeric and
+    float columns are float, as read_sql returned them.
+    """
+    from mage_ai.io.postgres_types import with_float_numbers
+
+    return with_float_numbers(loader.load(query, limit=limit, verbose=False, exact_types=True))
 
 
 class SQLBlock(Block):

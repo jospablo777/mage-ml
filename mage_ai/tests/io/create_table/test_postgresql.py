@@ -1,5 +1,6 @@
 import datetime
 import decimal
+import math
 
 import numpy as np
 import pandas as pd
@@ -104,11 +105,40 @@ class TestPostgresColumnTypes(DBTestCase):
     def test_polars_column_types(self):
         self.assertEqual(postgres_types.polars_column_type(pl.Int16), 'smallint')
         self.assertEqual(postgres_types.polars_column_type(pl.UInt64), 'numeric(20, 0)')
+        # Int128 was written as text.
+        self.assertEqual(postgres_types.polars_column_type(pl.Int128), 'numeric(39, 0)')
+        self.assertEqual(postgres_types.polars_column_type(pl.UInt128), 'numeric(39, 0)')
         self.assertEqual(postgres_types.polars_column_type(pl.Decimal(10, 2)), 'numeric(10, 2)')
         self.assertEqual(postgres_types.polars_column_type(pl.Datetime('us', 'UTC')), 'timestamptz')
         self.assertEqual(postgres_types.polars_column_type(pl.List(pl.String)), 'text[]')
         self.assertEqual(postgres_types.polars_column_type(pl.List(pl.List(pl.Int64))), 'jsonb')
         self.assertEqual(postgres_types.polars_column_type(pl.Struct({'a': pl.Int64})), 'jsonb')
+
+    def test_with_float_numbers(self):
+        """SQL blocks get read_sql's float columns, and exact integers."""
+        import decimal
+
+        import pandas as pd
+
+        frame = pd.DataFrame({
+            'n': pd.array([2**63 - 1, None], dtype='Int64'),
+            'f': pd.array([1.5, None], dtype='Float64'),
+            'd': pd.Series([decimal.Decimal('1.25'), None], dtype=object),
+            'both': pd.Series([decimal.Decimal('NaN'), None], dtype=object),
+            'text': pd.Series(['a', None], dtype='str'),
+        })
+
+        result = postgres_types.with_float_numbers(frame)
+
+        self.assertEqual(result['n'].tolist(), [2**63 - 1, pd.NA])
+        self.assertEqual(str(result['f'].dtype), 'float64')
+        self.assertEqual(result['d'].dtype, 'float64')
+        self.assertEqual(result['d'][0], 1.25)
+        # NULL and NaN stay apart, as Python floats.
+        self.assertEqual(result['both'].dtype, object)
+        self.assertTrue(math.isnan(result['both'][0]))
+        self.assertIsNone(result['both'][1])
+        self.assertEqual(str(result['text'].dtype), 'str')
 
     def test_copy_text_escapes_and_nulls(self):
         text = postgres_types.copy_text([['a\tb', None, 'c\\d', 'e\nf', '']])

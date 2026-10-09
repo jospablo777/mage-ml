@@ -1,0 +1,26 @@
+blocks:
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    use_raw_sql: true
+  downstream_blocks:
+  - pg_sql_to_python_check
+  language: sql
+  name: pg_sql_raw_query
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: pg_sql_raw_query
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: pg_sql_to_python_check
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - pg_sql_raw_query
+  uuid: pg_sql_to_python_check
+name: pg_sql_raw_to_python
+type: python
+uuid: pg_sql_raw_to_python

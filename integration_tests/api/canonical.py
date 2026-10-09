@@ -2,7 +2,8 @@
 Compare data frames from any library by value.
 
 Each value becomes a plain Python value: missing markers become None, NumPy and Arrow
-scalars become Python scalars, timestamps become datetimes, arrays become lists. A column
+scalars become Python scalars, timestamps become datetimes, with their nanoseconds when
+they have any, arrays become lists. A column
 matches when every value matches, type included.
 """
 import datetime as dt
@@ -23,6 +24,9 @@ def canonical(value: Any) -> Any:
     if isinstance(value, np.generic):
         return canonical(value.item())
     if isinstance(value, pd.Timestamp):
+        if value.nanosecond:
+            # A datetime holds microseconds; the nanoseconds are compared as well.
+            return (value.to_pydatetime(warn=False), value.nanosecond)
         return value.to_pydatetime()
     if isinstance(value, (np.ndarray, list, tuple)):
         return [canonical(v) for v in list(value)]

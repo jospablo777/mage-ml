@@ -33,3 +33,13 @@ mysql:
   MYSQL_PASSWORD: "{{ env_var('MAGE_TEST_MYSQL_PASSWORD') }}"
   MYSQL_PORT: "{{ env_var('MAGE_TEST_MYSQL_PORT') }}"
   MYSQL_USER: "{{ env_var('MAGE_TEST_MYSQL_USER') }}"
+# The schema of one test, from MAGE_TEST_SCHEMA, which the test sets. SQL blocks
+# interpolate their profile, not their schema.
+test_schema:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+  POSTGRES_SCHEMA: "{{ env_var('MAGE_TEST_SCHEMA') }}"
+  POSTGRES_USER: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+  POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+  POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"

@@ -1,0 +1,43 @@
+blocks:
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - pg_sql_to_python_check
+  language: sql
+  name: pg_sql_to_python_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: pg_sql_to_python_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pg_sql_to_python_export
+  language: python
+  name: pg_sql_to_python_check
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - pg_sql_to_python_load
+  uuid: pg_sql_to_python_check
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    data_provider_table: pg_sql_to_python_dst
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks: []
+  language: sql
+  name: pg_sql_to_python_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - pg_sql_to_python_check
+  uuid: pg_sql_to_python_export
+name: pg_sql_to_python
+type: python
+uuid: pg_sql_to_python

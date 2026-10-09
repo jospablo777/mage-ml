@@ -332,6 +332,16 @@ class Postgres(BaseSQL):
                 return __load()
         return __load()
 
+    def fetch_query(self, cursor, query: str) -> DataFrame:
+        """
+        The result of a query of a raw SQL block, with read_sql's types except that
+        integer columns stay integers. read_sql turned integer columns with NULLs into
+        float64.
+        """
+        register_type(UUID_ARRAY, cursor)
+        cursor.execute(query)
+        return postgres_types.with_float_numbers(postgres_types.frame_from_cursor(cursor))
+
     def build_create_schema_command(
         self,
         schema_name: str

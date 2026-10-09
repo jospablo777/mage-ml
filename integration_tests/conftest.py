@@ -90,6 +90,16 @@ def mage_postgres(postgres_settings, schema):
     client.close()
 
 
+@pytest.fixture
+def profile_schema(schema, monkeypatch):
+    """
+    The test's schema, which the test_schema profile of the project's io_config.yaml
+    uses. SQL blocks interpolate their profile, not their schema.
+    """
+    monkeypatch.setenv('MAGE_TEST_SCHEMA', schema)
+    return schema
+
+
 @pytest.fixture(scope='session')
 def source_rows():
     return postgres_dataset.edge_rows() + postgres_dataset.faker_rows(FAKER_ROW_COUNT)

@@ -1,0 +1,28 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pg_sql_polars_export
+  language: python
+  name: pg_sql_polars_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: pg_sql_polars_load
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    data_provider_table: pg_sql_polars_dst
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks: []
+  language: sql
+  name: pg_sql_polars_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - pg_sql_polars_load
+  uuid: pg_sql_polars_export
+name: pg_sql_polars
+type: python
+uuid: pg_sql_polars
