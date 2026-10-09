@@ -1,12 +1,10 @@
 import io
 import re
 from collections import Counter
-from typing import Dict, Generator, List, Optional
+from typing import Dict, Generator, List
 
 import boto3
 import pandas as pd
-import polars as pl
-import pyarrow as pa
 from botocore.config import Config
 from singer.schema import Schema
 
@@ -24,7 +22,11 @@ from mage_integrations.sources.constants import (
 )
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
-from mage_integrations.utils.frames import records_from_frame
+from mage_integrations.utils.frames import (
+    nested_column_type,
+    read_file_frame,
+    records_from_frame,
+)
 
 COLUMN_LAST_MODIFIED = '_s3_last_modified'
 
@@ -36,21 +38,6 @@ VALID_FILE_TYPES = [
 ]
 
 
-
-def _nested_column_type(dtype) -> Optional[str]:
-    """The JSON schema type of a pyarrow-backed list or struct column."""
-    if not isinstance(dtype, pd.ArrowDtype):
-        return None
-    arrow_type = dtype.pyarrow_dtype
-    if (
-        pa.types.is_list(arrow_type)
-        or pa.types.is_large_list(arrow_type)
-        or pa.types.is_fixed_size_list(arrow_type)
-    ):
-        return COLUMN_TYPE_ARRAY
-    if pa.types.is_struct(arrow_type) or pa.types.is_map(arrow_type):
-        return COLUMN_TYPE_OBJECT
-    return None
 
 class AmazonS3(Source):
     @property
@@ -170,7 +157,7 @@ class AmazonS3(Source):
 
             properties = {}
             for col in df.columns:
-                nested_type = _nested_column_type(df[col].dtype)
+                nested_type = nested_column_type(df[col].dtype)
                 if nested_type:
                     properties[col] = dict(type=['null', nested_type])
                     continue
@@ -296,20 +283,13 @@ class AmazonS3(Source):
         elif '.csv' in key:
             file_type = FILE_TYPE_CSV
 
-        # Polars reads both formats. pd.read_parquet turned integer columns with nulls
-        # into floats, rounding values above 2**53, and pyarrow before 26 cannot read
-        # fixed-size lists that hold a null. pandas' CSV parser read -2**63 as missing
-        # in a column with nulls, and dropped null rows of one-column files.
         if file_type == FILE_TYPE_PARQUET:
             data_buffer = io.BytesIO()
             client.download_fileobj(self.bucket, key, data_buffer)
-            data_buffer.seek(0)
-            df = pl.read_parquet(data_buffer).to_pandas(use_pyarrow_extension_array=True)
+            df = read_file_frame(data_buffer.getvalue(), 'parquet')
         elif file_type == FILE_TYPE_CSV:
             obj = client.get_object(Bucket=self.bucket, Key=key)
-            df = pl.read_csv(
-                io.BytesIO(obj['Body'].read()), infer_schema_length=None,
-            ).to_pandas(use_pyarrow_extension_array=True)
+            df = read_file_frame(obj['Body'].read(), 'csv')
 
         return df
 

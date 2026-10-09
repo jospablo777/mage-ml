@@ -8,7 +8,6 @@ from os.path import isfile
 from typing import Dict, Generator, List
 
 import dateutil.parser
-import pandas as pd
 import simplejson
 import singer
 from singer import utils
@@ -25,6 +24,7 @@ from mage_integrations.sources.utils import get_standard_metadata, parse_args
 from mage_integrations.utils.array import find_index
 from mage_integrations.utils.dictionary import extract, group_by, merge_dict
 from mage_integrations.utils.files import get_abs_path
+from mage_integrations.utils.frames import frame_from_records
 from mage_integrations.utils.logger import Logger
 from mage_integrations.utils.logger.constants import TYPE_SAMPLE_DATA
 from mage_integrations.utils.schema_helpers import extract_selected_columns
@@ -210,7 +210,9 @@ class Source:
                     gen = self.load_data(stream, sample_data=True)
                     if gen is not None:
                         data = next(gen)
-                        df = pd.DataFrame.from_records(data)
+                        df = frame_from_records(
+                            data, stream.schema.to_dict().get('properties'),
+                        )
 
                         output = {
                             'stream_id': stream.tap_stream_id,

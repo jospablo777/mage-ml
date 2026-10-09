@@ -44,6 +44,7 @@ from mage_integrations.destinations.sql.utils import (
     column_type_mapping,
 )
 from mage_integrations.utils.dictionary import merge_dict
+from mage_integrations.utils.frames import frame_from_records
 
 
 def convert_column_if_json(value, column_type):
@@ -784,7 +785,10 @@ WHERE table_id = '{table_name}'
             job_config.source_format = source_format
 
             # Convert the records to dataframe to speed up the BigQuery load job
-            df = pd.DataFrame.from_records(values)
+            df = frame_from_records(
+                values,
+                {column_name_mapping[c]: {'type': [mapping[c]['type']]} for c in columns},
+            )
             for column in columns:
                 column_cleaned = column_name_mapping[column]
                 column_type_dict = mapping[column]

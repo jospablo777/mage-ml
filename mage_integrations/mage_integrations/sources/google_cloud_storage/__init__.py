@@ -1,4 +1,3 @@
-import io
 from collections import Counter
 from typing import Dict, Generator, List
 
@@ -20,7 +19,11 @@ from mage_integrations.sources.constants import (
 )
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
-from mage_integrations.utils.frames import records_from_frame
+from mage_integrations.utils.frames import (
+    nested_column_type,
+    read_file_frame,
+    records_from_frame,
+)
 
 
 class GoogleCloudStorage(Source):
@@ -65,6 +68,10 @@ class GoogleCloudStorage(Source):
 
             properties = {}
             for col in df.columns:
+                nested_type = nested_column_type(df[col].dtype)
+                if nested_type:
+                    properties[col] = dict(type=['null', nested_type])
+                    continue
                 df_filtered = df[df[col].notnull()][[col]]
 
                 for k, v in infer_dtypes(df_filtered).items():
@@ -147,12 +154,11 @@ class GoogleCloudStorage(Source):
         bucket = client.get_bucket(self.bucket)
         blob = bucket.get_blob(key)
         data = blob.download_as_bytes()
-        buffer = io.BytesIO(data)
         if '.parquet' in key:
-            df = pd.read_parquet(buffer)
+            df = read_file_frame(data, 'parquet')
         elif '.csv' in key:
             encoding = from_bytes(data).best().encoding
-            df = pd.read_csv(buffer, encoding=encoding)
+            df = read_file_frame(data, 'csv', encoding=encoding)
         return df
 
 

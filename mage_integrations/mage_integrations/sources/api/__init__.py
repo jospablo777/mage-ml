@@ -21,7 +21,7 @@ from mage_integrations.sources.constants import (
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
 from mage_integrations.utils.dictionary import dig
-from mage_integrations.utils.frames import records_from_frame
+from mage_integrations.utils.frames import frame_from_records, records_from_frame
 
 
 def read_csv_to_pandas(source, separator: str, has_header: bool) -> pd.DataFrame:
@@ -50,7 +50,7 @@ class Api(Source):
         for rows in self.load_data():
             if len(rows) >= 1:
 
-                df = pd.DataFrame(rows)
+                df = frame_from_records(rows)
 
                 stream_id = 'api'
 

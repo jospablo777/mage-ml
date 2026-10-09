@@ -1,4 +1,3 @@
-import io
 from collections import Counter
 from typing import Dict, Generator, List
 
@@ -18,7 +17,11 @@ from mage_integrations.sources.constants import (
 )
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
-from mage_integrations.utils.frames import records_from_frame
+from mage_integrations.utils.frames import (
+    nested_column_type,
+    read_file_frame,
+    records_from_frame,
+)
 
 LOGGER = singer.get_logger()
 
@@ -55,6 +58,10 @@ class AzureBlobStorage(Source):
 
             properties = {}
             for col in df.columns:
+                nested_type = nested_column_type(df[col].dtype)
+                if nested_type:
+                    properties[col] = dict(type=['null', nested_type])
+                    continue
                 df_filtered = df[df[col].notnull()][[col]]
 
                 for k, v in infer_dtypes(df_filtered).items():
@@ -141,11 +148,11 @@ class AzureBlobStorage(Source):
         if not blob_client.exists():
             return df
         blob_data = blob_client.download_blob()
-        buffer = io.BytesIO(blob_data.readall())
+        data = blob_data.readall()
         if '.parquet' in key:
-            df = pd.read_parquet(buffer)
+            df = read_file_frame(data, 'parquet')
         elif '.csv' in key:
-            df = pd.read_csv(buffer)
+            df = read_file_frame(data, 'csv')
         return df
 
 

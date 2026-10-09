@@ -25,6 +25,7 @@ from mage_integrations.destinations.sql.utils import (
     column_type_mapping,
 )
 from mage_integrations.utils.array import batch
+from mage_integrations.utils.frames import frame_from_records
 from mage_integrations.utils.parsers import encode_complex
 
 
@@ -446,7 +447,10 @@ WHERE TABLE_SCHEMA = '{schema_name}' AND TABLE_NAME = '{table_name}'
             else:
                 self.logger.info(f'Skip executing empty query_strings: {query_strings}')
 
-            df = pd.DataFrame([d['record'] for d in record_data])
+            df = frame_from_records(
+                [d['record'] for d in record_data],
+                self.schemas[stream].get('properties'),
+            )
 
             self.logger.info(f'Batch upload to Snowflake: {df.shape[0]} rows.')
             self.logger.info(f'Columns: {df.columns}')

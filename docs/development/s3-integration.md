@@ -141,5 +141,39 @@ Destination:
 - CSV files held nested values as Python reprs, `{'a': None}`. They hold JSON.
 
 The GCS destination had the same code and is fixed the same way. The GCS and Azure
-sources still read with pandas; the GCS source takes a CSV `encoding`, which Polars
-supports only for UTF-8. Neither has a service in the suite.
+sources read files with the same Polars reader as the S3 source; CSV in another encoding,
+which the GCS source detects, is decoded to UTF-8 first. Neither has a service in the
+suite, so they are covered by unit tests of the reader.
+
+Other connectors built frames from records with pandas, with the same float conversion:
+the Snowflake and BigQuery destinations, the sample data sources send to the UI, and the
+API source's discovery, which typed integer columns with nulls as `number`. They use
+`frame_from_records`, which also infers integer columns when the schema gives no type.
+
+### Delta Lake
+
+The Delta Lake destinations (S3, Azure and the shared base) failed to import since
+deltalake was upgraded to 0.20 (upstream #5541, November 2024): the writer copied from an
+older deltalake imported names that no longer exist. Before that, the S3 destination's
+table URI passed a list to `posixpath.join`, which raised TypeError on every export
+since September 2023. Both are broken on upstream master.
+
+The destination now writes with deltalake's `write_deltalake`. Measured against MinIO
+with the old type handling replaced:
+
+- Records went through a pandas frame, so integers with nulls became floats, and every
+  column holding a null was turned into text with `''` for null. The table schema was
+  overwritten on each batch, so a column's type depended on the batch. Columns now take
+  their Arrow type from the stream schema; arrays and objects are JSON text.
+- In overwrite mode each batch replaced the table, so a sync kept only its last batch.
+  The first write of a sync replaces the table, and later batches append.
+- Partitioned overwrite rewrote the Delta log after each commit to keep partitions the
+  batch did not touch. It uses a `predicate` on the batch's partitions, once per
+  partition and sync.
+- New columns are merged into the table schema.
+- Without a Delta log, objects under the table path were removed by a prefix without a
+  trailing slash, so a table named `orders` also removed `orders_archive`, and only the
+  first 1,000 objects were listed.
+- The S3 destination takes `aws_endpoint`, for S3-compatible storage.
+
+Test: `test_delta_lake.py`.

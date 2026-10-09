@@ -74,7 +74,8 @@ def json_catalog_example():
                         "current_price": {"type": ["null", "number"]},
                         "market_cap": {"type": ["null", "integer"]},
                         "market_cap_rank": {"type": ["null", "integer"]},
-                        "fully_diluted_valuation": {"type": ["null", "number"]},
+                        # Integers with nulls; they were read as floats.
+                        "fully_diluted_valuation": {"type": ["null", "integer"]},
                         "total_volume": {"type": ["null", "number"]},
                         "high_24h": {"type": ["null", "number"]},
                         "low_24h": {"type": ["null", "number"]},
