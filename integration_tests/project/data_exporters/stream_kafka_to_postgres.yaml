@@ -1,0 +1,9 @@
+connector_type: postgres
+database: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+host: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+password: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+port: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+schema: "{{ variables('pg_schema') }}"
+table: events
+username: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+allow_reserved_words: true

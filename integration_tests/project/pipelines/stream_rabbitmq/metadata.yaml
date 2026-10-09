@@ -1,0 +1,44 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_rabbitmq_transform]
+  language: yaml
+  name: stream_rabbitmq_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_rabbitmq_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_rabbitmq_to_rabbitmq, stream_rabbitmq_to_mysql, stream_rabbitmq_to_clickhouse]
+  language: python
+  name: stream_rabbitmq_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_rabbitmq_source]
+  uuid: stream_rabbitmq_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_rabbitmq_to_rabbitmq
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_rabbitmq_transform]
+  uuid: stream_rabbitmq_to_rabbitmq
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_rabbitmq_to_mysql
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_rabbitmq_transform]
+  uuid: stream_rabbitmq_to_mysql
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_rabbitmq_to_clickhouse
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_rabbitmq_transform]
+  uuid: stream_rabbitmq_to_clickhouse
+name: stream_rabbitmq
+type: streaming
+uuid: stream_rabbitmq

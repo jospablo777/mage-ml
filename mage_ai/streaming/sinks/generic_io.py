@@ -5,8 +5,6 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-import pandas as pd
-
 from mage_ai.io.config import ConfigFileLoader
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.config import BaseConfig
@@ -62,14 +60,7 @@ class GenericIOSink(BaseSink):
         self._print(
             f'Batch ingest {len(messages)} records, time={time.time()}. Sample: {messages[0]}')
 
-        formatted_messages = []
-        for m in messages:
-            if self._is_message_format_v2(m):
-                formatted_messages.append(
-                    merge_dict(m.get('data'), dict(metadata=m.get('metadata'))))
-            else:
-                formatted_messages.append(m)
-        df = pd.DataFrame.from_records(formatted_messages)
+        df = self._frame(messages)
         self.io_client.export(
             df,
             **merge_dict(dict(if_exists='append'), self.config.config),

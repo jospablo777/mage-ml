@@ -121,6 +121,43 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The source commits offsets in single-message mode.** It never did, so a consumer
   group that restarted skipped or read again what came while it was down.
 
+#### Streaming pipelines
+
+- **Execute pipeline works on macOS.** The notebook runs a pipeline in a process started
+  with spawn, macOS's default. That process imported the scheduler, which started a
+  multiprocessing Manager while the process was starting, and it died. The scheduler
+  creates its job manager on first use. This affected every pipeline type, and would
+  affect Linux from Python 3.14, which no longer forks by default.
+- **Streaming source and sink blocks check their connection when run alone.** Their YAML
+  ran as Python and failed with a NameError; the notebook hid the Run button. The block
+  renders its config, connects, and closes; the button reads "Check connection".
+- **Database sinks keep integers.** The Postgres sink and the generic sink (MySQL,
+  ClickHouse, DuckDB, MSSQL, BigQuery) made an integer field with a missing value
+  float64, so 2**53 + 1 became 9007199254740992.0. The Postgres sink also wrote messages
+  with the `{"data", "metadata"}` format as two columns.
+- **ClickHouse exports write any value into a String column as text.** A column created
+  from a first batch whose values were all missing is String, and later integers failed
+  to insert.
+- **The Kafka templates no longer set `api_version: 0.10.2`**, which fails against Kafka 4.
+- **The RabbitMQ source acks messages.** It never acked them unless the transformer did,
+  so a restarted pipeline read every message again. A message is acked when the
+  transformer returns, unless the transformer acked, nacked or rejected it with
+  `kwargs['channel']`; a failed transformer leaves it in the queue. Also:
+  - `prefetch_count` (default 100): the broker sent the whole queue, which the source
+    held in memory.
+  - `batch_size` and `batch_timeout`: the transformer gets lists of messages, so sinks
+    write in batches. The default is one message, as before.
+  - Inactivity timeouts no longer reach the transformer as messages of None values.
+  - The template set the consume options outside `consume_config`, where they were
+    ignored.
+- **The RabbitMQ sink waits for the broker's confirms**, so a message no queue takes
+  raises; it was lost. Messages are persistent and JSON-encode dates, decimals and UUIDs,
+  which failed.
+- **RabbitMQ credentials are quoted and not printed.** A password with `@`, `/` or `:`
+  failed to connect, and the source and sink printed the URL with the password.
+- `encode_complex` writes UUIDs, bytes and `datetime.timedelta`, which simplejson
+  reported as circular references; this affected the Kafka sink too.
+
 #### Trino
 
 - **Exports keep their values.** Columns were BIGINT, DOUBLE, BOOLEAN, TIMESTAMP or
@@ -267,9 +304,9 @@ Each item says what changed, which pipelines it affects, and what to do.
   storage such as MinIO.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops), `duckdb` and `trino`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, Trino (memory, Iceberg and Delta Lake),
-  Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), and R blocks with R 4.6
-  and rv.
+  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, RabbitMQ, Trino (memory, Iceberg and
+  Delta Lake), Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), streaming
+  pipelines run from triggers and from the notebook, and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
 

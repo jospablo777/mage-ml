@@ -489,3 +489,44 @@ def mage_trino(trino_settings, trino_catalog, trino_schema):
     client.open()
     yield client
     client.close()
+
+
+@pytest.fixture(scope='session')
+def rabbitmq_settings():
+    port = os.getenv('MAGE_TEST_RABBITMQ_PORT')
+    if not port:
+        pytest.skip('RabbitMQ is not configured: MAGE_TEST_RABBITMQ_PORT unset')
+    return dict(
+        connection_host='127.0.0.1',
+        connection_port=int(port),
+        username=os.environ['MAGE_TEST_RABBITMQ_USER'],
+        password=os.environ['MAGE_TEST_RABBITMQ_PASSWORD'],
+    )
+
+
+@pytest.fixture
+def rabbitmq_channel(rabbitmq_settings):
+    """A pika channel that bypasses Mage."""
+    import pika
+
+    connection = pika.BlockingConnection(pika.ConnectionParameters(
+        host=rabbitmq_settings['connection_host'],
+        port=rabbitmq_settings['connection_port'],
+        credentials=pika.PlainCredentials(
+            rabbitmq_settings['username'], rabbitmq_settings['password'],
+        ),
+    ))
+    channel = connection.channel()
+    yield channel
+    if connection.is_open:
+        connection.close()
+
+
+@pytest.fixture
+def rabbitmq_queue(rabbitmq_channel):
+    """A durable queue used by one test and deleted after it."""
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    rabbitmq_channel.queue_declare(name, durable=True)
+    yield name
+    if rabbitmq_channel.is_open:
+        rabbitmq_channel.queue_delete(name)

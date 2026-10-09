@@ -8,7 +8,6 @@ title: "Kafka"
 connector_type: kafka
 bootstrap_server: "localhost:9092"
 topic: topic_name
-api_version: "0.10.2"
 batch_size: 100
 timeout_ms: 500
 ```
@@ -135,4 +134,4 @@ topic: topic_name
 
 - The default time timestamp is the current time of execution.
 
-- In case you are using newer versions of Kafka brokers, you should consider using corresponding Kafka api_version.
+- Mage detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.

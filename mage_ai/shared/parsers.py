@@ -2,8 +2,9 @@ import base64
 import inspect
 import io
 import traceback
+import uuid
 from collections.abc import Generator
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from json import JSONDecoder
 from typing import Any, Dict, List, Optional, Union
@@ -74,6 +75,13 @@ def encode_complex(obj):
         and 'method' in type(obj.isoformat).__name__
     ):
         return obj.isoformat()
+    elif isinstance(obj, timedelta):
+        # pandas Timedeltas have isoformat; datetime.timedelta does not.
+        return pd.Timedelta(obj).isoformat()
+    elif isinstance(obj, uuid.UUID):
+        return str(obj)
+    elif isinstance(obj, (bytes, bytearray, memoryview)):
+        return bytes(obj).hex()
     elif isinstance(obj, INTS):
         return int(obj)
     elif isinstance(obj, np.floating):

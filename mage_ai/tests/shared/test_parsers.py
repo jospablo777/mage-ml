@@ -139,3 +139,19 @@ class PolarsToDictSplitTests(TestCase):
         )
 
         self.assertIn('2026-01-01T00:00:00', encoded)
+
+    def test_encode_complex_uuids_bytes_and_timedeltas(self):
+        """simplejson reported UUIDs and timedeltas as circular references."""
+        import json
+        import uuid
+        from datetime import timedelta
+
+        self.assertEqual(
+            simplejson.loads(simplejson.dumps(
+                dict(key=uuid.UUID(int=7), span=timedelta(seconds=1.5)),
+                default=encode_complex,
+            )),
+            dict(key='00000000-0000-0000-0000-000000000007', span='P0DT0H0M1.5S'),
+        )
+        # simplejson decodes bytes as UTF-8 itself; json passes them to default.
+        self.assertEqual(json.dumps(b'\x00\xff', default=encode_complex), '"00ff"')

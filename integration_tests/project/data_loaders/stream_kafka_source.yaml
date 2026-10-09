@@ -1,0 +1,6 @@
+connector_type: kafka
+bootstrap_server: "{{ env_var('MAGE_TEST_KAFKA_BOOTSTRAP') }}"
+topic: "{{ variables('in_topic') }}"
+consumer_group: "{{ variables('consumer_group') }}"
+auto_offset_reset: earliest
+include_metadata: false

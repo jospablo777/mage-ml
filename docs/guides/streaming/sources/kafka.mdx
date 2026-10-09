@@ -11,7 +11,6 @@ topic: topic_name
 topics: ['topic_name1', 'topic_name2']  # Optional. Used for specifying multiple topics.
 consumer_group: unique_consumer_group
 include_metadata: false
-api_version: "0.10.2"
 batch_size: 100
 timeout_ms: 500
 auto_offset_reset: latest # Optional
@@ -61,7 +60,7 @@ offset:  # Optional
 
 - **`auto_offset_reset`** (default: `latest`): What to do when there is no initial offset or the offset is out of range. Options: `earliest`, `latest`, `none`
 - **`include_metadata`**: If `true`, includes Kafka metadata (key, partition, offset, timestamp, topic) with each message
-- **`api_version`** (default: `"0.10.2"`): Kafka API version. Use a version matching your broker version for best compatibility
+- **`api_version`** (default: detected): Kafka API version. Mage detects the broker's version; set it only for brokers that cannot report it. `0.10.2`, the old default, fails against Kafka 4
 ### Offset Configuration
 <Note>
     Available in versions `>= 0.9.61`
@@ -232,7 +231,7 @@ serde_config:
 
 ## API version
 
-In case you are using newer versions of Kafka brokers, you should consider using corresponding Kafka api_version.
+Mage detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.
 
 ## Performance Tuning
 

@@ -167,6 +167,11 @@ function CommandButtons({
     { blockColor: blockColor, theme: themeContext },
   ).accent;
   const isStreaming = useMemo(() => pipelineType === PipelineTypeEnum.STREAMING, [pipelineType]);
+  // A streaming source or sink block run alone checks its connection.
+  const isStreamingConnector = useMemo(() => isStreaming
+    && BlockLanguageEnum.YAML === language
+    && [BlockTypeEnum.DATA_LOADER, BlockTypeEnum.DATA_EXPORTER].includes(type),
+  [isStreaming, language, type]);
   const isIntegration = useMemo(() => pipelineType === PipelineTypeEnum.INTEGRATION, [pipelineType]);
 
   const convertBlockMenuItems =
@@ -336,7 +341,7 @@ function CommandButtons({
         />
       )}
 
-      {runBlock && (!isInProgress && !isStreaming) && (
+      {runBlock && (!isInProgress && (!isStreaming || isStreamingConnector)) && (
         <>
           {!isDBT && (
             <Tooltip
@@ -344,7 +349,7 @@ function CommandButtons({
               default
               label={(
                 <Text>
-                  Run block
+                  {isStreamingConnector ? 'Check connection' : 'Run block'}
                   &nbsp;
                   &nbsp;
                   <KeyboardTextGroup
@@ -366,7 +371,7 @@ function CommandButtons({
                 noBorder
                 noPadding
                 onClick={() => {
-                  if (upstreamBlocksExecuted) {
+                  if (upstreamBlocksExecuted || isStreamingConnector) {
                     runBlock({ block });
                   } else {
                     setShowExecuteActions(true);

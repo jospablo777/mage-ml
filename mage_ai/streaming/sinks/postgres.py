@@ -3,8 +3,6 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-import pandas as pd
-
 from mage_ai.io.base import ExportWritePolicy
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_IGNORE
 from mage_ai.io.postgres import Postgres
@@ -52,7 +50,7 @@ class PostgresSink(BaseSink):
         self._print(
             f'Batch ingest {len(messages)} records, time={time.time()}. Sample: {messages[0]}')
 
-        df = pd.DataFrame.from_records(messages)
+        df = self._frame(messages)
         self.postgres_client.export(
             df,
             self.config.schema,

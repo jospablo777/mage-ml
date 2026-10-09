@@ -8,16 +8,14 @@ from datetime import datetime
 from typing import Callable, Dict, List, Union
 
 import pytz
-import yaml
-from jinja2 import Template
 
 from mage_ai.data_preparation.executors.pipeline_executor import PipelineExecutor
 from mage_ai.data_preparation.logging.logger import DictLogger
+from mage_ai.data_preparation.models.block.streaming import streaming_config
 from mage_ai.data_preparation.models.constants import BlockLanguage, BlockType
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.shared.retry import RetryConfig
 from mage_ai.data_preparation.shared.stream import StreamToLogger
-from mage_ai.data_preparation.shared.utils import get_template_vars
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.schedules import PipelineRun
 from mage_ai.shared.hash import merge_dict
@@ -310,10 +308,4 @@ class StreamingPipelineExecutor(PipelineExecutor):
         pass
 
     def __interpolate_vars(self, content: str, global_vars: Dict = None):
-        if global_vars is None:
-            global_vars = dict()
-        config_file = Template(content).render(
-            variables=lambda x: global_vars.get(x) if global_vars else None,
-            **get_template_vars()
-        )
-        return yaml.safe_load(config_file)
+        return streaming_config(content, global_vars)

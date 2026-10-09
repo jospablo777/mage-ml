@@ -55,10 +55,7 @@ from mage_ai.settings.platform import (
 )
 from mage_ai.settings.platform.utils import get_pipeline_from_platform
 from mage_ai.settings.repo import get_repo_path
-from mage_ai.settings.server import (
-    KERNEL_MAGIC,
-    RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE,
-)
+from mage_ai.settings.server import RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE
 from mage_ai.shared.array import find
 from mage_ai.shared.dates import compare, utc_now
 from mage_ai.shared.environments import get_env
@@ -72,7 +69,9 @@ REQUIREMENTS_FILE = 'requirements.txt'
 lock = DistributedLock()
 logger = Logger().new_server_logger(__name__)
 
-job_manager = None if KERNEL_MAGIC else get_job_manager()
+# The job manager starts a multiprocessing Manager process, so it is created on first
+# use. Created on import, it failed every process started with spawn that imported
+# this module, such as the notebook's pipeline runs on macOS.
 
 
 class PipelineScheduler:

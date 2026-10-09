@@ -1,11 +1,13 @@
-import json
 from dataclasses import dataclass
 from typing import Dict, List
 
 import pika
+import simplejson
 
 from mage_ai.shared.config import BaseConfig
+from mage_ai.shared.parsers import encode_complex
 from mage_ai.streaming.sinks.base import BaseSink
+from mage_ai.streaming.sources.rabbitmq import connection_label, connection_parameters
 
 
 @dataclass
@@ -20,37 +22,27 @@ class RabbitMQConfig(BaseConfig):
 
 
 class RabbitMQSink(BaseSink):
+    """
+    Publishes each message to the queue and waits for the broker to confirm it. Without
+    confirms, a message that no queue took or that the broker rejected was lost without
+    an error. Messages are persistent, so a durable queue keeps them across a broker
+    restart.
+    """
     config_class = RabbitMQConfig
 
     def init_client(self):
         self._print('Start initializing producer.')
-        # Initialize RabbitMQ producer
-        queue_name = self.config.queue_name
-        username = self.config.username
-        password = self.config.password
-        connection_host = self.config.connection_host
-        connection_port = self.config.connection_port
-        url_protocol = self.config.url_protocol
-        vt_host = self.config.amqp_url_virtual_host
-
-        self._print(f'Starting to initialize producer for queue {queue_name}')
-
+        self._print(f'Starting to initialize producer for queue {self.config.queue_name}')
+        self._print(f'Trying to connect on {connection_label(self.config)}')
         try:
-            generated_url = f"{url_protocol}://{username}:{password}@" \
-                            f"{connection_host}:{connection_port}/{vt_host}"
-
-            self._print(f'Trying to connect on {generated_url}')
-            self.connection = pika.BlockingConnection(
-                pika.URLParameters(
-                    generated_url
-                )
-            )
-
-            self.main_channel = self.connection.channel()
-            self._print('Finish initializing producer.')
-        except Exception as e:
+            self.connection = pika.BlockingConnection(connection_parameters(self.config))
+        except Exception:
             self._print('Connection Error! Please check RabbitMQ connection')
-            raise e
+            raise
+        self.main_channel = self.connection.channel()
+        # basic_publish raises UnroutableError or NackError.
+        self.main_channel.confirm_delivery()
+        self._print('Connected on broker. Finish initializing producer.')
 
     def write(self, message: Dict):
         pass
@@ -68,11 +60,26 @@ class RabbitMQSink(BaseSink):
             else:
                 data = message
                 metadata = None
-            message_properties = pika.BasicProperties(headers=metadata)
+            message_properties = pika.BasicProperties(
+                content_type='application/json',
+                delivery_mode=pika.DeliveryMode.Persistent,
+                headers=metadata,
+            )
             self.main_channel.basic_publish(
                 exchange='',
                 routing_key=self.config.queue_name,
-                body=json.dumps(data).encode('utf-8'),
+                # Dates, UUIDs and other values json cannot write raised.
+                body=simplejson.dumps(
+                    data, default=encode_complex, ignore_nan=True,
+                ).encode('utf-8'),
                 properties=message_properties,
                 mandatory=True,
             )
+
+    def destroy(self):
+        connection = getattr(self, 'connection', None)
+        if connection is not None and connection.is_open:
+            try:
+                connection.close()
+            except Exception:
+                pass

@@ -109,6 +109,41 @@ class BaseSink(ABC):
                 return True
         return False
 
+    def _records(self, messages: List[Dict]) -> List[Dict]:
+        """
+        The rows of messages: the data of a message with the format
+        {"data": {...}, "metadata": {...}}, with its metadata in the metadata column.
+        """
+        records = []
+        for message in messages:
+            if self._is_message_format_v2(message):
+                records.append(dict(message.get('data') or {}, metadata=message.get('metadata')))
+            else:
+                records.append(message)
+        return records
+
+    def _frame(self, messages: List[Dict]):
+        """
+        A pandas frame of the rows of messages, with the types pandas infers, except that
+        an integer column with a missing value is Int64, or object outside its range.
+        DataFrame.from_records made it float64, which rounds values above 2**53.
+        """
+        import pandas as pd
+
+        records = self._records(messages)
+        frame = pd.DataFrame.from_records(records)
+        for position, column in enumerate(frame.columns):
+            if not pd.api.types.is_float_dtype(frame.dtypes.iloc[position]):
+                continue
+            values = [r.get(column) if isinstance(r, dict) else None for r in records]
+            present = [v for v in values if v is not None]
+            if present and all(isinstance(v, int) and not isinstance(v, bool) for v in present):
+                try:
+                    frame.isetitem(position, pd.array(values, dtype='Int64'))
+                except (OverflowError, TypeError, ValueError):
+                    frame.isetitem(position, pd.array(values, dtype=object))
+        return frame
+
     def _print(self, msg):
         print(f'[{self.__class__.__name__}] {msg}')
 

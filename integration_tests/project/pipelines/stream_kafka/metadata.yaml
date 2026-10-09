@@ -1,0 +1,44 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_kafka_transform]
+  language: yaml
+  name: stream_kafka_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_kafka_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_kafka_to_kafka, stream_kafka_to_postgres, stream_kafka_to_mongodb]
+  language: python
+  name: stream_kafka_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_kafka_source]
+  uuid: stream_kafka_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_kafka_to_kafka
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_kafka_transform]
+  uuid: stream_kafka_to_kafka
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_kafka_to_postgres
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_kafka_transform]
+  uuid: stream_kafka_to_postgres
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_kafka_to_mongodb
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_kafka_transform]
+  uuid: stream_kafka_to_mongodb
+name: stream_kafka
+type: streaming
+uuid: stream_kafka

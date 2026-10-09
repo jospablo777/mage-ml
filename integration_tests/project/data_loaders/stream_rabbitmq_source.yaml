@@ -1,0 +1,8 @@
+connector_type: rabbitmq
+connection_host: 127.0.0.1
+connection_port: "{{ env_var('MAGE_TEST_RABBITMQ_PORT') }}"
+username: "{{ env_var('MAGE_TEST_RABBITMQ_USER') }}"
+password: "{{ env_var('MAGE_TEST_RABBITMQ_PASSWORD') }}"
+queue_name: "{{ variables('in_queue') }}"
+batch_size: 100
+batch_timeout: 0.5

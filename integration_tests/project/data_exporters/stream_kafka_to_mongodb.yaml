@@ -1,0 +1,4 @@
+connector_type: mongodb
+connection_string: "{{ env_var('MAGE_TEST_MONGODB_URL') }}"
+database_name: "{{ variables('mongo_database') }}"
+collection_name: events

@@ -90,18 +90,19 @@ use RabbitMQ locally
 
     ```python
     from typing import Dict, List
-    import logging
-    import json
 
     if 'transformer' not in globals():
         from mage_ai.data_preparation.decorators import transformer
 
 
     @transformer
-    def transform(messages: List[Dict], *args, **kwargs):
-        kwargs['channel'].basic_ack(messages[0].delivery_tag)
-        print(messages.body.decode())
-        return json.dumps({'message':messages.body.decode()})
+    def transform(message, *args, **kwargs) -> List[Dict]:
+        # message is a Payload(method, properties, body) with one RabbitMQ message.
+        # It is acked when this function returns; it can also be acked, nacked or
+        # rejected here with kwargs['channel'].
+        print(message.body.decode())
+        # Sinks take a list of messages.
+        return [{'message': message.body.decode()}]
     ```
 
 5. Add a data exporter block, select `OpenSearch` and paste the following:

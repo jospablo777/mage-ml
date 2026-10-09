@@ -1,0 +1,5 @@
+connector_type: mysql
+profile: mysql
+config:
+  table_name: events
+  allow_reserved_words: true

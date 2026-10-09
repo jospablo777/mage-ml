@@ -152,6 +152,24 @@ services:
       timeout: 10s
       retries: 60
 
+  # RabbitMQ 4.3, data in memory. It sets its memory watermark from the container limit.
+  # The password has characters that a URL must quote.
+  rabbitmq:
+    image: rabbitmq:4.3-alpine
+    mem_limit: 512m
+    environment:
+      RABBITMQ_DEFAULT_USER: mage
+      RABBITMQ_DEFAULT_PASS: "p@ss/w:rd%"
+    tmpfs:
+      - /var/lib/rabbitmq
+    ports:
+      - "${MAGE_TEST_RABBITMQ_PORT:-15673}:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 60
+
   # Trino 483, one node with a heap of 768 MB. Catalogs: memory; iceberg, with tables in
   # MinIO and the catalog in PostgreSQL; delta, with tables and a file metastore in MinIO.
   # The memory limit keeps the JVM from taking memory from the other services. glibc

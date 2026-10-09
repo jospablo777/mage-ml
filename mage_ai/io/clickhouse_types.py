@@ -157,15 +157,32 @@ def values_for_insert(series: pd.Series, clickhouse_type: Optional[str]) -> pd.S
             index=series.index,
             dtype=object,
         )
-    if 'String' in clickhouse_type and series.dtype == object:
-        # A list keeps None; Series.map made it NaN, which would be inserted as text.
+    is_text = pd.api.types.is_string_dtype(series.dtype) \
+        and not pd.api.types.is_object_dtype(series.dtype)
+    if 'String' in clickhouse_type and not is_text:
+        # Any value goes into a String column as text. Only lists and dicts were
+        # converted, so an integer column appended to a String column, which a first
+        # batch whose values were all missing had created, failed to insert. A list
+        # keeps None; Series.map made it NaN, which would be inserted as text.
         return pd.Series(
-            [
-                json.dumps(v, default=_json_value, ensure_ascii=False)
-                if isinstance(v, (dict, list, tuple, np.ndarray)) else v
-                for v in series
-            ],
+            [None if _is_missing(v) else _text(v) for v in series.tolist()],
             index=series.index,
             dtype=object,
         )
     return series
+
+
+def _text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list, tuple, np.ndarray)):
+        return json.dumps(value, default=_json_value, ensure_ascii=False)
+    if isinstance(value, (bool, np.bool_)):
+        return 'true' if value else 'false'
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()
+    if isinstance(value, np.generic):
+        return str(value.item())
+    return str(value)

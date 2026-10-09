@@ -1024,6 +1024,10 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
       let el;
       const isMarkdown = type === BlockTypeEnum.MARKDOWN;
       const isTransformer = type === BlockTypeEnum.TRANSFORMER;
+      // A streaming source or sink block run alone checks its connection.
+      const isStreamingConnector = isStreaming
+        && BlockLanguageEnum.YAML === block?.language
+        && [BlockTypeEnum.DATA_LOADER, BlockTypeEnum.DATA_EXPORTER].includes(type);
       const isHidden = !!hiddenBlocks?.[uuid];
       const noDivider = idx === numberOfBlocks - 1 || isIntegration;
       const currentBlockOutputRef = blockOutputRefs.current[path];
@@ -1086,7 +1090,9 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
           fetchPipeline={fetchPipeline}
           globalDataProducts={globalDataProducts}
           hideOutputOnExecution={hideOutputOnExecution}
-          hideRunButton={isStreaming || isMarkdown || (isIntegration && isTransformer)}
+          hideRunButton={
+            (isStreaming && !isStreamingConnector) || isMarkdown || (isIntegration && isTransformer)
+          }
           interactionsMapping={interactionsMapping}
           interruptKernel={interruptKernel}
           isHidden={isHidden}

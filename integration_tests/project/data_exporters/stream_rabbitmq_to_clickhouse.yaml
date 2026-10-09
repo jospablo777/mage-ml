@@ -1,0 +1,4 @@
+connector_type: clickhouse
+profile: clickhouse
+config:
+  table_name: events

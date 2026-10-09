@@ -1497,7 +1497,14 @@ class Block(
                 logging_tags = dict()
 
             try:
-                if not run_all_blocks:
+                # A streaming sink block run alone checks its connection and reads no input.
+                is_streaming_sink = (
+                    self.pipeline is not None
+                    and self.pipeline.type == PipelineType.STREAMING
+                    and self.language == BlockLanguage.YAML
+                    and self.type == BlockType.DATA_EXPORTER
+                )
+                if not run_all_blocks and not is_streaming_sink:
                     not_executed_upstream_blocks = list(
                         filter(
                             lambda b: b.status == BlockStatus.NOT_EXECUTED,
@@ -2020,6 +2027,18 @@ class Block(
                 data_integration_runtime_settings=data_integration_runtime_settings,
                 **kwargs,
             )
+
+        if (
+            self.pipeline is not None
+            and self.pipeline.type == PipelineType.STREAMING
+            and self.language == BlockLanguage.YAML
+            and self.type in (BlockType.DATA_LOADER, BlockType.DATA_EXPORTER)
+        ):
+            from mage_ai.data_preparation.models.block.streaming import check_connection
+
+            code = custom_code if custom_code and custom_code.strip() else self.content
+            check_connection(self.type, code or '', global_vars)
+            return []
 
         decorated_functions = []
         preprocesser_functions = []
