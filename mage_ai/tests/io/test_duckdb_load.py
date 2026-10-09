@@ -69,3 +69,33 @@ class DuckDBLoadTest(TestCase):
         )
 
         self.assertEqual(frame['id'].to_list(), [1])
+
+
+class DuckDBNullableIntegersTest(TestCase):
+    """SQL blocks load with nullable_integers: read_sql's types, with exact integers."""
+
+    def setUp(self):
+        super().setUp()
+        self.client = DuckDB(database=':memory:', verbose=False)
+
+    def test_integers_stay_integers(self):
+        query = """
+            SELECT * FROM (VALUES
+                (9223372036854775807::BIGINT, 18446744073709551615::UBIGINT,
+                 170141183460469231731687303715884105727::HUGEINT, 1.5::DECIMAL(10, 2), 'a'),
+                (NULL, NULL, NULL, NULL, NULL)
+            ) t(big, ubig, huge, amount, name)
+        """
+
+        default = self.client.load(query, verbose=False)
+        frame = self.client.load(query, verbose=False, nullable_integers=True)
+
+        # read_sql made the integer columns float64.
+        self.assertEqual(str(default['big'].dtype), 'float64')
+        self.assertEqual(frame['big'].tolist(), [2**63 - 1, pd.NA])
+        self.assertEqual(str(frame['big'].dtype), 'Int64')
+        self.assertEqual(frame['ubig'].tolist(), [2**64 - 1, pd.NA])
+        self.assertEqual(str(frame['ubig'].dtype), 'UInt64')
+        self.assertEqual(frame['huge'].tolist(), [2**127 - 1, None])
+        for name in ('amount', 'name'):
+            self.assertEqual(frame[name].dtype, default[name].dtype)

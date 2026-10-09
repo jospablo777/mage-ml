@@ -115,6 +115,10 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Passwords** are truncated to 72 bytes before hashing, as bcrypt 4 did, so existing
   hashes keep verifying with bcrypt 5.
 - **Publishing** the image and the distributions runs on manual dispatch only.
+- **The scheduler's memory check works outside containers on every platform.** It ran
+  Linux's `free` command, which macOS lacks, so it printed an error on every heartbeat
+  and never checked memory there; on Linux, `free -t` counted swap in the total. It reads
+  the machine's memory with psutil.
 
 #### R blocks
 
@@ -135,9 +139,15 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### SQL blocks
 
-- **PostgreSQL SQL blocks keep integers.** pandas read_sql turned integer columns with
-  NULLs into float64, so `9223372036854775807` became `9.223372036854776e18`. Integer
-  columns are nullable Int64; numeric and float columns are float64, as before.
+- **SQL blocks keep integers** on PostgreSQL, MySQL and DuckDB, in standard and raw SQL
+  blocks. pandas read_sql turned integer columns with NULLs into float64, so
+  `9223372036854775807` became `9.223372036854776e18`. Integer columns are nullable Int64,
+  or UInt64 for unsigned ones; the other columns keep read_sql's types, so numeric and
+  DECIMAL are float and MySQL TIMESTAMP is naive in the session time zone, as before.
+- **The tables Mage creates for `{{ df_1 }}` keep the frame's column names.** Names on the
+  reserved word list, such as `date`, `name` and `text`, were prefixed with an underscore,
+  so `SELECT date FROM {{ df_1 }}` failed. SQL blocks that used `_date` for a frame's
+  `date` column need `date`.
 - **Polars Int128 and UInt128 columns are written to PostgreSQL as numeric(39, 0)**. They
   were written as text.
 

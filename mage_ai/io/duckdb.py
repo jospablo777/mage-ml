@@ -90,10 +90,15 @@ class DuckDB(BaseSQL):
         verbose: bool = True,
         exact_types: bool = False,
         polars: bool = False,
+        nullable_integers: bool = False,
         **kwargs,
     ) -> Union[DataFrame, pl.DataFrame]:
         """
         Loads the result of a query.
+
+        nullable_integers=True returns read_sql's types, except that integer columns stay
+        integers: nullable Int64 or UInt64, and Python ints for HUGEINT and UHUGEINT.
+        read_sql turned integer columns with NULL into float64. SQL blocks load with it.
 
         By default the result goes through pandas.read_sql, as before. exact_types=True
         returns pyarrow-backed pandas columns built from DuckDB's Arrow result, which keep
@@ -104,6 +109,10 @@ class DuckDB(BaseSQL):
         result in columns instead of building Python rows: 0.04 s instead of 4.3 s for
         1,000,000 rows.
         """
+        if nullable_integers and not (exact_types or polars):
+            return self.__load_nullable_integers(
+                query_string, limit, display_query, verbose, kwargs.get('params') or None,
+            )
         if not (exact_types or polars):
             return super().load(
                 query_string,
@@ -151,6 +160,36 @@ class DuckDB(BaseSQL):
                 index=frame.index,
                 dtype=object,
             )
+        return frame
+
+    def __load_nullable_integers(
+        self,
+        query_string: str,
+        limit: int,
+        display_query: Union[str, None],
+        verbose: bool,
+        params,
+    ) -> DataFrame:
+        query = self._enforce_limit(self._clean_query(query_string), limit)
+        message = 'Loading data'
+        if verbose:
+            message += f' with query\n\n{display_query or query}\n\n'
+        with self.printer.print_msg(message):
+            relation = self.conn.sql(query, params=params)
+            names, kinds = relation.columns, [str(kind) for kind in relation.types]
+            rows = relation.fetchall()
+        # read_sql builds its frame this way from a DBAPI cursor.
+        frame = pd.DataFrame.from_records(rows, columns=names, coerce_float=True)
+        for position, kind in enumerate(kinds):
+            if kind in INTEGER_TYPES:
+                frame.isetitem(position, pd.array(
+                    [row[position] for row in rows],
+                    dtype='UInt64' if kind.startswith('U') else 'Int64',
+                ))
+            elif kind in ('HUGEINT', 'UHUGEINT'):
+                frame.isetitem(position, pd.Series(
+                    [row[position] for row in rows], index=frame.index, dtype=object,
+                ))
         return frame
 
     def table_exists(self, schema_name: str, table_name: str) -> bool:
@@ -486,6 +525,13 @@ def _intervals_for_polars(table: pa.Table) -> pa.Table:
             )
         table = table.set_column(index, field.name, column)
     return table
+
+
+# DuckDB's integer types that fit 64 bits.
+INTEGER_TYPES = {
+    'TINYINT', 'SMALLINT', 'INTEGER', 'BIGINT',
+    'UTINYINT', 'USMALLINT', 'UINTEGER', 'UBIGINT',
+}
 
 
 def _quote(name: str) -> str:

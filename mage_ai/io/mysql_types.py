@@ -138,3 +138,27 @@ def decimal_column_type(values: List[Optional[decimal.Decimal]]) -> Optional[str
     if data_type.precision > 65 or data_type.scale > 30:
         return None
     return f'DECIMAL({max(data_type.precision, 1)}, {data_type.scale})'
+
+
+def frame_with_nullable_integers(cursor):
+    """
+    A pandas frame from an executed cursor, as pandas read_sql builds it, except that
+    integer columns stay integers: nullable Int64, or UInt64 for unsigned columns. read_sql
+    turned integer columns with a NULL into float64, which rounds values above 2**53.
+    """
+    import pandas as pd
+
+    description = cursor.description or []
+    rows = cursor.fetchall()
+    names = [d[0] for d in description]
+    # read_sql builds its frame this way from a DBAPI cursor.
+    frame = pd.DataFrame.from_records(rows, columns=names, coerce_float=True)
+    for position, column in enumerate(description):
+        type_code, flags = column[1], column[7]
+        if type_code in INTEGER_TYPES or type_code in (FieldType.YEAR, FieldType.BIT):
+            unsigned = bool(flags & FieldFlag.UNSIGNED) or type_code == FieldType.BIT
+            frame.isetitem(position, pd.array(
+                [row[position] for row in rows],
+                dtype='UInt64' if unsigned else 'Int64',
+            ))
+    return frame

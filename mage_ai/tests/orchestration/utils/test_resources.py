@@ -1,9 +1,14 @@
-import os
-import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 from mage_ai.orchestration.utils.resources import get_memory
+
+MB = 1024 * 1024
+
+
+def virtual_memory(total_mb, available_mb):
+    """What psutil.virtual_memory returns, with the fields get_memory reads."""
+    return MagicMock(total=total_mb * MB, available=available_mb * MB)
 
 
 class TestGetMemory(unittest.TestCase):
@@ -19,13 +24,13 @@ class TestGetMemory(unittest.TestCase):
                 "/sys/fs/cgroup/memory/memory.usage_in_bytes",
                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"
             ]
-        
+
         mock_exists.side_effect = exists_side_effect
-        
+
         # Mock file reads: 1387 MB usage, 4768 MB limit (from the issue)
         usage_bytes = 1387 * 1024 * 1024
         limit_bytes = 4768 * 1024 * 1024
-        
+
         mock_file_handles = {
             "/sys/fs/cgroup/memory/memory.usage_in_bytes": MagicMock(
                 __enter__=lambda self: self,
@@ -38,15 +43,15 @@ class TestGetMemory(unittest.TestCase):
                 read=lambda: str(limit_bytes)
             ),
         }
-        
+
         def open_side_effect(path, mode='r'):
             return mock_file_handles.get(path)
-        
+
         mock_open.side_effect = open_side_effect
-        
+
         # Execute
         free_memory, used_memory, total_memory = get_memory()
-        
+
         # Assert
         self.assertAlmostEqual(used_memory, 1387.0, places=1)
         self.assertAlmostEqual(total_memory, 4768.0, places=1)
@@ -62,20 +67,20 @@ class TestGetMemory(unittest.TestCase):
                 "/sys/fs/cgroup/memory.current",
                 "/sys/fs/cgroup/memory.max"
             ]
-        
+
         mock_exists.side_effect = exists_side_effect
-        
+
         # Mock file reads
         usage_bytes = 1500 * 1024 * 1024
         limit_bytes = 5000 * 1024 * 1024
-        
+
         # Create mock read() return value with strip() method
         usage_read_value = MagicMock()
         usage_read_value.strip.return_value = str(usage_bytes)
-        
+
         limit_read_value = MagicMock()
         limit_read_value.strip.return_value = str(limit_bytes)
-        
+
         mock_file_handles = {
             "/sys/fs/cgroup/memory.current": MagicMock(
                 __enter__=lambda self: self,
@@ -88,15 +93,15 @@ class TestGetMemory(unittest.TestCase):
                 read=lambda: limit_read_value
             ),
         }
-        
+
         def open_side_effect(path, mode='r'):
             return mock_file_handles.get(path)
-        
+
         mock_open.side_effect = open_side_effect
-        
+
         # Execute
         free_memory, used_memory, total_memory = get_memory()
-        
+
         # Assert
         self.assertAlmostEqual(used_memory, 1500.0, places=1)
         self.assertAlmostEqual(total_memory, 5000.0, places=1)
@@ -112,18 +117,18 @@ class TestGetMemory(unittest.TestCase):
                 "/sys/fs/cgroup/memory.current",
                 "/sys/fs/cgroup/memory.max"
             ]
-        
+
         mock_exists.side_effect = exists_side_effect
-        
+
         usage_bytes = 1500 * 1024 * 1024
-        
+
         # Create mock read() return value with strip() method
         usage_read_value = MagicMock()
         usage_read_value.strip.return_value = str(usage_bytes)
-        
+
         limit_read_value = MagicMock()
         limit_read_value.strip.return_value = "max"
-        
+
         mock_file_handles = {
             "/sys/fs/cgroup/memory.current": MagicMock(
                 __enter__=lambda self: self,
@@ -136,47 +141,48 @@ class TestGetMemory(unittest.TestCase):
                 read=lambda: limit_read_value
             ),
         }
-        
+
         def open_side_effect(path, mode='r'):
             return mock_file_handles.get(path)
-        
+
         mock_open.side_effect = open_side_effect
-        
-        # With 'max' limit, should fall back to free command
-        # We'll mock subprocess as well
-        with patch('subprocess.check_output') as mock_subprocess:
-            mock_subprocess.return_value = b"Mem:     8000     4000     4000\nSwap:       0        0        0\nTotal:   8000     4000     4000"
-            
+
+        # With 'max' limit, should fall back to the machine's memory
+        with patch('psutil.virtual_memory', return_value=virtual_memory(8000, 4000)):
             free_memory, used_memory, total_memory = get_memory()
-            
-            # Should use free command fallback
+
+            # Should use the machine's memory
             self.assertEqual(total_memory, 8000.0)
             self.assertEqual(used_memory, 4000.0)
             self.assertEqual(free_memory, 4000.0)
 
     @patch('os.path.exists')
-    @patch('subprocess.check_output')
-    def test_get_memory_fallback_to_free(self, mock_subprocess, mock_exists):
-        """Test fallback to 'free' command when cgroup files don't exist."""
-        # Setup: no cgroup files exist
+    @patch('psutil.virtual_memory')
+    def test_get_memory_without_cgroups(self, mock_memory, mock_exists):
+        """
+        Without cgroup files, the machine's memory. The free command, used before, does
+        not exist on macOS, so the scheduler's memory check never ran there.
+        """
         mock_exists.return_value = False
-        
-        # Mock free command output
-        mock_subprocess.return_value = b"Mem:     4570     1921     2533\nSwap:       0        0        0\nTotal:   4570     1921     2533"
-        
-        # Execute
+        mock_memory.return_value = virtual_memory(4570, 2533)
+
         free_memory, used_memory, total_memory = get_memory()
-        
-        # Assert - values from the issue's screenshot
+
         self.assertEqual(total_memory, 4570.0)
-        self.assertEqual(used_memory, 1921.0)
+        self.assertEqual(used_memory, 2037.0)
         self.assertEqual(free_memory, 2533.0)
+
+    def test_get_memory_reads_this_machine(self):
+        free_memory, used_memory, total_memory = get_memory()
+
+        self.assertGreater(total_memory, 0)
+        self.assertAlmostEqual(free_memory + used_memory, total_memory)
 
     @patch('os.name', 'nt')
     def test_get_memory_windows(self):
         """Test that Windows returns None values."""
         free_memory, used_memory, total_memory = get_memory()
-        
+
         self.assertIsNone(free_memory)
         self.assertIsNone(used_memory)
         self.assertIsNone(total_memory)
@@ -191,20 +197,20 @@ class TestGetMemory(unittest.TestCase):
                 "/sys/fs/cgroup/memory/memory.usage_in_bytes",
                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"
             ]
-        
+
         mock_exists.side_effect = exists_side_effect
-        
+
         usage_bytes = 1500 * 1024 * 1024
         # Very large limit indicates no limit
         limit_bytes = 9223372036854771712
-        
+
         # Create mock read() return value with strip() method
         usage_read_value = MagicMock()
         usage_read_value.strip.return_value = str(usage_bytes)
-        
+
         limit_read_value = MagicMock()
         limit_read_value.strip.return_value = str(limit_bytes)
-        
+
         mock_file_handles = {
             "/sys/fs/cgroup/memory/memory.usage_in_bytes": MagicMock(
                 __enter__=lambda self: self,
@@ -217,19 +223,17 @@ class TestGetMemory(unittest.TestCase):
                 read=lambda: limit_read_value
             ),
         }
-        
+
         def open_side_effect(path, mode='r'):
             return mock_file_handles.get(path)
-        
+
         mock_open.side_effect = open_side_effect
-        
-        # With no real limit, should fall back to free command
-        with patch('subprocess.check_output') as mock_subprocess:
-            mock_subprocess.return_value = b"Mem:     8000     4000     4000\nSwap:       0        0        0\nTotal:   8000     4000     4000"
-            
+
+        # With no real limit, should fall back to the machine's memory
+        with patch('psutil.virtual_memory', return_value=virtual_memory(8000, 4000)):
             free_memory, used_memory, total_memory = get_memory()
-            
-            # Should use free command fallback
+
+            # Should use the machine's memory
             self.assertEqual(total_memory, 8000.0)
             self.assertEqual(used_memory, 4000.0)
             self.assertEqual(free_memory, 4000.0)

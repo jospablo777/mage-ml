@@ -1,0 +1,43 @@
+blocks:
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: mysql
+    data_provider_profile: mysql
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - mysql_sql_check
+  language: sql
+  name: mysql_sql_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: mysql_sql_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - mysql_sql_export
+  language: python
+  name: mysql_sql_check
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - mysql_sql_load
+  uuid: mysql_sql_check
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: mysql
+    data_provider_profile: mysql
+    data_provider_table: mysql_sql_dst
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks: []
+  language: sql
+  name: mysql_sql_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - mysql_sql_check
+  uuid: mysql_sql_export
+name: mysql_sql
+type: python
+uuid: mysql_sql

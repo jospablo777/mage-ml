@@ -1,5 +1,4 @@
 import os
-import subprocess
 from typing import Tuple
 
 import psutil
@@ -23,7 +22,7 @@ def get_memory() -> Tuple[float, float, float]:
     For containerized environments (e.g., Google Cloud Run), this reads from cgroup files
     which provide accurate container-specific memory limits and usage.
 
-    For non-containerized environments, falls back to the 'free' command.
+    For non-containerized environments, it reads the machine's memory with psutil.
 
     Returns:
         Tuple[float, float, float]: (free_memory, used_memory, total_memory) in MB
@@ -36,11 +35,11 @@ def get_memory() -> Tuple[float, float, float]:
     if os.name == 'nt':
         return free_memory, used_memory, total_memory
 
+    # Define MB conversion factor (1024 * 1024)
+    mb_factor = 1024 * 1024
+
     # Try to read from cgroup files first (for containerized environments)
     try:
-        # Define MB conversion factor (1024 * 1024)
-        mb_factor = 1024 * 1024
-
         # Try cgroup v1 paths first
         usage_path = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
         limit_path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
@@ -71,15 +70,15 @@ def get_memory() -> Tuple[float, float, float]:
             free_memory = total_memory - used_memory
             return free_memory, used_memory, total_memory
     except (FileNotFoundError, ValueError, PermissionError):
-        # Cgroup files not available or unreadable, will fall back to 'free' command
+        # Cgroup files not available or unreadable; the machine's memory is read below.
         pass
 
-    # Fallback to 'free' command for non-containerized environments
-    try:
-        output = subprocess.check_output('free -t -m', shell=True).decode('utf-8')
-        values = output.splitlines()[-1].split()[1:]
-        total_memory, used_memory, free_memory = map(float, values)
-    except Exception as err:
-        print(err)
+    # Outside containers, the machine's memory. The free command, used before, exists on
+    # Linux only, and its total counted swap. Used memory is what new allocations cannot
+    # get: the total less the available memory, which includes reclaimable caches.
+    memory = psutil.virtual_memory()
+    total_memory = memory.total / mb_factor
+    free_memory = memory.available / mb_factor
+    used_memory = total_memory - free_memory
 
     return free_memory, used_memory, total_memory

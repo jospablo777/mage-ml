@@ -146,6 +146,7 @@ class MySQL(BaseSQL):
         verbose: bool = True,
         exact_types: bool = False,
         polars: bool = False,
+        nullable_integers: bool = False,
         **kwargs,
     ) -> Union[DataFrame, pl.DataFrame]:
         """
@@ -158,6 +159,8 @@ class MySQL(BaseSQL):
                 integer columns with NULLs become float64, DECIMAL becomes float, and
                 TIMESTAMP is naive, in the session time zone.
             polars (bool): Return a Polars DataFrame with the same types.
+            nullable_integers (bool): read_sql's types, except that integer columns stay
+                integers, as nullable Int64 or UInt64. SQL blocks load with it.
             **kwargs: Passed to pandas read_sql. With exact_types or polars, only params
                 is used.
         """
@@ -174,6 +177,7 @@ class MySQL(BaseSQL):
                 verbose=verbose,
                 exact_types=exact_types,
                 polars=polars,
+                nullable_integers=nullable_integers,
                 **kwargs,
             )
         except Exception:
@@ -192,8 +196,22 @@ class MySQL(BaseSQL):
         verbose: bool,
         exact_types: bool,
         polars: bool,
+        nullable_integers: bool = False,
         **kwargs,
     ) -> Union[DataFrame, pl.DataFrame]:
+        if nullable_integers and not (exact_types or polars):
+            query = self._enforce_limit(self._clean_query(query_string), limit)
+
+            def __load_nullable():
+                with self.conn.cursor() as cursor:
+                    cursor.execute(query, kwargs.get('params'))
+                    return mysql_types.frame_with_nullable_integers(cursor)
+
+            if verbose:
+                message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+                with self.printer.print_msg(message):
+                    return __load_nullable()
+            return __load_nullable()
         if not (exact_types or polars):
             return super().load(
                 query_string,

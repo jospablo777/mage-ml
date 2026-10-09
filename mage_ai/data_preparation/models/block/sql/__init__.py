@@ -340,9 +340,11 @@ def execute_sql_code(
 
             if should_query:
                 return [
+                    # read_sql turned integer columns with NULLs into float64.
                     loader.load(
                         f'SELECT * FROM {schema}.{table_name}',
                         verbose=False,
+                        nullable_integers=True,
                     ),
                 ]
     elif DataSource.MSSQL.value == data_provider:
@@ -432,10 +434,12 @@ def execute_sql_code(
 
                 if should_query:
                     return [
+                        # read_sql turned integer columns with NULLs into float64.
                         loader.load(
                             f'SELECT * FROM {table_name}',
                             limit=limit,
                             verbose=False,
+                            nullable_integers=True,
                         ),
                     ]
     elif DataSource.POSTGRES.value == data_provider:
