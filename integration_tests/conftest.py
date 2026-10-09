@@ -402,3 +402,24 @@ def mage_clickhouse(clickhouse_settings, clickhouse_database):
     from mage_ai.io.clickhouse import ClickHouse
 
     return ClickHouse(database=clickhouse_database, verbose=False, **clickhouse_settings)
+
+
+@pytest.fixture(scope='session')
+def kafka_bootstrap():
+    server = os.getenv('MAGE_TEST_KAFKA_BOOTSTRAP')
+    if not server:
+        pytest.skip('Kafka is not configured: MAGE_TEST_KAFKA_BOOTSTRAP unset')
+    return server
+
+
+@pytest.fixture
+def kafka_topic(kafka_bootstrap):
+    """A topic with 2 partitions, used by one test and deleted after it."""
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(name, num_partitions=2, replication_factor=1)])
+    yield name
+    admin.delete_topics([name])
+    admin.close()

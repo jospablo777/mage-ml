@@ -30,7 +30,8 @@ class KafkaTests(TestCase):
             'test_topic',
             group_id='test_group',
             bootstrap_servers='test_server',
-            api_version='0.10.2',
+            # The broker's protocol version is detected.
+            api_version=None,
             auto_offset_reset='latest',
             max_partition_fetch_bytes=1048576,
             enable_auto_commit=False,
@@ -53,7 +54,8 @@ class KafkaTests(TestCase):
             'test_topic2',
             group_id='test_group',
             bootstrap_servers='test_server',
-            api_version='0.10.2',
+            # The broker's protocol version is detected.
+            api_version=None,
             auto_offset_reset='latest',
             max_partition_fetch_bytes=1048576,
             enable_auto_commit=False,

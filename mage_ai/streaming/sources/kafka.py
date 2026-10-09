@@ -49,7 +49,9 @@ class SSLConfig:
 class KafkaConfig(BaseConfig):
     bootstrap_server: str
     consumer_group: str
-    api_version: str = '0.10.2'
+    # None detects the broker's protocol version. 0.10.2, the default before, made every
+    # request time out against Kafka 4, which removed protocol versions older than 2.1.
+    api_version: str = None
     batch_size: int = DEFAULT_BATCH_SIZE
     timeout_ms: int = DEFAULT_TIMEOUT_MS
     auto_offset_reset: str = 'latest'
@@ -280,6 +282,9 @@ class KafkaSource(BaseSource):
             self.__print_message(message)
             message = self._convert_message(message)
             handler(message)
+            # Auto-commit is off and offsets were never committed here, so a restarted
+            # consumer group skipped or read again what came while it was down.
+            self.consumer.commit()
 
     async def read_async(self, handler: Callable):
         if self.config.offset:
@@ -289,6 +294,7 @@ class KafkaSource(BaseSource):
             self.__print_message(message)
             message = self._convert_message(message)
             await handler(message)
+            self.consumer.commit()
 
     def batch_read(self, handler: Callable):
         if self.config.offset:

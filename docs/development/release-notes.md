@@ -102,6 +102,18 @@ Each item says what changed, which pipelines it affects, and what to do.
   lists and dicts as JSON text.
 - Column and table names are quoted, so names with spaces or keywords work.
 
+#### Kafka
+
+- **The Kafka source and sink work with Kafka 4.** `api_version` defaulted to 0.10.2, so
+  every request timed out against Kafka 4, which removed the protocol versions older
+  than 2.1. It defaults to the broker's version; a set `api_version` is kept.
+- **The sink waits until Kafka has the messages.** `batch_write` returned with messages
+  in the producer's buffer, and the source then committed their offsets, so a crash lost
+  them; failed sends, such as a message over the size limit, went unnoticed. It flushes
+  and raises for a failed send. Dates and decimals in messages are written as JSON.
+- **The source commits offsets in single-message mode.** It never did, so a consumer
+  group that restarted skipped or read again what came while it was down.
+
 #### MongoDB
 
 - **Exports store Decimal, date, timedelta, NumPy arrays, sets and UUIDs**, which raised.
@@ -192,7 +204,7 @@ Each item says what changed, which pipelines it affects, and what to do.
   storage such as MinIO.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, MongoDB, ClickHouse, Redis, a REST API service, Feast, MLflow,
+  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, Redis, a REST API service, Feast, MLflow,
   DuckDB, S3 (MinIO), and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.

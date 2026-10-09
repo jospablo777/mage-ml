@@ -24,6 +24,7 @@ make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test-mysql       # MySQL only
 make -C integration_tests test-mongodb     # MongoDB only
 make -C integration_tests test-clickhouse  # ClickHouse only
+make -C integration_tests test-kafka       # Kafka only
 make -C integration_tests test-r           # R blocks, with R 4.6, rv and PostgreSQL
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
@@ -32,11 +33,12 @@ make -C integration_tests down             # stop the services and drop their da
 ```
 
 The services stay up between runs. PostgreSQL, MySQL, MongoDB and MinIO keep their data in memory, so `down`
-leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017 and 18123; set
+leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123 and 19092;
+set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
 `MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
-`MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT` or `MAGE_TEST_CLICKHOUSE_PORT` to change
-them. `make up` rebuilds the
+`MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT`, `MAGE_TEST_CLICKHOUSE_PORT` or
+`MAGE_TEST_KAFKA_PORT` to change them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -48,7 +50,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines |
@@ -67,6 +69,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
 | `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads, and a ClickHouse SQL block between Python blocks |
+| `kafka/` | Mage's Kafka sink and source with the default settings, batches with every value type, acknowledged and failed sends, committed offsets in single-message mode, and metadata |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
 | `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, RPostgres, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |

@@ -1,13 +1,18 @@
-import json
 import time
 from dataclasses import dataclass
 from typing import Dict, List
 
+import simplejson
 from kafka import KafkaProducer
+
 from mage_ai.shared.config import BaseConfig
 from mage_ai.shared.enum import StrEnum
+from mage_ai.shared.parsers import encode_complex
 from mage_ai.streaming.constants import DEFAULT_BATCH_SIZE, DEFAULT_TIMEOUT_MS
 from mage_ai.streaming.sinks.base import BaseSink
+
+# Seconds a send waits for Kafka to acknowledge it.
+SEND_TIMEOUT_SECONDS = 60
 
 
 class SecurityProtocol(StrEnum):
@@ -41,7 +46,9 @@ class SSLConfig:
 class KafkaConfig(BaseConfig):
     bootstrap_server: str
     topic: str
-    api_version: str = '0.10.2'
+    # None detects the broker's protocol version. 0.10.2, the default before, made every
+    # request time out against Kafka 4, which removed protocol versions older than 2.1.
+    api_version: str = None
     security_protocol: SecurityProtocol = None
     ssl_config: SSLConfig = None
     sasl_config: SASLConfig = None
@@ -76,7 +83,10 @@ class KafkaSink(BaseSink):
         kwargs = dict(
             bootstrap_servers=self.config.bootstrap_server,
             api_version=self.config.api_version,
-            value_serializer=lambda x: json.dumps(x).encode('utf-8'),
+            # Dates, decimals and other values json cannot write raised in send.
+            value_serializer=lambda x: simplejson.dumps(
+                x, default=encode_complex, ignore_nan=True,
+            ).encode('utf-8'),
             key_serializer=lambda x: x.encode('utf-8') if x else None,
             batch_size=batch_size,
             linger_ms=timeout_ms,
@@ -113,9 +123,7 @@ class KafkaSink(BaseSink):
         self.producer = KafkaProducer(**kwargs)
         self._print('Finish initializing producer.')
 
-    def write(self, message: Dict):
-        # self._print(f'Ingest message {message}, time={time.time()}')
-
+    def _send(self, message: Dict):
         if isinstance(message, dict):
             data = message.get('data', message)
             metadata = message.get('metadata', {})
@@ -123,18 +131,29 @@ class KafkaSink(BaseSink):
             data = message
             metadata = {}
 
-        self.producer.send(
+        return self.producer.send(
             topic=metadata.get('dest_topic', self.config.topic),
             value=data,
             key=metadata.get('key'),
             timestamp_ms=metadata.get('time'),
         )
 
+    def write(self, message: Dict):
+        """Send a message and wait until Kafka has it; a failed send raises."""
+        self._send(message).get(timeout=SEND_TIMEOUT_SECONDS)
+
     def batch_write(self, messages: List[Dict]):
+        """
+        Send messages and wait until Kafka has every one; a failed send raises. Messages
+        stayed in the producer's buffer, and the source committed their offsets once
+        this returned, so a crash lost them; failed sends went unnoticed.
+        """
         if not messages:
             return
         self._print(
             f'Batch ingest {len(messages)} messages, time={time.time()}. Sample: {messages[0]}'
         )
-        for message in messages:
-            self.write(message)
+        futures = [self._send(message) for message in messages]
+        self.producer.flush(timeout=SEND_TIMEOUT_SECONDS)
+        for future in futures:
+            future.get(timeout=SEND_TIMEOUT_SECONDS)
