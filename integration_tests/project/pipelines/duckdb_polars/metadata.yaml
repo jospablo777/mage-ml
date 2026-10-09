@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - duckdb_polars_transform
+  language: python
+  name: duckdb_polars_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: duckdb_polars_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - duckdb_polars_export
+  language: python
+  name: duckdb_polars_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - duckdb_polars_load
+  uuid: duckdb_polars_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: duckdb_polars_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - duckdb_polars_transform
+  uuid: duckdb_polars_export
+name: duckdb_polars
+type: python
+uuid: duckdb_polars

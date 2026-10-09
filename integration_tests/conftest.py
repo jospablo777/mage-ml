@@ -160,3 +160,20 @@ def mlflow_url():
         pytest.skip('MLflow is not configured: MAGE_TEST_MLFLOW_URL unset')
     os.environ.setdefault('MLFLOW_DISABLE_AGENT_HINT', '1')
     return url.rstrip('/')
+
+
+@pytest.fixture
+def duckdb_path(tmp_path):
+    return str(tmp_path / 'test.duckdb')
+
+
+@pytest.fixture
+def duckdb_client(duckdb_path):
+    """Mage's DuckDB client on a new database file holding the source table src."""
+    from integration_tests.data import duckdb_dataset
+    from mage_ai.io.duckdb import DuckDB
+
+    client = DuckDB(database=duckdb_path, verbose=False)
+    duckdb_dataset.create_source_table(client.conn)
+    yield client
+    client.close()

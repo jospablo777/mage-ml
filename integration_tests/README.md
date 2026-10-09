@@ -15,6 +15,7 @@ make -C integration_tests test-redis       # Redis only
 make -C integration_tests test-api         # REST API only
 make -C integration_tests test-feast       # Feast only
 make -C integration_tests test-mlflow      # MLflow only
+make -C integration_tests test-duckdb      # DuckDB only, no service needed
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
 make -C integration_tests down             # stop the services and drop their data
 ```
@@ -45,8 +46,10 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `feast/` | Online reads, pushes, writes, materialization and point-in-time retrieval, and Mage pipelines that pull features and write them back |
 | `services/mlflow/` | MLflow 3.17 tracking server with PostgreSQL as backend store and proxied artifacts, seeded with an experiment, two runs, artifacts of several types, and a model registered as a cloudpickle version and a skops version with aliases |
 | `mlflow/` | Experiments, runs, metric histories, registry and aliases, artifact listings and downloads over HTTP and with the client, models loaded both ways, and a Mage pipeline that logs predictions back |
+| `data/duckdb_dataset.py` | DuckDB source table with one column per DuckDB type, limits and special values, and the SQL comparison for DuckDB |
+| `duckdb/` | Loads in each mode, exports to new and existing tables, conflicts, names, database files and locking, reading Parquet, CSV and JSON, and Mage pipelines with Python and SQL blocks |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
-| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/` and `mlflow/` tests run |
+| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/` and `duckdb/` tests run |
 
 ## How tables are compared
 

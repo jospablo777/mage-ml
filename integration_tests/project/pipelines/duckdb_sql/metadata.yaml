@@ -1,0 +1,38 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - duckdb_sql_transform
+  language: python
+  name: duckdb_polars_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: duckdb_polars_load
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: duckdb
+    data_provider_profile: duckdb
+    data_provider_schema: main
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - duckdb_sql_check
+  language: sql
+  name: duckdb_sql_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - duckdb_polars_load
+  uuid: duckdb_sql_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: duckdb_sql_check
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - duckdb_sql_transform
+  uuid: duckdb_sql_check
+name: duckdb_sql
+type: python
+uuid: duckdb_sql

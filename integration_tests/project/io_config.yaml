@@ -16,3 +16,7 @@ feast:
   POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
   POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
   POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+# The DuckDB database file of the DuckDB pipeline tests.
+duckdb:
+  DUCKDB_DATABASE: "{{ env_var('MAGE_TEST_DUCKDB_DATABASE') }}"
+  DUCKDB_SCHEMA: main

@@ -28,7 +28,7 @@ export MAGE_TEST_MLFLOW_URL ?= http://127.0.0.1:$(MAGE_TEST_MLFLOW_PORT)
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -53,6 +53,10 @@ test-feast: up
 
 test-mlflow: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mlflow $(PYTEST_ARGS)
+
+# DuckDB runs in process; these tests need no service.
+test-duckdb:
+	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up
