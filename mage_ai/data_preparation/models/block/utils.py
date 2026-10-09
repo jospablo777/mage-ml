@@ -13,7 +13,9 @@ from mage_ai.data_preparation.models.block.dynamic import (
     all_variable_uuids,
     reduce_output_from_block,
 )
-from mage_ai.data_preparation.models.block.dynamic.utils import DynamicBlockFlag
+from mage_ai.data_preparation.models.block.dynamic.utils import (
+    DynamicBlockFlag,
+)
 from mage_ai.data_preparation.models.block.dynamic.utils import (
     build_dynamic_block_uuid as build_dynamic_block_uuid_original,
 )
@@ -861,7 +863,9 @@ def serialize_output(
             data = dict(
                 sample_data=dict(
                     columns=columns_to_display,
-                    rows=json.loads(data[columns_to_display].to_json(orient='split'))['data'],
+                    rows=json.loads(data[columns_to_display].to_json(
+                        orient='split', date_format='iso', date_unit='us',
+                    ))['data'],
                 ),
                 shape=[row_count, column_count],
                 type=DataType.TABLE,
@@ -899,7 +903,9 @@ df = get_variable('{block.pipeline.uuid}', '{block.uuid}', 'df')
         data = dict(
             sample_data=dict(
                 columns=columns_to_display,
-                rows=json.loads(df[columns_to_display].to_json(orient='split'))['data'],
+                rows=json.loads(df[columns_to_display].to_json(
+                    orient='split', date_format='iso', date_unit='us',
+                ))['data'],
             ),
             type=DataType.TABLE,
             variable_uuid=variable_uuid,

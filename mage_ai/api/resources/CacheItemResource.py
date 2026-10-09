@@ -97,7 +97,9 @@ class CacheItemResource(AsyncBaseResource):
                         sample_data=dict(
                             columns=columns,
                             rows=json.loads(
-                                df[columns].to_json(orient='split'),
+                                df[columns].to_json(
+                                    orient='split', date_format='iso', date_unit='us',
+                                ),
                             )['data']
                         ),
                         shape=[len(df.index), len(columns)],

@@ -214,7 +214,7 @@ class Source:
 
                         output = {
                             'stream_id': stream.tap_stream_id,
-                            'sample_data': df.to_json(),
+                            'sample_data': df.to_json(date_format='iso', date_unit='us'),
                             'type': TYPE_SAMPLE_DATA,
                         }
 

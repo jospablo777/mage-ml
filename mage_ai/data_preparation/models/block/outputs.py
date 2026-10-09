@@ -264,7 +264,9 @@ def format_output_data(
                 sample_data=dict(
                     columns=columns_to_display,
                     rows=json.loads(
-                        data[columns_to_display].to_json(orient='split', date_format='iso'),
+                        data[columns_to_display].to_json(
+                            orient='split', date_format='iso', date_unit='us',
+                        ),
                     )['data'],
                 ),
                 shape=[row_count, column_count],
@@ -436,7 +438,9 @@ df = get_variable('{block.pipeline.uuid}', '{block.uuid}', 'df')
             sample_data=dict(
                 columns=columns_to_display,
                 rows=json.loads(
-                    df[columns_to_display].to_json(orient='split', date_format='iso'),
+                    df[columns_to_display].to_json(
+                        orient='split', date_format='iso', date_unit='us',
+                    ),
                 )['data'],
             ),
             type=DataType.TABLE,

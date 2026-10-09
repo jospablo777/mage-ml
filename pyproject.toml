@@ -266,6 +266,13 @@ testpaths = ["mage_ai/tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*", "*Test"]
 addopts = "--import-mode=importlib"
+# Deprecations fail the tests: FutureWarning from any library, and DeprecationWarning
+# raised from Mage code, which includes pandas' Pandas4Warning.
+filterwarnings = [
+  "error::FutureWarning",
+  "error::DeprecationWarning:mage_ai",
+  "error::DeprecationWarning:mage_integrations",
+]
 
 [tool.isort]
 profile = "black"

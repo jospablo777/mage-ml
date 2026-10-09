@@ -228,6 +228,7 @@ def __custom_output():
             _rows = simplejson.loads(
                 _sample[_columns].to_json(
                     date_format='iso',
+                    date_unit='us',
                     default_handler=str,
                     orient='split',
                 )

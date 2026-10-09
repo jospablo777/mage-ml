@@ -244,7 +244,7 @@ def transform_dataframe_for_display(
 
         data = dict(
             columns=columns_to_display,
-            rows=json.loads(df.to_json(orient='split'))['data'],
+            rows=json.loads(df.to_json(orient='split', date_format='iso', date_unit='us'))['data'],
             shape=[row_count, column_count],
         )
     else:
