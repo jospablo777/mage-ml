@@ -1,17 +1,11 @@
-name: Build and publish Docker image
+name: Build Docker image
 
-# Nothing is published automatically. Run this by hand when an image should go
-# out, and restore the tag trigger here to make it automatic again:
-#   push:
-#     tags:
-#       - "v*"
+# Builds the image and pushes it nowhere: no registry login, no push. Publishing is
+# off until an account and registry are chosen. To publish, add a login step, set
+# push: true and give the job packages: write.
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Image tag'
-        required: true
-        default: latest
       platforms:
         description: 'Target platforms'
         required: true
@@ -19,35 +13,14 @@ on:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
 
 jobs:
-  push_to_registry:
-    name: Push Docker image to the GitHub container registry
+  build:
+    name: Build the Docker image without pushing it
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repo
         uses: actions/checkout@v5
-
-      - name: Log in to the container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       # arm64 is emulated on GitHub runners and takes hours for this image. Pass it
       # through the workflow input only when the build has time to finish.
@@ -58,13 +31,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ github.event.inputs.platforms || 'linux/amd64' }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          tags: mage-ml:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

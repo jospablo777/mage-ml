@@ -425,6 +425,12 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
                 if lsn is None:
                     lsn = self.__get_current_lsn(cur)
             postgres_connection.close_connection(connection)
+            # A bookmark is the LSN of a change that was read, and the next run skips the
+            # changes at or before it. The confirmed LSN, like the insert LSN, is where
+            # the next change can start: on an idle server the first change after the
+            # initial sync started there and was never read. WAL records are 8-byte
+            # aligned, so none starts at the byte before.
+            lsn -= 1
 
             state = singer.write_bookmark(
                 {},

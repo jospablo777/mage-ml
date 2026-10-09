@@ -23,6 +23,9 @@ class JobManager:
     def clean_up_jobs(self):
         self.queue.clean_up_jobs()
 
+    def jobs_finished(self) -> bool:
+        return self.queue.jobs_finished()
+
     def has_block_run_job(
         self,
         block_run_id: int,

@@ -27,6 +27,18 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The notebook preview of a Polars output holds a sample.** Every row was converted to
   JSON for it. A Duration column failed the preview, and so did bytes that are not UTF-8,
   in Polars and pandas outputs; durations show as ISO 8601 and bytes as hex.
+- **Sparse matrices inside list and dict outputs read back.** They were stored as a dense
+  table, and reading the output failed with `scipy.sparse does not support dtype
+  object`. They are stored as npz; outputs written the old way read as before.
+- **Blocks without tests no longer read their output back** after writing it. The whole
+  output was loaded again for tests that did not exist.
+- **With `cache_block_output_in_memory`, an upstream output that is not in the cache is
+  read from storage.** In a resumed run, the blocks that completed before were missing
+  from the cache, and their downstream blocks received no input instead of an error.
+- **Block tests run on the output with `cache_block_output_in_memory`.** They received the
+  result dict's key, `'output'`, and every block with a `@test` function failed.
+- The async write of list and dict outputs that hold objects, such as frames or models,
+  raised `AttributeError`: it called a misspelled method.
 - **pandas and Polars dtypes are kept** across blocks: nullable integers, categoricals,
   non-string column labels, MultiIndex columns, decimals, UUIDs, bytes and values inside
   dicts and lists. Outputs written by earlier versions read as before.
@@ -123,6 +135,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Streaming pipelines
 
+- **Messages are copied only for blocks that share them.** Every transformer and sink got
+  a deep copy of each batch, which cost about 4 ms per 1000 messages per block, more
+  than most transformers. When a block has several downstream blocks, all but the last
+  get a copy; the last one, and the only one in a chain, gets the messages in a list of
+  its own. A block that changes its messages in place still changes no other block's.
 - **Execute pipeline works on macOS.** The notebook runs a pipeline in a process started
   with spawn, macOS's default. That process imported the scheduler, which started a
   multiprocessing Manager while the process was starting, and it died. The scheduler
@@ -222,6 +239,10 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### PostgreSQL change data capture (LOG_BASED replication)
 
+- **The first change after the initial sync is read.** The initial sync bookmarked the
+  slot's confirmed LSN, where the next change can start, and the next run skips changes
+  at or before the bookmark. On an idle server that change was lost. The bookmark is
+  the byte before.
 - **Changes reach the destination with their types.** Log values were text, so ids
   became strings and arrays failed the destination; they were matched to the columns of
   information_schema, in no set order. Values are matched by the names in the log and
@@ -283,6 +304,15 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Runtime
 
+- **Each job starts one worker process.** The worker pool started workers while the queue
+  was not empty, and a worker took its job only after it started, seconds later with
+  spawn (macOS, Linux from Python 3.14). Every block run started up to 20 processes,
+  the queue's concurrency, that each loaded Mage (about 370 MB) and exited. The pool
+  takes each job from the queue and starts one worker for it.
+- **Downstream block runs start when their upstream finishes.** They waited for the next
+  scheduler run, up to `SCHEDULER_TRIGGER_INTERVAL` (10 seconds). The scheduler runs
+  again when a job finishes, at most once a second. A trigger run of 5 blocks on 3
+  million rows took 56 seconds and takes 33.
 - **Block runs execute with spawn and forkserver.** With Redis configured, the job queue's
   worker pool failed to start on macOS and Windows, and would on Linux from Python 3.14,
   so block runs stayed queued. Races in the queue that dropped new jobs, or left them
@@ -322,6 +352,19 @@ Each item says what changed, which pipelines it affects, and what to do.
   `export_data()` still run.
 - The Docker image installs R 4.6 from CRAN and rv 0.20, in place of Debian's R with
   pacman and renv.
+- **R environments install on Linux arm64 and other platforms without binaries.** The
+  Docker image lacked the libraries that source builds need, and the tidyverse's `fs`
+  failed without libuv; arrow built without S3. On Debian and Ubuntu, `mage r setup`
+  prints the `apt-get install` command for the missing libraries.
+- **New R environments hold DBI, RPostgres, RMariaDB, duckdb, RSQLite and httr2** with
+  the tidyverse, for the R block templates; the first `mage r init` installs more. On
+  macOS, RMariaDB comes from CRAN, since Posit Package Manager has no binary for R 4.6.
+- **The block menus list SQL and R first.** R is a submenu with the base block and the R
+  templates; the "R block" item of the Python list is gone. Submenus that would cross the
+  right edge of the editor open to the left.
+- Block templates read from a file end with a newline.
+- The SQLite exporter template creates the database's directory; SQLite does not, and
+  the export failed with `unable to open database file`.
 
 #### SQL blocks
 
@@ -348,6 +391,17 @@ Each item says what changed, which pipelines it affects, and what to do.
   `io_config.yaml`. `mage r init`, `mage r sync` and `mage r status` manage the R
   environment.
 - Extra: `pointblank`, for data validation in `@test` functions.
+- R block templates in the block menus: loaders and exporters for local files, S3,
+  APIs, PostgreSQL, MySQL, DuckDB and SQLite, and transformers that clean, aggregate,
+  join and reshape.
+- mageml `read_file`, `write_file`, `read_s3`, `write_s3` and `s3_filesystem`: CSV, TSV,
+  Parquet, Feather, JSON, NDJSON and RDS files, locally and on S3 with the `AWS_*`
+  settings of an `io_config.yaml` profile.
+- R versions with rig: Mage runs the Rscript of the R version the rv environment names,
+  from `PATH` or from the versions rig installed. `mage r setup` prints what is missing
+  and how to install it; `mage r init --install-r` installs the R version with rig.
+- `mage-ml[r]` extra. R and rv are not Python packages; it documents the setup that
+  `mage r setup` checks.
 - `load(exact_types=True)` and `load(polars=True)` on the PostgreSQL, MySQL and DuckDB
   clients and on the S3 and other file clients. They keep integers with nulls, decimals,
   unsigned and 128-bit integers, nested values and zoned timestamps. The default load is
@@ -363,6 +417,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   pipelines run from triggers and from the notebook, and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
+
+### CI
+
+- The Docker image workflow builds the image and pushes it nowhere. It used to log in
+  to the GitHub container registry and push when run by hand.
 
 ### Upstream issues and workarounds
 

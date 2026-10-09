@@ -188,3 +188,74 @@ class ProcessQueueLivenessTests(TestCase):
         self.queue.stop()
 
         self.assertIsNone(self.queue.redis_client.get(self.queue.client_id))
+
+
+
+class WorkerPoolTests(TestCase):
+    def run_pool(self, jobs, size):
+        """
+        Runs the pool with fake workers that stay alive for two pool loops; returns the
+        jobs started and the pool size at each loop.
+        """
+        import queue as queue_module
+
+        from mage_ai.orchestration.queue import process_queue
+
+        started = []
+
+        class FakeWorker:
+            def __init__(self, job, job_dict):
+                self.job = job
+                self.checks = 0
+
+            def start(self):
+                started.append(self.job[0])
+
+            def is_alive(self):
+                self.checks += 1
+                return self.checks <= 2
+
+        queue = queue_module.Queue()
+        for job_id in jobs:
+            queue.put([job_id, run_block, (), {}])
+        with patch.object(process_queue, 'Worker', FakeWorker), \
+                patch.object(process_queue.time, 'sleep'), \
+                patch('builtins.print') as printed:
+            process_queue.poll_job_and_execute(queue, size, {}, None, None)
+        sizes = [
+            int(call.args[0].rsplit(': ', 1)[1]) for call in printed.call_args_list
+            if 'Worker pool size' in str(call.args[0])
+        ]
+        return started, sizes
+
+    def test_each_job_starts_one_worker(self):
+        """Workers took jobs only after they started, so a job started `size` of them."""
+        started, _ = self.run_pool(['a'], size=20)
+
+        self.assertEqual(started, ['a'])
+
+    def test_the_pool_runs_every_job_with_at_most_size_workers(self):
+        jobs = [f'job_{i}' for i in range(5)]
+
+        started, sizes = self.run_pool(jobs, size=2)
+
+        self.assertEqual(started, jobs)
+        self.assertEqual(max(sizes), 2)
+
+
+class JobsFinishedTests(TestCase):
+    def setUp(self):
+        self.queue = ProcessQueue(queue_config=QueueConfig.load(config=dict(concurrency=2)))
+        self.queue.start()
+
+    def test_a_completed_job_counts_once_it_is_cleaned_up(self):
+        self.assertFalse(self.queue.jobs_finished())
+        self.queue.job_dict['block_run_1'] = JobStatus.COMPLETED
+        self.assertTrue(self.queue.jobs_finished())
+
+        # Removed by clean_up_jobs, as at the end of a scheduler run: the next wait
+        # still starts early, since that run may have missed it.
+        self.queue.clean_up_jobs()
+        self.assertNotIn('block_run_1', self.queue.job_dict)
+        self.assertTrue(self.queue.jobs_finished())
+        self.assertFalse(self.queue.jobs_finished())

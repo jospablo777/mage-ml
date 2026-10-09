@@ -99,6 +99,34 @@ def remove_duplicate_rows(df):
         # self.assertTrue(len(analysis['statistics']) > 0)
         # self.assertTrue(len(analysis['insights']) > 0)
 
+    def test_run_tests_reads_the_outputs_only_for_test_functions(self):
+        pipeline = Pipeline.create('run tests pipeline', repo_path=self.repo_path)
+        block = Block.create('loader_tests', 'data_loader', self.repo_path, pipeline=pipeline)
+        loader = """import pandas as pd
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+@data_loader
+def load_data():
+    return pd.DataFrame({'col1': [1, 2]})
+"""
+        with open(block.file_path, 'w') as file:
+            file.write(loader)
+        block.execute_sync()
+
+        with patch.object(Block, 'get_raw_outputs', wraps=block.get_raw_outputs) as read:
+            block.run_tests()
+            # No test functions: the output is not read back from disk.
+            read.assert_not_called()
+
+            with open(block.file_path, 'w') as file:
+                file.write(loader + """
+@test
+def test_rows(df):
+    assert len(df) == 2
+""")
+            block.run_tests()
+            read.assert_called_once()
+
     def test_execute_with_preprocessers(self):
         pipeline = Pipeline.create(
             'test pipeline preprocessers',

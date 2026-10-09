@@ -244,6 +244,17 @@ def test_value_types(postgres_settings, pg, schema, cdc, tmp_path):
     """The log has values as text; records carry the types of the columns."""
     syncs = Syncs(postgres_settings, schema, cdc, tmp_path)
     syncs.sync()
+    # The next change can start at the slot's confirmed LSN, as it does on an idle
+    # server; the bookmark must be before it, or that change is skipped.
+    with pg.cursor() as cursor:
+        cursor.execute(
+            'SELECT confirmed_flush_lsn - %s::pg_lsn FROM pg_replication_slots '
+            'WHERE slot_name = %s',
+            ('0/0', cdc['slot']),
+        )
+        confirmed = int(cursor.fetchone()[0])
+    pg.rollback()
+    assert syncs.state['bookmarks']['events']['lsn'] == confirmed - 1
     execute(
         pg,
         f"INSERT INTO {schema}.events VALUES (7, 'seven', 7.25, true, "

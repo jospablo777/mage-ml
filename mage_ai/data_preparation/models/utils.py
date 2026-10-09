@@ -27,9 +27,11 @@ from mage_ai.shared.hash import unflatten_dict
 from mage_ai.shared.outputs import load_custom_object, save_custom_object
 from mage_ai.shared.parsers import (
     convert_matrix_to_dataframe,
+    deserialize_matrix,
     encode_complex,
     object_to_dict,
     object_to_uuid,
+    serialize_matrix,
 )
 
 MAX_PARTITION_BYTE_SIZE = 100 * 1024 * 1024
@@ -702,7 +704,12 @@ def serialize_complex(
                     os.makedirs(os.path.dirname(full_save_path), exist_ok=True)
                     _, full_save_path = save_custom_object(value, full_save_path, variable_type)
 
-            serialized_value, _ = prepare_data_for_output(value)
+            if variable_type == VariableType.MATRIX_SPARSE and save_path:
+                # Stored as npz; prepare_data_for_output makes a dense table for previews,
+                # which a sparse matrix cannot be built from again.
+                serialized_value = serialize_matrix(value)
+            else:
+                serialized_value, _ = prepare_data_for_output(value)
 
         if current_path:
             update_column_types(
@@ -757,6 +764,13 @@ def construct_value(type_info: Dict[str, Union[str, Optional[str]]], value: Any)
         return pd.Timestamp(value)
     elif 'datetime' == type_name:
         return datetime.fromisoformat(value)
+    elif type_info.get('variable_type') == VariableType.MATRIX_SPARSE.value:
+        from scipy.sparse import csr_matrix
+
+        if isinstance(value, dict) and '__data__' in value:
+            return deserialize_matrix(value)
+        # Written before matrices were stored as npz: the rows of the dense table.
+        return csr_matrix(pd.DataFrame(value).to_numpy())
     elif 'ndarray' == type_name:
         return np.array(value)
     elif 'DataFrame' == type_name and not isinstance(value, str):

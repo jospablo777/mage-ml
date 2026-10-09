@@ -23,6 +23,18 @@ from mage_ai.shared.retry import retry
 from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
+def copy_messages(data):
+    """A deep copy of a batch; items that cannot be deep copied are copied shallowly."""
+    if data is None:
+        return data
+    if type(data) is list:
+        return [copy_messages(item) for item in data]
+    try:
+        return copy.deepcopy(data)
+    except Exception:
+        return copy.copy(data)
+
+
 class StreamingPipelineExecutor(PipelineExecutor):
     def __init__(self, pipeline: Pipeline, **kwargs):
         super().__init__(pipeline, **kwargs)
@@ -184,26 +196,25 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     ),
                 )
 
-        def __deepcopy(data):
-            if data is None:
-                return data
-            if type(data) is list:
-                data_copy = []
-                for item in data:
-                    data_copy.append(__deepcopy(item))
-                return data_copy
-            try:
-                return copy.deepcopy(data)
-            except Exception:
-                return copy.copy(data)
-
         def handle_batch_events_recursively(curr_block, outputs_by_block: Dict, **kwargs):
             curr_block_output = outputs_by_block[curr_block.uuid]
-            for downstream_block in curr_block.downstream_blocks:
+            downstream_blocks = curr_block.downstream_blocks
+            for index, downstream_block in enumerate(downstream_blocks):
+                # Each block but the last gets a copy, so that one that changes the
+                # messages does not change those of the others. The last one gets them
+                # as they are, in a list of its own: the source can read its list after
+                # the handler, as RabbitMQ does to acknowledge the messages. Copying for
+                # every block cost more than most transformers.
+                if index < len(downstream_blocks) - 1:
+                    data = copy_messages(curr_block_output)
+                elif type(curr_block_output) is list:
+                    data = list(curr_block_output)
+                else:
+                    data = curr_block_output
                 if downstream_block.type == BlockType.TRANSFORMER:
                     execute_block_kwargs = dict(
                         global_vars=kwargs,
-                        input_args=[__deepcopy(curr_block_output)],
+                        input_args=[data],
                         logger=self.logger,
                     )
                     if build_block_output_stdout:
@@ -214,8 +225,7 @@ class StreamingPipelineExecutor(PipelineExecutor):
                             **execute_block_kwargs,
                     )['output']
                 elif downstream_block.type == BlockType.DATA_EXPORTER:
-                    sinks_by_uuid[downstream_block.uuid].batch_write(
-                        __deepcopy(curr_block_output))
+                    sinks_by_uuid[downstream_block.uuid].batch_write(data)
                 if downstream_block.downstream_blocks:
                     handle_batch_events_recursively(
                         downstream_block,

@@ -983,7 +983,7 @@ class Variable:
                     VariableType.DICTIONARY_COMPLEX == self.variable_type
                     or VariableType.LIST_COMPLEX == self.variable_type
                 ):
-                    data = await self.__save_complex_object_asycn(data)
+                    data = await self.__save_complex_object_async(data)
                 else:
                     data = self.__should_save_object(data)
                 await self.__write_json_async(data)

@@ -462,6 +462,50 @@ class VariableTest(DBTestCase):
             ) as f:
                 self.assertEqual(json.load(f)['original_row_count'], row_count)
 
+    def test_write_data_async_for_list_complex(self):
+        """The async write of complex lists called a misspelled method and raised."""
+        import asyncio
+
+        with patch('mage_ai.data.models.manager.DataManager.writeable', return_value=False):
+            data = build_list_complex()
+            variable_type = infer_variable_type(data)[0]
+            self.assertEqual(variable_type, VariableType.LIST_COMPLEX)
+            written = {}
+            for uuid, asynchronous in [('var_sync', False), ('var_async', True)]:
+                variable = Variable(
+                    uuid, self.pipeline.dir_path, 'block_async', variable_type=variable_type,
+                )
+                if asynchronous:
+                    asyncio.run(variable.write_data_async(data))
+                else:
+                    variable.write_data(data)
+                written[uuid] = sorted(os.listdir(variable.variable_path))
+
+            # The same files as the sync write, which read back the same.
+            self.assertEqual(written['var_async'], written['var_sync'])
+            read = Variable('var_async', self.pipeline.dir_path, 'block_async').read_data()
+            expected = Variable('var_sync', self.pipeline.dir_path, 'block_async').read_data()
+            self.assertEqual(repr(read), repr(expected))
+            # The sparse matrix in the list comes back sparse, with its values.
+            self.assertEqual(type(read[-1]), type(data[-1]))
+            self.assertEqual((read[-1] != data[-1]).nnz, 0)
+
+    def test_sparse_matrix_in_a_list_written_as_a_dense_table(self):
+        """Outputs written before matrices were stored as npz still read."""
+        from mage_ai.data_preparation.models.utils import construct_value
+
+        matrix = build_matrix_sparse()
+        rows = pd.DataFrame(
+            matrix.toarray(), columns=[str(i) for i in range(matrix.shape[1])],
+        ).to_dict('records')
+
+        value = construct_value(
+            dict(name='csr_matrix', module='scipy.sparse._csr', variable_type='matrix_sparse'),
+            rows,
+        )
+
+        self.assertEqual((value != matrix).nnz, 0)
+
     def __create_pipeline(self, name):
         pipeline = Pipeline.create(
             name,

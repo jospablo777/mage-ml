@@ -15,6 +15,10 @@ class Queue(ABC):
     def has_job(self, job_id: str, logger=None):
         pass
 
+    def jobs_finished(self) -> bool:
+        """Whether a job finished since the last call."""
+        return False
+
     @abstractmethod
     def kill_job(self, job_id: str):
         pass

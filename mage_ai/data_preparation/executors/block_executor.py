@@ -1187,13 +1187,18 @@ class BlockExecutor:
             **extra_options,
         )
 
+        # execute_sync returns dict(output=[...]); tests take the outputs as arguments.
+        outputs = None
+        if cache_block_output_in_memory:
+            outputs = (result.get('output') if isinstance(result, dict) else result) or []
+
         if BlockType.DBT == self.block.type:
             self.block.run_tests(
                 block=self.block,
                 global_vars=global_vars,
                 logger=self.logger,
                 logging_tags=logging_tags,
-                outputs=result if cache_block_output_in_memory else None,
+                outputs=outputs,
             )
         elif PipelineType.INTEGRATION != self.pipeline.type and (
             not is_data_integration or BlockLanguage.PYTHON == self.block.language
@@ -1203,7 +1208,7 @@ class BlockExecutor:
                 global_vars=global_vars,
                 logger=self.logger,
                 logging_tags=logging_tags,
-                outputs=result if cache_block_output_in_memory else None,
+                outputs=outputs,
                 update_tests=False,
                 dynamic_block_index=dynamic_block_index,
                 dynamic_block_indexes=dynamic_block_indexes,

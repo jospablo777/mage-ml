@@ -3333,7 +3333,8 @@ class Block(
         else:
             test_functions = self.test_functions
 
-        if outputs is None:
+        # Reading the outputs back loads the whole data; only test functions use them.
+        if outputs is None and test_functions:
             outputs = self.get_raw_outputs(
                 dynamic_block_uuid or self.uuid,
                 execution_partition=execution_partition,

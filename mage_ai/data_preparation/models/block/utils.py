@@ -579,9 +579,11 @@ def fetch_input_variables(
                     for variable_uuid in variables
                 ]
             else:
-                # Getting input variables from cache the cache is not empty
-                if block_run_outputs_cache:
-                    variable_values = block_run_outputs_cache.get(upstream_block_uuid, [])
+                # Outputs that ran in this process; the others, such as those of a run
+                # resumed after a failure, are read from storage, which raises when
+                # they are missing. Running without them gave the block no input.
+                if block_run_outputs_cache and upstream_block_uuid in block_run_outputs_cache:
+                    variable_values = block_run_outputs_cache[upstream_block_uuid]
                 else:
                     variable_values = [
                         pipeline.get_block_variable(

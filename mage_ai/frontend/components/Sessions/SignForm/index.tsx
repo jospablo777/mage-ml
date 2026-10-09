@@ -225,15 +225,13 @@ function SignForm({
                 </Spacing>
 
                 {Object.entries(OAUTH_PROVIDER_SIGN_IN_MAPPING).map(([provider, SignInComponent]) => (
-                  <>
-                    {providerMapping?.[provider] && (
-                      <Spacing mt={4}>
-                        <SignInComponent
-                          oauthResponse={providerMapping?.[provider]}
-                        />
-                      </Spacing>
-                    )}
-                  </>
+                  providerMapping?.[provider] && (
+                    <Spacing key={provider} mt={4}>
+                      <SignInComponent
+                        oauthResponse={providerMapping?.[provider]}
+                      />
+                    </Spacing>
+                  )
                 ))}
               </form>
             </ContainerStyle>

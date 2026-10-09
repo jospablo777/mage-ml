@@ -4,7 +4,7 @@ import queue as queue_module
 import signal
 import time
 from multiprocessing import Manager
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 import newrelic.agent
 import psutil
@@ -78,6 +78,8 @@ class ProcessQueue(Queue):
         self.size = queue_config.concurrency or os.cpu_count()
         self.mp_manager = Manager()
         self.job_dict = self.mp_manager.dict()
+        # Whether clean_up_jobs removed a finished job since jobs_finished last ran.
+        self.removed_finished_job = False
 
         # Initialize redis client to track jobs across multiple replicas
         if self.process_queue_config and self.process_queue_config.redis_url:
@@ -106,6 +108,8 @@ class ProcessQueue(Queue):
         for job_id in job_ids:
             if job_id in self.job_dict:
                 if not self.has_job(job_id):
+                    if self.job_dict.get(job_id) == JobStatus.COMPLETED:
+                        self.removed_finished_job = True
                     del self.job_dict[job_id]
                     self.queued_at.pop(job_id, None)
                 elif self.__should_kill_job(job_id):
@@ -114,6 +118,19 @@ class ProcessQueue(Queue):
         # exiting waited until the next enqueue started a pool.
         if not self.queue.empty() and not self.is_worker_pool_alive():
             self.start_worker_pool()
+
+    def jobs_finished(self) -> bool:
+        """
+        Whether a job finished since the last call, so that the scheduler can start the
+        block runs that waited for it.
+        """
+        finished = self.removed_finished_job
+        self.removed_finished_job = False
+        try:
+            statuses = list(self.job_dict.values())
+        except Exception:
+            return finished
+        return finished or JobStatus.COMPLETED in statuses
 
     def enqueue(self, job_id: str, target: Callable, *args, **kwargs):
         """
@@ -308,24 +325,24 @@ class ProcessQueue(Queue):
 class Worker(mp.Process):
     def __init__(
         self,
-        queue: mp.Queue,
+        job: List,
         job_dict,
     ):
         """
-        A worker process for executing jobs from the process queue.
+        A worker process that runs one job of the process queue.
 
         Args:
-            queue (mp.Queue): The multiprocessing queue from which jobs are fetched.
+            job (List): The job, as queued: [job_id, target, args, kwargs].
             job_dict: The shared job dictionary.
 
         Attributes:
-            queue (mp.Queue): The multiprocessing queue from which jobs are fetched.
+            job (List): The job.
             job_dict: The shared job dictionary.
             dsn (str): The Sentry DSN for error reporting.
 
         """
         super().__init__()
-        self.queue = queue
+        self.job = job
         self.job_dict = job_dict
         self.dsn = SENTRY_DSN
         if self.dsn:
@@ -348,33 +365,29 @@ class Worker(mp.Process):
         """
         The entry point for the worker process.
 
-        Fetches a job from the queue, executes it, and updates the job status in the job dictionary.
+        Executes the job and updates the job status in the job dictionary.
 
         """
-        if not self.queue.empty():
-            try:
-                args = self.queue.get(timeout=1)
-            except queue_module.Empty:
-                return
-            job_id = args[0]
-            print(f'Run worker for job {job_id}')
-            # clean_up_jobs removes a queued job when the queue looks empty, which it is
-            # once a worker has taken the job. The scheduler then enqueues the job again,
-            # so this worker skips it.
-            status = self.job_dict.get(job_id)
-            if status != JobStatus.QUEUED:
-                print(f'Skip job {job_id} with status {status}')
-                return
-            self.job_dict[job_id] = self.pid
+        job_id, target, args, kwargs = self.job
+        print(f'Run worker for job {job_id}')
+        # clean_up_jobs removes a queued job when the queue looks empty, which it is
+        # once the pool has taken the job. The scheduler then enqueues the job again,
+        # so this worker skips it. A stopped queue or a killed job also leave another
+        # status.
+        status = self.job_dict.get(job_id)
+        if status != JobStatus.QUEUED:
+            print(f'Skip job {job_id} with status {status}')
+            return
+        self.job_dict[job_id] = self.pid
 
-            try:
-                start_session_and_run(args[1], *args[2], **args[3])
-            except Exception as e:
-                if self.dsn:
-                    capture_exception(e)
-                raise
-            finally:
-                self.job_dict[job_id] = JobStatus.COMPLETED
+        try:
+            start_session_and_run(target, *args, **kwargs)
+        except Exception as e:
+            if self.dsn:
+                capture_exception(e)
+            raise
+        finally:
+            self.job_dict[job_id] = JobStatus.COMPLETED
 
 
 def poll_job_and_execute(
@@ -407,10 +420,17 @@ def poll_job_and_execute(
                 break
         else:
             idle_checks = 0
-        while not queue.empty():
-            if len(workers) >= size:
+        # The pool takes each job and starts one worker for it. Workers used to take
+        # jobs themselves: the pool started a worker while the queue was not empty, and
+        # a worker took a job only after it started, seconds later where processes
+        # start with spawn (macOS, Linux from Python 3.14). Each job started up to
+        # `size` processes that loaded Mage and exited, 20 by default.
+        while len(workers) < size:
+            try:
+                job = queue.get_nowait()
+            except queue_module.Empty:
                 break
-            worker = Worker(queue, job_dict)
+            worker = Worker(job, job_dict)
             worker.start()
             workers.append(worker)
         time.sleep(1)

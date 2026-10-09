@@ -105,6 +105,55 @@ class FlowExecutionTest(DBTestCase):
                 })
                 self.assert_export(self.execute_run(run))
 
+    def test_outputs_missing_from_the_memory_cache_are_read_from_storage(self):
+        """A resumed run caches only the blocks it runs; the others ran before."""
+        self.branched_flow()
+        variables = {'multiplier': 2, 'output_path': str(self.output)}
+        run = self.execute_run(trigger_pipeline(self.pipeline.uuid, variables=variables))
+        self.assert_export(run)
+        self.output.unlink()
+        uuid = self.pipeline.uuid
+        cached = pd.DataFrame({
+            'id': pd.Series([7], dtype='Int64'), 'amount': pd.Series([5], dtype='Int64'),
+        })
+
+        self.pipeline.get_block(f'{uuid}_export').execute_sync(
+            block_run_outputs_cache={f'{uuid}_filter': [cached]}, global_vars=variables,
+            execution_partition=run.execution_partition, run_all_blocks=True,
+        )
+
+        # filter from the cache; aggregate from its stored output. It came as no input.
+        self.assertEqual(pd.read_parquet(self.output).to_dict('list'), {
+            'id': [7], 'amount': [5], 'total': [40],
+        })
+
+    def test_block_tests_receive_the_output_with_and_without_memory_cache(self):
+        load = self.block('load', 'data_loader', '''
+            import pandas as pd
+            @data_loader
+            def load(**kwargs):
+                return pd.DataFrame({'id': [1, 2]})
+
+            @test
+            def test_frame(frame, *args):
+                assert isinstance(frame, pd.DataFrame), type(frame)
+                assert frame['id'].tolist() == [1, 2]
+        ''')
+        self.block('export', 'data_exporter', '''
+            @data_exporter
+            def export(frame, **kwargs):
+                frame.to_parquet(kwargs['output_path'])
+        ''', upstream=[load])
+        for cache in (False, True):
+            with self.subTest(cache=cache):
+                self.pipeline.cache_block_output_in_memory = cache
+                self.pipeline.save()
+                run = trigger_pipeline(self.pipeline.uuid, variables={
+                    'output_path': str(self.output),
+                })
+                self.execute_run(run)
+                self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+
     def test_async_execution_awaits_all_blocks(self):
         self.branched_flow()
         run = trigger_pipeline(self.pipeline.uuid, variables={
