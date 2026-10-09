@@ -68,8 +68,8 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, the S3 source and destination of `mage_integrations`, and its Delta Lake S3 destination |
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
-| `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads, and a ClickHouse SQL block between Python blocks |
-| `kafka/` | Mage's Kafka sink and source with the default settings, batches with every value type, acknowledged and failed sends, committed offsets in single-message mode, and metadata |
+| `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads; a ClickHouse SQL block between Python blocks; and the ClickHouse destination of `mage_integrations` |
+| `kafka/` | Mage's Kafka sink and source with the default settings, batches with every value type, acknowledged and failed sends, committed offsets in single-message mode, and metadata; and the Kafka destination of `mage_integrations` |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
 | `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, RPostgres, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |

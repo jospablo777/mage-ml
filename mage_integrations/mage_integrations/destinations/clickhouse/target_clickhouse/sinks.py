@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import typing
+import datetime
 from typing import TYPE_CHECKING, Any, Iterable
 
 import simplejson as json
 import sqlalchemy.types
 from clickhouse_sqlalchemy import Table, engines
-from singer_sdk import typing as th
+from clickhouse_sqlalchemy import types as ch_types
 from singer_sdk.connectors import SQLConnector
 from sqlalchemy import Column, MetaData, create_engine
 
@@ -44,27 +44,52 @@ class ClickhouseConnector(SQLConnector):
         return create_engine(self.get_sqlalchemy_url(self.config))
 
     def to_sql_type(self, jsonschema_type: dict) -> sqlalchemy.types.TypeEngine:
-        """Return a JSON Schema representation of the provided type.
-
-        Developers may override this method to accept additional input argument types,
-        to support non-standard types, or to provide custom typing logic.
-
-        Args:
-            jsonschema_type: The JSON Schema representation of the source type.
-
-        Returns:
-            The SQLAlchemy type representation of the data type.
         """
-        sql_type = th.to_sql_type(jsonschema_type)
-
-        # Clickhouse does not support the DECIMAL type without providing precision,
-        # so we need to use the FLOAT type.
-        if type(sql_type) == sqlalchemy.types.DECIMAL:
-            sql_type = typing.cast(
-                sqlalchemy.types.TypeEngine, sqlalchemy.types.FLOAT(),
-            )
-
+        The ClickHouse type of a JSON schema type, Nullable unless the schema rules out
+        null. singer-sdk's generic types made integers Int32, which wrapped 2**53 + 1
+        around to 1, numbers Float32, and date-times DateTime, without microseconds; and
+        no column was Nullable, so NULL became 0, '', false or 1970-01-01.
+        """
+        types = jsonschema_type.get('type') or ['string']
+        if isinstance(types, str):
+            types = [types]
+        string_format = jsonschema_type.get('format')
+        if 'integer' in types:
+            sql_type = ch_types.Int64()
+        elif 'number' in types:
+            sql_type = ch_types.Float64()
+        elif 'boolean' in types:
+            sql_type = ch_types.Boolean()
+        elif 'string' in types and string_format == 'date-time':
+            sql_type = ch_types.DateTime64(6, 'UTC')
+        elif 'string' in types and string_format == 'date':
+            sql_type = ch_types.Date32()
+        else:
+            # Strings, and objects and arrays, which are written as JSON text.
+            sql_type = ch_types.String()
+        if 'null' in types or len(types) != 1:
+            sql_type = ch_types.Nullable(sql_type)
         return sql_type
+
+    def _adapt_column_type(
+        self,
+        full_table_name: str,
+        column_name: str,
+        sql_type: sqlalchemy.types.TypeEngine,
+    ) -> None:
+        """
+        Keep a column whose type matches. Reflected time zones have doubled quotes, as
+        DateTime64(6, ''UTC''), so a second sync into a table found every date-time
+        column changed, and singer-sdk's type merge raised NotImplementedError for the
+        ClickHouse types.
+        """
+        current_type = self._get_column_type(full_table_name, column_name)
+        if str(current_type).replace("''", "'") == str(sql_type):
+            return
+        raise NotImplementedError(
+            f"Altering columns is not supported. Column '{full_table_name}.{column_name}' "
+            f"is {current_type}, and the stream's schema needs {sql_type}.",
+        )
 
     def create_empty_table(
         self,
@@ -99,8 +124,10 @@ class ClickhouseConnector(SQLConnector):
         if self.config.get("table_name"):
             table_name = self.config.get("table_name")
 
-        # Do not set schema, as it is not supported by Clickhouse.
-        meta = MetaData(schema=None, bind=self._engine)
+        # Do not set schema, as it is not supported by Clickhouse. SQLAlchemy 2 removed
+        # MetaData's bind, so creating the table failed on the first SCHEMA message;
+        # create_all gets the engine.
+        meta = MetaData(schema=None)
         columns: list[Column] = []
         primary_keys = primary_keys or []
         try:
@@ -177,10 +204,16 @@ class ClickhouseSink(SQLSink):
             True if table exists, False if not, None if unsure or undetectable.
         """
         # Need to convert any records with a dict type to a JSON string.
+        records = list(records)
         for record in records:
             for key, value in record.items():
-                if isinstance(value, dict):
+                if isinstance(value, (dict, list)):
                     record[key] = json.dumps(value)
+                elif isinstance(value, datetime.datetime):
+                    # The HTTP driver writes datetimes without fractions of a second.
+                    if value.tzinfo is not None:
+                        value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                    record[key] = value.strftime('%Y-%m-%d %H:%M:%S.%f')
 
         return super().bulk_insert_records(full_table_name, schema, records)
 

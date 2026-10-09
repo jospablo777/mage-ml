@@ -101,6 +101,13 @@ Each item says what changed, which pipelines it affects, and what to do.
   columns, and Int128 for wider Python integers. Durations are stored in microseconds, and
   lists and dicts as JSON text.
 - Column and table names are quoted, so names with spaces or keywords work.
+- **The ClickHouse destination of mage_integrations writes data.** It failed on its first
+  SCHEMA message: SQLAlchemy 2 removed `MetaData(bind=...)`. Its column types made
+  integers Int32, which wrapped 2**53 + 1 around to 1, numbers Float32 and date-times
+  DateTime without microseconds, and no column was Nullable, so NULL became 0, `''`,
+  false or 1970-01-01. Columns are Int64, Float64, Bool, DateTime64(6, 'UTC'), Date32 or
+  String, Nullable unless the schema rules out null, and date-times keep microseconds. A
+  second sync into a table failed on its date-time columns.
 
 #### Kafka
 
