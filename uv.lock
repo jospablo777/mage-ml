@@ -1605,6 +1605,21 @@ dataframe = [
 ]
 
 [[package]]
+name = "databricks-sdk"
+version = "0.149.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth" },
+    { name = "protobuf" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3c/53/0ab47481a27cb84dd0c6bcd434ff45f911d3021563d244eab9d3e0b08f54/databricks_sdk-0.149.0.tar.gz", hash = "sha256:d41516829d537a06aed2b6e9f8ce612df1034a1c6fda17ac673dd82ac358bb18", size = 1143454, upload-time = "2026-10-08T04:39:10.042Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/e0/795693bf5f83fd529bd32dff0ddfc11e24c51148982a6ba52aab3df551f1/databricks_sdk-0.149.0-py3-none-any.whl", hash = "sha256:5e7045ddfd16727739d5ac407f9d0f271a74ed01a937ab4ae5963f5802e780da", size = 1087650, upload-time = "2026-10-08T04:39:08.269Z" },
+]
+
+[[package]]
 name = "datadog"
 version = "0.55.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2193,6 +2208,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0c/f5/cf09c597bac1c2600e4f77200a7abb73e20fb2a542c11d0c557c1c4220f5/faker-40.41.0.tar.gz", hash = "sha256:5383e4ebba7061491530ae5952a33dcf8f161a250c89717fa0ac856602dcfaf3", size = 2031440, upload-time = "2026-10-05T22:08:14.767Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/52/9ae853e8c70d6b77fe81b1563378d8ee49aa316cf19502a2e0bf1e4a873e/faker-40.41.0-py3-none-any.whl", hash = "sha256:35a7f66282990698c20c3e6dd57180900206b760c2f777112c085cc217e7de92", size = 2067633, upload-time = "2026-10-05T22:08:12.554Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.143.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/d7/6a8753ab6c1d432dc53703c3e1b92974a94531b7d047c32bbaae461ea844/fastapi-0.143.0.tar.gz", hash = "sha256:1acffe48206a80917cf7dac21992b5c44b25384e8902bf745c1fd9dabcf6c51f", size = 468391, upload-time = "2026-10-08T12:29:46.54Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/f4/27e386913417ad32aae42bba48b0c0cce40e9ff2fba1a871ca2702c37324/fastapi-0.143.0-py3-none-any.whl", hash = "sha256:3e9395fd35276425b61b516a31fdd7c77fe2af83e41b4da22e30696fb1304c5d", size = 144665, upload-time = "2026-10-08T12:29:44.853Z" },
 ]
 
 [[package]]
@@ -4251,6 +4283,7 @@ all = [
     { name = "langchain-text-splitters" },
     { name = "langsmith" },
     { name = "lxml" },
+    { name = "mlflow-skinny" },
     { name = "nats-py" },
     { name = "nkeys" },
     { name = "openai" },
@@ -4271,6 +4304,7 @@ all = [
     { name = "pyodbc" },
     { name = "redshift-connector" },
     { name = "requests-aws4auth" },
+    { name = "skops" },
     { name = "snowflake-connector-python" },
     { name = "sshtunnel" },
     { name = "stomp-py" },
@@ -4322,6 +4356,10 @@ hdf5 = [
 ]
 integrations = [
     { name = "mage-integrations" },
+]
+mlflow = [
+    { name = "mlflow-skinny" },
+    { name = "skops" },
 ]
 mysql = [
     { name = "mysql-connector-python" },
@@ -4466,6 +4504,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["clickhouse"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["dbt"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["mlflow"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["postgres"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["redshift"], marker = "extra == 'all'" },
@@ -4474,6 +4513,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["spark"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["streaming"], marker = "extra == 'all'" },
     { name = "memory-profiler" },
+    { name = "mlflow-skinny", marker = "extra == 'mlflow'", specifier = ">=3.17,<4" },
     { name = "mysql-connector-python", marker = "extra == 'mysql'", specifier = ">=9.1,<10" },
     { name = "nats-py", marker = "extra == 'streaming'", specifier = ">=2.16" },
     { name = "newrelic", specifier = ">=13.6" },
@@ -4521,6 +4561,7 @@ requires-dist = [
     { name = "setuptools", specifier = ">=83.0.0" },
     { name = "simplejson" },
     { name = "six", specifier = ">=1.15.0" },
+    { name = "skops", marker = "extra == 'mlflow'", specifier = ">=0.16,<1" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=4.0.0" },
     { name = "sqlalchemy", specifier = ">2.0.0,<3" },
     { name = "sqlglot", extras = ["c"] },
@@ -4539,7 +4580,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "great-expectations", "google-cloud-storage", "hdf5", "mysql", "oracle", "postgres", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
+provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "great-expectations", "google-cloud-storage", "hdf5", "mysql", "oracle", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4728,6 +4769,38 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7b/92/328a294a6de83bacb95bed01f04e0eaff4e3616ee359fc821a5dfc539b02/mistune-3.3.4.tar.gz", hash = "sha256:58b5c96d6fcb61190dfe5fae498d2b2065f99cf61e9649418fd54cf1ada86dfe", size = 121426, upload-time = "2026-07-22T05:22:30.89Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/e4/288365afae98953bc01de09f686f40d8ee84578135aa7767d5d4e60b5278/mistune-3.3.4-py3-none-any.whl", hash = "sha256:ee015381e955e370962968befe1d729ab60fafb6a715ac6751763fbce38c8d4a", size = 66862, upload-time = "2026-07-22T05:22:29.419Z" },
+]
+
+[[package]]
+name = "mlflow-skinny"
+version = "3.17.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "cachetools" },
+    { name = "click" },
+    { name = "cloudpickle" },
+    { name = "databricks-sdk" },
+    { name = "fastapi" },
+    { name = "gitpython" },
+    { name = "importlib-metadata" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-proto" },
+    { name = "opentelemetry-sdk" },
+    { name = "packaging" },
+    { name = "protobuf" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "sqlparse" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "uvicorn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/18/5a/dea201b3cec8a3a1d97b042684113df54e79681f4bc051e807a13dd164b2/mlflow_skinny-3.17.0.tar.gz", hash = "sha256:e887675d9f5ab57ec70860247b1cd5682bb719f626c69979ca7c99b5439877df", size = 3472600, upload-time = "2026-10-07T05:46:44.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/36/6c4cb2aa855061705f0295228654cfca564a0a2425d5e5484f187e4aa44d/mlflow_skinny-3.17.0-py3-none-any.whl", hash = "sha256:443c1e8cbf04edc71434754e0dae2846db91814b342c65bbc05b131c2a68b7ba", size = 4090651, upload-time = "2026-10-07T05:46:42.447Z" },
 ]
 
 [[package]]
@@ -6337,6 +6410,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/74/89/1f3e8e1fc3e97de0fa963495832f581f025f29471602a309e48808244292/pre_commit-4.6.2.tar.gz", hash = "sha256:8f5d7bfb021ecdbcd9d49d89847082dd24172ccde534390081a679ad046e2441", size = 198670, upload-time = "2026-08-10T22:07:18.421Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/e2/bbb7129c9e7999a6b8ee9cca3b66486c25c423ab5a75f34071798b74ce94/pre_commit-4.6.2-py2.py3-none-any.whl", hash = "sha256:e2dde9a75d3bce11bd3831c26d134df00a2803c1d818be6a0383c3dcda25dc4e", size = 226202, upload-time = "2026-08-10T22:07:16.942Z" },
+]
+
+[[package]]
+name = "prettytable"
+version = "3.18.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wcwidth" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/74/ba08d81e668ccfe8658d7520a307e63c19862c08eb4ccb26f356c5239a7a/prettytable-3.18.0.tar.gz", hash = "sha256:439217116152244369caf3d9f1caf2f9fe29b03bd79e88d2928c8e718c95d680", size = 76373, upload-time = "2026-06-22T16:07:50.174Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/be/2e6798ace5cc036f5d05d36b7b2fd85346f1a708c87060890b070d0ec607/prettytable-3.18.0-py3-none-any.whl", hash = "sha256:b3346e0e6f79180833aebaac088ae926340586cf6d7d991b9eb125b65f72313a", size = 37357, upload-time = "2026-06-22T16:07:48.595Z" },
 ]
 
 [[package]]
@@ -8173,6 +8258,24 @@ wheels = [
 ]
 
 [[package]]
+name = "skops"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "packaging" },
+    { name = "prettytable" },
+    { name = "scikit-learn" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/4b/7fef0af1efcb06c0986762645fb414ad850314a891434a2bbaea12a962ea/skops-0.16.0.tar.gz", hash = "sha256:58ddb63fed9f2a8545baa1a91c45c26d44cf65c83e2fd217541c41e411cf1d74", size = 673544, upload-time = "2026-09-24T06:29:46.96Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/a3/08ae9ea7f7c16e20a447d9289dce40f06f52607ed9a39f554a8426d96ba3/skops-0.16.0-py3-none-any.whl", hash = "sha256:5b2eb1bc49392c74a38db04481e2d110f97d9a72d6ae38fbd698aa7a865a9070", size = 148650, upload-time = "2026-09-24T06:29:45.491Z" },
+]
+
+[[package]]
 name = "smmap"
 version = "5.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -8381,6 +8484,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707, upload-time = "2023-09-30T13:58:05.479Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521, upload-time = "2023-09-30T13:58:03.53Z" },
+]
+
+[[package]]
+name = "starlette"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/2b/3850dc6bf7ef71b088962eba31dafc6cffd2f96e577ebb0bb316df96da3e/starlette-1.7.0.tar.gz", hash = "sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d", size = 2736246, upload-time = "2026-09-23T07:30:26.35Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/d6/1ec1b290f9e0fb067899b61e1d37a30c923068bad260b216dbe37a7d2967/starlette-1.7.0-py3-none-any.whl", hash = "sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e", size = 78980, upload-time = "2026-09-23T07:30:24.567Z" },
 ]
 
 [[package]]

@@ -151,3 +151,12 @@ def feast_offline(postgres_settings, feast_url):
             ids=list(client.written_drivers),
         )
     client.close()
+
+
+@pytest.fixture(scope='session')
+def mlflow_url():
+    url = os.getenv('MAGE_TEST_MLFLOW_URL')
+    if not url:
+        pytest.skip('MLflow is not configured: MAGE_TEST_MLFLOW_URL unset')
+    os.environ.setdefault('MLFLOW_DISABLE_AGENT_HINT', '1')
+    return url.rstrip('/')

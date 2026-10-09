@@ -148,6 +148,13 @@ postgres = [
   "psycopg2-binary>=2.9.10",
   "sshtunnel>=0.4.0",
 ]
+# The MLflow tracking client, to read runs and registered models and download artifacts
+# from an MLflow server. The server itself is not installed.
+mlflow = [
+  "mlflow-skinny>=3.17,<4",
+  # MLflow 3 saves scikit-learn models with skops by default.
+  "skops>=0.16,<1",
+]
 qdrant = [
   "qdrant-client>=1.9,<2",
   "sentence-transformers>=5.0,<6",
@@ -192,6 +199,7 @@ all = [
   "mage-ml[clickhouse]",
   "mage-ml[dbt]",
   "mage-ml[google-cloud-storage]",
+  "mage-ml[mlflow]",
   "mage-ml[oracle]",
   "mage-ml[postgres]",
   "mage-ml[redshift]",

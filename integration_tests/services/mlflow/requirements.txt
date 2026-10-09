@@ -1,0 +1,9 @@
+mlflow==3.17.0
+psycopg2-binary==2.9.11
+# The same versions as Mage, so pickled models load on both sides.
+scikit-learn==1.9.1
+numpy==2.5.3
+pandas==3.0.6
+pyarrow==25.0.1
+pillow==12.3.0
+skops==0.16.0

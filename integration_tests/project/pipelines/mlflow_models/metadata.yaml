@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - mlflow_predict
+  language: python
+  name: mlflow_model_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: mlflow_model_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - mlflow_log_export
+  language: python
+  name: mlflow_predict
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - mlflow_model_load
+  uuid: mlflow_predict
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: mlflow_log_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - mlflow_predict
+  uuid: mlflow_log_export
+name: mlflow_models
+type: python
+uuid: mlflow_models

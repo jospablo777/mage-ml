@@ -23,8 +23,12 @@ export MAGE_TEST_API_PORT ?= 18000
 export MAGE_TEST_API_URL ?= http://127.0.0.1:$(MAGE_TEST_API_PORT)
 export MAGE_TEST_FEAST_PORT ?= 16566
 export MAGE_TEST_FEAST_URL ?= http://127.0.0.1:$(MAGE_TEST_FEAST_PORT)
+export MAGE_TEST_MLFLOW_PORT ?= 15000
+export MAGE_TEST_MLFLOW_URL ?= http://127.0.0.1:$(MAGE_TEST_MLFLOW_PORT)
+# MLflow prints a hint for coding agents on import.
+export MLFLOW_DISABLE_AGENT_HINT ?= 1
 
-.PHONY: up down test test-postgres test-redis test-api test-feast ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -46,6 +50,9 @@ test-api: up
 
 test-feast: up
 	cd .. && $(PYTHON) -m pytest integration_tests/feast $(PYTEST_ARGS)
+
+test-mlflow: up
+	cd .. && $(PYTHON) -m pytest integration_tests/mlflow $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up

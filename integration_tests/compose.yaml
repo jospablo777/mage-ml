@@ -52,3 +52,18 @@ services:
       FEAST_PG_PASSWORD: test
     ports:
       - "${MAGE_TEST_FEAST_PORT:-16566}:6566"
+
+  # MLflow tracking server with PostgreSQL as backend store and proxied artifacts.
+  mlflow:
+    build: services/mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MLFLOW_PG_HOST: postgres
+      MLFLOW_PG_PORT: "5432"
+      MLFLOW_PG_DB: mlflow
+      MLFLOW_PG_USER: postgres
+      MLFLOW_PG_PASSWORD: test
+    ports:
+      - "${MAGE_TEST_MLFLOW_PORT:-15000}:5000"
