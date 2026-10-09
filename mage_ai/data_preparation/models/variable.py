@@ -1294,10 +1294,12 @@ class Variable:
         lazy = not sample and self.storage.path_exists(
             os.path.join(self.variable_path, DATAFRAME_POLARS_LAZY_FILE),
         )
-        if lazy and isinstance(self.storage, LocalStorage):
+        location = self.storage.polars_location(file_path) if lazy else None
+        if location is not None:
             # The output was a LazyFrame: scanning lets the next block's query read only
-            # the columns and rows it needs.
-            return pl.scan_parquet(file_path)
+            # the columns and rows it needs, from local files and from S3.
+            uri, storage_options = location
+            return pl.scan_parquet(uri, storage_options=storage_options)
 
         read_sample_success = False
         if sample:
@@ -1579,28 +1581,26 @@ class Variable:
             # A LazyFrame used to be pickled as its query plan, so the next block ran the
             # plan again against whatever the sources held then. It is computed once and
             # streamed to Parquet; the next block scans that file.
-            if isinstance(self.storage, LocalStorage):
-                data.sink_parquet(file_path)
+            location = self.storage.polars_location(file_path)
+            if location is not None:
+                uri, storage_options = location
+                data.sink_parquet(uri, storage_options=storage_options)
                 # The sample comes from the file: running the plan again would read the
                 # sources twice, and plans without a fixed row order give other rows.
-                sample = pl.scan_parquet(file_path).head(DATAFRAME_SAMPLE_COUNT).collect()
+                written = pl.scan_parquet(uri, storage_options=storage_options)
+                sample = written.head(DATAFRAME_SAMPLE_COUNT).collect()
+                schema = written.collect_schema()
+                rows = written.select(pl.len()).collect().item()
             else:
                 data = data.collect()
                 self.storage.write_polars_dataframe(data, file_path)
                 sample = data.head(DATAFRAME_SAMPLE_COUNT)
+                schema, rows = data.schema, data.height
             self.storage.write_json_file(
                 os.path.join(self.variable_path, DATAFRAME_POLARS_LAZY_FILE),
                 dict(lazy=True),
             )
             try:
-                schema = pl.read_parquet_schema(file_path) if isinstance(
-                    self.storage, LocalStorage,
-                ) else data.schema
-                rows = (
-                    pl.scan_parquet(file_path).select(pl.len()).collect().item()
-                    if isinstance(self.storage, LocalStorage)
-                    else data.height
-                )
                 self.__write_dataframe_analysis(
                     dict(
                         statistics=dict(

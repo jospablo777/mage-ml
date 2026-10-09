@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 from contextlib import contextmanager
@@ -88,7 +89,8 @@ class GCSStorage(BaseStorage):
         self.bucket.delete_blob(gcs_url_path(path))
 
     def remove_dir(self, path: str) -> None:
-        blobs = self.bucket.list_blobs(prefix=gcs_url_path(path))
+        # The trailing slash keeps 'output_1' from matching 'output_10'.
+        blobs = self.bucket.list_blobs(prefix=gcs_url_path(path).rstrip('/') + '/')
         for blob in blobs:
             blob.delete()
 
@@ -167,4 +169,6 @@ class GCSStorage(BaseStorage):
             stream.close()
 
     async def read_async(self, file_path: str) -> str:
-        pass
+        return await asyncio.to_thread(
+            self.bucket.blob(gcs_url_path(file_path)).download_as_text,
+        )

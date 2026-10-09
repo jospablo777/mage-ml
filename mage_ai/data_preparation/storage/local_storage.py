@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import aiofiles
 import pandas as pd
@@ -161,6 +161,9 @@ class LocalStorage(BaseStorage):
             yield file
         finally:
             file.close()
+
+    def polars_location(self, path: str) -> Tuple[str, None]:
+        return path, None
 
     async def read_async(self, file_path: str) -> str:
         dirname = os.path.dirname(file_path)

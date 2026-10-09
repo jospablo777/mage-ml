@@ -1,7 +1,8 @@
+import asyncio
 import io
 import json
 from contextlib import contextmanager
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import polars as pl
@@ -29,9 +30,7 @@ class S3Storage(BaseStorage):
             self.client = s3.Client(bucket, **kwargs)
 
     def isdir(self, path: str) -> bool:
-        if not path.endswith('/'):
-            path += '/'
-        return self.path_exists(path)
+        return len(self.client.list_objects(self.__dir_prefix(path), max_keys=1)) > 0
 
     def listdir(
         self,
@@ -39,9 +38,7 @@ class S3Storage(BaseStorage):
         suffix: str = None,
         max_results: int = None,
     ) -> List[str]:
-        if not path.endswith('/'):
-            path += '/'
-        path = s3_url_path(path)
+        path = self.__dir_prefix(path)
         try:
             keys = self.client.listdir(path, suffix=suffix, max_results=max_results)
             return [k[len(path):].rstrip('/') for k in keys]
@@ -52,14 +49,22 @@ class S3Storage(BaseStorage):
         pass
 
     def path_exists(self, path: str) -> bool:
-        results = self.client.list_objects(s3_url_path(path), max_keys=1)
-        return len(results) > 0
+        # S3 has no directories: a path exists as an object or as the prefix of objects
+        # under it. A bare prefix match would also find 'output_10' for 'output_1'.
+        key = s3_url_path(path).rstrip('/')
+        return self.client.exists(key) or self.isdir(path)
 
     def remove(self, path: str) -> None:
-        self.client.delete_objects(s3_url_path(path))
+        key = s3_url_path(path).rstrip('/')
+        self.client.delete_keys(
+            [key] + self.client.list_objects(self.__dir_prefix(path)),
+        )
 
     def remove_dir(self, path: str) -> None:
-        self.client.delete_objects(s3_url_path(path))
+        self.client.delete_objects(self.__dir_prefix(path))
+
+    def __dir_prefix(self, path: str) -> str:
+        return s3_url_path(path).rstrip('/') + '/'
 
     def read_json_file(
         self,
@@ -133,5 +138,10 @@ class S3Storage(BaseStorage):
             self.client.upload(s3_url_path(file_path), stream.getvalue())
             stream.close()
 
+    def polars_location(self, path: str) -> Tuple[str, Optional[Dict]]:
+        uri = path if path.startswith(S3_PREFIX) else f'{S3_PREFIX}{self.client.bucket}/{path}'
+        return uri, self.client.polars_storage_options()
+
     async def read_async(self, file_path: str) -> str:
-        pass
+        content = await asyncio.to_thread(self.client.read, s3_url_path(file_path))
+        return content.decode()

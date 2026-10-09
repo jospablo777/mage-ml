@@ -1,5 +1,8 @@
+import io
+import json
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import IO, Any, Callable, Dict, Union
 
 import pandas as pd
@@ -184,8 +187,10 @@ class BaseFile(BaseIO):
         input: Union[IO, os.PathLike, str],
         format: Union[FileFormat, str, None],
         limit: int = QUERY_ROW_LIMIT,
+        exact_types: bool = False,
+        polars: bool = False,
         **kwargs,
-    ) -> DataFrame:
+    ) -> Union[DataFrame, pl.DataFrame]:
         """
         Loads the data frame from the filepath or buffer specified.
 
@@ -194,13 +199,76 @@ class BaseFile(BaseIO):
             Can be a stream or a filepath.
             format (Union[FileFormat, str]): Format of the data frame as stored
             in stream or filepath.
+            exact_types (bool): Return pyarrow-backed pandas columns. Integers with
+            missing values stay integers, and decimals, nested values and string
+            columns keep their types. Applies to CSV, JSON and Parquet.
+            polars (bool): Return a Polars data frame, read by Polars. Applies to CSV,
+            JSON and Parquet.
 
         Returns:
             DataFrame: Data frame object loaded from the specified data frame.
         """
+        if (exact_types or polars) and format in (
+            FileFormat.CSV, FileFormat.JSON, FileFormat.PARQUET,
+        ):
+            if exact_types and format == FileFormat.PARQUET:
+                from mage_ai.data_preparation.storage.base_storage import (
+                    read_parquet_table,
+                )
+
+                # pyarrow restores the index pandas stored in the file; Polars does not.
+                return read_parquet_table(input, **kwargs).to_pandas(
+                    types_mapper=pd.ArrowDtype,
+                )
+            df = self.__read_polars(input, format, **kwargs)
+            if polars:
+                return df
+            return df.to_pandas(use_pyarrow_extension_array=True)
+
+        if format == FileFormat.PARQUET:
+            from mage_ai.data_preparation.storage.base_storage import (
+                read_pandas_parquet,
+            )
+
+            # pd.read_parquet fails on list and struct columns pandas wrote from
+            # pd.ArrowDtype columns.
+            return read_pandas_parquet(input, **kwargs)
         reader = self.__get_reader(format)
         df = reader(input, **kwargs)
         return df
+
+    def __read_polars(
+        self,
+        input: Union[IO, os.PathLike, str],
+        format: Union[FileFormat, str],
+        **kwargs,
+    ) -> pl.DataFrame:
+        if format == FileFormat.PARQUET:
+            return pl.read_parquet(input, **kwargs)
+        # Polars infers types from the first 100 rows by default, and fails on a later
+        # row that does not fit them.
+        kwargs.setdefault('infer_schema_length', None)
+        if format == FileFormat.CSV:
+            return pl.read_csv(input, **kwargs)
+
+        content = input.read() if hasattr(input, 'read') else Path(input).read_bytes()
+        if isinstance(content, str):
+            content = content.encode()
+        start = content.lstrip()[:1]
+        if start == b'[':
+            # A JSON array of rows, as Polars writes it.
+            return pl.read_json(io.BytesIO(content), **kwargs)
+        if start == b'{' and content.strip().count(b'\n') == 0:
+            document = json.loads(content)
+            if document and all(isinstance(v, dict) for v in document.values()):
+                # pandas writes {column: {index: value}} by default, which Polars reads
+                # as one row of structs. pd.read_json would turn integers with nulls
+                # into floats.
+                return pl.DataFrame(
+                    {column: list(values.values()) for column, values in document.items()},
+                    strict=False,
+                )
+        return pl.read_ndjson(io.BytesIO(content), **kwargs)
 
     def __trim_df(self, df: DataFrame, limit: int = QUERY_ROW_LIMIT) -> DataFrame:
         """
@@ -240,17 +308,27 @@ class BaseFile(BaseIO):
             format = FileFormat.PARQUET
         writer = self.__get_writer(df, format)
         if format == FileFormat.HDF5:
-            if isinstance(output, IO):
+            if isinstance(output, io.IOBase):
                 raise ValueError('Cannot write HDF5 file to buffer of any type.')
             name = os.path.splitext(os.path.basename(output))[0]
             kwargs.setdefault('key', name)
         elif format == FileFormat.PARQUET and isinstance(df, DataFrame):
-            if 'coerce_timestamps' not in kwargs:
-                # Microseconds are what pandas 3 stores and what Spark, Athena and Hive read
-                # as TIMESTAMP_MICROS. The default used to be milliseconds, which dropped
-                # the microseconds without an error. Nanoseconds are still cut.
+            if 'coerce_timestamps' not in kwargs and any(
+                'datetime64[ns' in str(dtype) or 'timestamp[ns' in str(dtype)
+                for dtype in df.dtypes
+            ):
+                # Nanosecond columns are written in microseconds, which Spark, Athena and
+                # Hive read as TIMESTAMP_MICROS. A value with nanoseconds raises; pass
+                # coerce_timestamps=None to write nanoseconds. Frames without nanosecond
+                # columns keep their units. The writer used to coerce every frame to
+                # milliseconds, which dropped the microseconds without an error.
                 kwargs['coerce_timestamps'] = 'us'
-                kwargs['allow_truncated_timestamps'] = True
+                kwargs.setdefault('allow_truncated_timestamps', False)
+        elif format in (FileFormat.CSV, FileFormat.EXCEL) and isinstance(df, DataFrame):
+            if df.index.name is None and df.index.equals(pd.RangeIndex(len(df))):
+                # The default index holds only row numbers; written to the file, it is read
+                # back as an extra column named 'Unnamed: 0'.
+                kwargs.setdefault('index', False)
         elif format == FileFormat.JSON and isinstance(df, DataFrame):
             # pandas deprecates epoch milliseconds as the default date format.
             kwargs.setdefault('date_format', 'iso')

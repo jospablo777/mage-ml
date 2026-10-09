@@ -1,4 +1,5 @@
 import os
+import tempfile
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
@@ -48,17 +49,20 @@ class S3(BaseFile):
         object_key: str,
         format: Union[FileFormat, str, None] = None,
         limit: int = QUERY_ROW_LIMIT,
+        exact_types: bool = False,
+        polars: bool = False,
         **kwargs,
-    ) -> DataFrame:
+    ) -> Union[DataFrame, pl.DataFrame]:
         """
-        Loads data from S3 into a Pandas data frame. This function will load at
-        maximum 10,000,000 rows of data from the specified file.
+        Loads data from S3 into a Pandas data frame.
 
         Args:
+            exact_types (bool): Return pyarrow-backed pandas columns, which keep integers
+            with missing values, decimals and nested values. CSV, JSON and Parquet only.
+            polars (bool): Return a Polars data frame. CSV, JSON and Parquet only.
             import_config (Mapping, optional): Configuration settings for importing file from
             S3. Defaults to None.
-            limit (int, Optional): The number of rows to limit the loaded dataframe to.
-                                    Defaults to 10,000,000.
+            limit (int, Optional): Not applied; the whole file is loaded.
             read_config (Mapping, optional): Configuration settings for reading file into data
             frame. Defaults to None.
 
@@ -80,7 +84,9 @@ class S3(BaseFile):
                 return self._read(obj_loc, format, limit, **kwargs)
         else:
             buffer = BytesIO(response['Body'].read())
-            return self._read(buffer, format, limit, **kwargs)
+            return self._read(
+                buffer, format, limit, exact_types=exact_types, polars=polars, **kwargs,
+            )
 
     def export(
         self,
@@ -140,12 +146,10 @@ class S3(BaseFile):
 
     @contextmanager
     def open_temporary_directory(self):
-        temp_dir = Path.cwd() / '.tmp'
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        yield temp_dir
-        for file in temp_dir.iterdir():
-            file.unlink()
-        temp_dir.rmdir()
+        # Each call gets its own directory. A shared one was emptied and removed by
+        # whichever call finished first.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            yield Path(temp_dir)
 
     @classmethod
     def with_config(

@@ -54,7 +54,7 @@ class TestGCSStorage(TestCase):
 
     def test_remove_dir(self):
         self.storage.remove_dir('your_dir_path')
-        self.gcs_bucket_mock.list_blobs.assert_called_with(prefix='your_dir_path')
+        self.gcs_bucket_mock.list_blobs.assert_called_with(prefix='your_dir_path/')
 
     def test_open_to_write(self):
         with self.storage.open_to_write('test_dir/test_file') as f:
