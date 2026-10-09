@@ -10,7 +10,10 @@ import polars as pl
 import simplejson
 
 from mage_ai.data_preparation.models.file import File
-from mage_ai.data_preparation.storage.base_storage import BaseStorage
+from mage_ai.data_preparation.storage.base_storage import (
+    BaseStorage,
+    read_pandas_parquet,
+)
 from mage_ai.settings.server import DEBUG_FILE_IO
 from mage_ai.shared.environments import is_debug
 from mage_ai.shared.parsers import encode_complex
@@ -126,8 +129,7 @@ class LocalStorage(BaseStorage):
             await file.write(fcontent)
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:
-        kwargs.setdefault('engine', 'pyarrow')
-        return pd.read_parquet(file_path, **kwargs)
+        return read_pandas_parquet(file_path, **kwargs)
 
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         return pl.read_parquet(file_path, **kwargs)

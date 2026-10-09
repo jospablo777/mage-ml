@@ -44,6 +44,14 @@ STRING_SERIALIZABLE_COLUMN_TYPES = {
 DECIMAL_COLUMN_TYPE = 'Decimal'
 FLOAT_COLUMN_TYPE = 'float_with_nan'
 TIMETZ_COLUMN_TYPE = 'timetz'
+UUID_COLUMN_TYPE = 'UUID'
+# Categorical columns whose categories are not strings. Parquet keeps the dictionary of a
+# string column only, and cannot store interval categories, so the column is stored as its
+# codes and the categories are kept in DATAFRAME_PANDAS_METADATA_FILE.
+CATEGORY_CODES_COLUMN_TYPE = 'category_codes'
+# Object columns whose values differ in type, or that Arrow cannot hold, such as integers
+# beyond 64 bits. Each value is stored as tagged JSON and read back with its type.
+OBJECT_JSON_COLUMN_TYPE = 'object_json'
 
 AMBIGUOUS_COLUMN_TYPES = {
     'mixed-integer',
@@ -88,6 +96,10 @@ def _encode_tagged(value: Any) -> Any:
         return _tag('bytes', base64.b64encode(bytes(value)).decode('ascii'))
     if isinstance(value, uuid.UUID):
         return _tag('uuid', str(value))
+    if isinstance(value, complex):
+        return _tag('complex', [repr(value.real), repr(value.imag)])
+    if isinstance(value, pd.Interval):
+        return _tag('interval', [value.left, value.right, value.closed])
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, np.generic):
@@ -103,6 +115,8 @@ DECODERS = {
     'timedelta': lambda parts: timedelta(days=parts[0], seconds=parts[1], microseconds=parts[2]),
     'bytes': base64.b64decode,
     'uuid': uuid.UUID,
+    'complex': lambda parts: complex(float(parts[0]), float(parts[1])),
+    'interval': lambda parts: pd.Interval(parts[0], parts[1], closed=parts[2]),
 }
 
 
@@ -121,6 +135,170 @@ def serialize_json_value(value: Any) -> Any:
     return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
 
 
+# Types each value of an OBJECT_JSON_COLUMN_TYPE column may have. Tuples and sets are left
+# out because JSON would return them as lists.
+OBJECT_JSON_VALUE_TYPES = (
+    bool, int, float, complex, str, bytes, dict, list,
+    decimal.Decimal, date, time, timedelta, uuid.UUID, np.generic, np.ndarray,
+)
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
+
+
+def needs_object_json(values: List[Any]) -> bool:
+    """
+    Whether an object column must be stored as tagged JSON to keep its values: values of
+    more than one type, complex numbers, or integers beyond 64 bits. Columns holding
+    other objects keep the default handling.
+    """
+    kinds = {type(v) for v in values}
+    if not kinds or not all(issubclass(k, OBJECT_JSON_VALUE_TYPES) for k in kinds):
+        return False
+    if len(kinds) > 1:
+        return True
+    kind = kinds.pop()
+    if issubclass(kind, complex):
+        return True
+    if kind is int:
+        return any(v < INT64_MIN or v > INT64_MAX for v in values)
+    return False
+
+
+# Dtypes that Parquet cannot store or stores at another resolution. The column is written
+# as values Parquet holds and cast back to the recorded dtype on read.
+def restorable_dtype(dtype: Any) -> bool:
+    if isinstance(dtype, pd.SparseDtype):
+        return True
+    return isinstance(dtype, np.dtype) and (
+        dtype.kind == 'c' or dtype in (np.dtype('datetime64[s]'), np.dtype('timedelta64[s]'))
+    )
+
+
+def restore_column_dtypes(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
+    for column, column_type in column_types.items():
+        if column not in df.columns or not isinstance(column_type, str):
+            continue
+        if not (column_type.startswith(('Sparse[', 'complex')) or column_type in (
+            'datetime64[s]', 'timedelta64[s]',
+        )):
+            continue
+        if str(df[column].dtype) != column_type:
+            df[column] = df[column].astype(column_type)
+    return df
+
+
+def stores_category_codes(dtype: Any) -> bool:
+    return isinstance(dtype, pd.CategoricalDtype) and not (
+        pd.api.types.is_string_dtype(dtype.categories.dtype)
+        or pd.api.types.is_object_dtype(dtype.categories.dtype)
+        and dtype.categories.inferred_type == 'string'
+    )
+
+
+def encode_categories(dtype: pd.CategoricalDtype) -> Dict:
+    return dict(
+        categories=json.dumps(
+            dtype.categories.tolist(), default=_encode_tagged, allow_nan=True, ensure_ascii=False,
+        ),
+        categories_dtype=str(dtype.categories.dtype),
+        ordered=bool(dtype.ordered),
+    )
+
+
+def decode_categories(encoded: Dict) -> pd.CategoricalDtype:
+    categories = pd.Index(json.loads(encoded['categories'], object_hook=_decode_tagged))
+    try:
+        categories = categories.astype(encoded['categories_dtype'])
+    except (TypeError, ValueError):
+        pass
+    return pd.CategoricalDtype(categories, ordered=encoded['ordered'])
+
+
+def restore_categories(df: pd.DataFrame, categories: Dict) -> pd.DataFrame:
+    for column, encoded in (categories or {}).items():
+        if column not in df.columns:
+            continue
+        codes = df[column].fillna(-1).astype('int64').to_numpy()
+        df[column] = pd.Series(
+            pd.Categorical.from_codes(codes, dtype=decode_categories(encoded)),
+            index=df.index,
+        )
+    return df
+
+
+def _dumps_tagged(value: Any) -> str:
+    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+
+
+def _loads_tagged(text: str) -> Any:
+    return json.loads(text, object_hook=_decode_tagged)
+
+
+def encode_column_labels(columns: pd.Index) -> Optional[Dict]:
+    """
+    Parquet needs string column names, so labels are written as str. Record the original
+    labels when that changes them, so 0 and 1 from a NumPy array come back as 0 and 1.
+    """
+    multi = isinstance(columns, pd.MultiIndex)
+    if not multi and columns.name is None and all(isinstance(c, str) for c in columns):
+        return None
+    labels = [list(c) for c in columns] if multi else columns.tolist()
+    return dict(labels=_dumps_tagged(labels), names=list(columns.names), multi=multi)
+
+
+def decode_column_labels(encoded: Dict, count: int) -> Optional[pd.Index]:
+    labels = _loads_tagged(encoded['labels'])
+    if len(labels) != count:
+        # A sample file keeps only the first columns.
+        labels = labels[:count]
+        if len(labels) != count:
+            return None
+    if encoded.get('multi'):
+        return pd.MultiIndex.from_tuples([tuple(label) for label in labels], names=encoded['names'])
+    return pd.Index(labels, name=encoded['names'][0], tupleize_cols=False)
+
+
+def pad_safe(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Make integer and boolean columns nullable before a shorter frame is padded with
+    missing values, which would turn them into float or object columns. Integers above
+    2**53 lose precision as float.
+    """
+    frame = frame.copy(deep=False)
+    for column in frame.columns:
+        dtype = frame[column].dtype
+        if isinstance(dtype, np.dtype) and dtype.kind in 'iub':
+            frame[column] = frame[column].astype(
+                'boolean' if dtype.kind == 'b' else pd.api.types.pandas_dtype(
+                    f"{'U' if dtype.kind == 'u' else ''}Int{dtype.itemsize * 8}",
+                ),
+            )
+    return frame
+
+
+def restore_padded_dtype(series: pd.Series, column_type: Optional[str]) -> pd.Series:
+    """
+    Cast a column cut back to its length to the NumPy integer or boolean dtype it had
+    before pad_safe.
+    """
+    if not isinstance(column_type, str) or str(series.dtype) == column_type:
+        return series
+    try:
+        dtype = np.dtype(column_type)
+    except TypeError:
+        return series
+    if dtype.kind in 'iub' and not series.isna().any():
+        return series.astype(dtype)
+    return series
+
+
+def serialize_object_json_value(value: Any) -> Any:
+    # In a column of mixed values a float NaN is a value, so only None and the pandas
+    # missing markers are NULL.
+    if value is None or value is pd.NA or value is pd.NaT:
+        return None
+    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+
+
 def serialize_string_value(value: Any) -> Any:
     return value if value is None else str(value)
 
@@ -131,13 +309,34 @@ def _is_missing(value: Any) -> bool:
     return isinstance(value, float) and value != value
 
 
+def _parser(cls: type, parse: Any) -> Any:
+    """
+    Parse stored text into cls. Values that already have the type pass through: outputs
+    written before these columns were stored as text hold Decimal values and UUID bytes.
+    """
+
+    def parse_value(value: Any) -> Any:
+        if isinstance(value, cls):
+            return value
+        if cls is uuid.UUID and isinstance(value, bytes):
+            return uuid.UUID(bytes=value)
+        return parse(value)
+
+    return parse_value
+
+
 # Object columns stored as text and parsed back, keyed by their recorded column type.
 TEXT_COLUMN_TYPES = {
-    DECIMAL_COLUMN_TYPE: (str, decimal.Decimal),
+    DECIMAL_COLUMN_TYPE: (str, _parser(decimal.Decimal, decimal.Decimal)),
     # Floats with NaN: stored as text, so NaN and NULL stay apart.
-    FLOAT_COLUMN_TYPE: (repr, float),
+    FLOAT_COLUMN_TYPE: (repr, _parser(float, float)),
     # Times with an offset: Parquet times have no time zone.
-    TIMETZ_COLUMN_TYPE: (lambda value: value.isoformat(), time.fromisoformat),
+    TIMETZ_COLUMN_TYPE: (lambda value: value.isoformat(), _parser(time, time.fromisoformat)),
+    # pyarrow stores UUID objects as 16 bytes and returns bytes.
+    UUID_COLUMN_TYPE: (str, _parser(uuid.UUID, uuid.UUID)),
+    # Arrow has no complex type.
+    'complex64': (repr, _parser(complex, complex)),
+    'complex128': (repr, _parser(complex, complex)),
 }
 
 
@@ -152,6 +351,12 @@ def serialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
         if column_type in JSON_SERIALIZABLE_COLUMN_TYPES:
             df[column] = pd.Series(
                 [serialize_json_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
+        elif column_type == OBJECT_JSON_COLUMN_TYPE:
+            df[column] = pd.Series(
+                [serialize_object_json_value(v) for v in df[column].tolist()],
                 index=df.index,
                 dtype=object,
             )
@@ -231,10 +436,16 @@ def deserialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
                 index=df.index,
                 dtype=object,
             )
+        elif column_type == OBJECT_JSON_COLUMN_TYPE:
+            df[column] = pd.Series(
+                [deserialize_json_value(v) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
         elif column_type in TEXT_COLUMN_TYPES:
             parse = TEXT_COLUMN_TYPES[column_type][1]
             df[column] = pd.Series(
-                [parse(v) if isinstance(v, str) else None for v in df[column].tolist()],
+                [None if _is_missing(v) else parse(v) for v in df[column].tolist()],
                 index=df.index,
                 dtype=object,
             )
@@ -262,6 +473,7 @@ def should_serialize_pandas(column_types: Dict) -> bool:
             column_type in JSON_SERIALIZABLE_COLUMN_TYPES
             or column_type in STRING_SERIALIZABLE_COLUMN_TYPES
             or column_type in TEXT_COLUMN_TYPES
+            or column_type == OBJECT_JSON_COLUMN_TYPE
         ):
             return True
     return False
@@ -271,7 +483,11 @@ def should_deserialize_pandas(column_types: Dict) -> bool:
     if not column_types:
         return False
     for _, column_type in column_types.items():
-        if column_type in JSON_SERIALIZABLE_COLUMN_TYPES or column_type in TEXT_COLUMN_TYPES:
+        if (
+            column_type in JSON_SERIALIZABLE_COLUMN_TYPES
+            or column_type in TEXT_COLUMN_TYPES
+            or column_type == OBJECT_JSON_COLUMN_TYPE
+        ):
             return True
     return False
 

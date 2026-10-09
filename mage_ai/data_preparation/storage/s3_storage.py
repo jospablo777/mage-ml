@@ -7,7 +7,10 @@ import pandas as pd
 import polars as pl
 import simplejson
 
-from mage_ai.data_preparation.storage.base_storage import BaseStorage
+from mage_ai.data_preparation.storage.base_storage import (
+    BaseStorage,
+    read_pandas_parquet,
+)
 from mage_ai.services.aws.s3 import s3
 from mage_ai.shared.constants import S3_PREFIX
 from mage_ai.shared.parsers import encode_complex
@@ -103,7 +106,7 @@ class S3Storage(BaseStorage):
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:
         buffer = io.BytesIO(self.client.get_object(s3_url_path(file_path)).read())
-        return pd.read_parquet(buffer, **kwargs)
+        return read_pandas_parquet(buffer, **kwargs)
 
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         buffer = io.BytesIO(self.client.get_object(s3_url_path(file_path)).read())

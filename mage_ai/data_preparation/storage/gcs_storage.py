@@ -8,7 +8,10 @@ import polars as pl
 import simplejson
 from google.cloud import storage
 
-from mage_ai.data_preparation.storage.base_storage import BaseStorage
+from mage_ai.data_preparation.storage.base_storage import (
+    BaseStorage,
+    read_pandas_parquet,
+)
 from mage_ai.shared.constants import GCS_PREFIX
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.urls import gcs_url_path
@@ -133,7 +136,7 @@ class GCSStorage(BaseStorage):
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:
         buffer = io.BytesIO(self.bucket.blob(gcs_url_path(file_path)).download_as_bytes())
-        return pd.read_parquet(buffer, **kwargs)
+        return read_pandas_parquet(buffer, **kwargs)
 
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         buffer = io.BytesIO(self.bucket.blob(gcs_url_path(file_path)).download_as_bytes())

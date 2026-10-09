@@ -5,6 +5,9 @@ DATAFRAME_COLUMN_TYPES_FILE = 'data_column_types.json'
 DATAFRAME_CSV_FILE = 'data.csv'
 DATAFRAME_PARQUET_FILE = 'data.parquet'
 DATAFRAME_PARQUET_SAMPLE_FILE = 'sample_data.parquet'
+# pandas details Parquet does not keep: column labels that are not strings, Series names,
+# and the categories of categorical columns stored as codes.
+DATAFRAME_PANDAS_METADATA_FILE = 'data_pandas_metadata.json'
 JOBLIB_FILE = 'model.joblib'
 JOBLIB_OBJECT_FILE = 'object.joblib'
 JSON_FILE = 'data.json'

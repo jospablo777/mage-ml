@@ -4,6 +4,7 @@ import datetime
 import decimal
 import os
 import traceback
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -27,24 +28,37 @@ from mage_ai.data_preparation.models.constants import (
 )
 from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     AMBIGUOUS_COLUMN_TYPES,
+    CATEGORY_CODES_COLUMN_TYPE,
     DECIMAL_COLUMN_TYPE,
     FLOAT_COLUMN_TYPE,
+    OBJECT_JSON_COLUMN_TYPE,
     STRING_SERIALIZABLE_COLUMN_TYPES,
     TIMETZ_COLUMN_TYPE,
+    UUID_COLUMN_TYPE,
     cast_column_types,
-    cast_column_types_polars,
+    decode_column_labels,
     deserialize_columns,
     deserialize_complex,
+    encode_categories,
+    encode_column_labels,
     infer_variable_type,
     is_basic_iterable,
+    needs_object_json,
+    pad_safe,
+    restorable_dtype,
+    restore_categories,
+    restore_column_dtypes,
+    restore_padded_dtype,
     serialize_columns,
     serialize_complex,
     should_deserialize_pandas,
     should_serialize_pandas,
+    stores_category_codes,
 )
 from mage_ai.data_preparation.models.variables.constants import (
     DATAFRAME_COLUMN_TYPES_FILE,
     DATAFRAME_CSV_FILE,
+    DATAFRAME_PANDAS_METADATA_FILE,
     DATAFRAME_PARQUET_FILE,
     DATAFRAME_PARQUET_SAMPLE_FILE,
     JOBLIB_FILE,
@@ -756,9 +770,17 @@ class Variable:
             if isinstance(data, pd.Series) and self.variable_type != VariableType.SERIES_PANDAS:
                 data = data.to_list()
 
-            if self.variable_type is None and isinstance(data, pd.DataFrame):
+            # A type read from an earlier output's metadata must not decide how a frame of
+            # the other library is written; a block can switch between pandas and Polars.
+            if isinstance(data, pd.DataFrame) and self.variable_type in (
+                None,
+                VariableType.POLARS_DATAFRAME,
+            ):
                 self.variable_type = VariableType.DATAFRAME
-            elif self.variable_type is None and isinstance(data, pl.DataFrame):
+            elif isinstance(data, pl.DataFrame) and self.variable_type in (
+                None,
+                VariableType.DATAFRAME,
+            ):
                 self.variable_type = VariableType.POLARS_DATAFRAME
             elif is_spark_dataframe(data):
                 self.variable_type = VariableType.SPARK_DATAFRAME
@@ -849,9 +871,17 @@ class Variable:
                 size=self.data_manager.resource_usage.size,
             )
         else:
-            if self.variable_type is None and isinstance(data, pd.DataFrame):
+            # A type read from an earlier output's metadata must not decide how a frame of
+            # the other library is written; a block can switch between pandas and Polars.
+            if isinstance(data, pd.DataFrame) and self.variable_type in (
+                None,
+                VariableType.POLARS_DATAFRAME,
+            ):
                 self.variable_type = VariableType.DATAFRAME
-            elif self.variable_type is None and isinstance(data, pl.DataFrame):
+            elif isinstance(data, pl.DataFrame) and self.variable_type in (
+                None,
+                VariableType.DATAFRAME,
+            ):
                 self.variable_type = VariableType.POLARS_DATAFRAME
             elif is_spark_dataframe(data):
                 self.variable_type = VariableType.SPARK_DATAFRAME
@@ -1126,10 +1156,27 @@ class Variable:
         file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
         sample_file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_SAMPLE_FILE)
 
+        column_types_raw = None
+        column_types = {}
+        column_types_filename = os.path.join(self.variable_path, DATAFRAME_COLUMN_TYPES_FILE)
+        if self.storage.path_exists(column_types_filename):
+            column_types_raw = self.storage.read_json_file(column_types_filename)
+            if isinstance(column_types_raw, list):
+                for col_data in column_types_raw:
+                    column_types.update(col_data['column_types'])
+            else:
+                # A single Series is stored as a frame, with a dict of column types.
+                column_types = column_types_raw or {}
+        arrow_columns = [
+            column
+            for column, column_type in column_types.items()
+            if isinstance(column_type, str) and column_type.endswith('[pyarrow]')
+        ]
+
         read_sample_success = False
         if sample:
             try:
-                df = self.storage.read_parquet(sample_file_path, engine='pyarrow')
+                df = self.storage.read_parquet(sample_file_path, arrow_columns=arrow_columns)
                 read_sample_success = True
             except Exception as ex:
                 if raise_exception:
@@ -1138,7 +1185,7 @@ class Variable:
                     traceback.print_exc()
         if not read_sample_success:
             try:
-                df = self.storage.read_parquet(file_path, engine='pyarrow')
+                df = self.storage.read_parquet(file_path, arrow_columns=arrow_columns)
             except Exception as ex:
                 if raise_exception:
                     raise Exception(f'Failed to read parquet file: {file_path}') from ex
@@ -1150,23 +1197,22 @@ class Variable:
             if df.shape[0] > sample_count:
                 df = df.iloc[:sample_count]
 
-        column_types_raw = None
-        column_types_filename = os.path.join(self.variable_path, DATAFRAME_COLUMN_TYPES_FILE)
-        if self.storage.path_exists(column_types_filename):
-            column_types_raw = self.storage.read_json_file(column_types_filename)
-            column_types = {}
-
-            if self.variable_type == VariableType.SERIES_PANDAS:
-                if isinstance(column_types_raw, list):
-                    for col_data in column_types_raw:
-                        column_types.update(col_data['column_types'])
-            else:
-                column_types = column_types_raw
-
+        if column_types_raw is not None:
             # ddf = dask_from_pandas(df)
             if should_deserialize_pandas(column_types):
                 df = deserialize_columns(df, column_types)
             df = cast_column_types(df, column_types)
+            df = restore_column_dtypes(df, column_types)
+        pandas_metadata = {}
+        metadata_path = os.path.join(self.variable_path, DATAFRAME_PANDAS_METADATA_FILE)
+        if self.storage.path_exists(metadata_path):
+            pandas_metadata = self.storage.read_json_file(metadata_path) or {}
+        if pandas_metadata.get('categories'):
+            df = restore_categories(df, pandas_metadata['categories'])
+        if pandas_metadata.get('column_labels') and len(df.columns):
+            labels = decode_column_labels(pandas_metadata['column_labels'], len(df.columns))
+            if labels is not None:
+                df.columns = labels
 
         if self.variable_type == VariableType.SERIES_PANDAS:
             if column_types_raw and isinstance(column_types_raw, list):
@@ -1174,24 +1220,39 @@ class Variable:
 
                 for col_data in column_types_raw:
                     column_mapping = col_data.get('column_mapping')
-                    index = col_data.get('index')
+                    col_types = col_data.get('column_types') or {}
+                    index_column = col_data.get('index_column')
+                    if index_column and index_column not in df.columns:
+                        # Sample files keep only the first DATAFRAME_SAMPLE_MAX_COLUMNS.
+                        continue
+                    if index_column:
+                        length = col_data.get('length', len(df))
+                        # pd.Index takes the name of a Series when name is None.
+                        index = pd.Index(
+                            restore_padded_dtype(
+                                df[index_column].iloc[:length], col_types.get(index_column),
+                            ),
+                        ).rename(col_data.get('index_name'))
+                    else:
+                        index = col_data.get('index')
+                        length = len(index)
 
-                    columns_idx = []
-                    columns = []
                     for col_idx, col in column_mapping.items():
-                        columns_idx.append(col_idx)
-                        columns.append(col)
-
-                    df_series = df.iloc[: len(index)][columns_idx]
-                    df_series.columns = columns
-                    for col in df_series.columns:
-                        series = df_series[col]
-                        series.set_axis(index)
-                        series_list.append(series)
+                        if col_idx not in df.columns:
+                            continue
+                        series = restore_padded_dtype(
+                            df[col_idx].iloc[:length], col_types.get(col_idx),
+                        )
+                        if len(index) == len(series):
+                            # set_axis returns a new Series.
+                            series = series.set_axis(index)
+                        series_list.append(series.rename(col))
 
                 return series_list
             else:
                 df = df.iloc[:, 0]
+                if pandas_metadata.get('unnamed_series'):
+                    df = df.rename(None)
 
         return df
 
@@ -1230,7 +1291,7 @@ class Variable:
         read_sample_success = False
         if sample:
             try:
-                df = self.storage.read_polars_parquet(sample_file_path, use_pyarrow=True)
+                df = self.storage.read_polars_parquet(sample_file_path)
                 read_sample_success = True
             except Exception as ex:
                 if raise_exception:
@@ -1239,7 +1300,7 @@ class Variable:
                     traceback.print_exc()
         if not read_sample_success:
             try:
-                df = self.storage.read_polars_parquet(file_path, use_pyarrow=True)
+                df = self.storage.read_polars_parquet(file_path)
             except Exception as ex:
                 if raise_exception:
                     raise Exception(f'Failed to read parquet file: {file_path}') from ex
@@ -1251,12 +1312,9 @@ class Variable:
             if df.shape[0] > sample_count:
                 df = df.head(sample_count)
 
-        column_types_filename = os.path.join(self.variable_path, DATAFRAME_COLUMN_TYPES_FILE)
-        if self.storage.path_exists(column_types_filename):
-            column_types = self.storage.read_json_file(column_types_filename)
-            # No Mage specific code to serialize columns for polars when writing a variable,
-            # so no need to deserialize columns here
-            df = cast_column_types_polars(df, column_types)
+        # Parquet keeps every Polars type. A data_column_types.json file next to a Polars
+        # output is left from an earlier pandas output of the same block, and casting with
+        # it turned floats into integers.
         return df
 
     def __read_spark_parquet(
@@ -1281,19 +1339,40 @@ class Variable:
         df_sample_output = data.iloc[:DATAFRAME_SAMPLE_COUNT]
         df_sample_output.to_file(os.path.join(self.variable_path, 'sample_data.sh'))
 
-    def __get_column_types(self, data: pd.DataFrame) -> Tuple[Dict, pd.DataFrame]:
+    def __get_column_types(self, data: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, Dict]:
         column_types = {}
+        categories = {}
         # Columns are replaced on this frame and never modified in place, so a shallow copy
         # leaves data unchanged under copy-on-write.
         df_output = data.copy(deep=False)
+        if df_output.columns.duplicated().any():
+            duplicated = df_output.columns[df_output.columns.duplicated()].tolist()
+            raise Exception(f'Please do not use duplicate column name: "{duplicated[0]}"')
+        # Parquet needs string column names. Column types are keyed by those names, and the
+        # original labels are restored on read from DATAFRAME_PANDAS_METADATA_FILE.
+        df_output.columns = [str(c) for c in df_output.columns]
+        if df_output.columns.duplicated().any():
+            raise Exception(
+                'Column names must stay distinct as text, which Parquet requires: '
+                f'{data.columns.tolist()}',
+            )
         # Clean up data types since parquet doesn't support mixed data types
         for c in df_output.columns:
             df_col = df_output[c]
             if type(df_col) is pd.DataFrame:
                 raise Exception(f'Please do not use duplicate column name: "{c}"')
             c_dtype = df_col.dtype
-            if not is_object_dtype(c_dtype):
+            if stores_category_codes(c_dtype):
+                df_output[c] = pd.Series(df_col.cat.codes, index=df_col.index)
+                column_types[c] = CATEGORY_CODES_COLUMN_TYPE
+                categories[c] = encode_categories(c_dtype)
+            elif not is_object_dtype(c_dtype):
                 column_types[c] = str(c_dtype)
+                if restorable_dtype(c_dtype):
+                    if isinstance(c_dtype, pd.SparseDtype):
+                        df_output[c] = df_col.sparse.to_dense()
+                    elif c_dtype.kind == 'c':
+                        df_output[c] = df_col.astype(object)
             else:
                 present = [v for v in df_col.tolist() if v is not None and v is not pd.NA]
                 if present and all(isinstance(v, (float, np.floating)) for v in present) and any(
@@ -1327,6 +1406,15 @@ class Variable:
                         )
                         column_types[c] = bytes.__name__
                         continue
+                    values = series_non_null.tolist()
+                    if all(isinstance(v, uuid.UUID) for v in values):
+                        column_types[c] = UUID_COLUMN_TYPE
+                        continue
+                    if needs_object_json(values):
+                        # Casting to the type of the first value turned 2.5 into 2 in a
+                        # column of ints and floats.
+                        column_types[c] = OBJECT_JSON_COLUMN_TYPE
+                        continue
                     coltype_inferred = infer_dtype(series_non_null)
                     if is_object_dtype(series_non_null.dtype):
                         if coltype.__name__ in STRING_SERIALIZABLE_COLUMN_TYPES:
@@ -1354,11 +1442,12 @@ class Variable:
                         column_types[c] = coltype.__name__
                     else:
                         column_types[c] = type(series_non_null.iloc[0].item()).__name__
-        return column_types, df_output
+        return column_types, df_output, categories
 
     def __write_parquet(
         self,
         data: Union[pd.DataFrame, List[pd.Series]],
+        unnamed_series: bool = False,
     ) -> None:
         column_types_to_test = {}
 
@@ -1368,41 +1457,56 @@ class Variable:
             and isinstance(data[0], pd.Series)
         )
 
+        pandas_metadata = {}
         if is_series_list:
-            df_output = pd.DataFrame()
-
+            frames = []
             column_types = []
+            categories = {}
             for idx, series in enumerate(data):
-                df_series = series.to_frame()
-                column_mapping = {}
-
-                columns = []
-                for col in df_series.columns:
-                    col_idx = f'{col}_{idx}'
-                    column_mapping[col_idx] = col
-                    columns.append(col_idx)
-
-                df_series.columns = columns
-                col_types, df_series = self.__get_column_types(df_series)
-
-                df_output = pd.concat([df_output, df_series], axis=1)
-                column_types.append(
-                    dict(
-                        column_mapping=column_mapping,
-                        column_types=col_types,
-                        index=series.index.to_list(),
-                    )
-                )
+                col_idx = f'{series.name}_{idx}'
+                # Series are stored side by side by position. Aligning them on their index
+                # labels mixed up rows of Series with different indexes.
+                df_series = pd.DataFrame({col_idx: series.reset_index(drop=True)})
+                entry = dict(column_mapping={col_idx: series.name}, length=len(series))
+                if isinstance(series.index, pd.MultiIndex):
+                    entry['index'] = series.index.to_list()
+                else:
+                    index_column = f'{col_idx}__index'
+                    df_series[index_column] = pd.Series(series.index).reset_index(drop=True)
+                    entry['index_column'] = index_column
+                    entry['index_name'] = series.index.name
+                col_types, df_series, col_categories = self.__get_column_types(df_series)
+                categories.update(col_categories)
+                entry['column_types'] = col_types
+                column_types.append(entry)
                 column_types_to_test.update(col_types)
+                frames.append(df_series)
+            length = max(len(frame) for frame in frames)
+            df_output = pd.concat(
+                [frame if len(frame) == length else pad_safe(frame) for frame in frames],
+                axis=1,
+            )
         else:
-            column_types, df_output = self.__get_column_types(data)
+            column_types, df_output, categories = self.__get_column_types(data)
             column_types_to_test.update(column_types)
+            column_labels = encode_column_labels(data.columns)
+            if column_labels:
+                pandas_metadata['column_labels'] = column_labels
+        if categories:
+            pandas_metadata['categories'] = categories
+        if unnamed_series:
+            pandas_metadata['unnamed_series'] = True
 
         self.storage.makedirs(self.variable_path, exist_ok=True)
         self.storage.write_json_file(
             os.path.join(self.variable_path, DATAFRAME_COLUMN_TYPES_FILE),
             column_types,
         )
+        metadata_path = os.path.join(self.variable_path, DATAFRAME_PANDAS_METADATA_FILE)
+        if pandas_metadata:
+            self.storage.write_json_file(metadata_path, pandas_metadata)
+        elif self.storage.path_exists(metadata_path):
+            self.storage.remove(metadata_path)
 
         if should_serialize_pandas(column_types_to_test):
             # Polars turned dict columns into structs, which adds every other row's keys to
@@ -1447,6 +1551,10 @@ class Variable:
 
     def __write_polars_dataframe(self, data: pl.DataFrame) -> None:
         self.storage.makedirs(self.variable_path, exist_ok=True)
+        for filename in (DATAFRAME_COLUMN_TYPES_FILE, DATAFRAME_PANDAS_METADATA_FILE):
+            stale = os.path.join(self.variable_path, filename)
+            if self.storage.path_exists(stale):
+                self.storage.remove(stale)
 
         self.storage.write_polars_dataframe(
             data,
@@ -1535,7 +1643,7 @@ class Variable:
             if basic_iterable:
                 self.__write_parquet(data)
             else:
-                self.__write_parquet(data.to_frame())
+                self.__write_parquet(data.to_frame(), unnamed_series=data.name is None)
 
             row_count = None
 
