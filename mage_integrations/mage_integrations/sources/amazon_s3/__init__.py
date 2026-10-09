@@ -1,10 +1,12 @@
 import io
 import re
 from collections import Counter
-from typing import Dict, Generator, List
+from typing import Dict, Generator, List, Optional
 
 import boto3
 import pandas as pd
+import polars as pl
+import pyarrow as pa
 from botocore.config import Config
 from singer.schema import Schema
 
@@ -33,6 +35,22 @@ VALID_FILE_TYPES = [
     FILE_TYPE_PARQUET,
 ]
 
+
+
+def _nested_column_type(dtype) -> Optional[str]:
+    """The JSON schema type of a pyarrow-backed list or struct column."""
+    if not isinstance(dtype, pd.ArrowDtype):
+        return None
+    arrow_type = dtype.pyarrow_dtype
+    if (
+        pa.types.is_list(arrow_type)
+        or pa.types.is_large_list(arrow_type)
+        or pa.types.is_fixed_size_list(arrow_type)
+    ):
+        return COLUMN_TYPE_ARRAY
+    if pa.types.is_struct(arrow_type) or pa.types.is_map(arrow_type):
+        return COLUMN_TYPE_OBJECT
+    return None
 
 class AmazonS3(Source):
     @property
@@ -152,6 +170,10 @@ class AmazonS3(Source):
 
             properties = {}
             for col in df.columns:
+                nested_type = _nested_column_type(df[col].dtype)
+                if nested_type:
+                    properties[col] = dict(type=['null', nested_type])
+                    continue
                 df_filtered = df[df[col].notnull()][[col]]
 
                 for k, v in infer_dtypes(df_filtered).items():
@@ -274,13 +296,20 @@ class AmazonS3(Source):
         elif '.csv' in key:
             file_type = FILE_TYPE_CSV
 
+        # Polars reads both formats. pd.read_parquet turned integer columns with nulls
+        # into floats, rounding values above 2**53, and pyarrow before 26 cannot read
+        # fixed-size lists that hold a null. pandas' CSV parser read -2**63 as missing
+        # in a column with nulls, and dropped null rows of one-column files.
         if file_type == FILE_TYPE_PARQUET:
             data_buffer = io.BytesIO()
             client.download_fileobj(self.bucket, key, data_buffer)
-            df = pd.read_parquet(data_buffer)
+            data_buffer.seek(0)
+            df = pl.read_parquet(data_buffer).to_pandas(use_pyarrow_extension_array=True)
         elif file_type == FILE_TYPE_CSV:
             obj = client.get_object(Bucket=self.bucket, Key=key)
-            df = pd.read_csv(io.BytesIO(obj['Body'].read()))
+            df = pl.read_csv(
+                io.BytesIO(obj['Body'].read()), infer_schema_length=None,
+            ).to_pandas(use_pyarrow_extension_array=True)
 
         return df
 

@@ -12,6 +12,11 @@ from botocore.config import Config
 from mage_integrations.destinations.base import Destination
 from mage_integrations.destinations.constants import COLUMN_FORMAT_DATETIME
 from mage_integrations.destinations.utils import update_record_with_internal_columns
+from mage_integrations.utils.frames import (
+    batch_file_name,
+    frame_from_records,
+    nested_values_as_json,
+)
 
 
 class AmazonS3(Destination):
@@ -95,7 +100,10 @@ class AmazonS3(Destination):
         for r in record_data:
             r['record'] = update_record_with_internal_columns(r['record'])
 
-        df = pd.DataFrame([d['record'] for d in record_data])
+        df = frame_from_records(
+            [d['record'] for d in record_data],
+            (self.schemas or {}).get(stream, {}).get('properties'),
+        )
 
         # Convert data types
         schema = self.schemas[stream]
@@ -125,7 +133,7 @@ class AmazonS3(Destination):
                 allow_truncated_timestamps=True,
             )
         elif self.file_type == 'csv':
-            df.to_csv(buffer, index=False)
+            nested_values_as_json(df).to_csv(buffer, index=False)
         else:
             raise Exception(f'File type {self.file_type} is not supported.')
 
@@ -133,8 +141,7 @@ class AmazonS3(Destination):
 
         curr_time = datetime.now(timezone.utc)
 
-        filename = curr_time.strftime('%Y%m%d-%H%M%S')
-        filename = f'{filename}.{self.file_type}'
+        filename = batch_file_name(curr_time, self.file_type)
 
         object_key = os.path.join(self.object_key_path, table_name)
 
