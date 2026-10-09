@@ -55,6 +55,24 @@ def missing_as_none(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.astype(object).where(frame.notna(), None)
 
 
+# pandas 3 deprecates or rejects these timedelta unit aliases. Saved transformer actions
+# can hold them.
+TIMEDELTA_UNIT_ALIASES = {
+    'd': 'D',
+    'H': 'h',
+    'T': 'min',
+    'S': 's',
+    'L': 'ms',
+    'U': 'us',
+    'N': 'ns',
+    'w': 'W',
+}
+
+
+def timedelta_unit(unit: str) -> str:
+    return TIMEDELTA_UNIT_ALIASES.get(unit, unit)
+
+
 DATETIME_UNITS_PER_SECOND = {
     's': 1,
     'ms': 10**3,

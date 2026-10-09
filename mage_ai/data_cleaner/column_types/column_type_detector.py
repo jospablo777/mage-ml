@@ -197,7 +197,8 @@ def infer_object_type(series, column_name, kwargs):
                 try:
                     clean_series.astype(np.int64)
                     return ColumnType.NUMBER
-                except OverflowError:
+                except (OverflowError, ValueError):
+                    # ValueError: text such as '$1,000' that is not a plain integer.
                     if clean_series_nunique <= kwargs.get(
                         "category_cardinality_threshold", 255
                     ):

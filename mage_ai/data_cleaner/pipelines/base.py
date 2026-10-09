@@ -1,27 +1,32 @@
+import numpy as np
+
 from mage_ai.data_cleaner.cleaning_rules.base import STATUS_COMPLETED
 from mage_ai.data_cleaner.cleaning_rules.clean_column_names import CleanColumnNames
 from mage_ai.data_cleaner.cleaning_rules.fix_syntax_errors import FixSyntaxErrors
 from mage_ai.data_cleaner.cleaning_rules.impute_values import ImputeValues
 from mage_ai.data_cleaner.cleaning_rules.reformat_values import ReformatValues
-from mage_ai.data_cleaner.cleaning_rules.remove_collinear_columns import RemoveCollinearColumns
+from mage_ai.data_cleaner.cleaning_rules.remove_collinear_columns import (
+    RemoveCollinearColumns,
+)
 from mage_ai.data_cleaner.cleaning_rules.remove_columns_with_high_empty_rate import (
     RemoveColumnsWithHighEmptyRate,
 )
 from mage_ai.data_cleaner.cleaning_rules.remove_columns_with_single_value import (
     RemoveColumnsWithSingleValue,
 )
-from mage_ai.data_cleaner.cleaning_rules.remove_duplicate_rows import RemoveDuplicateRows
+from mage_ai.data_cleaner.cleaning_rules.remove_duplicate_rows import (
+    RemoveDuplicateRows,
+)
 from mage_ai.data_cleaner.cleaning_rules.remove_outliers import (
-    RemoveOutliers,
     REMOVE_OUTLIERS_TITLE,
+    RemoveOutliers,
 )
 from mage_ai.data_cleaner.column_types.column_type_detector import infer_column_types
-from mage_ai.data_cleaner.transformer_actions.base import BaseAction
 from mage_ai.data_cleaner.statistics.calculator import StatisticsCalculator
+from mage_ai.data_cleaner.transformer_actions.base import BaseAction
 from mage_ai.shared.array import flatten
 from mage_ai.shared.constants import SAMPLE_SIZE
 from mage_ai.shared.logger import VerboseFunctionExec, timer
-import numpy as np
 
 DEFAULT_RULES = [
     CleanColumnNames,
@@ -45,7 +50,7 @@ class BasePipeline:
     def create_actions(self, df, column_types, statistics, rule_configs={}):
         if not statistics or len(statistics) == 0:
             calculator = StatisticsCalculator(column_types, self.verbose)
-            statistics = calculator.calculate_statistics_overview(df, False)
+            statistics = calculator.calculate_statistics_overview(df, is_clean=False)
         self.column_types = column_types
         all_suggestions = []
         for rule in self.rules:

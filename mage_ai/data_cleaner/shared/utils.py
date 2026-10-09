@@ -38,7 +38,7 @@ def clean_series(series, column_type, dropna=True):
         if dtype is str:
             series_cleaned = series_cleaned.str.replace(',', '')
             if series_cleaned.str.count(CURRENCY_SYMBOLS).sum() != 0:
-                series_cleaned = series_cleaned.str.replace(CURRENCY_SYMBOLS, '')
+                series_cleaned = series_cleaned.str.replace(CURRENCY_SYMBOLS, '', regex=True)
             elif series_cleaned.str.contains('%').sum() != 0:
                 is_percent = True
                 series_cleaned = series_cleaned.str.replace('%', '')

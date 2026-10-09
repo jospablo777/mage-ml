@@ -104,7 +104,7 @@ def impute(df, action, **kwargs):
     df[columns] = (
         df[columns]
         .replace(empty_string_pattern, np.nan, regex=True)
-        .infer_objects(copy=False)
+        .infer_objects()
     )
     ctypes = [action_variables[column]['feature']['column_type'] for column in columns]
 
@@ -137,7 +137,7 @@ def impute(df, action, **kwargs):
         timeseries_cols = action_options.get('timeseries_index')
         df = df.sort_values(by=timeseries_cols, axis=0)
         # In pandas 2.x, fillna(method=...) is deprecated; prefer ffill/bfill directly.
-        df[columns] = df[columns].ffill().infer_objects(copy=False)
+        df[columns] = df[columns].ffill().infer_objects()
     elif strategy == ImputationStrategy.RANDOM:
         for column, dtype in zip(columns, ctypes):
             invalid_idx = df[df[column].isna()].index
@@ -202,7 +202,7 @@ def reformat(df, action, **kwargs):
         df[columns] = (
             df[columns]
             .replace(r'^\s*$', np.nan, regex=True)
-            .infer_objects(copy=False)
+            .infer_objects()
         )
     elif reformat_action == 'currency_to_num':
         for column in generate_string_cols(df, columns):
@@ -210,7 +210,7 @@ def reformat(df, action, **kwargs):
             clean_col = clean_col.replace(r'\s', '', regex=True)
             clean_col = (
                 clean_col.replace(r'^\s*$', np.nan, regex=True)
-                .infer_objects(copy=False)
+                .infer_objects()
             )
 
             # Robust numeric coercion that works across pandas 1.x and 2.x
@@ -241,7 +241,7 @@ def reformat(df, action, **kwargs):
         df[columns] = (
             df[columns]
             .replace(r'^\s*$', np.nan, regex=True)
-            .infer_objects(copy=False)
+            .infer_objects()
         )
 
     return df
@@ -332,7 +332,17 @@ def __agg(df, action, agg_method):
         return __groupby_agg(df, action, agg_method)
     else:
         output_col = action['outputs'][0]['uuid']
-        df[output_col] = df[action['action_arguments'][0]].agg(agg_method)
+        series = df[action['action_arguments'][0]]
+        if agg_method in ('first', 'last'):
+            # Series.first and Series.last were offset filters and pandas 3 removed them.
+            # Like GroupBy.first and GroupBy.last, take the first or last present value.
+            present = series.dropna()
+            if present.empty:
+                df[output_col] = None
+            else:
+                df[output_col] = present.iloc[0 if agg_method == 'first' else -1]
+        else:
+            df[output_col] = series.agg(agg_method)
         return df
 
 

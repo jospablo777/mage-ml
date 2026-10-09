@@ -130,11 +130,12 @@ class DBTAdapterTest(AsyncDBTestCase):
 
                 _res, df = dbt_adapter.execute('select * from test.main.test', fetch=True)
 
+                # The column names were passed as the index, which transposed the result.
                 self.assertEqual(
                     df.to_dict(),
                     {
-                        0: {'id': Decimal('1'), 'text': Decimal('2')},
-                        1: {'id': 'foo', 'text': 'bar'},
+                        'id': {0: Decimal('1'), 1: Decimal('2')},
+                        'text': {0: 'foo', 1: 'bar'},
                     },
                 )
 

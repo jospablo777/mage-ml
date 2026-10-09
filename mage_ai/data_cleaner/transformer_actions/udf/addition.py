@@ -2,6 +2,7 @@ import pandas as pd
 
 from mage_ai.data_cleaner.column_types.constants import ColumnType
 from mage_ai.data_cleaner.transformer_actions.udf.base import BaseUDF
+from mage_ai.shared.pandas_utils import timedelta_unit
 
 
 class Addition(BaseUDF):
@@ -28,7 +29,7 @@ class Addition(BaseUDF):
 
     def __add_value(self, original_column, value, column_type=None, options={}):
         if column_type == ColumnType.DATETIME:
-            time_unit = options.get('time_unit', 'd')
+            time_unit = timedelta_unit(options.get('time_unit', 'D'))
             return (
                 pd.to_datetime(original_column, format='mixed', utc=True) +
                 pd.to_timedelta(value, unit=time_unit)

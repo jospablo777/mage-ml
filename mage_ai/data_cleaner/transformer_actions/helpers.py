@@ -13,7 +13,7 @@ def convert_col_type(df_col, col_type):
         return (
             df_col.replace(r'^\s*$', 0, regex=True)
             .fillna(0)
-            .infer_objects(copy=False)
+            .infer_objects()
             .astype(np.int64)
         )
     elif col_type == ColumnType.NUMBER_WITH_DECIMALS:
@@ -42,7 +42,7 @@ def convert_value_type(feature_uuid, action, value):
 def drop_na(df):
     return (
         df.replace(r'^\s*$', np.nan, regex=True)
-        .infer_objects(copy=False)
+        .infer_objects()
         .dropna()
     )
 

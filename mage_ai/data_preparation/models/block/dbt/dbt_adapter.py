@@ -98,10 +98,8 @@ class DBTAdapter:
             Tuple[AdapterResponse, pd.DataFrame]: Adapter Response and the result dataframe.
         """
         res, table = self.__adapter.execute(sql, fetch=fetch)
-        df = pd.DataFrame(
-            table.rows,
-            table.column_names
-        )
+        # The second positional argument of DataFrame is the index.
+        df = pd.DataFrame(table.rows, columns=table.column_names)
         return res, df
 
     def execute_macro(

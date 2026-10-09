@@ -1,5 +1,7 @@
 import json
 
+import pandas as pd
+
 from mage_ai.data_cleaner.shared.utils import is_spark_dataframe
 from mage_ai.data_cleaner.transformer_actions import column, row
 from mage_ai.data_cleaner.transformer_actions.constants import (
@@ -15,6 +17,18 @@ from mage_ai.data_cleaner.transformer_actions.variable_replacer import (
     interpolate,
     replace_true_false,
 )
+
+
+def join_compatible(left, right) -> bool:
+    if left == right:
+        return True
+    types = pd.api.types
+    if types.is_datetime64_any_dtype(left) and types.is_datetime64_any_dtype(right):
+        return getattr(left, 'tz', None) == getattr(right, 'tz', None)
+    if types.is_timedelta64_dtype(left) and types.is_timedelta64_dtype(right):
+        return True
+    return types.is_string_dtype(left) and types.is_string_dtype(right)
+
 
 try:
     from mage_ai.data_cleaner.transformer_actions.spark.transformers import (
@@ -194,13 +208,18 @@ class BaseAction:
                 self.action['action_options'] = json.loads(interpolate(action_options_json, k, v))
 
     def join(self, df, df_to_join, action):
+        """
+        Keys of different kinds are joined as text. Datetime keys of different resolutions,
+        common since pandas 3 keeps the source resolution, and text keys in str and object
+        columns join as they are.
+        """
         action_options = action['action_options']
         left_on = action_options['left_on']
         right_on = action_options['right_on']
 
         for i in range(len(left_on)):
             col1, col2 = left_on[i], right_on[i]
-            if df[col1].dtype != df_to_join[col2].dtype:
+            if not join_compatible(df[col1].dtype, df_to_join[col2].dtype):
                 df[col1] = drop_na(df[col1]).astype(str)
                 df_to_join[col2] = drop_na(df_to_join[col2]).astype(str)
 
