@@ -24,6 +24,9 @@ Each item says what changed, which pipelines it affects, and what to do.
   streamed to Parquet; the next block receives `pl.scan_parquet` of it, on local storage
   and on S3. The query plan used to be pickled and run again by the next block, against
   whatever its sources held then.
+- **The notebook preview of a Polars output holds a sample.** Every row was converted to
+  JSON for it. A Duration column failed the preview, and so did bytes that are not UTF-8,
+  in Polars and pandas outputs; durations show as ISO 8601 and bytes as hex.
 - **pandas and Polars dtypes are kept** across blocks: nullable integers, categoricals,
   non-string column labels, MultiIndex columns, decimals, UUIDs, bytes and values inside
   dicts and lists. Outputs written by earlier versions read as before.

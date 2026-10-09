@@ -46,6 +46,57 @@ from mage_ai.shared.parsers import (
 from mage_ai.shared.strings import is_json
 
 
+def _preview_value(value: Any) -> Any:
+    encoded = encode_complex(value)
+    # encode_complex returns what it cannot encode, such as bytes, unchanged.
+    return str(value) if encoded is value else encoded
+
+
+def _bytes_as_hex(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    A pandas sample with bytes as hex, as PostgreSQL shows bytea. to_json decodes bytes
+    as UTF-8 and failed on other bytes.
+    """
+    positions = [
+        position for position in range(frame.shape[1])
+        if frame.iloc[:, position].dtype == object
+        and any(isinstance(v, (bytes, bytearray)) for v in frame.iloc[:, position])
+    ]
+    if not positions:
+        return frame
+    frame = frame.copy()
+    for position in positions:
+        frame.isetitem(position, frame.iloc[:, position].map(
+            lambda v: '\\x' + bytes(v).hex() if isinstance(v, (bytes, bytearray)) else v,
+        ))
+    return frame
+
+
+def _polars_preview_rows(frame: pl.DataFrame) -> List[List[Any]]:
+    """
+    The rows of a Polars sample as JSON values. Every row used to be converted, and a
+    Duration column failed: encode_complex left timedeltas unchanged. Temporal and binary
+    columns are rendered by Polars, since Python datetimes end at the year 9999.
+    """
+    rendered = []
+    for name, dtype in frame.schema.items():
+        if dtype == pl.Binary:
+            # As hex, as PostgreSQL shows bytea; bytes that are not UTF-8 failed JSON.
+            rendered.append((pl.lit('\\x') + pl.col(name).bin.encode('hex')).alias(name))
+        elif isinstance(dtype, pl.Duration):
+            rendered.append(pl.col(name).dt.to_string('iso').alias(name))
+        elif dtype.is_temporal():
+            rendered.append(pl.col(name).dt.to_string().alias(name))
+    if rendered:
+        frame = frame.with_columns(rendered)
+    return [
+        list(row.values())
+        for row in json.loads(
+            simplejson.dumps(frame.to_dicts(), default=_preview_value, ignore_nan=True),
+        )
+    ]
+
+
 def format_output_data(
     block,
     data: Any,
@@ -264,7 +315,7 @@ def format_output_data(
                 sample_data=dict(
                     columns=columns_to_display,
                     rows=json.loads(
-                        data[columns_to_display].to_json(
+                        _bytes_as_hex(data[columns_to_display]).to_json(
                             orient='split', date_format='iso', date_unit='us',
                         ),
                     )['data'],
@@ -292,14 +343,13 @@ def format_output_data(
                 variable_uuid=variable_uuid,
             )
         except Exception as err:
-            raise err
+            print(f'Error getting dataframe analysis for block {block_uuid}: {err}')
             analysis = None
+        row_count, column_count = data.shape
         if analysis is not None:
-            stats = analysis.get('statistics', {})
-            row_count = stats.get('original_row_count')
-            column_count = stats.get('original_column_count')
-        else:
-            row_count, column_count = data.shape
+            stats = analysis.get('statistics') or {}
+            row_count = stats.get('original_row_count') or row_count
+            column_count = stats.get('original_column_count') or column_count
 
         columns_to_display = data.columns[:DATAFRAME_ANALYSIS_MAX_COLUMNS]
         sample_count = sample_count or DATAFRAME_SAMPLE_COUNT_PREVIEW
@@ -330,9 +380,6 @@ def format_output_data(
                 except ValueError:
                     pass
 
-            if sample_count is not None:
-                data = data[:sample_count]
-
             resource_usage = block.get_resource_usage(
                 block_uuid=block_uuid,
                 partition=execution_partition,
@@ -343,16 +390,7 @@ def format_output_data(
         data = dict(
             sample_data=dict(
                 columns=columns_to_display,
-                rows=[
-                    list(row.values())
-                    for row in json.loads(
-                        simplejson.dumps(
-                            data[columns_to_display].to_dicts(),
-                            default=encode_complex,
-                            ignore_nan=True,
-                        )
-                    )
-                ],
+                rows=_polars_preview_rows(data[columns_to_display].head(sample_count)),
             ),
             resource_usage=resource_usage,
             shape=[row_count, column_count],
