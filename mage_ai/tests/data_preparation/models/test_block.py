@@ -127,6 +127,21 @@ def test_rows(df):
             block.run_tests()
             read.assert_called_once()
 
+    def test_outputs_not_stored_leave_no_variable_files(self):
+        pipeline = Pipeline.create('no store pipeline', repo_path=self.repo_path)
+        block = Block.create('loader_no_store', 'data_loader', self.repo_path, pipeline=pipeline)
+        with open(block.file_path, 'w') as file:
+            file.write("""import pandas as pd
+@data_loader
+def load_data():
+    return pd.DataFrame({'col1': [1, 2]})
+""")
+
+        output = block.execute_sync(store_variables=False, execution_partition='run_1')
+
+        self.assertEqual(output['output'][0]['col1'].tolist(), [1, 2])
+        self.assertEqual(block.get_variables_by_block(block.uuid, partition='run_1'), [])
+
     def test_execute_with_preprocessers(self):
         pipeline = Pipeline.create(
             'test pipeline preprocessers',

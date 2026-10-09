@@ -40,7 +40,7 @@ from mage_ai.data_preparation.models.constants import (
 from mage_ai.data_preparation.models.project import Project
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleType
-from mage_ai.data_preparation.shared.retry import RetryConfig
+from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
@@ -596,9 +596,10 @@ class BlockExecutor:
 
                     if retry_config is None:
                         if self.RETRYABLE:
-                            retry_config = merge_dict(
-                                self.pipeline.repo_config.retry_config or dict(),
-                                self.block.retry_config or dict(),
+                            retry_config = resolve_retry_config(
+                                self.pipeline.repo_config.retry_config,
+                                self.pipeline.retry_config,
+                                self.block.retry_config,
                             )
                         else:
                             retry_config = dict()

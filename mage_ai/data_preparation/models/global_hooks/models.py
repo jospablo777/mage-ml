@@ -279,33 +279,27 @@ class Hook(BaseDataClass):
 
         outputs_mapping = {}
 
-        if pipeline_run:
-            for block_run in pipeline_run.block_runs:
-                block = self.pipeline.get_block(block_run.block_uuid)
-                block_uuid = block.uuid
-                if block_uuid not in block_uuids:
-                    continue
+        # The output of each block, from the hook pipeline's run when there is one, or
+        # from the notebook's outputs. The run's outputs were read with
+        # BlockRun.get_outputs(sample=False), which takes no sample argument and raised
+        # TypeError; it also returns display samples, not the data.
+        execution_partition = pipeline_run.execution_partition if pipeline_run else None
+        for block_uuid in block_uuids.keys():
+            input_vars, _kwargs_vars, _upstream_block_uuids_final = fetch_input_variables(
+                self.pipeline,
+                input_args=None,
+                execution_partition=execution_partition,
+                global_vars=self.pipeline_settings.get('variables'),
+                upstream_block_uuids=[block_uuid],
+            )
+            output = input_vars
+            if isinstance(output, list) and len(output) >= 1:
+                output = output[0]
 
-                if block_uuid not in outputs_mapping:
-                    outputs_mapping[block_uuid] = []
+            if block_uuid not in outputs_mapping:
+                outputs_mapping[block_uuid] = []
 
-                outputs_mapping[block_uuid].append(block_run.get_outputs(sample=False))
-        else:
-            for block_uuid in block_uuids.keys():
-                input_vars, _kwargs_vars, _upstream_block_uuids_final = fetch_input_variables(
-                    self.pipeline,
-                    input_args=None,
-                    global_vars=self.pipeline_settings.get('variables'),
-                    upstream_block_uuids=[block_uuid],
-                )
-                output = input_vars
-                if isinstance(output, list) and len(output) >= 1:
-                    output = output[0]
-
-                if block_uuid not in outputs_mapping:
-                    outputs_mapping[block_uuid] = []
-
-                outputs_mapping[block_uuid].append(output)
+            outputs_mapping[block_uuid].append(output)
 
         for hook_output_setting in self.output_settings:
             if not hook_output_setting.block or not hook_output_setting.block.uuid:

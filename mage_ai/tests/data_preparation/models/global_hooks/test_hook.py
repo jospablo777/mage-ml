@@ -1,7 +1,6 @@
 import hashlib
 import uuid
 from datetime import datetime
-from typing import List
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -642,68 +641,43 @@ class HookTest(GlobalHooksMixin):
         )
 
         block1, block2, block3, block4 = self.blocks1
+        # The outputs of the hook pipeline's run, in the run's partition, which differ
+        # from the notebook's outputs that the test without a run reads.
+        outputs = {
+            block1.uuid: {'type[]': [PipelineType.STREAMING.value]},
+            block2.uuid: {'type[]': [PipelineType.PYSPARK.value]},
+            block3.uuid: dict(powers=dict(fire=1)),
+            block4.uuid: dict(level=2),
+        }
+        for block_uuid, data in outputs.items():
+            hook.pipeline.variable_manager.add_variable(
+                hook.pipeline.uuid,
+                block_uuid,
+                'output_0',
+                data,
+                partition=pipeline_run.execution_partition,
+            )
 
-        def _build_get_outputs(
-            block_run,
-            block1=block1,
-            block2=block2,
-            block3=block3,
-            block4=block4,
-        ):
-            mapping = {
-                block1.uuid: {
-                    'type[]': [PipelineType.STREAMING.value],
-                },
-                block2.uuid: {
-                    'type[]': [PipelineType.PYSPARK.value],
-                },
-                block3.uuid: dict(powers=dict(fire=1)),
-                block4.uuid: dict(level=2),
-            }
+        output = hook.get_and_set_output(pipeline_run)
 
-            def _get_outputs(
-                block_run=block_run,
-                mapping=mapping,
-                *args,
-                **kwargs,
-            ):
-                return mapping[block_run.block_uuid]
-
-            return _get_outputs
-
-        br1, br2, br3, br4 = list(pipeline_run.block_runs)
-
-        class PipelineRunFake(object):
-            @property
-            def block_runs(self) -> List:
-                return [br1, br2, br3, br4]
-
-        pipeline_run_mock = PipelineRunFake()
-
-        with patch.object(br1, 'get_outputs', _build_get_outputs(br1)):
-            with patch.object(br2, 'get_outputs', _build_get_outputs(br2)):
-                with patch.object(br3, 'get_outputs', _build_get_outputs(br3)):
-                    with patch.object(br4, 'get_outputs', _build_get_outputs(br4)):
-                        output = hook.get_and_set_output(pipeline_run_mock)
-
-                        self.assertEqual(output, hook.output)
-                        self.assertEqual(output, dict(
-                            query={
-                                'type[]': [
-                                    'streaming',
-                                    'pyspark',
-                                ],
-                            },
-                            metadata=dict(
-                                powers=dict(
-                                    fire=1,
-                                    level=2,
-                                ),
-                                water=dict(
-                                    level=2,
-                                ),
-                            ),
-                        ))
+        self.assertEqual(output, hook.output)
+        self.assertEqual(output, dict(
+            query={
+                'type[]': [
+                    'streaming',
+                    'pyspark',
+                ],
+            },
+            metadata=dict(
+                powers=dict(
+                    fire=1,
+                    level=2,
+                ),
+                water=dict(
+                    level=2,
+                ),
+            ),
+        ))
 
     @freeze_time(datetime(3000, 1, 1))
     async def test_to_dict(self):

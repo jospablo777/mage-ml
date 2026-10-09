@@ -1654,7 +1654,9 @@ class Block(
                     # Reset outputs cache
                     self._outputs = None
 
-                    if BlockType.CHART != self.type:
+                    # Without stored outputs, the shape files made an output_0 with no
+                    # data, which the run page showed blank and readers took for an output.
+                    if BlockType.CHART != self.type and store_variables:
                         if analyze_outputs:
                             self.analyze_outputs(
                                 variable_mapping,

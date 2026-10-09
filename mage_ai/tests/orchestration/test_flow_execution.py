@@ -232,6 +232,40 @@ class FlowExecutionTest(DBTestCase):
                 self.assertEqual(pd.read_parquet(self.output)['amount'].tolist(), [20, 60])
                 self.assertEqual(len(run.completed_block_runs), 4)
 
+    def test_one_process_run_gets_the_triggers_allow_blocks_to_fail(self):
+        """The one-process job dropped the setting and stopped at the first failure."""
+        from mage_ai.orchestration import pipeline_scheduler_original
+
+        self.block('fail', 'data_loader', '''
+            @data_loader
+            def fail(**kwargs):
+                raise RuntimeError('optional source failed')
+        ''')
+        self.branched_flow()
+        self.pipeline.run_pipeline_in_one_process = True
+        self.pipeline.save()
+        run = trigger_pipeline(self.pipeline.uuid, variables={
+            'multiplier': 2, 'output_path': str(self.output),
+        })
+        run.pipeline_schedule.update(settings={'allow_blocks_to_fail': True})
+        jobs = []
+        job_manager = pipeline_scheduler_original.get_job_manager()
+        with patch.object(job_manager, 'add_job', side_effect=lambda *a, **k: jobs.append(
+            (a, k),
+        )), patch.object(job_manager, 'has_pipeline_run_job', return_value=False):
+            scheduler = PipelineScheduler(run)
+            scheduler.start(should_schedule=False)
+            scheduler.schedule()
+
+        (args, kwargs), = jobs
+        self.assertIs(kwargs['allow_blocks_to_fail'], True)
+        args[2](*args[3:], **kwargs)
+
+        # One process ran every branch that could run.
+        self.assertEqual(pd.read_parquet(self.output)['amount'].tolist(), [20, 60])
+        run.refresh()
+        self.assertEqual(len(run.completed_block_runs), 4)
+
     def test_cancellation_between_blocks_stops_downstream_execution(self):
         load = self.block('cancel', 'data_loader', '''
             from mage_ai.orchestration.db.models.schedules import PipelineRun
@@ -276,6 +310,30 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
         self.assertEqual(self.output.read_text(), '42')
         self.assertEqual(Path(str(self.output) + '.attempts').read_text(), '12')
+
+    def test_the_pipelines_retry_config_applies_when_the_block_leaves_it_null(self):
+        load = self.block('retry', 'data_loader', '''
+            @data_loader
+            def load(**kwargs):
+                if kwargs['retry']['attempts'] == 1:
+                    raise ValueError('retry source')
+                return 42
+        ''')
+        load.retry_config = {'retries': None, 'delay': 0}
+        self.pipeline.retry_config = {'retries': 1, 'delay': 0}
+        self.pipeline.save()
+        self.block('export', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            def export(value, **kwargs):
+                Path(kwargs['output_path']).write_text(str(value))
+        ''', upstream=[load])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertEqual(self.output.read_text(), '42')
 
     def test_false_condition_skips_its_downstream_branch(self):
         load = self.block('load', 'data_loader', '''

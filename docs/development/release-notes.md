@@ -30,6 +30,8 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Sparse matrices inside list and dict outputs read back.** They were stored as a dense
   table, and reading the output failed with `scipy.sparse does not support dtype
   object`. They are stored as npz; outputs written the old way read as before.
+- **Outputs that are not stored leave no files.** With `cache_block_output_in_memory`,
+  each block still wrote shape files into an `output_0` with no data.
 - **Blocks without tests no longer read their output back** after writing it. The whole
   output was loaded again for tests that did not exist.
 - **With `cache_block_output_in_memory`, an upstream output that is not in the cache is
@@ -309,6 +311,17 @@ Each item says what changed, which pipelines it affects, and what to do.
   spawn (macOS, Linux from Python 3.14). Every block run started up to 20 processes,
   the queue's concurrency, that each loaded Mage (about 370 MB) and exited. The pool
   takes each job from the queue and starts one worker for it.
+- **Retry configs merge as documented: project, pipeline, then block.** The pipeline's
+  `retry_config` was ignored for batch blocks, and a null field replaced the project's
+  value; `retries: null` failed the block with a TypeError. Blank and null fields now
+  inherit.
+- **Pipelines that run in one process get the trigger's `allow_blocks_to_fail`.** The
+  process stopped at the first failed block, and the scheduler started another one for
+  the remaining branches.
+- **Global hooks read the outputs of their pipeline's run.** They raised TypeError
+  (`get_outputs` takes no `sample` argument).
+- **Dashboard charts over the last runs of a block show each run's output.** Every run
+  read the notebook's output.
 - **Downstream block runs start when their upstream finishes.** They waited for the next
   scheduler run, up to `SCHEDULER_TRIGGER_INTERVAL` (10 seconds). The scheduler runs
   again when a job finishes, at most once a second. A trigger run of 5 blocks on 3

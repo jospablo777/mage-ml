@@ -58,11 +58,14 @@ class ChartDataSourceBlock(ChartDataSourceBase):
                 )
 
                 for v in output_variable_objects:
+                    # The run's output; without the partition every run read the
+                    # notebook's output.
                     arr.append(
                         self.pipeline.variable_manager.get_variable(
                             self.pipeline.uuid,
                             block.uuid,
                             v.uuid,
+                            partition=execution_partition,
                         )
                     )
         elif block:

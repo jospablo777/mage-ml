@@ -25,6 +25,7 @@ from mage_ai.data_preparation.models.triggers import (
     get_triggers_by_pipeline_with_cache,
 )
 from mage_ai.data_preparation.repo_manager import get_repo_config
+from mage_ai.data_preparation.shared.retry import resolve_retry_config
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
@@ -865,6 +866,9 @@ class PipelineScheduler:
             self.pipeline_run.id,
             self.pipeline_run.get_variables(),
             self.build_tags(),
+            # The trigger's setting. Without it the process stopped at the first failed
+            # block, and the scheduler started another for the remaining branches.
+            allow_blocks_to_fail=self.allow_blocks_to_fail,
         )
 
     def __fetch_crashed_block_runs(self) -> None:
@@ -1306,9 +1310,10 @@ def run_block(
             repo_path = pipeline_schedule.repo_path
         else:
             repo_path = get_repo_path()
-        retry_config = merge_dict(
-            get_repo_config(repo_path=repo_path).retry_config or dict(),
-            block.retry_config or dict(),
+        retry_config = resolve_retry_config(
+            get_repo_config(repo_path=repo_path).retry_config,
+            pipeline.retry_config,
+            block.retry_config,
         )
 
     return ExecutorFactory.get_block_executor(
