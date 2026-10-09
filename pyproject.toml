@@ -141,6 +141,9 @@ google-cloud-storage = [
 hdf5 = [
   "tables>=3.11.1",
 ]
+mongodb = [
+  "pymongo>=4.6.3,<5",
+]
 mysql = [
   "mysql-connector-python>=9.1,<10",
 ]
@@ -204,6 +207,7 @@ all = [
   "mage-ml[duckdb]",
   "mage-ml[google-cloud-storage]",
   "mage-ml[mlflow]",
+  "mage-ml[mongodb]",
   "mage-ml[oracle]",
   "mage-ml[postgres]",
   "mage-ml[redshift]",

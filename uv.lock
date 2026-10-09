@@ -4364,6 +4364,9 @@ mlflow = [
     { name = "mlflow-skinny" },
     { name = "skops" },
 ]
+mongodb = [
+    { name = "pymongo" },
+]
 mysql = [
     { name = "mysql-connector-python" },
 ]
@@ -4509,6 +4512,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["duckdb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["mlflow"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["postgres"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["redshift"], marker = "extra == 'all'" },
@@ -4547,6 +4551,7 @@ requires-dist = [
     { name = "pydruid", marker = "extra == 'all'", specifier = ">=0.6.9" },
     { name = "pygithub", specifier = ">=2.10,<3" },
     { name = "pyjwt", specifier = ">=2.13.0" },
+    { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.6.3,<5" },
     { name = "pymongo", marker = "extra == 'streaming'", specifier = ">=4.6.3,<5" },
     { name = "pyodbc", marker = "extra == 'all'", specifier = ">=5.2,<6" },
     { name = "python-dateutil", specifier = ">=2.9" },
@@ -4584,7 +4589,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mysql", "oracle", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
+provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [
