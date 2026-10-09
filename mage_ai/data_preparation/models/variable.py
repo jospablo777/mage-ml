@@ -1581,7 +1581,9 @@ class Variable:
             # streamed to Parquet; the next block scans that file.
             if isinstance(self.storage, LocalStorage):
                 data.sink_parquet(file_path)
-                sample = data.head(DATAFRAME_SAMPLE_COUNT).collect()
+                # The sample comes from the file: running the plan again would read the
+                # sources twice, and plans without a fixed row order give other rows.
+                sample = pl.scan_parquet(file_path).head(DATAFRAME_SAMPLE_COUNT).collect()
             else:
                 data = data.collect()
                 self.storage.write_polars_dataframe(data, file_path)
