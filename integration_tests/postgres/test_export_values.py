@@ -246,6 +246,51 @@ def test_nanoseconds_round_to_microseconds(mage_postgres, pg, schema):
     ]
 
 
+def test_polars_nanoseconds_round_to_microseconds(mage_postgres, pg, schema):
+    """Polars columns were truncated to microseconds; pandas columns are rounded."""
+    stamps = pl.Series(
+        [1704067200000001499, 1704067200000001501], dtype=pl.Int64,
+    ).cast(pl.Datetime('ns'))
+    data = pl.DataFrame({'id': [1, 2], 'v': stamps})
+
+    export(mage_postgres, schema, data, if_exists='replace')
+
+    assert column(pg, schema, 'v') == [
+        datetime.datetime(2024, 1, 1, 0, 0, 0, 1),
+        datetime.datetime(2024, 1, 1, 0, 0, 0, 2),
+    ]
+
+
+def test_polars_dates_after_the_year_9999(mage_postgres, pg, schema):
+    """
+    Python datetimes end at the year 9999, and the export of a Polars column with a later
+    value raised a Rust panic. PostgreSQL holds years up to 294276.
+    """
+    data = pl.DataFrame({'id': [1, 2, 3]}).with_columns(
+        at=pl.Series([
+            datetime.datetime(9999, 12, 31, 23, 59, 59, 999999), None,
+            datetime.datetime(2024, 1, 1),
+        ], dtype=pl.Datetime('us')),
+        zoned=pl.Series([
+            datetime.datetime(2024, 7, 1, 12, tzinfo=datetime.timezone.utc), None, None,
+        ]).dt.convert_time_zone('America/New_York'),
+        day=pl.Series([datetime.date(1, 1, 1), None, datetime.date(2024, 2, 29)]),
+    ).with_columns(
+        at=pl.when(pl.col('id') == 3).then(pl.datetime(10000, 1, 1, 12)).otherwise('at'),
+        day=pl.when(pl.col('id') == 3).then(pl.date(12345, 6, 7)).otherwise('day'),
+    )
+
+    export(mage_postgres, schema, data, if_exists='replace')
+
+    columns = 'id, _at::text AS at, zoned::text AS zoned, _day::text AS day'
+    assert fetch(pg, schema, columns=columns) == [
+        dict(id=1, at='9999-12-31 23:59:59.999999', zoned='2024-07-01 12:00:00+00',
+             day='0001-01-01'),
+        dict(id=2, at=None, zoned=None, day=None),
+        dict(id=3, at='10000-01-01 12:00:00', zoned=None, day='12345-06-07'),
+    ]
+
+
 @pytest.mark.parametrize('kind', ['pandas', 'polars'])
 def test_dates_times_and_intervals(mage_postgres, pg, schema, kind):
     dates = [datetime.date(1, 1, 1), None, datetime.date(9999, 12, 31)]

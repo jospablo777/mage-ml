@@ -645,6 +645,30 @@ def column_values(frame, column: str) -> Tuple[List[Any], bool]:
     return series.tolist(), nan_is_null
 
 
+def _polars_temporal_text(series: pl.Series, pg_type: str) -> Optional[List[Optional[str]]]:
+    """
+    A Polars date or datetime column in PostgreSQL's text format, rendered by Polars.
+    Python datetimes end at the year 9999, so to_list raised a Rust panic for later
+    values, which PostgreSQL holds. Nanoseconds are written, and PostgreSQL rounds them
+    to microseconds, as for pandas columns. Returns None for other columns.
+    """
+    family = type_family(pg_type)
+    dtype = series.dtype
+    if isinstance(dtype, pl.Datetime) and family == 'timestamp':
+        if dtype.time_zone:
+            text = series.dt.convert_time_zone('UTC').dt.strftime(
+                '%Y-%m-%d %H:%M:%S%.9f+00:00',
+            )
+        else:
+            text = series.dt.strftime('%Y-%m-%d %H:%M:%S%.9f')
+    elif dtype == pl.Date and family == 'date':
+        text = series.dt.strftime('%Y-%m-%d')
+    else:
+        return None
+    # Polars writes years after 9999 with a sign, which PostgreSQL reads as a time zone.
+    return text.str.strip_prefix('+').to_list()
+
+
 def render_columns(
     frame,
     columns: List[str],
@@ -652,8 +676,13 @@ def render_columns(
 ) -> List[List[Optional[str]]]:
     rendered = []
     for column in columns:
-        values, nan_is_null = column_values(frame, column)
         pg_type = pg_types[column]
+        if isinstance(frame, pl.DataFrame):
+            text = _polars_temporal_text(frame.get_column(column), pg_type)
+            if text is not None:
+                rendered.append(text)
+                continue
+        values, nan_is_null = column_values(frame, column)
         rendered.append([render_value(v, pg_type, nan_is_null=nan_is_null) for v in values])
     return rendered
 

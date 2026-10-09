@@ -150,6 +150,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   `date` column need `date`.
 - **Polars Int128 and UInt128 columns are written to PostgreSQL as numeric(39, 0)**. They
   were written as text.
+- **Polars dates and date-times after the year 9999 export to PostgreSQL.** The export
+  built Python datetimes, which end at 9999, and failed with a Rust panic. Polars renders
+  them, and nanoseconds are rounded to microseconds as for pandas columns; they were
+  truncated.
 
 ### New
 
@@ -188,6 +192,9 @@ Each item says what changed, which pipelines it affects, and what to do.
   reads as years after 2000, and truncates the microseconds of date-times.
   `mageml::write_table` formats them itself. R's arrow package truncates the microseconds
   of date-times too; Mage rounds them.
+- **Polars 2** wraps Python datetimes outside the years 1677 to 2262 when it builds a
+  nanosecond Series from them: the year 1 becomes 1754. Build such columns in
+  microseconds.
 - **rv 0.20** parses `dev_dependencies` in `rproject.toml` but installs none, so the
   integration tests' R environment lists testthat, lintr and roxygen2 as dependencies.
 - **Feast 0.66** rounds Int64 features above 2**53 in pushes with a NULL in the column,
