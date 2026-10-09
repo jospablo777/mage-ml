@@ -128,6 +128,9 @@ dbt = [
   "dbt-trino>=1.10.1,<2",
   "trino~=0.326",
 ]
+duckdb = [
+  "duckdb>=1.5.5",
+]
 great-expectations = [
   "great-expectations>=1.0",
 ]
@@ -198,6 +201,7 @@ all = [
   "mage-ml[bigquery]",
   "mage-ml[clickhouse]",
   "mage-ml[dbt]",
+  "mage-ml[duckdb]",
   "mage-ml[google-cloud-storage]",
   "mage-ml[mlflow]",
   "mage-ml[oracle]",
@@ -208,7 +212,6 @@ all = [
   "mage-ml[spark]",
   "mage-ml[streaming]",
   "aws-secretsmanager-caching>=1.2",
-  "duckdb>=1.5.5",
   "faster-fifo>=1.5.2,<2; sys_platform != 'win32'",
   "google-api-core>=2.30.0",
   "google-api-python-client>=2.201",

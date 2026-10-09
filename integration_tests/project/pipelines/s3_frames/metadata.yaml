@@ -1,0 +1,42 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - s3_polars_transform
+  language: python
+  name: s3_polars_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: s3_polars_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - s3_pandas_transform
+  language: python
+  name: s3_polars_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - s3_polars_load
+  uuid: s3_polars_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - s3_pandas_export
+  language: python
+  name: s3_pandas_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - s3_polars_transform
+  uuid: s3_pandas_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: s3_pandas_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - s3_pandas_transform
+  uuid: s3_pandas_export
+name: s3_frames
+type: python
+uuid: s3_frames

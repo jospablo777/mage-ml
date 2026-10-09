@@ -129,7 +129,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3
       # Same target as a local run. It starts the services in integration_tests/compose.yaml
       # and fails when any test is skipped.
       - name: Run integration tests

@@ -5,8 +5,9 @@ drivers; these tests check what reaches the database and what comes back.
 
 ## Running
 
-Requirements: Docker with Compose v2, and the project environment with the `postgres` and
-`mlflow` extras (`uv sync --group dev --extra postgres --extra mlflow`).
+Requirements: Docker with Compose v2, and the project environment with the `postgres`,
+`mlflow`, `duckdb` and `s3` extras
+(`uv sync --group dev --extra postgres --extra mlflow --extra duckdb --extra s3`).
 
 ```bash
 make -C integration_tests test             # start the services, run every test
@@ -16,14 +17,15 @@ make -C integration_tests test-api         # REST API only
 make -C integration_tests test-feast       # Feast only
 make -C integration_tests test-mlflow      # MLflow only
 make -C integration_tests test-duckdb      # DuckDB only, no service needed
+make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
 make -C integration_tests down             # stop the services and drop their data
 ```
 
-The services stay up between runs. PostgreSQL keeps its data in memory, so `down` leaves
-nothing behind. Ports default to 15432, 16379, 18000, 16566 and 15000; set `MAGE_TEST_POSTGRES_PORT`,
-`MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`, `MAGE_TEST_FEAST_PORT` or
-`MAGE_TEST_MLFLOW_PORT` to change them. `make up` rebuilds the
+The services stay up between runs. PostgreSQL and MinIO keep their data in memory, so `down`
+leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000 and 19000; set `MAGE_TEST_POSTGRES_PORT`,
+`MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`, `MAGE_TEST_FEAST_PORT`,
+`MAGE_TEST_MLFLOW_PORT` or `MAGE_TEST_S3_PORT` to change them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -35,7 +37,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, Redis 7, the test API, Feast and MLflow, with health checks |
+| `compose.yaml` | PostgreSQL 16, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines |
@@ -48,8 +50,11 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `mlflow/` | Experiments, runs, metric histories, registry and aliases, artifact listings and downloads over HTTP and with the client, models loaded both ways, and a Mage pipeline that logs predictions back |
 | `data/duckdb_dataset.py` | DuckDB source table with one column per DuckDB type, limits and special values, and the SQL comparison for DuckDB |
 | `duckdb/` | Loads in each mode, exports to new and existing tables, conflicts, names, database files and locking, reading Parquet, CSV and JSON, and Mage pipelines with Python and SQL blocks |
+| `services/minio/` | MinIO RELEASE.2025-09-07T16-13-09Z built from source, since MinIO no longer publishes images |
+| `data/s3_dataset.py` | Polars frame with one column per type Parquet stores, limits and special values, and a frame comparison |
+| `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, and the S3 source and destination of `mage_integrations` |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
-| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/` and `duckdb/` tests run |
+| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/` and `s3/` tests run |
 
 ## How tables are compared
 

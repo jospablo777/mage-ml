@@ -25,10 +25,14 @@ export MAGE_TEST_FEAST_PORT ?= 16566
 export MAGE_TEST_FEAST_URL ?= http://127.0.0.1:$(MAGE_TEST_FEAST_PORT)
 export MAGE_TEST_MLFLOW_PORT ?= 15000
 export MAGE_TEST_MLFLOW_URL ?= http://127.0.0.1:$(MAGE_TEST_MLFLOW_PORT)
+export MAGE_TEST_S3_PORT ?= 19000
+export MAGE_TEST_S3_ENDPOINT ?= http://127.0.0.1:$(MAGE_TEST_S3_PORT)
+export MAGE_TEST_S3_ACCESS_KEY ?= mage-test
+export MAGE_TEST_S3_SECRET_KEY ?= mage-test-secret
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -53,6 +57,9 @@ test-feast: up
 
 test-mlflow: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mlflow $(PYTEST_ARGS)
+
+test-s3: up
+	cd .. && $(PYTHON) -m pytest integration_tests/s3 $(PYTEST_ARGS)
 
 # DuckDB runs in process; these tests need no service.
 test-duckdb:

@@ -13,7 +13,10 @@ import pytest
 PROJECT = Path(__file__).resolve().parent / 'project'
 
 
-@pytest.fixture(scope='module')
+# One project per session. xdist gives a worker tests from several modules in turn, so a
+# module-scoped project was removed and created again mid-run, and a connection left on
+# the removed database failed with "attempt to write a readonly database".
+@pytest.fixture(scope='session')
 def mage_project():
     from mage_ai.orchestration.db import db_connection
     from mage_ai.orchestration.db.database_manager import database_manager

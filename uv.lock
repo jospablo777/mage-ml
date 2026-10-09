@@ -4344,6 +4344,9 @@ dbt = [
     { name = "google-cloud-aiplatform" },
     { name = "trino" },
 ]
+duckdb = [
+    { name = "duckdb" },
+]
 google-cloud-storage = [
     { name = "google-cloud-storage" },
     { name = "gspread" },
@@ -4462,7 +4465,7 @@ requires-dist = [
     { name = "dbt-sqlserver", marker = "extra == 'dbt'", specifier = ">=1.9.0,<2" },
     { name = "dbt-synapse", marker = "extra == 'dbt'", specifier = ">=1.8.4,<2" },
     { name = "dbt-trino", marker = "extra == 'dbt'", specifier = ">=1.10.1,<2" },
-    { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.5.5" },
+    { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.5.5" },
     { name = "elasticsearch", marker = "extra == 'streaming'", specifier = ">=8.19.3,<9" },
     { name = "faker", specifier = ">=40.41" },
     { name = "faster-fifo", marker = "sys_platform != 'win32' and extra == 'all'", specifier = ">=1.5.2,<2" },
@@ -4503,6 +4506,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["bigquery"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["clickhouse"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["dbt"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["duckdb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["mlflow"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
@@ -4580,7 +4584,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "great-expectations", "google-cloud-storage", "hdf5", "mysql", "oracle", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
+provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mysql", "oracle", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [

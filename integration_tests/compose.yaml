@@ -67,3 +67,14 @@ services:
       MLFLOW_PG_PASSWORD: test
     ports:
       - "${MAGE_TEST_MLFLOW_PORT:-15000}:5000"
+
+  # S3 storage. Data lives in memory, like PostgreSQL's.
+  minio:
+    build: services/minio
+    environment:
+      MINIO_ROOT_USER: mage-test
+      MINIO_ROOT_PASSWORD: mage-test-secret
+    tmpfs:
+      - /data
+    ports:
+      - "${MAGE_TEST_S3_PORT:-19000}:9000"

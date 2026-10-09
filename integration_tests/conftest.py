@@ -177,3 +177,61 @@ def duckdb_client(duckdb_path):
     duckdb_dataset.create_source_table(client.conn)
     yield client
     client.close()
+
+
+S3_ENV = {
+    'endpoint_url': 'MAGE_TEST_S3_ENDPOINT',
+    'aws_access_key_id': 'MAGE_TEST_S3_ACCESS_KEY',
+    'aws_secret_access_key': 'MAGE_TEST_S3_SECRET_KEY',
+}
+
+
+@pytest.fixture(scope='session')
+def s3_settings():
+    settings = {key: os.getenv(variable) for key, variable in S3_ENV.items()}
+    missing = [S3_ENV[key] for key, value in settings.items() if not value]
+    if missing:
+        pytest.skip(f'S3 is not configured: {", ".join(missing)} unset')
+    return dict(settings, region_name='us-east-1')
+
+
+@pytest.fixture(scope='session')
+def s3(s3_settings):
+    """A boto3 client that bypasses Mage, for setup and for reading results."""
+    import boto3
+
+    return boto3.client('s3', **s3_settings)
+
+
+@pytest.fixture
+def bucket(s3):
+    """A bucket used by one test, emptied and removed after it."""
+    name = f'it-{uuid.uuid4().hex[:12]}'
+    s3.create_bucket(Bucket=name)
+    yield name
+    for page in s3.get_paginator('list_objects_v2').paginate(Bucket=name):
+        keys = [{'Key': item['Key']} for item in page.get('Contents', [])]
+        if keys:
+            s3.delete_objects(Bucket=name, Delete={'Objects': keys})
+    s3.delete_bucket(Bucket=name)
+
+
+@pytest.fixture
+def mage_s3(s3_settings):
+    """Mage's S3 client."""
+    from mage_ai.io.s3 import S3
+
+    return S3(verbose=False, **s3_settings)
+
+
+@pytest.fixture
+def s3_env(s3_settings, monkeypatch):
+    """
+    The AWS environment variables, which Mage's S3 block output storage reads through
+    boto3.
+    """
+    monkeypatch.setenv('AWS_ENDPOINT_URL', s3_settings['endpoint_url'])
+    monkeypatch.setenv('AWS_ACCESS_KEY_ID', s3_settings['aws_access_key_id'])
+    monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', s3_settings['aws_secret_access_key'])
+    monkeypatch.setenv('AWS_DEFAULT_REGION', s3_settings['region_name'])
+    return s3_settings
