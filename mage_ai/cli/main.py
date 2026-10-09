@@ -209,6 +209,8 @@ def run(
             sentry_dsn,
             traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
             server_name=SENTRY_SERVER_NAME,
+            # Frames of block code hold DataFrames; their values would be sent.
+            include_local_variables=False,
         )
         import atexit
         atexit.register(lambda: sentry_sdk.flush(timeout=5))

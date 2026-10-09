@@ -55,7 +55,7 @@ from mage_ai.settings.platform import (
 from mage_ai.settings.platform.utils import get_pipeline_from_platform
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.array import find
-from mage_ai.shared.dates import compare, utc_now
+from mage_ai.shared.dates import as_utc, compare, utc_now
 from mage_ai.shared.environments import get_env
 from mage_ai.shared.hash import index_by, merge_dict
 from mage_ai.shared.retry import retry
@@ -509,7 +509,7 @@ class PipelineScheduler:
             if self.pipeline_run.started_at and pipeline_run_timeout:
                 time_difference = (
                     datetime.now(tz=pytz.UTC).timestamp()
-                    - self.pipeline_run.started_at.timestamp()
+                    - as_utc(self.pipeline_run.started_at).timestamp()
                 )
                 if time_difference > int(pipeline_run_timeout):
                     self.logger.error(
@@ -541,7 +541,8 @@ class PipelineScheduler:
                 block = self.pipeline.get_block(block_run.block_uuid)
                 if block and block.timeout and block_run.started_at:
                     time_difference = (
-                        datetime.now(tz=pytz.UTC).timestamp() - block_run.started_at.timestamp()
+                        datetime.now(tz=pytz.UTC).timestamp()
+                        - as_utc(block_run.started_at).timestamp()
                     )
                     if time_difference > int(block.timeout):
                         # Get logger from block_executor so that the error log shows up in the

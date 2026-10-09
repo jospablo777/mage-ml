@@ -808,6 +808,52 @@ class PipelineSchedulerTests(DBTestCase):
         block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
 
+    def test_on_block_failure_stores_the_error(self):
+        """The error was set in the metrics dict in place, and SQLAlchemy did not save it."""
+        from mage_ai.orchestration.db import db_connection
+
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        block_run.update(metrics=dict(mage=1))
+
+        scheduler.on_block_failure('block1', error=dict(error=ValueError('boom'), message='m'))
+
+        db_connection.session.expire_all()
+        metrics = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1').metrics
+        self.assertEqual(metrics['mage'], 1)
+        self.assertEqual(metrics['error']['error'], 'boom')
+
+    def test_a_block_run_whose_process_keeps_dying_fails(self):
+        """Crashed block runs were run again with no limit."""
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        fetch = scheduler._PipelineScheduler__fetch_crashed_block_runs
+        job_manager = pipeline_scheduler_original.get_job_manager()
+
+        with patch.object(job_manager, 'has_block_run_job', return_value=False):
+            for crash in range(1, 3):
+                block_run.update(status=BlockRun.BlockRunStatus.RUNNING)
+                self.assertEqual([b.id for b in fetch()], [block_run.id])
+                block_run.refresh()
+                self.assertEqual(block_run.status, BlockRun.BlockRunStatus.INITIAL)
+                self.assertEqual(block_run.metrics['crashes'], crash)
+
+            # A queued block run whose job is lost did not crash; it is queued again.
+            block_run.update(status=BlockRun.BlockRunStatus.QUEUED)
+            fetch()
+            block_run.refresh()
+            self.assertEqual(block_run.metrics['crashes'], 2)
+
+            block_run.update(status=BlockRun.BlockRunStatus.RUNNING)
+            self.assertEqual(fetch(), [])
+
+        block_run.refresh()
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
+        self.assertIn('3 times', block_run.metrics['error']['message'])
+
     def test_on_block_failure_allow_blocks_to_fail(self):
         pipeline_run = create_pipeline_run_with_schedule(
             pipeline_uuid='test_pipeline',
@@ -1376,6 +1422,47 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(pipeline_run.status, PipelineRun.PipelineRunStatus.CANCELLED)
         self.assertEqual(pipeline_run2.status, PipelineRun.PipelineRunStatus.RUNNING)
         self.assertEqual(pipeline_run3.status, PipelineRun.PipelineRunStatus.RUNNING)
+
+    @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')
+    def test_block_run_timeout_off_utc(self, mock_get_job_manager):
+        """
+        SQLite returns stored UTC times without a zone, which timestamp() read as local
+        time: on a machine west of UTC, a block run never timed out.
+        """
+        import time as time_module
+
+        from mage_ai.orchestration.db import db_connection
+
+        if not hasattr(time_module, 'tzset'):
+            self.skipTest('time.tzset is not available')
+        previous = os.environ.get('TZ')
+        os.environ['TZ'] = 'America/Costa_Rica'
+        time_module.tzset()
+
+        def restore():
+            if previous is None:
+                os.environ.pop('TZ', None)
+            else:
+                os.environ['TZ'] = previous
+            time_module.tzset()
+
+        self.addCleanup(restore)
+        mock_get_job_manager().add_job = MagicMock()
+        pipeline = create_pipeline_with_blocks('test block run timeout off utc', self.repo_path)
+        pipeline.get_block('block1').update(data=dict(timeout=60))
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid=pipeline.uuid)
+        block_run = find(lambda br: br.block_uuid == 'block1', pipeline_run.block_runs)
+        block_run.update(
+            status=BlockRun.BlockRunStatus.RUNNING,
+            started_at=datetime.now(tz=pytz.UTC) - timedelta(seconds=120),
+        )
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        db_connection.session.expire_all()
+
+        PipelineScheduler(pipeline_run=PipelineRun.get_by_id(pipeline_run.id)).schedule()
+
+        block_run.refresh()
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
 
     @freeze_time('2023-05-01 01:20:33')
     @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')

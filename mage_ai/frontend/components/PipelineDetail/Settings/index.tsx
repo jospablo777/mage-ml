@@ -37,6 +37,8 @@ import { isEqual } from '@utils/hash';
 import { capitalize, isJsonString } from '@utils/string';
 import { pushUnique } from '@utils/array';
 
+const BLOCK_FUSION_CHAINS = 'chains';
+
 type PipelineSettingsProps = {
   isPipelineUpdating?: boolean;
   pipeline: PipelineType;
@@ -155,6 +157,12 @@ function PipelineSettings({
 
   const noBlocks = useMemo(() => !blocks?.length, [blocks]);
 
+  // The chains of the saved pipeline that run as stages, from the server.
+  const fusionStages = useMemo(
+    () => (pipeline?.fusion_plan || []).filter(stage => stage?.length > 1),
+    [pipeline],
+  );
+
   const pipelineTags = useMemo(() => pipelineAttributes?.tags || [], [pipelineAttributes]);
   const { data: dataTags } = api.tags.list();
   const unselectedTags =
@@ -207,6 +215,52 @@ function PipelineSettings({
             onCheck: (valFunc: (val: boolean) => boolean) => setPipelineAttributes(prev => ({
               ...prev,
               run_pipeline_in_one_process: valFunc(prev?.run_pipeline_in_one_process),
+            })),
+          }}
+        />
+
+        <SetupSectionRow
+          description={(
+            <>
+              <Text muted small>
+                Blocks that form a chain run in one process and pass their outputs in
+                memory. Each block keeps its run, logs, retries and stored output, and
+                branches still run in parallel. Running a block in the notebook is unchanged.
+              </Text>
+
+              {pipelineAttributes?.run_pipeline_in_one_process && (
+                <Text small warning>
+                  Running the pipeline in a single process takes precedence over this setting.
+                </Text>
+              )}
+
+              {pipelineAttributes?.block_fusion === BLOCK_FUSION_CHAINS && (
+                <Spacing mt={1}>
+                  {fusionStages?.length ? fusionStages.map(stage => (
+                    <FlexContainer alignItems="center" flexWrap="wrap" key={stage.join('>')}>
+                      {stage.map((uuid, index) => (
+                        <Text key={uuid} monospace small>
+                          {index ? `→ ${uuid}` : uuid}&nbsp;
+                        </Text>
+                      ))}
+                    </FlexContainer>
+                  )) : (
+                    <Text muted small>
+                      No chains in the saved pipeline: each block runs alone.
+                    </Text>
+                  )}
+                </Spacing>
+              )}
+            </>
+          )}
+          title="Run chains of blocks together (block fusion)"
+          toggleSwitch={{
+            checked: pipelineAttributes?.block_fusion === BLOCK_FUSION_CHAINS,
+            onCheck: (valFunc: (val: boolean) => boolean) => setPipelineAttributes(prev => ({
+              ...prev,
+              block_fusion: valFunc(prev?.block_fusion === BLOCK_FUSION_CHAINS)
+                ? BLOCK_FUSION_CHAINS
+                : null,
             })),
           }}
         />
@@ -549,6 +603,7 @@ function PipelineSettings({
               executor_type: pipelineAttributes?.executor_type,
               name: pipelineAttributes?.name,
               retry_config: pipelineAttributes?.retry_config,
+              block_fusion: pipelineAttributes?.block_fusion || null,
               run_pipeline_in_one_process: pipelineAttributes?.run_pipeline_in_one_process,
               settings: pipelineAttributes?.settings,
               tags: pipelineAttributes?.tags,

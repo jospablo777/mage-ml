@@ -316,6 +316,40 @@ to clean up old variables:
 mage clean-cached-variables [project_path]
 ```
 
+## Block fusion
+
+Blocks that form a chain can run as one stage: one process, with each block receiving the
+previous block's output from memory. Each block keeps its block run, status, logs, retries,
+timeout and stored output, so the run page, retries and every reader of stored outputs work
+as before. Branches still run in parallel, each as its own stage. Running a block in the
+notebook is unchanged.
+
+Turn it on in the pipeline settings ("Run chains of blocks together"), or in the
+pipeline's metadata.yaml:
+
+```yaml
+block_fusion: chains
+```
+
+A chain is a path where each block has one downstream block and that block has one upstream
+block. The settings show the stages of the saved pipeline. These blocks always run alone:
+dynamic blocks and their children, replicated blocks, data integration blocks, sensors,
+global data products, dbt blocks, blocks with a non-local executor, and blocks with
+read settings (`configuration.variables`). To run another block alone, check "Run this
+block alone" in its settings, or set `fusion: false` in its configuration.
+
+- The next block gets the output from memory only when storage would give it the same
+  value: a single pandas DataFrame with string column names and no object columns, or a
+  Polars DataFrame. Other outputs are read from storage, as without fusion.
+- Each block gets its own copy of the pipeline variables. Environment variables, the
+  working directory, `sys.path`, warning filters and NumPy error settings are restored
+  after each block.
+- If the process dies while a block runs (out of memory, a crash in native code, a kill),
+  that block runs again alone; after 3 crashes (`MAGE_BLOCK_RUN_MAX_CRASHES`) it fails.
+- A stage ends early, and the next block starts a new one, when the process holds more than
+  half of the machine's memory (`MAGE_STAGE_MAX_MEMORY_SHARE`) or a block leaves a thread
+  running.
+
 ## Cache block output in memory
 
 By default, Mage persists block output on disk. In pipeline's metadata.yaml, you have the option to configure the pipeline to cache

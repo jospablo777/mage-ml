@@ -26,6 +26,7 @@ from mage_ai.data_preparation.models.triggers import (
 )
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.shared.retry import resolve_retry_config
+from mage_ai.orchestration.fusion import fusion_enabled, stage_block_runs
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
@@ -58,7 +59,7 @@ from mage_ai.settings.platform.utils import get_pipeline_from_platform
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.settings.server import RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE
 from mage_ai.shared.array import find
-from mage_ai.shared.dates import compare, utc_now
+from mage_ai.shared.dates import as_utc, compare, utc_now
 from mage_ai.shared.environments import get_env
 from mage_ai.shared.hash import index_by, merge_dict
 from mage_ai.shared.retry import retry
@@ -541,7 +542,7 @@ class PipelineScheduler:
             if self.pipeline_run.started_at and pipeline_run_timeout:
                 time_difference = (
                     datetime.now(tz=pytz.UTC).timestamp()
-                    - self.pipeline_run.started_at.timestamp()
+                    - as_utc(self.pipeline_run.started_at).timestamp()
                 )
                 if time_difference > int(pipeline_run_timeout):
                     self.logger.error(
@@ -572,7 +573,8 @@ class PipelineScheduler:
                 block = self.pipeline.get_block(block_run.block_uuid)
                 if block and block.timeout and block_run.started_at:
                     time_difference = (
-                        datetime.now(tz=pytz.UTC).timestamp() - block_run.started_at.timestamp()
+                        datetime.now(tz=pytz.UTC).timestamp()
+                        - as_utc(block_run.started_at).timestamp()
                     )
                     if time_difference > int(block.timeout):
                         # Get logger from block_executor so that the error log shows up in the
@@ -632,6 +634,7 @@ class PipelineScheduler:
             if block_run_quota <= 0:
                 return
 
+        fused = fusion_enabled(self.pipeline)
         for b in block_runs_to_schedule[:block_run_quota]:
             tags = dict(
                 block_run_id=b.id,
@@ -642,6 +645,23 @@ class PipelineScheduler:
                 status=BlockRun.BlockRunStatus.QUEUED,
             )
             job_manager = get_job_manager()
+            stage = stage_block_runs(
+                self.pipeline, b, self.pipeline_run.block_runs,
+            ) if fused else [b]
+            if len(stage) > 1:
+                # One job runs the chain; its other block runs stay INITIAL until the
+                # stage claims them, so this scheduler never starts them on their own.
+                job_manager.add_job(
+                    JobType.BLOCK_RUN,
+                    b.id,
+                    run_stage,
+                    # args
+                    self.pipeline_run.id,
+                    [br.id for br in stage],
+                    self.pipeline_run.get_variables(),
+                    self.build_tags(**tags),
+                )
+                continue
             job_manager.add_job(
                 JobType.BLOCK_RUN,
                 b.id,
@@ -896,13 +916,37 @@ class PipelineScheduler:
         job_manager = get_job_manager()
         crashed_runs = []
         for br in running_or_queued_block_runs:
-            if not job_manager.has_block_run_job(
+            if job_manager.has_block_run_job(
                 br.id,
                 logger=self.logger,
                 logging_tags=self.build_tags(block_run=br),
             ):
-                br.update(status=BlockRun.BlockRunStatus.INITIAL)
-                crashed_runs.append(br)
+                continue
+            metrics = dict(br.metrics or {})
+            if br.status == BlockRun.BlockRunStatus.RUNNING:
+                # Its process died while the block ran: out of memory, a crash in native
+                # code, or a kill. Such a block was run again with no limit, so one that
+                # runs out of memory restarted forever.
+                metrics['crashes'] = int(metrics.get('crashes') or 0) + 1
+            if int(metrics.get('crashes') or 0) >= BLOCK_RUN_MAX_CRASHES:
+                message = (
+                    f'The process died while this block ran, {metrics["crashes"]} times. '
+                    'It may run out of memory or crash in native code; its logs show how '
+                    'far it got.'
+                )
+                metrics['error'] = dict(error=message, message=message)
+                br.update(
+                    completed_at=datetime.now(tz=pytz.UTC),
+                    metrics=metrics,
+                    status=BlockRun.BlockRunStatus.FAILED,
+                )
+                self.logger.error(
+                    f'BlockRun {br.id} (block_uuid: {br.block_uuid}) failed: {message}',
+                    **self.build_tags(block_run_id=br.id, block_uuid=br.block_uuid),
+                )
+                continue
+            br.update(metrics=metrics, status=BlockRun.BlockRunStatus.INITIAL)
+            crashed_runs.append(br)
 
         return crashed_runs
 
@@ -1230,6 +1274,10 @@ def run_integration_stream(
                     )
 
 
+# Times a block run's process may die while it runs before the block run fails.
+BLOCK_RUN_MAX_CRASHES = int(os.getenv('MAGE_BLOCK_RUN_MAX_CRASHES') or 3)
+
+
 def run_block(
     pipeline_run_id: int,
     block_run_id: int,
@@ -1335,6 +1383,144 @@ def run_block(
         verify_output=verify_output,
         block_run_dicts=block_run_dicts,
     )
+
+
+def run_stage(
+    pipeline_run_id: int,
+    block_run_ids: List[int],
+    variables: Dict,
+    tags: Dict,
+) -> None:
+    """
+    Runs a stage: a chain of block runs in this process, each block receiving the
+    previous block's output from memory when storage would give it the same value.
+    Each block run keeps its status, logs, retries and stored output.
+
+    A block run starts only once claimed: the first while it is still waiting, each
+    next one in the same transaction that completes the one before, and only while the
+    pipeline run is still running. The stage stops when a claim fails (the run was
+    cancelled or the block run was handled elsewhere), when a block fails or its
+    condition fails, when its process holds too much memory, or when a block leaves a
+    thread running. The block runs after that stay INITIAL, and the scheduler handles
+    them as any other block runs.
+    """
+    from mage_ai.orchestration import fusion
+    from mage_ai.orchestration.queue.process_queue import register_job_alias
+
+    pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
+    if pipeline_run is None or pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
+        return
+    if not block_run_ids or not fusion.claim_first(block_run_ids[0], pipeline_run_id):
+        return
+
+    pipeline_scheduler = PipelineScheduler(pipeline_run)
+    pipeline = pipeline_scheduler.pipeline
+    pipeline_schedule = pipeline_run.pipeline_schedule
+    stage = f'{pipeline_run_id}_{block_run_ids[0]}'
+    if project_platform_activated() and pipeline_schedule and pipeline_schedule.repo_path:
+        repo_config = get_repo_config(repo_path=pipeline_schedule.repo_path)
+    else:
+        repo_config = get_repo_config(repo_path=get_repo_path())
+
+    previous_output = None
+    for index, block_run_id in enumerate(block_run_ids):
+        block_run = BlockRun.get_by_id(block_run_id)
+        block_uuid = block_run.block_uuid
+        block = pipeline.get_block(block_uuid)
+        next_id = block_run_ids[index + 1] if index + 1 < len(block_run_ids) else None
+        state = fusion.ProcessState()
+        claimed_next = dict(value=False)
+        member_tags = merge_dict(tags, dict(
+            block_run_id=block_run_id,
+            block_uuid=block_uuid,
+            stage=stage,
+        ))
+
+        def on_complete(
+            completed_uuid: str,
+            metrics: Dict = None,
+            block_run_id=block_run_id,
+            next_id=next_id,
+            state=state,
+            member_tags=member_tags,
+            claimed_next=claimed_next,
+        ) -> None:
+            if next_id is not None:
+                threads = state.threads_left_running()
+                if threads:
+                    pipeline_scheduler.logger.warning(
+                        f'Block {completed_uuid} left threads running '
+                        f'({", ".join(t.name for t in threads)}); the next block starts '
+                        'in a new stage.',
+                        **member_tags,
+                    )
+                    next_id = None
+                elif fusion.over_memory_limit():
+                    pipeline_scheduler.logger.info(
+                        f'The stage holds more than {fusion.MAX_MEMORY_SHARE:.0%} of the '
+                        'memory; the next block starts in a new stage.',
+                        **member_tags,
+                    )
+                    next_id = None
+            if next_id is not None:
+                # The next block run points at this process before it is RUNNING, so
+                # crash detection, timeouts and cancellation find this job for it.
+                register_job_alias(f'{JobType.BLOCK_RUN}_{next_id}')
+            claimed_next['value'] = fusion.complete_and_claim(
+                block_run_id, next_id, pipeline_run_id, metrics,
+            )
+            pipeline_scheduler.logger.info(
+                f'BlockRun {block_run_id} (block_uuid: {completed_uuid}) completes.',
+                **member_tags,
+            )
+
+        retry_config = resolve_retry_config(
+            repo_config.retry_config,
+            pipeline.retry_config,
+            block.retry_config if block else None,
+        )
+        outputs_cache = None
+        if previous_output is not None:
+            outputs_cache = {previous_output[0]: previous_output[1]}
+        previous_output = None
+        pipeline_scheduler.logger.info(
+            f'Execute PipelineRun {pipeline_run_id}, BlockRun {block_run_id}: pipeline '
+            f'{pipeline.uuid} block {block_uuid}, in stage {stage}',
+            **member_tags,
+        )
+        result = None
+        try:
+            result = ExecutorFactory.get_block_executor(
+                pipeline,
+                block_uuid,
+                block_run_id=block_run_id,
+                execution_partition=pipeline_run.execution_partition,
+            ).execute(
+                block_run_id=block_run_id,
+                block_run_outputs_cache=outputs_cache,
+                fused=True,
+                global_vars=fusion.member_variables(variables),
+                on_complete=on_complete,
+                on_failure=pipeline_scheduler.on_block_failure,
+                pipeline_run_id=pipeline_run_id,
+                retry_config=retry_config,
+                tags=member_tags,
+            )
+        except Exception:
+            # The block run is FAILED and its error stored; the block runs after it
+            # stay INITIAL for the scheduler.
+            return
+        finally:
+            outputs_cache = None
+            fusion.release_block(block)
+            state.restore()
+
+        if not claimed_next['value']:
+            return
+        output = result.get('output') if isinstance(result, dict) else None
+        if fusion.passes_in_memory(output):
+            previous_output = (block_uuid, output)
+        result = output = None
 
 
 def run_pipeline(

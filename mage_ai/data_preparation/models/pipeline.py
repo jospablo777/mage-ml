@@ -105,6 +105,8 @@ class Pipeline:
     ):
         self.block_configs = []
         self.blocks_by_uuid = {}
+        # 'chains' runs each chain of blocks as one stage; see block-fusion.md.
+        self.block_fusion = None
         # Can only be set True when run_pipeline_in_one_process is True
         self.cache_block_output_in_memory = False
         self.concurrency_config = dict()
@@ -877,6 +879,7 @@ class Pipeline:
         self.type = config.get('type') or self.type
 
         self.block_configs = config.get('blocks') or []
+        self.block_fusion = config.get('block_fusion')
         self.cache_block_output_in_memory = config.get('cache_block_output_in_memory', False)
         self.callback_configs = config.get('callbacks') or []
         self.concurrency_config = config.get('concurrency_config') or dict()
@@ -1061,6 +1064,9 @@ class Pipeline:
             uuid=self.uuid,
             variables_dir=self.variables_dir,
         )
+        # Saved only when set, so pipelines without it keep their metadata.yaml as is.
+        if self.block_fusion:
+            base['block_fusion'] = self.block_fusion
 
         if (
             include_execution_framework
@@ -1324,6 +1330,7 @@ class Pipeline:
                 should_update_block_cache = True
 
         for key in [
+            'block_fusion',
             'cache_block_output_in_memory',
             'concurrency_config',
             'data_integration',

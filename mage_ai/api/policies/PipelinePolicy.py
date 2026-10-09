@@ -53,6 +53,7 @@ PipelinePolicy.allow_read(
         'callbacks',
         'conditionals',
         'extensions',
+        'fusion_plan',
         'schedules',
     ],
     scopes=[

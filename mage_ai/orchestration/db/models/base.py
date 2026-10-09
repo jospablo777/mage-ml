@@ -3,6 +3,7 @@ from typing import Dict
 
 from sqlalchemy import Column, DateTime, Integer
 from sqlalchemy.orm import declarative_base, declared_attr
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm.collections import InstrumentedList
 from sqlalchemy.sql import func
 
@@ -91,7 +92,13 @@ class BaseModel(Base):
         commit = kwargs.pop('commit', True)
         for key, value in kwargs.items():
             if hasattr(self, key):
+                unchanged_object = getattr(self, key) is value
                 setattr(self, key, value)
+                # A dict or list changed in place and set again is the object SQLAlchemy
+                # already holds, so it saw no change and did not save it: the error of a
+                # failed block run and the metrics of a completed one were lost.
+                if unchanged_object and isinstance(value, (dict, list)):
+                    flag_modified(self, key)
         if commit:
             try:
                 self.session.commit()

@@ -1,3 +1,6 @@
+from datetime import datetime
+
+import pytz
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import selectinload
 
@@ -373,11 +376,7 @@ class PipelineRunResource(DatabaseResource):
                         )
                     )
 
-            # Update block run status to INITIAL
-            BlockRun.batch_update_status(
-                [b.id for b in block_runs_to_retry],
-                BlockRun.BlockRunStatus.INITIAL,
-            )
+            BlockRun.reset_for_retry([b.id for b in block_runs_to_retry])
 
             from mage_ai.orchestration.execution_process_manager import (
                 execution_process_manager,
@@ -393,7 +392,12 @@ class PipelineRunResource(DatabaseResource):
                             br.id,
                         )
 
-            return super().update(dict(status=PipelineRun.PipelineRunStatus.RUNNING))
+            # The run's timeout counts from now; it counted from the first start, so a
+            # retried run with a timeout could time out at once.
+            return super().update(dict(
+                started_at=datetime.now(tz=pytz.UTC),
+                status=PipelineRun.PipelineRunStatus.RUNNING,
+            ))
         elif PipelineRun.PipelineRunStatus.CANCELLED == payload.get('status'):
             pipeline = Pipeline.get(
                 self.model.pipeline_uuid,

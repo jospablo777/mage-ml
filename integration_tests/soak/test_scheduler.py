@@ -42,7 +42,8 @@ def soak(postgres_settings, redis_url, tmp_path):
         cursor.execute(f'CREATE SCHEMA {schema}')
         cursor.execute(
             f'CREATE TABLE {schema}.results (pipeline_uuid text, pipeline_run_id bigint, '
-            'trigger_name text, total bigint, run_in_frame bigint, '
+            'trigger_name text, total bigint, run_in_frame bigint, load_pid bigint, '
+            'export_pid bigint, '
             'written_at timestamptz DEFAULT now())'
         )
         cursor.execute(f'CREATE TABLE {schema}.attempts (pipeline_run_id bigint)')
@@ -220,6 +221,15 @@ def test_scheduler_runs_every_pipeline_run_once(soak):
             project.CHAIN_TOTAL
         )
         assert (total, run_in_frame) == (expected, run_id), (run_id, completed[run_id])
+
+    # With fusion, a chain's loader and exporter ran in the same process, as one stage;
+    # without it, each block ran in its own process.
+    pids = query(soak['results'], f'''
+        SELECT load_pid, export_pid FROM {soak['schema']}.results WHERE load_pid IS NOT NULL
+    ''')
+    assert pids
+    same = [load_pid == export_pid for load_pid, export_pid in pids]
+    assert all(same) if os.getenv('MAGE_TEST_SOAK_FUSION') else not any(same), pids
 
     # The flaky loader failed once per run and passed on its retry.
     attempts = Counter(row[0] for row in query(

@@ -312,6 +312,27 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Runtime
 
+- **A block run whose process keeps dying fails after 3 crashes**
+  (`MAGE_BLOCK_RUN_MAX_CRASHES`). Crashed block runs were run again with no limit, so a
+  block that ran out of memory restarted forever. The crash count is in the block run's
+  metrics.
+- **Job keys in Redis are deleted when the job ends.** They were never deleted, so a block
+  run that last ran on a replica that is still alive counted as running there, and
+  running it again from another replica left it queued.
+- **Block and pipeline timeouts fire on machines that are not on UTC.** SQLite returns the
+  stored UTC times without a zone, which were read as local time, so a run west of UTC
+  looked hours younger and never timed out.
+- **Retried block runs start clean.** "Retry blocks" and "Retry incomplete block runs"
+  reset only the status: the old `started_at` made a block with a timeout time out at
+  once, and the earlier error and crash count carried over. "Retry blocks" also restarts
+  the pipeline run's timeout.
+- **Block run metrics changed in place are saved.** The error of a failed block run and
+  the metrics merged when a block completes were set on the stored dict and SQLAlchemy
+  saw no change, so they were lost.
+- **API errors are returned.** The error handler called `asyncio.run` inside the server's
+  event loop, which raised, so a failing request got an empty response.
+- **Errors reported to Sentry leave out local variables**, which held the DataFrames of
+  block code.
 - **Each job starts one worker process.** The worker pool started workers while the queue
   was not empty, and a worker took its job only after it started, seconds later with
   spawn (macOS, Linux from Python 3.14). Every block run started up to 20 processes,
@@ -405,6 +426,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Block fusion** (`block_fusion: chains`, or "Run chains of blocks together" in the
+  pipeline settings): blocks that form a chain run as one stage, in one process, and each
+  block receives the previous block's output from memory. Every block keeps its block run,
+  status, logs, retries, timeout and stored output; branches still run in parallel. A
+  5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
+  `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
 - R blocks with the `mageml` R package: annotations for block functions and tests,
   pipeline variables, and `read_sql`, `write_table` and `db_connect` for the databases of
   `io_config.yaml`. `mage r init`, `mage r sync` and `mage r status` manage the R

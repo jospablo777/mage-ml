@@ -1711,6 +1711,26 @@ class BlockRun(BlockRunProjectPlatformMixin, BaseModel):
         db_connection.session.commit()
 
     @classmethod
+    def reset_for_retry(self, block_run_ids: List[int]) -> None:
+        """
+        Block runs that run again start clean. Only the status was reset: started_at
+        stayed, so a block with a timeout that ran long before timed out at once, and
+        the error and crash count of the earlier attempt carried over.
+        """
+        if not block_run_ids:
+            return
+        for block_run in BlockRun.query.filter(BlockRun.id.in_(block_run_ids)).all():
+            metrics = {
+                key: value for key, value in (block_run.metrics or {}).items()
+                if key not in ('crashes', 'error')
+            }
+            block_run.status = BlockRun.BlockRunStatus.INITIAL
+            block_run.started_at = None
+            block_run.completed_at = None
+            block_run.metrics = metrics or None
+        db_connection.session.commit()
+
+    @classmethod
     @safe_db_query
     def batch_delete(self, block_run_ids: List[int]):
         BlockRun.query.filter(BlockRun.id.in_(block_run_ids)).delete(synchronize_session=False)

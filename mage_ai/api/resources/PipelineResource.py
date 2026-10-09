@@ -836,10 +836,7 @@ class PipelineResource(BaseResource):
             incomplete_block_run_results = query_incomplete_block_runs(pipeline_uuid)
             block_run_ids = [r[0] for r in incomplete_block_run_results]
             pipeline_run_ids = list(set([r[2] for r in incomplete_block_run_results]))
-            BlockRun.batch_update_status(
-                block_run_ids,
-                BlockRun.BlockRunStatus.INITIAL,
-            )
+            BlockRun.reset_for_retry(block_run_ids)
             PipelineRun.batch_update_status(
                 pipeline_run_ids,
                 PipelineRun.PipelineRunStatus.INITIAL,

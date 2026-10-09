@@ -125,6 +125,11 @@ test-r: up r-env
 test-soak: up
 	cd .. && $(PYTHON) -m pytest integration_tests/soak -p no:xdist -rs $(PYTEST_ARGS)
 
+# The same, with every chain of blocks running as one stage (block_fusion: chains).
+test-soak-fusion: up
+	cd .. && MAGE_TEST_SOAK_FUSION=1 $(PYTHON) -m pytest integration_tests/soak -p no:xdist \
+		-rs $(PYTEST_ARGS)
+
 # DuckDB runs in process; these tests need no service.
 test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)

@@ -4,7 +4,8 @@ import queue as queue_module
 import signal
 import time
 from multiprocessing import Manager
-from typing import Callable, Dict, List
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 import newrelic.agent
 import psutil
@@ -322,11 +323,62 @@ class ProcessQueue(Queue):
         return value is not None
 
 
+@dataclass
+class _CurrentJob:
+    aliases: List[str]
+    client_id: Optional[str]
+    job_dict: Any
+    job_id: str
+    redis_client: Any
+
+
+# The job this worker process runs; None outside workers.
+_current_job: Optional[_CurrentJob] = None
+
+
+def _redis_job_key(job_id: str) -> str:
+    return f'{redis_namespace()}:{job_id}'
+
+
+def _release_redis_job_key(redis_client, client_id: Optional[str], job_id: str) -> None:
+    """
+    Deletes the key that marks a job as this process's. Keys were never deleted, so a
+    job that ran on a replica that is still alive counted as running there, and running
+    the same block run again from another replica was skipped and left it queued.
+    """
+    if not redis_client or not client_id:
+        return
+    try:
+        key = _redis_job_key(job_id)
+        if redis_client.get(key) == client_id:
+            redis_client.delete(key)
+    except Exception as error:
+        print(f'[WARNING] Could not release the Redis key of job {job_id}: {error}')
+
+
+def register_job_alias(job_id: str) -> None:
+    """
+    Makes job_id point at the job this worker runs: checks for it see the job alive, and
+    killing it kills this process. A stage that runs several block runs registers each
+    one when it starts it, so crash detection, timeouts and cancellation work on them as
+    on any block run job. Outside a worker it does nothing.
+    """
+    current = _current_job
+    if current is None or job_id == current.job_id:
+        return
+    current.job_dict[job_id] = os.getpid()
+    if current.redis_client and current.client_id:
+        current.redis_client.set(_redis_job_key(job_id), current.client_id)
+    current.aliases.append(job_id)
+
+
 class Worker(mp.Process):
     def __init__(
         self,
         job: List,
         job_dict,
+        redis_url: str = None,
+        client_id: str = None,
     ):
         """
         A worker process that runs one job of the process queue.
@@ -344,12 +396,16 @@ class Worker(mp.Process):
         super().__init__()
         self.job = job
         self.job_dict = job_dict
+        self.redis_url = redis_url
+        self.client_id = client_id
         self.dsn = SENTRY_DSN
         if self.dsn:
             sentry_sdk.init(
                 self.dsn,
                 traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
                 server_name=SENTRY_SERVER_NAME,
+                # Frames of block code hold DataFrames; their values would be sent.
+                include_local_variables=False,
             )
             import atexit
             atexit.register(lambda: sentry_sdk.flush(timeout=5))
@@ -368,6 +424,7 @@ class Worker(mp.Process):
         Executes the job and updates the job status in the job dictionary.
 
         """
+        global _current_job
         job_id, target, args, kwargs = self.job
         print(f'Run worker for job {job_id}')
         # clean_up_jobs removes a queued job when the queue looks empty, which it is
@@ -379,6 +436,14 @@ class Worker(mp.Process):
             print(f'Skip job {job_id} with status {status}')
             return
         self.job_dict[job_id] = self.pid
+        redis_client = init_redis_client(self.redis_url) if self.redis_url else None
+        _current_job = _CurrentJob(
+            aliases=[],
+            client_id=self.client_id,
+            job_dict=self.job_dict,
+            job_id=job_id,
+            redis_client=redis_client,
+        )
 
         try:
             start_session_and_run(target, *args, **kwargs)
@@ -387,7 +452,10 @@ class Worker(mp.Process):
                 capture_exception(e)
             raise
         finally:
-            self.job_dict[job_id] = JobStatus.COMPLETED
+            for finished in [job_id] + _current_job.aliases:
+                self.job_dict[finished] = JobStatus.COMPLETED
+                _release_redis_job_key(redis_client, self.client_id, finished)
+            _current_job = None
 
 
 def poll_job_and_execute(
@@ -430,7 +498,7 @@ def poll_job_and_execute(
                 job = queue.get_nowait()
             except queue_module.Empty:
                 break
-            worker = Worker(job, job_dict)
+            worker = Worker(job, job_dict, redis_url=redis_url, client_id=client_id)
             worker.start()
             workers.append(worker)
         time.sleep(1)

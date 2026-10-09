@@ -504,6 +504,24 @@ function BlockSettings({
               }
             />
           </Spacing>
+
+          {pipeline?.block_fusion === 'chains' && (
+            <Spacing mt={PADDING_UNITS}>
+              <Checkbox
+                checked={blockAttributes?.configuration?.fusion === false}
+                label="Run this block alone, in its own process, when chains of blocks run together"
+                onClick={() =>
+                  setBlockAttributes((prev) => ({
+                    ...prev,
+                    configuration: {
+                      ...prev?.configuration,
+                      fusion: prev?.configuration?.fusion === false ? null : false,
+                    },
+                  }))
+                }
+              />
+            </Spacing>
+          )}
         </Spacing>
 
         {/*

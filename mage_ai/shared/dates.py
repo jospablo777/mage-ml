@@ -15,6 +15,18 @@ def utc_now() -> datetime.datetime:
     """
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
+
+def as_utc(value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:
+    """
+    A time from the database with its UTC zone. SQLite returns the UTC times Mage stores
+    without a zone, and timestamp() reads such a time as local time: on a machine that is
+    not on UTC, a block or pipeline run looked hours younger and never timed out.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=datetime.timezone.utc)
+
+
 def compare(date1, date2) -> Optional[int]:
     if date1 is None or date2 is None:
         return None

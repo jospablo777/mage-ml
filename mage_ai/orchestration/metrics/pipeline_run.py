@@ -323,8 +323,8 @@ def get_metrics(
             for logs in logs_for_uuid:
                 temp_metrics = {}
 
-                for _, l in enumerate(logs):
-                    tags = parse_line(l)
+                for line in logs:
+                    tags = parse_line(line)
                     if not tags:
                         continue
 

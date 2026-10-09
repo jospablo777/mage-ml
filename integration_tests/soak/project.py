@@ -4,6 +4,7 @@ The Mage project of the scheduler soak test, written to a temporary directory.
 Chain pipelines share one set of block files. Blocks record each run in PostgreSQL, in
 the schema named by SOAK_SCHEMA, so the test can check that every run executed once.
 """
+import os
 import textwrap
 from pathlib import Path
 from typing import Dict, List
@@ -39,6 +40,8 @@ def record(table, **values):
 
 BLOCKS = {
     ('data_loaders', 'soak_load'): '''
+import os
+
 import polars as pl
 
 if 'data_loader' not in globals():
@@ -49,6 +52,7 @@ if 'data_loader' not in globals():
 def load(**kwargs):
     return pl.DataFrame({'n': range(1000)}).with_columns(
         run=pl.lit(kwargs['pipeline_run_id']),
+        pid=pl.lit(os.getpid()),
     )
 ''',
     ('transformers', 'soak_transform'): '''
@@ -84,6 +88,8 @@ def export(frame, **kwargs):
         trigger_name=kwargs['trigger_name'],
         total=int(frame['doubled'].sum()),
         run_in_frame=int(frame['run'][0]),
+        load_pid=int(frame['pid'][0]) if 'pid' in frame.columns else None,
+        export_pid=os.getpid(),
     )
 ''',
     ('data_loaders', 'soak_flaky_load'): CONNECT + '''
@@ -237,6 +243,9 @@ def write_project(root: Path, chains: int, start_time: str) -> Dict[str, List[Di
         metadata = dict(blocks=blocks, name=uuid, type='python', uuid=uuid)
         if uuid == 'soak_fanout':
             metadata['concurrency_config'] = dict(block_run_limit=FANOUT_BLOCK_RUN_LIMIT)
+        if os.getenv('MAGE_TEST_SOAK_FUSION'):
+            # Every pipeline runs its chains as stages; the fan-out has none.
+            metadata['block_fusion'] = 'chains'
         (folder / 'metadata.yaml').write_text(yaml.safe_dump(metadata))
         (folder / '__init__.py').touch()
         triggers[uuid] = [

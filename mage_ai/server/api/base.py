@@ -73,20 +73,30 @@ class BaseHandler(tornado.web.RequestHandler):
             pk = self.path_kwargs.get('pk')
             resource = self.path_kwargs.get('resource')
 
-            asyncio.run(
-                UsageStatisticLogger().error(
-                    event_name=EventNameType.APPLICATION_ERROR,
-                    code=status_code,
-                    errors='\n'.join(errors or []),
-                    message=str(exception),
-                    operation=self.request.method,
-                    resource=child or resource,
-                    resource_id=child_pk if child else pk,
-                    resource_parent=resource if child else None,
-                    resource_parent_id=pk if child else None,
-                    type=None,
-                )
+            log = UsageStatisticLogger().error(
+                event_name=EventNameType.APPLICATION_ERROR,
+                code=status_code,
+                errors='\n'.join(errors or []),
+                message=str(exception),
+                operation=self.request.method,
+                resource=child or resource,
+                resource_id=child_pk if child else pk,
+                resource_parent=resource if child else None,
+                resource_parent_id=pk if child else None,
+                type=None,
             )
+            # Handlers run in Tornado's event loop, where asyncio.run raises: the error
+            # was never written and the client got an empty response.
+            try:
+                task = asyncio.get_running_loop().create_task(log)
+                self._error_log_tasks = getattr(self, '_error_log_tasks', set())
+                self._error_log_tasks.add(task)
+                task.add_done_callback(self._error_log_tasks.discard)
+            except RuntimeError:
+                try:
+                    asyncio.run(log)
+                except Exception:
+                    traceback.print_exc()
 
             self.write(
                 dict(

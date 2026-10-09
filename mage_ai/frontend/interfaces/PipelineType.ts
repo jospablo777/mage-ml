@@ -137,6 +137,7 @@ export default interface PipelineType {
   blocks?: BlockType[];
   callbacks?: BlockType[];
   concurrency_config?: ConcurrencyConfigType;
+  block_fusion?: string;
   conditionals?: BlockType[];
   created_at?: string;
   data_integration?: {
@@ -146,6 +147,7 @@ export default interface PipelineType {
   executor_type?: ExecutorTypeEnum;
   execution_framework?: PipelineExecutionFrameworkUUIDEnum;
   extensions?: PipelineExtensionsType;
+  fusion_plan?: string[][];
   groups?: GroupUUIDEnum[];
   id?: number;
   metadata?: PipelineMetadataType;

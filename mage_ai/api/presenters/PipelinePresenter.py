@@ -11,6 +11,7 @@ from mage_ai.data_preparation.models.project.constants import FeatureUUID
 
 class PipelinePresenter(BasePresenter):
     default_attributes = [
+        'block_fusion',
         'blocks',
         'cache_block_output_in_memory',
         'concurrency_config',
@@ -98,6 +99,10 @@ class PipelinePresenter(BasePresenter):
                 disable_block_output_previews=True,
                 exclude_blank_variable_uuids=True,
             )
+            from mage_ai.orchestration.fusion import fusion_plan
+
+            # The stages of a run with block fusion, for the pipeline settings.
+            data['fusion_plan'] = fusion_plan(self.model)
         elif constants.UPDATE == display_format:
             data = self.model.to_dict(include_extensions=include_extensions)
         else:

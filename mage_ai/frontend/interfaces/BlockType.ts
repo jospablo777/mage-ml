@@ -290,6 +290,8 @@ export interface TemplateType {
 }
 
 export interface ConfigurationType extends BaseConfigurationType {
+  // False runs the block alone when chains of blocks run together (block fusion).
+  fusion?: boolean | null;
   dynamic?:
     | any
     | boolean

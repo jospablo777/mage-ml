@@ -123,6 +123,7 @@ class BlockExecutor:
         verify_output: bool = True,
         block_run_dicts: List[str] = None,
         skip_logging: bool = False,
+        fused: bool = False,
         **kwargs,
     ) -> Dict:
         """
@@ -620,11 +621,18 @@ class BlockExecutor:
                         # can be shared across blocks
                         global_vars.update(dict(retry=self.retry_metadata))
 
+                        # A block of a stage gets its input from memory on the first
+                        # attempt; a failed attempt may have changed it in place, so later
+                        # attempts read the stored input, as a new process would.
+                        outputs_cache = block_run_outputs_cache
+                        if fused and (self.retry_metadata.get('attempts') or 1) > 1:
+                            outputs_cache = None
+
                         try:
                             return self._execute(
                                 analyze_outputs=analyze_outputs,
                                 block_run_id=block_run_id,
-                                block_run_outputs_cache=block_run_outputs_cache,
+                                block_run_outputs_cache=outputs_cache,
                                 cache_block_output_in_memory=cache_block_output_in_memory,
                                 callback_url=callback_url,
                                 global_vars=global_vars,
@@ -644,6 +652,7 @@ class BlockExecutor:
                                 data_integration_metadata=data_integration_metadata,
                                 pipeline_run=pipeline_run,
                                 block_run_dicts=block_run_dicts,
+                                fused=fused,
                                 **kwargs,
                             )
                         except Exception:
@@ -1190,8 +1199,14 @@ class BlockExecutor:
 
         # execute_sync returns dict(output=[...]); tests take the outputs as arguments.
         outputs = None
-        if cache_block_output_in_memory:
+        if cache_block_output_in_memory or kwargs.get('fused'):
             outputs = (result.get('output') if isinstance(result, dict) else result) or []
+        if kwargs.get('fused'):
+            from mage_ai.orchestration.fusion import copy_for_reader
+
+            # In a stage the next block gets the outputs from memory: a test that changes
+            # its copy does not change them. Read back, they were a separate copy.
+            outputs = copy_for_reader(outputs)
 
         if BlockType.DBT == self.block.type:
             self.block.run_tests(

@@ -204,7 +204,7 @@ class WorkerPoolTests(TestCase):
         started = []
 
         class FakeWorker:
-            def __init__(self, job, job_dict):
+            def __init__(self, job, job_dict, **kwargs):
                 self.job = job
                 self.checks = 0
 
@@ -259,3 +259,73 @@ class JobsFinishedTests(TestCase):
         self.assertNotIn('block_run_1', self.queue.job_dict)
         self.assertTrue(self.queue.jobs_finished())
         self.assertFalse(self.queue.jobs_finished())
+
+
+seen_during_job = {}
+
+
+def register_alias_and_record(queue_job_dict):
+    import os
+
+    from mage_ai.orchestration.queue import process_queue
+
+    process_queue.register_job_alias('block_run_2')
+    seen_during_job['alias'] = queue_job_dict.get('block_run_2')
+    seen_during_job['pid'] = os.getpid()
+
+
+class AliasRedis:
+    def __init__(self):
+        self.values = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def set(self, key, value, **kwargs):
+        self.values[key] = value
+
+    def delete(self, key):
+        self.values.pop(key, None)
+
+
+class JobAliasTests(TestCase):
+    def test_an_alias_points_at_the_running_job_until_it_ends(self):
+        from mage_ai.orchestration.queue import process_queue
+
+        job_dict = {'block_run_1': JobStatus.QUEUED}
+        redis = AliasRedis()
+        key = process_queue._redis_job_key('block_run_1')
+        redis.set(key, 'client_a')
+        worker = process_queue.Worker(
+            ['block_run_1', register_alias_and_record, (job_dict,), {}],
+            job_dict,
+            client_id='client_a',
+        )
+        with patch.object(process_queue, 'init_redis_client', return_value=redis), \
+                patch.object(process_queue, 'start_session_and_run',
+                             side_effect=lambda target, *a, **k: target(*a, **k)):
+            worker.redis_url = 'redis://fake'
+            worker.run()
+
+        # During the job the alias held this process's pid, in Redis too.
+        self.assertEqual(seen_during_job['alias'], seen_during_job['pid'])
+        # When the job ended, both were marked completed and their keys released.
+        self.assertEqual(job_dict['block_run_1'], JobStatus.COMPLETED)
+        self.assertEqual(job_dict['block_run_2'], JobStatus.COMPLETED)
+        self.assertEqual(redis.values, {})
+
+    def test_a_key_another_process_took_is_kept(self):
+        from mage_ai.orchestration.queue import process_queue
+
+        redis = AliasRedis()
+        key = process_queue._redis_job_key('block_run_1')
+        redis.set(key, 'client_b')
+
+        process_queue._release_redis_job_key(redis, 'client_a', 'block_run_1')
+
+        self.assertEqual(redis.get(key), 'client_b')
+
+    def test_outside_a_worker_an_alias_does_nothing(self):
+        from mage_ai.orchestration.queue import process_queue
+
+        process_queue.register_job_alias('block_run_9')
