@@ -19,11 +19,13 @@ export MAGE_TEST_POSTGRES_USER ?= postgres
 export MAGE_TEST_POSTGRES_PASSWORD ?= test
 export MAGE_TEST_REDIS_PORT ?= 16379
 export MAGE_TEST_REDIS_URL ?= redis://127.0.0.1:$(MAGE_TEST_REDIS_PORT)/0
+export MAGE_TEST_API_PORT ?= 18000
+export MAGE_TEST_API_URL ?= http://127.0.0.1:$(MAGE_TEST_API_PORT)
 
-.PHONY: up down test test-postgres test-redis ci
+.PHONY: up down test test-postgres test-redis test-api ci
 
 up:
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up -d --build --wait
 
 down:
 	$(COMPOSE) down --volumes --remove-orphans
@@ -36,6 +38,9 @@ test-postgres: up
 
 test-redis: up
 	cd .. && $(PYTHON) -m pytest integration_tests/redis $(PYTEST_ARGS)
+
+test-api: up
+	cd .. && $(PYTHON) -m pytest integration_tests/api $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up

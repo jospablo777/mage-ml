@@ -1,0 +1,12 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: polars_panic_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: polars_panic_load
+name: polars_panic
+type: python
+uuid: polars_panic

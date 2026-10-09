@@ -25,6 +25,9 @@ import pytest  # noqa: E402
 
 from integration_tests.data import postgres_dataset  # noqa: E402
 
+# The Mage project fixture, shared by the pipeline tests.
+pytest_plugins = ['integration_tests.mage_runner']
+
 POSTGRES_ENV = {
     'dbname': 'MAGE_TEST_POSTGRES_DBNAME',
     'host': 'MAGE_TEST_POSTGRES_HOST',
@@ -104,3 +107,17 @@ def redis_url():
     if not url:
         pytest.skip('Redis is not configured: MAGE_TEST_REDIS_URL unset')
     return url
+
+
+@pytest.fixture(scope='session')
+def api_url():
+    url = os.getenv('MAGE_TEST_API_URL')
+    if not url:
+        pytest.skip('The test API is not configured: MAGE_TEST_API_URL unset')
+    return url.rstrip('/')
+
+
+@pytest.fixture
+def collection():
+    """A collection name on the test API, unique to the test."""
+    return f'c_{uuid.uuid4().hex[:12]}'

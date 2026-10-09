@@ -1,0 +1,22 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - api_after_error_export
+  language: python
+  name: api_error_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: api_error_load
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: api_after_error_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - api_error_load
+  uuid: api_after_error_export
+name: api_error
+type: python
+uuid: api_error

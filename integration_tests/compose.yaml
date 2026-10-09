@@ -31,3 +31,8 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  api:
+    build: services/api
+    ports:
+      - "${MAGE_TEST_API_PORT:-18000}:8000"

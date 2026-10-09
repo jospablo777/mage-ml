@@ -1,0 +1,16 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: api_flaky_load
+  retry_config:
+    delay: 0
+    exponential_backoff: false
+    retries: 3
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: api_flaky_load
+name: api_retry
+type: python
+uuid: api_retry
