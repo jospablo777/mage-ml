@@ -9,7 +9,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import PipelineType from '@interfaces/PipelineType';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
-import { HTMLOutputStyle, OutputRowStyle } from 'components/CodeBlock/CodeOutput/index.style';
+import { HTMLOutputStyle, OutputRowStyle } from '@components/CodeBlock/CodeOutput/index.style';
 import Text from '@oracle/elements/Text';
 import OutputRenderer from '@components/CodeBlock/CodeOutput/OutputRenderer';
 import { DataTypeEnum } from '@interfaces/KernelOutputType';

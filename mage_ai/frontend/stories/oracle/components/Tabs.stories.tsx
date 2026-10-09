@@ -6,7 +6,7 @@ import Spacing from '@oracle/elements/Spacing';
 import Tab from '@oracle/components/Tabs/Tab';
 import Tabs, { TabsProps } from '@oracle/components/Tabs';
 import Text from '@oracle/elements/Text';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 import { ArrowRight } from '@oracle/icons';
 
 export default {

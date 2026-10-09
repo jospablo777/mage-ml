@@ -1,42 +1,41 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@api": [
-        "api/index"
+        "./api/index"
       ],
       "@api/*": [
-        "api/*"
+        "./api/*"
       ],
       "@components/*": [
-        "components/*"
+        "./components/*"
       ],
       "@context/*": [
-        "context/*"
+        "./context/*"
       ],
       "@hocs/*": [
-        "hocs/*"
+        "./hocs/*"
       ],
       "@interfaces/*": [
-        "interfaces/*"
+        "./interfaces/*"
       ],
       "@mana/*": [
-        "mana/*"
+        "./mana/*"
       ],
       "@oracle/*": [
-        "oracle/*"
+        "./oracle/*"
       ],
       "@public/*": [
-        "public/*"
+        "./public/*"
       ],
       "@storage/*": [
-        "storage/*"
+        "./storage/*"
       ],
       "@styles/*": [
-        "styles/*"
+        "./styles/*"
       ],
       "@utils/*": [
-        "utils/*"
+        "./utils/*"
       ]
     },
     "target": "es6",

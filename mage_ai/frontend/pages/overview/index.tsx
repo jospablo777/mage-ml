@@ -83,7 +83,7 @@ import { queryFromUrl } from '@utils/url';
 import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils';
 import { useModal } from '@context/Modal';
 import UploadPipeline from '@components/PipelineDetail/UploadPipeline';
-import { LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, set, get } from 'storage/localStorage';
+import { LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, set, get } from '@storage/localStorage';
 import Setup from '@components/AI/Setup';
 
 const SHARED_WIDGET_SPACING_PROPS = {

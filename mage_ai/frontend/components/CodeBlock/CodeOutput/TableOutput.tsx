@@ -10,7 +10,7 @@ import { OutputType, SampleDataType } from '@interfaces/BlockType';
 import { PADDING_UNITS, UNIT } from '@oracle/styles/units/spacing';
 import { SCROLLBAR_WIDTH } from '@oracle/styles/scrollbars';
 import { containsOnlySpecialCharacters, containsHTML, pluralize } from '@utils/string';
-import { isObject } from 'utils/hash';
+import { isObject } from '@utils/hash';
 
 type TableOutputProps = {
   containerWidth?: number;

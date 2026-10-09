@@ -2,7 +2,7 @@ import React from 'react';
 import { Meta, StoryFn } from '@storybook/react';
 
 import Chip, { ChipProps } from '@oracle/components/Chip';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 
 export default {
   component: Chip,

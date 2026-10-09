@@ -1,7 +1,7 @@
 import React from 'react';
 import { Meta, StoryFn } from '@storybook/react';
 
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 import SimpleDataTable, { SimpleDataTableProps } from '@oracle/components/Table/SimpleDataTable';
 
 export default {

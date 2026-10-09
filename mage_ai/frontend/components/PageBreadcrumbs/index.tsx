@@ -8,7 +8,7 @@ import {
   SHOW_COLUMNS_QUERY_PARAM,
   TAB_REPORTS,
   TABS_QUERY_PARAM,
-} from 'components/datasets/overview/constants';
+} from '@components/datasets/overview/constants';
 import { queryFromUrl } from '@utils/url';
 
 export enum PageEnum {

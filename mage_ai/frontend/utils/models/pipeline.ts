@@ -1,8 +1,8 @@
-import BlockType, { BlockTypeEnum } from 'interfaces/BlockType';
+import BlockType, { BlockTypeEnum } from '@interfaces/BlockType';
 import PipelineExecutionFrameworkType, {
   PipelineExecutionFrameworkBlockType,
 } from '@interfaces/PipelineExecutionFramework/interfaces';
-import PipelineType from 'interfaces/PipelineType';
+import PipelineType from '@interfaces/PipelineType';
 import {
   GroupUUIDEnum,
   PipelineExecutionFrameworkUUIDEnum,

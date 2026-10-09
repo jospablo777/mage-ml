@@ -2,7 +2,7 @@ import React from 'react';
 import { Meta, StoryFn } from '@storybook/react';
 
 import ProgressBar, { ProgressBarProps } from '@oracle/components/ProgressBar';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 
 export default {
   title: 'Oracle/Components/ProgressBar',

@@ -3,7 +3,7 @@ import { Meta, StoryFn } from '@storybook/react';
 
 import Panel, { PanelProps } from '@oracle/components/Panel';
 import Text from '@oracle/elements/Text';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 import { Check } from '@oracle/icons';
 
 export default {

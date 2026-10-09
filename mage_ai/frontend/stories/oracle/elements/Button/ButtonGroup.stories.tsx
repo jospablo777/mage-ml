@@ -3,7 +3,7 @@ import { Meta, StoryFn } from '@storybook/react';
 
 import Button from '@oracle/elements/Button';
 import ButtonGroup, { ButtonGroupProps } from '@oracle/elements/Button/ButtonGroup';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../../ThemeBlock';
 import { ArrowDown, Menu, Graph, Check } from '@oracle/icons';
 import { UNIT } from '@oracle/styles/units/spacing';
 

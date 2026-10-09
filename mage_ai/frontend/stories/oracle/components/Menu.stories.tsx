@@ -2,7 +2,7 @@ import React from 'react';
 import { Meta, StoryFn } from '@storybook/react';
 
 import Menu, { MenuProps } from '@oracle/components/Menu';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 import { ArrowRight, NumberHash } from '@oracle/icons';
 
 export default {

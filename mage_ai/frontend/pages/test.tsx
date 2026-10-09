@@ -13,7 +13,7 @@ import { displayLocalOrUtcTime } from '@components/Triggers/utils';
 import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
 import Button from '@oracle/elements/Button';
 import Text from '@oracle/elements/Text';
-import { ErrorDetailsType } from 'interfaces/ErrorsType';
+import { ErrorDetailsType } from '@interfaces/ErrorsType';
 import EventStreamType, { ResultType } from '@interfaces/EventStreamType';
 import { padString } from '@utils/string';
 

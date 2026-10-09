@@ -17,7 +17,7 @@ import Button from '@oracle/elements/Button';
 import { ExpandWindow, ExpandWindowFilled } from '@oracle/icons';
 import useClickOutside from '@utils/useClickOutside';
 import useDraggableElement from '@utils/useDraggableElement';
-import Text from 'oracle/elements/Text';
+import Text from '@oracle/elements/Text';
 import useResizeElement from '@utils/useResizeElement';
 import { ApplicationConfiguration } from '@components/CommandCenter/constants';
 import WithOnMount from '@components/shared/WithOnMount';

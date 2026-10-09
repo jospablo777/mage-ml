@@ -2,7 +2,7 @@ import React from 'react';
 import { Meta, StoryFn } from '@storybook/react';
 
 import BreadCrumbs from '@oracle/components/Breadcrumbs';
-import ThemeBlock from 'stories/ThemeBlock';
+import ThemeBlock from '../../ThemeBlock';
 
 export default {
   component: BreadCrumbs,

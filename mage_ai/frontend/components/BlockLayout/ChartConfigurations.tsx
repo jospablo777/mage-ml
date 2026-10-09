@@ -26,7 +26,7 @@ import { capitalize } from '@utils/string';
 import { remove, sortByKey } from '@utils/array';
 import TextArea from '@oracle/elements/Inputs/TextArea';
 import Panel from '@oracle/components/Panel';
-import { PADDING_UNITS } from 'oracle/styles/units/spacing';
+import { PADDING_UNITS } from '@oracle/styles/units/spacing';
 import { dig, setNested } from '@utils/hash';
 import BlockLayoutItemType from '@interfaces/BlockLayoutItemType';
 

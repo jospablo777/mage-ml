@@ -23,7 +23,7 @@ import {
   BAR_STACK_STATUSES,
   TOOLTIP_LEFT_OFFSET,
 } from '@components/Monitor/constants';
-import { LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, set, get } from 'storage/localStorage';
+import { LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, set, get } from '@storage/localStorage';
 import { MonitorStatsEnum } from '@interfaces/MonitorStatsType';
 import { RunStatus } from '@interfaces/BlockRunType';
 import { SHARED_UTC_TOOLTIP_PROPS } from '@components/PipelineRun/shared/constants';
