@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from mage_ai.shared.pandas_utils import (
+    concat_frames,
     datetime_resolution,
     datetime_to_epoch_seconds,
     get_setting_with_copy_warning,
@@ -221,3 +222,51 @@ class MissingAsNoneTest(TestCase):
         missing_as_none(frame)
 
         self.assertEqual(frame['number'].dtype, np.float64)
+
+
+class ConcatFramesTest(TestCase):
+    """The outputs of a dynamic block's children, reduced into one frame."""
+
+    def frame(self):
+        return pd.DataFrame({
+            'n': pd.array([2**53 + 1, 2], dtype='Int64'),
+            's': pd.Series(['x', 'y'], dtype='str'),
+        })
+
+    def test_all_missing_columns_take_the_shared_dtype(self):
+        missing = pd.DataFrame({'n': [float('nan')], 's': [None]})
+
+        result = concat_frames([self.frame(), missing])
+
+        # pd.concat made n Float64, which rounded 2**53 + 1 to 2**53.
+        self.assertEqual(str(result['n'].dtype), 'Int64')
+        self.assertEqual(result['n'].tolist(), [2**53 + 1, 2, pd.NA])
+        self.assertEqual(str(result['s'].dtype), 'str')
+
+    def test_empty_frames_are_left_out(self):
+        empty = pd.DataFrame({'n': pd.Series([], dtype=object), 's': pd.Series([], dtype=object)})
+
+        result = concat_frames([empty, self.frame(), pd.DataFrame()])
+
+        self.assertEqual(str(result['n'].dtype), 'Int64')
+        self.assertEqual(str(result['s'].dtype), 'str')
+        self.assertEqual(len(result), 2)
+
+    def test_the_index_is_kept(self):
+        result = concat_frames([self.frame(), self.frame()])
+
+        self.assertEqual(list(result.index), [0, 1, 0, 1])
+
+    def test_only_empty_frames(self):
+        result = concat_frames([pd.DataFrame({'a': pd.Series([], dtype='Int64')})])
+
+        self.assertEqual(len(result), 0)
+        self.assertEqual(str(result['a'].dtype), 'Int64')
+
+    def test_columns_whose_dtypes_differ_are_left_to_pandas(self):
+        floats = pd.DataFrame({'n': [1.5]})
+        missing = pd.DataFrame({'n': [None]})
+
+        result = concat_frames([self.frame()[['n']], floats, missing])
+
+        self.assertEqual(result['n'].tolist()[:3], [2**53 + 1, 2, 1.5])

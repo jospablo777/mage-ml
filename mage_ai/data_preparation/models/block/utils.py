@@ -795,7 +795,9 @@ def fetch_input_variables(
                     and len(final_value) >= 1
                     and all([type(v) is pd.DataFrame for v in final_value])
                 ):
-                    final_value = pd.concat(final_value)
+                    from mage_ai.shared.pandas_utils import concat_frames
+
+                    final_value = concat_frames(final_value)
 
                 if not should_reduce:
                     # Only get the 1st output of a dynamic block;

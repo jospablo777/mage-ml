@@ -1,5 +1,5 @@
 import warnings
-from typing import Optional, Type
+from typing import List, Optional, Type
 
 import numpy as np
 import pandas as pd
@@ -145,3 +145,39 @@ def integer_bit_width(min_value, max_value) -> int:
         return 32
 
     return 64
+
+
+def concat_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
+    """
+    Concatenate frames, such as the outputs of a dynamic block's children, keeping the
+    dtypes they share. pd.concat widened a column to the dtype of a frame where it held
+    only missing values: an Int64 column met a column of NaN and became Float64, which
+    rounded 2**53 + 1 to 2**53, and empty frames with object columns made every column
+    object. Frames without rows are left out, and a column with only missing values in
+    a frame takes the dtype that the frames with values agree on.
+    """
+    with_rows = [frame for frame in frames if len(frame)] or frames[:1]
+    dtypes = {}
+    for frame in with_rows:
+        for column in frame.columns:
+            series = frame[column]
+            if isinstance(series, pd.DataFrame) or not series.notna().any():
+                continue
+            dtypes.setdefault(column, set()).add(series.dtype)
+    aligned = []
+    for frame in with_rows:
+        casts = {}
+        for column in frame.columns:
+            series = frame[column]
+            if isinstance(series, pd.DataFrame) or series.notna().any():
+                continue
+            kinds = dtypes.get(column, set())
+            if len(kinds) == 1:
+                casts[column] = next(iter(kinds))
+        if casts:
+            try:
+                frame = frame.astype(casts)
+            except (TypeError, ValueError):
+                pass
+        aligned.append(frame)
+    return pd.concat(aligned)
