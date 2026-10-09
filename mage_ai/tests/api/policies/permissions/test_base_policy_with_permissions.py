@@ -26,6 +26,9 @@ from mage_ai.tests.api.policies.permissions.mixins import PermissionsMixin
 
 
 class TestSuite(StrEnum):
+    # A helper, not a test case.
+    __test__ = False
+
     AUTHORIZED = 'AUTHORIZED'
     DISABLED = 'DISABLED'
     INVERSE = 'INVERSE'

@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from mage_ai.authentication.providers.oidc import OidcProvider
 
@@ -34,6 +34,8 @@ class OidcProviderTest(unittest.IsolatedAsyncioTestCase):
                 # Mocking the aiohttp.ClientSession.get method
                 with patch('aiohttp.ClientSession.get') as mocked_get:
                     mocked_get_response = AsyncMock()
+                    # aiohttp's raise_for_status is synchronous.
+                    mocked_get_response.raise_for_status = MagicMock()
                     mocked_get_response.json = AsyncMock(return_value={
                         'email': 'test@example.com',
                         'preferred_username': 'test_user',

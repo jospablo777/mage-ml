@@ -1,5 +1,6 @@
 import os
 import shutil
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -112,7 +113,7 @@ class VariableAtomicWriteTest(DBTestCase):
     def contents(self):
         path = self.variable().variable_path
         return {
-            name: open(os.path.join(path, name), 'rb').read()
+            name: Path(path, name).read_bytes()
             for name in sorted(os.listdir(path))
             if name != 'resource_usage.json'
         }
@@ -188,7 +189,7 @@ class VariableAtomicWriteTest(DBTestCase):
         variable = self.variable()
         variable.write_data({'a': 1})
 
-        usage = open(variable.resource_usage_path()).read()
+        usage = Path(variable.resource_usage_path()).read_text()
 
         self.assertNotIn('.staging', usage)
         self.assertIn(variable.variable_path, usage)

@@ -32,6 +32,9 @@ class GenericObject:
 
 
 class TestBaseResource(BaseResource):
+    # A helper, not a test case.
+    __test__ = False
+
     model_class = GenericObject
 
     @classmethod

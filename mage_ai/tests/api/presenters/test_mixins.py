@@ -6,6 +6,9 @@ from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 
 
 class TestMixinPresenter(BasePresenter, AssociatedUserPresenter):
+    # A helper, not a test case.
+    __test__ = False
+
     default_attributes = [
         'user',
     ]

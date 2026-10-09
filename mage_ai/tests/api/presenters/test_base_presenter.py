@@ -12,6 +12,9 @@ from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 
 
 class TestPresenter(BasePresenter):
+    # A helper, not a test case.
+    __test__ = False
+
     default_attributes = [
         'id',
         'username',
@@ -24,6 +27,9 @@ TestPresenter.register_format('with_user', TestPresenter.default_attributes + ['
 
 
 class TestPolicy(BasePolicy):
+    # A helper, not a test case.
+    __test__ = False
+
     pass
 
 
@@ -35,6 +41,9 @@ TestPolicy.allow_read(TestPresenter.default_attributes + ['user'], scopes=[
 
 
 class TestResource(DatabaseResource):
+    # A helper, not a test case.
+    __test__ = False
+
     @classmethod
     def presenter_class(self):
         return TestPresenter
@@ -45,6 +54,9 @@ class TestResource(DatabaseResource):
 
 
 class TestGenericResource(GenericResource):
+    # A helper, not a test case.
+    __test__ = False
+
     @classmethod
     def presenter_class(self):
         return TestPresenter

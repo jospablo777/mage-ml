@@ -268,6 +268,21 @@ class RowTests(TestCase):
         assert_frame_equal(df_new, df_expected)
         assert_frame_equal(df_new2, df_expected)
 
+    def test_filter_row_contains_regular_expressions_with_escapes(self):
+        """
+        The value was pasted into the query in quotes, so the backslashes of a regular
+        expression were string escapes: the word boundaries of \\bcat\\b became backspace
+        characters and matched nothing, and \\w is an invalid escape that Python 3.12
+        warns about and later versions reject.
+        """
+        df = pd.DataFrame({'name': ['the cat sat', 'concatenate', 'x1', None]})
+
+        words = filter_rows(df, dict(action_code=r"name contains '\bcat\b'"), original_df=df)
+        word = filter_rows(df, dict(action_code=r"name contains '^x\w'"), original_df=df)
+
+        self.assertEqual(words['name'].tolist(), ['the cat sat'])
+        self.assertEqual(word['name'].tolist(), ['x1'])
+
     def test_filter_row_not_contains_string(self):
         df = pd.DataFrame(
             [
@@ -290,7 +305,7 @@ class RowTests(TestCase):
             action_code='email not contains @',
         )
         action4 = dict(
-            action_code='email not contains \'^e+\w\'',  # noqa: W605
+            action_code=r"email not contains '^e+\w'",
         )
         action_invalid = dict(action_code='subscription not contains False')
         df_new = filter_rows(df, action, original_df=df).reset_index(drop=True)
@@ -600,7 +615,7 @@ class RowTests(TestCase):
             action_code='"e e e e e e email" not contains @',
         )
         action4 = dict(
-            action_code='"e e e e e e email" not contains \'^e+\w\'',  # noqa: W605
+            action_code=r""""e e e e e e email" not contains '^e+\w'""",
         )
         action_invalid = dict(action_code='"subs crip tion" not contains False')
         df_new = filter_rows(df, action, original_df=df).reset_index(drop=True)

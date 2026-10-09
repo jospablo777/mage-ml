@@ -27,16 +27,16 @@ def __query_mutate_null_type(match, dtype):
     column_name = append_prefix(column_name, ORIGINAL_COLUMN_PREFIX)
     if operator == '==':
         condition.append(f'({column_name}.isna()')
-        if dtype == bool:
+        if dtype is bool:
             condition.append(f' | {column_name} == \'\'')
-        elif dtype == str:
+        elif dtype is str:
             condition.append(f' | {column_name}.str.len() == 0')
         condition.append(')')
     else:
         condition.append(f'({column_name}.notna()')
-        if dtype == bool:
+        if dtype is bool:
             condition.append(f' & {column_name} != \'\'')
-        elif dtype == str:
+        elif dtype is str:
             condition.append(f' & {column_name}.str.len() >= 1')
         condition.append(')')
     return ''.join(condition)
@@ -45,11 +45,15 @@ def __query_mutate_null_type(match, dtype):
 def __query_mutate_contains_op(match):
     column_name, operator, value = match.groups()
     column_name = append_prefix(column_name, TRANSFORMED_COLUMN_PREFIX)
-    value = value.strip(QUOTES)
+    # repr makes a literal of the value. Pasted in quotes, the backslashes of a regular
+    # expression were string escapes: the word boundaries of \bcat\b became backspace
+    # characters, and ^e+\w is an invalid escape, which Python 3.12 warns about and later
+    # versions reject.
+    value = repr(value.strip(QUOTES))
     if operator == Operator.CONTAINS:
-        condition = f'({column_name}.notna() & {column_name}.str.contains(\'{value}\'))'
+        condition = f'({column_name}.notna() & {column_name}.str.contains({value}))'
     else:
-        condition = f'~({column_name}.notna() & {column_name}.str.contains(\'{value}\'))'
+        condition = f'~({column_name}.notna() & {column_name}.str.contains({value}))'
     return condition
 
 
@@ -90,7 +94,7 @@ def query_with_action_code(df, action_code, kwargs):
         prev_end = match.end()
         if operator == Operator.CONTAINS or operator == Operator.NOT_CONTAINS:
             transformed_dtype = __get_column_type(df, transformed_types, column_name)
-            if transformed_dtype != str:
+            if transformed_dtype is not str:
                 raise TypeError(
                     f'\'{operator}\' can only be used on string columns, {transformed_dtype}'
                 )

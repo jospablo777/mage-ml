@@ -17,6 +17,9 @@ class UserResource(DatabaseResource):
 
 
 class TestUserRoleResource(DatabaseResource):
+    # A helper, not a test case.
+    __test__ = False
+
     model_class = UserRole
 
 

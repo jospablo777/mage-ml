@@ -122,6 +122,9 @@ class FakeCursor:
 class FakeConnection:
     closed = False
 
+    def close(self):
+        self.closed = True
+
     def __init__(self):
         self.statements = []
         self.copy_calls = []
