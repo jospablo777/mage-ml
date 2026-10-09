@@ -6,6 +6,7 @@ from pandas import DataFrame
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.shared.pandas_utils import missing_as_none
 
 LOGGER = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class Weaviate(BaseIO):
             LOGGER.info(f'Collection {collection} does not exist. Creating collection.')
             self.create_collection(collection)
 
-        data_objs = df.to_dict('records')
+        data_objs = missing_as_none(df).to_dict('records')
         self.client.batch.configure(batch_size=100)
         with self.client.batch as batch:
             for data_obj in data_objs:

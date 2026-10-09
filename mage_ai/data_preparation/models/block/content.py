@@ -15,6 +15,7 @@ from mage_ai.data_preparation.shared.utils import (
 )
 from mage_ai.data_preparation.templates.utils import get_variable_for_template
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.pandas_utils import missing_as_none
 
 
 def include_python_libraries() -> Dict:
@@ -48,7 +49,7 @@ def hydrate_block_outputs(
                 def _build_positional_arguments(acc: List, upstream_block_uuid: str) -> List:
                     results = outputs_from_input_vars.get(upstream_block_uuid)
                     if isinstance(results, pd.DataFrame):
-                        results = results.to_dict(orient='records')
+                        results = missing_as_none(results).to_dict(orient='records')
                     acc.append(results)
 
                     return acc

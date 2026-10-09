@@ -5,6 +5,7 @@ from pymongo import MongoClient
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.shared.pandas_utils import missing_as_none
 
 
 class MongoDB(BaseIO):
@@ -91,7 +92,7 @@ class MongoDB(BaseIO):
         if type(data) is list and type(data[0]) is dict:
             records = data
         elif type(data) is DataFrame:
-            records = data.to_dict('records')
+            records = missing_as_none(data).to_dict('records')
         else:
             raise Exception('Please provide a pandas DataFrame or a list of dictionary as the'
                             ' input.')

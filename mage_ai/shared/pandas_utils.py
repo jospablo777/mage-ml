@@ -43,6 +43,18 @@ def ignore_setting_with_copy_warning() -> bool:
     return True
 
 
+def missing_as_none(frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return an object copy of frame with None in place of every missing value.
+
+    pandas 3 stores missing text as NaN in the str dtype, where pandas 2 kept None, and
+    NA and NaT mark missing values in other dtypes. Records sent to a database or an API
+    need None, which the clients write as NULL; NaN is stored as a number or rejected
+    by JSON encoders.
+    """
+    return frame.astype(object).where(frame.notna(), None)
+
+
 DATETIME_UNITS_PER_SECOND = {
     's': 1,
     'ms': 10**3,

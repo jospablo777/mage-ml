@@ -6,6 +6,7 @@ from pandas import DataFrame
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.shared.pandas_utils import missing_as_none
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class Algolia(BaseIO):
         index_name = index_name or self.index_name
         index = self.client.init_index(index_name)
 
-        data_objs = df.to_dict('records')
+        data_objs = missing_as_none(df).to_dict('records')
         try:
             index.save_objects(data_objs, {
                 'autoGenerateObjectIDIfNotExist': True

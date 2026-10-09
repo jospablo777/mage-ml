@@ -15,6 +15,7 @@ from mage_ai.orchestration.db.models.schedules import BlockRun
 from mage_ai.shared.array import find, find_index
 from mage_ai.shared.custom_logger import DX_PRINTER
 from mage_ai.shared.environments import is_test
+from mage_ai.shared.pandas_utils import missing_as_none
 
 
 class DynamicChildBlockFactory:
@@ -428,7 +429,7 @@ class DynamicChildBlockFactory:
                 )
 
                 if isinstance(values, pd.DataFrame):
-                    values = values.to_dict(orient='records')
+                    values = missing_as_none(values).to_dict(orient='records')
 
                 if values:
                     dynamic_upstream_block_uuids = None

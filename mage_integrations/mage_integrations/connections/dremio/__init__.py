@@ -1,6 +1,5 @@
 from typing import List
 
-import numpy as np
 from dremio.flight.endpoint import DremioFlightEndpoint
 
 from mage_integrations.connections.sql.base import Connection
@@ -91,8 +90,8 @@ class Dremio(Connection):
         tags = merge_dict(self.build_tags(), dict(query=query_string))
         self.info('Load started.', tags=tags)
         df = self.execute(query_string)
-        df.replace({np.nan: None}, inplace=True)
-        data = df.values.tolist()
+        # replace({np.nan: None}) keeps NaN in float and str columns under pandas 3.
+        data = df.astype(object).where(df.notna(), None).values.tolist()
 
         if len(data[0]) == 0:
             raise Exception('0 Records where found')

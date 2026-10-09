@@ -4,6 +4,7 @@ from google.oauth2 import service_account
 
 from mage_ai.io.base import BaseFile
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.shared.pandas_utils import missing_as_none
 
 
 class GoogleSheets(BaseFile):
@@ -236,7 +237,9 @@ class GoogleSheets(BaseFile):
             f'Exporting dataframe to worksheet \'{worksheet.title}\''
             f'in sheet \'{worksheet.spreadsheet.title}\''
         ):
-            worksheet.update([df.columns.values.tolist()] + df.values.tolist())
+            worksheet.update(
+                [df.columns.values.tolist()] + missing_as_none(df).values.tolist(),
+            )
 
     def exists(
         self,

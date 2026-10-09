@@ -1,5 +1,12 @@
-from azure.storage.blob import BlobServiceClient
+import io
 from collections import Counter
+from typing import Dict, Generator, List
+
+import pandas as pd
+import singer
+from azure.storage.blob import BlobServiceClient
+from singer.schema import Schema
+
 from mage_integrations.sources.base import Source, main
 from mage_integrations.sources.catalog import Catalog, CatalogEntry
 from mage_integrations.sources.constants import (
@@ -11,11 +18,7 @@ from mage_integrations.sources.constants import (
 )
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
-from singer.schema import Schema
-from typing import Dict, Generator, List
-import io
-import pandas as pd
-import singer
+from mage_integrations.utils.frames import records_from_frame
 
 LOGGER = singer.get_logger()
 
@@ -118,7 +121,7 @@ class AzureBlobStorage(Source):
             if int(b.get('size', 0)) == 0:
                 continue
             df = self.__build_df(b['name'])
-            yield df.to_dict('records')
+            yield records_from_frame(df)
 
     def test_connection(self) -> None:
         client = self.build_client()

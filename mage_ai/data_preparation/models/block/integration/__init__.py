@@ -22,6 +22,7 @@ from mage_ai.data_preparation.models.block.data_integration.constants import (
 from mage_ai.data_preparation.models.constants import PYTHON_COMMAND, BlockType
 from mage_ai.data_preparation.shared.stream import StreamToLogger
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.pandas_utils import missing_as_none
 from mage_ai.shared.security import filter_out_config_values
 
 
@@ -308,7 +309,7 @@ class IntegrationBlock(Block):
 
                                 if df.shape[0] == 0:
                                     continue
-                                record_transformed = df.to_dict('records')[0]
+                                record_transformed = missing_as_none(df).to_dict('records')[0]
 
                                 line = json.dumps(merge_dict(
                                     data,

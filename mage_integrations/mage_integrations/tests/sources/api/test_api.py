@@ -4,6 +4,7 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from mage_integrations.sources.api import Api, read_csv_to_pandas
+from mage_integrations.utils.frames import records_from_frame
 
 
 def csv_catalog_example():
@@ -335,3 +336,21 @@ class ApiTest(unittest.TestCase):
             catalog = source.discover()
 
             self.assertEqual(catalog.to_dict(), json_catalog_example())
+
+
+class ApiCsvValuesTest(unittest.TestCase):
+    def test_integer_ids_with_missing_values_stay_exact(self):
+        """Converting through NumPy turned the column into float and rounded the id."""
+        df = read_csv_to_pandas(StringIO('id,name\n9007199254740993,a\n,\n'), ',', True)
+
+        self.assertEqual(
+            records_from_frame(df),
+            [dict(id=9007199254740993, name='a'), dict(id=None, name=None)],
+        )
+
+    def test_text_after_the_first_100_rows_is_read(self):
+        content = 'code\n' + '1\n' * 150 + 'A1\n'
+
+        df = read_csv_to_pandas(StringIO(content), ',', True)
+
+        self.assertEqual(df['code'].tolist()[-1], 'A1')

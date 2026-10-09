@@ -20,6 +20,7 @@ from mage_integrations.sources.constants import (
 )
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
+from mage_integrations.utils.frames import records_from_frame
 
 
 class GoogleCloudStorage(Source):
@@ -132,7 +133,7 @@ class GoogleCloudStorage(Source):
             # load selected streams only
             if stream_id in self.selected_streams:
                 df = self.__build_df(blob.name)
-                yield df.to_dict('records')
+                yield records_from_frame(df)
 
     def test_connection(self) -> None:
         client = self.build_client()

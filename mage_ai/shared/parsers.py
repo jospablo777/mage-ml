@@ -16,6 +16,7 @@ import scipy
 from mage_ai.data_preparation.models.variables.constants import VariableType
 from mage_ai.orchestration.db.models.base import BaseModel
 from mage_ai.shared.complex import is_model_sklearn, is_model_xgboost
+from mage_ai.shared.pandas_utils import missing_as_none
 
 
 def is_numpy_subdtype(dtype, numpy_type) -> bool:
@@ -88,7 +89,7 @@ def encode_complex(obj):
         # Convert pandas._libs.missing.NAType to None
         return None
     elif isinstance(obj, pd.DataFrame):
-        return obj.to_dict(orient='records')
+        return missing_as_none(obj).to_dict(orient='records')
     elif isinstance(obj, pl.DataFrame):
         return obj.to_dicts()
     elif isinstance(obj, (pd.Index, pd.Series, pl.Series)):

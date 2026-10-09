@@ -1,22 +1,24 @@
+import argparse
+import os
+import sys
+import traceback
 from datetime import datetime
+from typing import Dict, Generator, List
+
+import pandas as pd
+import singer
+
 from mage_integrations.destinations.base import Destination
 from mage_integrations.destinations.constants import KEY_VALUE
-from mage_integrations.sources.constants import BATCH_FETCH_LIMIT
 from mage_integrations.sources.base import Source
+from mage_integrations.sources.constants import BATCH_FETCH_LIMIT
 from mage_integrations.transformers.utils import (
     convert_data_type,
     infer_dtypes,
     write_parquet_file,
 )
+from mage_integrations.utils.frames import records_from_frame
 from mage_integrations.utils.logger import Logger
-from typing import Dict, Generator, List
-
-import argparse
-import os
-import pandas as pd
-import singer
-import sys
-import traceback
 
 LOGGER = singer.get_logger()
 
@@ -147,7 +149,7 @@ class Transformer(Source, Destination):
         start_date: datetime = None,
         **kwargs,
     ) -> Generator[List[Dict], None, None]:
-        records = self.df.to_dict('records')
+        records = records_from_frame(self.df)
         current = 0
         while current < len(records):
             yield records[current : current + BATCH_FETCH_LIMIT]

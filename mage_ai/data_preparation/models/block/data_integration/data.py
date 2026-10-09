@@ -11,6 +11,7 @@ from mage_ai.data_preparation.models.block.data_integration.constants import (
     OUTPUT_TYPE_RECORD,
 )
 from mage_ai.data_preparation.models.pipelines.utils import number_string
+from mage_ai.shared.pandas_utils import missing_as_none
 from mage_ai.shared.parsers import encode_complex
 
 CHUNK_SIZE_BUFFER_PERCENTAGE = 0.1
@@ -25,7 +26,7 @@ def convert_dataframe_to_output(
     log_message: Callable = None,
     schema: Dict = None,
 ) -> List[str]:
-    records = df.to_dict('records')
+    records = missing_as_none(df).to_dict('records')
 
     def _output(record, stream=stream):
         text = simplejson.dumps(

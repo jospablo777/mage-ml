@@ -21,15 +21,22 @@ from mage_integrations.sources.constants import (
 from mage_integrations.sources.utils import get_standard_metadata
 from mage_integrations.transformers.utils import convert_data_type, infer_dtypes
 from mage_integrations.utils.dictionary import dig
+from mage_integrations.utils.frames import records_from_frame
 
 
 def read_csv_to_pandas(source, separator: str, has_header: bool) -> pd.DataFrame:
-    df = polars.read_csv(source, separator=separator, has_header=has_header)
+    # Polars infers column types from the first 100 rows by default, so a text value
+    # further down failed the read.
+    df = polars.read_csv(
+        source, separator=separator, has_header=has_header, infer_schema_length=None,
+    )
     if not has_header:
         # Polars 2 names headerless columns from column_0. Streams keep the column_1
         # numbering so existing catalogs and destination tables match.
         df.columns = [f'column_{i}' for i in range(1, df.width + 1)]
-    return df.to_pandas()
+    # Arrow-backed columns keep integers with missing values exact. A NumPy integer
+    # column with a missing value becomes float, which rounds ids above 2**53.
+    return df.to_pandas(use_pyarrow_extension_array=True)
 
 
 class Api(Source):
@@ -195,15 +202,15 @@ class Api(Source):
 
         if checked_type == 'text/plain' or checked_type == 'text/csv':
             df = read_csv_to_pandas(StringIO(response.content.decode()), separator, header)
-            yield df.to_dict(orient='records')
+            yield records_from_frame(df)
 
         elif checked_type == 'google_sheets':
             df = self._deal_with_google_sheets(response, separator, header)
-            yield df.to_dict(orient='records')
+            yield records_from_frame(df)
 
         elif checked_type == 'application/gzip':
             df = read_csv_to_pandas(BytesIO(response.content), separator, header)
-            yield df.to_dict(orient='records')
+            yield records_from_frame(df)
 
         elif checked_type == 'application/json':
             result = response.json()
@@ -258,7 +265,7 @@ class Api(Source):
         else:
             try:
                 df = pd.read_excel(BytesIO(response.content), header=0 if header else None)
-                yield df.to_dict(orient='records')
+                yield records_from_frame(df)
             except Exception:
                 raise Exception(f'Problems reading file {checked_type}. Check if extension is XLSX')
 

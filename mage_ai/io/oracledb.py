@@ -11,6 +11,7 @@ from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import PandasTypes
 from mage_ai.io.sql import BaseSQL
 from mage_ai.server.logger import Logger
+from mage_ai.shared.pandas_utils import missing_as_none
 from mage_ai.shared.parsers import encode_complex
 
 logger = Logger().new_server_logger(__name__)
@@ -240,8 +241,9 @@ FETCH FIRST {limit} ROWS ONLY
             # Remove extraneous surrounding double quotes
             # that get added while performing conversion to string.
             df_[col] = df_[col].apply(lambda x: x.strip('"') if x and isinstance(x, str) else x)
-        df_.fillna('', inplace=True)
-        values = list(df_.itertuples(index=False, name=None))
+        # Missing values bind as NULL. fillna('') raised in float and Int64 columns under
+        # pandas 3.
+        values = list(missing_as_none(df_).itertuples(index=False, name=None))
 
         # Create values placeholder
         colmn_names = df.columns.tolist()

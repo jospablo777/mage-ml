@@ -12,6 +12,7 @@ from mage_ai.shared.pandas_utils import (
     get_setting_with_copy_warning,
     ignore_setting_with_copy_warning,
     integer_bit_width,
+    missing_as_none,
     timedelta_to_nanoseconds,
 )
 from mage_ai.tests.base_test import TestCase
@@ -185,3 +186,30 @@ class IntegerBitWidthTests(TestCase):
         for low, high in ((None, None), (np.nan, np.nan), ('a', 'b')):
             with self.subTest(bounds=(low, high)):
                 self.assertEqual(integer_bit_width(low, high), 64)
+
+
+class MissingAsNoneTest(TestCase):
+    def test_every_missing_marker_becomes_none(self):
+        frame = pd.DataFrame({
+            'text': pd.Series(['a', None], dtype='str'),
+            'number': [1.5, np.nan],
+            'count': pd.array([1, None], dtype='Int64'),
+            'when': pd.to_datetime(['2024-01-01', None]),
+            'items': pd.Series([[1], None], dtype=object),
+            'id': [1, 2],
+        })
+
+        records = missing_as_none(frame).to_dict('records')
+
+        self.assertEqual(records[1], dict(
+            text=None, number=None, count=None, when=None, items=None, id=2,
+        ))
+        self.assertEqual(records[0]['count'], 1)
+        self.assertIs(type(records[0]['id']), int)
+
+    def test_frame_is_not_modified(self):
+        frame = pd.DataFrame({'number': [1.5, np.nan]})
+
+        missing_as_none(frame)
+
+        self.assertEqual(frame['number'].dtype, np.float64)
