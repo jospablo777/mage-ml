@@ -4492,6 +4492,9 @@ streaming = [
     { name = "requests-aws4auth" },
     { name = "stomp-py" },
 ]
+trino = [
+    { name = "trino" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -4602,6 +4605,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["snowflake"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["spark"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["streaming"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["trino"], marker = "extra == 'all'" },
     { name = "memory-profiler" },
     { name = "mlflow-skinny", marker = "extra == 'mlflow'", specifier = ">=3.17,<4" },
     { name = "mysql-connector-python", marker = "extra == 'mysql'", specifier = ">=9.1,<10" },
@@ -4666,13 +4670,14 @@ requires-dist = [
     { name = "tornado", specifier = ">=6.5.8" },
     { name = "transformers", marker = "extra == 'qdrant'", specifier = ">=5.10,<6" },
     { name = "trino", marker = "extra == 'dbt'", specifier = "~=0.326" },
+    { name = "trino", marker = "extra == 'trino'", specifier = "~=0.326" },
     { name = "typer", specifier = ">=0.18" },
     { name = "typing-extensions", specifier = ">=4.13.2" },
     { name = "urllib3", specifier = ">=2.7,<3" },
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "integrations", "all"]
+provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "trino", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [

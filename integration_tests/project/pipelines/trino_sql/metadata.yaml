@@ -1,0 +1,37 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - trino_sql_transform
+  language: python
+  name: trino_sql_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: trino_sql_load
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: trino
+    data_provider_profile: trino
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - trino_sql_check
+  language: sql
+  name: trino_sql_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - trino_sql_load
+  uuid: trino_sql_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: trino_sql_check
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - trino_sql_transform
+  uuid: trino_sql_check
+name: trino_sql
+type: python
+uuid: trino_sql

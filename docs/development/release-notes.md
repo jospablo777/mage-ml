@@ -121,6 +121,36 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The source commits offsets in single-message mode.** It never did, so a consumer
   group that restarted skipped or read again what came while it was down.
 
+#### Trino
+
+- **Exports keep their values.** Columns were BIGINT, DOUBLE, BOOLEAN, TIMESTAMP or
+  VARCHAR. TIMESTAMP is `timestamp(3)` in Trino, so timestamps lost their microseconds;
+  uint64 values failed, and dates, decimals, UUIDs and bytes failed, since their columns
+  were VARCHAR. Columns get their integer width, DECIMAL(20, 0) for uint64,
+  DECIMAL(P, S), DATE, TIMESTAMP(6), with time zone for zoned columns, TIME(6), UUID
+  and VARBINARY. Durations are stored in microseconds, and lists and dicts as JSON
+  text. In Delta Lake, which has no UUID or TIME type, these are text, and zoned
+  timestamps keep milliseconds. `data_type_properties.timestamp_precision` still sets
+  the precision.
+- **Rows go in batched INSERT statements.** Each row was its own query, and in Iceberg
+  its own commit; 20,000 rows exhausted a 1 GB Trino heap.
+- **Appends match columns by name** and write values as the table's column types. Rows
+  were inserted by position.
+- **Replace works in the memory connector**, which cannot DELETE, by truncating the
+  table. A replace from a query into a kept table ran CREATE TABLE AS and failed.
+- **Failed queries raise.** `load` and `execute_queries` printed the error, ran the query
+  twice more and returned None or an empty list.
+- **Loads keep the query's order.** They ran `SELECT * FROM (query) LIMIT n`, and Trino
+  drops an ORDER BY in a subquery, so rows came in any order.
+- `table_exists` matches exact names; `SHOW TABLES LIKE` read `_` as any character.
+- `load(exact_types=True)`, `load(polars=True)` and `load(nullable_integers=True)`, as for
+  MySQL. Trino SQL blocks keep integer columns with NULLs as integers.
+- **The Trino destination of mage_integrations keeps text.** Apostrophes were replaced
+  with double quotes, so `it's` was stored as `it""s`; text was cut at 255 characters
+  without an error; empty arrays became NULL. In the memory connector, objects were
+  stored as JSON strings, arrays failed, and an apostrophe in an array failed the sync.
+  Date-times stay text. Tables created before keep their column types.
+
 #### PostgreSQL and MySQL sources and destinations of mage_integrations
 
 - **The PostgreSQL source syncs bytea, timetz, interval and array columns.** It failed on
@@ -235,10 +265,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   keys.
 - The S3 client and the Delta Lake S3 destination take an endpoint, for S3-compatible
   storage such as MinIO.
-- Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
+- Extras: `mlflow` (mlflow-skinny 3.17 and skops), `duckdb` and `trino`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, Redis, a REST API service, Feast, MLflow,
-  DuckDB, S3 (MinIO), and R blocks with R 4.6 and rv.
+  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, Trino (memory, Iceberg and Delta Lake),
+  Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), and R blocks with R 4.6
+  and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
 

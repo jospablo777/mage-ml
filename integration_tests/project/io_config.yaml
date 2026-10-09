@@ -51,3 +51,12 @@ clickhouse:
   CLICKHOUSE_PASSWORD: "{{ env_var('MAGE_TEST_CLICKHOUSE_PASSWORD') }}"
   CLICKHOUSE_PORT: "{{ env_var('MAGE_TEST_CLICKHOUSE_PORT') }}"
   CLICKHOUSE_USERNAME: "{{ env_var('MAGE_TEST_CLICKHOUSE_USER') }}"
+# The Trino catalog and schema of one test, from MAGE_TEST_TRINO_CATALOG and
+# MAGE_TEST_TRINO_SCHEMA.
+trino:
+  TRINO_CATALOG: "{{ env_var('MAGE_TEST_TRINO_CATALOG') }}"
+  TRINO_HOST: "{{ env_var('MAGE_TEST_TRINO_HOST') }}"
+  TRINO_PASSWORD: ""
+  TRINO_PORT: "{{ env_var('MAGE_TEST_TRINO_PORT') }}"
+  TRINO_SCHEMA: "{{ env_var('MAGE_TEST_TRINO_SCHEMA') }}"
+  TRINO_USER: mage

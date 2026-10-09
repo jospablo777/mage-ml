@@ -14,8 +14,8 @@ from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
 )
 from mage_integrations.destinations.trino.utils import (
+    convert_column_to_type,
     convert_column_type,
-    convert_json_or_string,
 )
 from mage_integrations.utils.dictionary import merge_dict
 
@@ -133,7 +133,11 @@ DESCRIBE {schema_name}.{table_name}
             columns=columns,
             records=records,
             convert_array_func=self.convert_array,
-            string_parse_func=self.string_parse_func,
+            convert_column_to_type_func=convert_column_to_type,
+            # Every value of an object column is written as JSON, with its apostrophes
+            # escaped. Apostrophes were replaced with double quotes, so it's became it""s.
+            json_object_values=True,
+            escape_json=True,
         )
         insert_columns = ', '.join(insert_columns)
 
@@ -207,14 +211,13 @@ DESCRIBE {schema_name}.{table_name}
         )
 
     def convert_array(self, value: str, column_type_dict: Dict) -> str:
-        if len(value) == 0:
-            return 'NULL'
-        item_type_converted = column_type_dict['item_type_converted']
-
-        if 'JSON' == item_type_converted.upper():
-            return f"JSON '{json.dumps(value)}'"
-        else:
-            return f"CAST('{json.dumps(value)}' AS {item_type_converted})"
+        """
+        Arrays are JSON columns. Values were cast to the item type, which the column
+        rejected; an apostrophe in an item ended the SQL string, and an empty array was
+        written as NULL.
+        """
+        value_serialized = json.dumps(value).replace("'", "''")
+        return f"JSON '{value_serialized}'"
 
     def calculate_records_inserted_and_updated(
         self,
@@ -292,9 +295,6 @@ DESCRIBE {schema_name}.{table_name}
             idx += 1
 
         return results
-
-    def string_parse_func(self, value: str, column_type_dict: Dict) -> str:
-        return convert_json_or_string(value, column_type_dict)
 
     def table_location(self, table_name):
         if not self.config.get('location'):

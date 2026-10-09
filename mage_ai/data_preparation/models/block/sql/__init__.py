@@ -651,10 +651,12 @@ def execute_sql_code(
                     full_table_name = '.'.join([f'"{n}"' for n in names])
 
                     return [
+                        # read_sql turned integer columns with NULLs into float64.
                         loader.load(
                             f'SELECT * FROM {full_table_name}',
                             limit=limit,
                             verbose=False,
+                            nullable_integers=True,
                         ),
                     ]
 

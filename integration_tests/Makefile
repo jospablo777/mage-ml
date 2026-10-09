@@ -42,6 +42,8 @@ export MAGE_TEST_KAFKA_PORT ?= 19092
 export MAGE_TEST_KAFKA_BOOTSTRAP ?= 127.0.0.1:$(MAGE_TEST_KAFKA_PORT)
 export MAGE_TEST_MONGODB_PORT ?= 17017
 export MAGE_TEST_MONGODB_URL ?= mongodb://127.0.0.1:$(MAGE_TEST_MONGODB_PORT)/?directConnection=true
+export MAGE_TEST_TRINO_HOST ?= 127.0.0.1
+export MAGE_TEST_TRINO_PORT ?= 18080
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 # The rv environment of the R tests: R 4.6 with the tidyverse, mageml's
@@ -49,7 +51,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-r test-soak ci r-env
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-r test-soak ci r-env
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -93,6 +95,9 @@ test-clickhouse: up
 
 test-kafka: up
 	cd .. && $(PYTHON) -m pytest integration_tests/kafka $(PYTEST_ARGS)
+
+test-trino: up
+	cd .. && $(PYTHON) -m pytest integration_tests/trino $(PYTEST_ARGS)
 
 test-r: up r-env
 	cd .. && $(PYTHON) -m pytest integration_tests/r $(PYTEST_ARGS)

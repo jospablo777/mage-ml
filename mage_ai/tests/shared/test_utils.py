@@ -36,11 +36,13 @@ class UtilsTests(TestCase):
         self.dtypes_trino = infer_dtypes(self.data_trino)
         return super().setUp()
 
-    def test_convert_python_type_to_trino_type(self):
+    def test_trino_column_types(self):
+        # TIMESTAMP without a precision is timestamp(3) in Trino, which dropped
+        # microseconds; the default is 6.
         expected_dtypes = [
             'VARCHAR',
             'BIGINT',
-            'TIMESTAMP',
+            'TIMESTAMP(6)',
             'TIMESTAMP(6)',
             'TIMESTAMP(12)'
         ]

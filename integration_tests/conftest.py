@@ -423,3 +423,69 @@ def kafka_topic(kafka_bootstrap):
     yield name
     admin.delete_topics([name])
     admin.close()
+
+
+TRINO_CATALOGS = ['memory', 'iceberg', 'delta']
+
+
+@pytest.fixture(scope='session')
+def trino_settings():
+    host, port = os.getenv('MAGE_TEST_TRINO_HOST'), os.getenv('MAGE_TEST_TRINO_PORT')
+    if not (host and port):
+        pytest.skip('Trino is not configured: MAGE_TEST_TRINO_HOST or MAGE_TEST_TRINO_PORT unset')
+    return dict(host=host, port=int(port), user='mage')
+
+
+@pytest.fixture(params=TRINO_CATALOGS)
+def trino_catalog(request):
+    """Each Trino catalog: memory, iceberg (Iceberg in MinIO) and delta (Delta Lake)."""
+    return request.param
+
+
+@pytest.fixture
+def trino_schema(trino_settings, trino_catalog, monkeypatch):
+    """A schema of trino_catalog used by one test, dropped with its tables after it."""
+    import trino
+
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    connection = trino.dbapi.connect(**trino_settings)
+    cursor = connection.cursor()
+    cursor.execute(f'CREATE SCHEMA {trino_catalog}.{name}')
+    cursor.fetchall()
+    # The trino profile of the project's io_config.yaml uses this catalog and schema.
+    monkeypatch.setenv('MAGE_TEST_TRINO_CATALOG', trino_catalog)
+    monkeypatch.setenv('MAGE_TEST_TRINO_SCHEMA', name)
+    yield name
+    cursor.execute(f'DROP SCHEMA IF EXISTS {trino_catalog}.{name} CASCADE')
+    cursor.fetchall()
+    connection.close()
+
+
+@pytest.fixture
+def tr(trino_settings, trino_catalog, trino_schema):
+    """A function that runs a statement with the trino client, bypassing Mage."""
+    import trino
+
+    connection = trino.dbapi.connect(
+        catalog=trino_catalog, schema=trino_schema, **trino_settings,
+    )
+
+    def run(statement):
+        cursor = connection.cursor()
+        cursor.execute(statement)
+        return cursor.fetchall()
+
+    yield run
+    connection.close()
+
+
+@pytest.fixture
+def mage_trino(trino_settings, trino_catalog, trino_schema):
+    from mage_ai.io.trino import Trino
+
+    client = Trino(
+        catalog=trino_catalog, schema=trino_schema, verbose=False, **trino_settings,
+    )
+    client.open()
+    yield client
+    client.close()

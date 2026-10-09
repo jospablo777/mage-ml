@@ -10,8 +10,9 @@ services:
       POSTGRES_PASSWORD: test
       POSTGRES_USER: postgres
     # Test data does not need to survive a crash, so the server skips fsync and keeps
-    # its data in memory.
-    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    # its data in memory. A smaller WAL keeps that memory down: the default let it grow
+    # to 1 GB.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_wal_size=128MB", "-c", "min_wal_size=32MB"]
     tmpfs:
       - /var/lib/postgresql/data
     ports:
@@ -65,6 +66,9 @@ services:
       MLFLOW_PG_DB: mlflow
       MLFLOW_PG_USER: postgres
       MLFLOW_PG_PASSWORD: test
+      # The job runner and its huey consumers, six processes of about 230 MB, run GenAI
+      # jobs, which the tests do not use.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     ports:
       - "${MAGE_TEST_MLFLOW_PORT:-15000}:5000"
 
@@ -80,10 +84,11 @@ services:
       - "${MAGE_TEST_S3_PORT:-19000}:9000"
 
   # MySQL 8.4 LTS. Data lives in memory. The server's time zone is not UTC, so values
-  # that go through the session time zone show it.
+  # that go through the session time zone show it. The performance schema is off, which
+  # saves memory.
   mysql:
     image: mysql:8.4
-    command: ["mysqld", "--default-time-zone=-06:00", "--innodb-flush-log-at-trx-commit=0"]
+    command: ["mysqld", "--default-time-zone=-06:00", "--innodb-flush-log-at-trx-commit=0", "--performance-schema=OFF"]
     environment:
       MYSQL_ROOT_PASSWORD: test
       MYSQL_DATABASE: test
@@ -146,6 +151,30 @@ services:
       interval: 3s
       timeout: 10s
       retries: 60
+
+  # Trino 483, one node with a heap of 768 MB. Catalogs: memory; iceberg, with tables in
+  # MinIO and the catalog in PostgreSQL; delta, with tables and a file metastore in MinIO.
+  # The memory limit keeps the JVM from taking memory from the other services. glibc
+  # gave each of its threads a malloc arena, which held about 700 MB outside the heap.
+  trino:
+    build: services/trino
+    mem_limit: 2g
+    environment:
+      MALLOC_ARENA_MAX: "2"
+    depends_on:
+      trino-setup:
+        condition: service_completed_successfully
+    ports:
+      - "${MAGE_TEST_TRINO_PORT:-18080}:8080"
+
+  # Creates the PostgreSQL database and the MinIO bucket of Trino's catalogs.
+  trino-setup:
+    build: services/trino/setup
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   # MongoDB 8 as a single-node replica set, which transactions require. Data lives in
   # memory. Clients connect with directConnection=true, since the member's address is

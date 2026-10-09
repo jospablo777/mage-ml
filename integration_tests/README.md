@@ -7,9 +7,9 @@ drivers; these tests check what reaches the database and what comes back.
 
 Requirements: Docker with Compose v2, R 4.6 and rv 0.20 on `PATH`, and the project
 environment with the `postgres`, `mlflow`, `duckdb`, `s3`, `mysql`, `mongodb`, `clickhouse`,
-`pointblank` and `integrations` extras (`uv sync --group dev --extra postgres --extra
-mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra
-pointblank --extra integrations`).
+`trino`, `pointblank` and `integrations` extras (`uv sync --group dev --extra postgres
+--extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse
+--extra trino --extra pointblank --extra integrations`).
 `make` installs the R packages of `r_env/` with `rv sync`.
 
 ```bash
@@ -25,6 +25,7 @@ make -C integration_tests test-mysql       # MySQL only
 make -C integration_tests test-mongodb     # MongoDB only
 make -C integration_tests test-clickhouse  # ClickHouse only
 make -C integration_tests test-kafka       # Kafka only
+make -C integration_tests test-trino       # Trino only
 make -C integration_tests test-r           # R blocks, with R 4.6, rv and PostgreSQL
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
@@ -33,13 +34,16 @@ make -C integration_tests down             # stop the services and drop their da
 ```
 
 The services stay up between runs. PostgreSQL, MySQL, MongoDB, ClickHouse and MinIO keep their data in memory, so `down`
-leaves nothing behind. Kafka's heap is 512 MB and ClickHouse uses at most 1 GB, so the
-suite runs in a Docker VM with 12 GB of memory. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123 and 19092;
+leaves nothing behind. Kafka's heap is 512 MB, Trino's 768 MB within a 2 GB limit,
+ClickHouse uses at most 1 GB, PostgreSQL's WAL at most 128 MB, MLflow runs without its
+job runner and MySQL without its performance schema, so the suite runs in a Docker VM
+with 12 GB of memory. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123,
+19092 and 18080;
 set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
 `MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
-`MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT`, `MAGE_TEST_CLICKHOUSE_PORT` or
-`MAGE_TEST_KAFKA_PORT` to change them. `make up` rebuilds the
+`MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT`, `MAGE_TEST_CLICKHOUSE_PORT`,
+`MAGE_TEST_KAFKA_PORT` or `MAGE_TEST_TRINO_PORT` to change them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -51,7 +55,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, Trino 483, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines; and the PostgreSQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs and upserts |
@@ -71,6 +75,8 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars; and the MySQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs and upserts |
 | `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads; a ClickHouse SQL block between Python blocks; and the ClickHouse destination of `mage_integrations` |
+| `services/trino/` | Trino 483, with a heap of 768 MB, and three catalogs: memory; iceberg, with tables in MinIO and a JDBC catalog in PostgreSQL; delta, with Delta Lake tables and a file metastore in MinIO. `setup/` creates the catalog's database and tables and the bucket before Trino starts |
+| `trino/` | Mage's Trino client in each catalog: column types for every value, special values, write policies, appends by name, batched inserts, loads in each mode and errors; a Trino SQL block between Python blocks; and the Trino destination of `mage_integrations` |
 | `kafka/` | Mage's Kafka sink and source with the default settings, batches with every value type, acknowledged and failed sends, committed offsets in single-message mode, and metadata; and the Kafka destination of `mage_integrations` |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
@@ -78,7 +84,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `data/r_dataset.py` | pandas frame with every type that crosses between Python and R, edge rows and seeded rows, and the comparisons of what comes back |
 | `r/` | R blocks: every type round trip, tidyverse transformations, errors, tests, timeouts, the checks of the environment, `mage r` commands, the mageml package's testthat tests, lintr, `R CMD check` and generated docs, and pipelines that chain Python, R, Polars and SQL blocks and write to PostgreSQL with SQL exporters and with DBI |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
-| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/`, `mysql/` and `r/` tests run |
+| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/`, `mysql/`, `clickhouse/`, `trino/` and `r/` tests run |
 
 ## How tables are compared
 

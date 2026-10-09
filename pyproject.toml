@@ -200,6 +200,10 @@ streaming = [
   "requests_aws4auth>=1.3",
   "stomp.py>=8.1,<9",
 ]
+# The client of mage_ai.io.trino and Trino SQL blocks.
+trino = [
+  "trino~=0.326",
+]
 integrations = ["mage-integrations"]
 # Dependency profile used by the container image.
 all = [
@@ -221,6 +225,7 @@ all = [
   "mage-ml[snowflake]",
   "mage-ml[spark]",
   "mage-ml[streaming]",
+  "mage-ml[trino]",
   "aws-secretsmanager-caching>=1.2",
   "faster-fifo>=1.5.2,<2; sys_platform != 'win32'",
   "google-api-core>=2.30.0",

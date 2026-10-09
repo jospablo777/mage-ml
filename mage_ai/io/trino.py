@@ -1,32 +1,21 @@
-from io import StringIO
-from time import sleep
-from typing import IO, Dict, List, Mapping, Union
+from typing import Dict, List, Mapping, Union
 
-import numpy as np
-import simplejson
+import pandas as pd
+import polars as pl
 import urllib3
-from pandas import DataFrame, Series
+from pandas import DataFrame, Series, read_sql
 from trino.auth import BasicAuthentication
 from trino.dbapi import Connection
 from trino.dbapi import Cursor as CursorParent
 from trino.exceptions import TrinoUserError
 from trino.transaction import IsolationLevel
 
+from mage_ai.io import trino_types
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
-from mage_ai.io.export_utils import (
-    clean_df_for_export,
-    infer_dtypes,
-    insert_rows,
-    to_pandas_frame,
-)
-from mage_ai.io.sql import BaseSQL
-from mage_ai.shared.parsers import encode_complex
-from mage_ai.shared.utils import (
-    clean_name,
-    convert_pandas_dtype_to_python_type,
-    convert_python_type_to_trino_type,
-)
+from mage_ai.io.export_utils import to_pandas_frame
+from mage_ai.io.sql import BaseSQL, ignore_dbapi_connection_warning
+from mage_ai.shared.utils import clean_name
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -58,8 +47,12 @@ class ConnectionWrapper(Connection):
         )
 
 
+
+
 class Trino(BaseSQL):
-    QUERY_MAX_LENGTH = 100_000
+    # Rows are inserted in statements of at most this many characters. Trino rejects
+    # statements longer than its query.max-length, 1,000,000 by default.
+    QUERY_MAX_LENGTH = 500_000
 
     def __init__(
         self,
@@ -149,47 +142,67 @@ class Trino(BaseSQL):
 
         return f'CREATE TABLE {full_table_name} (' + ','.join(query) + ')'
 
-    def execute_queries(
-        self,
-        queries: List[str],
-        **kwargs
-    ) -> List:
-        data = None
-        tries = 0
-
-        while data is None and tries < 3:
-            if tries >= 1:
-                sleep(1)
-
-            try:
-                data = super().execute_queries(queries, **kwargs)
-            except TrinoUserError as err:
-                print(err)
-
-            tries += 1
-
-        return data or []
-
     def load(
         self,
         query_string: str,
+        limit: int = QUERY_ROW_LIMIT,
+        display_query: Union[str, None] = None,
+        verbose: bool = True,
+        exact_types: bool = False,
+        polars: bool = False,
+        nullable_integers: bool = False,
         **kwargs,
-    ) -> DataFrame:
-        data = None
-        tries = 0
+    ) -> Union[DataFrame, pl.DataFrame]:
+        """
+        Load the result of a query, at most limit rows. A failed query raises; it was
+        printed, run twice more, and load returned None.
 
-        while data is None and tries < 3:
-            if tries >= 1:
-                sleep(1)
+        The query runs as written and the rows after limit are not fetched. It was run as
+        SELECT * FROM (query) LIMIT n, and Trino drops an ORDER BY in a subquery, so the
+        rows came in any order.
 
+        Args:
+            exact_types (bool): Return pyarrow-backed columns built from the Trino column
+                types: integers with NULLs stay integers, DECIMAL stays decimal, timestamps
+                keep microseconds, and zoned timestamps are in UTC. Defaults to False,
+                which uses pandas read_sql: integer columns with NULLs become float64.
+            polars (bool): Return a Polars DataFrame with the same types.
+            nullable_integers (bool): read_sql's types, except that integer columns stay
+                integers, as nullable Int64. SQL blocks load with it.
+            **kwargs: Passed to pandas read_sql, without exact_types, polars or
+                nullable_integers.
+        """
+        query = self._clean_query(query_string).rstrip(';')
+
+        def __load():
+            if not (exact_types or polars or nullable_integers):
+                with ignore_dbapi_connection_warning():
+                    chunks = read_sql(query, self.conn, chunksize=limit, **kwargs)
+                    try:
+                        return next(chunks)
+                    finally:
+                        # Closes the cursor, which cancels the rest of the query.
+                        chunks.close()
+
+            cursor = self.conn.cursor()
             try:
-                data = super().load(query_string, **kwargs)
-            except TrinoUserError as err:
-                print(err)
+                cursor.execute(query)
+                rows = cursor.fetchmany(limit)
+                description = cursor.description or []
+            finally:
+                cursor.close()
+            if not (exact_types or polars):
+                return trino_types.frame_with_nullable_integers(description, rows)
+            table = trino_types.arrow_table(description, rows)
+            if polars:
+                return pl.from_arrow(table)
+            return table.to_pandas(types_mapper=pd.ArrowDtype)
 
-            tries += 1
-
-        return data
+        if verbose:
+            message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+            with self.printer.print_msg(message):
+                return __load()
+        return __load()
 
     def open(self) -> None:
         with self.printer.print_msg('Opening connection to Trino database'):
@@ -214,50 +227,49 @@ class Trino(BaseSQL):
                     connect_kwargs['http_scheme'] = 'https'
             self._ctx = ConnectionWrapper(**connect_kwargs)
 
+    def _table_types(self, cursor: Cursor, catalog: str, schema_name: str, table_name: str):
+        """
+        The names and types of a table's columns, empty when it does not exist. SHOW
+        SCHEMAS and SHOW TABLES with LIKE read _ as any character, so another table could
+        match. Trino stores names in lower case.
+        """
+        cursor.execute(
+            'SELECT column_name, data_type FROM '
+            f'{trino_types.quote(catalog)}.information_schema.columns '
+            f'WHERE table_schema = {trino_types.string_literal(str(schema_name).lower())} '
+            f'AND table_name = {trino_types.string_literal(str(table_name).lower())} '
+            'ORDER BY ordinal_position'
+        )
+        return trino_types.table_types(cursor.fetchall())
+
     def table_exists(self, schema_name: str, table_name: str) -> bool:
-        with self.conn.cursor() as cur:
-            catalog = self.default_database()
+        with self.conn.cursor() as cursor:
+            return bool(self._table_types(
+                cursor,
+                self.default_database(),
+                schema_name or self.default_schema(),
+                table_name,
+            ))
 
-            cur.execute(f'SHOW SCHEMAS FROM {catalog} LIKE \'{schema_name}\'')
-            if len(cur.fetchall()) == 0:
-                return False
+    def _connector(self, cursor: Cursor, catalog: str) -> Union[str, None]:
+        """The connector of a catalog, such as iceberg or delta_lake."""
+        try:
+            cursor.execute(
+                'SELECT connector_name FROM system.metadata.catalogs '
+                f'WHERE catalog_name = {trino_types.string_literal(catalog)}'
+            )
+            rows = cursor.fetchall()
+        except TrinoUserError:
+            # Trino versions before 400 have no connector_name.
+            return None
+        return rows[0][0] if rows else None
 
-            cur.execute('\n'.join([
-                f'SHOW TABLES FROM {catalog}.{schema_name} LIKE \'{table_name}\''
-            ]))
-            return len(cur.fetchall()) >= 1
-
-    def upload_dataframe(
-        self,
-        cursor: Cursor,
-        df: DataFrame,
-        dtypes: List[str],
-        full_table_name: str,
-        buffer: Union[IO, None] = None,
-        **kwargs,
-    ) -> None:
-        columns = df.columns
-        values_placeholder = ', '.join(['?' for i in range(len(columns))])
-        sql = f'INSERT INTO {full_table_name} VALUES ({values_placeholder})'
-
-        def serialize_obj(val):
-            if type(val) is dict or type(val) is list or type(val) is np.ndarray:
-                return simplejson.dumps(
-                    val,
-                    default=encode_complex,
-                    ignore_nan=True,
-                )
-            return val
-
-        # serialize_obj leaves text unchanged, so it applies to every object column.
-        values = insert_rows(df, serialize=serialize_obj)
-
-        cursor.executemany(sql, values)
-
-    def get_type(self, column: Series, dtype: str, settings) -> str:
-        return convert_python_type_to_trino_type(
-            convert_pandas_dtype_to_python_type(dtype),
-            settings.get('data_type_properties')
+    def get_type(self, column: Series, dtype: str, settings, connector: str = None) -> str:
+        precision = (settings.get('data_type_properties') or {}).get('timestamp_precision')
+        return trino_types.column_type(
+            column,
+            connector=connector,
+            timestamp_precision=precision,
         )
 
     def export(
@@ -277,18 +289,24 @@ class Trino(BaseSQL):
         exist, the table is automatically created. If the schema doesn't exist, the schema is
         also created.
 
+        New tables get column types that hold the values: integers of their width, uint64
+        as DECIMAL(20, 0), DECIMAL(P, S), DATE, TIMESTAMP(6), with time zone for zoned
+        columns, UUID and VARBINARY. Durations are stored in microseconds, and lists and
+        dicts as JSON text. The Delta Lake connector has no UUID or TIME type, so these
+        are text, and stores zoned timestamps in milliseconds. Values are written as the
+        types of an existing table's columns, which are matched by name.
+
         Args:
             schema_name (str): Name of the schema of the table to export data to.
             table_name (str): Name of the table to insert rows from this data frame into.
             if_exists (ExportWritePolicy): Specifies export policy if table exists. Either
                 - `'fail'`: throw an error.
-                - `'replace'`: drops existing table and creates new table of same name.
-                - `'append'`: appends data frame to existing table. In this case the schema must
-                                match the original table.
+                - `'replace'`: deletes the rows of the existing table, or drops it with
+                    drop_table_on_replace.
+                - `'append'`: appends data frame to existing table.
             Defaults to `'replace'`.
             index (bool): If true, the data frame index is also exported alongside the table.
                             Defaults to False.
-            **kwargs: Additional query parameters.
         """
         df = to_pandas_frame(df)
         if table_name is None:
@@ -302,26 +320,27 @@ class Trino(BaseSQL):
             df = DataFrame(df)
 
         catalog = self.default_database()
-        full_table_name = f'{catalog}.{schema_name}.{table_name}'
+        full_table_name = '.'.join(
+            trino_types.quote(name) for name in (catalog, schema_name, table_name)
+        )
 
-        if not query_string:
-            if index:
-                df = df.reset_index()
-
-            dtypes = infer_dtypes(df)
-            df = clean_df_for_export(df, self.clean, dtypes)
+        if not query_string and index:
+            df = df.reset_index()
 
         def __process():
-            buffer = StringIO()
-            table_exists = self.table_exists(schema_name, table_name)
+            with self.conn.cursor() as cursor:
+                def run(statement: str) -> List:
+                    cursor.execute(statement)
+                    return cursor.fetchall()
 
-            with self.conn.cursor() as cur:
                 if schema_name:
-                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {catalog}.{schema_name}')
+                    run(
+                        'CREATE SCHEMA IF NOT EXISTS '
+                        f'{trino_types.quote(catalog)}.{trino_types.quote(schema_name)}'
+                    )
 
-                should_create_table = not table_exists
-
-                if table_exists:
+                existing = self._table_types(cursor, catalog, schema_name, table_name)
+                if existing:
                     if ExportWritePolicy.FAIL == if_exists:
                         raise ValueError(
                             f'Table \'{full_table_name}\' already exists in database.'
@@ -331,44 +350,21 @@ class Trino(BaseSQL):
                             cmd = f'DROP TABLE {full_table_name}'
                             if cascade_on_drop:
                                 cmd = f'{cmd} CASCADE'
-                            cur.execute(cmd)
-                            should_create_table = True
+                            run(cmd)
+                            existing = {}
                         else:
-                            cur.execute(f'DELETE FROM {full_table_name}')
+                            self.__delete_rows(run, full_table_name)
 
                 if query_string:
-                    query = 'CREATE TABLE {} AS\n{}'.format(
-                        full_table_name,
-                        query_string,
-                    )
+                    # CREATE TABLE AS failed for a table kept by replace.
+                    if existing:
+                        run(f'INSERT INTO {full_table_name}\n{query_string}')
+                    else:
+                        run(f'CREATE TABLE {full_table_name} AS\n{query_string}')
+                    return
 
-                    if ExportWritePolicy.APPEND == if_exists and table_exists:
-                        query = 'INSERT INTO {}\n{}'.format(
-                            full_table_name,
-                            query_string,
-                        )
-                    cur.execute(query)
-                else:
-                    if should_create_table:
-                        db_dtypes = {
-                            col: self.get_type(df[col], dtypes[col], settings=self.settings)
-                            for col in dtypes
-                        }
-                        query = self.build_create_table_command(
-                            db_dtypes,
-                            schema_name,
-                            table_name,
-                            overwrite_types=self.settings.get('overwrite_types'),
-                        )
-                        cur.execute(query)
+                self.__insert_frame(run, cursor, df, catalog, full_table_name, existing)
 
-                    self.upload_dataframe(
-                        cur,
-                        df,
-                        dtypes,
-                        full_table_name,
-                        buffer,
-                    )
             self.conn.commit()
 
         if verbose:
@@ -379,5 +375,58 @@ class Trino(BaseSQL):
         else:
             __process()
 
-    def _enforce_limit(self, query: str, limit: int = QUERY_ROW_LIMIT) -> str:
-        return f'SELECT * FROM ({query.strip(";")}) AS subquery LIMIT {limit}'
+    def __delete_rows(self, run, full_table_name: str) -> None:
+        try:
+            run(f'DELETE FROM {full_table_name}')
+        except TrinoUserError as error:
+            # The memory connector, among others, cannot delete rows.
+            if error.error_name != 'NOT_SUPPORTED':
+                raise
+            run(f'TRUNCATE TABLE {full_table_name}')
+
+    def __insert_frame(
+        self,
+        run,
+        cursor: Cursor,
+        df: DataFrame,
+        catalog: str,
+        full_table_name: str,
+        existing: Dict[str, str],
+    ) -> None:
+        connector = self._connector(cursor, catalog)
+        overwrite_types = self.settings.get('overwrite_types') or {}
+        names = []
+        types = []
+        create_types = {}
+        for position, column in enumerate(df.columns):
+            name = clean_name(str(column), case_sensitive=False)
+            if existing and name not in existing and str(column).lower() in existing:
+                # A table created outside Mage, with a name clean_name changes.
+                name = str(column).lower()
+            column_type = overwrite_types.get(column) or self.get_type(
+                df.iloc[:, position],
+                None,
+                self.settings,
+                connector=connector,
+            )
+            names.append(name)
+            types.append(existing.get(name, column_type))
+            create_types[name] = column_type
+
+        if not existing:
+            run(self.build_create_table_command(
+                create_types,
+                None,
+                full_table_name,
+                auto_clean_name=False,
+            ))
+
+        rows = df.itertuples(index=False, name=None)
+        for statement in trino_types.insert_statements(
+            full_table_name,
+            names,
+            types,
+            rows,
+            self.QUERY_MAX_LENGTH,
+        ):
+            run(statement)

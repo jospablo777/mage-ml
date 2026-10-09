@@ -105,17 +105,6 @@ class SQLRowExportersTest(TestCase):
 
         self.assertEqual(rows, [(2**53 + 1, 1.5), (5, 2.5)])
 
-    def test_trino_with_an_all_null_object_column(self):
-        """The serialization check read the first value of an empty column."""
-        from mage_ai.io.trino import Trino
-
-        frame = NUMERIC.assign(note=pd.Series([None, None], dtype=object))
-
-        rows = self.rows_sent(Trino, frame, {'id': 'integer', 'score': 'floating',
-                                             'note': 'empty'}, 'db.table')
-
-        self.assertEqual(rows, [(2**53 + 1, 1.5, None), (5, 2.5, None)])
-
 
 class RedshiftExportTest(TestCase):
     def test_numeric_frames_are_written_as_numbers(self):

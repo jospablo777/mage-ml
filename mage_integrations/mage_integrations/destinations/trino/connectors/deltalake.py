@@ -8,10 +8,10 @@ from mage_integrations.destinations.constants import (
 from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
 )
-from mage_integrations.destinations.sql.utils import (
+from mage_integrations.destinations.trino.connectors.base import TrinoConnector
+from mage_integrations.destinations.trino.utils import (
     convert_column_type as convert_column_type_orig,
 )
-from mage_integrations.destinations.trino.connectors.base import TrinoConnector
 
 
 def convert_column_type(
@@ -19,6 +19,7 @@ def convert_column_type(
     column_settings: Dict,
     **kwargs,
 ) -> str:
+    # The Iceberg and Delta Lake connectors have no JSON type.
     if COLUMN_TYPE_OBJECT == column_type:
         return 'VARCHAR'
 
@@ -37,8 +38,7 @@ class TrinoDeltalake(TrinoConnector):
         )
 
     def convert_array(self, value: str, column_type_dict: Dict) -> str:
-        if len(value) == 0:
-            return 'NULL'
+        # An empty array was written as NULL.
         item_type_converted = column_type_dict['item_type_converted']
 
         if item_type_converted == 'VARCHAR':
