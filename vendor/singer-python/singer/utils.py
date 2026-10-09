@@ -17,7 +17,7 @@ DATETIME_FMT = "%04Y-%m-%dT%H:%M:%S.%fZ"
 DATETIME_FMT_SAFE = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 def now():
-    return datetime.datetime.utcnow().replace(tzinfo=pytz.UTC)
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=pytz.UTC)
 
 def strptime_with_tz(dtime):
     d_object = dateutil.parser.parse(dtime)

@@ -11,7 +11,7 @@ class TestFormat(unittest.TestCase):
                          "0090-01-01T00:00:00.000000Z")
 
     def test_round_trip(self):
-        now = dt.utcnow().replace(tzinfo=pytz.UTC)
+        now = dt.now(pytz.UTC)
         dtime = u.strftime(now)
         pdtime = u.strptime_to_utc(dtime)
         fdtime = u.strftime(pdtime)

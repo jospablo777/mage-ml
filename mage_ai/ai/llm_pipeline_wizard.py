@@ -4,7 +4,6 @@ import json
 import re
 from typing import Dict, List
 
-import astor
 from jinja2.exceptions import TemplateNotFound
 from langchain_classic.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
@@ -21,7 +20,7 @@ from mage_ai.data_preparation.models.constants import (
     PipelineType,
 )
 from mage_ai.data_preparation.models.pipeline import Pipeline
-from mage_ai.data_preparation.repo_manager import get_repo_config, get_repo_path
+from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.templates.template import (
     fetch_template_source,
     fetch_transformer_default_template,
@@ -31,6 +30,7 @@ from mage_ai.io.base import DataSource
 from mage_ai.orchestration.ai.config import AIConfig
 from mage_ai.server.logger import Logger
 from mage_ai.settings import ENABLE_HUGGING_FACE, ENABLE_OPEN_AI
+from mage_ai.settings.repo import get_repo_path
 
 logger = Logger().new_server_logger(__name__)
 
@@ -407,13 +407,13 @@ class LLMPipelineWizard:
                         existing_comment_node = node.body[0]
                         existing_comment_text = node.body[0].value.value
                         new_comment = ast.Expr(
-                            value=ast.Str(s=f"{comment_text}\n{existing_comment_text}"))
+                            value=ast.Constant(value=f"{comment_text}\n{existing_comment_text}"))
                         node.body.remove(existing_comment_node)
                     else:
                         # Add newly generated doc string.
-                        new_comment = ast.Expr(value=ast.Str(s=comment_text))
+                        new_comment = ast.Expr(value=ast.Constant(value=comment_text))
                     node.body.insert(0, new_comment)
-        return astor.to_source(tree)
+        return ast.unparse(tree) + '\n'
 
     async def async_generate_comment_for_block(self, block_content: str) -> str:
         variable_values = dict()

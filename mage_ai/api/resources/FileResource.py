@@ -4,7 +4,6 @@ import urllib.parse
 from typing import Dict
 
 from mage_ai.api.errors import ApiError
-from mage_ai.api.resources.BlockResource import BlockResource
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.cache.block import BlockCache
 from mage_ai.cache.block_action_object import BlockActionObjectCache
@@ -222,18 +221,10 @@ class FileResource(GenericResource):
 
     @safe_db_query
     def delete(self, **kwargs):
-        try:
-            block_resource = BlockResource.member(
-                self.model.file_path,
-                self.current_user,
-                query=dict(file_path=[
-                    self.model.file_path,
-                ]),
-            )
-            if block_resource:
-                block_resource.delete()
-        except ApiError:
-            pass
+        # This used to call BlockResource.delete without awaiting it, so deleting a block's
+        # file never changed the pipelines that use the block. That behavior is kept:
+        # awaiting it would remove the block from those pipelines, or refuse when other
+        # blocks depend on it.
         return self.model.delete()
 
     @safe_db_query

@@ -2,7 +2,8 @@ import datetime
 import decimal
 import logging
 import re
-from jsonschema import RefResolver
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT4
 
 import singer.metadata
 from singer.logger import get_logger
@@ -385,12 +386,21 @@ def resolve_schema_references(schema, refs=None):
         schema
     '''
     refs = refs or {}
-    return _resolve_schema_references(schema, RefResolver("", schema, store=refs))
+    # jsonschema.RefResolver is deprecated in favor of the referencing library. References
+    # resolve against the root schema, at the empty URI, and the schemata in refs.
+    registry = Registry().with_resources(
+        [('', Resource.from_contents(schema, default_specification=DRAFT4))]
+        + [
+            (uri, Resource.from_contents(contents, default_specification=DRAFT4))
+            for uri, contents in refs.items()
+        ],
+    )
+    return _resolve_schema_references(schema, registry.resolver(base_uri=''))
 
 def _resolve_schema_references(schema, resolver):
     if SchemaKey.ref in schema:
         reference_path = schema.pop(SchemaKey.ref, None)
-        resolved = resolver.resolve(reference_path)[1]
+        resolved = resolver.lookup(reference_path).contents
         schema.update(resolved)
         return _resolve_schema_references(schema, resolver)
 

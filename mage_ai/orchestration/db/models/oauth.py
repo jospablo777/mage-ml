@@ -258,7 +258,7 @@ class User(BaseModel):
             )
         )
 
-        subquery = query.add_column(row_number_column).subquery()
+        subquery = query.add_columns(row_number_column).subquery()
         query = db_connection.session.query(subquery).filter(subquery.c.row_number == 1)
         query.cache = True
         rows = query.all()
@@ -784,7 +784,7 @@ class Permission(BaseModel):
             )
         )
 
-        subquery = query.add_column(row_number_column).subquery()
+        subquery = query.add_columns(row_number_column).subquery()
         query = db_connection.session.query(subquery).filter(subquery.c.row_number == 1)
         rows = query.all()
 

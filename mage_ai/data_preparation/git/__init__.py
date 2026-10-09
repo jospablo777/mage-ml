@@ -1,4 +1,3 @@
-import asyncio
 import os
 import shutil
 import subprocess
@@ -31,6 +30,7 @@ from mage_ai.orchestration.db.models.oauth import User
 from mage_ai.server.logger import Logger
 from mage_ai.settings.platform import git_settings, project_platform_activated
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.shared.async_utils import run_sync
 from mage_ai.shared.logger import VerboseFunctionExec
 
 REMOTE_NAME = 'mage-repo'
@@ -137,7 +137,7 @@ class Git:
                 as_process=True,
             )
 
-            asyncio.run(
+            run_sync(
                 poll_process_with_timeout(
                     proc,
                     error_message='Error cloning repo.',
@@ -220,7 +220,7 @@ class Git:
         def wrapper(self, *args, **kwargs):
             def add_host_to_known_hosts():
                 self.__add_host_to_known_hosts()
-                asyncio.run(self.check_connection())
+                run_sync(self.check_connection())
 
             if self.auth_type == AuthType.SSH:
                 url = f'ssh://{self.git_config.remote_repo_link}'
@@ -232,7 +232,7 @@ class Git:
                     if not os.path.exists(DEFAULT_KNOWN_HOSTS_FILE):
                         self.__add_host_to_known_hosts()
                     try:
-                        asyncio.run(self.check_connection())
+                        run_sync(self.check_connection())
                     except ChildProcessError as err:
                         if 'Host key verification failed' in str(err):
                             if hostname:
@@ -260,7 +260,7 @@ class Git:
                     )
                     self.origin.set_url(remote_repo_link)
                 try:
-                    asyncio.run(self.check_connection(remote_url=remote_repo_link))
+                    run_sync(self.check_connection(remote_url=remote_repo_link))
                     return func(self, *args, **kwargs)
                 finally:
                     self.origin.set_url(url_original)
@@ -420,7 +420,7 @@ class Git:
                         env=env,
                     )
 
-                    asyncio.run(
+                    run_sync(
                         poll_process_with_timeout(
                             proc,
                             error_message=f'Error updating submodule {section}.',
