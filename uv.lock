@@ -4179,7 +4179,7 @@ dependencies = [
     { name = "simplejson" },
     { name = "six" },
     { name = "sqlalchemy" },
-    { name = "sqlglot", extra = ["rs"] },
+    { name = "sqlglot", extra = ["c"] },
     { name = "sqlparse" },
     { name = "terminado" },
     { name = "thefuzz" },
@@ -4523,7 +4523,7 @@ requires-dist = [
     { name = "six", specifier = ">=1.15.0" },
     { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=4.0.0" },
     { name = "sqlalchemy", specifier = ">2.0.0,<3" },
-    { name = "sqlglot", extras = ["rs"] },
+    { name = "sqlglot", extras = ["c"] },
     { name = "sqlparse", specifier = ">=0.6,<1" },
     { name = "sshtunnel", marker = "extra == 'postgres'", specifier = ">=0.4.0" },
     { name = "stomp-py", marker = "extra == 'streaming'", specifier = ">=8.1,<9" },
@@ -8312,9 +8312,8 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-rs = [
+c = [
     { name = "sqlglotc" },
-    { name = "sqlglotrs" },
 ]
 
 [[package]]
@@ -8338,15 +8337,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/06/24/657a783f8d7a663b9635d5dc730a03e5a7515688bcb7531adc79d577695d/sqlglotc-30.21.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5a5548cc19e6847d810179b23cd0c05fd12329f7c2f9717704260a808961dbef", size = 26173118, upload-time = "2026-09-30T17:23:18.582Z" },
     { url = "https://files.pythonhosted.org/packages/35/d5/81657c0a4fd5fb2054de416f86c0e8378cd832cb61a2dccd85a6beb55cdd/sqlglotc-30.21.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e9de58f46f701635dc9ad930ca5b1c6a4b6ee45b2539cb47b9dcd8a45d4a0603", size = 27486336, upload-time = "2026-09-30T17:23:21.287Z" },
     { url = "https://files.pythonhosted.org/packages/84/6e/2973b3c3cf4078741c2dd0524a6ed128d2a9a92934f2691d44426f295383/sqlglotc-30.21.0-cp313-cp313-win_amd64.whl", hash = "sha256:8c6f8b96175678b05ea7f06a286324975529d010a3d959a13354f4546cb166df", size = 11393918, upload-time = "2026-10-01T01:29:01.753Z" },
-]
-
-[[package]]
-name = "sqlglotrs"
-version = "0.13.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1c/03/4c8133ff544788df8df3bb1f1a2395c8fe6a116f27ea2ae30eab4a3de54b/sqlglotrs-0.13.0.tar.gz", hash = "sha256:ad1ad158234af0f8ba5054ca51bd17a7c1e3f81b4798c7970ebf7953fe08ddcb", size = 1179, upload-time = "2026-02-23T19:10:11.495Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/51/df8564d8e78c6a0ebf81b752397f64bf94ab1c1f6ed50502bd5bf3da1c0d/sqlglotrs-0.13.0-py3-none-any.whl", hash = "sha256:6b934a244b16f26fca50974328a2ebc7689583c59f06203cebb46e2e6e8d93a7", size = 1416, upload-time = "2026-02-23T19:10:10.755Z" },
 ]
 
 [[package]]

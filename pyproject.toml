@@ -63,7 +63,7 @@ dependencies = [
   "simplejson",
   "six>=1.15.0",
   "sqlalchemy>2.0.0,<3",
-  "sqlglot[rs]",
+  "sqlglot[c]",
   "sqlparse>=0.6,<1",
   "terminado>=0.18.1",
   "thefuzz>=0.22.1",
