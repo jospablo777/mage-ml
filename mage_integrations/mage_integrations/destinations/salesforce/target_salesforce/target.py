@@ -156,7 +156,7 @@ class TargetSalesforce(Target):
 
                 line_dict['stream'] = self.config['table_name']
 
-            self._assert_line_requires(line_dict, requires={"type"})
+            self.assert_line_requires(line_dict, requires={"type"})
 
             record_type: SingerMessageType = line_dict["type"]
             if record_type == SingerMessageType.SCHEMA:

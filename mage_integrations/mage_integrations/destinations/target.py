@@ -283,7 +283,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             A counter object for the processed lines.
         """
         self.logger.info(f"Target {self.name} is listening for input from tap.")
-        counter = super()._process_lines(file_input)
+        counter = super().process_lines(file_input)
 
         line_count = sum(counter.values())
 
@@ -306,7 +306,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         Args:
             message_dict: TODO
         """
-        self._assert_line_requires(message_dict, requires={"stream", "record"})
+        self.assert_line_requires(message_dict, requires={"stream", "record"})
 
         stream_name = message_dict["stream"]
         for stream_map in self.mapper.stream_maps[stream_name]:
@@ -349,8 +349,8 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         Args:
             message_dict: The newly received schema message.
         """
-        self._assert_line_requires(message_dict, requires={"stream", "schema"})
-        self._assert_line_requires(message_dict["schema"], requires={"properties"})
+        self.assert_line_requires(message_dict, requires={"stream", "schema"})
+        self.assert_line_requires(message_dict["schema"], requires={"properties"})
 
         stream_name = message_dict["stream"]
         schema = message_dict["schema"]
@@ -409,7 +409,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         Args:
             message_dict: TODO
         """
-        self._assert_line_requires(message_dict, requires={"value"})
+        self.assert_line_requires(message_dict, requires={"value"})
         state = message_dict["value"]
         if self._latest_state == state:
             return

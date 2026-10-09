@@ -8,7 +8,6 @@ import uuid
 import bson
 import pytz
 import singer
-import tzlocal
 from bson import datetime as bson_datetime
 from bson import objectid, timestamp
 from singer import metadata, utils
@@ -20,19 +19,26 @@ INCLUDE_SCHEMAS_IN_DESTINATION_STREAM_NAME = False
 UPDATE_BOOKMARK_PERIOD = 1000
 COUNTS = {}
 TIMES = {}
+# The tap wrote a SCHEMA message built from the rows it had read whenever a row added a
+# field type. Mage writes the stream's schema from the catalog first, and the partial
+# schemas replaced it at the destination, which then failed on fields they lacked.
+WRITE_ROW_SCHEMAS = False
+
 SCHEMA_COUNT = {}
 SCHEMA_TIMES = {}
 
 
-def localize_naive(value):
-    """Attach the local timezone to a naive datetime.
+def as_utc(value):
+    """A datetime in UTC.
 
-    Raises ValueError for aware datetimes, matching pytz localize(). tzlocal 5 returns
-    a zoneinfo.ZoneInfo, which has no localize() method.
+    pymongo returns BSON dates as naive datetimes in UTC. They were read as local time,
+    so on a host outside UTC every date, and every datetime bookmark, was shifted by the
+    host's offset, and incremental syncs skipped or repeated documents.
     """
-    if value.tzinfo is not None:
-        raise ValueError('Not naive datetime (tzinfo is already set)')
-    return value.replace(tzinfo=tzlocal.get_localzone())
+    if value.tzinfo is None:
+        return value.replace(tzinfo=pytz.UTC)
+    return value.astimezone(pytz.UTC)
+
 
 class InvalidProjectionException(Exception):
     """Raised if projection blacklists _id"""
@@ -71,9 +77,7 @@ def get_stream_version(tap_stream_id, state):
 
 def class_to_string(bookmark_value, bookmark_type):
     if bookmark_type == 'datetime':
-        local_datetime = localize_naive(bookmark_value)
-        utc_datetime = local_datetime.astimezone(pytz.UTC)
-        return utils.strftime(utc_datetime)
+        return utils.strftime(as_utc(bookmark_value))
     if bookmark_type == 'Timestamp':
         return '{}.{}'.format(bookmark_value.time, bookmark_value.inc)
     if bookmark_type == 'bytes':
@@ -110,8 +114,7 @@ def string_to_class(str_value, type_value):
 
 def safe_transform_datetime(value, path):
     try:
-        local_datetime = localize_naive(value)
-        utc_datetime = local_datetime.astimezone(pytz.UTC)
+        utc_datetime = as_utc(value)
     except Exception as ex:
         if str(ex) == "year is out of range" and value.year == 0:
             # NB: Since datetimes are persisted as strings, it doesn't
@@ -151,9 +154,7 @@ def transform_value(value, path):
         # Return the original base64 encoded string
         return base64.b64encode(value).decode('utf-8')
     if isinstance(value, datetime.datetime):
-        local_datetime = localize_naive(value)
-        utc_datetime = local_datetime.astimezone(pytz.UTC)
-        return utils.strftime(utc_datetime)
+        return utils.strftime(as_utc(value))
     if isinstance(value, bson.decimal128.Decimal128):
         return value.to_decimal()
     if isinstance(value, bson.code.Code):

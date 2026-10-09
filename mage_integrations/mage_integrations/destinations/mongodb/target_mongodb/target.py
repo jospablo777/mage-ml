@@ -131,7 +131,7 @@ class TargetMongoDb(Target):
         Args:
             message_dict (dict): JSONL Singer RECORD message
         """
-        self._assert_line_requires(message_dict, requires={"stream", "record"})
+        self.assert_line_requires(message_dict, requires={"stream", "record"})
 
         stream_name = message_dict["stream"]
         for stream_map in self.mapper.stream_maps[stream_name]:

@@ -420,6 +420,10 @@ def build_client(config, logger=None):
         'replicaset': config.get('replica_set', None),
         'readPreference': 'secondaryPreferred',
     }
+    if str(config.get('direct_connection', '')).lower() == 'true':
+        # Connect to the given member only, for a replica set whose members' addresses are
+        # not reachable from Mage, such as one in a container.
+        connection_params['directConnection'] = True
     if config.get('authSource'):
         connection_params['authSource'] = config.get('authSource')
     if config.get('authMechanism'):

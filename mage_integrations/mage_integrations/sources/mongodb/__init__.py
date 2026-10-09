@@ -1,7 +1,10 @@
+import uuid
 from datetime import datetime
 from typing import Dict, Generator, List
 
+from bson import Binary, Code, Decimal128, Regex
 from pymongo_schema.extract import extract_pymongo_client_schema
+from pymongo_schema.mongo_sql_types import PYMONGO_TYPE_TO_TYPE_STRING
 from singer import catalog
 
 import mage_integrations.sources.mongodb.tap_mongodb.sync_strategies.common as common
@@ -9,10 +12,12 @@ from mage_integrations.sources.base import Source, main
 from mage_integrations.sources.catalog import Catalog
 from mage_integrations.sources.constants import (
     COLUMN_FORMAT_DATETIME,
+    COLUMN_TYPE_ARRAY,
     COLUMN_TYPE_BOOLEAN,
     COLUMN_TYPE_INTEGER,
     COLUMN_TYPE_NULL,
     COLUMN_TYPE_NUMBER,
+    COLUMN_TYPE_OBJECT,
     COLUMN_TYPE_STRING,
     REPLICATION_METHOD_LOG_BASED,
 )
@@ -23,6 +28,45 @@ from mage_integrations.sources.mongodb.tap_mongodb.sync_strategies.utils import 
 from mage_integrations.utils.array import find_index
 from mage_integrations.utils.dictionary import index_by
 
+# BSON types pymongo_schema does not know, typed as the sync emits them: Decimal128 as a
+# number, and binary and UUID values as text.
+PYMONGO_TYPE_TO_TYPE_STRING.setdefault(Decimal128, 'float')
+for bson_text_type in (Binary, bytes, uuid.UUID, Regex, Code):
+    PYMONGO_TYPE_TO_TYPE_STRING.setdefault(bson_text_type, 'string')
+
+MONGO_TYPES = {
+    'integer': COLUMN_TYPE_INTEGER,
+    'biginteger': COLUMN_TYPE_INTEGER,
+    'float': COLUMN_TYPE_NUMBER,
+    'number': COLUMN_TYPE_NUMBER,
+    'boolean': COLUMN_TYPE_BOOLEAN,
+    'OBJECT': COLUMN_TYPE_OBJECT,
+    'ARRAY': COLUMN_TYPE_ARRAY,
+}
+
+
+def column_schema(field: Dict) -> Dict:
+    """
+    The schema of a field from every type its values had. One type was taken from the
+    field's common type, and embedded documents, arrays and Decimal128 values were typed
+    as text, which the sync emits as objects, lists and numbers. Destinations then failed
+    the records in schema validation.
+    """
+    type_names = [t for t in (field.get('types_count') or {field['type']: 1}) if t != 'null']
+    types = []
+    formats = set()
+    for name in type_names:
+        if name in ('date', 'timestamp'):
+            formats.add(COLUMN_FORMAT_DATETIME)
+        column_type = MONGO_TYPES.get(name, COLUMN_TYPE_STRING)
+        if column_type not in types:
+            types.append(column_type)
+    if COLUMN_TYPE_INTEGER in types and COLUMN_TYPE_NUMBER in types:
+        types.remove(COLUMN_TYPE_INTEGER)
+    prop = dict(type=[COLUMN_TYPE_NULL] + (types or [COLUMN_TYPE_STRING]))
+    if formats and types == [COLUMN_TYPE_STRING]:
+        prop['format'] = COLUMN_FORMAT_DATETIME
+    return prop
 
 class MongoDB(Source):
     def discover(self, streams: List[str] = None) -> Catalog:
@@ -41,37 +85,7 @@ class MongoDB(Source):
             properties = {}
 
             for column, data2 in data1['object'].items():
-                mongo_type_orig = data2['type']
-                column_type = COLUMN_TYPE_STRING
-                column_format = None
-
-                # https://github.com/pajachiet/pymongo-schema/blob/master/pymongo_schema/mongo_sql_types.py#L147
-                if mongo_type_orig in ['biginteger', 'integer']:
-                    column_type = COLUMN_TYPE_INTEGER
-                elif 'boolean' == mongo_type_orig:
-                    column_type = COLUMN_TYPE_BOOLEAN
-                elif 'date' == mongo_type_orig:
-                    column_type = COLUMN_TYPE_STRING
-                    column_format = COLUMN_FORMAT_DATETIME
-                elif mongo_type_orig in [
-                    'dbref',
-                    'oid',
-                    'string',
-                ]:
-                    column_type = COLUMN_TYPE_STRING
-                elif mongo_type_orig in ['float', 'number']:
-                    column_type = COLUMN_TYPE_NUMBER
-
-                prop = dict(
-                    type=[
-                        COLUMN_TYPE_NULL,
-                        column_type,
-                    ],
-                )
-                if column_format:
-                    prop['format'] = column_format
-
-                properties[column] = prop
+                properties[column] = column_schema(data2)
 
             schema = catalog.Schema.from_dict(dict(
                 properties=properties,

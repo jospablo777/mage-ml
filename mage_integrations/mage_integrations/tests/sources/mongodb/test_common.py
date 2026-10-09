@@ -11,51 +11,62 @@ from mage_integrations.sources.mongodb.tap_mongodb.sync_strategies import common
 LOCAL_ZONE = ZoneInfo('America/Costa_Rica')
 
 
-@patch.object(common.tzlocal, 'get_localzone', return_value=LOCAL_ZONE)
-class LocalizeTest(unittest.TestCase):
-    def test_localize_naive_attaches_the_local_zone(self, _):
+class AsUtcTest(unittest.TestCase):
+    """
+    pymongo returns BSON dates as naive datetimes in UTC. They were read as local time, so
+    on a host at UTC-6 a date stored as 12:30 UTC was emitted as 18:30Z, and datetime
+    bookmarks moved by the same offset.
+    """
+
+    def test_naive_datetimes_are_utc(self):
         value = datetime.datetime(2024, 5, 1, 12, 30)
 
-        localized = common.localize_naive(value)
+        self.assertEqual(common.as_utc(value), value.replace(tzinfo=datetime.timezone.utc))
 
-        self.assertEqual(localized.tzinfo, LOCAL_ZONE)
-        self.assertEqual(localized.replace(tzinfo=None), value)
+    def test_aware_datetimes_are_converted(self):
+        value = datetime.datetime(2024, 5, 1, 6, 30, tzinfo=LOCAL_ZONE)
 
-    def test_localize_naive_rejects_aware_datetimes(self, _):
-        value = datetime.datetime(2024, 5, 1, 12, 30, tzinfo=datetime.timezone.utc)
+        self.assertEqual(
+            common.as_utc(value),
+            datetime.datetime(2024, 5, 1, 12, 30, tzinfo=datetime.timezone.utc),
+        )
 
-        with self.assertRaises(ValueError):
-            common.localize_naive(value)
+    def test_the_host_time_zone_does_not_matter(self):
+        value = datetime.datetime(2024, 5, 1, 12, 30)
+        with patch.dict('os.environ', {'TZ': 'America/Costa_Rica'}):
+            import time
+            time.tzset()
+            try:
+                result = common.transform_value(value, ['created_at'])
+            finally:
+                time.tzset()
 
-    def test_class_to_string_converts_datetime_bookmarks_to_utc(self, _):
+        self.assertEqual(result, '2024-05-01T12:30:00.000000Z')
+
+    def test_class_to_string_keeps_datetime_bookmarks_in_utc(self):
         value = datetime.datetime(2024, 5, 1, 12, 30)
 
         self.assertEqual(
             common.class_to_string(value, 'datetime'),
-            '2024-05-01T18:30:00.000000Z',
+            '2024-05-01T12:30:00.000000Z',
         )
 
-    def test_transform_value_converts_python_datetimes_to_utc(self, _):
-        value = datetime.datetime(2024, 5, 1, 12, 30)
-
-        self.assertEqual(
-            common.transform_value(value, ['created_at']),
-            '2024-05-01T18:30:00.000000Z',
-        )
-
-    def test_transform_value_converts_bson_datetimes_to_utc(self, _):
+    def test_transform_value_keeps_bson_datetimes_in_utc(self):
         value = bson_datetime.datetime(2024, 5, 1, 12, 30)
 
         self.assertEqual(
             common.transform_value({'created_at': value}, []),
-            {'created_at': '2024-05-01T18:30:00.000000Z'},
+            {'created_at': '2024-05-01T12:30:00.000000Z'},
         )
 
-    def test_safe_transform_datetime_rejects_aware_datetimes(self, _):
-        value = datetime.datetime(2024, 5, 1, 12, 30, tzinfo=datetime.timezone.utc)
+    def test_bookmark_round_trip(self):
+        """A bookmark written from a document's date reads back as the same instant."""
+        value = datetime.datetime(2024, 5, 1, 12, 30, 0, 123000)
 
-        with self.assertRaises(common.MongoInvalidDateTimeException):
-            common.safe_transform_datetime(value, ['created_at'])
+        written = common.class_to_string(value, 'datetime')
+        read = common.string_to_class(written, 'datetime')
+
+        self.assertEqual(read, value.replace(tzinfo=datetime.timezone.utc))
 
 
 if __name__ == '__main__':
