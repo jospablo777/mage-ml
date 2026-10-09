@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import decimal
 import os
+import shutil
 import traceback
 import uuid
 from contextlib import contextmanager
@@ -45,6 +46,7 @@ from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     is_basic_iterable,
     needs_object_json,
     pad_safe,
+    resolve_object_paths,
     restorable_dtype,
     restore_categories,
     restore_column_dtypes,
@@ -153,7 +155,59 @@ class Variable:
 
     @property
     def variable_path(self):
+        staging_path = getattr(self, '_staging_path', None)
+        if staging_path:
+            return staging_path
         return os.path.join(self.variable_dir_path, self.uuid or '')
+
+    @contextmanager
+    def __staged_write(self):
+        """
+        Write the variable's files into a staging directory and swap it in when every
+        file is written. A write that fails or is killed partway used to leave new files
+        next to old ones, such as new column types beside the previous data. The staging
+        directory starts with a dot, which variable listings skip.
+
+        Objects in S3 and GCS are written in place.
+        """
+        if not isinstance(self.storage, LocalStorage) or not self.uuid:
+            yield
+            return
+
+        final_path = self.variable_path
+        # Next to the final directory: dynamic block outputs have uuids such as
+        # output_0/0, whose parent is another variable's directory.
+        parent_path, name = os.path.split(final_path.rstrip(os.sep))
+        os.makedirs(parent_path, exist_ok=True)
+        staging_path = os.path.join(parent_path, f'.{name}.{uuid.uuid4().hex[:8]}.staging')
+        os.makedirs(staging_path)
+        self._staging_path = staging_path
+        try:
+            yield
+            # Resource usage recorded the staging path; it describes the final one.
+            if self.resource_usage:
+                for attribute in ('directory', 'path'):
+                    value = getattr(self.resource_usage, attribute, None)
+                    if isinstance(value, str) and value.startswith(staging_path):
+                        setattr(
+                            self.resource_usage,
+                            attribute,
+                            final_path + value[len(staging_path):],
+                        )
+                self.__write_resource_usage()
+        except BaseException:
+            shutil.rmtree(staging_path, ignore_errors=True)
+            raise
+        finally:
+            self._staging_path = None
+
+        if os.path.isdir(final_path):
+            previous_path = f'{staging_path}.previous'
+            os.rename(final_path, previous_path)
+            os.rename(staging_path, final_path)
+            shutil.rmtree(previous_path, ignore_errors=True)
+        else:
+            os.rename(staging_path, final_path)
 
     @property
     def metadata_path(self):
@@ -488,6 +542,8 @@ class Variable:
                 print('\n')
 
                 traceback.print_exc()
+                if raise_exception:
+                    raise
                 return None
             return data
 
@@ -664,7 +720,10 @@ class Variable:
     def __read_complex_object(self, data: Union[Dict, List]) -> Union[Dict, List]:
         column_types_filename = os.path.join(self.variable_path, DATAFRAME_COLUMN_TYPES_FILE)
         if self.storage.path_exists(column_types_filename):
-            column_types = self.storage.read_json_file(column_types_filename)
+            column_types = resolve_object_paths(
+                self.storage.read_json_file(column_types_filename),
+                self.variable_path,
+            )
             data = deserialize_complex(
                 data,
                 column_types,
@@ -795,30 +854,41 @@ class Variable:
                 self.__write_dataframe_analysis(data)
                 return
 
-            if self.variable_type == VariableType.DATAFRAME:
-                self.__write_parquet(data)
-            elif self.variable_type == VariableType.POLARS_DATAFRAME:
-                self.__write_polars_dataframe(data)
-            elif self.variable_type == VariableType.SPARK_DATAFRAME:
-                self.__write_spark_parquet(data)
-            elif self.variable_type == VariableType.GEO_DATAFRAME:
-                self.__write_geo_dataframe(data)
-            elif self.variable_type == VariableType.MATRIX_SPARSE:
-                self.__write_matrix_sparse(data)
-            elif self.variable_type == VariableType.SERIES_PANDAS:
-                if not self.__write_series_pandas(data):
-                    self.__write_json(data)
-            else:
-                if (
-                    VariableType.DICTIONARY_COMPLEX == self.variable_type
-                    or VariableType.LIST_COMPLEX == self.variable_type
-                ):
-                    data = self.__save_complex_object(data)
-                else:
-                    data = self.__should_save_object(data)
+            with self.__staged_write():
+                data = self.__write_by_type(data)
+                self.__write_shared_files(data)
+            return
 
+        self.__write_shared_files(data)
+
+    def __write_by_type(self, data: Any) -> Any:
+        """Write the data files of the variable's type and return the data as written."""
+        if self.variable_type == VariableType.DATAFRAME:
+            self.__write_parquet(data)
+        elif self.variable_type == VariableType.POLARS_DATAFRAME:
+            self.__write_polars_dataframe(data)
+        elif self.variable_type == VariableType.SPARK_DATAFRAME:
+            self.__write_spark_parquet(data)
+        elif self.variable_type == VariableType.GEO_DATAFRAME:
+            self.__write_geo_dataframe(data)
+        elif self.variable_type == VariableType.MATRIX_SPARSE:
+            self.__write_matrix_sparse(data)
+        elif self.variable_type == VariableType.SERIES_PANDAS:
+            if not self.__write_series_pandas(data):
                 self.__write_json(data)
+        else:
+            if (
+                VariableType.DICTIONARY_COMPLEX == self.variable_type
+                or VariableType.LIST_COMPLEX == self.variable_type
+            ):
+                data = self.__save_complex_object(data)
+            else:
+                data = self.__should_save_object(data)
 
+            self.__write_json(data)
+        return data
+
+    def __write_shared_files(self, data: Any) -> None:
         # Shared logic across most variable types
         if self.variable_type != VariableType.SPARK_DATAFRAME:
             # Not write json file in spark data directory to avoid read error

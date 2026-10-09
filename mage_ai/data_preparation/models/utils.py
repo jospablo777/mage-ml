@@ -653,7 +653,12 @@ def serialize_complex(
         ]:
             type_info = object_to_dict(value, variable_type=variable_type)
             if full_save_path:
-                type_info['path'] = full_save_path
+                # Relative to the variable's directory, which moves when a write is
+                # swapped in and when the project moves. resolve_object_paths makes it
+                # absolute again on read.
+                type_info['path'] = (
+                    os.path.relpath(full_save_path, save_path) if save_path else full_save_path
+                )
         else:
             type_info = object_to_dict(value, variable_type=variable_type)
 
@@ -823,6 +828,30 @@ def unflatten_and_deserialize(flattened_data: Dict, column_types: Dict[str, Dict
 
     return unflatten_dict(staging_data)
 
+
+
+def resolve_object_paths(column_types: Any, base_path: str) -> Any:
+    """
+    Make the relative paths of objects saved by serialize_complex absolute, relative to
+    base_path. Absolute paths, written before paths were relative, stay as they are.
+    """
+    if isinstance(column_types, dict):
+        resolved = {
+            key: resolve_object_paths(value, base_path)
+            for key, value in column_types.items()
+        }
+        path = resolved.get('path')
+        if (
+            'variable_type' in resolved
+            and isinstance(path, str)
+            and path
+            and not os.path.isabs(path)
+        ):
+            resolved['path'] = os.path.join(base_path, path)
+        return resolved
+    if isinstance(column_types, list):
+        return [resolve_object_paths(value, base_path) for value in column_types]
+    return column_types
 
 def deserialize_complex(data: Any, column_types: Dict[str, Dict], unflatten: bool = False) -> Dict:
     """

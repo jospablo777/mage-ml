@@ -1,7 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import pandas as pd
 import polars as pl
@@ -255,3 +255,11 @@ class BaseStorage(ABC):
         None when Polars cannot reach the storage, so frames go through this class.
         """
         return None
+
+    @contextmanager
+    def writing(self, file_path: str) -> Iterator[str]:
+        """
+        The path to write file_path through. Objects in S3 and GCS appear whole when
+        their upload completes, so the path itself is returned.
+        """
+        yield file_path

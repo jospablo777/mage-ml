@@ -1,15 +1,15 @@
 import json
 import os
 import shutil
+import uuid
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import aiofiles
 import pandas as pd
 import polars as pl
 import simplejson
 
-from mage_ai.data_preparation.models.file import File
 from mage_ai.data_preparation.storage.base_storage import (
     BaseStorage,
     read_pandas_parquet,
@@ -20,6 +20,26 @@ from mage_ai.shared.parsers import encode_complex
 
 
 class LocalStorage(BaseStorage):
+    @contextmanager
+    def writing(self, file_path: str) -> Iterator[str]:
+        """
+        A temporary path next to file_path, moved over file_path when the block exits
+        without an error. Readers see the old file or the new one, never a partial file
+        left by a failed or killed write.
+        """
+        dirname = os.path.dirname(file_path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        temporary = os.path.join(
+            dirname, f'.{os.path.basename(file_path)}.{uuid.uuid4().hex[:8]}.tmp',
+        )
+        try:
+            yield temporary
+            os.replace(temporary, file_path)
+        finally:
+            if os.path.isfile(temporary):
+                os.remove(temporary)
+
     def isdir(self, path: str) -> bool:
         return os.path.isdir(path)
 
@@ -67,14 +87,18 @@ class LocalStorage(BaseStorage):
         if DEBUG_FILE_IO and '.variables' in file_path:
             print(f'[READ JSON FILE]: {file_path}')
         if not self.path_exists(file_path):
-            return default_value or {}
+            if raise_exception:
+                # A missing file used to return the default even when the caller asked
+                # for an error, so a deleted block output reached the next block as {}.
+                raise FileNotFoundError(file_path)
+            return {} if default_value is None else default_value
         with open(file_path) as file:
             try:
                 return json.load(file)
             except Exception:
                 if raise_exception:
                     raise
-                return default_value or {}
+                return {} if default_value is None else default_value
 
     async def read_json_file_async(
         self,
@@ -83,14 +107,16 @@ class LocalStorage(BaseStorage):
         raise_exception: bool = False,
     ) -> Dict:
         if not self.path_exists(file_path):
-            return default_value or {}
+            if raise_exception:
+                raise FileNotFoundError(file_path)
+            return {} if default_value is None else default_value
         async with aiofiles.open(file_path, mode='r') as file:
             try:
                 return json.loads(await file.read())
             except Exception:
                 if raise_exception:
                     raise
-                return default_value or {}
+                return {} if default_value is None else default_value
 
     def write_json_file(self, file_path: str, data) -> None:
         dirname = os.path.dirname(file_path)
@@ -113,8 +139,9 @@ class LocalStorage(BaseStorage):
                 'supported variable type.'
             ) from err
 
-        with open(file_path, 'w') as file:
-            file.write(contents)
+        with self.writing(file_path) as temporary:
+            with open(temporary, 'w') as file:
+                file.write(contents)
 
     async def write_json_file_async(self, file_path: str, data) -> None:
         # Same ordering as write_json_file: opening the file truncates it, so encode
@@ -125,8 +152,9 @@ class LocalStorage(BaseStorage):
             ignore_nan=True,
         )
 
-        async with aiofiles.open(file_path, mode='w') as file:
-            await file.write(fcontent)
+        with self.writing(file_path) as temporary:
+            async with aiofiles.open(temporary, mode='w') as file:
+                await file.write(fcontent)
 
     def read_parquet(self, file_path: str, **kwargs) -> pd.DataFrame:
         return read_pandas_parquet(file_path, **kwargs)
@@ -135,16 +163,16 @@ class LocalStorage(BaseStorage):
         return pl.read_parquet(file_path, **kwargs)
 
     def write_csv(self, df: pd.DataFrame, file_path: str) -> None:
-        File.create_parent_directories(file_path)
-        df.to_csv(file_path, index=False)
+        with self.writing(file_path) as temporary:
+            df.to_csv(temporary, index=False)
 
     def write_parquet(self, df: pd.DataFrame, file_path: str) -> None:
-        File.create_parent_directories(file_path)
-        df.to_parquet(file_path)
+        with self.writing(file_path) as temporary:
+            df.to_parquet(temporary)
 
     def write_polars_dataframe(self, df: pl.DataFrame, file_path: str) -> None:
-        File.create_parent_directories(file_path)
-        df.write_parquet(file_path)
+        with self.writing(file_path) as temporary:
+            df.write_parquet(temporary)
 
     @contextmanager
     def open_to_write(
@@ -152,15 +180,17 @@ class LocalStorage(BaseStorage):
         file_path: str,
         append: bool = False,
     ) -> None:
-        dirname = os.path.dirname(file_path)
-        if not os.path.isdir(dirname):
-            os.mkdir(dirname)
+        if append:
+            dirname = os.path.dirname(file_path)
+            if not os.path.isdir(dirname):
+                os.mkdir(dirname)
+            with open(file_path, 'a') as file:
+                yield file
+            return
 
-        try:
-            file = open(file_path, 'a' if append else 'w')
-            yield file
-        finally:
-            file.close()
+        with self.writing(file_path) as temporary:
+            with open(temporary, 'w') as file:
+                yield file
 
     def polars_location(self, path: str) -> Tuple[str, None]:
         return path, None
