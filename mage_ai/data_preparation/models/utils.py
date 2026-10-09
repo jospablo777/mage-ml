@@ -126,13 +126,19 @@ def _decode_tagged(obj: Dict) -> Any:
     return obj
 
 
+# json.dumps and json.loads build a new encoder or decoder on every call when given
+# options, which costs more than encoding a small value. These are built once.
+_TAGGED_ENCODER = json.JSONEncoder(default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+_TAGGED_DECODER = json.JSONDecoder(object_hook=_decode_tagged)
+
+
 def serialize_json_value(value: Any) -> Any:
     # A NaN in place of the whole value is pandas' missing marker.
     if _is_missing(value):
         return None
     # The json module hands bytes and Decimal to the default function; simplejson decodes
     # bytes as UTF-8 first. NaN and infinity are written as tokens loads accepts.
-    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+    return _TAGGED_ENCODER.encode(value)
 
 
 # Types each value of an OBJECT_JSON_COLUMN_TYPE column may have. Tuples and sets are left
@@ -196,16 +202,14 @@ def stores_category_codes(dtype: Any) -> bool:
 
 def encode_categories(dtype: pd.CategoricalDtype) -> Dict:
     return dict(
-        categories=json.dumps(
-            dtype.categories.tolist(), default=_encode_tagged, allow_nan=True, ensure_ascii=False,
-        ),
+        categories=_TAGGED_ENCODER.encode(dtype.categories.tolist()),
         categories_dtype=str(dtype.categories.dtype),
         ordered=bool(dtype.ordered),
     )
 
 
 def decode_categories(encoded: Dict) -> pd.CategoricalDtype:
-    categories = pd.Index(json.loads(encoded['categories'], object_hook=_decode_tagged))
+    categories = pd.Index(_TAGGED_DECODER.decode(encoded['categories']))
     try:
         categories = categories.astype(encoded['categories_dtype'])
     except (TypeError, ValueError):
@@ -226,11 +230,11 @@ def restore_categories(df: pd.DataFrame, categories: Dict) -> pd.DataFrame:
 
 
 def _dumps_tagged(value: Any) -> str:
-    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+    return _TAGGED_ENCODER.encode(value)
 
 
 def _loads_tagged(text: str) -> Any:
-    return json.loads(text, object_hook=_decode_tagged)
+    return _TAGGED_DECODER.decode(text)
 
 
 def encode_column_labels(columns: pd.Index) -> Optional[Dict]:
@@ -296,7 +300,7 @@ def serialize_object_json_value(value: Any) -> Any:
     # missing markers are NULL.
     if value is None or value is pd.NA or value is pd.NaT:
         return None
-    return json.dumps(value, default=_encode_tagged, allow_nan=True, ensure_ascii=False)
+    return _TAGGED_ENCODER.encode(value)
 
 
 def serialize_string_value(value: Any) -> Any:
@@ -402,13 +406,13 @@ def cast_column_types_polars(df: pl.DataFrame, column_types: Dict):
 
 def deserialize_json_value(value: Any) -> Any:
     if isinstance(value, str):
-        return json.loads(value, object_hook=_decode_tagged)
+        return _TAGGED_DECODER.decode(value)
     return None if _is_missing(value) else value
 
 
 def deserialize_list_value(value: Any) -> Any:
     if isinstance(value, str):
-        return json.loads(value, object_hook=_decode_tagged)
+        return _TAGGED_DECODER.decode(value)
     if isinstance(value, np.ndarray):
         return list(value)
     return None if _is_missing(value) else value
