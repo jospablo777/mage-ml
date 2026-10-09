@@ -246,6 +246,6 @@ start R.
 
 Tests: `mage_ai/tests/data_preparation/models/block/r/` (Python, no R needed), the
 package's testthat tests, and `integration_tests/r/` with R 4.6, rv and PostgreSQL:
-every type round trip, errors, timeouts, the environment checks, the CLI, and pipelines
+every type round trip, errors, timeouts, the environment checks, the CLI, the notebook, and pipelines
 that chain Python, R, Polars and SQL blocks and write to PostgreSQL with SQL exporters
 and with DBI. `make -C integration_tests test-r` runs them.
