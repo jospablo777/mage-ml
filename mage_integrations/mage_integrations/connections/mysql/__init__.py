@@ -73,13 +73,17 @@ class MySQL(Connection):
 
             host = '127.0.0.1'
             port = self.ssh_tunnel.local_bind_port
+        conn_kwargs = dict(self.conn_kwargs)
+        # MySQL returns TIMESTAMP values in the session time zone, the server's, and the
+        # source wrote them without an offset, so the instant was lost; they are in UTC.
+        conn_kwargs.setdefault('time_zone', '+00:00')
         return connect(
             database=self.database,
             host=host,
             password=self.password,
             port=port,
             user=self.username,
-            **self.conn_kwargs,
+            **conn_kwargs,
         )
 
     def close_connection(self, connection):

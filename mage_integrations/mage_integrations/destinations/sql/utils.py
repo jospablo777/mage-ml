@@ -267,7 +267,15 @@ def build_insert_command(
     column_identifier: str = '',
     use_lowercase: bool = True,
     allow_reserved_words: bool = False,
+    json_object_values: bool = False,
+    escape_json: bool = False,
 ) -> List[str]:
+    """
+    json_object_values writes every value of an object column as JSON: a JSON string or
+    number, which the source reads as a Python str or int, was written unencoded and was
+    not JSON. escape_json escapes the quotes of JSON text, which a value with an
+    apostrophe ended.
+    """
     values = []
     for row in records:
         vals = []
@@ -294,8 +302,13 @@ def build_insert_command(
                         and convert_datetime_func:
                     value_final = convert_datetime_func(v, column_type_dict)
                 else:
-                    if type(v) is dict or type(v) is list:
-                        value_final = json.dumps(v)
+                    is_json = type(v) is dict or type(v) is list or (
+                        json_object_values and COLUMN_TYPE_OBJECT == column_type
+                    )
+                    if is_json:
+                        value_final = json.dumps(v, default=str)
+                        if escape_json:
+                            value_final = value_final.replace("'", "''")
                     else:
                         value_final = str(v).replace("'", "''")
 

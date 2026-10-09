@@ -51,7 +51,9 @@ WHERE table_schema = '{database}'
         if COLUMN_FORMAT_DATETIME == column_format:
             return 'DATETIME'
         elif COLUMN_TYPE_INTEGER == column_type:
-            return 'UNSIGNED'
+            # UNSIGNED wrapped negative bookmarks around; DECIMAL(20, 0) holds signed and
+            # unsigned 64-bit integers.
+            return 'DECIMAL(20, 0)'
         return super().column_type_mapping(column_type, column_format)
 
     def update_column_names(self, columns: List[str]) -> List[str]:

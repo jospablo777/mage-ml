@@ -32,8 +32,9 @@ make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
 make -C integration_tests down             # stop the services and drop their data
 ```
 
-The services stay up between runs. PostgreSQL, MySQL, MongoDB and MinIO keep their data in memory, so `down`
-leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123 and 19092;
+The services stay up between runs. PostgreSQL, MySQL, MongoDB, ClickHouse and MinIO keep their data in memory, so `down`
+leaves nothing behind. Kafka's heap is 512 MB and ClickHouse uses at most 1 GB, so the
+suite runs in a Docker VM with 12 GB of memory. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123 and 19092;
 set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
 `MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
@@ -53,7 +54,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
-| `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines |
+| `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines; and the PostgreSQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs and upserts |
 | `redis/` | The scheduler's distributed lock |
 | `services/api/` | A FastAPI service that serves and accepts data frames as JSON, NDJSON, CSV, Parquet and Arrow, exchanges images, and returns every kind of failure |
 | `api/` | Pulling and pushing frames with pandas and Polars, failure handling, images, and Mage pipelines that call the API |
@@ -63,11 +64,12 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `mlflow/` | Experiments, runs, metric histories, registry and aliases, artifact listings and downloads over HTTP and with the client, models loaded both ways, and a Mage pipeline that logs predictions back |
 | `data/duckdb_dataset.py` | DuckDB source table with one column per DuckDB type, limits and special values, and the SQL comparison for DuckDB |
 | `duckdb/` | Loads in each mode, exports to new and existing tables, conflicts, names, database files and locking, reading Parquet, CSV and JSON, and Mage pipelines with Python and SQL blocks |
+| `services/clickhouse/` | ClickHouse memory limits, so the suite fits in a Docker VM with 12 GB |
 | `services/minio/` | MinIO RELEASE.2025-09-07T16-13-09Z built from source, since MinIO no longer publishes images |
 | `data/s3_dataset.py` | Polars frame with one column per type Parquet stores, limits and special values, and a frame comparison |
 | `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, the S3 source and destination of `mage_integrations`, and its Delta Lake S3 destination |
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
-| `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
+| `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars; and the MySQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs and upserts |
 | `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads; a ClickHouse SQL block between Python blocks; and the ClickHouse destination of `mage_integrations` |
 | `kafka/` | Mage's Kafka sink and source with the default settings, batches with every value type, acknowledged and failed sends, committed offsets in single-message mode, and metadata; and the Kafka destination of `mage_integrations` |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |

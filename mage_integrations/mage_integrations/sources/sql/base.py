@@ -10,6 +10,7 @@ from mage_integrations.sources.constants import (
     BATCH_FETCH_LIMIT_KEY,
     COLUMN_FORMAT_DATETIME,
     COLUMN_FORMAT_UUID,
+    COLUMN_TYPE_ARRAY,
     COLUMN_TYPE_BOOLEAN,
     COLUMN_TYPE_INTEGER,
     COLUMN_TYPE_NULL,
@@ -91,38 +92,30 @@ class Source(BaseSource):
                 if 'YES' == is_nullable:
                     column_types.append(COLUMN_TYPE_NULL)
 
-                if 'bool' in column_type:
-                    column_types.append(COLUMN_TYPE_BOOLEAN)
-                elif 'int' in column_type or 'bigint' in column_type:
-                    column_types.append(COLUMN_TYPE_INTEGER)
-                elif 'double' in column_type or 'float' in column_type or \
-                        'numeric' in column_type or 'decimal' in column_type or \
-                        'real' in column_type or 'number' in column_type:
-                    column_types.append(COLUMN_TYPE_NUMBER)
-                elif 'datetime' in column_type or 'timestamp' in column_type or \
-                        'date' in column_type:
-                    column_format = COLUMN_FORMAT_DATETIME
-                    column_types.append(COLUMN_TYPE_STRING)
-                elif 'json' in column_type or 'variant' in column_type:
-                    column_properties = {}
-                    column_types.append(COLUMN_TYPE_OBJECT)
-                elif 'uuid' in column_type:
-                    column_format = COLUMN_FORMAT_UUID
-                    column_types.append(COLUMN_TYPE_STRING)
-                # TODO: when adding array column type, we also need to add the setting
-                # for items and the item properties and types.
-                # See Stripe’s balance_transactions.json schema for an example.
-                # elif 'array' in column_type:
-                #     column_types.append(COLUMN_TYPE_ARRAY)
+                column_items = None
+                if column_type.endswith('[]'):
+                    # PostgreSQL arrays. They were discovered as their element type, while
+                    # records hold lists, so destinations wrote the lists' JSON into
+                    # integer or text columns.
+                    item_types, item_format, _ = self.__column_schema(column_type[:-2])
+                    column_types.append(COLUMN_TYPE_ARRAY)
+                    column_items = dict(type=[COLUMN_TYPE_NULL] + item_types)
+                    if item_format:
+                        column_items['format'] = item_format
                 else:
-                    # binary, text, varchar, character varying
-                    column_types.append(COLUMN_TYPE_STRING)
+                    types, column_format, column_properties = self.__column_schema(column_type)
+                    column_types.extend(types)
 
                 properties[column_name] = dict(
                     properties=column_properties,
                     format=column_format,
                     type=column_types,
                 )
+                if COLUMN_TYPE_INTEGER in column_types and 'unsigned' in column_type:
+                    # MySQL's unsigned columns, so destinations hold values above 2**63.
+                    properties[column_name]['minimum'] = 0
+                if column_items is not None:
+                    properties[column_name]['items'] = column_items
 
             schema = Schema.from_dict(dict(
                 properties=properties,
@@ -252,6 +245,29 @@ WHERE table_schema = '{schema}'
     def test_connection(self):
         conn = self.build_connection()
         conn.close_connection(conn.build_connection())
+
+    def __column_schema(self, column_type: str):
+        """The JSON schema types, format and properties of a database column type."""
+        if 'bool' in column_type:
+            return [COLUMN_TYPE_BOOLEAN], None, None
+        # interval and point contain "int"; they were discovered as integers.
+        if column_type.startswith(('interval', 'point')):
+            return [COLUMN_TYPE_STRING], None, None
+        if 'int' in column_type or 'bigint' in column_type:
+            return [COLUMN_TYPE_INTEGER], None, None
+        if 'double' in column_type or 'float' in column_type or \
+                'numeric' in column_type or 'decimal' in column_type or \
+                'real' in column_type or 'number' in column_type:
+            return [COLUMN_TYPE_NUMBER], None, None
+        if 'datetime' in column_type or 'timestamp' in column_type or \
+                'date' in column_type:
+            return [COLUMN_TYPE_STRING], COLUMN_FORMAT_DATETIME, None
+        if 'json' in column_type or 'variant' in column_type:
+            return [COLUMN_TYPE_OBJECT], None, {}
+        if 'uuid' in column_type:
+            return [COLUMN_TYPE_STRING], COLUMN_FORMAT_UUID, None
+        # binary, text, varchar, character varying
+        return [COLUMN_TYPE_STRING], None, None
 
     def column_type_mapping(self, column_type: str, column_format: str = None) -> str:
         return column_type_mapping(column_type, column_format)

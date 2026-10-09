@@ -2,7 +2,6 @@ from typing import Dict, List, Tuple
 
 from mage_integrations.connections.postgresql import PostgreSQL as PostgreSQLConnection
 from mage_integrations.destinations.constants import (
-    COLUMN_TYPE_OBJECT,
     INTERNAL_COLUMN_CREATED_AT,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
@@ -118,7 +117,9 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
             string_parse_func=self.string_parse_func,
             column_identifier=self.quote,
             use_lowercase=self.use_lowercase,
-            allow_reserved_words=self.allow_reserved_words
+            allow_reserved_words=self.allow_reserved_words,
+            json_object_values=True,
+            escape_json=True,
         )
         insert_columns = ', '.join(insert_columns)
         insert_values = ', '.join(insert_values)
@@ -170,9 +171,7 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
         return convert_array(value, column_type_dict)
 
     def string_parse_func(self, value: str, column_type_dict: Dict) -> str:
-        if COLUMN_TYPE_OBJECT == column_type_dict['type']:
-            return value.replace("'", "''")
-
+        # build_insert_command escapes the quotes of every value.
         return value
 
     def does_table_exist(

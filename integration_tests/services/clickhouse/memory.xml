@@ -1,0 +1,8 @@
+<!-- Smaller caches and a memory limit, so the test services fit on a CI runner. -->
+<clickhouse>
+    <max_server_memory_usage>1073741824</max_server_memory_usage>
+    <mark_cache_size>134217728</mark_cache_size>
+    <index_mark_cache_size>0</index_mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <primary_index_cache_size>67108864</primary_index_cache_size>
+</clickhouse>

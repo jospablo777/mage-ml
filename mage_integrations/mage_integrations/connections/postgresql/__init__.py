@@ -1,5 +1,7 @@
-from mage_integrations.connections.sql.base import Connection
 from psycopg2 import connect
+from psycopg2.extras import register_uuid
+
+from mage_integrations.connections.sql.base import Connection
 
 
 class PostgreSQL(Connection):
@@ -30,4 +32,8 @@ class PostgreSQL(Connection):
         )
         if self.connection_factory is not None:
             connect_kwargs['connection_factory'] = self.connection_factory
-        return connect(**connect_kwargs)
+        connection = connect(**connect_kwargs)
+        # uuid[] arrived as the array's literal text, as '{1111...,NULL}', since psycopg2
+        # reads it only with a registered type; uuid values become text as before.
+        register_uuid(conn_or_curs=connection)
+        return connection

@@ -121,6 +121,32 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The source commits offsets in single-message mode.** It never did, so a consumer
   group that restarted skipped or read again what came while it was down.
 
+#### PostgreSQL and MySQL sources and destinations of mage_integrations
+
+- **The PostgreSQL source syncs bytea, timetz, interval and array columns.** It failed on
+  bytea, timetz and interval values, which its JSON writer could not encode. It
+  discovered arrays as their element type and interval as an integer, so the destination
+  failed writing them. Arrays are discovered with their item type, interval as a string
+  and json and jsonb as objects. Binary values are written as `\x` hex text.
+- **The PostgreSQL destination writes arrays and JSON.** NULL in an array was written as
+  `None`, text with commas or quotes broke array literals, JSON values were written
+  unencoded, and an apostrophe in JSON ended the SQL string.
+- **The MySQL source syncs SET and binary columns.** SET values failed to encode, and
+  non-UTF-8 bytes failed the log writer. SET values are written comma-separated.
+  Sessions use UTC, so TIMESTAMP values no longer shift with the server's time zone.
+  Unsigned columns are discovered with `minimum: 0`, and incremental syncs on BIGINT
+  UNSIGNED keys compare above 2**63.
+- **The MySQL destination keeps values.** Integers were cast to UNSIGNED, so every
+  negative value failed; strings were CHAR(255), which cut them at 255 characters and
+  dropped trailing spaces; booleans and date-times were stored as CHAR(52); integers
+  were INT, which failed above 2**31; backslashes in text were read as escapes. New
+  columns are BIGINT, BIGINT UNSIGNED for unsigned source columns, BOOLEAN, DOUBLE, JSON,
+  DATETIME(6) and LONGTEXT, or VARCHAR(255) for keys. Tables created before keep their
+  types. The Doris destination, which used the same functions, keeps its previous types.
+- Limits of the Singer format that remain: decimals become double precision, NaN and
+  Infinity become NULL, dates become date-times at midnight UTC, and JSON null becomes
+  NULL.
+
 #### MongoDB
 
 - **Exports store Decimal, date, timedelta, NumPy arrays, sets and UUIDs**, which raised.

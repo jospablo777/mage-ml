@@ -7,7 +7,7 @@ from mage_integrations.destinations.constants import (
     INTERNAL_COLUMN_CREATED_AT,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
-from mage_integrations.destinations.mysql.utils import (
+from mage_integrations.destinations.doris.utils import (
     build_alter_table_command,
     build_create_table_command,
     clean_column_name,

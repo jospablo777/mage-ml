@@ -1,4 +1,4 @@
-from mage_integrations.utils.parsers import encode_complex
+from mage_integrations.utils.parsers import binary_as_text, encode_complex
 from singer.messages import (
     RecordMessage,
     SchemaMessage as SchemaMessageOriginal,
@@ -45,12 +45,22 @@ class SchemaMessage(SchemaMessageOriginal):
 
 def format_message(message):
     try:
-        return simplejson.dumps(
-            message.asdict(),
-            default=encode_complex,
-            ignore_nan=True,
-            use_decimal=True,
-        )
+        try:
+            return simplejson.dumps(
+                message.asdict(),
+                default=encode_complex,
+                ignore_nan=True,
+                use_decimal=True,
+            )
+        except UnicodeDecodeError:
+            # simplejson decodes bytes as UTF-8 and failed on other bytes, such as a
+            # BLOB's; they are written in bytea text format.
+            return simplejson.dumps(
+                binary_as_text(message.asdict()),
+                default=encode_complex,
+                ignore_nan=True,
+                use_decimal=True,
+            )
     except ValueError as err:
         raise Exception(f'Fail to serialize message {message}') from err
 

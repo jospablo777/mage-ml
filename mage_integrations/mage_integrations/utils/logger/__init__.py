@@ -12,7 +12,7 @@ from mage_integrations.utils.logger.constants import (
     LOG_LEVEL_INFO,
     TYPE_LOG,
 )
-from mage_integrations.utils.parsers import encode_complex
+from mage_integrations.utils.parsers import binary_as_text, encode_complex
 
 
 class Logger():
@@ -67,11 +67,20 @@ class Logger():
         data.update(kwargs)
         data.update(type=TYPE_LOG)
 
-        json_string = simplejson.dumps(
-            data,
-            default=encode_complex,
-            ignore_nan=True,
-        )
+        try:
+            json_string = simplejson.dumps(
+                data,
+                default=encode_complex,
+                ignore_nan=True,
+            )
+        except UnicodeDecodeError:
+            # The tags of a log message can hold a record's bytes; simplejson decodes
+            # bytes as UTF-8, and a log message failed the sync.
+            json_string = simplejson.dumps(
+                binary_as_text(data),
+                default=encode_complex,
+                ignore_nan=True,
+            )
 
         if self.log_to_stdout:
             sys.stdout.write(f'{json_string}\n')

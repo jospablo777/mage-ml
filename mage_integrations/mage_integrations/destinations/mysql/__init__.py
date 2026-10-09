@@ -3,7 +3,6 @@ from typing import Dict, List, Tuple
 from mage_integrations.connections.mysql import ConnectionMethod
 from mage_integrations.connections.mysql import MySQL as MySQLConnection
 from mage_integrations.destinations.constants import (
-    COLUMN_TYPE_OBJECT,
     INTERNAL_COLUMN_CREATED_AT,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
@@ -131,9 +130,13 @@ WHERE table_name = '{table_name}' AND table_schema = '{database_name}'
             columns=columns,
             records=records,
             convert_column_to_type_func=convert_column_to_type,
-            string_parse_func=lambda x, y: x.replace("'", "''").replace('\\', '\\\\')
-            if COLUMN_TYPE_OBJECT == y['type'] else x,
+            # MySQL reads a backslash in a string as an escape. Only JSON values had theirs
+            # escaped, so a backslash in text was dropped or became a control character,
+            # and one at the end of a value ended the statement with a syntax error.
+            string_parse_func=lambda x, y: x.replace('\\', '\\\\'),
             use_lowercase=self.use_lowercase,
+            json_object_values=True,
+            escape_json=True,
         )
         insert_columns = ', '.join([self.clean_column_name(col)
                                     for col in insert_columns])

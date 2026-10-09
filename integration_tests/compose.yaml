@@ -107,6 +107,8 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     tmpfs:
       - /var/lib/clickhouse
+    volumes:
+      - ./services/clickhouse/memory.xml:/etc/clickhouse-server/config.d/memory.xml:ro
     ports:
       - "${MAGE_TEST_CLICKHOUSE_PORT:-18123}:8123"
     ulimits:
@@ -136,6 +138,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 2
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
     ports:
       - "${MAGE_TEST_KAFKA_PORT:-19092}:19092"
     healthcheck:

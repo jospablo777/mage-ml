@@ -15,6 +15,7 @@ from singer.schema import Schema
 
 from mage_integrations.sources.catalog import Catalog, CatalogEntry
 from mage_integrations.sources.constants import (
+    COLUMN_TYPE_OBJECT,
     REPLICATION_METHOD_FULL_TABLE,
     REPLICATION_METHOD_INCREMENTAL,
     REPLICATION_METHOD_LOG_BASED,
@@ -455,6 +456,13 @@ class Source:
 
         return record_count
 
+    def __object_columns(self, stream) -> List[str]:
+        schema = stream.schema.to_dict() if stream.schema else {}
+        return [
+            name for name, prop in (schema.get('properties') or {}).items()
+            if COLUMN_TYPE_OBJECT in (prop.get('type') or [])
+        ]
+
     def write_records(self, stream, rows: List[Dict], properties: Dict = None) -> List:
         """Write RECORD messages.
 
@@ -477,10 +485,21 @@ class Source:
             columns = list(properties.keys())
         columns += self.internal_column_schema(stream, bookmarks=bookmarks).keys()
 
+        object_columns = self.__object_columns(stream)
+
         final_record = None
         for row in rows:
             tap_stream_id = stream.tap_stream_id
             record = {col: row.get(col) for col in columns}
+            for col in object_columns:
+                value = record.get(col)
+                if isinstance(value, str):
+                    # MySQL returns JSON columns as text, which destinations wrote as a
+                    # JSON string; the record holds the JSON value, as for PostgreSQL.
+                    try:
+                        record[col] = json.loads(value)
+                    except ValueError:
+                        pass
             write_records(
                 tap_stream_id,
                 [
