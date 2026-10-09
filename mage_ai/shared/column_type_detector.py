@@ -97,8 +97,9 @@ def infer_column_types(df, **kwargs):
                     incorrect_emails = len(
                         df_sub[~df_sub.str.contains(REGEX_EMAIL)].index,
                     )
-                    warnings.filterwarnings('ignore', 'This pattern has match groups')
-                    nums = df_sub[~df_sub.str.contains(REGEX_PHONE_NUMBER)].index
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings('ignore', r'This pattern .*has match groups')
+                        nums = df_sub[~df_sub.str.contains(REGEX_PHONE_NUMBER)].index
                     incorrect_phone_numbers = len(nums)
                     incorrect_zip_codes = len(
                         df_sub[~df_sub.str.contains(REGEX_ZIP_CODE)].index,
@@ -142,7 +143,9 @@ def infer_column_types(df, **kwargs):
         if df_drop_na.empty:
             text_feature_names.append(col_name)
         else:
-            matches = df_drop_na.astype(str).str.contains(REGEX_DATETIME_PATTERN)
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', r'This pattern .*has match groups')
+                matches = df_drop_na.astype(str).str.contains(REGEX_DATETIME_PATTERN)
             matches = matches.where(matches).dropna()
             if type(df_drop_na.iloc[0]) is list:
                 text_feature_names.append(col_name)

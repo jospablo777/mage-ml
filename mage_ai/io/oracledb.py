@@ -1,4 +1,3 @@
-import warnings
 from typing import IO, Any, List, Union
 
 import numpy as np
@@ -9,7 +8,7 @@ from pandas import DataFrame, Series, read_sql
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import PandasTypes
-from mage_ai.io.sql import BaseSQL
+from mage_ai.io.sql import BaseSQL, ignore_dbapi_connection_warning
 from mage_ai.server.logger import Logger
 from mage_ai.shared.pandas_utils import missing_as_none
 from mage_ai.shared.parsers import encode_complex
@@ -95,9 +94,7 @@ class OracleDB(BaseSQL):
 
         query_string = self._clean_query(query_string)
 
-        with self.printer.print_msg(print_message):
-            warnings.filterwarnings('ignore', category=UserWarning)
-
+        with self.printer.print_msg(print_message), ignore_dbapi_connection_warning():
             return read_sql(
                 self._enforce_limit_oracledb(query_string, limit),
                 self.conn,

@@ -1,4 +1,5 @@
 import warnings
+from contextlib import contextmanager
 from io import StringIO
 from typing import IO, Any, Dict, List, Mapping, Optional, Union
 
@@ -16,6 +17,21 @@ from mage_ai.io.export_utils import (
 )
 from mage_ai.shared.pandas_utils import timedelta_to_nanoseconds
 
+
+@contextmanager
+def ignore_dbapi_connection_warning():
+    """
+    Silence pandas' warning that read_sql supports only SQLAlchemy and sqlite3
+    connections, for one call. The clients used to call warnings.filterwarnings, which
+    silenced every UserWarning for the rest of the process.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message='pandas only supports SQLAlchemy connectable',
+            category=UserWarning,
+        )
+        yield
 
 class BaseSQL(BaseSQLConnection):
     @classmethod
@@ -211,9 +227,7 @@ class BaseSQL(BaseSQLConnection):
 
         query_string = self._clean_query(query_string)
 
-        with self.printer.print_msg(print_message):
-            warnings.filterwarnings('ignore', category=UserWarning)
-
+        with self.printer.print_msg(print_message), ignore_dbapi_connection_warning():
             return read_sql(
                 self._enforce_limit(query_string, limit),
                 self.conn,

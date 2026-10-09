@@ -52,8 +52,11 @@ class Redshift(BaseSQL):
             ]:
                 if self.settings.get(key):
                     connect_options[key] = self.settings[key]
-            warnings.filterwarnings('ignore', category=DeprecationWarning)
-            self._ctx = connect(**connect_options)
+            # redshift_connector warns on import paths it uses; the filter is scoped to the
+            # call, where it used to silence every DeprecationWarning for the process.
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', category=DeprecationWarning)
+                self._ctx = connect(**connect_options)
 
     def execute(self, query_string: str, **kwargs) -> None:
         """
