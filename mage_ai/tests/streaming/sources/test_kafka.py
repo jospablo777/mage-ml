@@ -146,7 +146,7 @@ class KafkaTests(TestCase):
                 }
                 mock_response.raise_for_status = Mock()
                 mock_post.return_value = mock_response
-                
+
                 KafkaSource(kafka_config)
 
         # Verify KafkaConsumer was called with correct parameters
