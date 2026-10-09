@@ -62,6 +62,9 @@ class BaseModel(Base):
     @classmethod
     @safe_db_query
     def get_by_id(cls, pk):
+        # SQLAlchemy warns that a NULL key may raise in a future release; there is no row.
+        if pk is None:
+            return None
         return db_connection.session.get(cls, pk)
 
     @classmethod

@@ -22,6 +22,14 @@ class GetByIdTests(DBTestCase):
     def test_returns_none_for_a_missing_row(self):
         self.assertIsNone(Role.get_by_id(2 ** 31 - 1))
 
+    def test_returns_none_for_a_null_key(self):
+        """SQLAlchemy warns that a NULL key may raise in a future release."""
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            self.assertIsNone(Role.get_by_id(None))
+
     def test_get_delegates_to_get_by_id(self):
         role = Role.create(name=f'role_{uuid.uuid4().hex}')
 
