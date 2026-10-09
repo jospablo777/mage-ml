@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from mage_ai.shared.parsers import encode_complex
 
@@ -96,20 +97,25 @@ def calculate_metrics_for_group(metrics, group):
 def build_x_y(df, group_by_columns, metrics):
     data = {}
 
-    if not hasattr(df, 'groupby') or not hasattr(df, 'columns'):
+    if isinstance(df, pl.LazyFrame):
+        df = df.collect()
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+    if not isinstance(df, pd.DataFrame):
         return data
 
-    columns = df.columns
-
-    if not all([col in columns for col in group_by_columns]):
+    if not all([col in df.columns for col in group_by_columns]):
         return data
 
-    groups = df.groupby(group_by_columns)
-    data[VARIABLE_NAME_X] = list(groups.groups.keys())
-
-    metrics_per_group = groups.apply(
-        lambda group: calculate_metrics_for_group(metrics, group),
-    ).values
+    # Iterating keeps the grouping columns in each group; GroupBy.apply drops them in
+    # pandas 3, so a metric on a grouping column raised KeyError. Keys of a list of one
+    # column are tuples, and groups.keys() will return tuples too.
+    x_values = []
+    metrics_per_group = []
+    for key, group in df.groupby(group_by_columns):
+        x_values.append(key[0] if len(group_by_columns) == 1 else key)
+        metrics_per_group.append(calculate_metrics_for_group(metrics, group))
+    data[VARIABLE_NAME_X] = x_values
 
     y_values = []
     for _idx, metric in enumerate(metrics):
