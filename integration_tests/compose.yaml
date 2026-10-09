@@ -36,3 +36,19 @@ services:
     build: services/api
     ports:
       - "${MAGE_TEST_API_PORT:-18000}:8000"
+
+  # Feast requires pandas below 3, so it runs as its own service. PostgreSQL holds its
+  # registry, offline store and online store, in the feast database.
+  feast:
+    build: services/feast
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      FEAST_PG_HOST: postgres
+      FEAST_PG_PORT: "5432"
+      FEAST_PG_DB: feast
+      FEAST_PG_USER: postgres
+      FEAST_PG_PASSWORD: test
+    ports:
+      - "${MAGE_TEST_FEAST_PORT:-16566}:6566"

@@ -7,3 +7,12 @@ default:
   POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
   POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
   POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+# The database that holds Feast's registry, offline store and online store.
+feast:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: feast
+  POSTGRES_SCHEMA: public
+  POSTGRES_USER: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+  POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+  POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"

@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - feast_historical_transform
+  language: python
+  name: feast_historical_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: feast_historical_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - feast_offline_export
+  language: python
+  name: feast_historical_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - feast_historical_load
+  uuid: feast_historical_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: feast_offline_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - feast_historical_transform
+  uuid: feast_offline_export
+name: feast_offline_polars
+type: python
+uuid: feast_offline_polars

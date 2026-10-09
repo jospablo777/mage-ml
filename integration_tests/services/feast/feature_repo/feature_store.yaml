@@ -1,0 +1,26 @@
+project: mage_it
+provider: local
+registry:
+  registry_type: sql
+  path: postgresql+psycopg://${FEAST_PG_USER}:${FEAST_PG_PASSWORD}@${FEAST_PG_HOST}:${FEAST_PG_PORT}/${FEAST_PG_DB}
+  cache_ttl_seconds: 5
+online_store:
+  type: postgres
+  host: ${FEAST_PG_HOST}
+  port: ${FEAST_PG_PORT}
+  database: ${FEAST_PG_DB}
+  db_schema: feast_online
+  user: ${FEAST_PG_USER}
+  password: ${FEAST_PG_PASSWORD}
+  # The test server has no TLS; Feast requires it by default.
+  sslmode: disable
+offline_store:
+  type: postgres
+  host: ${FEAST_PG_HOST}
+  port: ${FEAST_PG_PORT}
+  database: ${FEAST_PG_DB}
+  db_schema: public
+  user: ${FEAST_PG_USER}
+  password: ${FEAST_PG_PASSWORD}
+  sslmode: disable
+entity_key_serialization_version: 3

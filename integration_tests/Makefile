@@ -21,8 +21,10 @@ export MAGE_TEST_REDIS_PORT ?= 16379
 export MAGE_TEST_REDIS_URL ?= redis://127.0.0.1:$(MAGE_TEST_REDIS_PORT)/0
 export MAGE_TEST_API_PORT ?= 18000
 export MAGE_TEST_API_URL ?= http://127.0.0.1:$(MAGE_TEST_API_PORT)
+export MAGE_TEST_FEAST_PORT ?= 16566
+export MAGE_TEST_FEAST_URL ?= http://127.0.0.1:$(MAGE_TEST_FEAST_PORT)
 
-.PHONY: up down test test-postgres test-redis test-api ci
+.PHONY: up down test test-postgres test-redis test-api test-feast ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -41,6 +43,9 @@ test-redis: up
 
 test-api: up
 	cd .. && $(PYTHON) -m pytest integration_tests/api $(PYTEST_ARGS)
+
+test-feast: up
+	cd .. && $(PYTHON) -m pytest integration_tests/feast $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up

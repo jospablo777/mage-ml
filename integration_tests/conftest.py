@@ -121,3 +121,33 @@ def api_url():
 def collection():
     """A collection name on the test API, unique to the test."""
     return f'c_{uuid.uuid4().hex[:12]}'
+
+
+@pytest.fixture(scope='session')
+def feast_url():
+    url = os.getenv('MAGE_TEST_FEAST_URL')
+    if not url:
+        pytest.skip('Feast is not configured: MAGE_TEST_FEAST_URL unset')
+    return url.rstrip('/')
+
+
+@pytest.fixture
+def feast_offline(postgres_settings, feast_url):
+    """
+    Mage's PostgreSQL client on the database of Feast's offline store. Rows a test
+    writes for its drivers are deleted afterwards.
+    """
+    from mage_ai.io.postgres import Postgres
+
+    client = Postgres(
+        verbose=False, options=LOCK_TIMEOUT, **dict(postgres_settings, dbname='feast'),
+    )
+    client.open()
+    client.written_drivers = []
+    yield client
+    if client.written_drivers:
+        client.execute(
+            'DELETE FROM driver_hourly_stats WHERE driver_id = ANY(%(ids)s)',
+            ids=list(client.written_drivers),
+        )
+    client.close()

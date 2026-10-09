@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - feast_online_transform
+  language: python
+  name: feast_online_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: feast_online_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - feast_online_export
+  language: python
+  name: feast_online_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - feast_online_load
+  uuid: feast_online_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: feast_online_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - feast_online_transform
+  uuid: feast_online_export
+name: feast_online_pandas
+type: python
+uuid: feast_online_pandas
