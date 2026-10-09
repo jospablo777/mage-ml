@@ -12,6 +12,7 @@ from mage_ai.data_preparation.models.block.sql.utils.shared import (
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLConnection, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
+from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.shared.hash import merge_dict
 
 DEFAULT_LOGIN_TIMEOUT = 20
@@ -223,6 +224,7 @@ class Snowflake(BaseSQLConnection):
             Defaults to `'append'`.
             **kwargs: Additional arguments to pass to writer
         """
+        df = to_pandas_frame(df)
         if table_name is None:
             raise Exception('Please provide a table_name argument in the export method.')
         if database is None:

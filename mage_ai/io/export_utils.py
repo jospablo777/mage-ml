@@ -1,5 +1,6 @@
-from typing import Callable, Dict, List, Mapping
+from typing import Any, Callable, Dict, List, Mapping
 
+import polars as pl
 from pandas import DataFrame, Series
 from pandas.api.types import infer_dtype
 
@@ -87,7 +88,8 @@ def clean_df_for_export(
     Returns:
         str: Table creation query for this table.
     """
-    copy_df = df.copy()
+    # Columns are replaced, and copy-on-write keeps the caller's frame unchanged.
+    copy_df = df.copy(deep=False)
 
     columns = []
     if type(df) is DataFrame:
@@ -161,3 +163,15 @@ def gen_table_creation_query(
     if skip_semicolon_at_end:
         return f'CREATE TABLE {full_table_name} (' + ','.join(query) + ')'
     return f'CREATE TABLE {full_table_name} (' + ','.join(query) + ');'
+
+
+def to_pandas_frame(df: Any) -> Any:
+    """
+    Return a Polars DataFrame or LazyFrame as a pandas DataFrame, for exporters that build
+    their requests from pandas. Other values are returned unchanged.
+    """
+    if isinstance(df, pl.LazyFrame):
+        df = df.collect()
+    if isinstance(df, pl.DataFrame):
+        return df.to_pandas()
+    return df

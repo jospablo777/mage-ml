@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Union
 
 import boto3
+import polars as pl
 from pandas import DataFrame
 
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseFile, FileFormat
@@ -101,11 +102,13 @@ class S3(BaseFile):
         """
         if format is None:
             format = self._get_file_format(object_key)
+        if isinstance(data, pl.LazyFrame):
+            data = data.collect()
 
         with self.printer.print_msg(
             f'Exporting data to bucket \'{bucket_name}\' at key \'{object_key}\''
         ):
-            if isinstance(data, DataFrame):
+            if isinstance(data, (DataFrame, pl.DataFrame)):
                 if format == FileFormat.HDF5:
                     name = os.path.splitext(os.path.basename(object_key))[0]
                     with self.open_temporary_directory() as temp_dir:
@@ -122,7 +125,9 @@ class S3(BaseFile):
                 self.client.upload_file(data, bucket_name, object_key)
             else:
                 raise Exception(
-                    'Please provide a pandas DataFrame or a valid file path as the input.')
+                    'Please provide a pandas or Polars DataFrame or a valid file path as the '
+                    'input.',
+                )
 
     def exists(
         self, bucket_name: str, prefix: str

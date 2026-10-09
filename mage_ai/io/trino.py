@@ -14,7 +14,12 @@ from trino.transaction import IsolationLevel
 
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
-from mage_ai.io.export_utils import PandasTypes, clean_df_for_export, infer_dtypes
+from mage_ai.io.export_utils import (
+    PandasTypes,
+    clean_df_for_export,
+    infer_dtypes,
+    to_pandas_frame,
+)
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.utils import (
@@ -244,7 +249,8 @@ class Trino(BaseSQL):
                 )
             return val
 
-        df_ = df.copy()
+        # Copy-on-write keeps changes to the copy out of the caller's frame.
+        df_ = df.copy(deep=False)
 
         for col in columns:
             df_col_dropna = df_[col].dropna()
@@ -300,6 +306,7 @@ class Trino(BaseSQL):
                             Defaults to False.
             **kwargs: Additional query parameters.
         """
+        df = to_pandas_frame(df)
         if table_name is None:
             raise Exception('Please provide a table_name argument in the export method.')
         if schema_name is None:

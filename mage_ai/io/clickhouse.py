@@ -5,7 +5,7 @@ from pandas import DataFrame, Series
 
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
-from mage_ai.io.export_utils import infer_dtypes
+from mage_ai.io.export_utils import infer_dtypes, to_pandas_frame
 from mage_ai.shared.utils import (
     convert_pandas_dtype_to_python_type,
     convert_python_type_to_clickhouse_type,
@@ -223,6 +223,7 @@ class ClickHouse(BaseSQLDatabase):
             Defaults to `'append'`.
             **kwargs: Additional arguments to pass to writer
         """
+        df = to_pandas_frame(df)
         if table_name is None:
             raise Exception('Please provide a table_name argument in the export method.')
         if database is None:

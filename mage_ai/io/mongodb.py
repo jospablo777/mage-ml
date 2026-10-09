@@ -5,6 +5,7 @@ from pymongo import MongoClient
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.shared.pandas_utils import missing_as_none
 
 
@@ -81,6 +82,7 @@ class MongoDB(BaseIO):
             data (Union[DataFrame, List[Dict]): Data frame or List of Dictionary to export.
             collection (str): MongoDB collection name.
         """
+        data = to_pandas_frame(data)
         if data is None:
             return
         collection = collection or self.collection

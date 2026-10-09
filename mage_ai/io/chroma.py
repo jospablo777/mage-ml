@@ -6,6 +6,7 @@ from pandas import DataFrame
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ class Chroma(BaseIO):
             df (DataFrame): Data frame to export.
             document_column (str): name of the document.
         """
+        df = to_pandas_frame(df)
         docs = df[document_column].tolist()
         if id_column is None:
             ids = [str(x) for x in df.index.tolist()]

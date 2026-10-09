@@ -4,6 +4,7 @@ from google.oauth2 import service_account
 
 from mage_ai.io.base import BaseFile
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.shared.pandas_utils import missing_as_none
 
 
@@ -224,6 +225,7 @@ class GoogleSheets(BaseFile):
             worksheet_name (str, optional): A worksheet name to export the df. Defaults to None
             worksheet_position (int, optional): A worksheet position to export the df. Defaults to 0
         """
+        df = to_pandas_frame(df)
 
         worksheet = self.fetch_worksheet(
             sheet_url=sheet_url,

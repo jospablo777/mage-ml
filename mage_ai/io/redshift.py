@@ -8,7 +8,7 @@ from redshift_connector import connect
 from mage_ai.data_preparation.models.block.sql.utils.shared import split_query_string
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
-from mage_ai.io.export_utils import clean_df_for_export, infer_dtypes
+from mage_ai.io.export_utils import clean_df_for_export, infer_dtypes, to_pandas_frame
 from mage_ai.io.sql import BaseSQL
 from mage_ai.io.utils import format_value
 from mage_ai.shared.utils import (
@@ -158,6 +158,7 @@ class Redshift(BaseSQL):
             table_name (str): Name of the table to export the data to.
             Table must already exist.
         """
+        df = to_pandas_frame(df)
         # CREATE TABLE predictions_dev.test_v01 AS
         # SELECT *
         # FROM experimentation.assignments_dev

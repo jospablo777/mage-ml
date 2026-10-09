@@ -225,7 +225,8 @@ FETCH FIRST {limit} ROWS ONLY
             return val
 
         # Create values
-        df_ = df.copy()
+        # Copy-on-write keeps changes to the copy out of the caller's frame.
+        df_ = df.copy(deep=False)
         columns = df_.columns
         for col in columns:
             dtype = df_[col].dtype

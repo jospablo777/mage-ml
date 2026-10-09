@@ -18,7 +18,7 @@ from sqlglot import exp, parse_one
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
-from mage_ai.io.export_utils import infer_dtypes
+from mage_ai.io.export_utils import infer_dtypes, to_pandas_frame
 from mage_ai.shared.custom_logger import DX_PRINTER
 from mage_ai.shared.environments import is_debug
 from mage_ai.shared.utils import (
@@ -231,6 +231,7 @@ WHERE TABLE_NAME = '{table_name}'
             create_dataset (bool): If set to True, creates the dataset
             **configuration_params: Configuration parameters for export job
         """
+        df = to_pandas_frame(df)
         if table_id is None:
             raise Exception('Please provide a table_id argument in the export method.')
 

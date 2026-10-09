@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 
 DEFAULT_EMBEDDING_MODEL = 'all-MiniLM-L6-v2'
 
@@ -115,6 +116,7 @@ class Qdrant(BaseIO):
             vector_size (int): dimension size of vector.
             distance (models.Distance): distance metric to use.
         """
+        df = to_pandas_frame(df)
         collection_name = collection_name or self.collection
         encoder = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
 

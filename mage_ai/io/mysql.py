@@ -134,7 +134,8 @@ class MySQL(BaseSQL):
             return val
         values_placeholder = ', '.join(["%s" for i in range(len(df.columns))])
         values = []
-        df_ = df.copy()
+        # Copy-on-write keeps changes to the copy out of the caller's frame.
+        df_ = df.copy(deep=False)
         columns = df_.columns
         for col in columns:
             dtype = df_[col].dtype

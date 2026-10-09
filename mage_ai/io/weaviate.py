@@ -6,6 +6,7 @@ from pandas import DataFrame
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.shared.pandas_utils import missing_as_none
 
 LOGGER = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ class Weaviate(BaseIO):
             df (DataFrame): data frame to write.
             collection (str): name of the collection.
         """
+        df = to_pandas_frame(df)
         collection = collection or self.collection
         # Create collection if not existing
         try:

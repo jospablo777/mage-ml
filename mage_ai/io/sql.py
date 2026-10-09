@@ -2,6 +2,7 @@ import warnings
 from io import StringIO
 from typing import IO, Any, Dict, List, Mapping, Union
 
+import polars as pl
 from pandas import DataFrame, Series, read_sql
 
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLConnection, ExportWritePolicy
@@ -268,6 +269,11 @@ class BaseSQL(BaseSQLConnection):
             df = DataFrame([df])
         elif type(df) is list:
             df = DataFrame(df)
+        elif isinstance(df, pl.LazyFrame):
+            df = df.collect().to_pandas()
+        elif isinstance(df, pl.DataFrame):
+            # The SQL exporters build their statements from pandas dtypes.
+            df = df.to_pandas()
 
         if schema_name:
             full_table_name = f'{schema_name}.{table_name}'
@@ -289,6 +295,15 @@ class BaseSQL(BaseSQLConnection):
                                             allow_reserved_words=allow_reserved_words,
                                             case_sensitive=case_sensitive)
                                for col in df.columns}
+                collisions = {}
+                for col, cleaned in col_mapping.items():
+                    collisions.setdefault(cleaned, []).append(col)
+                collisions = {k: v for k, v in collisions.items() if len(v) > 1}
+                if collisions:
+                    raise ValueError(
+                        'Columns would have the same name after cleaning, and one would '
+                        f'overwrite the other: {collisions}. Rename them before exporting.',
+                    )
                 df = df.rename(columns=col_mapping)
             dtypes = infer_dtypes(df)
 

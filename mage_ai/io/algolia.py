@@ -6,6 +6,7 @@ from pandas import DataFrame
 
 from mage_ai.io.base import BaseIO
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
+from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.shared.pandas_utils import missing_as_none
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class Algolia(BaseIO):
             df (DataFrame): dataframes to write.
             index_name (str): Name of the index. Defaults to the name defined in io_config.yaml.
         """
+        df = to_pandas_frame(df)
         index_name = index_name or self.index_name
         index = self.client.init_index(index_name)
 
