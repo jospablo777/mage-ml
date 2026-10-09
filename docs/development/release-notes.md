@@ -173,6 +173,15 @@ Each item says what changed, which pipelines it affects, and what to do.
   docs listed settings the source does not take.
 - **The ActiveMQ sink sends persistent messages and waits for the broker's receipt.**
   Messages were not persistent, a rejected message was lost, and dates failed to encode.
+- **The MongoDB change stream source resumes after a restart.** Each start watched from
+  that moment, so changes made while the pipeline was stopped were lost. The resume
+  token of the last handled change is saved in the streaming checkpoint, for its
+  database and collection. Every error, from the transformer too, was printed and the
+  pipeline stopped as if it had finished; errors raise. `operation_time` failed, since it
+  was passed to watch under a name it does not take; it takes seconds since the epoch.
+  Without a collection the source watched nothing; it watches the database.
+- `encode_complex` writes ObjectIds and Decimal128 as text and BSON timestamps as
+  `{"t", "i"}`, so change documents reach JSON sinks.
 
 #### Trino
 

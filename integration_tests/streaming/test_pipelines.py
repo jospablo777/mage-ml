@@ -227,3 +227,25 @@ def test_activemq_to_activemq(mode, mage_project, activemq_port):
     assert sorted(values, key=lambda v: v['n']) == [expected(i) for i in range(COUNT)]
     # Every input message was acked.
     assert drain(activemq_port, in_queue, wait=1) == []
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_mongodb_change_stream_to_kafka(mode, mage_project, mongo, kafka_bootstrap, kafka_topics):
+    import time
+
+    out_topic = kafka_topics[1]
+    # The change stream starts at this time, whenever the pipeline opens it.
+    start_time = int(time.time()) - 1
+    with streaming_pipeline(
+        'stream_mongodb', mode, mongo_database=mongo.name, out_topic=out_topic,
+        start_time=start_time,
+    ) as run:
+        mongo.events.insert_many([message(i) for i in range(COUNT)])
+        values = wait_until(
+            lambda: read_topic(kafka_bootstrap, out_topic, COUNT), run, message='Kafka sink',
+        )
+
+    ids = {str(d['_id']) for d in mongo.events.find({}, {'_id': 1})}
+    # ObjectIds are written as text.
+    assert {v.pop('_id') for v in values} == ids
+    assert sorted(values, key=lambda v: v['n']) == [expected(i) for i in range(COUNT)]

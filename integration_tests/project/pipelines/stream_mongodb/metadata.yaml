@@ -1,0 +1,28 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_mongodb_transform]
+  language: yaml
+  name: stream_mongodb_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_mongodb_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_mongodb_to_kafka]
+  language: python
+  name: stream_mongodb_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_mongodb_source]
+  uuid: stream_mongodb_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_mongodb_to_kafka
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_mongodb_transform]
+  uuid: stream_mongodb_to_kafka
+name: stream_mongodb
+type: streaming
+uuid: stream_mongodb

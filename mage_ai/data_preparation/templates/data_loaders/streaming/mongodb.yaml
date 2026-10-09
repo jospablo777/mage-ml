@@ -1,4 +1,9 @@
 connector_type: mongodb
-connection_str: "mongodb://localhost:27017/" #Must be replica set and MongoVersion is higher than Mongo5.1
+# The change stream needs a replica set or a sharded cluster.
+connection_str: "mongodb://localhost:27017/?replicaSet=rs0"
 database: "test"
+# Leave out collection to watch every collection of the database.
 collection: "test"
+
+# Optional: where the stream starts when no resume token is saved
+# operation_time: 1735689600

@@ -80,6 +80,9 @@ def encode_complex(obj):
         return pd.Timedelta(obj).isoformat()
     elif isinstance(obj, uuid.UUID):
         return str(obj)
+    elif type(obj).__module__.startswith('bson'):
+        # MongoDB values, such as those of change stream documents.
+        return _encode_bson(obj)
     elif isinstance(obj, (bytes, bytearray, memoryview)):
         return bytes(obj).hex()
     elif isinstance(obj, INTS):
@@ -119,6 +122,18 @@ def encode_complex(obj):
         }
 
     return obj
+
+
+def _encode_bson(obj):
+    from bson import Decimal128, ObjectId, Timestamp
+
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    if isinstance(obj, Timestamp):
+        return {'t': obj.time, 'i': obj.inc}
+    if isinstance(obj, Decimal128):
+        return str(obj.to_decimal())
+    return str(obj)
 
 
 def extract_json_objects(text, decoder=None):
