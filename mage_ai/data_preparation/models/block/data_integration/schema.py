@@ -66,11 +66,11 @@ def build_schema(
     strict: bool = False,
     schema_override: Dict = None,
 ) -> Dict:
-    column_types = infer_column_types(df)
-
     properties = {}
 
     if strict:
+        # Inferring column types reads the whole frame; only strict schemas use it.
+        column_types = infer_column_types(df)
         for column, column_type in column_types.items():
             if DATETIME == column_type:
                 props = COLUMN_SCHEMA_DATETIME
@@ -90,9 +90,10 @@ def build_schema(
 
                 properties[column] = props
     else:
-        rows = df.iloc[:100].to_numpy()
         for idx, column in enumerate(df.columns):
-            column_values = rows[:, idx]
+            # to_numpy on the whole frame made every value of a numeric-only frame a
+            # NumPy float, typed as a string below. tolist keeps Python types per column.
+            column_values = df.iloc[:100, idx].tolist()
             column_type_grouped = {}
             for val in column_values:
                 col_type = type(val)

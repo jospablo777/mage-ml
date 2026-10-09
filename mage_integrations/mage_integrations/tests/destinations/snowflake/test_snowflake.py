@@ -98,3 +98,16 @@ class SnowflakeDestinationTests(unittest.TestCase, SQLDestinationMixin):
             columns=['ID', '_USER']
         )
         assert_frame_equal(df_clean, df_expected)
+
+    def test_clean_df_keeps_missing_strings_missing(self):
+        """str(None) wrote 'None' under pandas 2 and str(nan) wrote 'nan' under pandas 3."""
+        destination = Snowflake(config=self.config)
+        destination.schemas = {STREAM: SCHEMA}
+        destination.key_properties = {}
+        df = pd.DataFrame({'ID': ['a', None, 3], 'USER': [{'a': '1'}, None, None]})
+
+        df_clean = destination.clean_df(df, 'swftest')
+
+        self.assertEqual(df_clean['ID'].tolist()[0], 'a')
+        self.assertTrue(pd.isna(df_clean['ID'].tolist()[1]))
+        self.assertEqual(df_clean['ID'].tolist()[2], '3')

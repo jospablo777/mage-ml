@@ -556,7 +556,9 @@ WHERE TABLE_SCHEMA = '{schema_name}' AND TABLE_NAME = '{table_name}'
             col_settings = mapping[col].get('column_settings')
             if COLUMN_TYPE_STRING == col_type \
                     and COLUMN_FORMAT_DATETIME != col_settings.get('format'):
-                df[clean_col_name] = df[clean_col_name].apply(lambda x: serialize_obj(x))
+                # Missing values stay missing. str(None) and str(nan) wrote the text
+                # 'None' under pandas 2 and 'nan' under pandas 3.
+                df[clean_col_name] = df[clean_col_name].map(serialize_obj, na_action='ignore')
             elif COLUMN_TYPE_OBJECT == col_type:
                 df[clean_col_name] = df[clean_col_name].apply(lambda x: remove_empty_dicts(x))
         return df

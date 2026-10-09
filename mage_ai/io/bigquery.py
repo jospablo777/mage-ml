@@ -385,19 +385,31 @@ WHERE table_id = '{table_name}'
         column_types = self.get_column_types(schema, table_name)
 
         if df is not None:
-            df.fillna(value=np.nan, inplace=True)
+            # The caller's frame is left unchanged; copy-on-write makes the shallow copy
+            # independent.
+            df = df.copy(deep=False).fillna(value=np.nan)
             for col in df.columns:
                 col_type = column_types.get(col)
                 if not col_type:
                     continue
 
-                null_rows = df[col].isnull()
                 if col_type.startswith('ARRAY<STRUCT'):
-                    df.loc[null_rows, col] = df.loc[null_rows, col].apply(lambda x: [{}])
+                    empty = lambda: [{}]  # noqa: E731
                 elif col_type.startswith('ARRAY'):
-                    df.loc[null_rows, col] = df.loc[null_rows, col].apply(lambda x: [])
+                    empty = list
                 elif col_type.startswith('STRUCT'):
-                    df.loc[null_rows, col] = df.loc[null_rows, col].apply(lambda x: {})
+                    empty = dict
+                else:
+                    continue
+                # Assigning lists into a float or str column with .loc raises TypeError
+                # under pandas 3, so the column is rebuilt as objects.
+                null_rows = df[col].isnull().tolist()
+                df[col] = pd.Series(
+                    [empty() if missing else value
+                     for value, missing in zip(df[col].tolist(), null_rows)],
+                    index=df.index,
+                    dtype=object,
+                )
 
             # Clean column names
             if type(df) is DataFrame:
