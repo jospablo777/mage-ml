@@ -12,7 +12,7 @@ from sqlalchemy.engine import URL
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
-from mage_ai.io.export_utils import PandasTypes
+from mage_ai.io.export_utils import PandasTypes, insert_rows
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.hash import extract
 from mage_ai.shared.parsers import encode_complex
@@ -158,29 +158,8 @@ class MSSQL(BaseSQL):
             return val
 
         values_placeholder = ', '.join(["?" for i in range(len(df.columns))])
-        values = []
-        # Copy-on-write keeps changes to the copy out of the caller's frame.
-        df_ = df.copy(deep=False)
-        columns = df_.columns
-        for col in columns:
-            dtype = df_[col].dtype
-            if dtype == PandasTypes.OBJECT:
-                df_[col] = df_[col].apply(lambda x: serialize_obj(x))
-            elif dtype in (
-                PandasTypes.MIXED,
-                PandasTypes.UNKNOWN_ARRAY,
-                PandasTypes.COMPLEX,
-            ):
-                df_[col] = df_[col].astype('string')
-
-            # Remove extraneous surrounding double quotes
-            # that get added while performing conversion to string.
-            df_[col] = df_[col].apply(
-                lambda x: x.strip('"') if x and isinstance(x, str) else x
-            )
-        df_.replace({np.nan: None}, inplace=True)
-        for _, row in df_.iterrows():
-            values.append(tuple(row))
+        # Text columns lose the double quotes that serializing can add.
+        values = insert_rows(df, serialize=serialize_obj, strip_quotes=True)
 
         sql = f'INSERT INTO {full_table_name} VALUES ({values_placeholder})'
         cursor.executemany(sql, values)

@@ -1,7 +1,6 @@
 from typing import IO, Dict, List, Mapping, Union
 
 import numpy as np
-import pandas as pd
 import simplejson
 from mysql.connector import connect
 from mysql.connector.cursor import MySQLCursor
@@ -9,7 +8,7 @@ from pandas import DataFrame, Series
 
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
-from mage_ai.io.export_utils import PandasTypes
+from mage_ai.io.export_utils import PandasTypes, insert_rows
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.utils import clean_name
@@ -133,28 +132,11 @@ class MySQL(BaseSQL):
                 )
             return val
         values_placeholder = ', '.join(["%s" for i in range(len(df.columns))])
-        values = []
-        # Copy-on-write keeps changes to the copy out of the caller's frame.
-        df_ = df.copy(deep=False)
-        columns = df_.columns
-        for col in columns:
-            dtype = df_[col].dtype
-            if dtype == PandasTypes.OBJECT:
-                df_[col] = df_[col].apply(lambda x: serialize_obj(x))
-            elif dtype in (
-                PandasTypes.MIXED,
-                PandasTypes.UNKNOWN_ARRAY,
-                PandasTypes.COMPLEX,
-            ):
-                df_[col] = df_[col].astype('string')
-
-            # Remove extraneous surrounding double quotes
-            # that get added while performing conversion to string.
-            df_[col] = df_[col].apply(lambda x: x.strip('"') if x and isinstance(x, str) else x)
-        df_.replace({np.nan: None}, inplace=True)
-
-        for _, row in df_.iterrows():
-            values.append(tuple([str(val) if type(val) is pd.Timestamp else val for val in row]))
+        columns = df.columns
+        # Text columns lose the double quotes that serializing can add.
+        values = insert_rows(
+            df, serialize=serialize_obj, strip_quotes=True, stringify_timestamps=True,
+        )
 
         cleaned_columns = [clean_name(col, case_sensitive=case_sensitive) for col in columns]
         insert_columns = ', '.join([f'`{col}`'for col in cleaned_columns])

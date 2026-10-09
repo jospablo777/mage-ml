@@ -15,9 +15,9 @@ from trino.transaction import IsolationLevel
 from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import (
-    PandasTypes,
     clean_df_for_export,
     infer_dtypes,
+    insert_rows,
     to_pandas_frame,
 )
 from mage_ai.io.sql import BaseSQL
@@ -249,24 +249,8 @@ class Trino(BaseSQL):
                 )
             return val
 
-        # Copy-on-write keeps changes to the copy out of the caller's frame.
-        df_ = df.copy(deep=False)
-
-        for col in columns:
-            df_col_dropna = df_[col].dropna()
-            if isinstance(df_col_dropna, DataFrame):
-                if len(df_col_dropna.index) == 0:
-                    continue
-
-            if dtypes[col] == PandasTypes.OBJECT \
-                    or (df_[col].dtype == PandasTypes.OBJECT and not
-                        isinstance(df_col_dropna.iloc[0], str)):
-                df_[col] = df_[col].apply(lambda x: serialize_obj(x))
-        df_.replace({np.nan: None}, inplace=True)
-
-        values = []
-        for _, row in df_.iterrows():
-            values.append(tuple(row))
+        # serialize_obj leaves text unchanged, so it applies to every object column.
+        values = insert_rows(df, serialize=serialize_obj)
 
         cursor.executemany(sql, values)
 

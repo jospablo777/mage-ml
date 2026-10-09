@@ -255,8 +255,10 @@ class Redshift(BaseSQL):
                         cur.execute(query)
                     if df.shape[0] > 0:
                         columns = ', '.join([t[0] for t in columns_with_type])
+                        # df.values made every value of a numeric-only frame a NumPy
+                        # float, which format_value quoted, and rounded large integers.
                         values = [f"""({', '.join([format_value(x) for x in v])})"""
-                                  for v in df.values]
+                                  for v in df.itertuples(index=False, name=None)]
                         values = ', '.join(values)
                         query = f'INSERT INTO {full_table_name} ({columns})\nVALUES {values}'
 

@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Mapping
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 import polars as pl
 from pandas import DataFrame, Series
@@ -175,3 +175,38 @@ def to_pandas_frame(df: Any) -> Any:
     if isinstance(df, pl.DataFrame):
         return df.to_pandas()
     return df
+
+
+def insert_rows(
+    df: DataFrame,
+    serialize: Optional[Callable[[Any], Any]] = None,
+    strip_quotes: bool = False,
+    stringify_timestamps: bool = False,
+) -> List[tuple]:
+    """
+    Rows of df as tuples of Python values for a driver's executemany, with None for every
+    missing value.
+
+    serialize is applied to object columns, and strip_quotes removes surrounding double
+    quotes from text values. iterrows built a Series per row, which turned every value of
+    a numeric-only frame into float: 2**53 + 1 became 9007199254740992.0. replace with
+    np.nan: None left NaN in float and str columns under pandas 3.
+    """
+    from pandas.api.types import is_object_dtype, is_string_dtype
+
+    from mage_ai.shared.pandas_utils import missing_as_none
+
+    frame = df.copy(deep=False)
+    for column in frame.columns:
+        series = frame[column]
+        if serialize is not None and is_object_dtype(series.dtype):
+            series = series.map(serialize)
+        if strip_quotes and (is_object_dtype(series.dtype) or is_string_dtype(series.dtype)):
+            series = series.map(lambda v: v.strip('"') if isinstance(v, str) and v else v)
+        frame[column] = series
+    rows = missing_as_none(frame).itertuples(index=False, name=None)
+    if stringify_timestamps:
+        from pandas import Timestamp
+
+        return [tuple(str(v) if isinstance(v, Timestamp) else v for v in row) for row in rows]
+    return list(rows)
