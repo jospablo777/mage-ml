@@ -171,6 +171,27 @@ class PipelineExecutor:
                     result = block_run_outputs[idx]
                     if isinstance(result, dict):
                         block_run_outputs_cache[block_run.block_uuid] = result.get('output', [])
+                self.__release_read_outputs(pipeline_run, block_run_outputs_cache)
+            block_run_outputs = None
+
+    def __release_read_outputs(self, pipeline_run: PipelineRun, cache: Dict[str, List]) -> None:
+        """
+        Drops the outputs whose downstream blocks have all finished. Every output stayed in
+        memory until the run ended.
+        """
+        finished = {
+            BlockRun.BlockRunStatus.CANCELLED,
+            BlockRun.BlockRunStatus.COMPLETED,
+            BlockRun.BlockRunStatus.CONDITION_FAILED,
+            BlockRun.BlockRunStatus.FAILED,
+            BlockRun.BlockRunStatus.UPSTREAM_FAILED,
+        }
+        statuses = {br.block_uuid: br.status for br in pipeline_run.block_runs}
+        for block_uuid in list(cache):
+            block = self.pipeline.get_block(block_uuid)
+            downstream = [b.uuid for b in (block.downstream_blocks or [])] if block else []
+            if all(statuses.get(uuid) in finished for uuid in downstream):
+                del cache[block_uuid]
 
     def build_tags(self, **kwargs):
         default_tags = dict(

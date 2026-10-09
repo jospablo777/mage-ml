@@ -36,6 +36,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   stored as their description, with a warning.
 - **A block's outputs reach the next block in order.** They were read in text order, so
   a block that returned 11 or more outputs passed `output_10` before `output_2`.
+- **Pipelines that run in one process store the error of a failed block.** The error was
+  left out because the exception is not JSON, so the run page and failure notifications
+  had none.
+- **`cache_block_output_in_memory` drops each output once its downstream blocks ran.**
+  Every output stayed in memory until the run ended.
 - **Outputs that are not stored leave no files.** With `cache_block_output_in_memory`,
   each block still wrote shape files into an `output_0` with no data.
 - **Blocks without tests no longer read their output back** after writing it. The whole

@@ -154,6 +154,30 @@ class FlowExecutionTest(DBTestCase):
                 self.execute_run(run)
                 self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
 
+    def test_the_memory_cache_drops_outputs_once_read(self):
+        self.branched_flow()
+        self.pipeline.cache_block_output_in_memory = True
+        self.pipeline.save()
+        uuid = self.pipeline.uuid
+        cached_after_wave = []
+        release = PipelineExecutor._PipelineExecutor__release_read_outputs
+
+        def record(executor, pipeline_run, cache):
+            release(executor, pipeline_run, cache)
+            cached_after_wave.append(sorted(key[len(uuid) + 1:] for key in cache))
+
+        with patch.object(PipelineExecutor, '_PipelineExecutor__release_read_outputs', record):
+            run = self.execute_run(trigger_pipeline(uuid, variables={
+                'multiplier': 2, 'output_path': str(self.output),
+            }))
+
+        self.assert_export(run)
+        # load is kept until filter and aggregate have read it, then dropped; the export
+        # has no downstream block, and nothing is kept at the end.
+        self.assertEqual(cached_after_wave[0], ['load'])
+        self.assertNotIn('load', cached_after_wave[-2])
+        self.assertEqual(cached_after_wave[-1], [])
+
     def test_async_execution_awaits_all_blocks(self):
         self.branched_flow()
         run = trigger_pipeline(self.pipeline.uuid, variables={
@@ -211,6 +235,24 @@ class FlowExecutionTest(DBTestCase):
         run.refresh()
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.CANCELLED)
         self.assertFalse(self.output.exists())
+
+    def test_a_failed_block_in_one_process_keeps_its_error(self):
+        """The error was left out when blocks ran in one process."""
+        self.block('fail', 'data_loader', '''
+            @data_loader
+            def fail(**kwargs):
+                raise RuntimeError('source failed')
+        ''')
+        run = trigger_pipeline(self.pipeline.uuid, variables={})
+        run.pipeline_schedule.update(settings={'allow_blocks_to_fail': True})
+
+        self.execute_run(run)
+
+        block_run = run.block_runs[0]
+        block_run.refresh()
+        self.assertEqual(block_run.status.value, 'failed')
+        self.assertIn('source failed', block_run.metrics['error']['error'])
+        self.assertIn('RuntimeError', block_run.metrics['error']['message'])
 
     def test_allowed_failure_does_not_stop_independent_branch(self):
         self.block('fail', 'data_loader', '''

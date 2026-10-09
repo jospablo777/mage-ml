@@ -714,9 +714,7 @@ class BlockExecutor:
                             BlockRun.BlockRunStatus.FAILED,
                             block_run_id=block_run_id,
                             callback_url=callback_url,
-                            error_details=dict(
-                                error=error,
-                            ),
+                            error_details=error_details,
                             tags=tags,
                         )
                     self.execute_callback(
@@ -1436,16 +1434,18 @@ class BlockExecutor:
             if status == BlockRun.BlockRunStatus.COMPLETED:
                 update_kwargs['completed_at'] = datetime.now(tz=pytz.UTC)
 
-            # Cannot save raw value in DB; it breaks:
-            # sqlalchemy.exc.StatementError:
-            # (builtins.TypeError) Object of type Py4JJavaError is not JSON serializable
-            # [SQL: UPDATE block_run SET updated_at=CURRENT_TIMESTAMP, status=?, metrics=?
-            # WHERE block_run.id = ?]
-
-            # if BlockRun.BlockRunStatus.FAILED == status and error_details:
-            #     update_kwargs['metrics'] = merge_dict(block_run.metrics or {}, dict(
-            #         __error_details=error_details,
-            #     ))
+            # The error as text, as the scheduler stores it: the raw exception is not JSON
+            # (a Py4JJavaError failed the update), so it was left out and pipelines that run
+            # in one process reported failures without their error.
+            if BlockRun.BlockRunStatus.FAILED == status and error_details:
+                update_kwargs['metrics'] = dict(
+                    block_run.metrics or {},
+                    error=dict(
+                        error=str(error_details.get('error')),
+                        errors=error_details.get('errors'),
+                        message=error_details.get('message'),
+                    ),
+                )
 
             block_run.update(**update_kwargs)
             return
@@ -1457,7 +1457,11 @@ class BlockExecutor:
 
         block_run_data = dict(status=status)
         if error_details:
-            block_run_data['error_details'] = error_details
+            # The exception itself is not JSON; json.dumps raised and no status was sent.
+            block_run_data['error_details'] = dict(
+                error=str(error_details.get('error')),
+                message=error_details.get('message'),
+            )
 
         # Fall back to making API calls
         response = requests.put(
