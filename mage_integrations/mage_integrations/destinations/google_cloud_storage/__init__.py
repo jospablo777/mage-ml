@@ -54,9 +54,10 @@ class GoogleCloudStorage(Destination):
 
         buffer = BytesIO()
         if self.file_type == 'parquet':
+            # Microseconds keep what pandas stores; milliseconds dropped them.
             df.to_parquet(
                 buffer,
-                coerce_timestamps='ms',
+                coerce_timestamps='us',
                 allow_truncated_timestamps=True,
             )
         elif self.file_type == 'csv':

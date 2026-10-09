@@ -246,8 +246,15 @@ class BaseFile(BaseIO):
             kwargs.setdefault('key', name)
         elif format == FileFormat.PARQUET and isinstance(df, DataFrame):
             if 'coerce_timestamps' not in kwargs:
-                kwargs['coerce_timestamps'] = 'ms'
+                # Microseconds are what pandas 3 stores and what Spark, Athena and Hive read
+                # as TIMESTAMP_MICROS. The default used to be milliseconds, which dropped
+                # the microseconds without an error. Nanoseconds are still cut.
+                kwargs['coerce_timestamps'] = 'us'
                 kwargs['allow_truncated_timestamps'] = True
+        elif format == FileFormat.JSON and isinstance(df, DataFrame):
+            # pandas deprecates epoch milliseconds as the default date format.
+            kwargs.setdefault('date_format', 'iso')
+            kwargs.setdefault('date_unit', 'us')
         writer(output, **kwargs)
 
     def __get_writer(
@@ -271,9 +278,10 @@ class BaseFile(BaseIO):
             elif format == FileFormat.JSON:
                 return df.write_json
             elif format == FileFormat.HDF5:
-                return df.write_hdf5
+                # Polars writes neither HDF5 nor XML.
+                return df.to_pandas().to_hdf
             elif format == FileFormat.XML:
-                return df.write_xml
+                return df.to_pandas().to_xml
             elif format == FileFormat.EXCEL:
                 return df.write_excel
             return df.write_parquet
