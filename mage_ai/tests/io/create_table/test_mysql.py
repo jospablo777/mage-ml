@@ -24,5 +24,8 @@ class TestTableMySQL(DBTestCase):
             unique_constraints=unique_constraints,
             overwrite_types=overwrite_types,
         )
-        self.assertEqual('CREATE TABLE Test (`varchar_time` TEXT NULL,`datetime_time` TIMESTAMP NULL);', # noqa
-                         query)
+        self.assertEqual(
+            'CREATE TABLE `Test`.`Test` '
+            '(`varchar_time` LONGTEXT NULL,`datetime_time` TIMESTAMP NULL);',
+            query,
+        )

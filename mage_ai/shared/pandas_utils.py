@@ -116,8 +116,14 @@ def datetime_to_epoch_seconds(series: pd.Series) -> pd.Series:
 
 
 def timedelta_to_nanoseconds(series: pd.Series) -> pd.Series:
-    """Integer nanoseconds for a timedelta64 column of any resolution."""
-    return series.astype('timedelta64[ns]').astype('int64')
+    """
+    Integer nanoseconds for a timedelta64 column of any resolution, with NA for NaT. A
+    cast to int64 turned NaT into -9223372036854775808, which exporters wrote as a value.
+    """
+    nanoseconds = series.astype('timedelta64[ns]')
+    result = nanoseconds.astype('int64').astype('Int64')
+    result[nanoseconds.isna()] = pd.NA
+    return result
 
 
 def integer_bit_width(min_value, max_value) -> int:

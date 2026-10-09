@@ -1,6 +1,6 @@
 import warnings
 from io import StringIO
-from typing import IO, Any, Dict, List, Mapping, Union
+from typing import IO, Any, Dict, List, Mapping, Optional, Union
 
 import polars as pl
 from pandas import DataFrame, Series, read_sql
@@ -12,6 +12,7 @@ from mage_ai.io.export_utils import (
     clean_df_for_export,
     gen_table_creation_query,
     infer_dtypes,
+    to_pandas_frame,
 )
 from mage_ai.shared.pandas_utils import timedelta_to_nanoseconds
 
@@ -219,6 +220,12 @@ class BaseSQL(BaseSQLConnection):
                 **kwargs,
             )
 
+    def _full_table_name(self, schema_name: Optional[str], table_name: str) -> str:
+        """The table name as written in statements. Clients that quote names override it."""
+        if schema_name:
+            return f'{schema_name}.{table_name}'
+        return table_name
+
     def export(
         self,
         df: DataFrame,
@@ -269,16 +276,11 @@ class BaseSQL(BaseSQLConnection):
             df = DataFrame([df])
         elif type(df) is list:
             df = DataFrame(df)
-        elif isinstance(df, pl.LazyFrame):
-            df = df.collect().to_pandas()
-        elif isinstance(df, pl.DataFrame):
+        elif isinstance(df, (pl.DataFrame, pl.LazyFrame)):
             # The SQL exporters build their statements from pandas dtypes.
-            df = df.to_pandas()
+            df = to_pandas_frame(df)
 
-        if schema_name:
-            full_table_name = f'{schema_name}.{table_name}'
-        else:
-            full_table_name = table_name
+        full_table_name = self._full_table_name(schema_name, table_name)
 
         if not query_string:
             if index:

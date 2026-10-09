@@ -166,6 +166,14 @@ class TimedeltaToNanosecondsTests(TestCase):
 
         self.assertTrue(pd.api.types.is_integer_dtype(timedelta_to_nanoseconds(series)))
 
+    def test_nat_becomes_na(self):
+        """NaT was cast to -9223372036854775808, which exporters wrote as a value."""
+        series = pd.Series(pd.to_timedelta(['1 s', None]))
+
+        self.assertEqual(
+            timedelta_to_nanoseconds(series).tolist(), [1_000_000_000, pd.NA],
+        )
+
 
 class IntegerBitWidthTests(TestCase):
     def test_picks_the_smallest_width(self):

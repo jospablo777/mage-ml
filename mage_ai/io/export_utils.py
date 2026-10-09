@@ -1,6 +1,8 @@
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
+import pandas as pd
 import polars as pl
+import pyarrow as pa
 from pandas import DataFrame, Series
 from pandas.api.types import infer_dtype
 
@@ -173,8 +175,40 @@ def to_pandas_frame(df: Any) -> Any:
     if isinstance(df, pl.LazyFrame):
         df = df.collect()
     if isinstance(df, pl.DataFrame):
-        return df.to_pandas()
+        return polars_to_pandas(df)
     return df
+
+
+# pandas' nullable types for the Arrow integer and boolean types.
+_NULLABLE_PANDAS_TYPES = {
+    pa.int8(): pd.Int8Dtype(),
+    pa.int16(): pd.Int16Dtype(),
+    pa.int32(): pd.Int32Dtype(),
+    pa.int64(): pd.Int64Dtype(),
+    pa.uint8(): pd.UInt8Dtype(),
+    pa.uint16(): pd.UInt16Dtype(),
+    pa.uint32(): pd.UInt32Dtype(),
+    pa.uint64(): pd.UInt64Dtype(),
+    pa.bool_(): pd.BooleanDtype(),
+    # to_pandas turned dates into datetime64.
+    pa.date32(): pd.ArrowDtype(pa.date32()),
+}
+
+
+def polars_to_pandas(frame: pl.DataFrame) -> DataFrame:
+    """
+    A Polars frame as pandas for the exporters that build statements from pandas.
+    Integer and boolean columns become pandas' nullable types: to_pandas made an integer
+    column with a null float64, which rounds values above 2**53. Dates stay dates.
+    """
+    wide = [
+        name for name, dtype in frame.schema.items() if dtype in (pl.Int128, pl.UInt128)
+    ]
+    # pyarrow cannot import Polars' 128-bit integers; they become Python ints.
+    result = frame.drop(wide).to_pandas(types_mapper=_NULLABLE_PANDAS_TYPES.get)
+    for name in wide:
+        result[name] = pd.Series(frame[name].to_list(), index=result.index, dtype=object)
+    return result[frame.columns]
 
 
 def insert_rows(
