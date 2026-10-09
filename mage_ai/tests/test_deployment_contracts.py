@@ -127,12 +127,19 @@ class NfsClientTest(unittest.TestCase):
 class PublishWorkflowTest(unittest.TestCase):
     """
     Both workflows were disabled because they pushed to upstream namespaces. A
-    fork with no release path cannot deploy what its CI validated.
+    fork with no release path cannot deploy what its CI validated. They publish the
+    fork on manual dispatch only; nothing is published on push or tag.
     """
 
     def workflow(self, name):
         path = REPO_ROOT / '.github/workflows' / name
         return path.read_text(encoding='utf-8'), yaml.safe_load(path.read_text(encoding='utf-8'))
+
+    def assert_manual_only(self, workflow):
+        # `on` parses as the boolean True.
+        triggers = workflow[True]
+        self.assertIn('workflow_dispatch', triggers)
+        self.assertNotIn('push', triggers)
 
     def test_image_workflow_publishes_the_fork(self):
         text, workflow = self.workflow('publish_docker_image.yml')
@@ -140,15 +147,14 @@ class PublishWorkflowTest(unittest.TestCase):
         self.assertNotIn('if: false', text)
         self.assertNotIn(UPSTREAM_IMAGE, text)
         self.assertIn('ghcr.io', text)
-        # `on` parses as the boolean True.
-        self.assertIn('tags', workflow[True]['push'])
+        self.assert_manual_only(workflow)
 
     def test_distribution_workflow_builds_every_workspace_package(self):
         text, workflow = self.workflow('publish_to_pypi.yml')
 
         self.assertNotIn('if: false', text)
         self.assertIn('uv build --all-packages', text)
-        self.assertIn('tags', workflow[True]['push'])
+        self.assert_manual_only(workflow)
 
 
 class UvVersionTest(unittest.TestCase):

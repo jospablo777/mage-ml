@@ -9,7 +9,9 @@ class TestS3Storage(TestCase):
     def setUp(self):
         # Create a mock for the s3.Client instance
         self.s3_client_mock = MagicMock()
-        self.storage = S3Storage(bucket='your_bucket', dirpath='your_dirpath')
+        # A boto3 client given no credentials looks them up from the EC2 instance
+        # metadata endpoint over the network when it is created.
+        self.storage = S3Storage(bucket='your_bucket', dirpath='your_dirpath', client=MagicMock())
         self.storage.client = self.s3_client_mock
 
     def test_isdir(self):

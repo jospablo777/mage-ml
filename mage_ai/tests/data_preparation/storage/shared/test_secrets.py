@@ -91,9 +91,11 @@ class SecretTests(DBTestCase):
         data_dir = os.path.join(self.repo_path, 'data')
         mock_data_dir.return_value = data_dir
 
-        _, key_uuid = _get_encryption_key(Entity.GLOBAL)
-
+        # Creating a secret creates the key; reading it first depended on another test
+        # having run before this one.
         create_secret('secret6', 'value')
+
+        _, key_uuid = _get_encryption_key(Entity.GLOBAL)
 
         with open(os.path.join(data_dir, 'secrets', 'uuid'), 'w') as f:
             f.write('  ' + key_uuid + '\n ')

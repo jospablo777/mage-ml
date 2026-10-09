@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from mage_ai.authentication.providers.okta import OktaProvider
 
@@ -18,7 +18,20 @@ class OktaProviderTest(unittest.TestCase):
         self.token_endpoint = 'https://samples.auth0.com/oauth/token'
         self.userinfo_endpoint = 'https://samples.auth0.com/userinfo'
 
-    def test_okta_provider_initialization(self):
+    def discovery_response(self):
+        # The provider fetched the discovery document from samples.auth0.com, so the test
+        # needed the network.
+        response = MagicMock()
+        response.json.return_value = dict(
+            authorization_endpoint=self.authorization_endpoint,
+            token_endpoint=self.token_endpoint,
+            userinfo_endpoint=self.userinfo_endpoint,
+        )
+        return response
+
+    @patch('mage_ai.authentication.providers.oidc.requests.get')
+    def test_okta_provider_initialization(self, get):
+        get.return_value = self.discovery_response()
         for url, id, secret in test_parameters:
             with self.subTest():
                 with patch.dict(
@@ -40,4 +53,8 @@ class OktaProviderTest(unittest.TestCase):
                         self.assertEqual(provider.token_endpoint, self.token_endpoint)
                         self.assertEqual(
                             provider.userinfo_endpoint, self.userinfo_endpoint
+                        )
+                        self.assertEqual(
+                            get.call_args.args[0],
+                            'https://samples.auth0.com/.well-known/openid-configuration',
                         )

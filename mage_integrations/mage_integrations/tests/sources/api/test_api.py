@@ -1,6 +1,8 @@
 import gzip
+import json
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mage_integrations.sources.api import Api, read_csv_to_pandas
@@ -263,6 +265,20 @@ class ApiCsvTest(unittest.TestCase):
         self.assertEqual(rows, [dict(column_1=1, column_2='a')])
 
 
+FIXTURES = Path(__file__).parent / 'fixtures'
+
+
+def serve(source, name: str):
+    """
+    Serve a saved response. These tests downloaded a Google Sheet and a GitHub gist, so
+    they failed without network access or when either was slow.
+    """
+    content = (FIXTURES / name).read_bytes()
+    response = MagicMock(content=content)
+    response.json.side_effect = lambda: json.loads(content)
+    return patch.object(source, '_Api__build_response', return_value=response)
+
+
 class ApiTest(unittest.TestCase):
 
     def test_api_csv(self):
@@ -279,7 +295,8 @@ class ApiTest(unittest.TestCase):
         ) as mock_build_connection:
             source.test_connection()
 
-            catalog = source.discover()
+            with serve(source, 'sheet.csv'):
+                catalog = source.discover()
             self.assertEqual(catalog.to_dict(), csv_catalog_example())
             mock_build_connection.assert_called()
 
@@ -297,7 +314,8 @@ class ApiTest(unittest.TestCase):
         ) as mock_build_connection:
             source.test_connection()
 
-            catalog = source.discover()
+            with serve(source, 'sheet.tsv'):
+                catalog = source.discover()
             self.assertEqual(catalog.to_dict(), csv_catalog_example())
             mock_build_connection.assert_called()
 
@@ -315,7 +333,8 @@ class ApiTest(unittest.TestCase):
         ) as mock_build_connection:
             source.test_connection()
 
-            catalog = source.discover()
+            with serve(source, 'sheet.xlsx'):
+                catalog = source.discover()
             self.assertEqual(catalog.to_dict(), csv_catalog_example())
             mock_build_connection.assert_called()
 
@@ -334,7 +353,8 @@ class ApiTest(unittest.TestCase):
             source.test_connection()
             mock_build_connection.assert_called_once()
 
-            catalog = source.discover()
+            with serve(source, 'coins.json'):
+                catalog = source.discover()
 
             self.assertEqual(catalog.to_dict(), json_catalog_example())
 

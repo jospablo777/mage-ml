@@ -79,7 +79,9 @@ test_profile:
 
             self.assertEqual(mock_objects['sink'].io_client, mock_objects['io_client'])
 
-            del mock_objects['sink']
+            # destroy runs from __del__. Deleting the reference ran it only when nothing
+            # else held the sink, which depended on garbage collection.
+            mock_objects['sink'].destroy()
             mock_objects['io_client'].close.assert_called_once()
 
     @patch('mage_ai.streaming.sinks.generic_io.importlib.import_module')
