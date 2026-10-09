@@ -3,6 +3,8 @@ from mage_ai.io.base import DataSource
 from mage_ai.shared.hash import index_by
 
 GROUP_AGGREGATE = 'Aggregate'
+GROUP_APIS = 'APIs'
+GROUP_CLOUD_STORAGE = 'Cloud storage'
 GROUP_COLUMN_ACTIONS = 'Column actions'
 GROUP_COLUMN_REMOVAL = 'Column removal'
 GROUP_DATABASES = 'Databases'
@@ -13,6 +15,7 @@ GROUP_DATA_WAREHOUSES = 'Data warehouses'
 GROUP_DELTA_LAKE = 'Delta Lake'
 GROUP_FEATURE_EXTRACTION = 'Feature extraction'
 GROUP_FEATURE_SCALING = 'Feature scaling'
+GROUP_FILES = 'Files'
 GROUP_FORMATTING = 'Formatting'
 GROUP_ORCHESTRATION = 'Orchestration'
 GROUP_ROW_ACTIONS = 'Row actions'
@@ -704,4 +707,102 @@ TEMPLATES_ONLY_FOR_V2 = [
     ),
 ]
 
-TEMPLATES_BY_UUID = index_by(lambda x: x['name'], TEMPLATES + TEMPLATES_ONLY_FOR_V2)
+
+def _r_template(block_type, name, file_name, description, groups=None):
+    folder = {
+        BlockType.DATA_LOADER: 'data_loaders',
+        BlockType.DATA_EXPORTER: 'data_exporters',
+        BlockType.TRANSFORMER: 'transformers',
+    }[block_type]
+    return dict(
+        block_type=block_type,
+        description=description,
+        groups=groups or [],
+        language=BlockLanguage.R,
+        name=name,
+        path=f'{folder}/r/{file_name}',
+    )
+
+
+# The templates of R blocks, which the block menus list under R.
+R_TEMPLATES = [
+    _r_template(
+        BlockType.DATA_LOADER, 'Local file', 'file.r',
+        'Read a CSV, TSV, Parquet, Feather, JSON, NDJSON or RDS file.', [GROUP_FILES],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'Amazon S3', 's3.r',
+        'Read a data file from S3 or S3-compatible storage.', [GROUP_CLOUD_STORAGE],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'API', 'api.r', 'Request JSON from an API with httr2.',
+        [GROUP_APIS],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'PostgreSQL', 'postgres.r',
+        'Query PostgreSQL with DBI and RPostgres.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'MySQL', 'mysql.r', 'Query MySQL with DBI and RMariaDB.',
+        [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'DuckDB', 'duckdb.r', 'Query DuckDB with DBI and duckdb.',
+        [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_LOADER, 'SQLite', 'sqlite.r',
+        'Query a SQLite database file with DBI and RSQLite.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Clean data', 'clean.r',
+        'snake_case column names, trimmed text, no empty or duplicate rows.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Aggregate', 'aggregate.r',
+        'Group rows and sum the numeric columns of each group.', [GROUP_AGGREGATE],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Join', 'join.r', 'Join the outputs of two upstream blocks.',
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Reshape', 'reshape.r',
+        'Turn columns into rows with pivot_longer.',
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'Local file', 'file.r',
+        'Write a CSV, TSV, Parquet, Feather, JSON, NDJSON or RDS file.', [GROUP_FILES],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'Amazon S3', 's3.r',
+        'Write a data file to S3 or S3-compatible storage.', [GROUP_CLOUD_STORAGE],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'API', 'api.r',
+        'Send rows to an API as JSON with httr2.', [GROUP_APIS],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'PostgreSQL', 'postgres.r',
+        'Write a table to PostgreSQL with DBI and RPostgres.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'MySQL', 'mysql.r',
+        'Write a table to MySQL with DBI and RMariaDB.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'DuckDB', 'duckdb.r',
+        'Write a table to DuckDB with DBI and duckdb.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'SQLite', 'sqlite.r',
+        'Write a table to a SQLite database file with DBI and RSQLite.', [GROUP_DATABASES],
+    ),
+]
+TEMPLATES += R_TEMPLATES
+
+# By name, which R templates share with Python ones; R templates are left out.
+TEMPLATES_BY_UUID = index_by(
+    lambda x: x['name'],
+    [t for t in TEMPLATES + TEMPLATES_ONLY_FOR_V2 if t['language'] != BlockLanguage.R],
+)

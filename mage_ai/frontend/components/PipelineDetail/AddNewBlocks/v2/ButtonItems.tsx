@@ -46,7 +46,7 @@ import { OpenBlockBrowserModalType } from '@components/BlockBrowser/constants';
 import { PipelineTypeEnum } from '@interfaces/PipelineType';
 import { capitalize } from '@utils/string';
 import { getColorsForBlockType } from '@components/CodeBlock/index.style';
-import { getdataSourceMenuItems } from '../utils';
+import { flattenTemplateGroups, getdataSourceMenuItems } from '../utils';
 import { ignoreKeys } from '@utils/hash';
 
 type ItemSettingsOptions = {
@@ -223,55 +223,55 @@ function ButtonItems({
       pipelineType,
     ]);
 
-  const buildNonPythonItems = useCallback((blockType: BlockTypeEnum) => [
+  // SQL and R come first, as one entry each, so that they stay in view above the long
+  // list of Python templates; R opens its templates.
+  const buildNonPythonItems = useCallback((blockType: BlockTypeEnum): FlyoutMenuItemType[] => [
     {
-      isGroupingTitle: true,
       label: () => 'SQL',
-      uuid: `${BlockLanguageEnum.SQL}/${blockType}/group`,
-    },
-    {
-      label: () => 'Base template (generic)',
       onClick: () => {
         addNewBlock({
           language: BlockLanguageEnum.SQL,
           type: blockType,
         });
       },
+      tooltip: () => 'A SQL block from the base template',
       uuid: `${BlockLanguageEnum.SQL}/${blockType}/Base template (generic)`,
     },
     {
-      isGroupingTitle: true,
+      items: [
+        {
+          label: () => 'Base template (generic)',
+          onClick: () => {
+            addNewBlock({
+              language: BlockLanguageEnum.R,
+              type: blockType,
+            });
+          },
+          uuid: `${BlockLanguageEnum.R}/${blockType}/Base template (generic)`,
+        },
+        // The R templates of the block type: files, S3, APIs and databases.
+        ...flattenTemplateGroups(
+          blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.R]?.items,
+        ),
+      ],
       label: () => 'R',
-      uuid: `${BlockLanguageEnum.R}/${blockType}/group`,
-    },
-    {
-      label: () => 'Base template (generic)',
-      onClick: () => {
-        addNewBlock({
-          language: BlockLanguageEnum.R,
-          type: blockType,
-        });
-      },
-      uuid: `${BlockLanguageEnum.R}/${blockType}/Base template (generic)`,
+      uuid: `${BlockLanguageEnum.R}/${blockType}`,
     },
   ], [
     addNewBlock,
+    blockTemplatesByBlockType,
   ]);
 
   const dataLoaderGroupItems = useMemo(() => {
-    const arr = [
+    // @ts-ignore
+    const arr = buildNonPythonItems(BlockTypeEnum.DATA_LOADER).concat([
       {
         isGroupingTitle: true,
         label: () => 'Python',
         uuid: `${BlockLanguageEnum.PYTHON}${BlockTypeEnum.DATA_LOADER}/group`,
       },
       // @ts-ignore
-    ].concat(
-      itemsDataLoader,
-    ).concat(
-      // @ts-ignore
-      buildNonPythonItems(BlockTypeEnum.DATA_LOADER),
-    );
+    ]).concat(itemsDataLoader);
 
     if (itemsDataLoaderSource) {
       arr.push(...[
@@ -305,14 +305,15 @@ function ButtonItems({
   ]);
 
   const dataExporterGroupItems = useMemo(() => {
-    const arr = [
+    // @ts-ignore
+    const arr = buildNonPythonItems(BlockTypeEnum.DATA_EXPORTER).concat([
       {
         isGroupingTitle: true,
         label: () => 'Python',
         uuid: `${BlockLanguageEnum.PYTHON}${BlockTypeEnum.DATA_EXPORTER}/group`,
       },
       // @ts-ignore
-    ].concat(itemsDataExporter).concat(buildNonPythonItems(BlockTypeEnum.DATA_EXPORTER));
+    ]).concat(itemsDataExporter);
 
     if (itemsDataExporterDestination) {
       arr.push(...[
@@ -359,17 +360,6 @@ function ButtonItems({
         });
       },
       uuid: 'SQL',
-    },
-    {
-      beforeIcon: <BlockGeneric default size={ICON_SIZE} />,
-      label: () => 'R block',
-      onClick: () => {
-        addNewBlock({
-          language: BlockLanguageEnum.R,
-          type: BlockTypeEnum.CUSTOM,
-        });
-      },
-      uuid: 'R',
     },
     {
       beforeIcon: <PenWriting default size={ICON_SIZE} />,
@@ -520,14 +510,15 @@ function ButtonItems({
       //     size={ICON_SIZE}
       //   />
       // ),
-      items: [
+      // @ts-ignore
+      items: buildNonPythonItems(BlockTypeEnum.TRANSFORMER).concat([
         {
           isGroupingTitle: true,
           label: () => 'Python',
           uuid: [BlockLanguageEnum.PYTHON, BlockTypeEnum.TRANSFORMER, 'group'].join('/'),
         },
         // @ts-ignore
-      ].concat(itemsTransformer).concat(buildNonPythonItems(BlockTypeEnum.TRANSFORMER)),
+      ]).concat(itemsTransformer),
       label: () => BLOCK_TYPE_NAME_MAPPING[BlockTypeEnum.TRANSFORMER],
       uuid: [BlockLanguageEnum.PYTHON, BlockTypeEnum.TRANSFORMER].join('/'),
     },
@@ -618,6 +609,7 @@ function ButtonItems({
     },
   }), {}), [
     addNewBlock,
+    buildNonPythonItems,
     dataExporterGroupItems,
     dataLoaderGroupItems,
     handleBlockZIndex,

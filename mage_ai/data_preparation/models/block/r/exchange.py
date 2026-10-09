@@ -335,17 +335,19 @@ def read_output(job_dir: str) -> Tuple[bool, Any]:
     return False, None
 
 
-# The io_config.yaml settings that mageml's db_connect() uses.
-DATABASE_CONFIG_PREFIXES = ('POSTGRES_', 'MYSQL_', 'DUCKDB_')
-IO_CONFIG_FUNCTIONS = re.compile(r'\b(db_connect|io_config|read_sql|write_table)\s*\(')
+# The io_config.yaml settings that mageml's db_connect() and S3 functions use.
+DATABASE_CONFIG_PREFIXES = ('POSTGRES_', 'MYSQL_', 'DUCKDB_', 'AWS_')
+IO_CONFIG_FUNCTIONS = re.compile(
+    r'\b(db_connect|io_config|read_sql|write_table|s3_filesystem|read_s3|write_s3)\s*\(',
+)
 STRING_LITERALS = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
 
 
 def database_settings(code: str, repo_path: Optional[str]) -> Dict[str, Dict]:
     """
-    The database settings of the io_config.yaml profiles that code names, for
-    mageml's db_connect(). The profiles are the string literals in code that name one, and
-    'default'; other settings, such as cloud credentials, are left out.
+    The database and AWS settings of the io_config.yaml profiles that code names, for
+    mageml's db_connect() and S3 functions. The profiles are the string literals in code
+    that name one, and 'default'; other settings are left out.
     """
     if not repo_path or not IO_CONFIG_FUNCTIONS.search(code):
         return {}

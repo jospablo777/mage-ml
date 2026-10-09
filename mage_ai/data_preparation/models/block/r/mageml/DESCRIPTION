@@ -5,8 +5,9 @@ Authors@R:
     person("jospablo777", email = "jospablo777@gmail.com", role = c("aut", "cre"))
 Description: The runtime of R blocks in Mage ML pipelines. It exchanges data
     frames with Python blocks through Arrow IPC files, keeping 64-bit
-    integers, lists, dates and time zones, and connects to the databases of
-    a Mage project's io_config.yaml through DBI.
+    integers, lists, dates and time zones, connects to the databases of a
+    Mage project's io_config.yaml through DBI, and reads and writes data
+    files locally and on S3.
 License: Apache License (== 2.0)
 Encoding: UTF-8
 Depends:
@@ -16,6 +17,7 @@ Imports:
     bit64,
     jsonlite,
     tibble,
+    tools,
     utils
 Suggests:
     blob,
@@ -23,6 +25,7 @@ Suggests:
     duckdb,
     RMariaDB,
     RPostgres,
+    readr,
     testthat (>= 3.0.0),
     withr
 Config/testthat/edition: 3

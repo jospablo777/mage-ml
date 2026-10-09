@@ -80,10 +80,12 @@ def fetch_template_source(
         if template_variables:
             template_variables_to_render.update(template_variables)
 
+        # Jinja drops the final newline of a template; the other templates add it back.
         return (
             template_env.get_template(config['template_path']).render(
                 **template_variables_to_render,
             )
+            + '\n'
         )
     elif block_type == BlockType.DATA_LOADER:
         template_source = __fetch_data_loader_templates(

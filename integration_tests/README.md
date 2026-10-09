@@ -30,7 +30,7 @@ make -C integration_tests test-rabbitmq    # RabbitMQ only
 make -C integration_tests test-nats        # NATS JetStream only
 make -C integration_tests test-activemq    # ActiveMQ only
 make -C integration_tests test-streaming   # streaming pipelines
-make -C integration_tests test-r           # R blocks, with R 4.6, rv and PostgreSQL
+make -C integration_tests test-r           # R blocks, with R 4.6 and rv
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
@@ -90,9 +90,9 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `streaming/` | The PostgreSQL streaming source (`test_postgres_cdc.py`): typed changes, restarts, TOASTed values, table filters and notebook checks. Streaming pipelines from Kafka, RabbitMQ, NATS, ActiveMQ, MongoDB change streams and PostgreSQL changes to Kafka, RabbitMQ, NATS, ActiveMQ, PostgreSQL, MongoDB, MySQL and ClickHouse, run both ways; source and sink blocks run from the notebook; and the source and sink templates |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases; and the change stream source: errors, resuming after a restart, database watches, start times and JSON encoding |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
-| `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, RPostgres, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |
+| `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, DBI with RPostgres, RMariaDB, duckdb and RSQLite, httr2, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |
 | `data/r_dataset.py` | pandas frame with every type that crosses between Python and R, edge rows and seeded rows, and the comparisons of what comes back |
-| `r/` | R blocks: every type round trip, tidyverse transformations, errors, tests, timeouts, the checks of the environment, `mage r` commands, the mageml package's testthat tests, lintr, `R CMD check` and generated docs, and pipelines that chain Python, R, Polars and SQL blocks and write to PostgreSQL with SQL exporters and with DBI |
+| `r/` | R blocks: every type round trip, tidyverse transformations, errors, tests, timeouts, the checks of the environment, `mage r` commands, the mageml package's testthat tests, lintr, `R CMD check` and generated docs, pipelines that chain Python, R, Polars and SQL blocks and write to PostgreSQL with SQL exporters and with DBI, and every R block template, linted and run against files, S3, the API, PostgreSQL, MySQL, DuckDB and SQLite |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
 | `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/`, `mysql/`, `clickhouse/`, `trino/`, `streaming/` and `r/` tests run |
 

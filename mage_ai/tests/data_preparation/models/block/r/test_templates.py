@@ -31,7 +31,7 @@ class RTemplateTest(TestCase):
 
             self.assertIn(f'database = "{database}"', loader)
             self.assertIn('read_sql(', loader)
-            self.assertIn(f'rv add {driver}', loader)
+            self.assertIn(f'rv add DBI {driver}', loader)
             self.assertIn('write_table(', exporter)
 
     def test_unknown_data_sources_get_the_default_template(self):
@@ -46,3 +46,25 @@ class RTemplateTest(TestCase):
             template(BlockType.TRANSFORMER, data_source='postgres'),
             template(BlockType.TRANSFORMER),
         )
+
+    def test_the_catalog_lists_the_r_templates(self):
+        from mage_ai.data_preparation.templates.constants import (
+            R_TEMPLATES,
+            TEMPLATES,
+            TEMPLATES_BY_UUID,
+        )
+        from mage_ai.data_preparation.templates.template import fetch_template_source
+
+        self.assertTrue(all(t in TEMPLATES for t in R_TEMPLATES))
+        # The index by name keeps the Python templates that share a name.
+        self.assertTrue(all(t['language'] != 'r' for t in TEMPLATES_BY_UUID.values()))
+        for entry in R_TEMPLATES:
+            source = fetch_template_source(
+                entry['block_type'], {'template_path': entry['path']}, language='r',
+            )
+            self.assertIn('#* @', source, entry['path'])
+            self.assertTrue(source.endswith('\n'), entry['path'])
+        loaders = {t['name'] for t in R_TEMPLATES if t['block_type'] == 'data_loader'}
+        self.assertEqual(loaders, {
+            'Local file', 'Amazon S3', 'API', 'PostgreSQL', 'MySQL', 'DuckDB', 'SQLite',
+        })

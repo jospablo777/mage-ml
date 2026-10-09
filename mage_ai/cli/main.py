@@ -338,6 +338,11 @@ R_PACKAGES_DEFAULT = typer.Option(
     help='an R package to install; repeat for more. Defaults to the tidyverse.',
 )
 R_VERSION_DEFAULT = typer.Option('4.6', help='the R version of the environment.')
+R_INSTALL_DEFAULT = typer.Option(
+    False,
+    '--install-r',
+    help='install the R version with rig (https://github.com/r-lib/rig) when it is missing.',
+)
 
 
 def _r_config(project_path: str):
@@ -357,11 +362,42 @@ def _r_config(project_path: str):
     return config
 
 
+@r_app.command('setup')
+def r_setup(
+    project_path: str = R_PROJECT_PATH_DEFAULT,
+    r_version: str = R_VERSION_DEFAULT,
+):
+    """
+    Check the tools R blocks need, R, rv and rig, and print how to install the missing ones.
+    """
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    steps = runtime.setup_steps(r_version)
+    missing = False
+    for step in steps:
+        if step['found']:
+            print(f'[green]✓[/green] {step["name"]}: {step["found"]}')
+            continue
+        optional = step.get('optional', False)
+        missing = missing or not optional
+        print(f'[yellow]✗[/yellow] {step["name"]}: install it with')
+        for command in step['commands']:
+            print(f'    {command}')
+    if missing:
+        print('Then run `mage r setup` again.')
+        raise typer.Exit(code=1)
+    print(
+        f'R blocks can be set up. Create the R environment with `mage r init {project_path}`; '
+        'edit <project>/r/rproject.toml or run `rv add` there to change its packages.'
+    )
+
+
 @r_app.command('init')
 def r_init(
     project_path: str = R_PROJECT_PATH_DEFAULT,
     packages: List[str] = R_PACKAGES_DEFAULT,
     r_version: str = R_VERSION_DEFAULT,
+    install_r: bool = R_INSTALL_DEFAULT,
 ):
     """
     Create the project's R environment in <project>/r with rv and install its packages.
@@ -372,6 +408,9 @@ def r_init(
 
     directory = Path(os.path.abspath(project_path)) / runtime.R_PROJECT_DIRECTORY
     try:
+        if install_r and not runtime.has_r_version(r_version):
+            print(f'Installing R {r_version} with rig.')
+            runtime.install_r(r_version)
         runtime.init_project(directory, packages=packages or None, r_version=r_version)
     except runtime.REnvironmentError as error:
         print(f'[red]{error}[/red]')

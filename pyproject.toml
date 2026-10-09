@@ -200,6 +200,9 @@ streaming = [
   "requests_aws4auth>=1.3",
   "stomp.py>=8.1,<9",
 ]
+# R blocks need no Python packages beyond Mage's own: R, rv and rig are installed
+# outside Python. `mage r setup` checks them and prints the commands that install them.
+r = []
 # The client of mage_ai.io.trino and Trino SQL blocks.
 trino = [
   "trino~=0.326",

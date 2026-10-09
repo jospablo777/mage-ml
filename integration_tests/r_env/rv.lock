@@ -25,6 +25,21 @@ force_source = false
 dependencies = []
 
 [[packages]]
+name = "RMariaDB"
+version = "1.3.5"
+source = { repository = "https://cloud.r-project.org/" }
+force_source = false
+dependencies = [
+    "bit64",
+    "blob",
+    { name = "DBI", requirement = "(>= 1.1.3)" },
+    { name = "hms", requirement = "(>= 0.5.0)" },
+    "lubridate",
+    "rlang",
+    "cpp11",
+]
+
+[[packages]]
 name = "RPostgres"
 version = "1.4.10"
 source = { repository = "https://packagemanager.posit.co/cran/latest" }
@@ -37,6 +52,21 @@ dependencies = [
     "lubridate",
     "withr",
     "cpp11",
+]
+
+[[packages]]
+name = "RSQLite"
+version = "3.53.3"
+source = { repository = "https://packagemanager.posit.co/cran/latest" }
+force_source = false
+dependencies = [
+    "bit64",
+    { name = "blob", requirement = "(>= 1.2.0)" },
+    { name = "DBI", requirement = "(>= 1.2.0)" },
+    "memoise",
+    "pkgconfig",
+    "rlang",
+    { name = "cpp11", requirement = "(>= 0.4.0)" },
 ]
 
 [[packages]]
@@ -413,6 +443,15 @@ dependencies = [
 ]
 
 [[packages]]
+name = "duckdb"
+version = "1.5.6"
+source = { repository = "https://packagemanager.posit.co/cran/latest" }
+force_source = false
+dependencies = [
+    "DBI",
+]
+
+[[packages]]
 name = "evaluate"
 version = "1.0.5"
 source = { repository = "https://packagemanager.posit.co/cran/latest" }
@@ -693,6 +732,24 @@ dependencies = [
     "mime",
     { name = "openssl", requirement = "(>= 0.8)" },
     "R6",
+]
+
+[[packages]]
+name = "httr2"
+version = "1.3.0"
+source = { repository = "https://packagemanager.posit.co/cran/latest" }
+force_source = false
+dependencies = [
+    { name = "cli", requirement = "(>= 3.0.0)" },
+    { name = "curl", requirement = "(>= 6.4.0)" },
+    "glue",
+    "lifecycle",
+    "magrittr",
+    "openssl",
+    "R6",
+    { name = "rlang", requirement = "(>= 1.3.0)" },
+    { name = "vctrs", requirement = "(>= 0.6.3)" },
+    "withr",
 ]
 
 [[packages]]

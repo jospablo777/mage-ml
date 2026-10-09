@@ -72,6 +72,38 @@ export type FlyoutMenuProps = {
   width?: number;
 };
 
+// The narrowest a submenu is assumed to be when deciding the side it opens on.
+const MIN_SUBMENU_WIDTH = 220;
+
+/*
+ * A submenu opens to the right of its item. It opens to the left when the space up to the
+ * nearest element that clips overflow, or to the window's edge, is narrower than a
+ * submenu and there is more space on the left. Submenus that opened to the right were
+ * cut off, as in the notebook's narrow block column.
+ */
+function opensLeft(item?: HTMLElement): boolean {
+  if (!item || typeof window === 'undefined') {
+    return false;
+  }
+  const rect = item.getBoundingClientRect();
+  let leftEdge = 0;
+  let rightEdge = window.innerWidth;
+  let element = item.parentElement;
+  while (element && element !== document.body) {
+    if (window.getComputedStyle(element).overflowX !== 'visible') {
+      const bounds = element.getBoundingClientRect();
+      leftEdge = Math.max(leftEdge, bounds.left);
+      rightEdge = Math.min(rightEdge, bounds.right);
+    }
+    element = element.parentElement;
+  }
+  const spaceRight = rightEdge - rect.right;
+  if (spaceRight >= Math.max(rect.width, MIN_SUBMENU_WIDTH)) {
+    return false;
+  }
+  return rect.left - leftEdge > spaceRight;
+}
+
 function FlyoutMenu({
   alternateBackground,
   compact,
@@ -93,6 +125,7 @@ function FlyoutMenu({
 }: FlyoutMenuProps) {
   const [highlightedIndices, setHighlightedIndices] = useState<number[]>([]);
   const [submenuVisible, setSubmenuVisible] = useState<{ [uuid: string]: boolean }>({});
+  const [submenuOpensLeft, setSubmenuOpensLeft] = useState<{ [uuid: string]: boolean }>({});
   const [submenuTopOffset, setSubmenuTopOffset] = useState<number>(0);
   const [submenuTopOffset2, setSubmenuTopOffset2] = useState<number>(0);
   const [submenuTopOffset3, setSubmenuTopOffset3] = useState<number>(0);
@@ -192,20 +225,22 @@ function FlyoutMenu({
       ? customSubmenuHeights?.[uuid] - DEFAULT_MENU_ITEM_HEIGHT
       : 0;
 
+    const toTheLeft = depth > 1 && submenuOpensLeft[uuid];
+
     return (
       <FlyoutMenuContainerStyle
         maxHeight={submenuHeight}
         roundedStyle={roundedStyle}
         style={{
           display: (visible || submenuVisible[uuid]) ? null : 'none',
-          left: typeof rightOffset === 'undefined' && (
+          left: toTheLeft ? 'auto' : typeof rightOffset === 'undefined' && (
             depth === 1
               ? (left || 0)
               : '100%'
           ),
           right: depth === 1
             ? rightOffset
-            : null,
+            : (toTheLeft ? '100%' : null),
           top: (
             depth === 1
               ? (height || 0) + topOffset
@@ -294,6 +329,13 @@ function FlyoutMenu({
                   ...prevState,
                   [uuid]: true,
                 }));
+                if (items?.length) {
+                  const toTheLeft = opensLeft(refArg.current[uuid]?.current);
+                  setSubmenuOpensLeft((prevState) => ({
+                    ...prevState,
+                    [uuid]: toTheLeft,
+                  }));
+                }
                 if (depth === 1) {
                   setSubmenuTopOffset(refArg.current[uuid]?.current?.offsetTop || 0);
                 } else if (depth === 2) {

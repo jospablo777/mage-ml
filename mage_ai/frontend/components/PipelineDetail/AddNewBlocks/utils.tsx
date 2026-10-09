@@ -121,16 +121,52 @@ function SQLMenuItems(
   };
 }
 
+/*
+ * Template groups as titles over their templates, in place of submenus: there are few R
+ * templates, and each level of submenus is another hover.
+ */
+export function flattenTemplateGroups(items?: FlyoutMenuItemType[]): FlyoutMenuItemType[] {
+  return (items || []).flatMap((item: FlyoutMenuItemType) => (item?.items?.length
+    ? [
+      {
+        isGroupingTitle: true,
+        label: item.label,
+        uuid: `${item.uuid}/title`,
+      },
+      ...item.items,
+    ]
+    : [item]));
+}
+
 function RMenuItems(
   addNewBlock: (block: BlockRequestPayloadType) => void,
   blockType: BlockTypeEnum,
+  templates?: FlyoutMenuItemType[],
 ) {
+  const generic = () => addNewBlock({
+    language: BlockLanguageEnum.R,
+    type: blockType,
+  });
+
+  if (!templates?.length) {
+    return {
+      label: () => 'R',
+      onClick: generic,
+      uuid: `${blockType}/r`,
+    };
+  }
+
+  // The R templates of the block type, after the generic one.
   return {
+    items: [
+      {
+        label: () => 'Base template (generic)',
+        onClick: generic,
+        uuid: `${blockType}/r/generic`,
+      },
+      ...flattenTemplateGroups(templates),
+    ],
     label: () => 'R',
-    onClick: () => addNewBlock({
-      language: BlockLanguageEnum.R,
-      type: blockType,
-    }),
     uuid: `${blockType}/r`,
   };
 }
@@ -344,7 +380,11 @@ export const getdataSourceMenuItems = (
     }
     if (!languages || languages?.includes(BlockLanguageEnum.R)) {
       // @ts-ignore
-      arr.push(RMenuItems(addNewBlock, blockType));
+      arr.push(RMenuItems(
+        addNewBlock,
+        blockType,
+        blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.R]?.items,
+      ));
     }
 
     if (

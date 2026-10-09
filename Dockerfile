@@ -29,7 +29,9 @@ RUN apt-get update && apt-get upgrade -y && \
 # R 4.6 from CRAN's Debian repository, and rv, which installs the packages of each
 # project's R environment (mage r init). Debian trixie ships R 4.5. rv installs
 # binaries from Posit Package Manager where it has them, as for amd64, and builds the
-# other packages from source with r-base-dev, as on arm64.
+# other packages from source with r-base-dev, as on arm64. The -dev libraries are those
+# that rv sysdeps lists for the default environment (the tidyverse, arrow and the DBI
+# drivers); without them a source build fails, such as fs without libuv.
 ARG RV_VERSION=0.20.0
 RUN curl -fsSL \
       'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
@@ -39,12 +41,19 @@ RUN curl -fsSL \
       'Signed-By: /etc/apt/trusted.gpg.d/cran_debian_key.asc' \
       > /etc/apt/sources.list.d/cran.sources && \
     apt-get update && \
-    apt-get install -y --no-install-recommends r-base-core r-recommended r-base-dev && \
+    apt-get install -y --no-install-recommends r-base-core r-recommended r-base-dev \
+      cmake libcurl4-openssl-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev \
+      libharfbuzz-dev libicu-dev libjpeg-dev libmariadb-dev libpng-dev libpq-dev \
+      libssl-dev libtiff-dev libuv1-dev libwebp-dev libxml2-dev make xz-utils \
+      zlib1g-dev && \
     curl -fsSL "https://github.com/A2-ai/rv/releases/download/v${RV_VERSION}/rv-v${RV_VERSION}-$(uname -m)-unknown-linux-gnu.tar.gz" \
       | tar -xz -C /usr/local/bin rv && \
     Rscript -e 'stopifnot(getRversion() >= "4.6.0")' && \
     rv --version && \
     rm -rf /var/lib/apt/lists/*
+
+# arrow built from source, as on arm64, leaves out S3 and GCS unless this is false.
+ENV LIBARROW_MINIMAL=false
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/mage \
     PATH="/opt/mage/bin:$PATH" \

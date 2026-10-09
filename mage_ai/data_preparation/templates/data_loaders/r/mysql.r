@@ -1,7 +1,8 @@
 suppressPackageStartupMessages(library(tidyverse))
 
-# Connects with the settings of the "default" profile in io_config.yaml. Needs
-# the RMariaDB package: run `rv add RMariaDB` in the project's R environment.
+# Connects with the settings of the "default" profile in io_config.yaml, with
+# DBI and RMariaDB, which `mage r init` installs. In an R environment of your
+# own, add them with `rv add DBI RMariaDB`.
 #* @data_loader
 load_data <- function(...) {
   read_sql(

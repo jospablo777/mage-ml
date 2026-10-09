@@ -29,4 +29,9 @@ dependencies = [
     "lintr",
     "roxygen2",
     "pointblank",
+    # PPM has no macOS binary of RMariaDB for R 4.6; CRAN has.
+    {name = "RMariaDB", repository = "CRAN"},
+    "duckdb",
+    "RSQLite",
+    "httr2",
 ]

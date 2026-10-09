@@ -4677,7 +4677,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "trino", "integrations", "all"]
+provides-extras = ["ai", "airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "trino", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [
