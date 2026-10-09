@@ -59,6 +59,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   their old column types; the first write merges new columns.
 - **Singer destinations validate records against the whole schema:** a column missing
   from the schema raises a validation error.
+- **Sources read the command line only when run as programs**, through `main()`. A source
+  built in code read the arguments of the program that built it.
 
 #### Databases
 
@@ -86,6 +88,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Runtime
 
+- **Block runs execute with spawn and forkserver.** With Redis configured, the job queue's
+  worker pool failed to start on macOS and Windows, and would on Linux from Python 3.14,
+  so block runs stayed queued. Races in the queue that dropped new jobs, or left them
+  waiting with no worker pool, are fixed. See `scheduler-soak.md`.
+- **Redis keys carry a namespace** from the metadata database URL, so deployments that
+  share a Redis server keep their jobs and locks apart. Stop the old scheduler before the
+  new one starts: during an upgrade the two versions do not see each other's locks.
 - **A Rust panic in Polars or pyarrow fails the block run** and its retries apply. The run
   used to stay running.
 - **Event, metric and cache timestamps** come from `time.time()`. On hosts outside UTC
@@ -107,6 +116,8 @@ Each item says what changed, which pipelines it affects, and what to do.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
   PostgreSQL, MySQL, Redis, a REST API service, Feast, MLflow, DuckDB and S3 (MinIO).
+  `make -C integration_tests test-soak` runs the scheduler with many concurrent
+  pipelines.
 
 ### Upstream issues and workarounds
 

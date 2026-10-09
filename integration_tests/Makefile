@@ -37,7 +37,7 @@ export MAGE_TEST_MYSQL_PASSWORD ?= test
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-soak ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -46,7 +46,7 @@ down:
 	$(COMPOSE) down --volumes --remove-orphans
 
 test: up
-	cd .. && $(PYTHON) -m pytest integration_tests $(PYTEST_ARGS)
+	cd .. && $(PYTHON) -m pytest integration_tests --ignore=integration_tests/soak $(PYTEST_ARGS)
 
 test-postgres: up
 	cd .. && $(PYTHON) -m pytest integration_tests/postgres $(PYTEST_ARGS)
@@ -69,12 +69,17 @@ test-s3: up
 test-mysql: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mysql $(PYTEST_ARGS)
 
+# The scheduler with many concurrent pipelines, for MAGE_TEST_SOAK_SECONDS (default 150).
+# It runs on its own: make test-soak MAGE_TEST_SOAK_SECONDS=1800
+test-soak: up
+	cd .. && $(PYTHON) -m pytest integration_tests/soak -p no:xdist -rs $(PYTEST_ARGS)
+
 # DuckDB runs in process; these tests need no service.
 test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up
-	cd .. && $(PYTHON) -m pytest integration_tests -rs \
+	cd .. && $(PYTHON) -m pytest integration_tests --ignore=integration_tests/soak -rs \
 		--junitxml=integration_tests/results.xml $(PYTEST_ARGS)
 	$(PYTHON) check_no_skips.py results.xml

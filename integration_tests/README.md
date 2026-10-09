@@ -19,6 +19,8 @@ make -C integration_tests test-mlflow      # MLflow only
 make -C integration_tests test-duckdb      # DuckDB only, no service needed
 make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test-mysql       # MySQL only
+make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
+make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
 make -C integration_tests down             # stop the services and drop their data
 ```
@@ -57,6 +59,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, the S3 source and destination of `mage_integrations`, and its Delta Lake S3 destination |
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
+| `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
 | `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/` and `mysql/` tests run |
 

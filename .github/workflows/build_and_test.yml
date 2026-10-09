@@ -134,6 +134,9 @@ jobs:
       # and fails when any test is skipped.
       - name: Run integration tests
         run: make -C integration_tests ci PYTEST_ARGS='-n 4'
+      # The scheduler process with many concurrent pipelines, for 150 seconds.
+      - name: Run the scheduler soak test
+        run: make -C integration_tests test-soak
       - name: Service logs
         if: failure()
         run: docker compose -f integration_tests/compose.yaml logs
