@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -10,7 +11,8 @@ def all_variable_uuids(
         partition=partition,
     )
 
-    arr = list(set([tup[0] for tup in arr]))
+    # Unique names in the order of the children; a set returned them in any order.
+    arr = list(dict.fromkeys(tup[0] for tup in arr))
 
     if max_results is not None:
         arr = arr[:max_results]
@@ -113,4 +115,12 @@ def __all_variable_uuids_and_file_paths_for_reducing_block_output(
                 )
             )
 
-    return variable_uuid_and_file_paths
+    # os.walk returns directories in file system order, which is not the order of the
+    # dynamic children: 0, 11, 1, 10 on APFS, and hash order on ext4.
+    return sorted(
+        variable_uuid_and_file_paths,
+        key=lambda pair: tuple(
+            (0, int(part), '') if part.isdigit() else (1, 0, part)
+            for part in re.split(r'(\d+)', os.path.relpath(pair[1], variable_dir_path))
+        ),
+    )
