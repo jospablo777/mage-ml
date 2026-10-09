@@ -14,6 +14,11 @@ online_store:
   password: ${FEAST_PG_PASSWORD}
   # The test server has no TLS; Feast requires it by default.
   sslmode: disable
+  # The default, singleton, shares one connection between the server's request threads;
+  # with 16 concurrent requests most reads and pushes failed with 500.
+  conn_type: pool
+  min_conn: 1
+  max_conn: 20
 offline_store:
   type: postgres
   host: ${FEAST_PG_HOST}

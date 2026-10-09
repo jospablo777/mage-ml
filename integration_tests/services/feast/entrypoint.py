@@ -19,6 +19,7 @@ import dataset
 import pandas as pd
 import psycopg
 import pyarrow as pa
+import typed_push
 import uvicorn
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, Response
@@ -145,6 +146,10 @@ def build_app(store):
             json.dumps(table.to_pylist(), default=_json_default, ensure_ascii=False),
             media_type='application/json',
         )
+
+    @app.post('/push/typed')
+    def push_typed(request: typed_push.TypedPushRequest):
+        return typed_push.push_typed(store, request)
 
     @app.get('/registry')
     def registry():

@@ -1,4 +1,5 @@
 import pandas as pd
+import pyarrow as pa
 import requests
 
 if 'data_loader' not in globals():
@@ -24,8 +25,9 @@ def load(**kwargs):
         name: result['values']
         for name, result in zip(payload['metadata']['feature_names'], payload['results'])
     }
-    # pyarrow-backed dtypes keep the integers above 2**53 next to NULL values.
-    return pd.DataFrame(columns).convert_dtypes(dtype_backend='pyarrow')
+    # Arrow infers int64 for integers next to NULL values. pd.DataFrame would infer
+    # float64, which rounds integers above 2**53, and convert_dtypes cannot undo that.
+    return pa.table(columns).to_pandas(types_mapper=pd.ArrowDtype)
 
 
 @test

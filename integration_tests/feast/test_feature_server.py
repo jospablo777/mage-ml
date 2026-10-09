@@ -15,7 +15,7 @@ Behaviors pinned here because they cause silent errors in pipelines:
 """
 import datetime as dt
 import io
-import random
+import secrets
 
 import pandas as pd
 import polars as pl
@@ -31,7 +31,8 @@ UTC = dt.timezone.utc
 
 
 def new_driver() -> int:
-    return random.randint(10**8, 10**9)
+    # secrets, not random: pytest-randomly reseeds random identically in every test.
+    return 10**9 + secrets.randbelow(10**12)
 
 
 def online(feast_url, drivers, features=None, **extra):

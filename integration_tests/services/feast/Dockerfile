@@ -5,7 +5,7 @@ WORKDIR /feast
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY feature_repo ./feature_repo
-COPY dataset.py entrypoint.py ./
+COPY dataset.py typed_push.py entrypoint.py ./
 
 EXPOSE 6566
 HEALTHCHECK --interval=3s --timeout=5s --retries=100 \

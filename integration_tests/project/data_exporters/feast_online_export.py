@@ -11,7 +11,9 @@ def export(frame, **kwargs) -> None:
     # JSON needs None for missing values and plain Python values.
     columns = missing_as_none(frame)
     response = requests.post(
-        f"{kwargs['feast_url']}/push",
+        # /push/typed keeps integers above 2**53 exact next to NULL values; Feast's /push
+        # rounds them. See integration_tests/services/feast/typed_push.py.
+        f"{kwargs['feast_url']}/push/typed",
         json=dict(
             push_source_name='driver_stats_push',
             to='online',

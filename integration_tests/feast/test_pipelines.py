@@ -8,7 +8,7 @@ rows for other drivers, writes them to the offline store with Mage's PostgreSQL 
 and materializes them into the online store.
 """
 import datetime as dt
-import random
+import secrets
 
 import requests
 
@@ -23,7 +23,7 @@ from integration_tests.services.feast import dataset
 
 
 def test_online_features_pulled_and_pushed_with_pandas(mage_project, feast_url):
-    offset = random.randint(10**8, 10**9)
+    offset = 10**9 + secrets.randbelow(10**12)
     when = '2025-05-05T05:05:05+00:00'
 
     run_pipeline('feast_online_pandas', feast_url=feast_url, driver_offset=offset,
@@ -43,7 +43,7 @@ def test_online_features_pulled_and_pushed_with_pandas(mage_project, feast_url):
 def test_offline_features_written_and_materialized_with_polars(
     mage_project, feast_url, feast_offline,
 ):
-    offset = random.randint(10**8, 10**9)
+    offset = 10**9 + secrets.randbelow(10**12)
     drivers = [d + offset for d in (1001, 1002, 1003)]
     feast_offline.written_drivers.extend(drivers)
 
