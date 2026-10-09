@@ -78,3 +78,21 @@ services:
       - /data
     ports:
       - "${MAGE_TEST_S3_PORT:-19000}:9000"
+
+  # MySQL 8.4 LTS. Data lives in memory. The server's time zone is not UTC, so values
+  # that go through the session time zone show it.
+  mysql:
+    image: mysql:8.4
+    command: ["mysqld", "--default-time-zone=-06:00", "--innodb-flush-log-at-trx-commit=0"]
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: test
+    tmpfs:
+      - /var/lib/mysql
+    ports:
+      - "${MAGE_TEST_MYSQL_PORT:-13306}:3306"
+    healthcheck:
+      test: ["CMD", "mysql", "-uroot", "-ptest", "-h127.0.0.1", "-e", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 60

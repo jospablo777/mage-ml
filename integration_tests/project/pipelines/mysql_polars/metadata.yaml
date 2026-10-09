@@ -1,0 +1,32 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - mysql_polars_transform
+  language: python
+  name: mysql_polars_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: mysql_polars_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - mysql_polars_export
+  language: python
+  name: mysql_polars_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - mysql_polars_load
+  uuid: mysql_polars_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: mysql_polars_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - mysql_polars_transform
+  uuid: mysql_polars_export
+name: mysql_polars
+type: python
+uuid: mysql_polars

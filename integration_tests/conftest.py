@@ -247,3 +247,69 @@ def connector_config(s3_settings, bucket):
         aws_endpoint=s3_settings['endpoint_url'],
         aws_region=s3_settings['region_name'],
     )
+
+
+MYSQL_ENV = {
+    'host': 'MAGE_TEST_MYSQL_HOST',
+    'port': 'MAGE_TEST_MYSQL_PORT',
+    'user': 'MAGE_TEST_MYSQL_USER',
+    'password': 'MAGE_TEST_MYSQL_PASSWORD',
+}
+
+
+@pytest.fixture(scope='session')
+def mysql_settings():
+    settings = {key: os.getenv(variable) for key, variable in MYSQL_ENV.items()}
+    missing = [MYSQL_ENV[key] for key, value in settings.items() if not value]
+    if missing:
+        pytest.skip(f'MySQL is not configured: {", ".join(missing)} unset')
+    return dict(settings, port=int(settings['port']))
+
+
+@pytest.fixture
+def mysql_database(mysql_settings):
+    """A database used by one test and dropped after it."""
+    import mysql.connector
+
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    connection = mysql.connector.connect(**mysql_settings)
+    with connection.cursor() as cursor:
+        cursor.execute(f'CREATE DATABASE `{name}`')
+    yield name
+    with connection.cursor() as cursor:
+        cursor.execute(f'DROP DATABASE `{name}`')
+    connection.close()
+
+
+@pytest.fixture
+def my(mysql_settings, mysql_database):
+    """A mysql-connector connection that bypasses Mage, for setup and for reading results."""
+    import mysql.connector
+
+    connection = mysql.connector.connect(database=mysql_database, **mysql_settings)
+    # Each read sees committed data; a transaction left open kept its snapshot.
+    connection.autocommit = True
+    yield connection
+    connection.close()
+
+
+@pytest.fixture
+def mage_mysql(mysql_settings, mysql_database):
+    """Mage's MySQL client on the test's database."""
+    from mage_ai.io.mysql import MySQL
+
+    client = MySQL(database=mysql_database, verbose=False, **mysql_settings)
+    client.open()
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def mysql_source(my):
+    """The source table src, with one column per MySQL type."""
+    from integration_tests.data import mysql_dataset
+
+    with my.cursor() as cursor:
+        mysql_dataset.create_source_table(cursor)
+    my.commit()
+    return 'src'

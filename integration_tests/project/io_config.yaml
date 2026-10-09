@@ -26,3 +26,10 @@ s3:
   AWS_SECRET_ACCESS_KEY: "{{ env_var('MAGE_TEST_S3_SECRET_KEY') }}"
   AWS_ENDPOINT: "{{ env_var('MAGE_TEST_S3_ENDPOINT') }}"
   AWS_REGION: us-east-1
+# The MySQL database of the MySQL pipeline tests.
+mysql:
+  MYSQL_DATABASE: "{{ env_var('MAGE_TEST_MYSQL_DATABASE') }}"
+  MYSQL_HOST: "{{ env_var('MAGE_TEST_MYSQL_HOST') }}"
+  MYSQL_PASSWORD: "{{ env_var('MAGE_TEST_MYSQL_PASSWORD') }}"
+  MYSQL_PORT: "{{ env_var('MAGE_TEST_MYSQL_PORT') }}"
+  MYSQL_USER: "{{ env_var('MAGE_TEST_MYSQL_USER') }}"
