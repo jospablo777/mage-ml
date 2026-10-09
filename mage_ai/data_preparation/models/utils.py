@@ -552,12 +552,13 @@ def infer_variable_type(
         #     variable_type=variable_type,
         #     clean_block_uuid=clean_block_uuid,
         # )
+    # Before pandas: a GeoDataFrame is a pandas DataFrame too, and this check never ran.
+    elif is_geo_dataframe(data):
+        variable_type_use = VariableType.GEO_DATAFRAME
     elif isinstance(data, pd.DataFrame):
         variable_type_use = VariableType.DATAFRAME
     elif is_spark_dataframe(data):
         variable_type_use = VariableType.SPARK_DATAFRAME
-    elif is_geo_dataframe(data):
-        variable_type_use = VariableType.GEO_DATAFRAME
     elif isinstance(data, csr_matrix) or (
         basic_iterable and len(data) >= 1 and all(isinstance(d, csr_matrix) for d in data)
     ):

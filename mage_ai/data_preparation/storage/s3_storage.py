@@ -113,6 +113,9 @@ class S3Storage(BaseStorage):
         buffer = io.BytesIO(self.client.get_object(s3_url_path(file_path)).read())
         return read_pandas_parquet(buffer, **kwargs)
 
+    def read_bytes(self, file_path: str) -> bytes:
+        return self.client.get_object(s3_url_path(file_path)).read()
+
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         buffer = io.BytesIO(self.client.get_object(s3_url_path(file_path)).read())
         return pl.read_parquet(buffer, **kwargs)

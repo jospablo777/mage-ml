@@ -282,6 +282,10 @@ def format_output_data(
             variable_uuid=variable_uuid,
         )
     elif isinstance(data, pd.DataFrame):
+        if is_geo_dataframe(data):
+            # GeoDataFrame.to_json writes GeoJSON and took no orient: the output failed.
+            # A table with each geometry as WKT text.
+            data = pd.DataFrame(data.to_wkt())
         if csv_lines_only:
             data = dict(table=data.to_csv(header=True, index=False).strip('\n').split('\n'))
         else:

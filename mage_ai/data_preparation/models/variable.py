@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import io
 import os
 import shutil
 import traceback
@@ -326,10 +327,6 @@ class Variable:
         ):
             # If parquet file exists for given variable, set the variable type to DATAFRAME
             self.variable_type = VariableType.DATAFRAME
-        elif (
-            self.variable_type == VariableType.DATAFRAME or self.variable_type is None
-        ) and os.path.exists(os.path.join(self.variable_path, f'{self.uuid}', 'data.sh')):
-            self.variable_type = VariableType.GEO_DATAFRAME
         elif (
             self.variable_type is None
             and len(self.storage.listdir(self.variable_path, suffix='.parquet')) > 0
@@ -832,9 +829,14 @@ class Variable:
 
             # A type read from an earlier output's metadata must not decide how a frame of
             # the other library is written; a block can switch between pandas and Polars.
-            if isinstance(data, pd.DataFrame) and self.variable_type in (
+            # A GeoDataFrame is a pandas DataFrame too; it was written as one, and came
+            # back without its geometry type and coordinate reference system.
+            if is_geo_dataframe(data):
+                self.variable_type = VariableType.GEO_DATAFRAME
+            elif isinstance(data, pd.DataFrame) and self.variable_type in (
                 None,
                 VariableType.POLARS_DATAFRAME,
+                VariableType.GEO_DATAFRAME,
             ):
                 self.variable_type = VariableType.DATAFRAME
             elif isinstance(data, (pl.DataFrame, pl.LazyFrame)) and self.variable_type in (
@@ -945,9 +947,14 @@ class Variable:
         else:
             # A type read from an earlier output's metadata must not decide how a frame of
             # the other library is written; a block can switch between pandas and Polars.
-            if isinstance(data, pd.DataFrame) and self.variable_type in (
+            # A GeoDataFrame is a pandas DataFrame too; it was written as one, and came
+            # back without its geometry type and coordinate reference system.
+            if is_geo_dataframe(data):
+                self.variable_type = VariableType.GEO_DATAFRAME
+            elif isinstance(data, pd.DataFrame) and self.variable_type in (
                 None,
                 VariableType.POLARS_DATAFRAME,
+                VariableType.GEO_DATAFRAME,
             ):
                 self.variable_type = VariableType.DATAFRAME
             elif isinstance(data, (pl.DataFrame, pl.LazyFrame)) and self.variable_type in (
@@ -1088,7 +1095,7 @@ class Variable:
         ]:
             return os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
         elif VariableType.GEO_DATAFRAME == self.variable_type:
-            return os.path.join(self.variable_path, 'data.sh')
+            return os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
         elif VariableType.MODEL_SKLEARN == self.variable_type:
             return os.path.join(self.variable_path, JOBLIB_FILE)
         elif VariableType.MODEL_XGBOOST == self.variable_type:
@@ -1201,23 +1208,18 @@ class Variable:
             traceback.print_exc()
 
     def __read_geo_dataframe(self, sample: bool = False, sample_count: Optional[int] = None):
+        """A GeoDataFrame stored as GeoParquet, with its geometry and coordinate system."""
         import geopandas as gpd
 
-        file_path = os.path.join(self.variable_path, 'data.sh')
-        sample_file_path = os.path.join(self.variable_path, 'sample_data.sh')
-        if not os.path.exists(file_path):
+        file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
+        sample_file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_SAMPLE_FILE)
+        if sample and self.storage.path_exists(sample_file_path):
+            file_path = sample_file_path
+        if not self.storage.path_exists(file_path):
             return gpd.GeoDataFrame()
-        if sample and os.path.exists(sample_file_path):
-            try:
-                df = gpd.read_file(sample_file_path)
-            except Exception:
-                df = gpd.read_file(file_path)
-        else:
-            df = gpd.read_file(file_path)
-        if sample:
-            sample_count = sample_count or DATAFRAME_SAMPLE_COUNT
-            if df.shape[0] > sample_count:
-                df = df.iloc[:sample_count]
+        df = gpd.read_parquet(io.BytesIO(self.storage.read_bytes(file_path)))
+        if sample and sample_count:
+            df = df.iloc[:sample_count]
         return df
 
     def __read_parquet(
@@ -1419,10 +1421,21 @@ class Variable:
         return df
 
     def __write_geo_dataframe(self, data) -> None:
-        os.makedirs(self.variable_path, exist_ok=True)
-        data.to_file(os.path.join(self.variable_path, 'data.sh'))
-        df_sample_output = data.iloc[:DATAFRAME_SAMPLE_COUNT]
-        df_sample_output.to_file(os.path.join(self.variable_path, 'sample_data.sh'))
+        """
+        GeoParquet, which keeps the geometry, the coordinate reference system and every
+        column with its name and type, on local and remote storage. It was a shapefile on
+        local disk, which cuts column names to 10 characters and loses types.
+        """
+        self.storage.makedirs(self.variable_path, exist_ok=True)
+        self.storage.write_parquet(data, os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE))
+        self.storage.write_parquet(
+            data.iloc[:DATAFRAME_SAMPLE_COUNT],
+            os.path.join(self.variable_path, DATAFRAME_PARQUET_SAMPLE_FILE),
+        )
+        self.__write_dataframe_analysis(dict(statistics=dict(
+            original_row_count=len(data),
+            original_column_count=len(data.columns),
+        )))
 
     def __get_column_types(self, data: pd.DataFrame) -> Tuple[Dict, pd.DataFrame, Dict]:
         column_types = {}

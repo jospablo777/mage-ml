@@ -30,6 +30,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Sparse matrices inside list and dict outputs read back.** They were stored as a dense
   table, and reading the output failed with `scipy.sparse does not support dtype
   object`. They are stored as npz; outputs written the old way read as before.
+- **GeoDataFrames pass to the next block as GeoDataFrames.** Type inference took them for
+  pandas frames, so they were stored as plain Parquet and came back without their
+  geometry type and coordinate reference system. They are stored as GeoParquet, on local,
+  S3 and GCS storage; the old shapefile writer, which cut column names to 10 characters,
+  is gone. The notebook shows them as tables with WKT geometry; the output failed.
 - **NumPy arrays and lists of objects pass to the next block.** They were stored as their
   description, and the next block received a dict such as `{'module': 'numpy', 'name':
   'ndarray', ...}`. They are pickled; generators and objects that cannot be pickled are
@@ -461,7 +466,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   keys.
 - The S3 client and the Delta Lake S3 destination take an endpoint, for S3-compatible
   storage such as MinIO.
-- Extras: `mlflow` (mlflow-skinny 3.17 and skops), `duckdb` and `trino`.
+- Extras: `mlflow` (mlflow-skinny 3.17 and skops), `duckdb`, `trino` and `geo`
+  (geopandas 1.2, for spatial and spatiotemporal data; in the Docker image).
 - Integration tests against real services, run with `make -C integration_tests ci`:
   PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, RabbitMQ, NATS, ActiveMQ, Trino (memory,
   Iceberg and Delta Lake), Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), streaming

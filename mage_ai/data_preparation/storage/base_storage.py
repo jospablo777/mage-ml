@@ -181,6 +181,11 @@ class BaseStorage(ABC):
         """
         pass
 
+    def read_bytes(self, file_path: str) -> bytes:
+        """The content of a file."""
+        with open(file_path, 'rb') as file:
+            return file.read()
+
     @abstractmethod
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         """

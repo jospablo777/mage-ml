@@ -865,6 +865,9 @@ def serialize_output(
     csv_lines_only: bool = False,
     variable_uuid: str = None,
 ):
+    if is_geo_dataframe(data):
+        # A table with each geometry as WKT text; the output showed only a hint.
+        data = pd.DataFrame(data.to_wkt())
     if type(data) is pd.DataFrame:
         if csv_lines_only:
             data = dict(table=data.to_csv(header=True, index=False).strip('\n').split('\n'))

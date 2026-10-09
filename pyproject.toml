@@ -131,6 +131,10 @@ dbt = [
 duckdb = [
   "duckdb>=1.5.5",
 ]
+# GeoDataFrames, for spatial and spatiotemporal data.
+geo = [
+  "geopandas>=1.1",
+]
 great-expectations = [
   "great-expectations>=1.0",
 ]
@@ -217,6 +221,7 @@ all = [
   "mage-ml[clickhouse]",
   "mage-ml[dbt]",
   "mage-ml[duckdb]",
+  "mage-ml[geo]",
   "mage-ml[google-cloud-storage]",
   "mage-ml[mlflow]",
   "mage-ml[mongodb]",

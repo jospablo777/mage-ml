@@ -140,6 +140,9 @@ class GCSStorage(BaseStorage):
         buffer = io.BytesIO(self.bucket.blob(gcs_url_path(file_path)).download_as_bytes())
         return read_pandas_parquet(buffer, **kwargs)
 
+    def read_bytes(self, file_path: str) -> bytes:
+        return self.bucket.blob(gcs_url_path(file_path)).download_as_bytes()
+
     def read_polars_parquet(self, file_path: str, **kwargs) -> pl.DataFrame:
         buffer = io.BytesIO(self.bucket.blob(gcs_url_path(file_path)).download_as_bytes())
         return pl.read_parquet(buffer, **kwargs)
