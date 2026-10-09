@@ -80,8 +80,18 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual(
             self.command_names,
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
-             'create-spark-cluster'],
+             'create-spark-cluster', 'r'],
         )
+
+    def test_r_commands(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        output = CliRunner().invoke(app, ['r', '--help']).output
+        for name in ['init', 'sync', 'status']:
+            with self.subTest(command=name):
+                self.assertIn(name, output)
 
     def test_every_command_parses(self):
         # --help returns before the command body runs, so this covers argument

@@ -187,7 +187,7 @@ def __fetch_transformer_templates(
     if suggested_action:
         return build_template_from_suggestion(suggested_action)
 
-    if data_source is not None:
+    if data_source is not None and language != BlockLanguage.R:
         return __fetch_transformer_data_warehouse_template(data_source)
     elif action_type is not None and axis is not None:
         return __fetch_transformer_action_template(action_type, axis, existing_code)

@@ -1,5 +1,7 @@
+suppressPackageStartupMessages(library(tidyverse))
+
+#* @data_exporter
 export_data <- function(df_1, ...) {
-    # Specify your data exporting logic here
-    # Return value: exported dataframe
-    df_1
+  # df_1 is the output of the first upstream block, as a tibble.
+  # write_csv(df_1, "output.csv")
 }

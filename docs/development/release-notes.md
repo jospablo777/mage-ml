@@ -116,8 +116,38 @@ Each item says what changed, which pipelines it affects, and what to do.
   hashes keep verifying with bcrypt 5.
 - **Publishing** the image and the distributions runs on manual dispatch only.
 
+#### R blocks
+
+- **R blocks run without Docker, with R 4.6 and an rv environment** that `mage r init`
+  creates in `<project>/r`. They used to run only in the Docker image, with whatever
+  packages its R library held. See `r-blocks.md`.
+- **Data frames cross as Arrow** and keep 64-bit integers, lists, dates, time zones,
+  durations and times. They used to cross as CSV: integers above 2**53, lists, dates and
+  time zones were lost, and every column came back as text or float.
+- **Pipeline variables cross as JSON.** They used to be pasted into the R code, so a
+  quote in a value broke the block. `global_vars` is now a list.
+- **R errors fail the block with R's message and the block's lines**; the output used to
+  be lost. Blocks mark their function with `#* @transformer` and the other annotations,
+  and their tests with `#* @test`; blocks that define `load_data()`, `transform()` or
+  `export_data()` still run.
+- The Docker image installs R 4.6 from CRAN and rv 0.20, in place of Debian's R with
+  pacman and renv.
+
+#### SQL blocks
+
+- **PostgreSQL SQL blocks keep integers.** pandas read_sql turned integer columns with
+  NULLs into float64, so `9223372036854775807` became `9.223372036854776e18`. Integer
+  columns are nullable Int64; numeric and float columns are float64, as before.
+- **Polars Int128 and UInt128 columns are written to PostgreSQL as numeric(39, 0)**. They
+  were written as text.
+
 ### New
 
+- R blocks with the `mageml` R package: annotations for block functions and tests,
+  pipeline variables, and `read_sql`, `write_table` and `db_connect` for the databases of
+  `io_config.yaml`. `mage r init`, `mage r sync` and `mage r status` manage the R
+  environment.
+- Extra: `pointblank`, for data validation in `@test` functions.
 - `load(exact_types=True)` and `load(polars=True)` on the PostgreSQL, MySQL and DuckDB
   clients and on the S3 and other file clients. They keep integers with nulls, decimals,
   unsigned and 128-bit integers, nested values and zoned timestamps. The default load is
@@ -128,7 +158,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   storage such as MinIO.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, Redis, a REST API service, Feast, MLflow, DuckDB and S3 (MinIO).
+  PostgreSQL, MySQL, MongoDB, Redis, a REST API service, Feast, MLflow, DuckDB, S3
+  (MinIO), and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
 
@@ -143,5 +174,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **pandas 3** treats NaN and NA as one missing value in pyarrow-backed and nullable float
   columns unless `future.distinguish_nan_and_na` is set; the first arithmetic turns NaN
   into NA.
+- **RPostgres** writes dates before the year 1000 without leading zeros, which PostgreSQL
+  reads as years after 2000, and truncates the microseconds of date-times.
+  `mageml::write_table` formats them itself. R's arrow package truncates the microseconds
+  of date-times too; Mage rounds them.
+- **rv 0.20** parses `dev_dependencies` in `rproject.toml` but installs none, so the
+  integration tests' R environment lists testthat, lintr and roxygen2 as dependencies.
 - **Feast 0.66** rounds Int64 features above 2**53 in pushes with a NULL in the column,
   and keeps the last write over the latest event. See `feast-integration.md`.

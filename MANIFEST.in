@@ -4,6 +4,7 @@ recursive-include mage_ai/server/frontend_dist *
 recursive-include mage_ai/server/frontend_dist_base_path_template *
 recursive-include mage_ai/sample_datasets *
 recursive-include mage_ai/data_preparation/templates *
-recursive-include mage_ai/data_preparation/models/block/r/templates *
+recursive-include mage_ai/data_preparation/models/block/r/mageml *
+include mage_ai/data_preparation/models/block/r/runner.R
 recursive-include mage_ai/orchestration/db *
 global-exclude *.db *.db-* *.sqlite *.sqlite3 *.py[cod] .env .env.*

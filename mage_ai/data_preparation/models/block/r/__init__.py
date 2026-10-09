@@ -1,199 +1,171 @@
-import os
-import subprocess
-import uuid
-from typing import Dict, List
+"""
+R blocks: data loaders, transformers and data exporters written in R.
 
-import jinja2
-import pandas as pd
-import simplejson
+A block runs in its own Rscript process, with the library of the project's rv
+environment (see runtime.py) and the mageml R package, which runs it (see mageml/). The
+upstream outputs and the pipeline's variables are written to a job directory, as
+described in exchange.py, and the block's return value and test results are read back
+from it.
+"""
+import json
+import os
+import shutil
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List
 
 from mage_ai.data_preparation.models.block import Block
-from mage_ai.data_preparation.models.constants import (
-    CHILD_DATA_VARIABLE_UUID,
-    BlockType,
-)
-from mage_ai.data_preparation.models.variables.constants import (
-    DATAFRAME_CSV_FILE,
-    VariableType,
-)
-from mage_ai.shared.parsers import encode_complex
+from mage_ai.data_preparation.models.block.r import exchange, runtime
+from mage_ai.data_preparation.models.constants import BlockType
 
-BLOCK_TYPE_TO_EXECUTION_TEMPLATE = {
-    BlockType.DATA_LOADER: "data_loader.jinja",
-    BlockType.TRANSFORMER: "transformer.jinja",
-    BlockType.DATA_EXPORTER: "data_exporter.jinja",
-}
+RUNNER = Path(__file__).parent / 'runner.R'
+BLOCK_TYPES = (BlockType.DATA_LOADER, BlockType.TRANSFORMER, BlockType.DATA_EXPORTER)
 
-template_env = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(
-        os.path.join(
-            os.path.dirname(__file__),
-            "templates",
-        )
-    ),
-    lstrip_blocks=True,
-    trim_blocks=True,
-)
+
+class RBlockError(Exception):
+    """An R block failed. The message holds R's error and the block's calls."""
+
+
+@dataclass
+class RRun:
+    # The block's return value, in a list, or an empty list when it returned NULL.
+    outputs: List[Any]
+    # The name, whether it passed and the error message of each of the block's tests.
+    tests: List[Dict] = field(default_factory=list)
+
+
+def _read_text(path: str) -> str:
+    if not os.path.exists(path):
+        return ''
+    with open(path, encoding='utf-8', errors='replace') as file:
+        return file.read().strip()
+
+
+def _write_json(job_dir: str, name: str, value: Any, private: bool = False) -> None:
+    path = os.path.join(job_dir, name)
+    # Settings with passwords are readable by the owner only; the job directory is
+    # removed after the run.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if private else 0o644)
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as file:
+        json.dump(value, file, ensure_ascii=False, default=str)
 
 
 def execute_r_code(
-    block,
+    block_type: BlockType,
     code: str,
-    execution_partition: str = None,
+    input_vars: List = None,
     global_vars: Dict = None,
-):
-    input_variable_objects = (
-        block.input_variable_objects(
+    repo_path: str = None,
+    block_uuid: str = None,
+    pipeline_uuid: str = None,
+    execution_partition: str = None,
+) -> RRun:
+    """Run R code as a block of block_type."""
+    if block_type not in BLOCK_TYPES:
+        raise RBlockError(f'R blocks cannot be {block_type} blocks.')
+    config = runtime.r_config(repo_path)
+    libraries = runtime.prepare(config)
+
+    job_dir = tempfile.mkdtemp(prefix='mage_r_')
+    try:
+        entries, warnings = exchange.write_inputs(input_vars or [], job_dir)
+        values, skipped = exchange.globals_for_r(global_vars)
+        if skipped:
+            warnings.append(
+                f'Variables {", ".join(skipped)} cannot be written as JSON and are not in '
+                'global_vars.',
+            )
+        for warning in warnings:
+            print(f'[R block {block_uuid}] {warning}')
+        # An empty dict, not a list, when there are no variables.
+        _write_json(job_dir, 'globals.json', values or {})
+        _write_json(job_dir, 'manifest.json', dict(
+            block_type=str(block_type),
+            block_uuid=block_uuid,
+            pipeline_uuid=pipeline_uuid,
             execution_partition=execution_partition,
-        )
-        or []
-    )
+            inputs=entries,
+        ))
+        with open(os.path.join(job_dir, 'block.R'), 'w', encoding='utf-8') as file:
+            file.write(code)
+        databases = exchange.database_settings(code, repo_path)
+        if databases:
+            _write_json(job_dir, 'io_config.json', databases, private=True)
 
-    # Render R script with user code
-    execution_code = __render_r_script(
-        block,
-        code,
-        execution_partition=execution_partition,
-        global_vars=global_vars,
-        input_variable_objects=input_variable_objects,
-    )
-    file_path = f"/tmp/{str(uuid.uuid4())}.r"
-    with open(file_path, "w") as foutput:
-        foutput.write(execution_code)
+        env = dict(os.environ)
+        env.pop('MAGE_R_LIBRARY', None)
+        if libraries.rv is not None:
+            env['MAGE_R_LIBRARY'] = str(libraries.rv)
+        env['MAGE_R_MAGEML_LIBRARY'] = str(libraries.mageml)
+        # R reads naive timestamps as UTC and shows them in the session's time zone.
+        env['TZ'] = os.getenv('MAGE_R_TZ') or 'UTC'
+        cwd = repo_path if repo_path and os.path.isdir(repo_path) else job_dir
+        exit_code = runtime.run_rscript(config, RUNNER, [job_dir], env=env, cwd=cwd)
+        if exit_code != 0:
+            message = _read_text(os.path.join(job_dir, 'error.txt'))
+            calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
+            text = f'R block {block_uuid} failed: {message or f"Rscript exited with {exit_code}"}'
+            if calls:
+                text += f'\n\nR calls:\n{calls}'
+            raise RBlockError(text)
 
-    # Convert input variable to csv format
-    __convert_inputs_to_csvs(input_variable_objects)
-
-    # Execute R script
-    __execute_r_code(file_path)
-    os.remove(file_path)
-
-    output_variable_objects = block.output_variable_objects(
-        execution_partition=execution_partition,
-    )
-    output_variable_objects = [
-        v
-        for v in output_variable_objects
-        if os.path.exists(
-            os.path.join(
-                output_variable_objects[0].variable_path,
-                DATAFRAME_CSV_FILE,
-            )
-        )
-    ]
-
-    if len(output_variable_objects) > 0:
-        df = pd.read_csv(
-            os.path.join(
-                output_variable_objects[0].variable_path,
-                DATAFRAME_CSV_FILE
-            )
-        )
-    else:
-        df = None
-    return df
+        tests_path = os.path.join(job_dir, 'tests.json')
+        tests = []
+        if os.path.exists(tests_path):
+            with open(tests_path, encoding='utf-8') as file:
+                tests = json.load(file) or []
+        if block_type == BlockType.DATA_EXPORTER:
+            return RRun(outputs=[], tests=tests)
+        returned, value = exchange.read_output(job_dir)
+        return RRun(outputs=[value] if returned else [], tests=tests)
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
 
 
-def __convert_inputs_to_csvs(input_variable_objects):
-    for v in input_variable_objects:
-        if v.variable_type == VariableType.DATAFRAME:
-            v.convert_parquet_to_csv()
+def _replayed_test(result: Dict) -> Callable:
+    """A test function that passes or fails as the R test did."""
 
+    def test(*args, **kwargs):
+        if not result.get('passed'):
+            raise AssertionError(result.get('message') or 'The R test failed.')
 
-def __render_global_vars(global_vars: Dict = None):
-    if not global_vars:
-        return ""
-
-    def format_value(val):
-        if type(val) is int or type(val) is float:
-            return val
-        elif type(val) is dict:
-            json_val = simplejson.dumps(
-                val,
-                default=encode_complex,
-                ignore_nan=True,
-            )
-            return f"'{json_val}'"
-        else:
-            return f"'{val}'"
-
-    var_list = [f"{k}={format_value(v)}" for k, v in global_vars.items()]
-    val_list_str = ", ".join(var_list)
-    return f"global_vars = c({val_list_str})"
-
-
-def __render_r_script(
-    block,
-    code: str,
-    execution_partition: str = None,
-    global_vars: Dict = None,
-    input_variable_objects: List = None,
-):
-    if input_variable_objects is None:
-        input_variable_objects = []
-    if block.type not in BLOCK_TYPE_TO_EXECUTION_TEMPLATE:
-        raise Exception(
-            f"Block execution for {block.type} with R language is not supported.",
-        )
-    template = template_env.get_template(
-        BLOCK_TYPE_TO_EXECUTION_TEMPLATE[block.type]
-    )
-
-    output_variable_object = block.variable_object(
-        CHILD_DATA_VARIABLE_UUID,
-        execution_partition=execution_partition,
-    )
-    os.makedirs(output_variable_object.variable_path, exist_ok=True)
-    output_path = os.path.join(
-        output_variable_object.variable_path,
-        DATAFRAME_CSV_FILE
-    )
-
-    global_vars_str = __render_global_vars(global_vars=global_vars)
-
-    return (
-        template.render(
-            code=code,
-            global_vars=global_vars_str,
-            input_paths=[
-                os.path.join(v.variable_path, DATAFRAME_CSV_FILE)
-                for v in input_variable_objects
-            ],
-            input_vars_str=", ".join(
-                [f"df_{i + 1}" for i in range(len(input_variable_objects))]
-            ),
-            output_path=output_path,
-        )
-        + "\n"
-    )
-
-
-def __execute_r_code(file_path: str):
-    subprocess.run(
-        ["Rscript", "--vanilla", file_path],
-        check=True,
-    )
+    test.__name__ = str(result.get('name') or 'test')
+    return test
 
 
 class RBlock(Block):
     def _execute_block(
         self,
-        output_from_input_vars,
+        outputs_from_input_vars,
         custom_code: str = None,
         execution_partition: str = None,
         global_vars: Dict = None,
+        input_vars: List = None,
         **kwargs,
     ) -> List:
-        outputs = execute_r_code(
-            self,
-            custom_code or self.content,
-            execution_partition=execution_partition,
+        code = custom_code if custom_code is not None and custom_code.strip() else None
+        if code is None:
+            code = self.content
+        if code is None and os.path.exists(self.file_path):
+            with open(self.file_path, encoding='utf-8') as file:
+                code = file.read()
+        run = execute_r_code(
+            self.type,
+            code or '',
+            input_vars=input_vars,
             global_vars=global_vars,
+            repo_path=self.repo_path,
+            block_uuid=self.uuid,
+            pipeline_uuid=self.pipeline_uuid,
+            execution_partition=execution_partition,
         )
+        # The tests ran in R with the output; run_tests reports them as Mage reports the
+        # tests of Python blocks, after the output is stored.
+        self.test_functions = [_replayed_test(result) for result in run.tests]
+        return run.outputs
 
-        if outputs is None:
-            outputs = []
-        if type(outputs) is not list:
-            outputs = [outputs]
-
-        return outputs
+    def run_tests(self, *args, **kwargs) -> None:
+        # The tests are R functions; updating them would run the block's code as Python.
+        kwargs['update_tests'] = False
+        return super().run_tests(*args, **kwargs)

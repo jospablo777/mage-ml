@@ -38,8 +38,12 @@ export MAGE_TEST_MONGODB_PORT ?= 17017
 export MAGE_TEST_MONGODB_URL ?= mongodb://127.0.0.1:$(MAGE_TEST_MONGODB_PORT)/?directConnection=true
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
+# The rv environment of the R tests: R 4.6 with the tidyverse, mageml's
+# dependencies, RPostgres, testthat, lintr and roxygen2.
+export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
+RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-soak ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-r test-soak ci r-env
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -47,7 +51,11 @@ up:
 down:
 	$(COMPOSE) down --volumes --remove-orphans
 
-test: up
+# Installs the R test environment's packages as rv.lock pins them.
+r-env:
+	cd r_env && $(RV) sync
+
+test: up r-env
 	cd .. && $(PYTHON) -m pytest integration_tests --ignore=integration_tests/soak $(PYTEST_ARGS)
 
 test-postgres: up
@@ -74,6 +82,9 @@ test-mysql: up
 test-mongodb: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mongodb $(PYTEST_ARGS)
 
+test-r: up r-env
+	cd .. && $(PYTHON) -m pytest integration_tests/r $(PYTEST_ARGS)
+
 # The scheduler with many concurrent pipelines, for MAGE_TEST_SOAK_SECONDS (default 150).
 # It runs on its own: make test-soak MAGE_TEST_SOAK_SECONDS=1800
 test-soak: up
@@ -84,7 +95,7 @@ test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
-ci: up
+ci: up r-env
 	cd .. && $(PYTHON) -m pytest integration_tests --ignore=integration_tests/soak -rs \
 		--junitxml=integration_tests/results.xml $(PYTEST_ARGS)
 	$(PYTHON) check_no_skips.py results.xml

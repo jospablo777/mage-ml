@@ -181,6 +181,35 @@ class UvVersionTest(unittest.TestCase):
                 self.assertEqual(pins, {version})
 
 
+class RVersionTest(unittest.TestCase):
+    """
+    The image and the integration tests install rv and R 4.6, the R version of the
+    projects that mage r init creates.
+    """
+
+    def test_rv_and_r_versions_match(self):
+        from mage_ai.data_preparation.models.block.r.runtime import DEFAULT_R_VERSION
+
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+        workflow = (REPO_ROOT / '.github/workflows/build_and_test.yml').read_text(
+            encoding='utf-8',
+        )
+        test_environment = (REPO_ROOT / 'integration_tests/r_env/rproject.toml').read_text(
+            encoding='utf-8',
+        )
+
+        image_rv = re.search(r'ARG RV_VERSION=(?P<version>[\d.]+)', dockerfile)
+        workflow_rv = re.search(r'RV_VERSION: "(?P<version>[\d.]+)"', workflow)
+        self.assertIsNotNone(image_rv)
+        self.assertIsNotNone(workflow_rv)
+        self.assertEqual(image_rv.group('version'), workflow_rv.group('version'))
+
+        r_minor = DEFAULT_R_VERSION.replace('.', '')
+        self.assertIn(f'trixie-cran{r_minor}/', dockerfile)
+        self.assertIn(f'r-version: "{DEFAULT_R_VERSION}"', workflow)
+        self.assertIn(f'r_version = "{DEFAULT_R_VERSION}"', test_environment)
+
+
 class DependencyUpdateTest(unittest.TestCase):
     def test_dependabot_covers_every_lockfile(self):
         config = yaml.safe_load((REPO_ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))

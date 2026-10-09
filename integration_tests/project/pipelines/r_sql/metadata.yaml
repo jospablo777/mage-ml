@@ -1,0 +1,53 @@
+blocks:
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - r_sql_transform
+  language: sql
+  name: r_sql_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: r_sql_load
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - r_sql_polars
+  language: r
+  name: r_sql_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - r_sql_load
+  uuid: r_sql_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - r_sql_export
+  language: python
+  name: r_sql_polars
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - r_sql_transform
+  uuid: r_sql_polars
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: postgres
+    data_provider_profile: test_schema
+    data_provider_table: r_sql_dst
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks: []
+  language: sql
+  name: r_sql_export
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - r_sql_polars
+  uuid: r_sql_export
+name: r_sql
+type: python
+uuid: r_sql

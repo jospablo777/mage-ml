@@ -27,6 +27,8 @@ env:
   NODE_OPTIONS: --max-old-space-size=4096
   # Match the uv image tag in Dockerfile.
   UV_VERSION: "0.11.29"
+  # Match RV_VERSION in Dockerfile.
+  RV_VERSION: "0.20.0"
 
 jobs:
   lint:
@@ -129,7 +131,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pointblank --extra integrations
+      # R 4.6 and rv for the R block tests, which run with the rv environment in
+      # integration_tests/r_env. make installs its packages from rv.lock.
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.6"
+          use-public-rspm: true
+      - name: Install rv and the system libraries of the R environment
+        run: |
+          curl -fsSL "https://github.com/A2-ai/rv/releases/download/v${RV_VERSION}/rv-v${RV_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin rv
+          rv --version
+          cd integration_tests/r_env
+          rv sysdeps --only-absent --json | python3 -c '
+          import json, sys
+          entries = json.load(sys.stdin)
+          names = [e if isinstance(e, str) else e["name"] for e in entries]
+          print(" ".join(names))' > /tmp/r-sysdeps
+          if [ -s /tmp/r-sysdeps ]; then
+            sudo apt-get update
+            sudo apt-get install -y $(cat /tmp/r-sysdeps)
+          fi
       # Same target as a local run. It starts the services in integration_tests/compose.yaml
       # and fails when any test is skipped.
       - name: Run integration tests

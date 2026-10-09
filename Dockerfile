@@ -22,8 +22,28 @@ RUN apt-get update && apt-get upgrade -y && \
     apt-get update && \
     ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
       tini msodbcsql18 libodbc2 libmagic1 libgssapi-krb5-2 libgomp1 \
-      graphviz postgresql-client r-base && \
+      graphviz postgresql-client && \
     uv pip uninstall --system pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# R 4.6 from CRAN's Debian repository, and rv, which installs the packages of each
+# project's R environment (mage r init). Debian trixie ships R 4.5. rv installs
+# binaries from Posit Package Manager where it has them, as for amd64, and builds the
+# other packages from source with r-base-dev, as on arm64.
+ARG RV_VERSION=0.20.0
+RUN curl -fsSL \
+      'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
+      -o /etc/apt/trusted.gpg.d/cran_debian_key.asc && \
+    printf '%s\n' 'Types: deb' 'URIs: https://cloud.r-project.org/bin/linux/debian/' \
+      'Suites: trixie-cran46/' 'Components:' \
+      'Signed-By: /etc/apt/trusted.gpg.d/cran_debian_key.asc' \
+      > /etc/apt/sources.list.d/cran.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends r-base-core r-recommended r-base-dev && \
+    curl -fsSL "https://github.com/A2-ai/rv/releases/download/v${RV_VERSION}/rv-v${RV_VERSION}-$(uname -m)-unknown-linux-gnu.tar.gz" \
+      | tar -xz -C /usr/local/bin rv && \
+    Rscript -e 'stopifnot(getRversion() >= "4.6.0")' && \
+    rv --version && \
     rm -rf /var/lib/apt/lists/*
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/mage \
@@ -59,13 +79,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     cp /build/livy/config.json /root/.sparkmagic/config.json && \
     rm -rf /build
 
-RUN R -e "install.packages(c('pacman', 'renv'), repos='https://cloud.r-project.org'); stopifnot(requireNamespace('pacman', quietly=TRUE), requireNamespace('renv', quietly=TRUE))"
-
 FROM runtime-base AS runtime
 COPY --from=python-build /opt/mage /opt/mage
 COPY --from=python-build /opt/mage-livy /opt/mage-livy
 COPY --from=python-build /root/.sparkmagic /root/.sparkmagic
-COPY --from=python-build /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 COPY --chmod=0755 scripts/install_other_dependencies.py scripts/run_app.sh /app/
 ENV MAGE_DATA_DIR=/home/src/mage_data \
     PYTHONPATH=/home/src

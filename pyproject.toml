@@ -150,6 +150,11 @@ mysql = [
 oracle = [
   "oracledb>=26.0.1",
 ]
+# Data validation for the @test functions of blocks: Validate(...).interrogate()
+# .assert_passing() raises an AssertionError that lists the failed steps.
+pointblank = [
+  "pointblank>=1.0.1",
+]
 postgres = [
   "psycopg2-binary>=2.9.10",
   "sshtunnel>=0.4.0",
@@ -209,6 +214,7 @@ all = [
   "mage-ml[mlflow]",
   "mage-ml[mongodb]",
   "mage-ml[oracle]",
+  "mage-ml[pointblank]",
   "mage-ml[postgres]",
   "mage-ml[redshift]",
   "mage-ml[s3]",

@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from typing import Union
+from typing import List, Union
 
 import typer
 from click import Context
@@ -321,6 +321,96 @@ def create_spark_cluster(
 
     project_path = os.path.abspath(project_path)
     create_cluster(project_path)
+
+
+r_app = typer.Typer(
+    cls=OrderCommands,
+    help='Manage the rv environment that R blocks run in.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(r_app, name='r')
+
+R_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the Mage project.')
+R_PACKAGES_DEFAULT = typer.Option(
+    None,
+    '--package',
+    '-p',
+    help='an R package to install; repeat for more. Defaults to the tidyverse.',
+)
+R_VERSION_DEFAULT = typer.Option('4.6', help='the R version of the environment.')
+
+
+def _r_config(project_path: str):
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    try:
+        config = runtime.r_config(os.path.abspath(project_path))
+    except runtime.REnvironmentError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=1)
+    if not config.uses_rv:
+        print(
+            f'[red]{os.path.abspath(project_path)} has no R environment. Create it with '
+            f'`mage r init {project_path}`.[/red]'
+        )
+        raise typer.Exit(code=1)
+    return config
+
+
+@r_app.command('init')
+def r_init(
+    project_path: str = R_PROJECT_PATH_DEFAULT,
+    packages: List[str] = R_PACKAGES_DEFAULT,
+    r_version: str = R_VERSION_DEFAULT,
+):
+    """
+    Create the project's R environment in <project>/r with rv and install its packages.
+    """
+    from pathlib import Path
+
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    directory = Path(os.path.abspath(project_path)) / runtime.R_PROJECT_DIRECTORY
+    try:
+        runtime.init_project(directory, packages=packages or None, r_version=r_version)
+    except runtime.REnvironmentError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=1)
+    print(f'Created the R environment in {directory}. Add packages with `rv add` there.')
+
+
+@r_app.command('sync')
+def r_sync(project_path: str = R_PROJECT_PATH_DEFAULT):
+    """
+    Install the packages of the project's R environment, as rv.lock pins them.
+    """
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    config = _r_config(project_path)
+    try:
+        runtime.sync(config)
+    except runtime.REnvironmentError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=1)
+    print(f'The R library of {config.project_dir} is synced.')
+
+
+@r_app.command('status')
+def r_status(project_path: str = R_PROJECT_PATH_DEFAULT):
+    """
+    Check that R blocks can run: the R version, the library and the packages Mage needs.
+    """
+    from mage_ai.data_preparation.models.block.r import runtime
+
+    config = _r_config(project_path)
+    report = runtime.status(config)
+    for key, value in report['details'].items():
+        print(f'{key}: {value}')
+    for problem in report['problems']:
+        print(f'[red]{problem}[/red]')
+    if report['problems']:
+        raise typer.Exit(code=1)
+    print('R blocks can run.')
 
 
 if __name__ == '__main__':

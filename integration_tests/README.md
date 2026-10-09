@@ -5,10 +5,11 @@ drivers; these tests check what reaches the database and what comes back.
 
 ## Running
 
-Requirements: Docker with Compose v2, and the project environment with the `postgres`,
-`mlflow`, `duckdb`, `s3`, `mysql`, `mongodb` and `integrations` extras (`uv sync --group dev
---extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb
---extra integrations`).
+Requirements: Docker with Compose v2, R 4.6 and rv 0.20 on `PATH`, and the project
+environment with the `postgres`, `mlflow`, `duckdb`, `s3`, `mysql`, `mongodb`, `pointblank`
+and `integrations` extras (`uv sync --group dev --extra postgres --extra mlflow --extra
+duckdb --extra s3 --extra mysql --extra mongodb --extra pointblank --extra integrations`).
+`make` installs the R packages of `r_env/` with `rv sync`.
 
 ```bash
 make -C integration_tests test             # start the services, run every test
@@ -21,6 +22,7 @@ make -C integration_tests test-duckdb      # DuckDB only, no service needed
 make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test-mysql       # MySQL only
 make -C integration_tests test-mongodb     # MongoDB only
+make -C integration_tests test-r           # R blocks, with R 4.6, rv and PostgreSQL
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
@@ -63,8 +65,11 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
+| `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, RPostgres, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |
+| `data/r_dataset.py` | pandas frame with every type that crosses between Python and R, edge rows and seeded rows, and the comparisons of what comes back |
+| `r/` | R blocks: every type round trip, tidyverse transformations, errors, tests, timeouts, the checks of the environment, `mage r` commands, the mageml package's testthat tests, lintr, `R CMD check` and generated docs, and pipelines that chain Python, R, Polars and SQL blocks and write to PostgreSQL with SQL exporters and with DBI |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
-| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/` and `mysql/` tests run |
+| `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/`, `mysql/` and `r/` tests run |
 
 ## How tables are compared
 
