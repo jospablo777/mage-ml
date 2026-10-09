@@ -1,4 +1,5 @@
 import os
+from collections.abc import Iterator
 from typing import Any, Dict, Optional, Tuple
 
 import joblib
@@ -15,7 +16,6 @@ from mage_ai.data_preparation.models.variables.constants import (
     UBJSON_MODEL_FILENAME,
     VariableType,
 )
-from mage_ai.shared.array import is_iterable
 from mage_ai.shared.parsers import object_to_dict
 
 # from scipy.sparse import load_npz, save_npz
@@ -50,9 +50,19 @@ def save_custom_object(
         is_object = True
         os.makedirs(variable_path, exist_ok=True)
 
-        if not is_iterable(data):
+        # Iterables were not pickled, so a NumPy array or a list of objects was stored
+        # as its description and the next block received that dict. Iterators and
+        # generators are still left out: pickling would consume them.
+        if not isinstance(data, Iterator):
             full_path = os.path.join(variable_path, JOBLIB_OBJECT_FILE)
-            joblib.dump(data, full_path)
+            try:
+                joblib.dump(data, full_path)
+            except Exception as error:
+                print(f'[WARNING] {type(data).__name__} cannot be pickled and is stored as '
+                      f'its description only: {error}')
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                full_path = None
     elif VariableType.DICTIONARY_COMPLEX == variable_type:
         is_object = True
         pass

@@ -30,6 +30,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Sparse matrices inside list and dict outputs read back.** They were stored as a dense
   table, and reading the output failed with `scipy.sparse does not support dtype
   object`. They are stored as npz; outputs written the old way read as before.
+- **NumPy arrays and lists of objects pass to the next block.** They were stored as their
+  description, and the next block received a dict such as `{'module': 'numpy', 'name':
+  'ndarray', ...}`. They are pickled; generators and objects that cannot be pickled are
+  stored as their description, with a warning.
+- **A block's outputs reach the next block in order.** They were read in text order, so
+  a block that returned 11 or more outputs passed `output_10` before `output_2`.
 - **Outputs that are not stored leave no files.** With `cache_block_output_in_memory`,
   each block still wrote shape files into an `output_0` with no data.
 - **Blocks without tests no longer read their output back** after writing it. The whole

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -283,9 +284,16 @@ def output_variables(
         else:
             output_variables = tap_stream_ids
 
-    output_variables.sort()
+    # By number: sorted as text, output_10 came before output_2, and a block that
+    # returned 11 or more outputs passed them to the next block out of order.
+    output_variables.sort(key=natural_sort_key)
 
     return output_variables
+
+
+def natural_sort_key(name: str) -> List:
+    """output_2 before output_10; text parts compare as text."""
+    return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
 
 
 def is_output_variable(variable_uuid: str, include_df: bool = True) -> bool:

@@ -142,6 +142,38 @@ def load_data():
         self.assertEqual(output['output'][0]['col1'].tolist(), [1, 2])
         self.assertEqual(block.get_variables_by_block(block.uuid, partition='run_1'), [])
 
+    def test_arrays_and_many_outputs_reach_the_next_block_as_returned(self):
+        """
+        A NumPy array was stored as its description, and outputs were read in text
+        order, so output_10 came before output_2.
+        """
+        pipeline = Pipeline.create('many outputs pipeline', repo_path=self.repo_path)
+        load = Block.create('loader_many', 'data_loader', self.repo_path, pipeline=pipeline)
+        with open(load.file_path, 'w') as file:
+            file.write("""import numpy as np
+@data_loader
+def load_data():
+    return tuple([np.arange(3)] + list(range(1, 12)))
+""")
+        check = Block.create(
+            'transformer_many', 'transformer', self.repo_path, pipeline=pipeline,
+            upstream_block_uuids=[load.uuid],
+        )
+        with open(check.file_path, 'w') as file:
+            file.write("""import numpy as np
+@transformer
+def transform(outputs, **kwargs):
+    assert isinstance(outputs[0], np.ndarray), type(outputs[0])
+    assert outputs[0].tolist() == [0, 1, 2]
+    assert outputs[1:] == list(range(1, 12)), outputs[1:]
+    return len(outputs)
+""")
+
+        load.execute_sync()
+        output = check.execute_sync(run_all_blocks=True)
+
+        self.assertEqual(output['output'][0], 12)
+
     def test_execute_with_preprocessers(self):
         pipeline = Pipeline.create(
             'test pipeline preprocessers',
