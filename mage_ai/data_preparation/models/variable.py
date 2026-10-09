@@ -61,6 +61,7 @@ from mage_ai.data_preparation.models.variables.constants import (
     DATAFRAME_PANDAS_METADATA_FILE,
     DATAFRAME_PARQUET_FILE,
     DATAFRAME_PARQUET_SAMPLE_FILE,
+    DATAFRAME_POLARS_LAZY_FILE,
     JOBLIB_FILE,
     JOBLIB_OBJECT_FILE,
     JSON_FILE,
@@ -777,9 +778,10 @@ class Variable:
                 VariableType.POLARS_DATAFRAME,
             ):
                 self.variable_type = VariableType.DATAFRAME
-            elif isinstance(data, pl.DataFrame) and self.variable_type in (
+            elif isinstance(data, (pl.DataFrame, pl.LazyFrame)) and self.variable_type in (
                 None,
                 VariableType.DATAFRAME,
+                VariableType.CUSTOM_OBJECT,
             ):
                 self.variable_type = VariableType.POLARS_DATAFRAME
             elif is_spark_dataframe(data):
@@ -878,9 +880,10 @@ class Variable:
                 VariableType.POLARS_DATAFRAME,
             ):
                 self.variable_type = VariableType.DATAFRAME
-            elif isinstance(data, pl.DataFrame) and self.variable_type in (
+            elif isinstance(data, (pl.DataFrame, pl.LazyFrame)) and self.variable_type in (
                 None,
                 VariableType.DATAFRAME,
+                VariableType.CUSTOM_OBJECT,
             ):
                 self.variable_type = VariableType.POLARS_DATAFRAME
             elif is_spark_dataframe(data):
@@ -1288,6 +1291,14 @@ class Variable:
         file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
         sample_file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_SAMPLE_FILE)
 
+        lazy = not sample and self.storage.path_exists(
+            os.path.join(self.variable_path, DATAFRAME_POLARS_LAZY_FILE),
+        )
+        if lazy and isinstance(self.storage, LocalStorage):
+            # The output was a LazyFrame: scanning lets the next block's query read only
+            # the columns and rows it needs.
+            return pl.scan_parquet(file_path)
+
         read_sample_success = False
         if sample:
             try:
@@ -1315,6 +1326,8 @@ class Variable:
         # Parquet keeps every Polars type. A data_column_types.json file next to a Polars
         # output is left from an earlier pandas output of the same block, and casting with
         # it turned floats into integers.
+        if lazy:
+            return df.lazy()
         return df
 
     def __read_spark_parquet(
@@ -1549,27 +1562,61 @@ class Variable:
             print(f'Writing DataFrame analysis failed during writing parquet: {err}.')
             traceback.print_exc()
 
-    def __write_polars_dataframe(self, data: pl.DataFrame) -> None:
+    def __write_polars_dataframe(self, data: Union[pl.DataFrame, pl.LazyFrame]) -> None:
         self.storage.makedirs(self.variable_path, exist_ok=True)
-        for filename in (DATAFRAME_COLUMN_TYPES_FILE, DATAFRAME_PANDAS_METADATA_FILE):
+        for filename in (
+            DATAFRAME_COLUMN_TYPES_FILE,
+            DATAFRAME_PANDAS_METADATA_FILE,
+            DATAFRAME_POLARS_LAZY_FILE,
+        ):
             stale = os.path.join(self.variable_path, filename)
             if self.storage.path_exists(stale):
                 self.storage.remove(stale)
 
-        self.storage.write_polars_dataframe(
-            data,
-            os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE),
-        )
+        file_path = os.path.join(self.variable_path, DATAFRAME_PARQUET_FILE)
+        lazy = isinstance(data, pl.LazyFrame)
+        if lazy:
+            # A LazyFrame used to be pickled as its query plan, so the next block ran the
+            # plan again against whatever the sources held then. It is computed once and
+            # streamed to Parquet; the next block scans that file.
+            if isinstance(self.storage, LocalStorage):
+                data.sink_parquet(file_path)
+                sample = data.head(DATAFRAME_SAMPLE_COUNT).collect()
+            else:
+                data = data.collect()
+                self.storage.write_polars_dataframe(data, file_path)
+                sample = data.head(DATAFRAME_SAMPLE_COUNT)
+            self.storage.write_json_file(
+                os.path.join(self.variable_path, DATAFRAME_POLARS_LAZY_FILE),
+                dict(lazy=True),
+            )
+            try:
+                schema = pl.read_parquet_schema(file_path) if isinstance(
+                    self.storage, LocalStorage,
+                ) else data.schema
+                rows = (
+                    pl.scan_parquet(file_path).select(pl.len()).collect().item()
+                    if isinstance(self.storage, LocalStorage)
+                    else data.height
+                )
+                self.__write_dataframe_analysis(
+                    dict(
+                        statistics=dict(
+                            original_row_count=rows,
+                            original_column_count=len(schema),
+                        ),
+                    ),
+                )
+            except Exception as err:
+                print(f'Writing DataFrame analysis failed during writing parquet: {err}.')
+        else:
+            self.storage.write_polars_dataframe(data, file_path)
+            sample = data.head(DATAFRAME_SAMPLE_COUNT)
 
         try:
-            sample_columns = data.columns[:DATAFRAME_SAMPLE_MAX_COLUMNS]
-            df_sample_output = data[
-                :DATAFRAME_SAMPLE_COUNT,
-                sample_columns,
-            ]
-
+            sample_columns = sample.columns[:DATAFRAME_SAMPLE_MAX_COLUMNS]
             self.storage.write_polars_dataframe(
-                df_sample_output,
+                sample.select(sample_columns),
                 os.path.join(self.variable_path, DATAFRAME_PARQUET_SAMPLE_FILE),
             )
         except Exception as err:

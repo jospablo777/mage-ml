@@ -8,6 +8,8 @@ DATAFRAME_PARQUET_SAMPLE_FILE = 'sample_data.parquet'
 # pandas details Parquet does not keep: column labels that are not strings, Series names,
 # and the categories of categorical columns stored as codes.
 DATAFRAME_PANDAS_METADATA_FILE = 'data_pandas_metadata.json'
+# Present when a block returned a Polars LazyFrame; the next block receives a LazyFrame.
+DATAFRAME_POLARS_LAZY_FILE = 'data_polars_lazy.json'
 JOBLIB_FILE = 'model.joblib'
 JOBLIB_OBJECT_FILE = 'object.joblib'
 JSON_FILE = 'data.json'

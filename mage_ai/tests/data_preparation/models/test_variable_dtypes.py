@@ -345,3 +345,50 @@ class VariableDtypeTest(DBTestCase):
         self.assertEqual(back['id'].tolist(), [3, 4])
         self.assertEqual(back['tags'].tolist(), [[3], [4]])
         self.assertEqual(back['tags'].dtype, frame['tags'].dtype)
+
+
+class LazyFrameOutputTest(DBTestCase):
+    def write_and_read(self, name, data, **read_kwargs):
+        with patch('mage_ai.data.models.manager.DataManager.writeable', return_value=False):
+            with patch('mage_ai.data.models.manager.DataManager.readable', return_value=False):
+                path = os.path.join(self.repo_path, 'pipelines', 'lazy')
+                variable = Variable(
+                    name, path, 'block1', variable_type=infer_variable_type(data)[0],
+                )
+                variable.write_data(data)
+                return Variable(name, path, 'block1').read_data(
+                    raise_exception=True, **read_kwargs,
+                )
+
+    def test_lazy_output_is_a_snapshot_read_as_a_lazy_frame(self):
+        """
+        A LazyFrame was pickled as its query plan, so the next block ran the plan again
+        and read the source file as it was at that moment.
+        """
+        source = os.path.join(self.repo_path, 'source.csv')
+        with open(source, 'w') as f:
+            f.write('id\n1\n2\n')
+        lazy = pl.scan_csv(source).filter(pl.col('id') > 0)
+
+        back = self.write_and_read('lazy', lazy)
+        with open(source, 'w') as f:
+            f.write('id\n99\n')
+
+        self.assertIsInstance(back, pl.LazyFrame)
+        self.assertEqual(back.collect()['id'].to_list(), [1, 2])
+
+    def test_lazy_output_sample_and_statistics(self):
+        lazy = pl.LazyFrame({'id': list(range(5)), 'name': list('abcde')})
+
+        sample = self.write_and_read('lazy_sample', lazy, sample=True, sample_count=2)
+
+        self.assertIsInstance(sample, pl.DataFrame)
+        self.assertEqual(sample['id'].to_list(), [0, 1])
+
+    def test_a_later_eager_output_is_read_eagerly(self):
+        self.write_and_read('switch_lazy', pl.LazyFrame({'id': [1]}))
+
+        back = self.write_and_read('switch_lazy', pl.DataFrame({'id': [2]}))
+
+        self.assertIsInstance(back, pl.DataFrame)
+        self.assertEqual(back['id'].to_list(), [2])

@@ -523,7 +523,7 @@ def infer_variable_type(
     basic_iterable = is_basic_iterable(data)
     variable_type_use = variable_type
 
-    if isinstance(data, pl.DataFrame) or (
+    if isinstance(data, (pl.DataFrame, pl.LazyFrame)) or (
         basic_iterable and len(data) >= 1 and all(isinstance(d, pl.DataFrame) for d in data)
     ):
         # Need to import here to mock in unit tests.
