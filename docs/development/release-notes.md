@@ -1,0 +1,123 @@
+# Release notes
+
+## v0.9.79-ml.5 (unreleased)
+
+Changes since `v0.9.79-ml.4`. The fork runs on Python 3.12 with pandas 3.0, Polars 2.0,
+pyarrow 25 and NumPy 2. Most changes fix values that Mage changed or lost without an
+error; the per-service findings are in `docs/development/*-integration.md` and
+`postgres-data-integrity.md`.
+
+### Behavior changes to check before upgrading
+
+Each item says what changed, which pipelines it affects, and what to do.
+
+#### Block outputs
+
+- **A missing upstream output raises.** When an upstream block's output file or
+  directory is missing, the next block fails with `Failed to read ...`. It used to
+  receive `{}` and run on it. Pipelines that relied on running after a deleted or
+  partial output now fail at that block.
+- **Outputs are written atomically.** On local storage, a block output is written to a
+  hidden staging directory (`.output_0.<id>.staging`) and swapped in when complete. A
+  killed process can leave such a directory behind; it is ignored and safe to delete.
+- **LazyFrame outputs are data.** A block that returns a Polars LazyFrame has the result
+  streamed to Parquet; the next block receives `pl.scan_parquet` of it, on local storage
+  and on S3. The query plan used to be pickled and run again by the next block, against
+  whatever its sources held then.
+- **pandas and Polars dtypes are kept** across blocks: nullable integers, categoricals,
+  non-string column labels, MultiIndex columns, decimals, UUIDs, bytes and values inside
+  dicts and lists. Outputs written by earlier versions read as before.
+
+#### File exports (local, S3, GCS, Azure)
+
+- **pandas CSV and Excel exports leave out the default index.** The default range index
+  used to be written and came back as a column named `Unnamed: 0`. A named or other
+  index is still written. Readers that expected the extra first column need updating.
+- **Parquet exports of pandas frames:** frames with a nanosecond column are written in
+  microseconds, and a value with nanoseconds raises `would lose data`. Pass
+  `coerce_timestamps=None` to write nanoseconds. Other frames keep their timestamp units;
+  the exporter used to coerce every frame to milliseconds.
+- **JSON exports of pandas frames** write ISO dates with microseconds.
+
+#### Data integration connectors
+
+- **Records carry Python values.** Sources that read files (S3, GCS, Azure) and the API
+  source read through Polars into pyarrow-backed pandas. Records hold Python `datetime`,
+  `date` and `Decimal` values where they held pandas `Timestamp`, integers stay integers,
+  and NaN becomes `None`.
+- **Discovery types change:** integer columns with nulls are `integer` (they were
+  `number`), and lists and structs are `array` and `object` (they were `string`).
+  Re-run discovery to pick up the types; existing catalogs keep working.
+- **S3 and GCS destinations name batch files** `YYYYMMDD-HHMMSS-ffffff-<id>.<ext>`.
+  Names had one-second resolution, and batches written within the same second replaced
+  each other. Consumers that parse the file name need the new pattern. CSV files hold
+  nested values as JSON.
+- **Delta Lake destinations work again.** They failed to import with deltalake 0.20.
+  Column types come from the stream schema; arrays and objects are JSON text. In overwrite
+  mode the first write of a sync replaces the table and later batches append; a
+  partitioned table replaces only the partitions it writes. Tables written before keep
+  their old column types; the first write merges new columns.
+- **Singer destinations validate records against the whole schema:** a column missing
+  from the schema raises a validation error.
+
+#### Databases
+
+- **MySQL new tables** get `DOUBLE`, sized `DECIMAL`, `BOOLEAN`, `DATETIME(6)`,
+  `LONGTEXT`, `LONGBLOB`, `JSON` and `TIME(6)`. Floats used to be `DECIMAL(10,0)`, which
+  rounded them to integers. Zoned timestamps are stored in UTC. Text values keep
+  surrounding double quotes, which were removed. Table and column names are quoted.
+  Tables created before keep their types.
+- **PostgreSQL new tables** follow the frame's dtypes (interval, bytea, jsonb, numeric,
+  arrays, integer widths). An unknown `unique_conflict_method` raises; it was treated as
+  IGNORE. With UPDATE, duplicate keys in one export raise before anything is written.
+- **DuckDB exports** create tables from the frame's types, insert by column name, and run
+  in one transaction. With UPDATE, duplicate keys raise; DuckDB kept one silently.
+- **Loads commit the transaction they start** (PostgreSQL, MySQL), so a client no longer
+  blocks other sessions' `ALTER` or `DROP`, and a second load sees newly committed rows.
+- **Existing tables match columns by name:** Mage's prefixed name for reserved words
+  (`_name`), the plain name, or the cleaned name. Appends to tables created outside Mage
+  used to fail.
+- **Column names that clean to the same name** (`Total Sales`, `total_sales`) raise
+  `ValueError`. One column used to overwrite the other.
+- **Missing durations (NaT) are NULL** in every SQL client; they were written as
+  `-9223372036854775808`.
+- **Polars frames keep integers with nulls, dates and 128-bit integers** when exported
+  through the pandas-based SQL clients (MSSQL, Trino, Redshift, BigQuery and others).
+
+#### Runtime
+
+- **A Rust panic in Polars or pyarrow fails the block run** and its retries apply. The run
+  used to stay running.
+- **Event, metric and cache timestamps** come from `time.time()`. On hosts outside UTC
+  they were off by the UTC offset.
+- **Passwords** are truncated to 72 bytes before hashing, as bcrypt 4 did, so existing
+  hashes keep verifying with bcrypt 5.
+- **Publishing** the image and the distributions runs on manual dispatch only.
+
+### New
+
+- `load(exact_types=True)` and `load(polars=True)` on the PostgreSQL, MySQL and DuckDB
+  clients and on the S3 and other file clients. They keep integers with nulls, decimals,
+  unsigned and 128-bit integers, nested values and zoned timestamps. The default load is
+  unchanged.
+- S3 block output storage streams LazyFrames with Polars and pages through any number of
+  keys.
+- The S3 client and the Delta Lake S3 destination take an endpoint, for S3-compatible
+  storage such as MinIO.
+- Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
+- Integration tests against real services, run with `make -C integration_tests ci`:
+  PostgreSQL, MySQL, Redis, a REST API service, Feast, MLflow, DuckDB and S3 (MinIO).
+
+### Upstream issues and workarounds
+
+- **pyarrow 25 and older cannot read a Parquet fixed-size list column that holds a null**
+  ([apache/arrow#35692](https://github.com/apache/arrow/issues/35692)). Mage reads such
+  files through Polars. The fix ships in pyarrow 26; the workaround switches off there.
+- **pandas 3.0's CSV parser** reads `-2**63` as missing in a column with other missing
+  values, and drops null rows of one-column files. Loads with `exact_types` or `polars`
+  read CSV with Polars.
+- **pandas 3** treats NaN and NA as one missing value in pyarrow-backed and nullable float
+  columns unless `future.distinguish_nan_and_na` is set; the first arithmetic turns NaN
+  into NA.
+- **Feast 0.66** rounds Int64 features above 2**53 in pushes with a NULL in the column,
+  and keeps the last write over the latest event. See `feast-integration.md`.
