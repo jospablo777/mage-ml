@@ -2,6 +2,7 @@ import ast
 import asyncio
 import json
 import os
+import re
 from functools import reduce
 from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple, Union
 
@@ -77,6 +78,34 @@ def create_filter(*args) -> ds.Expression:
         return schema_field >= value
     else:
         raise ValueError(f'Unsupported comparison type: {comparison}')
+
+
+def _natural_key(path: str) -> Tuple:
+    return tuple(
+        (0, int(part), '') if part.isdigit() else (1, 0, part)
+        for part in re.split(r'(\d+)', path)
+    )
+
+
+def ordered_dataset(path: str) -> ds.Dataset:
+    """
+    A Parquet dataset whose files are read in the order the rows were written.
+
+    pyarrow lists files in lexicographic order, so mage_chunk=10 came before mage_chunk=2
+    and rows of outputs with more than 10 chunks were read out of order. Files are sorted
+    by the numbers in their paths.
+    """
+    dataset = ds.dataset(path, format='parquet', partitioning='hive')
+    files = sorted(dataset.files, key=_natural_key)
+    if files == list(dataset.files):
+        return dataset
+    return ds.dataset(
+        files,
+        filesystem=dataset.filesystem,
+        format='parquet',
+        partition_base_dir=path,
+        partitioning='hive',
+    )
 
 
 def partition_from_path(file_path: str) -> Optional[Dict[str, str]]:
@@ -338,11 +367,9 @@ def __builder_scanner_generator_configurations(
         An iterator over the scanned (and optionally deserialized) batches of records.
     """
     if isinstance(source, list):
-        dataset = ds.dataset(
-            [ds.dataset(path, format='parquet', partitioning='hive') for path in source],
-        )
+        dataset = ds.dataset([ordered_dataset(path) for path in source])
     else:
-        dataset = ds.dataset(source, format='parquet', partitioning='hive')
+        dataset = ordered_dataset(source)
 
     metadatas = []
     for directory in source if isinstance(source, list) else [source]:
