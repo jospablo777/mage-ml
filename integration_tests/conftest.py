@@ -353,3 +353,52 @@ def mage_mongodb(mongodb_url, mongo):
     client = MongoDB(connection_string=mongodb_url, database=mongo.name, verbose=False)
     yield client
     client.client.close()
+
+
+CLICKHOUSE_ENV = {
+    'host': 'MAGE_TEST_CLICKHOUSE_HOST',
+    'port': 'MAGE_TEST_CLICKHOUSE_PORT',
+    'username': 'MAGE_TEST_CLICKHOUSE_USER',
+    'password': 'MAGE_TEST_CLICKHOUSE_PASSWORD',
+}
+
+
+@pytest.fixture(scope='session')
+def clickhouse_settings():
+    settings = {key: os.getenv(variable) for key, variable in CLICKHOUSE_ENV.items()}
+    missing = [CLICKHOUSE_ENV[key] for key, value in settings.items() if not value]
+    if missing:
+        pytest.skip(f'ClickHouse is not configured: {", ".join(missing)} unset')
+    return dict(settings, port=int(settings['port']))
+
+
+@pytest.fixture
+def clickhouse_database(clickhouse_settings, monkeypatch):
+    """A database used by one test and dropped after it."""
+    import clickhouse_connect
+
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    admin = clickhouse_connect.get_client(**clickhouse_settings)
+    admin.command(f'CREATE DATABASE {name}')
+    # The clickhouse profile of the project's io_config.yaml uses this database.
+    monkeypatch.setenv('MAGE_TEST_CLICKHOUSE_DATABASE', name)
+    yield name
+    admin.command(f'DROP DATABASE IF EXISTS {name}')
+    admin.close()
+
+
+@pytest.fixture
+def ch(clickhouse_settings, clickhouse_database):
+    """A clickhouse-connect client that bypasses Mage."""
+    import clickhouse_connect
+
+    client = clickhouse_connect.get_client(database=clickhouse_database, **clickhouse_settings)
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def mage_clickhouse(clickhouse_settings, clickhouse_database):
+    from mage_ai.io.clickhouse import ClickHouse
+
+    return ClickHouse(database=clickhouse_database, verbose=False, **clickhouse_settings)

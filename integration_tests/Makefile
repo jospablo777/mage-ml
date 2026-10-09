@@ -34,6 +34,10 @@ export MAGE_TEST_MYSQL_PORT ?= 13306
 export MAGE_TEST_MYSQL_DATABASE ?= test
 export MAGE_TEST_MYSQL_USER ?= root
 export MAGE_TEST_MYSQL_PASSWORD ?= test
+export MAGE_TEST_CLICKHOUSE_HOST ?= 127.0.0.1
+export MAGE_TEST_CLICKHOUSE_PORT ?= 18123
+export MAGE_TEST_CLICKHOUSE_USER ?= mage
+export MAGE_TEST_CLICKHOUSE_PASSWORD ?= test
 export MAGE_TEST_MONGODB_PORT ?= 17017
 export MAGE_TEST_MONGODB_URL ?= mongodb://127.0.0.1:$(MAGE_TEST_MONGODB_PORT)/?directConnection=true
 # MLflow prints a hint for coding agents on import.
@@ -43,7 +47,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-r test-soak ci r-env
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-r test-soak ci r-env
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -81,6 +85,9 @@ test-mysql: up
 
 test-mongodb: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mongodb $(PYTEST_ARGS)
+
+test-clickhouse: up
+	cd .. && $(PYTHON) -m pytest integration_tests/clickhouse $(PYTEST_ARGS)
 
 test-r: up r-env
 	cd .. && $(PYTHON) -m pytest integration_tests/r $(PYTEST_ARGS)

@@ -3,13 +3,13 @@ from typing import Dict, List, Union
 import clickhouse_connect
 from pandas import DataFrame, Series
 
+from mage_ai.io import clickhouse_types
 from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
-from mage_ai.io.export_utils import infer_dtypes, to_pandas_frame
-from mage_ai.shared.utils import (
-    convert_pandas_dtype_to_python_type,
-    convert_python_type_to_clickhouse_type,
-)
+from mage_ai.io.export_utils import to_pandas_frame
+
+# Tables keep their data on disk. Memory, used before, lost it when ClickHouse restarted.
+TABLE_ENGINE = 'MergeTree ORDER BY tuple()'
 
 
 class ClickHouse(BaseSQLDatabase):
@@ -157,10 +157,8 @@ class ClickHouse(BaseSQLDatabase):
                 self._enforce_limit(query_string, limit), **kwargs
             )
 
-    def get_type(self, column: Series, dtype: str) -> str:
-        return convert_python_type_to_clickhouse_type(
-            convert_pandas_dtype_to_python_type(dtype)
-        )
+    def get_type(self, column: Series, dtype: str = None) -> str:
+        return clickhouse_types.nullable(clickhouse_types.column_type(column))
 
     def build_create_table_command(
         self,
@@ -170,27 +168,34 @@ class ClickHouse(BaseSQLDatabase):
         overwrite_types: Dict = None,
         **kwargs,
     ):
+        """
+        CREATE TABLE for a frame. Tables used the Memory engine, which keeps data in RAM
+        only, so a restart of ClickHouse emptied them; they use MergeTree.
+        """
+        db_dtypes = {column: self.get_type(df[column]) for column in df.columns}
+        for column, column_type in (overwrite_types or {}).items():
+            if column in db_dtypes:
+                db_dtypes[column] = column_type
+        fields = [
+            f'{clickhouse_types.quote(column)} {column_type}'
+            for column, column_type in db_dtypes.items()
+        ]
+        return (
+            f'CREATE TABLE {self._full_name(database, table_name)} ('
+            + ', '.join(fields)
+            + f') ENGINE = {TABLE_ENGINE}'
+        )
 
-        dtypes = infer_dtypes(df)
-        db_dtypes = {
-            col: self.get_type(df[col], dtypes[col])
-            for col in dtypes
-        }
-        fields = []
-        if overwrite_types is not None:
+    def _full_name(self, database: str, table_name: str) -> str:
+        return f'{clickhouse_types.quote(database)}.{clickhouse_types.quote(table_name)}'
 
-            for cname in db_dtypes:
-                if cname in overwrite_types.keys():
-                    db_dtypes[cname] = overwrite_types[cname]
-
-                fields.append(f'{cname} {db_dtypes[cname]}')
-        else:
-            for cname in db_dtypes:
-                fields.append(f'{cname} {db_dtypes[cname]}')
-
-        command = f'CREATE TABLE {database}.{table_name} (' + \
-            ', '.join(fields) + ') ENGINE = Memory'
-        return command
+    def _column_types(self, database: str, table_name: str) -> Dict[str, str]:
+        rows = self.client.query(
+            'SELECT name, type FROM system.columns WHERE database = {database:String} '
+            'AND table = {table:String}',
+            parameters=dict(database=database, table=table_name),
+        ).result_rows
+        return dict(rows)
 
     def export(
         self,
@@ -234,13 +239,10 @@ class ClickHouse(BaseSQLDatabase):
         elif type(df) is list:
             df = DataFrame(df)
 
+        full_name = self._full_name(database, table_name)
+
         def __process():
-
-            df_existing = self.client.query_df(f"""
-EXISTS TABLE {database}.{table_name}
-""")
-
-            table_exists = not df_existing.empty and df_existing.iloc[0, 0] == 1
+            table_exists = bool(self.client.command(f'EXISTS TABLE {full_name}'))
             should_create_table = not table_exists
 
             if table_exists:
@@ -250,23 +252,22 @@ EXISTS TABLE {database}.{table_name}
                         f' exists in database {database}.',
                     )
                 elif ExportWritePolicy.REPLACE == if_exists:
-                    self.client.command(
-                        f'DROP TABLE IF EXISTS {database}.{table_name}')
+                    self.client.command(f'DROP TABLE IF EXISTS {full_name}')
                     should_create_table = True
 
             if query_string:
-                self.client.command(f'USE {database}')
+                self.client.command(f'USE {clickhouse_types.quote(database)}')
 
                 if should_create_table:
                     with self.printer.print_msg(
                            f'Creating a new table: {database}.{table_name}'):
                         self.client.command(f"""
-CREATE TABLE IF NOT EXISTS {database}.{table_name} ENGINE = Memory EMPTY AS
+CREATE TABLE IF NOT EXISTS {full_name} ENGINE = {TABLE_ENGINE} EMPTY AS
 {query_string}
 """)
 
                 self.client.command(f"""
-INSERT INTO {database}.{table_name}
+INSERT INTO {full_name}
 {query_string}
 """)
             else:
@@ -283,7 +284,13 @@ INSERT INTO {database}.{table_name}
                            f'Creating a new table: {create_table_stmt}'):
                         self.client.command(create_table_stmt)
 
-                self.client.insert_df(f'{database}.{table_name}', df)
+                column_types = self._column_types(database, table_name)
+                frame = df.copy(deep=False)
+                for column in frame.columns:
+                    frame[column] = clickhouse_types.values_for_insert(
+                        frame[column], column_types.get(str(column)),
+                    )
+                self.client.insert_df(table=table_name, df=frame, database=database)
 
         if verbose:
             with self.printer.print_msg(

@@ -89,6 +89,19 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Polars frames keep integers with nulls, dates and 128-bit integers** when exported
   through the pandas-based SQL clients (MSSQL, Trino, Redshift, BigQuery and others).
 
+#### ClickHouse
+
+- **Tables Mage creates use MergeTree.** They used the Memory engine, which keeps data in
+  RAM only, so a restart of ClickHouse emptied every exported table and every SQL block's
+  table. Tables created before keep their engine.
+- **Column types hold the values.** Nullable Int64, int32 and uint64 columns became
+  String, and uint64 values failed to insert; dates, decimals and UUIDs failed; datetimes
+  became DateTime64(3), which dropped their microseconds. Columns get their integer width,
+  Date32, Decimal(P, S), UUID, DateTime64 at the column's precision, in UTC for zoned
+  columns, and Int128 for wider Python integers. Durations are stored in microseconds, and
+  lists and dicts as JSON text.
+- Column and table names are quoted, so names with spaces or keywords work.
+
 #### MongoDB
 
 - **Exports store Decimal, date, timedelta, NumPy arrays, sets and UUIDs**, which raised.
@@ -179,8 +192,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   storage such as MinIO.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops) and `duckdb`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, MongoDB, Redis, a REST API service, Feast, MLflow, DuckDB, S3
-  (MinIO), and R blocks with R 4.6 and rv.
+  PostgreSQL, MySQL, MongoDB, ClickHouse, Redis, a REST API service, Feast, MLflow,
+  DuckDB, S3 (MinIO), and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
 

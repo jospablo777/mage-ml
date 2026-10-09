@@ -1,0 +1,37 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - clickhouse_sql_transform
+  language: python
+  name: clickhouse_sql_load
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: clickhouse_sql_load
+- all_upstream_blocks_executed: true
+  configuration:
+    data_provider: clickhouse
+    data_provider_profile: clickhouse
+    export_write_policy: replace
+    use_raw_sql: false
+  downstream_blocks:
+  - clickhouse_sql_check
+  language: sql
+  name: clickhouse_sql_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - clickhouse_sql_load
+  uuid: clickhouse_sql_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: python
+  name: clickhouse_sql_check
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - clickhouse_sql_transform
+  uuid: clickhouse_sql_check
+name: clickhouse_sql
+type: python
+uuid: clickhouse_sql

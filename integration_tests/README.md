@@ -6,9 +6,10 @@ drivers; these tests check what reaches the database and what comes back.
 ## Running
 
 Requirements: Docker with Compose v2, R 4.6 and rv 0.20 on `PATH`, and the project
-environment with the `postgres`, `mlflow`, `duckdb`, `s3`, `mysql`, `mongodb`, `pointblank`
-and `integrations` extras (`uv sync --group dev --extra postgres --extra mlflow --extra
-duckdb --extra s3 --extra mysql --extra mongodb --extra pointblank --extra integrations`).
+environment with the `postgres`, `mlflow`, `duckdb`, `s3`, `mysql`, `mongodb`, `clickhouse`,
+`pointblank` and `integrations` extras (`uv sync --group dev --extra postgres --extra
+mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra
+pointblank --extra integrations`).
 `make` installs the R packages of `r_env/` with `rv sync`.
 
 ```bash
@@ -22,6 +23,7 @@ make -C integration_tests test-duckdb      # DuckDB only, no service needed
 make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test-mysql       # MySQL only
 make -C integration_tests test-mongodb     # MongoDB only
+make -C integration_tests test-clickhouse  # ClickHouse only
 make -C integration_tests test-r           # R blocks, with R 4.6, rv and PostgreSQL
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
@@ -30,10 +32,11 @@ make -C integration_tests down             # stop the services and drop their da
 ```
 
 The services stay up between runs. PostgreSQL, MySQL, MongoDB and MinIO keep their data in memory, so `down`
-leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306 and 17017; set
+leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017 and 18123; set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
 `MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
-`MAGE_TEST_MYSQL_PORT` or `MAGE_TEST_MONGODB_PORT` to change them. `make up` rebuilds the
+`MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT` or `MAGE_TEST_CLICKHOUSE_PORT` to change
+them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -45,7 +48,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines |
@@ -63,6 +66,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, the S3 source and destination of `mage_integrations`, and its Delta Lake S3 destination |
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
+| `clickhouse/` | Mage's ClickHouse client: column types for every value, the table engine, names, write policies, appends, Polars frames and loads, and a ClickHouse SQL block between Python blocks |
 | `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
 | `r_env/` | The rv environment of the R tests: R 4.6, the tidyverse, mageml's dependencies, RPostgres, pointblank, testthat, lintr and roxygen2, pinned in `rv.lock` |
