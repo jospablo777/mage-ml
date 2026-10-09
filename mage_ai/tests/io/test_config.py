@@ -7,7 +7,9 @@ from unittest import mock
 class ConfigLoaderTests(DBTestCase):
     def setUp(self):
         super().setUp()
-        self.test_path = Path('./test')
+        # The test's own project directory. ./test, used before, is shared by every
+        # process of a parallel run, which removed the files of the others.
+        self.test_path = Path(self.repo_path)
         self.test_config_path = self.test_path / 'io_config.yaml'
         self.test_config_path_verbose = self.test_path / 'old_io_config.yaml'
         sample_yaml = """default:
