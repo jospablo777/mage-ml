@@ -235,3 +235,15 @@ def s3_env(s3_settings, monkeypatch):
     monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', s3_settings['aws_secret_access_key'])
     monkeypatch.setenv('AWS_DEFAULT_REGION', s3_settings['region_name'])
     return s3_settings
+
+
+@pytest.fixture
+def connector_config(s3_settings, bucket):
+    """The S3 settings of the mage_integrations connectors, for the test bucket."""
+    return dict(
+        bucket=bucket,
+        aws_access_key_id=s3_settings['aws_access_key_id'],
+        aws_secret_access_key=s3_settings['aws_secret_access_key'],
+        aws_endpoint=s3_settings['endpoint_url'],
+        aws_region=s3_settings['region_name'],
+    )

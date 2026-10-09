@@ -7,10 +7,6 @@ from botocore.config import Config
 
 from mage_integrations.destinations.delta_lake.base import DeltaLake as BaseDeltaLake
 from mage_integrations.destinations.delta_lake.base import main
-from mage_integrations.destinations.delta_lake.constants import MODE_OVERWRITE
-from mage_integrations.destinations.delta_lake_s3.utils import (
-    fix_overwritten_partitions,
-)
 
 
 class DeltaLakeS3(BaseDeltaLake):
@@ -56,45 +52,31 @@ class DeltaLakeS3(BaseDeltaLake):
             os.environ['AWS_DEFAULT_REGION'] = self.aws_region
         self.aws_region = None
 
-    def after_write_for_batch(self, stream, index, **kwargs) -> None:
-        if MODE_OVERWRITE != self.mode or len(self.partition_keys.get(stream, [])) == 0:
-            return
-
-        table = self.get_table_for_stream(stream)
-
-        version = int(table.version())
-        tags = kwargs.get('tags', {})
-        tags.update(version=version)
-
-        if version == 0:
-            self.logger.info(f'Fix overwritten partitions for batch {index} skipped.', tags=tags)
-            return
-        else:
-            self.logger.info(f'Fix overwritten partitions for batch {index} started.', tags=tags)
-
-        fix_overwritten_partitions(
-            self.build_client(),
-            self.bucket,
-            self.delta_log_object_key_path,
-            version,
-        )
-
-        self.logger.info(f'Fix overwritten partitions for batch {index} completed.', tags=tags)
+    @property
+    def endpoint(self) -> str:
+        return self.config.get('aws_endpoint')
 
     def build_storage_options(self) -> Dict:
-        return {
+        options = {
             'AWS_ACCESS_KEY_ID': self.config['aws_access_key_id'],
             'AWS_REGION': self.region,
             'AWS_S3_ALLOW_UNSAFE_RENAME': 'true',
             'AWS_SECRET_ACCESS_KEY': self.config['aws_secret_access_key'],
         }
+        if self.endpoint:
+            options['AWS_ENDPOINT_URL'] = self.endpoint
+            if self.endpoint.startswith('http://'):
+                options['AWS_ALLOW_HTTP'] = 'true'
+        return options
 
     def build_table_uri(self, stream: str) -> str:
-        return posixpath.join([
+        # posixpath.join took the parts as a list, which raised TypeError on every
+        # export.
+        return posixpath.join(
             f"s3://{self.config['bucket']}",
             self.config['object_key_path'],
             self.table_name,
-        ])
+        )
 
     def build_client(self):
         config = Config(
@@ -110,28 +92,32 @@ class DeltaLakeS3(BaseDeltaLake):
             aws_secret_access_key=self.config['aws_secret_access_key'],
             config=config,
             region_name=self.region,
+            endpoint_url=self.endpoint,
         )
 
-    def check_and_create_delta_log(self, stream: str) -> None:
+    def check_and_create_delta_log(self, stream: str) -> bool:
+        """
+        Whether the table has a Delta log. Without one, objects left under the table's
+        path are removed. The prefix had no trailing slash, so a table named orders also
+        removed orders_archive, and only the first 1,000 objects were listed.
+        """
         client = self.build_client()
+        table_prefix = f'{self.table_object_key_path}/'
 
         resp = client.list_objects_v2(
             Bucket=self.bucket,
-            Prefix=self.delta_log_object_key_path,
+            Prefix=f'{self.delta_log_object_key_path}/',
+            MaxKeys=1,
         )
-
-        has_logs = 'Contents' in resp
+        has_logs = resp.get('KeyCount', 0) > 0
         if not has_logs:
-            resp = client.list_objects_v2(
+            for page in client.get_paginator('list_objects_v2').paginate(
                 Bucket=self.bucket,
-                Prefix=self.table_object_key_path,
-            )
-
-            for obj in resp.get('Contents', []):
-                client.delete_object(
-                    Bucket=self.bucket,
-                    Key=obj['Key'],
-                )
+                Prefix=table_prefix,
+            ):
+                keys = [{'Key': obj['Key']} for obj in page.get('Contents', [])]
+                if keys:
+                    client.delete_objects(Bucket=self.bucket, Delete={'Objects': keys})
 
         return has_logs
 

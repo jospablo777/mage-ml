@@ -25,17 +25,6 @@ FRAME = pl.DataFrame({
 FLAT = ['n', 'text', 'flag']
 
 
-@pytest.fixture
-def connector_config(s3_settings, bucket):
-    return dict(
-        bucket=bucket,
-        aws_access_key_id=s3_settings['aws_access_key_id'],
-        aws_secret_access_key=s3_settings['aws_secret_access_key'],
-        aws_endpoint=s3_settings['endpoint_url'],
-        aws_region=s3_settings['region_name'],
-    )
-
-
 def read_source(config):
     from mage_integrations.sources.amazon_s3 import AmazonS3
 
