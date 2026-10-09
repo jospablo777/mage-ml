@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 
-from mage_ai.services.redis.redis import init_redis_client
+from mage_ai.services.redis.redis import init_redis_client, redis_namespace
 from mage_ai.settings import REDIS_URL
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class DistributedLock:
         return bool(self.redis_url)
 
     def __lock_key(self, key) -> str:
-        return f'{self.lock_key_prefix}_{key}'
+        return f'{self.lock_key_prefix}_{redis_namespace()}_{key}'
 
     def __client(self):
         if self.redis_client is not None:

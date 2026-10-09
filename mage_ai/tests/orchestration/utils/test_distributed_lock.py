@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
+from mage_ai.services.redis.redis import redis_namespace
 
 REDIS_URL = 'redis://localhost:6379/0'
 
@@ -72,7 +73,7 @@ class DistributedLockTest(unittest.TestCase):
 
         lock.release_lock(key)
 
-        self.assertIn(f'LOCK_KEY_{key}', client.values)
+        self.assertIn(f'LOCK_KEY_{redis_namespace()}_{key}', client.values)
         self.assertFalse(lock.try_acquire_lock(key))
 
     def test_reconnects_after_the_interval(self):
@@ -110,3 +111,13 @@ class DistributedLockTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_keys_are_namespaced_by_the_metadata_database(self):
+        """Deployments that share a Redis server took each other's locks."""
+        client = FakeRedisClient()
+        lock = self.build_lock(client)
+        with patch('mage_ai.orchestration.db.db_connection_url', 'postgresql://a/one'):
+            self.assertTrue(lock.try_acquire_lock('pipeline_schedule_1'))
+        with patch('mage_ai.orchestration.db.db_connection_url', 'postgresql://a/two'):
+            self.assertTrue(lock.try_acquire_lock('pipeline_schedule_1'))
+        self.assertEqual(len(client.values), 2)

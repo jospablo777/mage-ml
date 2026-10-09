@@ -59,3 +59,68 @@ class ProcessQueueTests(TestCase):
         mock_pid_exists.return_value = False
         self.assertTrue(self.queue.has_job('block_run_1'))
         self.assertFalse(self.queue.has_job('block_run_2'))
+
+
+class ProcessQueueRaceTests(TestCase):
+    """Races the scheduler soak test found in the process queue."""
+
+    def setUp(self):
+        self.queue = ProcessQueue(queue_config=QueueConfig.load(config=dict(concurrency=2)))
+        self.queue.start()
+
+    @patch.object(ProcessQueue, 'start_worker_pool')
+    def test_a_job_enqueued_just_before_clean_up_is_kept(self, _):
+        """
+        Queue.empty() reported an empty queue right after put, and clean_up_jobs, which
+        runs right after the scheduler enqueues, deleted the job.
+        """
+        with patch.object(self.queue.queue, 'empty', return_value=True):
+            self.queue.enqueue('block_run_1', run_block)
+            self.queue.clean_up_jobs()
+
+            self.assertEqual(self.queue.job_dict['block_run_1'], JobStatus.QUEUED)
+            self.assertTrue(self.queue.has_job('block_run_1'))
+
+    @patch.object(ProcessQueue, 'start_worker_pool')
+    def test_a_lost_queued_job_is_released_after_the_grace_period(self, _):
+        with patch.object(self.queue.queue, 'empty', return_value=True):
+            self.queue.enqueue('block_run_1', run_block)
+            self.queue.queued_at['block_run_1'] -= 120
+
+            self.assertFalse(self.queue.has_job('block_run_1'))
+
+    @patch.object(ProcessQueue, 'start_worker_pool')
+    def test_the_status_is_set_before_the_job_is_queued(self, _):
+        """A worker that took the job before its status was set raised KeyError."""
+        statuses = []
+        with patch.object(
+            self.queue.queue, 'put',
+            side_effect=lambda item: statuses.append(self.queue.job_dict.get(item[0])),
+        ):
+            self.queue.enqueue('block_run_1', run_block)
+
+        self.assertEqual(statuses, [JobStatus.QUEUED])
+
+    def test_the_worker_pool_gets_picklable_arguments(self):
+        """
+        The worker pool received the Redis client, which holds locks. With spawn or
+        forkserver its arguments are pickled, so the pool failed to start.
+        """
+        import pickle
+
+        self.queue.redis_url = 'redis://localhost:6379/0'
+        with patch('mage_ai.orchestration.queue.process_queue.mp.Process') as process:
+            self.queue.start_worker_pool()
+
+        args = process.call_args.kwargs['args']
+        self.assertIn('redis://localhost:6379/0', args)
+        pickle.dumps(args[2:])
+
+    def test_clean_up_starts_a_worker_pool_for_waiting_jobs(self):
+        """A job put while the pool exited waited for the next enqueue."""
+        with patch.object(self.queue.queue, 'empty', return_value=False), \
+                patch.object(ProcessQueue, 'is_worker_pool_alive', return_value=False), \
+                patch.object(ProcessQueue, 'start_worker_pool') as start:
+            self.queue.clean_up_jobs()
+
+        start.assert_called_once()

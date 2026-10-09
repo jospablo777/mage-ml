@@ -10,6 +10,7 @@ import time
 import unittest
 
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
+from mage_ai.services.redis.redis import redis_namespace
 
 REDIS_URL = os.getenv('MAGE_TEST_REDIS_URL')
 
@@ -24,6 +25,10 @@ class DistributedLockIntegrationTest(unittest.TestCase):
 
     def build_lock(self, **kwargs):
         return DistributedLock(lock_key_prefix=self.prefix, redis_url=REDIS_URL, **kwargs)
+
+    def raw_key(self, key: str) -> str:
+        """The Redis key of a lock, prefixed with the deployment's namespace."""
+        return f'{self.prefix}_{redis_namespace()}_{key}'
 
     def clear_keys(self):
         client = self.lock.redis_client
@@ -44,7 +49,7 @@ class DistributedLockIntegrationTest(unittest.TestCase):
         self.assertTrue(self.other.try_acquire_lock('schedule_1'))
 
     def test_release_runs_the_lua_script(self):
-        key = '%s_schedule_2' % self.prefix
+        key = self.raw_key('schedule_2')
         self.assertTrue(self.lock.try_acquire_lock('schedule_2'))
         self.assertIsNotNone(self.lock.redis_client.get(key))
 
@@ -53,7 +58,7 @@ class DistributedLockIntegrationTest(unittest.TestCase):
         self.assertIsNone(self.lock.redis_client.get(key))
 
     def test_release_leaves_the_key_of_the_next_holder(self):
-        key = '%s_schedule_3' % self.prefix
+        key = self.raw_key('schedule_3')
         self.assertTrue(self.lock.try_acquire_lock('schedule_3', timeout=1))
         time.sleep(1.5)
         self.assertTrue(self.other.try_acquire_lock('schedule_3'))
@@ -65,7 +70,7 @@ class DistributedLockIntegrationTest(unittest.TestCase):
         self.assertFalse(self.lock.try_acquire_lock('schedule_3'))
 
     def test_key_expires(self):
-        key = '%s_schedule_4' % self.prefix
+        key = self.raw_key('schedule_4')
         self.assertTrue(self.lock.try_acquire_lock('schedule_4', timeout=1))
 
         self.assertGreater(self.lock.redis_client.ttl(key), 0)

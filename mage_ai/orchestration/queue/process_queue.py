@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import os
+import queue as queue_module
 import signal
 import time
 from multiprocessing import Manager
@@ -14,7 +15,7 @@ from mage_ai.orchestration.db.process import start_session_and_run
 from mage_ai.orchestration.queue.config import QueueConfig
 from mage_ai.orchestration.queue.queue import Queue
 from mage_ai.services.newrelic import initialize_new_relic
-from mage_ai.services.redis.redis import init_redis_client
+from mage_ai.services.redis.redis import init_redis_client, redis_namespace
 from mage_ai.settings import (
     HOSTNAME,
     REDIS_URL,
@@ -28,6 +29,10 @@ from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
 
 LIVENESS_TIMEOUT_SECONDS = 300
+# Seconds the worker pool waits with no workers and an empty queue before it exits.
+POOL_IDLE_CHECKS = 5
+# Seconds a queued job counts as present while the queue looks empty.
+QUEUED_GRACE_SECONDS = 60
 
 
 class JobStatus(StrEnum):
@@ -75,11 +80,15 @@ class ProcessQueue(Queue):
         else:
             redis_url = None
 
+        self.redis_url = redis_url
         self.redis_client = init_redis_client(redis_url)
 
         self.client_id = f'HOST_{HOSTNAME}_PID_{os.getpid()}'
+        self.redis_namespace = redis_namespace()
 
         self.worker_pool_proc = None
+        # When each job was enqueued, in this process.
+        self.queued_at = {}
 
     def clean_up_jobs(self):
         """
@@ -91,8 +100,13 @@ class ProcessQueue(Queue):
             if job_id in self.job_dict:
                 if not self.has_job(job_id):
                     del self.job_dict[job_id]
+                    self.queued_at.pop(job_id, None)
                 elif self.__should_kill_job(job_id):
                     self.kill_job(job_id)
+        # The worker pool exits when it finds the queue empty. A job put while it was
+        # exiting waited until the next enqueue started a pool.
+        if not self.queue.empty() and not self.is_worker_pool_alive():
+            self.start_worker_pool()
 
     def enqueue(self, job_id: str, target: Callable, *args, **kwargs):
         """
@@ -113,11 +127,14 @@ class ProcessQueue(Queue):
             return
         self._print(f'Enqueue job {job_id}')
         if self.redis_client:
-            self.redis_client.set(job_id, self.client_id)
+            self.redis_client.set(self.__redis_key_job(job_id), self.client_id)
         if self.redis_client:
             self.redis_client.set(self.client_id, '1', ex=LIVENESS_TIMEOUT_SECONDS)
-        self.queue.put([job_id, target, args, kwargs])
+        # The status is set first: a worker that took the job before it was set raised
+        # KeyError and the job was lost.
         self.job_dict[job_id] = JobStatus.QUEUED
+        self.queued_at[job_id] = time.monotonic()
+        self.queue.put([job_id, target, args, kwargs])
         if not self.is_worker_pool_alive():
             self.start_worker_pool()
 
@@ -133,7 +150,7 @@ class ProcessQueue(Queue):
 
         """
         if self.redis_client:
-            job_client_id = self.redis_client.get(job_id)
+            job_client_id = self.redis_client.get(self.__redis_key_job(job_id))
             if not job_client_id:
                 return False
             if job_client_id != self.client_id and self.redis_client.get(job_client_id):
@@ -141,9 +158,19 @@ class ProcessQueue(Queue):
         job = self.job_dict.get(job_id)
         if job is None:
             return False
-        if job == JobStatus.QUEUED and not self.queue.empty():
-            # Job is in queue
-            return True
+        if job == JobStatus.QUEUED:
+            if not self.queue.empty():
+                # Job is in queue
+                return True
+            # Queue.empty() reports an empty queue right after put, before the feeder
+            # thread writes the job, and while a worker that took the job has not marked
+            # it yet. clean_up_jobs runs right after the scheduler enqueues, so it deleted
+            # every new job, the worker skipped it, and the block run never ran. A queued
+            # job counts as present for a while; one lost after that is enqueued again.
+            queued_at = self.queued_at.get(job_id)
+            return queued_at is not None and (
+                time.monotonic() - queued_at < QUEUED_GRACE_SECONDS
+            )
         if isinstance(job, int):
             # Job is being processed
             if self.__is_process_alive(job):
@@ -188,11 +215,15 @@ class ProcessQueue(Queue):
         """
         self.worker_pool_proc = mp.Process(
             target=poll_job_and_execute,
+            # The Redis URL, not the client: the worker pool process receives its
+            # arguments pickled where processes start with spawn or forkserver (macOS,
+            # Windows, Linux from Python 3.14), and a Redis client holds locks that cannot
+            # be pickled. The pool failed to start and block runs stayed queued.
             args=[
                 self.queue,
                 self.size,
                 self.job_dict,
-                self.redis_client,
+                self.redis_url,
                 self.client_id,
             ],
         )
@@ -235,8 +266,11 @@ class ProcessQueue(Queue):
     def __is_process_alive(self, pid: int) -> bool:
         return psutil.pid_exists(pid)
 
+    def __redis_key_job(self, job_id):
+        return f'{self.redis_namespace}:{job_id}'
+
     def __redis_key_kill_job(self, job_id):
-        return f'kill_job_{job_id}'
+        return f'{self.redis_namespace}:kill_job_{job_id}'
 
     def __set_kill_job(self, job_id):
         if not self.redis_client:
@@ -308,10 +342,18 @@ class Worker(mp.Process):
 
         """
         if not self.queue.empty():
-            args = self.queue.get()
+            try:
+                args = self.queue.get(timeout=1)
+            except queue_module.Empty:
+                return
             job_id = args[0]
             print(f'Run worker for job {job_id}')
-            if self.job_dict[job_id] != JobStatus.QUEUED:
+            # clean_up_jobs removes a queued job when the queue looks empty, which it is
+            # once a worker has taken the job. The scheduler then enqueues the job again,
+            # so this worker skips it.
+            status = self.job_dict.get(job_id)
+            if status != JobStatus.QUEUED:
+                print(f'Skip job {job_id} with status {status}')
                 return
             self.job_dict[job_id] = self.pid
 
@@ -329,7 +371,7 @@ def poll_job_and_execute(
     queue: mp.Queue,
     size: int,
     job_dict,
-    redis_client,
+    redis_url,
     client_id: str,
 ):
     """
@@ -342,12 +384,19 @@ def poll_job_and_execute(
 
     """
     pid = os.getpid()
+    redis_client = init_redis_client(redis_url) if redis_url else None
     workers = []
+    idle_checks = 0
     while True:
         workers = [w for w in workers if w.is_alive()]
         print(f'[Process {pid}] Worker pool size: {len(workers)}')
         if not workers and queue.empty():
-            break
+            # A job just put may not be visible yet: Queue.put hands it to a feeder thread.
+            idle_checks += 1
+            if idle_checks >= POOL_IDLE_CHECKS:
+                break
+        else:
+            idle_checks = 0
         while not queue.empty():
             if len(workers) >= size:
                 break

@@ -56,7 +56,9 @@ class Source:
     ):
         if query is None:
             query = {}
-        args = parse_args([])
+        # main() parses the command line and passes args. Parsing it here read the
+        # arguments of any program that built a source in code, such as pytest's -p, as
+        # Singer options.
         if args:
             if args.catalog:
                 catalog = args.catalog
@@ -730,5 +732,5 @@ class Source:
 
 @utils.handle_top_exception(LOGGER)
 def main(source_class, **kwargs):
-    source = source_class(**kwargs)
+    source = source_class(args=parse_args([]), **kwargs)
     source.process()

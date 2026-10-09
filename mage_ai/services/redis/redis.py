@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 import redis
@@ -17,3 +18,15 @@ def init_redis_client(redis_url):
         logger.debug('Redis connection error', exc_info=True)
         redis_client = None
     return redis_client
+
+
+def redis_namespace() -> str:
+    """
+    A prefix for the Redis keys of one Mage deployment, from its metadata database URL.
+    Job and lock keys were named by ids alone, such as block_run_1, so deployments that
+    share a Redis server, or a deployment whose metadata database was recreated, took
+    each other's keys and skipped jobs.
+    """
+    from mage_ai.orchestration.db import db_connection_url
+
+    return hashlib.sha256(str(db_connection_url or '').encode()).hexdigest()[:12]
