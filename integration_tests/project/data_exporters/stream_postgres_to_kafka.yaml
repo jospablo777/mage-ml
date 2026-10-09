@@ -1,0 +1,3 @@
+connector_type: kafka
+bootstrap_server: "{{ env_var('MAGE_TEST_KAFKA_BOOTSTRAP') }}"
+topic: "{{ variables('out_topic') }}"

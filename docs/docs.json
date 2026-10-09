@@ -579,6 +579,7 @@
                       "guides/streaming/sources/kafka",
                       "guides/streaming/sources/kinesis",
                       "guides/streaming/sources/nats",
+                      "guides/streaming/sources/postgres",
                       "guides/streaming/sources/oracledb",
                       "guides/streaming/sources/postgres-cdc",
                       "guides/streaming/sources/rabbitmq",

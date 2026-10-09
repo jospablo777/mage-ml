@@ -34,6 +34,10 @@ class SourceFactory:
             from mage_ai.streaming.sources.nats_js import NATSSource
 
             return NATSSource(config, **kwargs)
+        elif connector_type == SourceType.POSTGRES:
+            from mage_ai.streaming.sources.postgres import PostgresSource
+
+            return PostgresSource(config, **kwargs)
         elif connector_type == SourceType.KINESIS:
             from mage_ai.streaming.sources.kinesis import KinesisSource
 

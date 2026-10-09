@@ -15,6 +15,7 @@ class SourceType(StrEnum):
     KINESIS = 'kinesis'
     RABBITMQ = 'rabbitmq'
     MONGODB = 'mongodb'
+    POSTGRES = 'postgres'
 
 
 class SinkType(StrEnum):

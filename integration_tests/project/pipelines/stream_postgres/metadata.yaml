@@ -1,0 +1,28 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_postgres_transform]
+  language: yaml
+  name: stream_postgres_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_postgres_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_postgres_to_kafka]
+  language: python
+  name: stream_postgres_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_postgres_source]
+  uuid: stream_postgres_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_postgres_to_kafka
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_postgres_transform]
+  uuid: stream_postgres_to_kafka
+name: stream_postgres
+type: streaming
+uuid: stream_postgres

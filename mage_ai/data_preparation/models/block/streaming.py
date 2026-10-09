@@ -36,7 +36,12 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
     if block_type == BlockType.DATA_LOADER:
         from mage_ai.streaming.sources.source_factory import SourceFactory
 
-        connector = SourceFactory.get_source(dict(config))
+        config = dict(config)
+        if connector_type == 'postgres':
+            # A replication slot keeps the server's log until it is read, so a check does
+            # not create one.
+            config['create_slot'] = False
+        connector = SourceFactory.get_source(config)
         # The source skips it in test environments.
         connector.test_connection()
     else:
@@ -44,6 +49,10 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
 
         connector = SinkFactory.get_sink(dict(config))
     try:
+        describe = getattr(connector, 'describe_setup', None)
+        if describe:
+            for line in describe():
+                print(line)
         print(
             f'Connected to the {connector_type} {kind}. The block runs with the pipeline: '
             'use Execute pipeline to process messages.'

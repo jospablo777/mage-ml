@@ -1,0 +1,12 @@
+connector_type: postgres
+host: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+port: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+database: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+user: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+password: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+replication_slot: "{{ variables('slot') }}"
+publication_name: "{{ variables('publication') }}"
+tables:
+  - "{{ variables('tables') }}"
+batch_size: 100
+batch_timeout: 0.5

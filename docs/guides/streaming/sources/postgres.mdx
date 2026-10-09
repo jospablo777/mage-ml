@@ -1,0 +1,82 @@
+---
+title: "PostgreSQL (logical replication)"
+description: "Stream the changes of PostgreSQL tables into a streaming pipeline."
+---
+
+The PostgreSQL streaming source reads inserts, updates and deletes from the write-ahead
+log with logical replication (`pgoutput`) and hands them to the transformer in batches.
+
+## Server setup
+
+- `wal_level = logical` in `postgresql.conf`, then restart the server.
+- A user with the `REPLICATION` attribute: `ALTER ROLE <user> WITH REPLICATION;`
+- PostgreSQL 10 or later.
+
+## Config
+
+```yaml
+connector_type: postgres
+host: localhost
+port: 5432
+database: postgres
+user: postgres
+password: password
+replication_slot: mage_slot
+publication_name: mage_pub
+# Tables to read, as schema.table. Without them, every table of the publication.
+tables:
+  - public.users
+# Create the slot and the publication when they do not exist.
+create_slot: true
+batch_size: 100
+# Seconds to wait for a batch to fill before handing over what arrived.
+batch_timeout: 1.0
+# The log position to start at when no position is saved, such as 0/16B3748.
+# start_lsn: 0/16B3748
+# sslmode: require
+```
+
+A publication created by the source is `FOR TABLE` the configured tables, or `FOR ALL
+TABLES` without them, which needs a superuser.
+
+## Changes
+
+The transformer gets a list of changed rows. Each row has its columns, with the types of
+the columns (numeric as Decimal, timestamps as datetimes, arrays as lists, JSON as
+dicts), and:
+
+| Field | Value |
+| --- | --- |
+| `_mage_operation` | `insert`, `update` or `delete` |
+| `_mage_schema`, `_mage_table` | The table of the change |
+| `_mage_lsn` | The log position of the change |
+| `_mage_commit_time` | When the transaction committed, in UTC |
+| `_mage_deleted_at` | For deletes, when the change was read |
+
+- A delete has the key columns only, unless the table has `REPLICA IDENTITY FULL`.
+- When an update changes the primary key, a delete of the old key comes first.
+- A large value an update did not change (TOAST) is not in the log; the source reads it
+  from the table by primary key.
+- `TRUNCATE` is not replicated.
+
+```python
+@transformer
+def transform(changes, *args, **kwargs):
+    return [c for c in changes if c['_mage_operation'] != 'delete']
+```
+
+## Position and restarts
+
+The source tells PostgreSQL that a transaction was handled once the transformer has
+returned for all of its changes, and saves that position in the pipeline's streaming
+checkpoint. A restarted pipeline continues after it, so no change is lost; changes of a
+transaction that was partly handled come again.
+
+A replication slot keeps the server's log until its changes are read. Drop the slot of a
+pipeline you no longer run: `SELECT pg_drop_replication_slot('mage_slot');`. Checking the
+block's connection in the notebook creates no slot; it reports whether the slot and the
+publication exist.
+
+A transformer that runs longer than the server's `wal_sender_timeout` (60 seconds by
+default) loses the replication connection; the pipeline fails and resumes from the saved
+position when restarted.

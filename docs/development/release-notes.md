@@ -165,6 +165,13 @@ Each item says what changed, which pipelines it affects, and what to do.
   connection raises; it was printed and the source failed later with an AttributeError.
   The pull consumer connected twice. New setting: `ack_wait`.
 - **A NATS JetStream sink**, which waits for JetStream to store each message.
+- **A PostgreSQL streaming source** (`connector_type: postgres`), which reads the changes
+  of tables with logical replication: typed rows with the operation, table, log position
+  and commit time. It confirms a transaction to the server once the transformer has
+  handled all of its changes and saves the position in the streaming checkpoint, so a
+  restart loses nothing. It creates the slot and publication when missing, reads
+  unchanged TOASTed values from the table, and turns a changed primary key into a delete
+  and an update. Checking its block in the notebook creates no slot.
 - **The ActiveMQ source acks after the transformer.** The transformer ran on the STOMP
   receiver thread, which swallowed its errors, and the subscription acked messages on
   delivery, so a failed transformer lost its messages while the pipeline seemed to run.

@@ -70,9 +70,10 @@ def execute(pg, *statements):
 class Syncs:
     """Runs the source with LOG_BASED replication, keeping its state between runs."""
 
-    def __init__(self, postgres_settings, schema, cdc, tmp_path, poll_seconds=3):
+    def __init__(self, postgres_settings, schema, cdc, tmp_path, poll_seconds=30):
         self.tmp_path = tmp_path
         self.state = None
+        self.history = []
         config = connection_config(
             postgres_settings, schema, replication_slot=cdc['slot'],
             publication_name=cdc['publication'], logical_poll_total_seconds=poll_seconds,
@@ -112,7 +113,15 @@ class Syncs:
         result = subprocess.run(self.args(), capture_output=True, text=True, timeout=300)
         assert result.returncode == 0, result.stderr[-4000:]
         self.stderr = result.stderr
+        self.history.append(self.log_lines(result.stderr))
         return self.finish(result.stdout)
+
+    @staticmethod
+    def log_lines(stderr):
+        return [
+            json.loads(line[line.index('{'):])['message'] for line in stderr.splitlines()
+            if '{"caller"' in line and ('Logical' in line or 'log' in line or 'end_lsn' in line)
+        ]
 
     def start(self):
         return subprocess.Popen(self.args(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -185,10 +194,11 @@ def test_changes_made_during_a_sync_are_not_lost(postgres_settings, pg, schema, 
     execute(pg, f"INSERT INTO {schema}.events (id, name) VALUES (11, 'during')")
     output, errors = process.communicate(timeout=120)
     assert process.returncode == 0, errors[-4000:]
+    syncs.history.append(syncs.log_lines(errors))
     during = records(syncs.finish(output))
     after = records(syncs.sync())
 
-    assert sorted(r['id'] for r in during + after) == [10, 11]
+    assert sorted(r['id'] for r in during + after) == [10, 11], syncs.history
 
 
 def test_tables_of_other_schemas_are_ignored(postgres_settings, pg, schema, cdc, tmp_path):
@@ -295,7 +305,7 @@ def test_a_failed_destination_reads_the_changes_again(
 
     # The destination failed, so the state of that run was not kept.
     syncs.state = saved
-    assert [r['id'] for r in records(syncs.sync())] == [30]
+    assert [r['id'] for r in records(syncs.sync())] == [30], syncs.history
 
 
 def test_a_sync_without_changes_stops_when_it_has_read_the_log(

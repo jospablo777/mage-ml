@@ -41,7 +41,8 @@ const getDataSourceTypes = (
         DataSourceTypeEnum.NATS,
         DataSourceTypeEnum.KINESIS,
         DataSourceTypeEnum.RABBITMQ,
-        DataSourceTypeEnum.MONGODB
+        DataSourceTypeEnum.MONGODB,
+        DataSourceTypeEnum.POSTGRES,
       ],
       [BlockTypeEnum.DATA_EXPORTER]: [
         DataSourceTypeEnum.GENERIC,

@@ -1,0 +1,17 @@
+connector_type: postgres
+# Changes of PostgreSQL tables, read with logical replication: the server needs
+# wal_level = logical, and the user the REPLICATION attribute.
+host: localhost
+port: 5432
+database: postgres
+user: postgres
+password: password
+replication_slot: mage_slot
+publication_name: mage_pub
+# Tables to read, as schema.table. Without them, every table of the publication.
+tables:
+  - public.users
+# Create the slot and the publication when they do not exist.
+create_slot: true
+batch_size: 100
+batch_timeout: 1.0
