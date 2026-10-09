@@ -3,7 +3,6 @@ import logging
 import random
 import sys
 import time
-from datetime import datetime
 from typing import List
 
 from botocore.exceptions import ClientError
@@ -12,6 +11,7 @@ from mage_ai.services.aws import get_aws_boto3_client
 from mage_ai.services.aws.emr import emr_basics
 from mage_ai.services.aws.emr.config import EmrConfig
 from mage_ai.services.compute.aws.constants import ClusterStatusState
+from mage_ai.shared.dates import utc_now
 
 MAX_STEPS_IN_CLUSTER = 255 - 55
 MAX_RUNNING_OR_PENDING_STEPS = 15
@@ -56,7 +56,7 @@ def create_a_new_cluster(
     applications = ['Hadoop', 'Hive', 'Spark']
 
     emr_kwargs = dict(
-        Name=f'{datetime.utcnow().isoformat()}-{cluster_name}',
+        Name=f'{utc_now().isoformat()}-{cluster_name}',
         ReleaseLabel='emr-6.9.0',
         Instances=emr_config.get_instances_config(
             get_running_cluster_count(emr_client),

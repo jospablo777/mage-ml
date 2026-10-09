@@ -10,6 +10,7 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineRun,
     PipelineSchedule,
 )
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 
 
@@ -28,7 +29,7 @@ def start_backfill(backfill: Backfill) -> List[PipelineRun]:
             name=f'Backfill {backfill.name}',
             pipeline_uuid=backfill.pipeline_uuid,
             schedule_interval=ScheduleInterval.ONCE,
-            start_time=datetime.utcnow(),
+            start_time=utc_now(),
             variables=backfill_variables,
             settings=backfill.settings,
         )

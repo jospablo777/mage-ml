@@ -1,7 +1,7 @@
-from datetime import datetime
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.oauth import Oauth2AccessToken
+from mage_ai.shared.dates import utc_now
 
 
 class OauthAccessTokenResource(DatabaseResource):
@@ -17,7 +17,7 @@ class OauthAccessTokenResource(DatabaseResource):
             show_all = show_all[0]
 
         if not show_all:
-            results = results.filter(Oauth2AccessToken.expires > datetime.utcnow())
+            results = results.filter(Oauth2AccessToken.expires > utc_now())
 
         results = results.order_by(Oauth2AccessToken.expires.desc())
 

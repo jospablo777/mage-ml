@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime
 from typing import Dict, List
 
@@ -181,7 +182,7 @@ class SparkBlock:
             Application.cache_application(application)
 
     def set_spark_job_execution_start(self, execution_uuid: str = None) -> None:
-        self.execution_timestamp_start = datetime.utcnow().timestamp()
+        self.execution_timestamp_start = time.time()
         application = self.spark_session_application()
 
         if execution_uuid:
@@ -207,7 +208,7 @@ class SparkBlock:
     def set_spark_job_execution_end(self) -> None:
         # Need a slight buffer of 10 seconds because stages are still being submitted even after
         # the end of the block function execution.
-        self.execution_timestamp_end = datetime.utcnow().timestamp() + 10
+        self.execution_timestamp_end = time.time() + 10
         application = self.spark_session_application()
 
         self.__update_spark_jobs_cache(

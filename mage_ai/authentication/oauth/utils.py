@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Awaitable, Dict, List, Optional
 
 from mage_ai.authentication.oauth2 import generate_access_token
@@ -11,6 +11,7 @@ from mage_ai.orchestration.db.models.oauth import (
     User,
 )
 from mage_ai.server.logger import Logger
+from mage_ai.shared.dates import utc_now
 
 logger = Logger().new_server_logger(__name__)
 
@@ -30,7 +31,7 @@ def access_tokens_for_client(
         access_tokens_query = Oauth2AccessToken.query
         access_tokens_query.cache = True
         access_tokens_query = access_tokens_query.filter(
-            Oauth2AccessToken.expires > datetime.utcnow(),
+            Oauth2AccessToken.expires > utc_now(),
             Oauth2AccessToken.oauth2_application_id == oauth_client.id,
         )
         if user:

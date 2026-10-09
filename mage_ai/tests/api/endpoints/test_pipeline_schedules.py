@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict
 from unittest.mock import patch
 
@@ -13,6 +13,7 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineRun,
     PipelineSchedule,
 )
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.api.endpoints.mixins import (
     BaseAPIEndpointTest,
     build_create_endpoint_tests,
@@ -38,7 +39,7 @@ class PipelineScheduleAPIEndpointTest(BaseAPIEndpointTest):
             pipeline_uuid=self.pipeline.uuid,
             schedule_interval=ScheduleInterval.MONTHLY,
             schedule_type=ScheduleType.TIME,
-            start_time=datetime.utcnow(),
+            start_time=utc_now(),
             status=ScheduleStatus.INACTIVE,
         )
         self.pipeline_schedule2 = PipelineSchedule.create(
@@ -108,7 +109,7 @@ class PipelineScheduleProjectPlatformTests(ProjectPlatformMixin, BaseAPIEndpoint
                 repo_path=settings['full_path'],
                 schedule_interval=ScheduleInterval.MONTHLY,
                 schedule_type=ScheduleType.TIME,
-                start_time=datetime.utcnow(),
+                start_time=utc_now(),
                 status=ScheduleStatus.INACTIVE,
             )
             pipeline_schedules.append(pipeline_schedule)
@@ -255,7 +256,7 @@ build_create_endpoint_tests(
         name=self.faker.unique.name(),
         schedule_interval=ScheduleInterval.HOURLY,
         schedule_type=ScheduleType.TIME,
-        start_time=datetime.utcnow(),
+        start_time=utc_now(),
         status=ScheduleStatus.ACTIVE,
         variables=dict(fire=1),
     ),

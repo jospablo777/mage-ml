@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Union
@@ -84,7 +85,7 @@ class OperationHistoryReader:
                 type=resource_type,
                 uuid=resource_uuid,
             ),
-            timestamp=timestamp or int(datetime.utcnow().timestamp()),
+            timestamp=timestamp or int(time.time()),
             user=user,
         )
 
@@ -99,7 +100,7 @@ class OperationHistoryReader:
         )
 
         filename = datetime.fromtimestamp(
-            timestamp or int(datetime.utcnow().timestamp()),
+            timestamp or int(time.time()),
         ).strftime('%Y-%m-%d')
 
         return os.path.join(dir_path, filename)
@@ -111,7 +112,7 @@ class OperationHistoryReader:
         timestamp_end: int = None,
         timestamp_start: int = None,
     ) -> List[OperationHistory]:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         if not timestamp_start:
             timestamp_start = now

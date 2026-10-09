@@ -1,8 +1,10 @@
-from datetime import datetime
+from unittest.mock import patch
+
 from mage_ai.services import datadog as dd
 from mage_ai.tests.base_test import TestCase
-from unittest.mock import Mock, patch
 
+# 2023-01-01T00:00:00Z
+EPOCH = 1672531200.0
 TEST_METRIC = 'mage.test'
 TAGS = dict(tag1='tag')
 
@@ -16,15 +18,13 @@ class DatadogTests(TestCase):
         mock_event.assert_called_with(title=event_name, text=event_text, tags=TAGS)
 
     @patch('datadog.api.Metric.send')
-    @patch('mage_ai.services.datadog.datetime')
-    def test_gauge(self, mock_dt, mock_metric):
-        dt = datetime(2023, 1, 1)
-        mock_dt.utcnow = Mock(return_value=dt)
+    @patch('mage_ai.services.datadog.time.time', return_value=EPOCH)
+    def test_gauge(self, mock_time, mock_metric):
         dd.gauge(TEST_METRIC, 5, tags=TAGS)
         mock_metric.assert_called_with(
             host='mage',
             metric=TEST_METRIC,
-            points=[(dt.timestamp(), 5)],
+            points=[(EPOCH, 5)],
             tags=TAGS,
             type='gauge'
         )
@@ -41,29 +41,25 @@ class DatadogTests(TestCase):
         }])
 
     @patch('datadog.api.Metric.send')
-    @patch('mage_ai.services.datadog.datetime')
-    def test_histogram(self, mock_dt, mock_metric):
-        dt = datetime(2023, 1, 1)
-        mock_dt.utcnow = Mock(return_value=dt)
+    @patch('mage_ai.services.datadog.time.time', return_value=EPOCH)
+    def test_histogram(self, mock_time, mock_metric):
         dd.histogram(TEST_METRIC, 3, tags=TAGS)
         mock_metric.assert_called_with(
             host='mage',
             metric=TEST_METRIC,
-            points=[(dt.timestamp(), 3)],
+            points=[(EPOCH, 3)],
             tags=TAGS,
             type='histogram'
         )
 
     @patch('datadog.api.Metric.send')
-    @patch('mage_ai.services.datadog.datetime')
-    def test_timing(self, mock_dt, mock_metric):
-        dt = datetime(2023, 1, 1)
-        mock_dt.utcnow = Mock(return_value=dt)
+    @patch('mage_ai.services.datadog.time.time', return_value=EPOCH)
+    def test_timing(self, mock_time, mock_metric):
         dd.timing(TEST_METRIC, 100, tags=TAGS)
         mock_metric.assert_called_with(
             host='mage',
             metric=TEST_METRIC,
-            points=[(dt.timestamp(), 100)],
+            points=[(EPOCH, 100)],
             tags=TAGS,
             type='timer'
         )

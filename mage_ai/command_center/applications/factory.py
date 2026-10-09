@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+import time
 from typing import Dict, List
 
 from mage_ai.command_center.applications.constants import ITEMS
@@ -91,6 +91,6 @@ class ApplicationFactory(BaseFactory):
     def score_item(self, item_dict: Dict, score: int = None) -> int:
         timestamp = ((item_dict.get('metadata') or {}).get('page') or {}).get('timestamp')
         if timestamp:
-            now = datetime.utcnow().timestamp()
+            now = time.time()
             return score + (DEFAULT_RATIO * (now / timestamp))
         return score

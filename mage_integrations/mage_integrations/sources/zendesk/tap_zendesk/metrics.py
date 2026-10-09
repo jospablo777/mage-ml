@@ -1,8 +1,11 @@
 import logging
-from statistics import mean
 from collections import defaultdict
 from datetime import datetime
+from statistics import mean
+
 import singer
+
+from mage_integrations.utils.dates import utc_now
 
 # Defines the window (in seconds) over which we will collect raw metrics.
 # After this much time has elapsed we'll capture a compressed datapoint
@@ -25,7 +28,7 @@ LOGGER.setLevel(logging.DEBUG)
 
 def _seconds_since_datetime(dt):
     "Returns the number of seconds since DT"
-    return (datetime.utcnow() - dt).seconds
+    return (utc_now() - dt).seconds
 
 def _log_aggregate_rates(current_capture_rate, aggregate_rates):
     """Logs the aggregate rates"""
@@ -63,7 +66,7 @@ def _aggregate_rates(current_capture_rate, current_metrics_data):
     aggregate_rates = current_metrics_data['aggregate_rates']
     for metric in list(window_counts.keys()):
         aggregate_rates[metric] += [window_counts.pop(metric)]
-    current_metrics_data['window_start_time'] = datetime.utcnow()
+    current_metrics_data['window_start_time'] = utc_now()
     _log_aggregate_rates(current_capture_rate, current_metrics_data['aggregate_rates'])
 
 def _maybe_aggregate_rates(current_capture_rate, current_metrics_data):
@@ -87,7 +90,7 @@ def capture(metric):
     # Start the metrics window timer if this is the first time capture has
     # been called
     if not metrics_data['window_start_time']:
-        metrics_data['window_start_time'] = datetime.utcnow()
+        metrics_data['window_start_time'] = utc_now()
         LOGGER.info('Starting metrics capture at %s',
                     datetime.strftime(metrics_data['window_start_time'], '%Y-%m-%dT%H:%M:%SZ'))
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import timedelta, timezone
 from logging import Logger
 from time import sleep
 from typing import Dict, List, Optional, Union
@@ -21,6 +22,7 @@ from mage_ai.orchestration.triggers.constants import (
 )
 from mage_ai.orchestration.triggers.utils import create_and_start_pipeline_run
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import group_by, merge_dict
 
 BLOCK_RUN_SLEEP_SECONDS = 10
@@ -177,7 +179,7 @@ def trigger_and_check_status(
             logging_tags=logging_tags,
         )
 
-    poll_start = datetime.utcnow().replace(tzinfo=timezone.utc)
+    poll_start = utc_now().replace(tzinfo=timezone.utc)
     while True:
         pipeline_runs = global_data_product.pipeline_runs()
 
@@ -200,7 +202,7 @@ def trigger_and_check_status(
                 break
 
         # Check if polling has timed out
-        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        now = utc_now().replace(tzinfo=timezone.utc)
         if (
             poll_timeout is not None and
             now > poll_start + timedelta(seconds=poll_timeout)
@@ -223,7 +225,7 @@ def trigger_and_check_status(
 
             if pipeline_run_created and pipeline_run_created.id == pipeline_run.id:
                 diff = (
-                    datetime.utcnow().replace(tzinfo=timezone.utc).timestamp() -
+                    time.time() -
                     pipeline_run_created.created_at.timestamp()
                 )
                 __log(

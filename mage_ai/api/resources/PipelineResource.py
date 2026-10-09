@@ -1,6 +1,6 @@
 import asyncio
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from typing import Dict, List
 
@@ -57,6 +57,7 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.platform.utils import get_pipeline_from_platform_async
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.array import find, find_index
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import group_by, ignore_keys, merge_dict
 from mage_ai.shared.strings import is_number
 from mage_ai.usage_statistics.logger import UsageStatisticLogger
@@ -169,7 +170,7 @@ class PipelineResource(BaseResource):
         history_by_pipeline_uuid = {}
         if from_history_days is not None and is_number(from_history_days):
             timestamp_start = (
-                datetime.utcnow()
+                utc_now()
                 - timedelta(
                     hours=24 * int(from_history_days),
                 )

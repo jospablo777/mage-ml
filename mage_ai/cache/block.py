@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime
+import time
 from typing import Dict, List, Union
 
 import inflection
@@ -110,7 +110,7 @@ class BlockCache(BaseCache):
         return pipeline_count_mapping
 
     def add_pipeline(self, block, pipeline, repo_path: str) -> None:
-        self.update_pipeline(block, pipeline, repo_path, added_at=datetime.utcnow().timestamp())
+        self.update_pipeline(block, pipeline, repo_path, added_at=time.time())
 
     def move_pipelines(self, new_block, old_block, repo_path: str) -> None:
         new_key = self.build_key(new_block, repo_path=repo_path)

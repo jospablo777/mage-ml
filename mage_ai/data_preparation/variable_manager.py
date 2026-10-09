@@ -1,6 +1,5 @@
 import os
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from mage_ai.data.constants import InputDataType
@@ -23,7 +22,7 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path, get_variables_dir
 from mage_ai.settings.server import MEMORY_MANAGER_V2
 from mage_ai.shared.constants import GCS_PREFIX, S3_PREFIX
-from mage_ai.shared.dates import str_to_timedelta
+from mage_ai.shared.dates import str_to_timedelta, utc_now
 from mage_ai.shared.environments import is_debug
 from mage_ai.shared.strings import to_ordinal_integers
 from mage_ai.shared.utils import clean_name
@@ -270,7 +269,7 @@ class VariableManager:
         if retention_ds is None:
             return
 
-        min_partition = (datetime.utcnow() - retention_ds).strftime(format='%Y%m%dT%H%M%S')
+        min_partition = (utc_now() - retention_ds).strftime(format='%Y%m%dT%H%M%S')
 
         print(f'Clean variables before partition {min_partition}')
         if pipeline_uuid is None:

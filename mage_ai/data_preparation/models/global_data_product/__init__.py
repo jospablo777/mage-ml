@@ -15,7 +15,7 @@ from mage_ai.settings.platform.constants import project_platform_activated
 from mage_ai.settings.platform.utils import full_paths_for_all_projects
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.array import find
-from mage_ai.shared.dates import week_of_month
+from mage_ai.shared.dates import utc_now, week_of_month
 from mage_ai.shared.hash import extract, index_by
 from mage_ai.shared.io import safe_write
 from mage_ai.shared.path_fixer import add_absolute_path, get_path_parts
@@ -170,7 +170,7 @@ class GlobalDataProduct:
             d = relativedelta(**delta)
 
             if in_seconds:
-                now = datetime.utcnow().replace(tzinfo=timezone.utc)
+                now = utc_now().replace(tzinfo=timezone.utc)
 
                 return ((now + d) - now).total_seconds()
             else:
@@ -203,7 +203,7 @@ class GlobalDataProduct:
             value = outdated_starting_at.get(key, None)
             if value is not None:
                 value2 = extract_value_from_datetime(
-                    now or datetime.utcnow().replace(tzinfo=timezone.utc),
+                    now or utc_now().replace(tzinfo=timezone.utc),
                 )
                 values[key] = dict(
                     current=value2,
@@ -235,7 +235,7 @@ class GlobalDataProduct:
         if not pipeline_run:
             return [True, True]
 
-        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        now = utc_now().replace(tzinfo=timezone.utc)
 
         execution_date = self.next_run_at(pipeline_run)
         if not execution_date:

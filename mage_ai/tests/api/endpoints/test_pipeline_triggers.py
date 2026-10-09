@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from mage_ai.data_preparation.models.triggers import (
     ScheduleInterval,
@@ -9,6 +8,7 @@ from mage_ai.data_preparation.models.triggers import (
     get_triggers_by_pipeline,
 )
 from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.api.endpoints.mixins import (
     BaseAPIEndpointTest,
     build_create_endpoint_tests,
@@ -30,7 +30,7 @@ class PipelineTriggerAPIEndpointTest(BaseAPIEndpointTest):
             pipeline_uuid=self.pipeline.uuid,
             schedule_interval=ScheduleInterval.MONTHLY,
             schedule_type=ScheduleType.TIME,
-            start_time=datetime.utcnow(),
+            start_time=utc_now(),
             status=ScheduleStatus.INACTIVE,
         )
         self.pipeline_schedule2 = PipelineSchedule.create(

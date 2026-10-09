@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BaseResource import BaseResource
@@ -15,6 +14,7 @@ from mage_ai.settings import (
     get_settings_value,
 )
 from mage_ai.settings.keys import LDAP_DEFAULT_ACCESS, UPDATE_ROLES_ON_LOGIN
+from mage_ai.shared.dates import utc_now
 from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
@@ -145,7 +145,7 @@ class SessionResource(BaseResource):
 
     @safe_db_query
     def update(self, payload, **kwargs):
-        self.model.expires = datetime.utcnow()
+        self.model.expires = utc_now()
         self.model.save()
 
     @safe_db_query

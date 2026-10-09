@@ -15,6 +15,7 @@ from mage_ai.orchestration.pipeline_scheduler import (
     run_block,
     schedule_all,
 )
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.base_test import DBTestCase
 from mage_ai.tests.factory import create_pipeline_with_blocks
 from mage_ai.tests.shared.mixins import ProjectPlatformMixin
@@ -99,7 +100,7 @@ class PipelineSchedulerProjectPlatformTests(ProjectPlatformMixin, DBTestCase):
                             for block_run in pipeline_run.block_runs:
                                 block_run.update(
                                     status=BlockRun.BlockRunStatus.RUNNING,
-                                    started_at=datetime.utcnow() - timedelta(seconds=601),
+                                    started_at=utc_now() - timedelta(seconds=601),
                                 )
 
                                 class FakeExecutor:

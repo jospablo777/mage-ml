@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 from typing import Dict, List
 
@@ -142,7 +143,7 @@ def check_auto_termination(cluster_type: ClusterType):
                                 latest_activity_time,
                                 last_scheduler_activity.timestamp(),
                             )
-                        now_time = datetime.utcnow().timestamp()
+                        now_time = time.time()
                         if (
                             not active_pipeline_run_count
                             and now_time - latest_activity_time > max_idle_seconds

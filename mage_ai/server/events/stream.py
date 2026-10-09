@@ -1,6 +1,6 @@
 import asyncio
+import time
 from collections import defaultdict
-from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
@@ -44,7 +44,7 @@ class EventStreamHandler(BaseHandler):
                 event_stream = EventStream.load(
                     event_uuid=uuid4().hex,
                     result=result,
-                    timestamp=int(datetime.utcnow().timestamp() * 1000),
+                    timestamp=int(time.time() * 1000),
                     type=EventStreamType.EXECUTION,
                     uuid=self.uuid,
                 )

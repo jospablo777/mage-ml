@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 from typing import Dict, Optional
 
 import aiofiles
@@ -13,6 +12,7 @@ from mage_ai.settings.server import (
     SYSTEM_LOGS_PARTITIONS,
     SYSTEM_LOGS_POLL_INTERVAL,
 )
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.files import makedirs_async, makedirs_sync
 from mage_ai.shared.singletons.memory import get_memory_manager_controller
 from mage_ai.system.constants import LogType
@@ -68,7 +68,7 @@ class MemoryManager:
                             /[process_uuid].log
         """
         if not self._log_path:
-            now = datetime.utcnow()
+            now = utc_now()
 
             datetime_partitions = []
             for partition_name in SYSTEM_LOGS_PARTITIONS:

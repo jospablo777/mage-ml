@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from mage_ai.api.resources.PipelineScheduleResource import PipelineScheduleResource
@@ -17,6 +16,7 @@ from mage_ai.orchestration.triggers.utils import (
 )
 from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.shared.dates import utc_now
 
 
 def trigger_pipeline(
@@ -113,7 +113,7 @@ def __fetch_or_create_pipeline_schedule(
             dict(
                 name=schedule_name,
                 schedule_type=schedule_type,
-                start_time=datetime.utcnow(),
+                start_time=utc_now(),
                 status=ScheduleStatus.ACTIVE,
             ),
             None,

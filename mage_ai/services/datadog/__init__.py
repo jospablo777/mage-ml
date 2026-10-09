@@ -1,7 +1,7 @@
-from datadog import initialize, api, statsd
-from datetime import datetime
 import os
 import time
+
+from datadog import api, initialize, statsd
 
 options = {
     'api_key': os.getenv('DD_API_KEY'),
@@ -24,7 +24,7 @@ def gauge(metric, value, host='mage', tags={}):
         host=host,
         metric=metric,
         points=[
-            (datetime.utcnow().timestamp(), value),
+            (time.time(), value),
         ],
         tags=tags,
         type='gauge',
@@ -57,7 +57,7 @@ def create_metric(metric, value, host='mage', tags={}):
         host=host,
         metric=metric,
         points=[
-            (datetime.utcnow().timestamp(), value),
+            (time.time(), value),
         ],
         tags=tags,
         type='count',
@@ -69,7 +69,7 @@ def histogram(metric, value, host='mage', tags={}):
         host=host,
         metric=metric,
         points=[
-            (datetime.utcnow().timestamp(), value),
+            (time.time(), value),
         ],
         tags=tags,
         type='histogram',
@@ -81,7 +81,7 @@ def timing(metric, value, host='mage', tags={}):
         host=host,
         metric=metric,
         points=[
-            (datetime.utcnow().timestamp(), value),
+            (time.time(), value),
         ],
         tags=tags,
         type='timer',

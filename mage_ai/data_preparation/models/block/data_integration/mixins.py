@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+import time
 from inspect import Parameter, signature
 from typing import Any, Callable, Dict, List, Tuple, Union
 
@@ -620,7 +620,7 @@ class DataIntegrationMixin:
         partition: str = None,
         **kwargs,
     ) -> Dict:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         decorated_functions = []
         decorated_functions_catalog = []
@@ -689,7 +689,7 @@ class DataIntegrationMixin:
 
         def _print_time(block=self, now=now):
             if is_debug():
-                seconds = round((datetime.utcnow().timestamp() - now) * 10000) / 10000
+                seconds = round((time.time() - now) * 10000) / 10000
                 print(f'[Block.__execute_data_integration_block_code]: {seconds} | {block.uuid}')
 
         if data_integration_uuid_only:

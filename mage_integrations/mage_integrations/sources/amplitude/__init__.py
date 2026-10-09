@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, Generator, List
 
 import dateutil.parser
@@ -13,6 +13,7 @@ from mage_integrations.sources.base import Source, main
 from mage_integrations.sources.constants import REPLICATION_METHOD_INCREMENTAL
 from mage_integrations.sources.query import get_end_date, get_start_date
 from mage_integrations.utils.array import find_index
+from mage_integrations.utils.dates import utc_now
 
 LOGGER = singer.get_logger()
 
@@ -36,7 +37,7 @@ class Amplitude(Source):
         if query is None:
             query = {}
 
-        today = datetime.utcnow()
+        today = utc_now()
         start_date = today - timedelta(days=1)
         end_date = today
 
@@ -74,7 +75,7 @@ class Amplitude(Source):
         return VALID_REPLICATION_KEYS[stream_id]
 
     def test_connection(self):
-        today = datetime.utcnow()
+        today = utc_now()
         self.connection.load(start_date=today, end_date=today)
 
 

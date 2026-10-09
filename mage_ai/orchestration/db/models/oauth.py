@@ -1,5 +1,4 @@
 import re
-from datetime import datetime
 from typing import Callable, List, Union
 
 from sqlalchemy import (
@@ -30,6 +29,7 @@ from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.errors import ValidationError
 from mage_ai.orchestration.db.models.base import BaseModel
 from mage_ai.shared.array import find
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.enum import IntEnum, StrEnum
 from mage_ai.shared.environments import is_test
 from mage_ai.shared.hash import group_by, merge_dict
@@ -882,5 +882,5 @@ class Oauth2AccessToken(BaseModel):
     def is_valid(self) -> bool:
         return self.token and \
             self.expires and \
-            self.expires >= datetime.utcnow().replace(tzinfo=self.expires.tzinfo) and \
+            self.expires >= utc_now().replace(tzinfo=self.expires.tzinfo) and \
             self.user is not None

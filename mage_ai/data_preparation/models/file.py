@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime
+import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -253,7 +253,7 @@ class File:
         file_path_versions_dir = self.file_path_versions_dir(repo_path, dir_path, filename)
         file_path_versions = os.path.join(
             file_path_versions_dir,
-            str(round(datetime.utcnow().timestamp())),
+            str(round(time.time())),
         )
 
         arr = []

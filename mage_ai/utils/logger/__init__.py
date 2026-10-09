@@ -1,4 +1,11 @@
-from datetime import datetime
+import sys
+import uuid
+from typing import Any
+
+import simplejson
+
+from mage_ai.shared.dates import utc_now
+from mage_ai.shared.parsers import encode_complex
 from mage_ai.utils.logger.constants import (
     LOG_LEVEL_DEBUG,
     LOG_LEVEL_ERROR,
@@ -6,11 +13,6 @@ from mage_ai.utils.logger.constants import (
     LOG_LEVEL_INFO,
     TYPE_LOG,
 )
-from mage_ai.shared.parsers import encode_complex
-from typing import Any
-import simplejson
-import sys
-import uuid
 
 
 class Logger():
@@ -45,7 +47,7 @@ class Logger():
         if self.verbose == 0:
             return
 
-        now = datetime.utcnow()
+        now = utc_now()
         if self.caller:
             if type(self.caller) is str:
                 caller_string = self.caller

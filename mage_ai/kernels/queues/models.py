@@ -1,5 +1,5 @@
+import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Optional
 
 from mage_ai.shared.models import BaseDataClass
@@ -12,4 +12,4 @@ class Message(BaseDataClass):
     timestamp: Optional[int] = None
 
     def __post_init__(self):
-        self.timestamp = int(datetime.utcnow().timestamp() * 1000)
+        self.timestamp = int(time.time() * 1000)

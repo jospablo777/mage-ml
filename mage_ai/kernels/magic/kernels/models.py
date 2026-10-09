@@ -1,7 +1,7 @@
 import asyncio
+import time
 from asyncio import Event as AsyncEvent
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from multiprocessing import Event, Pool, Queue
 from multiprocessing.managers import SyncManager
 from queue import Empty
@@ -90,7 +90,7 @@ class Kernel:
         message_request_uuid: Optional[str] = None,
         timestamp: Optional[float] = None,
     ) -> ProcessBase:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         if is_debug():
             print('[Manager.start_processes]', now - (timestamp or 0))

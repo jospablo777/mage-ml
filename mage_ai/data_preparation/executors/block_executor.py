@@ -42,6 +42,7 @@ from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleType
 from mage_ai.data_preparation.shared.retry import RetryConfig
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.utils import clean_name
 from mage_ai.usage_statistics.constants import EventNameType, EventObjectType
@@ -220,7 +221,7 @@ class BlockExecutor:
                 pipeline_schedule = pipeline_run.pipeline_schedule
                 schedule_interval = pipeline_schedule.schedule_interval
                 if ScheduleType.API == pipeline_schedule.schedule_type:
-                    execution_date = datetime.utcnow()
+                    execution_date = utc_now()
                 else:
                     # This will be none if trigger is API type
                     execution_date = pipeline_schedule.current_execution_date()

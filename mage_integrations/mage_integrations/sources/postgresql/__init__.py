@@ -29,6 +29,7 @@ from mage_integrations.sources.postgresql.decoders import (
     decode_message,
 )
 from mage_integrations.sources.sql.base import Source
+from mage_integrations.utils.dates import utc_now
 
 INTERNAL_COLUMN_LSN = 'lsn'
 
@@ -251,7 +252,7 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
                             f'Msg lsn {msg.data_start} smaller than start lsn {start_lsn}')
                         continue
 
-                    if not type(decoded_payload) in [Delete, Insert, Update]:
+                    if type(decoded_payload) not in [Delete, Insert, Update]:
                         continue
 
                     relation_name = relations.get(decoded_payload.relation_id)
@@ -269,7 +270,7 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
                         payload = dict(zip(columns, values))
                         payload[INTERNAL_COLUMN_LSN] = msg.data_start
                         payload[INTERNAL_COLUMN_DELETED_AT] = \
-                            datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
+                            utc_now().strftime('%Y-%m-%d %H:%M:%S.%f')
                         yield [payload]
                     cur.send_feedback(flush_lsn=msg.data_start)
                 else:

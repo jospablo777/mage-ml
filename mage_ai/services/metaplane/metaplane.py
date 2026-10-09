@@ -1,9 +1,12 @@
-from datetime import datetime
-from mage_ai.services.metaplane.config import Config
-from mage_ai.shared.http_client import HttpClient
-from typing import Dict, List, Literal, TypedDict, Union
-import dateutil.parser
 import time
+from datetime import datetime
+from typing import Dict, List, Literal, TypedDict, Union
+
+import dateutil.parser
+
+from mage_ai.services.metaplane.config import Config
+from mage_ai.shared.dates import utc_now
+from mage_ai.shared.http_client import HttpClient
 
 
 class Connection(TypedDict):
@@ -93,7 +96,7 @@ class Metaplane(HttpClient):
         print(f'Running {len(monitor_ids)} monitor(s).')
         for monitor_id in monitor_ids:
             print(f'Running monitor ID {monitor_id}.')
-            now = datetime.utcnow()
+            now = utc_now()
             status = self.run_monitors([monitor_id])['status']
             print(f'Monitor ID {monitor_id} ran with status {status}.')
             if 200 == status:

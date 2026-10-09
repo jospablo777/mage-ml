@@ -1,7 +1,6 @@
 import hashlib
 import os
 from dataclasses import dataclass, field, make_dataclass
-from datetime import datetime
 from typing import Dict, List, Tuple, Union
 
 import yaml
@@ -29,6 +28,7 @@ from mage_ai.settings.platform import (
 )
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.array import find, find_index, flatten
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.environments import is_debug, is_test
 from mage_ai.shared.hash import (
@@ -530,7 +530,7 @@ class Hook(BaseDataClass):
         if not self.metadata:
             self.metadata = HookMetadata.load()
 
-        now = datetime.utcnow().isoformat(' ', 'seconds')
+        now = utc_now().isoformat(' ', 'seconds')
         self.metadata.snapshot_hash = self.__generate_snapshot_hash(prefix=now)
         self.metadata.snapshotted_at = now
 
@@ -787,7 +787,7 @@ class GlobalHooks(BaseDataClass):
         snapshot: bool = False,
         update: bool = False,
     ) -> Hook:
-        now = datetime.utcnow().isoformat(' ', 'seconds')
+        now = utc_now().isoformat(' ', 'seconds')
 
         if not update and self.get_hook(
             operation_type=hook.operation_type,

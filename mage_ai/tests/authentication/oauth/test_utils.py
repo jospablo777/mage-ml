@@ -12,6 +12,7 @@ from mage_ai.authentication.oauth.utils import (
 )
 from mage_ai.data_preparation.git.utils import get_oauth_client_id
 from mage_ai.orchestration.db.models.oauth import Oauth2AccessToken, Oauth2Application
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.base_test import AsyncDBTestCase
 from mage_ai.tests.factory import create_user
 
@@ -39,7 +40,7 @@ class OauthUtilsTest(AsyncDBTestCase):
 
     def test_access_tokens_for_client(self):
         token = Oauth2AccessToken.create(
-            expires=datetime.utcnow() + timedelta(days=1),
+            expires=utc_now() + timedelta(days=1),
             token=uuid4().hex,
             oauth2_application_id=self.oauth_application.id,
         )
@@ -51,7 +52,7 @@ class OauthUtilsTest(AsyncDBTestCase):
 
     def test_access_tokens_for_client_with_user(self):
         Oauth2AccessToken.create(
-            expires=datetime.utcnow() + timedelta(days=1),
+            expires=utc_now() + timedelta(days=1),
             token=uuid4().hex,
             oauth2_application_id=self.oauth_application.id,
         )
@@ -62,7 +63,7 @@ class OauthUtilsTest(AsyncDBTestCase):
         self.assertEqual(len(access_tokens_for_client(self.client_id)), 1)
 
         token = Oauth2AccessToken.create(
-            expires=datetime.utcnow() + timedelta(days=1),
+            expires=utc_now() + timedelta(days=1),
             token=uuid4().hex,
             oauth2_application_id=self.oauth_application.id,
             user_id=self.user.id,
@@ -82,7 +83,7 @@ class OauthUtilsTest(AsyncDBTestCase):
     )
     async def test_refresh_token_for_client(self):
         Oauth2AccessToken.create(
-            expires=datetime.utcnow() - timedelta(days=1),
+            expires=utc_now() - timedelta(days=1),
             token='test_token',
             refresh_token='test_refresh_token',
             oauth2_application_id=self.oauth_application.id,

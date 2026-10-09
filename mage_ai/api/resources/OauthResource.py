@@ -1,5 +1,5 @@
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
 from mage_ai.api.errors import ApiError
@@ -23,6 +23,7 @@ from mage_ai.authentication.providers.constants import NAME_TO_PROVIDER
 from mage_ai.data_preparation.git.utils import get_oauth_client_id
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.oauth import Oauth2AccessToken, Oauth2Application
+from mage_ai.shared.dates import utc_now
 
 
 class OauthResource(GenericResource):
@@ -130,7 +131,7 @@ class OauthResource(GenericResource):
         else:
             expire_timedelta = get_default_expire_time(provider)
         if access_token:
-            access_token.expires = datetime.utcnow() + expire_timedelta
+            access_token.expires = utc_now() + expire_timedelta
             access_token.save()
         else:
             access_token = generate_access_token(

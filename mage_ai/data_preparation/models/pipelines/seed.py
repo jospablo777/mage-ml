@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import List
 
 from mage_ai.data_preparation.models.block import Block
@@ -15,6 +14,7 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineRun,
     PipelineSchedule,
 )
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import index_by
 
 
@@ -84,7 +84,7 @@ def __process(
                 pipeline_uuid=pipeline.uuid,
                 schedule_interval=ScheduleInterval.DAILY,
                 schedule_type=ScheduleType.TIME,
-                start_time=datetime.utcnow(),
+                start_time=utc_now(),
                 status=ScheduleStatus.INACTIVE,
             )
             pipeline_schedules_models.append(model)
@@ -110,11 +110,11 @@ def __process(
 
             pipeline_schedule = pipeline_schedules_models[i % pipeline_schedules_count]
             model = PipelineRun(
-                completed_at=datetime.utcnow(),
-                execution_date=datetime.utcnow(),
+                completed_at=utc_now(),
+                execution_date=utc_now(),
                 pipeline_schedule_id=pipeline_schedule.id,
                 pipeline_uuid=pipeline_schedule.pipeline_uuid,
-                started_at=datetime.utcnow(),
+                started_at=utc_now(),
                 status=statuses[i % len(statuses)],
             )
             pipeline_runs_models.append(model)
@@ -142,9 +142,9 @@ def __process(
 
             model = BlockRun(
                 block_uuid=blocks[i % len(blocks)].uuid,
-                completed_at=datetime.utcnow(),
+                completed_at=utc_now(),
                 pipeline_run_id=pipeline_run.id,
-                started_at=datetime.utcnow(),
+                started_at=utc_now(),
                 status=statuses[i % len(statuses)],
             )
             block_runs_models.append(model)

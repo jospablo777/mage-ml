@@ -12,6 +12,7 @@ import singer
 from dateutil.rrule import DAILY, rrule
 
 from mage_integrations.sources.postmark.tap_postmark.cleaners import CLEANERS
+from mage_integrations.utils.dates import utc_now
 
 # Example URL: https://api.postmarkapp.com/stats/outbound/opens/platforms
 
@@ -534,7 +535,7 @@ class Postmark(object):  # noqa: WPS230
         dates: rrule = rrule(
             freq=DAILY,
             dtstart=period,
-            until=datetime.utcnow(),
+            until=utc_now(),
         )
 
         # Yield dates in YYYY-MM-DD format

@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime
+import time
 from typing import Dict, List
 
 from mage_ai.cache.base import BaseCache
@@ -59,7 +59,7 @@ class TagCache(BaseCache):
         return os.path.join(tag_uuid)
 
     def add_pipeline(self, tag_uuid: str, pipeline) -> None:
-        self.update_pipeline(tag_uuid, pipeline, added_at=datetime.utcnow().timestamp())
+        self.update_pipeline(tag_uuid, pipeline, added_at=time.time())
 
     def update_pipeline(
         self,

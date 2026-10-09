@@ -1,9 +1,9 @@
 import re
-from datetime import datetime
 from typing import List, Tuple
 
 from mage_integrations.connections.base import Connection as BaseConnection
 from mage_integrations.connections.utils.sql import clean_query
+from mage_integrations.utils.dates import utc_now
 from mage_integrations.utils.dictionary import merge_dict
 
 
@@ -88,7 +88,7 @@ class Connection(BaseConnection):
                 message = 'Execute alter table command'
 
             self.logger.info(f'{message} started.')
-            now1 = datetime.utcnow().timestamp()
+            now1 = utc_now().timestamp()
 
             try:
                 cursor.execute(clean_query(query_string))
@@ -106,7 +106,7 @@ class Connection(BaseConnection):
                     self.logger.info(error_message)
                 raise err
 
-            now2 = datetime.utcnow().timestamp()
+            now2 = utc_now().timestamp()
             self.logger.info(f'{message} completed.', tags=dict(
                 time=now2 - now1,
             ))

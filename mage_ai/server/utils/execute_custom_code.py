@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 import simplejson
@@ -32,8 +33,6 @@ def send_status_update(
     progress: Optional[float] = None,
     uuid: Optional[str] = ' Status',
 ):
-    import datetime
-
     print(
         render_output_tags(
             simplejson.dumps(
@@ -47,7 +46,7 @@ def send_status_update(
                             ),
                         ],
                         priority=0,
-                        timestamp=int(datetime.datetime.utcnow().timestamp() * 1000),
+                        timestamp=int(time.time() * 1000),
                         type=DataType.GROUP,
                         variable_uuid=uuid,
                     ),

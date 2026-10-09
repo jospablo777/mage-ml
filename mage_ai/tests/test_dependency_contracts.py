@@ -8,10 +8,12 @@ Web server coverage lives in mage_ai/tests/server/test_server_http_smoke.py.
 """
 import re
 import unittest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from importlib.metadata import version
 
 from packaging.version import Version
+
+from mage_ai.shared.dates import utc_now
 
 # rich renders the help in color whenever it believes it is attached to a
 # terminal, and it treats GitHub Actions as one. Colored output splits an option
@@ -116,7 +118,7 @@ class AuthenticationContractTest(unittest.TestCase):
     def test_jwt_token_round_trip(self):
         from mage_ai.authentication.oauth2 import decode_token, encode_token
 
-        expires = datetime.utcnow() + timedelta(days=1)
+        expires = utc_now() + timedelta(days=1)
         encoded = encode_token('some-token', expires)
 
         self.assertIsInstance(encoded, str)

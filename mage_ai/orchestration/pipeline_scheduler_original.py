@@ -60,7 +60,7 @@ from mage_ai.settings.server import (
     RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE,
 )
 from mage_ai.shared.array import find
-from mage_ai.shared.dates import compare
+from mage_ai.shared.dates import compare, utc_now
 from mage_ai.shared.environments import get_env
 from mage_ai.shared.hash import index_by, merge_dict
 from mage_ai.shared.retry import retry
@@ -755,7 +755,7 @@ class PipelineScheduler:
             pipeline_schedule = self.pipeline_run.pipeline_schedule
             schedule_interval = pipeline_schedule.schedule_interval
             if ScheduleType.API == pipeline_schedule.schedule_type:
-                execution_date = datetime.utcnow()
+                execution_date = utc_now()
             else:
                 # This will be none if trigger is API type
                 execution_date = pipeline_schedule.current_execution_date()
@@ -1377,7 +1377,7 @@ def configure_pipeline_run_payload(
     payload['pipeline_uuid'] = pipeline_schedule.pipeline_uuid
     execution_date = payload.get('execution_date')
     if execution_date is None:
-        payload['execution_date'] = datetime.utcnow()
+        payload['execution_date'] = utc_now()
     elif not isinstance(execution_date, datetime):
         payload['execution_date'] = datetime.fromisoformat(execution_date)
 
@@ -1598,7 +1598,7 @@ def build_restarted_streaming_pipeline_run_payload(
         variables=variables,
     )
     if ScheduleType.API == pipeline_schedule.schedule_type:
-        payload['execution_date'] = datetime.utcnow()
+        payload['execution_date'] = utc_now()
 
     return payload
 

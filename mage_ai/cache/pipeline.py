@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+import time
 from typing import Any, Dict, List, Union
 
 from mage_ai.cache.base import BaseCache
@@ -124,7 +124,7 @@ class PipelineCache(BaseCache):
 
     def add_model(self, model, repo_path: str = None) -> None:
         self.update_model(
-            model, added_at=datetime.utcnow().timestamp(), repo_path=repo_path
+            model, added_at=time.time(), repo_path=repo_path
         )
 
     def move_model(self, new_model, old_model, repo_path: str = None) -> None:

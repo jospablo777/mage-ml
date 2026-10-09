@@ -6,6 +6,15 @@ import pytz
 from mage_ai.shared.array import find_index
 
 
+def utc_now() -> datetime.datetime:
+    """
+    The current UTC time without tzinfo, the value datetime.utcnow() returned.
+
+    datetime.utcnow() is deprecated since Python 3.12. Callers compare the result with
+    naive timestamps stored in UTC, so it stays naive.
+    """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
 def compare(date1, date2) -> Optional[int]:
     if date1 is None or date2 is None:
         return None

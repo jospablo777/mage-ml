@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 from functools import reduce
 from typing import Callable, Dict, List, Union
@@ -14,6 +15,7 @@ from mage_ai.orchestration.db.models.schedules import (
 )
 from mage_ai.settings.platform.constants import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.hash import group_by, merge_dict
 
@@ -42,7 +44,7 @@ class MonitorStats:
         **kwargs,
     ) -> Dict:
         if end_time is None:
-            end_time = datetime.utcnow()
+            end_time = utc_now()
         else:
             end_time = dateutil.parser.parse(end_time)
         if start_time is None:
@@ -99,7 +101,7 @@ class MonitorStats:
         pipeline_schedule_id: int = None,
         **kwargs,
     ) -> Dict:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         query = (
             PipelineRun.
@@ -129,9 +131,9 @@ class MonitorStats:
         pipeline_runs = query.all()
         # Query: 11.1094
         # Query: 2.7102 (after optimization)
-        print(f'Query: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
 
-        now = datetime.utcnow().timestamp()
+        now = time.time()
         stats_by_schedule_id = dict()
         pipelines_mapping = {}
         for uuid in set([p.pipeline_uuid for p in pipeline_runs]):
@@ -146,9 +148,9 @@ class MonitorStats:
             except Exception as err:
                 print(f'[ERROR] MonitorStats.get_pipeline_run_count: {err}.')
         # 0.2497
-        print(f'Mapping: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
-        now = datetime.utcnow().timestamp()
+        now = time.time()
         for p in pipeline_runs:
             if p.pipeline_schedule_id is None:
                 pipeline_schedule_id = NO_PIPELINE_SCHEDULE_ID
@@ -185,7 +187,7 @@ class MonitorStats:
                     data[created_at_formatted][p.status] += 1
         # Loop: 2.4017
         # Loop: 1.0568 (optimized)
-        print(f'Loop: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Loop: {round((time.time() - now) * 10000) / 10000}')
 
         return stats_by_schedule_id
 
@@ -196,7 +198,7 @@ class MonitorStats:
         end_time: datetime = None,
         **kwargs,
     ) -> Dict:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         select = [
             PipelineRun.completed_at,
@@ -224,9 +226,9 @@ class MonitorStats:
         pipeline_runs = query.all()
         # v1: 11.4428
         # v2: 2.2877
-        print(f'Query: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
 
-        now = datetime.utcnow().timestamp()
+        now = time.time()
         pipeline_run_by_date = group_by(lambda p: p.ds_created_at, pipeline_runs)
 
         def __mean_runtime(pipeline_runs):
@@ -237,7 +239,7 @@ class MonitorStats:
             return sum(runtime_list) / len(runtime_list)
         pipeline_run_time_by_date = {k: __mean_runtime(v) for k, v in pipeline_run_by_date.items()}
         # v1: 0.7857
-        print(f'Mapping: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
         return {pipeline_uuid: dict(name=pipeline_uuid, data=pipeline_run_time_by_date)}
 
@@ -249,7 +251,7 @@ class MonitorStats:
         start_time: datetime = None,
         **kwargs,
     ) -> Dict:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         select_query = [
             BlockRun.block_uuid.label('name'),
@@ -294,9 +296,9 @@ class MonitorStats:
         )
         # v1: 21.6741
         # v2: 1.24
-        print(f'Query: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
 
-        now = datetime.utcnow().timestamp()
+        now = time.time()
 
         def _reduce(obj, tup):
             name, status, count, ds_created_at = tup[:4]
@@ -310,7 +312,7 @@ class MonitorStats:
 
         # v1: <= 1
         # v2: 0
-        print(f'Mapping: {round((datetime.utcnow().timestamp() - now) * 10000) / 10000}')
+        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
         return mapping
 

@@ -1,4 +1,5 @@
-from datetime import datetime
+
+import time
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
@@ -9,7 +10,7 @@ from mage_ai.shared.environments import is_debug
 class CodeExecutionResource(GenericResource):
     @classmethod
     async def create(cls, payload, user, **kwargs) -> GenericResource:
-        now = datetime.utcnow().timestamp()
+        now = time.time()
         if is_debug():
             print('[CodeExecutionResource.create]', now)
 

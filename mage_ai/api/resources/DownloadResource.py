@@ -10,6 +10,7 @@ from mage_ai.data_preparation.models.file import File
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.settings import JWT_DOWNLOAD_SECRET
+from mage_ai.shared.dates import utc_now
 
 
 class DownloadResource(GenericResource):
@@ -45,7 +46,7 @@ class DownloadResource(GenericResource):
         return [zip_name, file_list]
 
     def generate_download_token(file_name, file_list, ignore_folder_structure):
-        now = datetime.datetime.utcnow()
+        now = utc_now()
         payload = {
             'file_name': file_name,
             'file_list': file_list,

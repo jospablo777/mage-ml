@@ -1,4 +1,5 @@
-from datetime import datetime
+
+import time
 
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.data_preparation.models.project import Project
@@ -27,7 +28,7 @@ class KernelResource(GenericResource):
 
         if Project().is_feature_enabled(FeatureUUID.AUTOMATIC_KERNEL_CLEANUP):
             # Only do this every minute
-            if int(datetime.utcnow().timestamp()) % 60 == 0:
+            if int(time.time()) % 60 == 0:
                 kill_count, memory_freed = KernelProcess.terminate_inactive(
                     await find_ipykernel_launchers_info_async(),
                 )

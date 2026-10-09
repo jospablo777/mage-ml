@@ -1,6 +1,6 @@
 import asyncio
+import time
 from asyncio import Event as AsyncEvent
-from datetime import datetime
 from multiprocessing import Queue
 from multiprocessing.pool import AsyncResult
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Protocol, Union
@@ -117,7 +117,7 @@ class ProcessBase:
             ],
             kwds={},
         )
-        now = datetime.utcnow().timestamp()
+        now = time.time()
         self.timestamp = int(now * 1000)
 
         if is_debug():

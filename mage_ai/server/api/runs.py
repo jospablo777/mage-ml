@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy.orm import load_only
@@ -18,6 +17,7 @@ from mage_ai.orchestration.db.models.schedules import (
 from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.errors import UnauthenticatedRequestException
 from mage_ai.settings.utils import base_repo_dirname
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.requests import get_bearer_auth_token_from_headers
 from mage_ai.shared.utils import clean_name
 
@@ -68,10 +68,10 @@ class ApiRunHandler(BaseHandler):
         try:
             if record:
                 pipeline_run = PipelineRun.create(
-                    completed_at=datetime.utcnow(),
+                    completed_at=utc_now(),
                     create_block_runs=False,
-                    execution_date=datetime.utcnow(),
-                    started_at=datetime.utcnow(),
+                    execution_date=utc_now(),
+                    started_at=utc_now(),
                     pipeline_schedule_id=pipeline_schedule.id,
                     pipeline_uuid=pipeline.uuid,
                     status=PipelineRun.PipelineRunStatus.COMPLETED,
@@ -82,7 +82,7 @@ class ApiRunHandler(BaseHandler):
                     block_uuid=block.uuid,
                     metrics=variables,
                     status=BlockRun.BlockRunStatus.RUNNING,
-                    started_at=datetime.utcnow(),
+                    started_at=utc_now(),
                 )
 
             parts = []
@@ -91,7 +91,7 @@ class ApiRunHandler(BaseHandler):
             else:
                 parts.extend([
                     str(pipeline_schedule.id),
-                    datetime.utcnow().strftime('%Y%m%dT%H%M%S'),
+                    utc_now().strftime('%Y%m%dT%H%M%S'),
                 ])
 
             execution_partition = os.path.join(
@@ -129,7 +129,7 @@ class ApiRunHandler(BaseHandler):
 
             if record:
                 block_run.update(
-                    completed_at=datetime.utcnow(),
+                    completed_at=utc_now(),
                     status=BlockRun.BlockRunStatus.COMPLETED,
                 )
         except Exception as err:

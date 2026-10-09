@@ -1,5 +1,4 @@
 import json
-from datetime import datetime
 from functools import reduce
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -9,6 +8,7 @@ from mage_ai.api.logging import debug, error, info
 from mage_ai.api.operations.base import BaseOperation
 from mage_ai.api.operations.constants import CREATE, DELETE, DETAIL, LIST, UPDATE
 from mage_ai.services.tracking.metrics import increment, timing
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.parsers import encode_complex
 
 
@@ -29,7 +29,7 @@ async def execute_operation(
         resource=resource,
         user_id=user_id,
     )
-    start_time = datetime.utcnow()
+    start_time = utc_now()
 
     meta = __meta(request)
     http_error_codes = (meta or {}).get('_http_error_codes', False)
@@ -69,7 +69,7 @@ async def execute_operation(
         )
         raise err
 
-    end_time = datetime.utcnow()
+    end_time = utc_now()
 
     error_response = response.get('error', None)
     if error_response:
@@ -244,7 +244,7 @@ def __log_error(
 
     error(
         '[{}] [ERROR] {} /{} [user: {}]: {}'.format(
-            datetime.utcnow(),
+            utc_now(),
             request.method,
             endpoint,
             user_id,

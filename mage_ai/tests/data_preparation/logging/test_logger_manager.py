@@ -1,11 +1,12 @@
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from mage_ai.data_preparation.logging.logger_manager import LoggerManager
 from mage_ai.data_preparation.models.constants import PipelineType
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.storage.local_storage import LocalStorage
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.base_test import TestCase
 
 
@@ -120,7 +121,7 @@ class LoggerManagerTest(TestCase):
             pipeline_uuid=pipeline_uuid
         )
         mock_old_log_date = (
-            datetime.utcnow() -
+            utc_now() -
             timedelta(days=days_ago)
         ).strftime(format='%Y%m%dT%H%M%S')
         mock_log_folder = os.path.join(

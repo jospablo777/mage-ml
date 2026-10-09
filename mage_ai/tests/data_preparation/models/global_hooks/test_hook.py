@@ -26,6 +26,7 @@ from mage_ai.data_preparation.models.global_hooks.models import (
 )
 from mage_ai.data_preparation.models.global_hooks.predicates import HookPredicate
 from mage_ai.orchestration.triggers.constants import TRIGGER_NAME_FOR_GLOBAL_HOOK
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.tests.shared.mixins import GlobalHooksMixin
 
@@ -720,8 +721,8 @@ class HookTest(GlobalHooksMixin):
             dict(
                 conditions=[m.value for m in hook.conditions],
                 metadata=dict(
-                    created_at=datetime.utcnow().isoformat(' ', 'seconds'),
-                    updated_at=datetime.utcnow().isoformat(' ', 'seconds'),
+                    created_at=utc_now().isoformat(' ', 'seconds'),
+                    updated_at=utc_now().isoformat(' ', 'seconds'),
                 ),
                 outputs=[m.to_dict() for m in hook.output_settings],
                 pipeline=dict(
@@ -752,8 +753,8 @@ class HookTest(GlobalHooksMixin):
             dict(
                 conditions=[m.value for m in hook.conditions],
                 metadata=dict(
-                    created_at=datetime.utcnow().isoformat(' ', 'seconds'),
-                    updated_at=datetime.utcnow().isoformat(' ', 'seconds'),
+                    created_at=utc_now().isoformat(' ', 'seconds'),
+                    updated_at=utc_now().isoformat(' ', 'seconds'),
                 ),
                 operation_type=hook.operation_type.value,
                 outputs=[m.to_dict() for m in hook.output_settings],
@@ -787,8 +788,8 @@ class HookTest(GlobalHooksMixin):
             dict(
                 conditions=[m.value for m in hook.conditions],
                 metadata=dict(
-                    created_at=datetime.utcnow().isoformat(' ', 'seconds'),
-                    updated_at=datetime.utcnow().isoformat(' ', 'seconds'),
+                    created_at=utc_now().isoformat(' ', 'seconds'),
+                    updated_at=utc_now().isoformat(' ', 'seconds'),
                 ),
                 output=dict(fire=2),
                 outputs=[m.to_dict() for m in hook.output_settings],
@@ -812,7 +813,7 @@ class HookTest(GlobalHooksMixin):
         hook = self.hooks_match[0]
         hook.snapshot()
 
-        now = datetime.utcnow().isoformat(' ', 'seconds')
+        now = utc_now().isoformat(' ', 'seconds')
         hashes = []
 
         for block in self.pipeline1.blocks_by_uuid.values():

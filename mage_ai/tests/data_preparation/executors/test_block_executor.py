@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 from typing import Dict
 from unittest.mock import ANY, MagicMock, patch
 from uuid import uuid4
@@ -13,6 +12,7 @@ from mage_ai.data_preparation.models.block.hook.block import HookBlock
 from mage_ai.data_preparation.models.constants import BlockType
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 from mage_ai.tests.factory import create_pipeline_with_blocks
@@ -337,7 +337,7 @@ class BlockExecutorTest(BaseApiTestCase):
         self.pipeline1.add_block(block1)
 
         pipeline_run = PipelineRun.create(
-            execution_date=datetime.utcnow(),
+            execution_date=utc_now(),
             pipeline_schedule_id=0,
             pipeline_uuid=self.pipeline1.uuid,
         )
@@ -395,7 +395,7 @@ class BlockExecutorTest(BaseApiTestCase):
         block2 = blocks[1]
 
         pipeline_run = PipelineRun.create(
-            execution_date=datetime.utcnow(),
+            execution_date=utc_now(),
             pipeline_schedule_id=0,
             pipeline_uuid=pipeline.uuid,
         )
@@ -478,7 +478,7 @@ class BlockExecutorTest(BaseApiTestCase):
         self.pipeline1.add_block(block2)
 
         pipeline_run = PipelineRun.create(
-            execution_date=datetime.utcnow(),
+            execution_date=utc_now(),
             pipeline_schedule_id=0,
             pipeline_uuid=self.pipeline1.uuid,
         )

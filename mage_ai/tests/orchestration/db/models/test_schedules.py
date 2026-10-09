@@ -22,6 +22,7 @@ from mage_ai.orchestration.db.models.schedules import (
 )
 from mage_ai.orchestration.pipeline_scheduler import configure_pipeline_run_payload
 from mage_ai.shared.croniter import croniter
+from mage_ai.shared.dates import utc_now
 
 # from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.hash import merge_dict
@@ -1606,7 +1607,7 @@ class PipelineRunTests(DBTestCase):
             pipeline_schedule, PipelineType.PYTHON, dict()
         )[0]
         pipeline_run = PipelineRun.create(**payload)
-        execution_date_str = datetime.utcnow().strftime(format='%Y%m%dT%H%M%S_%f')
+        execution_date_str = utc_now().strftime(format='%Y%m%dT%H%M%S_%f')
         self.assertEqual(
             pipeline_run.execution_partition,
             f'{pipeline_run.pipeline_schedule_id}/{execution_date_str}',
@@ -1853,7 +1854,7 @@ class PipelineScheduleProjectPlatformTests(ProjectPlatformMixin):
             pipeline_uuid = self.faker.unique.name()
             repo_path = self.faker.unique.name()
 
-            PipelineSchedule(
+            _ = PipelineSchedule(
                 pipeline_uuid=pipeline_uuid,
                 repo_path=repo_path,
             ).pipeline
@@ -1889,7 +1890,7 @@ class PipelineRunProjectPlatformTests(ProjectPlatformMixin, AsyncDBTestCase):
         with patch(
             'mage_ai.orchestration.db.models.schedules_project_platform.get_pipeline_from_platform',
         ) as mock:
-            pipeline_run.pipeline
+            _ = pipeline_run.pipeline
 
             mock.assert_called_once_with(
                 pipeline_uuid,

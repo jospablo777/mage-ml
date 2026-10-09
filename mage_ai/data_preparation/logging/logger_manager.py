@@ -4,7 +4,6 @@ import logging
 import logging.handlers
 import os
 import traceback
-from datetime import datetime
 from typing import Callable, Dict, List
 
 from mage_ai.data_preparation.logging import LoggingConfig
@@ -15,7 +14,7 @@ from mage_ai.data_preparation.storage.local_storage import LocalStorage
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.settings.server import LOGS_DIR_PATH
 from mage_ai.shared.array import find
-from mage_ai.shared.dates import str_to_timedelta
+from mage_ai.shared.dates import str_to_timedelta, utc_now
 
 MAX_LOG_FILE_SIZE = 20 * 1024 * 1024
 
@@ -147,7 +146,7 @@ class LoggerManager:
         log_retention_period = self.logging_config.retention_period
         if not log_retention_period:
             return
-        min_partition = (datetime.utcnow() -
+        min_partition = (utc_now() -
                          str_to_timedelta(log_retention_period)).strftime(
                             format='%Y%m%dT%H%M%S')
 

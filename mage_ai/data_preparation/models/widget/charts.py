@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.strings import is_number
 
 from .constants import TIME_INTERVAL_TO_TIME_DELTA, TimeInterval
@@ -191,7 +192,7 @@ def build_time_series_buckets(
 
     max_value_datetime_ts = max_value_datetime.timestamp()
 
-    now = datetime.utcnow()
+    now = utc_now()
     interval_seconds = (
         now + TIME_INTERVAL_TO_TIME_DELTA[time_interval]
     ).timestamp() - now.timestamp()

@@ -9,7 +9,6 @@ import sys
 import time
 import traceback
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime
 from enum import Enum
 from inspect import Parameter, isfunction, signature
 from logging import Logger
@@ -145,6 +144,7 @@ from mage_ai.settings.server import VARIABLE_DATA_OUTPUT_META_CACHE
 from mage_ai.shared.array import is_iterable, unique_by
 from mage_ai.shared.constants import ENV_DEV, ENV_TEST
 from mage_ai.shared.custom_logger import DX_PRINTER
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.environments import get_env, is_debug
 from mage_ai.shared.hash import extract, ignore_keys, merge_dict
 from mage_ai.shared.logger import BlockFunctionExec
@@ -1555,7 +1555,7 @@ class Block(
                     )
 
                     logger_manager = LoggerManagerFactory.get_logger_manager(
-                        block_uuid=datetime.utcnow().strftime(format='%Y%m%dT%H%M%S'),
+                        block_uuid=utc_now().strftime(format='%Y%m%dT%H%M%S'),
                         partition=LOG_PARTITION_EDIT_PIPELINE,
                         pipeline_uuid=self.pipeline_uuid,
                         subpartition=clean_name(self.uuid),

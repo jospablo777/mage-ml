@@ -4,8 +4,10 @@ from datetime import datetime, timedelta
 import backoff
 import requests
 import singer
-from singer import metrics, utils
 from requests.exceptions import ConnectionError
+from singer import metrics, utils
+
+from mage_integrations.utils.dates import utc_now
 
 LOGGER = singer.get_logger()
 
@@ -54,7 +56,7 @@ class OutreachClient(object):
 
         self.__access_token = data['access_token']
 
-        self.__expires_at = datetime.utcnow() + \
+        self.__expires_at = utc_now() + \
             timedelta(seconds=data['expires_in'] -
                       10)  # pad by 10 seconds for clock drift
 
@@ -79,7 +81,7 @@ class OutreachClient(object):
     def request(self, method, path=None, url=None, skip_quota=False, **kwargs):
         if url is None and \
             (self.__access_token is None or
-             self.__expires_at <= datetime.utcnow()):
+             self.__expires_at <= utc_now()):
             self.refresh()
 
         if url is None and path:

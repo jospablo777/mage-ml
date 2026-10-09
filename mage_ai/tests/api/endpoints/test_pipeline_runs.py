@@ -1,4 +1,3 @@
-from datetime import datetime
 from unittest.mock import patch
 
 from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -8,6 +7,7 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineSchedule,
 )
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.api.endpoints.mixins import (
     BaseAPIEndpointTest,
     build_create_endpoint_tests,
@@ -294,7 +294,7 @@ build_create_endpoint_tests(
         ).all(),
     ) == self.pipeline_runs_count_by_pipeline_schedule_id[self.pipeline_schedule.id],
     build_payload=lambda self: dict(
-        execution_date=datetime.utcnow(),
+        execution_date=utc_now(),
         variables=dict(fire=1),
     ),
 )

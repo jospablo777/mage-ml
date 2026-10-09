@@ -1,7 +1,10 @@
-from datetime import datetime, date
+from datetime import date
 
 import singer
-from singer import bookmarks as bks_, metadata
+from singer import bookmarks as bks_
+from singer import metadata
+
+from mage_integrations.utils.dates import utc_now
 
 from .http import Client
 
@@ -21,7 +24,7 @@ class Context(object):
         self.client = Client(config)
         self._catalog = None
         self.selected_stream_ids = None
-        self.now = datetime.utcnow()
+        self.now = utc_now()
 
     @property
     def catalog(self):

@@ -22,6 +22,7 @@ from mage_ai.data_preparation.models.global_hooks.models import (
 from mage_ai.data_preparation.models.global_hooks.predicates import HookPredicate
 from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.array import find
+from mage_ai.shared.dates import utc_now
 from mage_ai.shared.io import safe_write
 from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 from mage_ai.tests.factory import build_pipeline_with_blocks_and_content
@@ -39,8 +40,8 @@ def build_seed_data(test_case: BaseApiTestCase) -> Dict:
                     dict(
                         uuid=SEED_DATA_HOOK_UUID,
                         metadata=dict(
-                            created_at=datetime.utcnow().isoformat(' ', 'seconds'),
-                            updated_at=datetime.utcnow().isoformat(' ', 'seconds'),
+                            created_at=utc_now().isoformat(' ', 'seconds'),
+                            updated_at=utc_now().isoformat(' ', 'seconds'),
                         ),
                     ),
                 ],
@@ -580,8 +581,8 @@ class GlobalHooksTest(BaseApiTestCase):
                             dict(
                                 uuid=SEED_DATA_HOOK_UUID,
                                 metadata=dict(
-                                    created_at=datetime.utcnow().isoformat(' ', 'seconds'),
-                                    updated_at=datetime.utcnow().isoformat(' ', 'seconds'),
+                                    created_at=utc_now().isoformat(' ', 'seconds'),
+                                    updated_at=utc_now().isoformat(' ', 'seconds'),
                                 ),
                             ),
                         ],

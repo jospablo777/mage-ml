@@ -1,6 +1,16 @@
 import datetime
 import math
 
+
+def utc_now() -> datetime.datetime:
+    """
+    The current UTC time without tzinfo, the value datetime.utcnow() returned.
+
+    datetime.utcnow() is deprecated since Python 3.12. Callers compare the result with
+    naive timestamps stored in UTC, so it stays naive.
+    """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
 def date_intervals(start_date, end_date, timedelta):
     tzinfos = list(filter(lambda x: x, [end_date.tzinfo, start_date.tzinfo]))
     if len(tzinfos) == 1:

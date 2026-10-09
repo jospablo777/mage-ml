@@ -2,6 +2,7 @@ import os
 import re
 import stat
 import tempfile
+import time
 from datetime import datetime
 
 import backoff
@@ -136,7 +137,7 @@ class SFTPConnection():
                     LOGGER.warning("Cannot read m_time for file %s, \
                                     defaulting to current epoch time",
                                    os.path.join(prefix, file_attr.filename))
-                    last_modified = datetime.utcnow().timestamp()
+                    last_modified = time.time()
 
                 # NB: SFTP specifies path characters to be '/'
                 #     https://tools.ietf.org/html/draft-ietf-secsh-filexfer-13#section-6

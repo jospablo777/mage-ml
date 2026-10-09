@@ -1,4 +1,4 @@
-from datetime import datetime
+import time
 from typing import Callable, Dict, List, Union
 
 from mage_ai.shared.hash import extract, merge_dict
@@ -117,7 +117,7 @@ def build_pipeline_dict(
     return dict(
         added_at=added_at,
         pipeline=pipeline_output_dict,
-        updated_at=datetime.utcnow().timestamp(),
+        updated_at=time.time(),
     )
 
 

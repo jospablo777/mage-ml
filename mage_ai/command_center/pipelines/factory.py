@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime
+import time
 from typing import Dict, List
 
 from sqlalchemy import or_
@@ -106,29 +106,29 @@ class PipelineFactory(BaseFactory):
                     items.append(item_dict)
 
             if self.search:
-                now = datetime.utcnow().timestamp()
+                now = time.time()
                 cache = await PipelineCache.initialize_cache()
                 mapping = cache.get(cache.cache_key) or {}
                 print(
                     f'[PipelineFactory] Load: {len(mapping)} -'
-                    f'{datetime.utcnow().timestamp() - now}',
+                    f'{time.time() - now}',
                 )
 
-                now = datetime.utcnow().timestamp()
+                now = time.time()
                 await asyncio.gather(
                     *[build_and_score(self, data, items) for data in mapping.items()]
                 )
                 print(
                     f'[PipelineFactory] Search {self.search}: '
-                    f'{len(items)} - {datetime.utcnow().timestamp() - now}',
+                    f'{len(items)} - {time.time() - now}',
                 )
 
-                now = datetime.utcnow().timestamp()
+                now = time.time()
                 items = await self.rank_items(items)
                 items = [merge_dict(
                     item_dict,
                     add_application_actions(item_dict),
                 ) for item_dict in items]
-                print(f'[PipelineFactory] Rank items: {datetime.utcnow().timestamp() - now}')
+                print(f'[PipelineFactory] Rank items: {time.time() - now}')
 
         return items

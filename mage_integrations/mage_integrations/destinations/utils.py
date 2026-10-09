@@ -1,12 +1,12 @@
 import json
 import re
 import sys
-from datetime import datetime
 
 from mage_integrations.destinations.constants import (
     INTERNAL_COLUMN_CREATED_AT,
     INTERNAL_COLUMN_UPDATED_AT,
 )
+from mage_integrations.utils.dates import utc_now
 
 if sys.version_info.major == 3 and sys.version_info.minor >= 10:
     from collections.abc import MutableMapping
@@ -33,7 +33,7 @@ def flatten_record(d, parent_key='', sep='__'):
 
 
 def update_record_with_internal_columns(record):
-    curr_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
+    curr_time = utc_now().strftime('%Y-%m-%d %H:%M:%S.%f')
     record[INTERNAL_COLUMN_CREATED_AT] = curr_time
     record[INTERNAL_COLUMN_UPDATED_AT] = curr_time
     return record

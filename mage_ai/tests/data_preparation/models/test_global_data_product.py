@@ -15,6 +15,7 @@ from mage_ai.orchestration.triggers.global_data_product import (
     fetch_or_create_pipeline_schedule,
 )
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.shared.dates import utc_now
 from mage_ai.tests.base_test import DBTestCase
 
 
@@ -204,7 +205,7 @@ class GlobalDataProductTest(DBTestCase):
 
     @freeze_time('2023-10-11 12:13:14')
     def test_get_outdated_at_delta_in_seconds(self):
-        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        now = utc_now().replace(tzinfo=timezone.utc)
         d = relativedelta(
             months=1,
             seconds=2,
