@@ -605,6 +605,7 @@
                       "guides/streaming/destinations/mongodb",
                       "guides/streaming/destinations/mssql",
                       "guides/streaming/destinations/mysql",
+                      "guides/streaming/destinations/nats",
                       "guides/streaming/destinations/opensearch",
                       "guides/streaming/destinations/oracledb",
                       "guides/streaming/destinations/postgres",

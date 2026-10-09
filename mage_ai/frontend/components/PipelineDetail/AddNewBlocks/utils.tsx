@@ -61,6 +61,7 @@ const getDataSourceTypes = (
         DataSourceTypeEnum.MONGODB,
         DataSourceTypeEnum.MSSQL,
         DataSourceTypeEnum.MYSQL,
+        DataSourceTypeEnum.NATS,
         DataSourceTypeEnum.OPENSEARCH,
         DataSourceTypeEnum.ORACLEDB,
         DataSourceTypeEnum.POSTGRES,

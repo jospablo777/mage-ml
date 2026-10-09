@@ -36,26 +36,22 @@ Adjust these values according to your ActiveMQ setup:
 Ensure that the stomp port on ActiveMQ is open, which is 61613 by default.
 </Note>
 
-### Step 4: Additional configuration (optional)
+### Step 4: Batches (optional)
 
-Depending on your specific requirements, you may need to add additional configuration options:
+The transformer gets a list of message bodies, as text. By default each list holds one
+message. To process messages in batches:
 
-1. For SSL/TLS connections:
-```YAML
-use_ssl: true
-ssl_cert_path: '/path/to/cert.pem'
-ssl_key_path: '/path/to/key.pem'
+```yaml
+batch_size: 100
+# Seconds to wait for a batch to fill before handing over what arrived.
+batch_timeout: 1.0
 ```
-2. To set a connection timeout:
-```YAML
-connection_timeout: 30 # in seconds
-```
-3. To control message prefetching:
-```YAML
-prefetch_size: 100
-```
-### Step 5: Test your connection
 
-1. Save your data loader block.
-2. Click the "Test" button to verify your connection to ActiveMQ.
-3. If successful, you should see a sample of messages from your queue.
+Messages are acked after the transformer returns. When the transformer raises, the
+pipeline stops and the messages go back to the queue once the connection closes. When
+the connection to the broker drops, the pipeline stops with an error.
+
+### Step 5: Check your connection
+
+Click the run button of the data loader block, "Check connection". The block connects
+with its config and closes the connection; it reads no message.

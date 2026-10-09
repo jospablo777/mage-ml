@@ -7,5 +7,43 @@ title: "NATS.io - JetStream"
 ```yaml
 connector_type: 'nats'
 server_url: 'nats://localhost:4222'
-subject: 'test_subject'
+stream_name: 'events'
+subject: 'events.created'
+```
+
+The source reads the stream with a durable consumer, named by `consumer_name` or, by
+default, after the stream. The stream is created when it does not exist.
+
+## Consumers
+
+- `PULL` (default): the transformer gets a list of up to `batch_size` messages.
+- `PUSH`: the transformer gets one message at a time. With `use_queue_group`, several
+  executors share the messages.
+
+Each message is its JSON value, or its text when it is not JSON. Messages are acked after
+the transformer returns. When the transformer raises, its messages are nacked and
+JetStream delivers them again.
+
+## All settings
+
+```yaml
+connector_type: 'nats'
+server_url: 'nats://localhost:4222'
+stream_name: 'events'
+subject: 'events.created'
+consumer_name: 'mage'
+consumer_type: PULL
+batch_size: 100
+# Seconds to wait for messages before fetching again.
+timeout: 5
+# Seconds JetStream waits for an ack before it delivers a message again.
+ack_wait: 30
+use_queue_group: true
+use_tls: false
+# ssl_config:
+#   cafile: "path/to/ca.pem"
+#   certfile: "path/to/client-cert.pem"
+#   keyfile: "path/to/client-key.pem"
+# nkeys_seed_str: "SUAPAEYJQOQHJ4"
+# user_credentials: "path/to/credentials.creds"
 ```

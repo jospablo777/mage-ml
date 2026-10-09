@@ -157,6 +157,22 @@ Each item says what changed, which pipelines it affects, and what to do.
   failed to connect, and the source and sink printed the URL with the password.
 - `encode_complex` writes UUIDs, bytes and `datetime.timedelta`, which simplejson
   reported as circular references; this affected the Kafka sink too.
+- **The NATS JetStream source acks after the transformer.** It acked each message before
+  the transformer ran, so a failed transformer lost its batch. A failed transformer's
+  messages are nacked and delivered again. A message that is not JSON reaches the
+  transformer as text; it failed every fetch and came back each time. The push consumer
+  no longer stops the first time no message arrives within the timeout. A failed
+  connection raises; it was printed and the source failed later with an AttributeError.
+  The pull consumer connected twice. New setting: `ack_wait`.
+- **A NATS JetStream sink**, which waits for JetStream to store each message.
+- **The ActiveMQ source acks after the transformer.** The transformer ran on the STOMP
+  receiver thread, which swallowed its errors, and the subscription acked messages on
+  delivery, so a failed transformer lost its messages while the pipeline seemed to run.
+  A failed transformer stops the pipeline and its messages go back to the queue; a lost
+  connection stops the pipeline too. New settings: `batch_size` and `batch_timeout`. The
+  docs listed settings the source does not take.
+- **The ActiveMQ sink sends persistent messages and waits for the broker's receipt.**
+  Messages were not persistent, a rejected message was lost, and dates failed to encode.
 
 #### Trino
 
@@ -304,8 +320,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   storage such as MinIO.
 - Extras: `mlflow` (mlflow-skinny 3.17 and skops), `duckdb` and `trino`.
 - Integration tests against real services, run with `make -C integration_tests ci`:
-  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, RabbitMQ, Trino (memory, Iceberg and
-  Delta Lake), Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), streaming
+  PostgreSQL, MySQL, MongoDB, ClickHouse, Kafka, RabbitMQ, NATS, ActiveMQ, Trino (memory,
+  Iceberg and Delta Lake), Redis, a REST API service, Feast, MLflow, DuckDB, S3 (MinIO), streaming
   pipelines run from triggers and from the notebook, and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.

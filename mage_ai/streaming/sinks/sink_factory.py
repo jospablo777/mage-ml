@@ -56,6 +56,10 @@ class SinkFactory:
             from mage_ai.streaming.sinks.mongodb import MongoDbSink
 
             return MongoDbSink(config, **kwargs)
+        elif connector_type == SinkType.NATS:
+            from mage_ai.streaming.sinks.nats_js import NATSSink
+
+            return NATSSink(config, **kwargs)
         elif connector_type == SinkType.OPENSEARCH:
             from mage_ai.streaming.sinks.opensearch import OpenSearchSink
 

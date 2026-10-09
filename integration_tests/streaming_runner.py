@@ -92,11 +92,14 @@ def streaming_pipeline(pipeline_uuid, mode, **variables):
 
 
 def wait_until(predicate, run, timeout=90, message='condition'):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
         result = predicate()
         if result:
             return result
         run.check_alive()
         time.sleep(0.5)
-    raise AssertionError(f'Timed out waiting for {message}:\n{run.text()[-4000:]}')
+    raise AssertionError(
+        f'Timed out after {time.monotonic() - start:.1f} s waiting for {message}:\n'
+        f'{run.text()[-4000:]}'
+    )

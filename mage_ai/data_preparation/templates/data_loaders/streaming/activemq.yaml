@@ -4,3 +4,7 @@ connection_port: 61613
 queue_name: 'default'
 username: 'admin'
 password: 'admin'
+
+# Optional: hand the transformer lists of up to batch_size messages
+# batch_size: 100
+# batch_timeout: 1.0

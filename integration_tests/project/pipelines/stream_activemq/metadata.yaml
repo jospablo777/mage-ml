@@ -1,0 +1,28 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_activemq_transform]
+  language: yaml
+  name: stream_activemq_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_activemq_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_activemq_to_activemq]
+  language: python
+  name: stream_activemq_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_activemq_source]
+  uuid: stream_activemq_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_activemq_to_activemq
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_activemq_transform]
+  uuid: stream_activemq_to_activemq
+name: stream_activemq
+type: streaming
+uuid: stream_activemq

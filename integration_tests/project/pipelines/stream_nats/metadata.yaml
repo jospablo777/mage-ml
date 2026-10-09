@@ -1,0 +1,28 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_nats_transform]
+  language: yaml
+  name: stream_nats_source
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: stream_nats_source
+- all_upstream_blocks_executed: true
+  downstream_blocks: [stream_nats_to_nats]
+  language: python
+  name: stream_nats_transform
+  status: not_executed
+  type: transformer
+  upstream_blocks: [stream_nats_source]
+  uuid: stream_nats_transform
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  language: yaml
+  name: stream_nats_to_nats
+  status: not_executed
+  type: data_exporter
+  upstream_blocks: [stream_nats_transform]
+  uuid: stream_nats_to_nats
+name: stream_nats
+type: streaming
+uuid: stream_nats

@@ -240,7 +240,9 @@ bootstrap_server: "localhost:9092"
 topic: topic_name
 consumer_group: unique_consumer_group
 include_metadata: false
-api_version: 0.10.2
+# Mage detects the broker's protocol version. Set api_version only for old brokers;
+# 0.10.2, which this template set, fails against Kafka 4.
+# api_version: 2.8.0
 
 # Uncomment the config below to use SSL config
 # security_protocol: "SSL"

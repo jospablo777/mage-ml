@@ -169,3 +169,61 @@ def test_rabbitmq_to_rabbitmq_mysql_and_clickhouse(
     # MySQL stores BOOLEAN as TINYINT.
     assert [tuple(r) for r in mysql] == [r[:4] + (int(r[4]),) + r[5:] for r in rows]
     assert [tuple(r) for r in clickhouse] == rows
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_nats_to_nats(mode, mage_project, nats_url):
+    from integration_tests.nats.test_streaming import jetstream, publish
+
+    names = [f'it_{uuid.uuid4().hex[:12]}' for _ in range(2)]
+    subjects = [f'{n}.events' for n in names]
+    for name, subject in zip(names, subjects):
+        jetstream(nats_url, lambda js, n=name, s=subject: js.add_stream(name=n, subjects=[s]))
+    try:
+        with streaming_pipeline(
+            'stream_nats', mode, in_stream=names[0], in_subject=subjects[0],
+            out_stream=names[1], out_subject=subjects[1],
+        ) as run:
+            publish(nats_url, subjects[0], *[message(i) for i in range(COUNT)])
+
+            def out_count():
+                async def action(js):
+                    return (await js.stream_info(names[1])).state.messages
+
+                return jetstream(nats_url, action) >= COUNT
+
+            wait_until(out_count, run, message='NATS sink')
+
+        async def read(js):
+            subscription = await js.pull_subscribe(subjects[1], durable='reader', stream=names[1])
+            return [json.loads(m.data) for m in await subscription.fetch(COUNT, timeout=5)]
+
+        values = jetstream(nats_url, read)
+    finally:
+        for name in names:
+            jetstream(nats_url, lambda js, n=name: js.delete_stream(n))
+
+    assert sorted(values, key=lambda v: v['n']) == [expected(i) for i in range(COUNT)]
+
+
+@pytest.mark.parametrize('mode', MODES)
+def test_activemq_to_activemq(mode, mage_project, activemq_port):
+    from integration_tests.activemq.test_streaming import drain, publish
+
+    in_queue, out_queue = (f'it_{uuid.uuid4().hex[:12]}' for _ in range(2))
+    with streaming_pipeline(
+        'stream_activemq', mode, in_queue=in_queue, out_queue=out_queue,
+    ) as run:
+        publish(activemq_port, in_queue, *[message(i) for i in range(COUNT)])
+        frames = []
+
+        def out_messages():
+            frames.extend(drain(activemq_port, out_queue, wait=1))
+            return len(frames) >= COUNT
+
+        wait_until(out_messages, run, message='ActiveMQ sink')
+
+    values = [json.loads(f.body) for f in frames]
+    assert sorted(values, key=lambda v: v['n']) == [expected(i) for i in range(COUNT)]
+    # Every input message was acked.
+    assert drain(activemq_port, in_queue, wait=1) == []

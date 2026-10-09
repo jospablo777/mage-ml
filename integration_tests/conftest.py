@@ -530,3 +530,19 @@ def rabbitmq_queue(rabbitmq_channel):
     yield name
     if rabbitmq_channel.is_open:
         rabbitmq_channel.queue_delete(name)
+
+
+@pytest.fixture(scope='session')
+def nats_url():
+    url = os.getenv('MAGE_TEST_NATS_URL')
+    if not url:
+        pytest.skip('NATS is not configured: MAGE_TEST_NATS_URL unset')
+    return url
+
+
+@pytest.fixture(scope='session')
+def activemq_port():
+    port = os.getenv('MAGE_TEST_ACTIVEMQ_PORT')
+    if not port:
+        pytest.skip('ActiveMQ is not configured: MAGE_TEST_ACTIVEMQ_PORT unset')
+    return int(port)

@@ -73,7 +73,9 @@ def test_records_reach_the_table(clickhouse_settings, clickhouse_database, ch, t
 
     run_destination(clickhouse_settings, clickhouse_database, tmp_path, messages)
 
-    rows = ch.query('SELECT id, big, price, text, flag, at, day FROM orders ORDER BY id').result_rows
+    rows = ch.query(
+        'SELECT id, big, price, text, flag, at, day FROM orders ORDER BY id',
+    ).result_rows
     assert rows == [
         (1, 2**53 + 1, 1.5, 'ñ "q"', True, dt.datetime(2024, 1, 1, 12, 0, 0, 123456),
          dt.date(2024, 2, 29)),

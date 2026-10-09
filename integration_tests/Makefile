@@ -47,6 +47,9 @@ export MAGE_TEST_TRINO_PORT ?= 18080
 export MAGE_TEST_RABBITMQ_PORT ?= 15673
 export MAGE_TEST_RABBITMQ_USER ?= mage
 export MAGE_TEST_RABBITMQ_PASSWORD ?= p@ss/w:rd%
+export MAGE_TEST_NATS_PORT ?= 14222
+export MAGE_TEST_NATS_URL ?= nats://127.0.0.1:$(MAGE_TEST_NATS_PORT)
+export MAGE_TEST_ACTIVEMQ_PORT ?= 16613
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 # The rv environment of the R tests: R 4.6 with the tidyverse, mageml's
@@ -54,7 +57,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-streaming test-r test-soak ci r-env
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak ci r-env
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -104,6 +107,12 @@ test-trino: up
 
 test-rabbitmq: up
 	cd .. && $(PYTHON) -m pytest integration_tests/rabbitmq $(PYTEST_ARGS)
+
+test-nats: up
+	cd .. && $(PYTHON) -m pytest integration_tests/nats $(PYTEST_ARGS)
+
+test-activemq: up
+	cd .. && $(PYTHON) -m pytest integration_tests/activemq $(PYTEST_ARGS)
 
 test-streaming: up
 	cd .. && $(PYTHON) -m pytest integration_tests/streaming $(PYTEST_ARGS)

@@ -12,3 +12,9 @@ queue_name: 'queue_name'
 username: 'admin'
 password: 'admin'
 ```
+
+Messages are sent as persistent JSON, so the broker keeps them across a restart. Dates,
+decimals and UUIDs are written as text. The sink waits for the broker to confirm each
+batch (`receipt_timeout`, 30 seconds by default) and raises when the broker rejects a
+message. A message with the format `{"data": {...}, "metadata": {...}}` sends its data,
+with the metadata as message headers.

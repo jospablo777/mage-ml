@@ -1,0 +1,31 @@
+---
+title: "NATS.io - JetStream"
+---
+
+## Basic config
+
+```yaml
+connector_type: 'nats'
+server_url: 'nats://localhost:4222'
+subject: 'events.processed'
+# Optional: the stream that takes the subject, created when it does not exist.
+stream_name: 'processed'
+```
+
+Each message is published as JSON, and the sink waits for JetStream to store it, so a
+message that no stream takes raises. Dates, decimals and UUIDs are written as text.
+A message with the format `{"data": {...}, "metadata": {...}}` publishes its data, with
+the metadata as message headers.
+
+## All settings
+
+```yaml
+connector_type: 'nats'
+server_url: 'nats://localhost:4222'
+subject: 'events.processed'
+stream_name: 'processed'
+# Seconds to wait for JetStream to store each message.
+timeout: 5
+# nkeys_seed_str: "SUAPAEYJQOQHJ4"
+# user_credentials: "path/to/credentials.creds"
+```

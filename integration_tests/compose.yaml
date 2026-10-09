@@ -170,6 +170,35 @@ services:
       timeout: 10s
       retries: 60
 
+  # NATS 2.15 with JetStream, data in memory.
+  nats:
+    image: nats:2.15-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    mem_limit: 256m
+    tmpfs:
+      - /data
+    ports:
+      - "${MAGE_TEST_NATS_PORT:-14222}:4222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # ActiveMQ Classic 6.2 with a heap of 256 MB. Mage's ActiveMQ source and sink use STOMP.
+  activemq:
+    image: apache/activemq-classic:6.2.0
+    mem_limit: 640m
+    environment:
+      ACTIVEMQ_OPTS: "-Xms64M -Xmx256M -Djava.util.logging.config.file=logging.properties -Djava.security.auth.login.config=/opt/apache-activemq/conf/login.config -Djetty.host=0.0.0.0"
+    ports:
+      - "${MAGE_TEST_ACTIVEMQ_PORT:-16613}:61613"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/61613'"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
   # Trino 483, one node with a heap of 768 MB. Catalogs: memory; iceberg, with tables in
   # MinIO and the catalog in PostgreSQL; delta, with tables and a file metastore in MinIO.
   # The memory limit keeps the JVM from taking memory from the other services. glibc

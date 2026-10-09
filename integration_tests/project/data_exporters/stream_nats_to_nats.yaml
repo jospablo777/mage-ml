@@ -1,0 +1,4 @@
+connector_type: nats
+server_url: "{{ env_var('MAGE_TEST_NATS_URL') }}"
+stream_name: "{{ variables('out_stream') }}"
+subject: "{{ variables('out_subject') }}"

@@ -1,0 +1,4 @@
+connector_type: activemq
+connection_host: 127.0.0.1
+connection_port: "{{ env_var('MAGE_TEST_ACTIVEMQ_PORT') }}"
+queue_name: "{{ variables('out_queue') }}"

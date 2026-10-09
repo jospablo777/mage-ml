@@ -1,0 +1,7 @@
+connector_type: nats
+server_url: "{{ env_var('MAGE_TEST_NATS_URL') }}"
+stream_name: "{{ variables('in_stream') }}"
+subject: "{{ variables('in_subject') }}"
+consumer_name: mage
+batch_size: 100
+timeout: 0.5

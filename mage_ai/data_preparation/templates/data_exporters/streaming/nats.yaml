@@ -1,0 +1,15 @@
+connector_type: nats
+server_url: "nats://localhost:4222"
+subject: subject_name
+
+# Optional: the JetStream stream that takes the subject, created when it does not exist
+# stream_name: stream_name
+
+# Optional: seconds to wait for JetStream to store each message
+# timeout: 5
+
+# Optional: NKEY seed string
+# nkeys_seed_str: "SUAPAEYJQOQHJ4"
+
+# Optional: user credentials
+# user_credentials: "path/to/credentials.creds"
