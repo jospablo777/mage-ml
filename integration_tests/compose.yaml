@@ -11,8 +11,8 @@ services:
       POSTGRES_USER: postgres
     # Test data does not need to survive a crash, so the server skips fsync and keeps
     # its data in memory. A smaller WAL keeps that memory down: the default let it grow
-    # to 1 GB.
-    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_wal_size=128MB", "-c", "min_wal_size=32MB"]
+    # to 1 GB. Logical WAL is for the change data capture tests.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_wal_size=128MB", "-c", "min_wal_size=32MB", "-c", "wal_level=logical", "-c", "max_replication_slots=20"]
     tmpfs:
       - /var/lib/postgresql/data
     ports:

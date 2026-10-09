@@ -213,6 +213,28 @@ Each item says what changed, which pipelines it affects, and what to do.
   stored as JSON strings, arrays failed, and an apostrophe in an array failed the sync.
   Date-times stay text. Tables created before keep their column types.
 
+#### PostgreSQL change data capture (LOG_BASED replication)
+
+- **Changes reach the destination with their types.** Log values were text, so ids
+  became strings and arrays failed the destination; they were matched to the columns of
+  information_schema, in no set order. Values are matched by the names in the log and
+  converted with PostgreSQL's type casters.
+- **No change is lost or read twice.** The first sync bookmarked the server's position at
+  its end, so changes made while the table was read were never read. Each change was
+  confirmed to the server when read, so a failed destination lost it. The change at the
+  bookmark was read again. A sync took its end at the WAL write position, before
+  transactions committed with synchronous_commit off, and stopped before them.
+- Only the table of the configured schema is read; a table of the same name in another
+  schema leaked in.
+- Unchanged large (TOASTed) values are read from the table; NULL was written over them.
+- An update of the primary key marks the old key's row as deleted.
+- From PostgreSQL 14, a sync stops once it has read the log; it waited
+  `logical_poll_total_seconds`, 60 by default, after the last change.
+- **The PostgreSQL destination keeps the last record of each key in a batch**, which
+  failed with "ON CONFLICT DO UPDATE command cannot affect row a second time", and a
+  delete only marks the row as deleted; its NULLs were written over the row's values.
+  The Trino destination's MERGE keeps the last record of each key too.
+
 #### PostgreSQL and MySQL sources and destinations of mage_integrations
 
 - **The PostgreSQL source syncs bytea, timetz, interval and array columns.** It failed on

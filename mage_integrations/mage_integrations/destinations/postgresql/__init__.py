@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple
 from mage_integrations.connections.postgresql import PostgreSQL as PostgreSQLConnection
 from mage_integrations.destinations.constants import (
     INTERNAL_COLUMN_CREATED_AT,
+    INTERNAL_COLUMN_DELETED_AT,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
 from mage_integrations.destinations.postgresql.utils import (
@@ -14,6 +15,7 @@ from mage_integrations.destinations.sql.utils import (
     build_alter_table_command,
     build_create_table_command,
     build_insert_command,
+    latest_by_key,
 )
 from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
@@ -108,7 +110,49 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
         unique_conflict_method: str = None,
         unique_constraints: List[str] = None,
     ) -> List[str]:
+        """
+        With unique constraints and the UPDATE conflict method, a batch keeps the last
+        record of each key. A record with _mage_deleted_at, a delete of change data
+        capture, only marks an existing row as deleted: such records carry the key
+        alone, and their NULLs were written over the row's values.
+        """
         columns = list(schema['properties'].keys())
+        update_columns = [c for c in columns if c != INTERNAL_COLUMN_CREATED_AT]
+        if not (unique_constraints and UNIQUE_CONFLICT_METHOD_UPDATE == unique_conflict_method):
+            return self.__insert_commands(
+                records, schema, schema_name, table_name, columns, update_columns,
+                unique_constraints, unique_conflict_method,
+            )
+
+        deleted_column = INTERNAL_COLUMN_DELETED_AT if INTERNAL_COLUMN_DELETED_AT in columns \
+            else None
+        records = latest_by_key(records, unique_constraints, deleted_column=deleted_column)
+        deletes = [r for r in records if deleted_column and r.get(deleted_column)]
+        upserts = [r for r in records if not (deleted_column and r.get(deleted_column))]
+        commands = []
+        if upserts:
+            commands += self.__insert_commands(
+                upserts, schema, schema_name, table_name, columns, update_columns,
+                unique_constraints, unique_conflict_method,
+            )
+        if deletes:
+            commands += self.__insert_commands(
+                deletes, schema, schema_name, table_name, columns, [deleted_column],
+                unique_constraints, unique_conflict_method,
+            )
+        return commands
+
+    def __insert_commands(
+        self,
+        records: List[Dict],
+        schema: Dict,
+        schema_name: str,
+        table_name: str,
+        columns: List[str],
+        update_columns: List[str],
+        unique_constraints: List[str],
+        unique_conflict_method: str,
+    ) -> List[str]:
         insert_columns, insert_values = build_insert_command(
             column_type_mapping=self.column_type_mapping(schema),
             columns=columns,
@@ -136,7 +180,7 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
             ]
             columns_cleaned = [
                 self._wrap_with_quotes(self.clean_column_name(col))
-                for col in columns if col != INTERNAL_COLUMN_CREATED_AT
+                for col in update_columns
             ]
 
             commands.append(f"ON CONFLICT ({', '.join(unique_constraints)})")

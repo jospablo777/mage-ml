@@ -333,3 +333,31 @@ def build_insert_command(
                              allow_reserved_words=allow_reserved_words),
         values,
     ]
+
+
+def latest_by_key(
+    records: List[Dict],
+    unique_constraints: List[str],
+    deleted_column: str = None,
+) -> List[Dict]:
+    """
+    The last record of each key, in the order of the records. An upsert of a batch with
+    two records of one key failed: INSERT ON CONFLICT DO UPDATE cannot change a row
+    twice, and a MERGE target row cannot match two source rows. Change data capture
+    gives a key several records, such as an insert and a later delete.
+
+    A record with a value in deleted_column marks a delete, which change data capture
+    often sends with the key alone; it takes the other values from an earlier record of
+    its key.
+    """
+    if not unique_constraints:
+        return records
+    latest = {}
+    for record in records:
+        key = tuple(json.dumps(record.get(c), sort_keys=True, default=str)
+                    for c in unique_constraints)
+        previous = latest.pop(key, None)
+        if previous is not None and deleted_column and record.get(deleted_column):
+            record = dict(previous, **{k: v for k, v in record.items() if v is not None})
+        latest[key] = record
+    return list(latest.values())

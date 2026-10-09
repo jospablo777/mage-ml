@@ -9,6 +9,7 @@ from mage_integrations.destinations.sql.utils import (
     build_create_table_command,
     build_insert_command,
     clean_column_name,
+    latest_by_key,
 )
 from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
@@ -128,6 +129,8 @@ DESCRIBE {schema_name}.{table_name}
         full_table_name_temp = f'{schema_name}.temp_{table_name}'
 
         columns = list(schema['properties'].keys())
+        if self._support_merge_rows() and unique_constraints and unique_conflict_method:
+            records = latest_by_key(records, unique_constraints)
         insert_columns, insert_values = build_insert_command(
             column_type_mapping=self.column_type_mapping(schema),
             columns=columns,

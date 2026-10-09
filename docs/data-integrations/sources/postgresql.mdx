@@ -165,6 +165,25 @@ in Mage.
 However, choose <b>PostgreSQL</b> as the source and choose <b>`LOG_BASED`</b> as the
 replication method.
 
+#### How log-based replication works
+
+- The first sync reads the whole table and bookmarks the slot's confirmed position. Each
+  later sync reads the changes after the bookmark: inserts and updates, and deletes,
+  which have `_mage_deleted_at` set. Records have the types of the columns.
+- A sync confirms to PostgreSQL only the bookmark it starts from, which the previous sync
+  completed. If a destination fails, the next sync reads the same changes again.
+- From PostgreSQL 14, a sync stops as soon as it has read the changes committed before it
+  started. Older versions stop after `logical_poll_total_seconds` (default 60) without a
+  change.
+- With unique constraints and the `UPDATE` conflict method, the destination keeps the
+  last change of each key in a batch. A delete marks the row as deleted and keeps its
+  values. When an update changes the primary key, the row of the old key is marked as
+  deleted.
+- Values an update leaves unchanged and PostgreSQL stores out of line (TOAST), such as
+  long text, are not in the log; the source reads them from the table by primary key.
+  For tables without a primary key, run `ALTER TABLE ... REPLICA IDENTITY FULL`.
+- `TRUNCATE` is not replicated.
+
 <br />
 
 #### Testing pipeline end-to-end
