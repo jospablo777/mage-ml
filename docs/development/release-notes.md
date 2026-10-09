@@ -108,6 +108,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   worker pool failed to start on macOS and Windows, and would on Linux from Python 3.14,
   so block runs stayed queued. Races in the queue that dropped new jobs, or left them
   waiting with no worker pool, are fixed. See `scheduler-soak.md`.
+- **A crashed scheduler's block runs run again within 30 seconds.** Another scheduler
+  process treated them as running while the crashed one's liveness key lived, 300
+  seconds. The key lives 30 seconds, set with `MAGE_QUEUE_LIVENESS_SECONDS`, and the
+  worker pool renews it every second; a stopped scheduler deletes it.
 - **Redis keys carry a namespace** from the metadata database URL, so deployments that
   share a Redis server keep their jobs and locks apart. Stop the old scheduler before the
   new one starts: during an upgrade the two versions do not see each other's locks.

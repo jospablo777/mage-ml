@@ -28,7 +28,14 @@ from mage_ai.settings import (
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
 
-LIVENESS_TIMEOUT_SECONDS = 300
+# Seconds a scheduler process's liveness key lives; its worker pool renews it every
+# second. Another process treats this one's jobs as running while the key exists, so a
+# crashed scheduler's block runs are found and run again this long after it died. It was
+# 300 seconds.
+LIVENESS_TIMEOUT_SECONDS = int(os.getenv('MAGE_QUEUE_LIVENESS_SECONDS') or 30)
+# Seconds a request to kill a job waits for the process that runs it, which checks on
+# every scheduler tick.
+KILL_REQUEST_SECONDS = 300
 # Seconds the worker pool waits with no workers and an empty queue before it exits.
 POOL_IDLE_CHECKS = 5
 # Seconds a queued job counts as present while the queue looks empty.
@@ -239,6 +246,9 @@ class ProcessQueue(Queue):
         3. Kill all the running jobs
         """
         self.status = QueueStatus.INACTIVE
+        if self.redis_client:
+            # Other processes see at once that this one's jobs stopped.
+            self.redis_client.delete(self.client_id)
         while not self.queue.empty():
             try:
                 self.queue.get_nowait()
@@ -278,7 +288,7 @@ class ProcessQueue(Queue):
         return self.redis_client.set(
             self.__redis_key_kill_job(job_id),
             '1',
-            ex=LIVENESS_TIMEOUT_SECONDS,
+            ex=KILL_REQUEST_SECONDS,
         )
 
     def __unset_kill_job(self, job_id):

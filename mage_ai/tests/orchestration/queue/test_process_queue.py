@@ -124,3 +124,67 @@ class ProcessQueueRaceTests(TestCase):
             self.queue.clean_up_jobs()
 
         start.assert_called_once()
+
+
+class FakeRedis:
+    def __init__(self):
+        self.values = {}
+        self.expiries = {}
+
+    def set(self, key, value, ex=None):
+        self.values[key] = value
+        self.expiries[key] = ex
+        return True
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def delete(self, key):
+        self.values.pop(key, None)
+        self.expiries.pop(key, None)
+
+
+class ProcessQueueLivenessTests(TestCase):
+    """How scheduler processes that share Redis see each other's jobs."""
+
+    def setUp(self):
+        self.queue = ProcessQueue(queue_config=QueueConfig.load(config=dict(concurrency=2)))
+        self.queue.redis_client = FakeRedis()
+        self.queue.start()
+
+    @patch.object(ProcessQueue, 'start_worker_pool')
+    def test_liveness_expires_in_30_seconds(self, _):
+        """It expired in 300, so a crashed scheduler's runs waited 5 minutes to run again."""
+        from mage_ai.orchestration.queue import process_queue
+
+        self.queue.enqueue('block_run_1', run_block)
+
+        self.assertEqual(process_queue.LIVENESS_TIMEOUT_SECONDS, 30)
+        self.assertEqual(self.queue.redis_client.expiries[self.queue.client_id], 30)
+
+    def test_jobs_of_a_scheduler_that_died_are_not_running(self):
+        redis = self.queue.redis_client
+        job_key = f'{self.queue.redis_namespace}:block_run_1'
+        redis.set(job_key, 'other_client')
+        redis.set('other_client', '1', ex=30)
+        self.assertTrue(self.queue.has_job('block_run_1'))
+
+        # The other process died; its liveness key expired.
+        redis.delete('other_client')
+
+        self.assertFalse(self.queue.has_job('block_run_1'))
+
+    def test_kill_requests_outlive_the_liveness_key(self):
+        """The process that runs the job checks for a kill request on its next tick."""
+        self.queue.kill_job('block_run_1')
+
+        kill_key = f'{self.queue.redis_namespace}:kill_job_block_run_1'
+        self.assertEqual(self.queue.redis_client.expiries[kill_key], 300)
+
+    @patch.object(ProcessQueue, 'start_worker_pool')
+    def test_stop_releases_the_liveness_key(self, _):
+        self.queue.enqueue('block_run_1', run_block)
+
+        self.queue.stop()
+
+        self.assertIsNone(self.queue.redis_client.get(self.queue.client_id))
