@@ -86,6 +86,19 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Polars frames keep integers with nulls, dates and 128-bit integers** when exported
   through the pandas-based SQL clients (MSSQL, Trino, Redshift, BigQuery and others).
 
+#### MongoDB
+
+- **Exports store Decimal, date, timedelta, NumPy arrays, sets and UUIDs**, which raised.
+  `unique_constraints` with `unique_conflict_method` upserts, and `if_exists='replace'`
+  swaps the collection in one rename. `load(exact_types=True)` and `load(polars=True)`
+  keep integers and decimals. Install the driver with `mage-ml[mongodb]`.
+- **The MongoDB source emits dates in UTC.** It read BSON dates as local time, shifting
+  them and datetime bookmarks by the host's offset. Discovered types change for embedded
+  documents (`object`), arrays (`array`), Decimal128 (`number`) and mixed fields (a union);
+  re-run discovery.
+- **The MongoDB destination works again** and upserts on every key property; records
+  whose `_id` is not an ObjectId are kept.
+
 #### Runtime
 
 - **Block runs execute with spawn and forkserver.** With Redis configured, the job queue's

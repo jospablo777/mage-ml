@@ -313,3 +313,33 @@ def mysql_source(my):
         mysql_dataset.create_source_table(cursor)
     my.commit()
     return 'src'
+
+
+@pytest.fixture(scope='session')
+def mongodb_url():
+    url = os.getenv('MAGE_TEST_MONGODB_URL')
+    if not url:
+        pytest.skip('MongoDB is not configured: MAGE_TEST_MONGODB_URL unset')
+    return url
+
+
+@pytest.fixture
+def mongo(mongodb_url):
+    """A pymongo database used by one test and dropped after it."""
+    from pymongo import MongoClient
+
+    client = MongoClient(mongodb_url, uuidRepresentation='standard')
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    yield client[name]
+    client.drop_database(name)
+    client.close()
+
+
+@pytest.fixture
+def mage_mongodb(mongodb_url, mongo):
+    """Mage's MongoDB client on the test's database."""
+    from mage_ai.io.mongodb import MongoDB
+
+    client = MongoDB(connection_string=mongodb_url, database=mongo.name, verbose=False)
+    yield client
+    client.client.close()

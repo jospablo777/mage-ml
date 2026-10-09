@@ -34,10 +34,12 @@ export MAGE_TEST_MYSQL_PORT ?= 13306
 export MAGE_TEST_MYSQL_DATABASE ?= test
 export MAGE_TEST_MYSQL_USER ?= root
 export MAGE_TEST_MYSQL_PASSWORD ?= test
+export MAGE_TEST_MONGODB_PORT ?= 17017
+export MAGE_TEST_MONGODB_URL ?= mongodb://127.0.0.1:$(MAGE_TEST_MONGODB_PORT)/?directConnection=true
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-soak ci
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-soak ci
 
 up:
 	$(COMPOSE) up -d --build --wait
@@ -68,6 +70,9 @@ test-s3: up
 
 test-mysql: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mysql $(PYTEST_ARGS)
+
+test-mongodb: up
+	cd .. && $(PYTHON) -m pytest integration_tests/mongodb $(PYTEST_ARGS)
 
 # The scheduler with many concurrent pipelines, for MAGE_TEST_SOAK_SECONDS (default 150).
 # It runs on its own: make test-soak MAGE_TEST_SOAK_SECONDS=1800

@@ -6,8 +6,9 @@ drivers; these tests check what reaches the database and what comes back.
 ## Running
 
 Requirements: Docker with Compose v2, and the project environment with the `postgres`,
-`mlflow`, `duckdb`, `s3` and `mysql` extras (`uv sync --group dev --extra postgres
---extra mlflow --extra duckdb --extra s3 --extra mysql`).
+`mlflow`, `duckdb`, `s3`, `mysql`, `mongodb` and `integrations` extras (`uv sync --group dev
+--extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb
+--extra integrations`).
 
 ```bash
 make -C integration_tests test             # start the services, run every test
@@ -19,17 +20,18 @@ make -C integration_tests test-mlflow      # MLflow only
 make -C integration_tests test-duckdb      # DuckDB only, no service needed
 make -C integration_tests test-s3          # S3 (MinIO) only
 make -C integration_tests test-mysql       # MySQL only
+make -C integration_tests test-mongodb     # MongoDB only
 make -C integration_tests test-soak        # the scheduler with many pipelines, 150 s
 make -C integration_tests test-soak MAGE_TEST_SOAK_SECONDS=1800  # a longer soak
 make -C integration_tests test PYTEST_ARGS='-n 4 -k conflicts'
 make -C integration_tests down             # stop the services and drop their data
 ```
 
-The services stay up between runs. PostgreSQL, MySQL and MinIO keep their data in memory, so `down`
-leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000 and 13306; set
+The services stay up between runs. PostgreSQL, MySQL, MongoDB and MinIO keep their data in memory, so `down`
+leaves nothing behind. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306 and 17017; set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
-`MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT` or
-`MAGE_TEST_MYSQL_PORT` to change them. `make up` rebuilds the
+`MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
+`MAGE_TEST_MYSQL_PORT` or `MAGE_TEST_MONGODB_PORT` to change them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -41,7 +43,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines |
@@ -59,6 +61,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `s3/` | Mage's S3 client in each format with pandas, pyarrow-backed pandas and Polars, block output storage on S3, a pipeline whose block outputs live in S3, the S3 source and destination of `mage_integrations`, and its Delta Lake S3 destination |
 | `data/mysql_dataset.py` | MySQL source table with one column per MySQL type, limits and special values, and a row comparison |
 | `mysql/` | Loads in each mode, exports to new and existing tables, names, upserts, transactions, and a Mage pipeline with Polars |
+| `mongodb/` | Mage's MongoDB client: every value type, upserts, replace, exact loads, credentials; and the MongoDB source and destination run as programs, from discovery to an incremental sync and a copy between databases |
 | `soak/` | Mage's scheduler in its own process, with a PostgreSQL metadata database and Redis locks, running chain, retry, failing and fan-out pipelines from once and every-minute triggers; every run must finish once with its result. It runs only through `make test-soak` |
 | `mage_runner.py` | Runs the pipelines in `project/` through Mage's trigger, scheduler and executor |
 | `project/` | Mage project with the pipelines the `postgres/`, `api/`, `feast/`, `mlflow/`, `duckdb/`, `s3/` and `mysql/` tests run |

@@ -96,3 +96,24 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+
+  # MongoDB 8 as a single-node replica set, which transactions require. Data lives in
+  # memory. Clients connect with directConnection=true, since the member's address is
+  # the container's.
+  mongodb:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    tmpfs:
+      - /data/db
+    ports:
+      - "${MAGE_TEST_MONGODB_PORT:-17017}:27017"
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]}).ok }"
+      interval: 2s
+      timeout: 10s
+      retries: 60
