@@ -619,31 +619,46 @@ class BlockExecutor:
                         # can be shared across blocks
                         global_vars.update(dict(retry=self.retry_metadata))
 
-                        return self._execute(
-                            analyze_outputs=analyze_outputs,
-                            block_run_id=block_run_id,
-                            block_run_outputs_cache=block_run_outputs_cache,
-                            cache_block_output_in_memory=cache_block_output_in_memory,
-                            callback_url=callback_url,
-                            global_vars=global_vars,
-                            update_status=update_status,
-                            input_from_output=input_from_output,
-                            logging_tags=tags,
-                            pipeline_run_id=pipeline_run_id,
-                            verify_output=verify_output,
-                            runtime_arguments=runtime_arguments,
-                            template_runtime_configuration=template_runtime_configuration,
-                            dynamic_block_index=dynamic_block_index,
-                            dynamic_block_indexes=dynamic_block_indexes,
-                            dynamic_block_uuid=None
-                            if dynamic_block_index is None
-                            else block_run.block_uuid,
-                            dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
-                            data_integration_metadata=data_integration_metadata,
-                            pipeline_run=pipeline_run,
-                            block_run_dicts=block_run_dicts,
-                            **kwargs,
-                        )
+                        try:
+                            return self._execute(
+                                analyze_outputs=analyze_outputs,
+                                block_run_id=block_run_id,
+                                block_run_outputs_cache=block_run_outputs_cache,
+                                cache_block_output_in_memory=cache_block_output_in_memory,
+                                callback_url=callback_url,
+                                global_vars=global_vars,
+                                update_status=update_status,
+                                input_from_output=input_from_output,
+                                logging_tags=tags,
+                                pipeline_run_id=pipeline_run_id,
+                                verify_output=verify_output,
+                                runtime_arguments=runtime_arguments,
+                                template_runtime_configuration=template_runtime_configuration,
+                                dynamic_block_index=dynamic_block_index,
+                                dynamic_block_indexes=dynamic_block_indexes,
+                                dynamic_block_uuid=None
+                                if dynamic_block_index is None
+                                else block_run.block_uuid,
+                                dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                                data_integration_metadata=data_integration_metadata,
+                                pipeline_run=pipeline_run,
+                                block_run_dicts=block_run_dicts,
+                                **kwargs,
+                            )
+                        except Exception:
+                            raise
+                        except BaseException as err:
+                            if isinstance(err, (
+                                KeyboardInterrupt,
+                                SystemExit,
+                                GeneratorExit,
+                                asyncio.CancelledError,
+                            )):
+                                raise
+                            # Rust extensions such as Polars and pyarrow raise
+                            # PanicException, which derives from BaseException. Uncaught,
+                            # it left the block run and the pipeline run running.
+                            raise RuntimeError(f'{type(err).__name__}: {err}') from err
 
                     result = __execute_with_retry()
                 except Exception as error:
