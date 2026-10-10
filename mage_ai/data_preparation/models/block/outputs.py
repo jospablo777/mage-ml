@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import pandas as pd
 import polars as pl
 import simplejson
-from sklearn.utils import estimator_html_repr
 
 from mage_ai.ai.utils.xgboost import render_tree_visualization
 from mage_ai.data.constants import InputDataType
@@ -45,6 +44,12 @@ from mage_ai.shared.parsers import (
 )
 from mage_ai.shared.strings import is_json
 
+
+def estimator_html_repr(estimator) -> str:
+    # scikit-learn takes half a second to import; only model outputs need it.
+    from sklearn.utils import estimator_html_repr as html_repr
+
+    return html_repr(estimator)
 
 def _preview_value(value: Any) -> Any:
     encoded = encode_complex(value)

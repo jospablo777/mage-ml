@@ -5,7 +5,6 @@ import socket
 from datetime import datetime
 from typing import Callable, Dict, List, Union
 
-import aiohttp
 import pytz
 import requests
 
@@ -487,6 +486,8 @@ class UsageStatisticLogger():
             data_to_send['project_uuid'] = project_uuid
 
         try:
+            import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     API_ENDPOINT,

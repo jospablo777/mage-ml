@@ -16,12 +16,6 @@ from mage_ai.data_preparation.models.constants import (
 )
 from mage_ai.data_preparation.models.widget import Widget
 
-try:
-    from mage_ai.data_preparation.models.block.dbt.block_sql import DBTBlockSQL
-    from mage_ai.data_preparation.models.block.dbt.block_yaml import DBTBlockYAML
-except Exception:
-    print('DBT library not installed.')
-
 
 class BlockFactory:
     @classmethod
@@ -29,8 +23,16 @@ class BlockFactory:
         if BlockType.CHART == block_type:
             return Widget
         elif BlockType.DBT == block_type:
+            # Imported here: dbt and its dependencies take about 3 s to import, which
+            # every process that runs a block paid, with or without dbt blocks.
             if language == BlockLanguage.YAML:
+                from mage_ai.data_preparation.models.block.dbt.block_yaml import (
+                    DBTBlockYAML,
+                )
+
                 return DBTBlockYAML
+            from mage_ai.data_preparation.models.block.dbt.block_sql import DBTBlockSQL
+
             return DBTBlockSQL
         elif BlockType.GROUP == block_type:  # These need to be handled
             return Block

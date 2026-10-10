@@ -16,13 +16,18 @@ import joblib
 import pandas as pd
 import psutil
 import pyarrow.parquet as pq
-from memory_profiler import memory_usage
 
 from mage_ai.data_preparation.logging.logger import DictLogger
 from mage_ai.settings.repo import get_variables_dir
 from mage_ai.system.constants import METRICS_DIRECTORY, SYSTEM_DIRECTORY, LogType
 from mage_ai.system.models import MemoryUsage, ResourceUsage
 
+
+def memory_usage(*args, **kwargs):
+    # memory_profiler imports IPython, about 0.2 s; most processes never measure.
+    from memory_profiler import memory_usage as measure
+
+    return measure(*args, **kwargs)
 
 def get_log_directory(
     scope_uuid: str,

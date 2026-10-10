@@ -15,7 +15,6 @@ import pandas as pd
 import polars as pl
 import yaml
 from pandas import DataFrame
-from sklearn.utils import estimator_html_repr
 
 from mage_ai.data_cleaner.shared.utils import is_geo_dataframe, is_spark_dataframe
 from mage_ai.data_preparation.models.project import Project
@@ -78,6 +77,13 @@ POLARS_CAST_TYPE_COLUMN_TYPES = {
 # the tags existed read the same as before.
 TYPE_TAG = '__mage_type__'
 
+
+
+def estimator_html_repr(estimator) -> str:
+    # scikit-learn takes half a second to import; only model outputs need it.
+    from sklearn.utils import estimator_html_repr as html_repr
+
+    return html_repr(estimator)
 
 def _tag(name: str, value: Any) -> Dict:
     return {TYPE_TAG: name, 'value': value}
