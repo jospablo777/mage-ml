@@ -56,6 +56,8 @@ MAGE_EXCLUDED_PATHS = (
     Path('pipeline_services/service'),
     Path('data_preparation/models/block/rust/sdk'),
 )
+# Mage's R runner and its mageml R package: every file, whatever its suffix.
+R_RUNNER = Path('data_preparation/models/block/r')
 MAGE_DATA_SUFFIXES = ('.py', '.yaml', '.yml', '.json', '.jinja', '.sql', '.txt')
 SKIPPED_PROJECT_DIRS = {
     '.variables', '.logs', '.file_versions', '__pycache__', '.mage_temp_profiles', 'pipelines',
@@ -83,11 +85,21 @@ class Capture:
     models: List[Tuple[str, str]] = field(default_factory=list)
     # Whether the copied Cargo.lock matches the exported crates, so the image builds --locked.
     rust_locked: bool = False
+    # The rv environment R blocks run with (rproject.toml and rv.lock).
+    r_project: Optional[Path] = None
+
+    @property
+    def needs_r(self) -> bool:
+        return any(
+            b['language'] == 'r' for p in self.manifest['pipelines'] for b in p['blocks']
+        )
 
     @property
     def needs_python(self) -> bool:
+        # The Python worker runs R blocks too, with Mage's R runner, and SQL blocks.
         return any(
-            b['language'] == 'python' for p in self.manifest['pipelines'] for b in p['blocks']
+            b['language'] in ('python', 'r', 'sql')
+            for p in self.manifest['pipelines'] for b in p['blocks']
         )
 
 
@@ -168,10 +180,85 @@ def capture(
         pipelines=pipelines,
     )
     capture_.manifest['environment'] = _environment(capture_)
+    if capture_.needs_r:
+        capture_.r_project = _r_project(project_path)
     capture_.models = _models(capture_, models or [])
     if capture_.needs_python:
         capture_.requirements = _requirements(capture_)
     return capture_
+
+
+SQL_PROVIDERS = ('postgres',)
+
+
+def _sql_unsupported(block) -> Optional[str]:
+    configuration = block.configuration or {}
+    provider = configuration.get('data_provider')
+    if provider not in SQL_PROVIDERS:
+        return (
+            f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
+            'PostgreSQL.'
+        )
+    if not configuration.get('data_provider_profile'):
+        return 'a SQL block without a data provider profile (io_config.yaml).'
+    if 'block_output' in (block.content or ''):
+        return 'a SQL block that uses block_output(), which services do not support yet.'
+    return None
+
+
+def _sql_table_name(pipeline, block) -> str:
+    """The table of a block's output in SQL, as Block.table_name in a pipeline run."""
+    from mage_ai.shared.utils import clean_name
+
+    configured = (block.configuration or {}).get('data_provider_table')
+    if configured:
+        return configured
+    return f'{pipeline.uuid}_{clean_name(block.uuid)}_{pipeline.version_name}'
+
+
+def _sql_details(pipeline, block) -> Dict:
+    """What the service's SQL runner needs from the block and its upstream blocks."""
+    upstream = []
+    for parent in block.upstream_blocks:
+        language = str(getattr(parent.language, 'value', parent.language))
+        configuration = _json_safe(parent.configuration or {})
+        entry = dict(
+            uuid=parent.uuid,
+            type=str(getattr(parent.type, 'value', parent.type)),
+            language=language,
+            configuration=configuration,
+            table_name=_sql_table_name(pipeline, parent),
+        )
+        if language == 'sql' and configuration.get('use_raw_sql'):
+            # A raw SELECT on the same database is inlined into the query.
+            entry['content'] = parent.content or ''
+        upstream.append(entry)
+    return dict(table_name=_sql_table_name(pipeline, block), upstream=upstream)
+
+
+def _r_project(project: Path) -> Path:
+    """
+    The project's rv environment, which the image installs as rv.lock pins it. Found as
+    Mage finds it (MAGE_R_PROJECT_DIR, <project>/r, the project); R need not be installed.
+    """
+    configured = os.getenv('MAGE_R_PROJECT_DIR')
+    if configured:
+        path = Path(configured)
+        candidates = [path if path.is_absolute() else project / path]
+    else:
+        candidates = [project / 'r', project]
+    directory = next((c for c in candidates if (c / 'rproject.toml').is_file()), None)
+    if directory is None:
+        raise ExportError([
+            'R blocks need an R environment managed by rv, so the image installs the same '
+            f'packages: run `mage r init {project}`.'
+        ])
+    if not (directory / 'rv.lock').is_file():
+        raise ExportError([
+            f'{directory} has no rv.lock; run `mage r sync {project}` so the image installs '
+            'the versions the blocks ran with.'
+        ])
+    return directory.resolve()
 
 
 def _models(capture_: Capture, options: List[str]) -> List[Tuple[str, str]]:
@@ -245,11 +332,17 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         if block_type not in SUPPORTED_TYPES:
             problems.append(f'{where} is a {block_type} block, which services do not run yet.')
             continue
-        if language not in ('python', 'rust'):
+        if language not in ('python', 'rust', 'r', 'sql'):
             problems.append(
-                f'{where} is written in {language}; services run Python and Rust blocks.',
+                f'{where} is written in {language}; services run Python, R, Rust and SQL '
+                'blocks.',
             )
             continue
+        if language == 'sql':
+            reason = _sql_unsupported(block)
+            if reason:
+                problems.append(f'{where}: {reason}')
+                continue
         if is_dynamic_block(block) or is_dynamic_block_child(block) or is_replicated_block(block):
             problems.append(f'{where} is dynamic or replicated, which services do not run yet.')
             continue
@@ -291,6 +384,8 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         timeout = getattr(block, 'timeout', None)
         if timeout:
             entry['timeout_seconds'] = int(timeout)
+        if language == 'sql':
+            entry['sql'] = _sql_details(pipeline, block)
         if language == 'rust':
             crate = _prepare_rust_block(block, project, problems, where)
             if crate:
@@ -575,6 +670,20 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
         if m.split('.')[0] not in local_tops and m.split('.')[0] not in sys.stdlib_module_names
     )
     candidates += ['pyarrow', 'pandas']
+    if any(b['language'] == 'sql' for p in capture_.manifest['pipelines'] for b in p['blocks']):
+        # What the SQL runner imports to render queries and use PostgreSQL.
+        candidates += [
+            'jinja2', 'inflection', 'psycopg2', 'mage_ai.io.config', 'mage_ai.io.postgres',
+            'mage_ai.io.postgres_types', 'mage_ai.data_preparation.shared.utils',
+            'mage_ai.data_preparation.templates.utils',
+        ]
+    if capture_.needs_r:
+        # What Mage's R runner imports to pass tables and database settings to R.
+        candidates += [
+            'polars', 'simplejson', 'yaml', 'jinja2', 'mage_ai.shared.parsers',
+            'mage_ai.shared.processes', 'mage_ai.io.config',
+            'mage_ai.data_preparation.shared.utils',
+        ]
     script = textwrap.dedent('''
         import importlib, json, os, sys
         failed = []
@@ -687,6 +796,10 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         )
     if capture_.rust_blocks:
         _copy_rust_workspace(capture_, out_dir / 'rust')
+    if capture_.r_project is not None:
+        (out_dir / 'r').mkdir(parents=True, exist_ok=True)
+        for name in ('rproject.toml', 'rv.lock'):
+            shutil.copy2(capture_.r_project / name, out_dir / 'r' / name)
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
@@ -787,7 +900,8 @@ def _copy_mage_python(target: Path) -> None:
             continue
         if any(relative.is_relative_to(excluded) for excluded in MAGE_EXCLUDED_PATHS):
             continue
-        if not path.is_file() or path.suffix not in MAGE_DATA_SUFFIXES:
+        r_runner = relative.is_relative_to(R_RUNNER)
+        if not path.is_file() or (path.suffix not in MAGE_DATA_SUFFIXES and not r_runner):
             continue
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -880,6 +994,26 @@ def _rust_version() -> str:
     return match.group(1) if match else '1.98.0'
 
 
+RV_VERSION = '0.20.0'
+CRAN_KEY_URL = (
+    'https://keyserver.ubuntu.com/pks/lookup?op=get'
+    '&search=0x95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7'
+)
+RV_URL = (
+    'https://github.com/A2-ai/rv/releases/download/v${RV_VERSION}/'
+    'rv-v${RV_VERSION}-$(uname -m)-unknown-linux-gnu.tar.gz'
+)
+# Loads Mage's R runner without Mage's Block (as the worker does) and installs mageml.
+R_PREPARE = (
+    "import importlib, importlib.util, os, sys, types; "
+    "d = os.path.join(os.path.dirname(importlib.util.find_spec('mage_ai').origin), "
+    "'data_preparation', 'models', 'block', 'r'); "
+    "p = types.ModuleType('mage_service_r'); p.__path__ = [d]; sys.modules['mage_service_r'] = p; "
+    "rt = importlib.import_module('mage_service_r.runtime'); "
+    "print(rt.prepare(rt.r_config()))"
+)
+
+
 def _dockerfile(capture_: Capture) -> str:
     project = capture_.project.name
     rust = _rust_version()
@@ -901,8 +1035,48 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     mkdir -p /out/bin && {copies}
 '''
         copy_blocks = 'COPY --from=build --chown=mage:mage /out/bin ./bin\n'
+    r_install = ''
+    r_prepare = ''
+    if capture_.needs_r:
+        # As in Mage's image: R 4.6 from CRAN's Debian repository and rv, which installs
+        # the packages rv.lock pins (binaries where Posit has them, else from source).
+        r_install = f'''
+ARG RV_VERSION={RV_VERSION}
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \\
+    curl -fsSL \\
+      '{CRAN_KEY_URL}' \\
+      -o /etc/apt/trusted.gpg.d/cran_debian_key.asc && \\
+    printf '%s\\n' 'Types: deb' 'URIs: https://cloud.r-project.org/bin/linux/debian/' \\
+      'Suites: trixie-cran46/' 'Components:' \\
+      'Signed-By: /etc/apt/trusted.gpg.d/cran_debian_key.asc' \\
+      > /etc/apt/sources.list.d/cran.sources && \\
+    apt-get update && \\
+    apt-get install -y --no-install-recommends r-base-core r-recommended r-base-dev \\
+      cmake libcurl4-openssl-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev \\
+      libharfbuzz-dev libicu-dev libjpeg-dev libmariadb-dev libpng-dev libpq-dev \\
+      libssl-dev libtiff-dev libuv1-dev libwebp-dev libxml2-dev make xz-utils zlib1g-dev && \\
+    curl -fsSL "{RV_URL}" \\
+      | tar -xz -C /usr/local/bin rv && \\
+    rm -rf /var/lib/apt/lists/*
+ENV LIBARROW_MINIMAL=false \\
+    MAGE_R_PROJECT_DIR=/srv/mage-service/r \\
+    MAGE_R_CACHE_DIR=/srv/mage-service/r-cache \\
+    MAGE_R_SYNC=check
+# The R packages of the project's R environment, as rv.lock pins them.
+COPY r /srv/mage-service/r
+RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync
+'''
+        # Mage's mageml package, installed now: the image's files are read-only at run time.
+        r_prepare = f'''RUN PYTHONPATH=/srv/mage-service/python python3 -c "{R_PREPARE}" && \\
+    chown -R mage:mage /srv/mage-service/r-cache
+# The R library was synced and checked above; nothing changes it at run time. rv still
+# reads its cache directory, which must be writable: /tmp is, also on Kubernetes.
+ENV MAGE_R_SYNC=off \\
+    XDG_CACHE_HOME=/tmp/mage-service-cache
+'''
     if capture_.needs_python:
-        runtime = f'''FROM python:{python_version}-slim-bookworm
+        base = 'trixie' if capture_.needs_r else 'bookworm'
+        runtime = f'''FROM python:{python_version}-slim-{base}
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
@@ -910,7 +1084,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
 COPY requirements.txt /tmp/requirements.txt
 COPY {project}/requirements.tx[t] /tmp/{project}/
 RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.txt /tmp/{project}
-'''
+{r_install}'''
         python_env = (
             ' \\\n    PYTHONPATH=/srv/mage-service/python'
             ' \\\n    MAGE_SERVICE_PYTHON=python3'
@@ -946,6 +1120,7 @@ WORKDIR /srv/mage-service
 COPY --from=build /out/mage-service /usr/local/bin/mage-service
 {copy_python}{copy_blocks}{copy_models}COPY --chown=mage:mage {project} ./{project}
 COPY --chown=mage:mage service.json ./service.json
+{r_prepare}
 ENV MAGE_SERVICE_DIR=/srv/mage-service \\
     MAGE_SERVICE_DATA=/var/lib/mage-service \\
     MAGE_SERVICE_HOST=0.0.0.0 \\

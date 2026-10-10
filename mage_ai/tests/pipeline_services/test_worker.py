@@ -83,6 +83,17 @@ class OutputsTest(WorkerTestCase):
         series = pd.Series([1.5, 2.5], name='x')
         pd.testing.assert_series_equal(worker.read_input(self.write(series, 's')), series)
 
+    def test_arrow_backed_pandas_columns_come_back(self):
+        import pyarrow as pa
+
+        frame = pd.DataFrame({
+            'id': [1, 2],
+            'tags': pd.Series([[1, 2], [3]], dtype=pd.ArrowDtype(pa.list_(pa.int64()))),
+            'score': pd.Series([1.5, None], dtype=pd.ArrowDtype(pa.float64())),
+        })
+        back = worker.read_input(self.write(frame))
+        pd.testing.assert_frame_equal(back, frame)
+
     def test_other_values_choose_a_format_that_keeps_them(self):
         array = np.arange(6).reshape(2, 3)
         record = self.write(array, 'np')

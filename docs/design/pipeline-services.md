@@ -2,7 +2,8 @@
 
 Status: phase 1 implemented (Python and pandas/Polars pipelines, secrets providers, models,
 IBM Cloud and Kubernetes deploy files, the console); Rust blocks are compiled into the
-image. R and SQL blocks are next. User guide: `docs/production/pipeline-services.mdx`.
+image; R blocks run with Mage's R runner and the locked rv environment; SQL blocks run on
+PostgreSQL (runtime/sql.py follows Mage's PostgreSQL path). Other SQL databases are next. User guide: `docs/production/pipeline-services.mdx`.
 
 ## Goal
 

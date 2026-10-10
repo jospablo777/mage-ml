@@ -464,6 +464,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Pipeline services run R and SQL blocks.** `mage export service` exports R blocks with
+  the project's rv environment (the image installs R 4.6 and the packages rv.lock pins)
+  and PostgreSQL SQL blocks, which run as in a Mage pipeline run. Rust blocks are
+  compiled into the image, and secrets can come from AWS Secrets Manager and Parameter
+  Store. See `docs/production/pipeline-services.mdx`.
 - **Light theme.** Settings > Preferences > Light theme, or Light theme in the user menu,
   switches this browser to light colors; dark stays the default. The choice is a cookie,
   so the static export starts in it without a dark flash. The code editors use GitHub's

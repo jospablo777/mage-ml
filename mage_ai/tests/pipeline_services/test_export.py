@@ -358,6 +358,62 @@ class ModelTest(ExportTestCase):
         self.assertIn('must use letters', problems)
 
 
+
+class RExportTest(ExportTestCase):
+    R_TRANSFORM = """
+        #* @transformer
+        transform <- function(df_1, ...) {
+          df_1
+        }
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(shutil.rmtree, self.project / 'r', ignore_errors=True)
+
+    def add_r_pipeline(self):
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        return self.add('r_step', 'transformer', self.R_TRANSFORM, upstream=[load], language='r')
+
+    def test_r_blocks_export_with_their_locked_environment(self):
+        self.add_r_pipeline()
+        r_dir = self.project / 'r'
+        r_dir.mkdir(exist_ok=True)
+        (r_dir / 'rproject.toml').write_text('[project]\nname = "p"\nr_version = "4.6"\n')
+        (r_dir / 'rv.lock').write_text('version = 2\nr_version = "4.6"\n')
+        captured = export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
+        self.assertTrue(captured.needs_r)
+        self.assertTrue(captured.needs_python)
+        self.assertIn('polars', captured.requirements)
+        out = export.write(captured, tempfile.mkdtemp(), force=True)
+        self.addCleanup(shutil.rmtree, out, ignore_errors=True)
+        self.assertEqual(
+            (out / 'r' / 'rv.lock').read_text(), (r_dir / 'rv.lock').read_text(),
+        )
+        runner = out / 'python/mage_ai/data_preparation/models/block/r'
+        for name in ('runner.R', 'execution.py', 'mageml/DESCRIPTION', 'mageml/NAMESPACE'):
+            self.assertTrue((runner / name).is_file(), name)
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('-slim-trixie', dockerfile)
+        self.assertIn('trixie-cran46', dockerfile)
+        self.assertIn('rv sync', dockerfile)
+        self.assertIn("rt.prepare(rt.r_config())", dockerfile)
+        manifest = json.loads((out / 'service.json').read_text())
+        languages = {b['uuid'].split('_')[-1]: b['language']
+                     for b in manifest['pipelines'][0]['blocks']}
+        self.assertEqual(languages['step'], 'r')
+
+    def test_r_blocks_without_a_locked_environment_are_explained(self):
+        self.add_r_pipeline()
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
+        self.assertIn('mage r init', str(caught.exception))
+        (self.project / 'r').mkdir(exist_ok=True)
+        (self.project / 'r' / 'rproject.toml').write_text('[project]\nname = "p"\n')
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
+        self.assertIn('rv.lock', str(caught.exception))
+
 @unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
 class CargoLockTest(unittest.TestCase):
     def setUp(self):

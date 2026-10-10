@@ -355,16 +355,16 @@ impl BlockTask {
     async fn run_once(&self) -> Result<Vec<Value>, BlockFailure> {
         let timeout = self.block.timeout_seconds.map(Duration::from_secs);
         match self.block.language {
-            Language::Python => {
+            // The Python worker runs R and SQL blocks too.
+            Language::Python | Language::R | Language::Sql => {
                 let pool = self.service.python.as_ref().ok_or_else(|| {
-                    BlockFailure::fatal("this image has no Python runtime for Python blocks")
+                    BlockFailure::fatal(
+                        "this image has no Python runtime for Python, R and SQL blocks",
+                    )
                 })?;
                 self.run_python(pool, timeout).await
             }
             Language::Rust => self.run_rust(timeout).await,
-            Language::R => Err(BlockFailure::fatal(
-                "R blocks are not supported by pipeline services yet",
-            )),
         }
     }
 
@@ -384,6 +384,13 @@ impl BlockTask {
                 "type": self.block.block_type.as_str(),
                 "file": self.service.project_dir().join(&self.block.file),
                 "configuration": self.block.configuration,
+                "language": match self.block.language {
+                    Language::R => "r",
+                    Language::Sql => "sql",
+                    _ => "python",
+                },
+                "pipeline_uuid": self.pipeline_uuid,
+                "sql": self.block.sql,
             },
             "inputs": inputs,
             "kwargs": *self.kwargs,

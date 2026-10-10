@@ -47,14 +47,30 @@ What the export takes:
 | Python packages | Only those the blocks' imports load, pinned to your Mage environment's versions |
 | MLflow models the blocks load | Their files and metadata (see [Models](#models)) |
 
-Python and [Rust](/guides/blocks/rust-blocks) blocks are supported. Rust blocks are
-compiled when the image builds, so the service runs native binaries and needs no Rust
-installation; the export brings `rust/Cargo.lock` up to date for the exported blocks and
-keeps the locked versions, so the image builds the same crates you ran in Mage.
+Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
+[SQL](/guides/blocks/sql-blocks) blocks are supported.
+
+- **Rust** blocks are compiled when the image builds, so the service runs native binaries
+  and needs no Rust installation. The export brings `rust/Cargo.lock` up to date for the
+  exported blocks and keeps the locked versions, so the image builds the crates you ran.
+- **R** blocks run with Mage's R runner and the project's rv environment: the image
+  installs R 4.6 and the packages `rv.lock` pins, so the export needs that lock file
+  (`mage r init`, then `mage r sync`). Packages install from binaries where Posit has them,
+  as on amd64; on arm64 some build from source, which makes the first build slow. An
+  image with R blocks is based on Debian trixie and is larger.
+
+- **SQL** blocks on PostgreSQL run as in a Mage pipeline run: upstream outputs that the
+  query reads as `{{ df_1 }}` are written to tables first (the table of an upstream SQL
+  block on the same database is used directly), the query is rendered with the run's
+  variables, `variables()`, `env_var()` and `mage_secret_var()`, and the result is created
+  as the block's table by its export write policy, or the statements run as they are with
+  raw SQL. The integration tests compare every table these pipelines leave, column by
+  column, with Mage's.
 
 Blocks the service cannot run stop the export with the block named and the reason, so
-nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, R and SQL
-blocks are not supported yet. Chart and markdown blocks are notebook only and are left out.
+nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, SQL blocks
+on databases other than PostgreSQL and SQL blocks that use `block_output()` are not
+supported yet. Chart and markdown blocks are notebook only and are left out.
 
 ## 2. Build and run
 

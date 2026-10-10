@@ -304,8 +304,9 @@ block.R#6: stop("expected 5 rows, got ", nrow(df))
 run, in the notebook or by cancelling a pipeline run, also stops its R process.
 
 Each run starts a new `Rscript` process; nothing is kept between runs except stored
-outputs. `mage export service` does not export R blocks; [pipeline
-services](/production/pipeline-services) run Python and Rust blocks.
+outputs. `mage export service` exports R blocks with the project's rv environment: the
+[pipeline service](/production/pipeline-services) image installs R and the packages
+`rv.lock` pins, and runs the blocks the same way.
 
 ## Settings
 

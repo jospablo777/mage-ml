@@ -78,6 +78,22 @@ def _module(name: str):
     return sys.modules.get(name)
 
 
+def _has_python_objects(frame) -> bool:
+    """Whether an object column holds dicts, lists, sets, tuples or UUIDs."""
+    import uuid
+
+    import pandas as pd
+
+    kinds = (dict, list, tuple, set, uuid.UUID)
+    for position, dtype in enumerate(frame.dtypes):
+        if not pd.api.types.is_object_dtype(dtype):
+            continue
+        for item in frame.iloc[:, position].array:
+            if isinstance(item, kinds):
+                return True
+    return False
+
+
 def write_output(value: Any, directory: str, index: int) -> Dict:
     """Writes one output and returns its record."""
     base = os.path.join(directory, f'output_{index}')
@@ -110,7 +126,21 @@ def write_output(value: Any, directory: str, index: int) -> Dict:
         import pyarrow as pa_module
 
         frame = value.to_frame() if isinstance(value, pd.Series) else value
-        table = pa_module.Table.from_pandas(frame, preserve_index=None)
+        try:
+            if _has_python_objects(frame):
+                raise pa_module.ArrowInvalid('object columns that Arrow changes')
+            table = pa_module.Table.from_pandas(frame, preserve_index=None)
+        except (
+            pa_module.ArrowInvalid, pa_module.ArrowTypeError, pa_module.ArrowNotImplementedError,
+        ):
+            # Object columns that Arrow cannot hold or would change (UUIDs come back as
+            # bytes, dicts gain the keys of other rows, lists become arrays) keep the frame
+            # as it is in a pickle.
+            path = base + '.pickle'
+            with open(path, 'wb') as file:
+                pickle.dump(value, file, protocol=pickle.HIGHEST_PROTOCOL)
+            return dict(kind='pickle', path=path, type=f'{type(value).__module__}.'
+                        f'{type(value).__name__}', rows=len(frame))
         path = base + '.arrow'
         _write_ipc(table, path)
         origin = 'pandas_series' if isinstance(value, pd.Series) else 'pandas'
@@ -152,6 +182,36 @@ def _ipc_rows(path: str):
             return sum(reader.get_batch(i).num_rows for i in range(reader.num_record_batches))
     except Exception:
         return None
+
+
+def _to_pandas(table):
+    """
+    The pandas frame a table was written from. pandas cannot read back some ArrowDtype
+    names it writes in the metadata, such as 'list<item: int64>[pyarrow]'; those columns
+    are rebuilt as ArrowDtype columns from the Arrow data.
+    """
+    try:
+        return table.to_pandas()
+    except (TypeError, ValueError):
+        metadata = table.schema.pandas_metadata
+        if not metadata:
+            raise
+    import pandas as pd
+
+    arrow_columns = []
+    for column in metadata.get('columns', []):
+        if str(column.get('numpy_type', '')).endswith('[pyarrow]'):
+            arrow_columns.append((column['name'], column.get('field_name') or column['name']))
+            column['numpy_type'] = 'object'
+    patched = table.replace_schema_metadata({
+        **(table.schema.metadata or {}), b'pandas': json.dumps(metadata).encode(),
+    })
+    frame = patched.to_pandas()
+    for name, field in arrow_columns:
+        frame[name] = pd.Series(
+            pd.arrays.ArrowExtensionArray(table.column(field)), index=frame.index, name=name,
+        )
+    return frame
 
 
 def read_input(record: Dict) -> Any:
@@ -197,7 +257,7 @@ def read_input(record: Dict) -> Any:
         table = pq.read_table(path)
     if origin == 'arrow':
         return table
-    frame = table.to_pandas()
+    frame = _to_pandas(table)
     if origin == 'pandas_series':
         return frame.iloc[:, 0]
     return frame
@@ -243,6 +303,111 @@ def _kwargs(request: Dict, block: Dict) -> Dict:
     return values
 
 
+_R_EXECUTION = None
+
+
+def _r_execution():
+    """
+    Mage's R runner (mage_ai/data_preparation/models/block/r/execution.py), loaded as a
+    package of its own: importing it through mage_ai.data_preparation.models.block would
+    load Mage's Block and every dependency it has.
+    """
+    global _R_EXECUTION
+    if _R_EXECUTION is None:
+        import importlib
+        import importlib.util
+        import types
+
+        spec = importlib.util.find_spec('mage_ai')
+        directory = os.path.join(
+            os.path.dirname(spec.origin), 'data_preparation', 'models', 'block', 'r',
+        )
+        package = types.ModuleType('mage_service_r')
+        package.__path__ = [directory]
+        sys.modules['mage_service_r'] = package
+        _R_EXECUTION = importlib.import_module('mage_service_r.execution')
+    return _R_EXECUTION
+
+
+def _run_tests(block: Dict, results: List[Dict]) -> None:
+    """Fails the block when a test failed, as Mage does."""
+    failed = [t for t in results if not t['passed']]
+    if failed:
+        for t in failed:
+            print(f"FAIL: {t['name']} (block: {block['uuid']}): {t['message']}", flush=True)
+        raise BlockError(
+            'test',
+            f"{len(failed)} of {len(results)} tests failed: "
+            + ', '.join(t['name'] for t in failed),
+        )
+    if results:
+        print(f'{len(results)}/{len(results)} tests passed.', flush=True)
+
+
+def run_r_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> Dict:
+    try:
+        execution = _r_execution()
+        with open(block['file'], encoding='utf-8') as file:
+            code = file.read()
+    except Exception as error:
+        raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc())
+    variables = {
+        key: value for key, value in _kwargs(request, block).items() if key != 'logger'
+    }
+    started = time.monotonic()
+    try:
+        run = execution.execute_r_code(
+            block['type'],
+            code,
+            input_vars=inputs,
+            global_vars=variables,
+            repo_path=os.environ.get('MAGE_REPO_PATH'),
+            block_uuid=block['uuid'],
+            pipeline_uuid=block.get('pipeline_uuid'),
+        )
+    except execution.RBlockError as error:
+        raise BlockError('run', str(error))
+    except Exception as error:
+        # The R environment is missing or broken: the image, not the block.
+        raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc())
+    seconds = time.monotonic() - started
+    try:
+        records = [write_output(value, output_dir, i) for i, value in enumerate(run.outputs)]
+    except Exception as error:
+        raise BlockError('output', f'Writing the output failed: {type(error).__name__}: {error}',
+                         traceback.format_exc())
+    tests = [
+        dict(name=str(t.get('name') or 'test'), passed=bool(t.get('passed')),
+             message=str(t.get('message') or t.get('name') or 'test'))
+        for t in run.tests
+    ]
+    if request.get('run_tests', True):
+        _run_tests(block, tests)
+    return dict(outputs=records, tests=tests, seconds=round(seconds, 6))
+
+
+def run_sql_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> Dict:
+    from mage_ai.pipeline_services.runtime import sql
+
+    variables = {
+        key: value for key, value in _kwargs(request, block).items() if key != 'logger'
+    }
+    started = time.monotonic()
+    try:
+        outputs = sql.run(block, inputs, variables, os.environ.get('MAGE_REPO_PATH') or '.')
+    except sql.SqlBlockError as error:
+        raise BlockError('run', str(error))
+    except Exception as error:
+        raise BlockError('run', f'{type(error).__name__}: {error}', traceback.format_exc())
+    seconds = time.monotonic() - started
+    try:
+        records = [write_output(value, output_dir, i) for i, value in enumerate(outputs)]
+    except Exception as error:
+        raise BlockError('output', f'Writing the output failed: {type(error).__name__}: {error}',
+                         traceback.format_exc())
+    return dict(outputs=records, tests=[], seconds=round(seconds, 6))
+
+
 def run_block(request: Dict) -> Dict:
     block = request['block']
     block_type = block['type']
@@ -258,6 +423,10 @@ def run_block(request: Dict) -> Dict:
     except Exception as error:
         raise BlockError('input', f'Reading the upstream outputs failed: {error}',
                          traceback.format_exc())
+    if block.get('language') == 'r':
+        return run_r_block(request, block, inputs, output_dir)
+    if block.get('language') == 'sql':
+        return run_sql_block(request, block, inputs, output_dir)
 
     functions, tests, preprocessors = [], [], []
     namespace = {
@@ -317,17 +486,7 @@ def run_block(request: Dict) -> Dict:
             except Exception as error:
                 raise BlockError('test', f'{name}: {type(error).__name__}: {error}',
                                  _user_traceback())
-        failed = [t for t in test_results if not t['passed']]
-        if failed:
-            for t in failed:
-                print(f"FAIL: {t['name']} (block: {block['uuid']}): {t['message']}", flush=True)
-            raise BlockError(
-                'test',
-                f"{len(failed)} of {len(test_results)} tests failed: "
-                + ', '.join(t['name'] for t in failed),
-            )
-        if test_results:
-            print(f'{len(test_results)}/{len(test_results)} tests passed.', flush=True)
+        _run_tests(block, test_results)
 
     return dict(outputs=records, tests=test_results, seconds=round(seconds, 6))
 

@@ -278,6 +278,7 @@ fn info(common: &Common) -> Result<(), String> {
                 Language::Python => "py",
                 Language::Rust => "rs",
                 Language::R => "r",
+                Language::Sql => "sql",
             };
             let upstream = if block.upstream.is_empty() {
                 String::new()
@@ -423,10 +424,11 @@ async fn start_service(
             recovered.join(", ")
         ));
     }
-    let needs_python = manifest
-        .pipelines
-        .iter()
-        .any(|p| p.blocks.iter().any(|b| b.language == Language::Python));
+    let needs_python = manifest.pipelines.iter().any(|p| {
+        p.blocks
+            .iter()
+            .any(|b| matches!(b.language, Language::Python | Language::R | Language::Sql))
+    });
     let python = if needs_python {
         let worker = common.worker.clone().unwrap_or_else(|| {
             common
