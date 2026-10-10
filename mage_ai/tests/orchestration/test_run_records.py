@@ -14,16 +14,30 @@ from mage_ai.orchestration.fusion_verify import run_in_process
 from mage_ai.orchestration.triggers.api import trigger_pipeline
 from mage_ai.tests.base_test import DBTestCase
 
+# The shared file is loaded by path: the test project is named test, which Python's own
+# test package shadows where the interpreter ships it (Ubuntu's does).
 LOAD = '''
+import importlib.util
+import os
+
 import pandas as pd
 
-from {project}.run_records_shared import FACTOR
+from mage_ai.settings.repo import get_repo_path
+
+
+def shared():
+    path = os.path.join(get_repo_path(), 'run_records_shared.py')
+    spec = importlib.util.spec_from_file_location('run_records_shared', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @data_loader
 def load(*args, **kwargs):
     rows = int(kwargs.get('rows', 3))
-    return pd.DataFrame({{'id': range(rows), 'value': [i * FACTOR for i in range(rows)]}})
+    factor = shared().FACTOR
+    return pd.DataFrame({'id': range(rows), 'value': [i * factor for i in range(rows)]})
 '''
 
 TRANSFORM = '''
@@ -44,7 +58,7 @@ class RunRecordsTest(DBTestCase):
         load = Block.create(
             f'{self.pipeline.uuid}_load', 'data_loader', self.repo_path, pipeline=self.pipeline,
         )
-        Path(load.file_path).write_text(textwrap.dedent(LOAD.format(project=self.project.name)))
+        Path(load.file_path).write_text(textwrap.dedent(LOAD))
         transform = Block.create(
             f'{self.pipeline.uuid}_transform', 'transformer', self.repo_path,
             pipeline=self.pipeline, upstream_block_uuids=[load.uuid],

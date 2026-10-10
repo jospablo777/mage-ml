@@ -36,6 +36,21 @@ def cdc_table(pg, schema):
     )
     yield names
     with pg.cursor() as cursor:
+        # The source's walsender can still hold the slot for a moment after the test;
+        # dropping an active slot fails.
+        cursor.execute(
+            'SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots '
+            'WHERE slot_name = %s AND active_pid IS NOT NULL', (names['slot'],),
+        )
+        for _ in range(50):
+            cursor.execute(
+                'SELECT active FROM pg_replication_slots WHERE slot_name = %s',
+                (names['slot'],),
+            )
+            row = cursor.fetchone()
+            if row is None or not row[0]:
+                break
+            time.sleep(0.1)
         cursor.execute(
             'SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots '
             'WHERE slot_name = %s', (names['slot'],),
