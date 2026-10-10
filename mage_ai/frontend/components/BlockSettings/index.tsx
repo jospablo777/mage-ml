@@ -13,6 +13,7 @@ import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import Circle from '@oracle/elements/Circle';
 import DataContract from './DataContract';
+import Resources from './Resources';
 import Flex from '@oracle/components/Flex';
 import FlexContainer, { JUSTIFY_SPACE_BETWEEN_PROPS } from '@oracle/components/FlexContainer';
 import GlobalDataProductType, {
@@ -84,6 +85,7 @@ const RESERVED_BLOCK_CONFIG_KEYS = [
   'file_source',
   'global_data_product',
   'reduce_output',
+  'resources',
 ];
 
 type BlockSettingsProps = {
@@ -809,6 +811,21 @@ function BlockSettings({
             </Spacing>
           </Spacing>
         </Spacing>
+
+        {showBlockRunTimeout && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <Resources
+              onChange={resources => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  resources,
+                },
+              }))}
+              value={blockAttributes?.configuration?.resources}
+            />
+          </Spacing>
+        )}
 
         {showBlockRunTimeout && (
           <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>

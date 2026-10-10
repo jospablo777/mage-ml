@@ -102,6 +102,9 @@ def block_can_fuse(pipeline, block) -> bool:
     configuration = block.configuration or {}
     if configuration.get('fusion') is False or configuration.get('variables'):
         return False
+    # A block that declares resources waits for them on its own (resources.py).
+    if configuration.get('resources'):
+        return False
     if block.type not in FUSIBLE_BLOCK_TYPES or block.language not in FUSIBLE_LANGUAGES:
         return False
     if (

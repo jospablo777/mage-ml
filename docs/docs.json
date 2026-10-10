@@ -634,6 +634,7 @@
               "guides/pipelines/run-records",
               "guides/pipelines/experiments",
               "guides/pipelines/model-releases",
+              "guides/pipelines/resources",
               "guides/community-examples"
             ]
           },

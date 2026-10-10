@@ -19,4 +19,5 @@ class RunRecordPresenter(BasePresenter):
         'releases',
         'reproduction',
         'variables',
+        'waiting',
     ]

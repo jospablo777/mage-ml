@@ -1,0 +1,78 @@
+---
+title: "Resources and shared limits"
+sidebarTitle: "Resources"
+icon: "microchip"
+description: "Start block runs only when the memory, CPUs, GPUs and shared limits they need are free."
+---
+
+## Overview
+
+By default a triggered block run starts as soon as its upstream blocks are done and a
+worker process is free. Two memory-hungry blocks can then start together and run the
+host out of memory, and ten pipelines can open ten connections to a warehouse that
+allows four.
+
+A block can declare what it needs. The scheduler starts its block run only when that's
+free, and a block run that waits shows why.
+
+## Declare what the project has
+
+In the project's `metadata.yaml`:
+
+```yaml
+resources:
+  limits:              # shared limits, across every pipeline of the project
+    warehouse: 4       # at most 4 block runs that use the warehouse at a time
+    gpu_host: 1
+  memory: 48GiB        # memory for block runs per scheduler (default: 80% of its RAM)
+  gpus: [0, 1]         # GPU devices block runs get one by one (or a count: gpus: 2)
+```
+
+## Declare what a block needs
+
+In the block's **Block settings**, under **Resources**, or in its configuration:
+
+```yaml
+configuration:
+  resources:
+    memory: 8GiB       # also 512MB, 1.5G, or bytes
+    cpu: 2
+    gpu: 1
+    uses: [warehouse]
+```
+
+| Setting | Effect |
+| --- | --- |
+| `memory` | The block run starts when this much of the scheduler's memory budget is free. |
+| `cpu` | The block run's thread pools (OpenMP, OpenBLAS, MKL, NumExpr, Polars, Rayon) get this many threads, unless their environment variables are already set. |
+| `gpu` | The block run gets that many of the project's GPU devices for itself, through `CUDA_VISIBLE_DEVICES`. |
+| `uses` | The block run starts when each named shared limit has room. |
+
+## Waiting and failing
+
+A block run that waits stays **initial**. The pipeline run's page lists it under
+**Waiting** with the reason, such as `waiting for warehouse: 4 of 4 in use` or
+`waiting for memory: needs 8.0 GiB, 3.2 GiB of 48.0 GiB free`. It starts on the first
+scheduler tick after the resource frees.
+
+A request that can never fit fails the block run at once, with the reason:
+
+- more memory than the scheduler's budget;
+- more GPUs than the project declares;
+- a shared limit the project doesn't declare.
+
+## How it's counted
+
+- What a block run holds is recorded with it when it's queued. The counts are the
+  queued and running block runs, so a block run that ends, fails, is cancelled or is
+  reset after a crash stops counting, and a scheduler restart loses nothing.
+- Shared limits count every scheduler and replica of the project. Memory and GPUs count
+  the block runs of one scheduler, since they belong to its host.
+- Blocks that declare resources don't run in a block fusion stage; each waits for its own
+  resources.
+- Declared amounts are what the scheduler counts. They aren't enforced limits on the
+  process: a block that uses more memory than it declares still can. Set container or
+  Kubernetes limits for that.
+- Thread settings apply to libraries that start their thread pools after the block run
+  starts. A library the worker process loaded and used before keeps its pool.
+- Notebook runs don't wait for resources.

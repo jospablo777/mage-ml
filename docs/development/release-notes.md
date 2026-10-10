@@ -478,6 +478,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Resources and shared limits.** A block can declare the memory, CPUs, GPUs and shared
+  limits it needs (block settings > Resources), and the project declares what exists
+  (`resources` in its metadata.yaml: limits such as `warehouse: 4`, a memory budget and
+  GPU devices). A triggered block run starts only when what it needs is free. A waiting
+  run shows why on the pipeline run's page, a request that can never fit fails at once,
+  and a run gets its own GPU devices and thread counts. See
+  `docs/guides/pipelines/resources.mdx`.
 - **Model release checks.** A policy in `releases/<model>.yaml` lists metric rules (min,
   max, at most this much worse than the champion). Each version a block registers in
   MLflow is checked against it and decided pass, hold or fail. A passing version is

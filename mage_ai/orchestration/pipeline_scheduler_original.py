@@ -692,10 +692,8 @@ class PipelineScheduler:
             # Which scheduler process runs the job: a job lost when that process stopped
             # is an interruption, not a crash of the block.
             launcher = _launcher(job_manager)
-            b.update(
-                metrics=dict(b.metrics or {}, launched_by=launcher) if launcher else b.metrics,
-                status=BlockRun.BlockRunStatus.QUEUED,
-            )
+            if not self.__queue(b, launcher):
+                continue
             stage = stage_block_runs(
                 self.pipeline, b, self.pipeline_run.block_runs,
             ) if fused else [b]
@@ -740,6 +738,82 @@ class PipelineScheduler:
                 ],
                 True,
             )
+
+    def __queue(self, block_run: BlockRun, launcher: Optional[str]) -> bool:
+        """
+        Marks the block run QUEUED with what it holds, if the resources its block declares
+        are free (resources.py); otherwise records why it waits, or fails it when its
+        request can never fit. Returns whether it was queued.
+        """
+        from mage_ai.orchestration import resources
+
+        metrics = dict(block_run.metrics or {})
+        if launcher:
+            metrics['launched_by'] = launcher
+        block = self.pipeline.get_block(block_run.block_uuid)
+        try:
+            request = resources.request_of(block) if block else resources.Request()
+        except resources.ResourceError as error:
+            self.__fail_admission(block_run, metrics, str(error))
+            return False
+        if request.empty:
+            metrics.pop('waiting', None)
+            block_run.update(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
+            return True
+
+        # Admission reads what the active block runs hold and adds this one; schedulers
+        # of other pipeline runs (and replicas, with Redis) do it one at a time.
+        key = 'mage_resource_admission'
+        if not lock.try_acquire_lock(key, timeout=SCHEDULE_LOCK_SECONDS):
+            return False
+        try:
+            try:
+                policy = resources.policy_of(_project_metadata(self.pipeline.repo_path))
+            except resources.ResourceError as error:
+                self.__fail_admission(block_run, metrics, str(error))
+                return False
+            active = BlockRun.query.filter(BlockRun.status.in_([
+                BlockRun.BlockRunStatus.QUEUED,
+                BlockRun.BlockRunStatus.RUNNING,
+            ])).all()
+            decision = resources.decide(
+                request,
+                policy,
+                resources.held_by(active),
+                os.path.basename(os.path.realpath(self.pipeline.repo_path)),
+                launcher,
+            )
+            if decision.impossible:
+                self.__fail_admission(
+                    block_run, metrics, f'The block cannot start: {decision.reason}.',
+                )
+                return False
+            if not decision.admitted:
+                if (block_run.metrics or {}).get('waiting') != decision.reason:
+                    block_run.update(metrics=dict(
+                        block_run.metrics or {}, waiting=decision.reason,
+                    ))
+                return False
+            metrics.pop('waiting', None)
+            metrics['resources'] = decision.held
+            block_run.update(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
+            return True
+        finally:
+            lock.release_lock(key)
+
+    def __fail_admission(self, block_run: BlockRun, metrics: Dict, message: str) -> None:
+        metrics = dict(metrics)
+        metrics.pop('waiting', None)
+        metrics['error'] = dict(error=message, message=message)
+        block_run.update(
+            completed_at=datetime.now(tz=pytz.UTC),
+            metrics=metrics,
+            status=BlockRun.BlockRunStatus.FAILED,
+        )
+        self.logger.error(
+            f'BlockRun {block_run.id} (block_uuid: {block_run.block_uuid}) failed: {message}',
+            **self.build_tags(block_run_id=block_run.id, block_uuid=block_run.block_uuid),
+        )
 
     def __schedule_integration_streams(self, block_runs: List[BlockRun] = None) -> None:
         """Schedule the integration streams for execution.
@@ -1349,6 +1423,18 @@ def run_integration_stream(
 SCHEDULE_LOCK_SECONDS = 60
 
 
+def _project_metadata(repo_path: str) -> Dict:
+    """The project's metadata.yaml as written, with settings RepoConfig does not keep."""
+    import yaml
+
+    path = os.path.join(repo_path, 'metadata.yaml')
+    try:
+        with open(path, encoding='utf-8') as file:
+            return yaml.safe_load(file) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
 def _launcher(job_manager) -> Optional[str]:
     """The scheduler process the job manager's queue belongs to, as HOST_<host>_PID_<pid>."""
     client_id = getattr(getattr(job_manager, 'queue', None), 'client_id', None)
@@ -1432,6 +1518,12 @@ def run_block(
             block_run_data['started_at'] = datetime.now(tz=pytz.UTC)
 
         block_run.update(**block_run_data)
+
+    # Thread pools and GPUs within what the block run holds (resources.py); this process
+    # runs only this job.
+    from mage_ai.orchestration.resources import apply_environment
+
+    apply_environment((block_run.metrics or {}).get('resources'))
 
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     if attempt is not None:

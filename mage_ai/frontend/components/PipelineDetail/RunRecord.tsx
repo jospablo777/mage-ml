@@ -91,6 +91,7 @@ type RunRecordType = {
     [blockUUID: string]: { runs: MlflowRunType[]; tracking_uri?: string };
   };
   releases?: { [blockUUID: string]: ReleaseType[] };
+  waiting?: { [blockUUID: string]: string };
   environment?: {
     mage?: string;
     packages?: number;
@@ -253,6 +254,14 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
 
   return (
     <>
+      {Object.keys(record.waiting || {}).length > 0 && (
+        <Spacing mb={2}>
+          <Headline level={5}>Waiting</Headline>
+          {Object.entries(record.waiting).map(([blockUUID, reason]) => (
+            <Row key={blockUUID} label={blockUUID}>{reason}</Row>
+          ))}
+        </Spacing>
+      )}
       <Headline level={5}>Run record</Headline>
       {!record.code ? (
         <Spacing mt={1}>

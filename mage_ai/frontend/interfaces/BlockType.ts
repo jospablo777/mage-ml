@@ -302,6 +302,13 @@ export interface ConfigurationType extends BaseConfigurationType {
   } | null;
   // False runs the block alone when chains of blocks run together (block fusion).
   fusion?: boolean | null;
+  // What the block needs to start in a triggered run (orchestration/resources.py).
+  resources?: {
+    cpu?: number;
+    gpu?: number;
+    memory?: string;
+    uses?: string[];
+  } | null;
   dynamic?:
     | any
     | boolean
