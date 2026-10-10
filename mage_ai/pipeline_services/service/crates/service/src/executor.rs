@@ -26,6 +26,8 @@ use crate::service::Service;
 struct BlockOutcome {
     block: String,
     result: Result<Vec<Value>, String>,
+    /// The block stopped because the run was cancelled, not because it failed.
+    cancelled: bool,
 }
 
 pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: CancellationToken) {
@@ -185,6 +187,7 @@ async fn run_blocks(
             Ok(records) => {
                 outputs.insert(outcome.block, records);
             }
+            Err(_) if outcome.cancelled => {}
             Err(message) => {
                 if failure.is_none() {
                     failure = Some((outcome.block.clone(), message));
@@ -293,6 +296,7 @@ impl BlockTask {
                     return BlockOutcome {
                         block: self.block.uuid.clone(),
                         result: Ok(records),
+                        cancelled: false,
                     };
                 }
                 Err(BlockFailure {
@@ -328,24 +332,23 @@ impl BlockTask {
                 }
             }
         }
-        let status = if self.cancel.is_cancelled() && last_error.is_empty() {
-            BlockStatus::Cancelled
+        let cancelled = self.cancel.is_cancelled();
+        let (status, error) = if cancelled {
+            (BlockStatus::Cancelled, "the run was cancelled".to_string())
         } else {
-            BlockStatus::Failed
+            (BlockStatus::Failed, last_error)
         };
-        if last_error.is_empty() {
-            last_error = "the run was cancelled".into();
-        }
         let _ = self.service.ledger.finish_block(
             &self.run_id,
             &self.block.uuid,
             status,
-            Some(&last_error),
+            Some(&error),
             &[],
         );
         BlockOutcome {
             block: self.block.uuid.clone(),
-            result: Err(last_error),
+            result: Err(error),
+            cancelled,
         }
     }
 
