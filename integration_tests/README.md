@@ -54,6 +54,10 @@ set
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
+PostgreSQL serves TLS with a certificate for `db.test` from a test CA, which `make up`
+writes to `integration_tests/.certs` (`tls_certs.py`, git-ignored). Clients that use
+`prefer`, the default, connect with TLS.
+
 Without the `MAGE_TEST_*` variables the tests skip, so `pytest integration_tests` in a
 plain checkout passes without Docker. `make ci` runs the same suite and fails when any
 test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.

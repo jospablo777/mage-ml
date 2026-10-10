@@ -507,6 +507,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Rust blocks read and write PostgreSQL.** `mage::postgres` streams binary `COPY` both
+  ways with typed columns, keeps `numeric` values exact, handles nested arrays, and
+  connects with the block's io_config profile. TLS modes are libpq's (`prefer` by
+  default, `require`, `verify-ca`, `verify-full`, with a root certificate file for
+  private CAs). Appends cast by column name; a write
+  is one transaction. New PostgreSQL loader and exporter templates. Exported services
+  pass the profile to Rust blocks, with variables and secrets filled in at run time.
 - **Monitoring block outputs.** A monitor (`monitors/<name>.yaml`) watches a block's
   output across pipeline runs against a baseline run. It checks drift of each column
   (Jensen–Shannon divergence over the baseline's bins or frequent values), missing

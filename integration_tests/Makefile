@@ -60,6 +60,7 @@ RV ?= rv
 .PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark ci r-env
 
 up:
+	cd .. && $(PYTHON) integration_tests/tls_certs.py
 	$(COMPOSE) up -d --build --wait
 
 down:

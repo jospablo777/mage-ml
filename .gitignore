@@ -207,3 +207,4 @@ test_project/
 
 do_not_commit/
 integration_tests/results.xml
+integration_tests/.certs/

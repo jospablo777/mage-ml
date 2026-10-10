@@ -105,8 +105,8 @@ impl Postgres {
     }
 
     /// Connects with POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DBNAME, POSTGRES_USER,
-    /// POSTGRES_PASSWORD, POSTGRES_SCHEMA, POSTGRES_CONNECT_TIMEOUT and POSTGRES_SSLMODE
-    /// (disable, the default, or require).
+    /// POSTGRES_PASSWORD, POSTGRES_SCHEMA, POSTGRES_CONNECT_TIMEOUT, POSTGRES_SSLMODE and
+    /// POSTGRES_SSLROOTCERT. TLS modes are libpq's: see `Tls`.
     pub fn connect_settings(settings: &HashMap<String, String>) -> Result<Self> {
         let get = |key: &str| {
             settings
@@ -138,33 +138,33 @@ impl Postgres {
                     .context("POSTGRES_CONNECT_TIMEOUT is not a number")?,
             ));
         }
+        let tls = Tls::from_settings(get("POSTGRES_SSLMODE"), get("POSTGRES_SSLROOTCERT"))?;
+        Self::open(config, &tls, get("POSTGRES_SCHEMA").map(str::to_string))
+    }
+
+    /// Connects with a URL, such as postgresql://user:password@host:5432/db, or key=value
+    /// settings. `sslmode` and `sslrootcert` take libpq's values, as in `Tls`.
+    pub fn connect_url(url: &str) -> Result<Self> {
+        let (url, mode) = take_parameter(url, "sslmode");
+        let (url, root) = take_parameter(&url, "sslrootcert");
+        let config = url
+            .parse::<Config>()
+            .context("the connection URL is not valid")?;
+        let tls = Tls::from_settings(mode.as_deref(), root.as_deref())?;
+        Self::open(config, &tls, None)
+    }
+
+    fn open(mut config: Config, tls: &Tls, schema: Option<String>) -> Result<Self> {
         config.application_name("mage rust block");
-        let sslmode = get("POSTGRES_SSLMODE")
-            .map(str::to_string)
-            .or_else(|| std::env::var("PGSSLMODE").ok())
-            .unwrap_or_else(|| "disable".to_string());
-        let client = match sslmode.as_str() {
-            "disable" | "allow" | "prefer" => config.connect(NoTls)?,
-            "require" | "verify-ca" | "verify-full" => config.connect(tls::connector()?)?,
-            other => bail!("POSTGRES_SSLMODE {other} is not one of disable, require"),
+        config.ssl_mode(tls.mode);
+        let client = match tls.check {
+            None => config.connect(NoTls)?,
+            Some(check) => config.connect(tls::connector(check, tls.root.as_deref())?)?,
         };
-        let mut connection = Postgres {
-            client,
-            schema: get("POSTGRES_SCHEMA").map(str::to_string),
-        };
+        let mut connection = Postgres { client, schema };
         // Timestamps with time zone travel in UTC, whatever the server's TimeZone.
         connection.client.batch_execute("SET TIME ZONE 'UTC'")?;
         Ok(connection)
-    }
-
-    /// Connects with a URL, such as postgresql://user:password@host:5432/db.
-    pub fn connect_url(url: &str) -> Result<Self> {
-        let mut client = Client::connect(url, NoTls)?;
-        client.batch_execute("SET TIME ZONE 'UTC'")?;
-        Ok(Postgres {
-            client,
-            schema: None,
-        })
     }
 
     /// The underlying rust-postgres client, for anything else.
@@ -351,20 +351,217 @@ impl Postgres {
     }
 }
 
-mod tls {
-    use anyhow::Result;
+/// TLS as libpq does it, so a profile connects the same way from Python and Rust blocks:
+///
+/// - `disable`: no TLS;
+/// - `allow`, `prefer` (the default): TLS when the server offers it, without checking its
+///   certificate;
+/// - `require`: TLS without checking the certificate, unless a root certificate is given,
+///   which makes it `verify-ca`;
+/// - `verify-ca`: the certificate must chain to a trusted root;
+/// - `verify-full`: and name the host.
+///
+/// Trusted roots are Mozilla's plus the PEM file in POSTGRES_SSLROOTCERT (or PGSSLROOTCERT),
+/// for a private CA such as Amazon RDS's. POSTGRES_SSLMODE falls back to PGSSLMODE.
+#[derive(Debug, Clone, PartialEq)]
+struct Tls {
+    mode: postgres::config::SslMode,
+    check: Option<tls::Check>,
+    root: Option<String>,
+}
 
-    pub fn connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect> {
-        let roots = rustls::RootCertStore {
+impl Tls {
+    fn from_settings(mode: Option<&str>, root: Option<&str>) -> Result<Tls> {
+        use postgres::config::SslMode;
+        use tls::Check;
+
+        let mode = mode
+            .map(str::to_string)
+            .or_else(|| std::env::var("PGSSLMODE").ok().filter(|v| !v.is_empty()))
+            .unwrap_or_else(|| "prefer".to_string());
+        let root = root.map(str::to_string).or_else(|| {
+            std::env::var("PGSSLROOTCERT")
+                .ok()
+                .filter(|v| !v.is_empty())
+        });
+        let (mode, check) = match mode.as_str() {
+            "disable" => (SslMode::Disable, None),
+            "allow" | "prefer" => (SslMode::Prefer, Some(Check::None)),
+            "require" if root.is_some() => (SslMode::Require, Some(Check::Chain)),
+            "require" => (SslMode::Require, Some(Check::None)),
+            "verify-ca" => (SslMode::Require, Some(Check::Chain)),
+            "verify-full" => (SslMode::Require, Some(Check::Full)),
+            other => bail!(
+                "sslmode {other} is not one of disable, allow, prefer, require, verify-ca, \
+                 verify-full"
+            ),
+        };
+        Ok(Tls { mode, check, root })
+    }
+}
+
+/// The URL without `name`, and its value: `?name=v` or `&name=v` in a URL, `name=v` in
+/// key=value settings.
+fn take_parameter(url: &str, name: &str) -> (String, Option<String>) {
+    let key = format!("{name}=");
+    let is_url = url.contains("://");
+    let separators: &[char] = if is_url { &['?', '&'] } else { &[' '] };
+    let mut found = None;
+    let mut position = 0;
+    while let Some(offset) = url[position..].find(&key) {
+        let start = position + offset;
+        if start == 0 && !is_url
+            || start > 0 && separators.contains(&url[..start].chars().last().unwrap())
+        {
+            found = Some(start);
+            break;
+        }
+        position = start + key.len();
+    }
+    let Some(start) = found else {
+        return (url.to_string(), None);
+    };
+    let value_start = start + key.len();
+    let end = url[value_start..]
+        .find(if is_url { '&' } else { ' ' })
+        .map_or(url.len(), |e| value_start + e);
+    let value = url[value_start..end].to_string();
+    let (before, after) = (&url[..start], url.get(end + 1..).unwrap_or(""));
+    let rest = if after.is_empty() {
+        before.trim_end_matches(['?', '&', ' ']).to_string()
+    } else {
+        format!("{before}{after}")
+    };
+    (rest, Some(value))
+}
+
+mod tls {
+    use std::sync::Arc;
+
+    use anyhow::{Context as _, Result};
+    use rustls::client::WebPkiServerVerifier;
+    use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+    use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+    use rustls::{CertificateError, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
+
+    /// What of the server's certificate is checked.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum Check {
+        None,
+        Chain,
+        Full,
+    }
+
+    pub fn connector(
+        check: Check,
+        root_file: Option<&str>,
+    ) -> Result<tokio_postgres_rustls::MakeRustlsConnect> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut roots = RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
-        let config = rustls::ClientConfig::builder_with_provider(
-            rustls::crypto::ring::default_provider().into(),
-        )
-        .with_safe_default_protocol_versions()?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+        if let Some(path) = root_file {
+            let certificates = CertificateDer::pem_file_iter(path)
+                .with_context(|| format!("could not read the root certificates in {path}"))?;
+            for certificate in certificates {
+                let certificate =
+                    certificate.with_context(|| format!("{path} is not a PEM certificate"))?;
+                roots
+                    .add(certificate)
+                    .with_context(|| format!("{path} holds a certificate rustls can't use"))?;
+            }
+        }
+        let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()?;
+        let config = if check == Check::Full {
+            builder.with_root_certificates(roots).with_no_client_auth()
+        } else {
+            let webpki =
+                WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+                    .build()?;
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(Verifier {
+                    check,
+                    webpki,
+                    provider,
+                }))
+                .with_no_client_auth()
+        };
         Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+    }
+
+    /// `require` and `verify-ca`: the handshake's signatures are always verified, the
+    /// certificate's chain only for `verify-ca`, its name never.
+    #[derive(Debug)]
+    struct Verifier {
+        check: Check,
+        webpki: Arc<WebPkiServerVerifier>,
+        provider: Arc<CryptoProvider>,
+    }
+
+    impl ServerCertVerifier for Verifier {
+        fn verify_server_cert(
+            &self,
+            end_entity: &CertificateDer<'_>,
+            intermediates: &[CertificateDer<'_>],
+            server_name: &ServerName<'_>,
+            ocsp_response: &[u8],
+            now: UnixTime,
+        ) -> Result<ServerCertVerified, Error> {
+            if self.check == Check::None {
+                return Ok(ServerCertVerified::assertion());
+            }
+            match self.webpki.verify_server_cert(
+                end_entity,
+                intermediates,
+                server_name,
+                ocsp_response,
+                now,
+            ) {
+                Err(Error::InvalidCertificate(
+                    CertificateError::NotValidForName
+                    | CertificateError::NotValidForNameContext { .. },
+                )) => Ok(ServerCertVerified::assertion()),
+                other => other,
+            }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            certificate: &CertificateDer<'_>,
+            signature: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            verify_tls12_signature(
+                message,
+                certificate,
+                signature,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            certificate: &CertificateDer<'_>,
+            signature: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, Error> {
+            verify_tls13_signature(
+                message,
+                certificate,
+                signature,
+                &self.provider.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            self.provider
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
     }
 }
 
@@ -1136,6 +1333,78 @@ fn encode_array(element: &Writer, items: &Series, out: &mut Vec<u8>) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tls_modes_are_libpq_s() {
+        use postgres::config::SslMode;
+        use tls::Check;
+
+        let tls = |mode, root| Tls::from_settings(Some(mode), root).unwrap();
+        assert_eq!(tls("disable", None).check, None);
+        assert_eq!(tls("prefer", None).mode, SslMode::Prefer);
+        assert_eq!(tls("prefer", None).check, Some(Check::None));
+        assert_eq!(tls("require", None).check, Some(Check::None));
+        assert_eq!(tls("require", Some("/ca.pem")).check, Some(Check::Chain));
+        assert_eq!(tls("verify-ca", None).check, Some(Check::Chain));
+        let full = tls("verify-full", Some("/ca.pem"));
+        assert_eq!(
+            (full.mode, full.check),
+            (SslMode::Require, Some(Check::Full))
+        );
+        assert_eq!(full.root.as_deref(), Some("/ca.pem"));
+        let error = Tls::from_settings(Some("verify"), None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("verify-full"), "{error}");
+    }
+
+    #[test]
+    fn tls_connectors_build_for_every_check() {
+        for check in [tls::Check::None, tls::Check::Chain, tls::Check::Full] {
+            tls::connector(check, None).unwrap();
+        }
+        let error = tls::connector(tls::Check::Chain, Some("/no/such/ca.pem"))
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("/no/such/ca.pem"), "{error}");
+    }
+
+    #[test]
+    fn ssl_parameters_come_out_of_urls() {
+        let take = |url: &str, name| take_parameter(url, name);
+        assert_eq!(
+            take("postgresql://u:p@h/db?sslmode=verify-full", "sslmode"),
+            ("postgresql://u:p@h/db".into(), Some("verify-full".into()))
+        );
+        assert_eq!(
+            take(
+                "postgresql://h/db?connect_timeout=5&sslmode=require&application_name=x",
+                "sslmode"
+            ),
+            (
+                "postgresql://h/db?connect_timeout=5&application_name=x".into(),
+                Some("require".into())
+            )
+        );
+        assert_eq!(
+            take(
+                "postgresql://h/db?sslmode=require&connect_timeout=5",
+                "sslmode"
+            ),
+            (
+                "postgresql://h/db?connect_timeout=5".into(),
+                Some("require".into())
+            )
+        );
+        assert_eq!(
+            take("host=h sslmode=verify-ca dbname=db", "sslmode"),
+            ("host=h dbname=db".into(), Some("verify-ca".into()))
+        );
+        assert_eq!(
+            take("postgresql://h/db?xsslmode=1", "sslmode"),
+            ("postgresql://h/db?xsslmode=1".into(), None)
+        );
+    }
 
     fn roundtrip(unscaled: i128, scale: usize) -> NumericValue {
         let mut out = Vec::new();

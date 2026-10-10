@@ -11,8 +11,13 @@ services:
       POSTGRES_USER: postgres
     # Test data does not need to survive a crash, so the server skips fsync and keeps
     # its data in memory. A smaller WAL keeps that memory down: the default let it grow
-    # to 1 GB. Logical WAL is for the change data capture tests.
-    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_wal_size=128MB", "-c", "min_wal_size=32MB", "-c", "wal_level=logical", "-c", "max_replication_slots=20"]
+    # to 1 GB. Logical WAL is for the change data capture tests. TLS uses the
+    # certificate tls_certs.py writes to .certs (make up); the server wants its key
+    # owned by postgres and private, so the entrypoint copies it.
+    entrypoint: ["sh", "-c", "install -o postgres -m 600 /certs/server.key /certs/server.pem /var/lib/postgresql/ && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_wal_size=128MB", "-c", "min_wal_size=32MB", "-c", "wal_level=logical", "-c", "max_replication_slots=20", "-c", "ssl=on", "-c", "ssl_cert_file=/var/lib/postgresql/server.pem", "-c", "ssl_key_file=/var/lib/postgresql/server.key"]
+    volumes:
+      - ./.certs:/certs:ro
     tmpfs:
       - /var/lib/postgresql/data
     ports:

@@ -3,6 +3,8 @@ Pipelines of Rust blocks only, on PostgreSQL: a Rust loader reads with binary CO
 Rust transformer works on the frame, a Rust exporter writes with binary COPY. Every type
 of the source table round trips; appends cast by column name; failures say why.
 """
+import json
+
 import pytest
 
 from integration_tests.mage_runner import execute_pipeline, run_pipeline
@@ -181,6 +183,129 @@ def test_errors_name_the_problem(mage_project, pg, profile_schema):
     run = execute_pipeline(duplicate)
     assert run.status.value == 'failed'
     assert 'two columns named a' in error_of(run, 'load')
+
+
+def test_the_pipeline_runs_as_an_exported_service(
+    mage_project, pg, profile_schema, source_table, source_rows, tmp_path,
+):
+    """The service fills in the block's io_config profile from its environment; the
+    export keeps env_var() as a reference, so the password never enters the service."""
+    from integration_tests.exported_services import (
+        build_rust_blocks,
+        export_service,
+        run_service,
+    )
+
+    pipeline = rust_pipeline(
+        mage_project,
+        dict(uuid='load', type='data_loader', code=LOAD),
+        dict(uuid='export', type='data_exporter', code=EXPORT, upstream=['load']),
+    )
+    directory = export_service(mage_project, pipeline, tmp_path)
+    manifest = json.loads((directory / 'service.json').read_text())
+    profiles = [b['io_config'] for b in manifest['pipelines'][0]['blocks']]
+    assert [p['POSTGRES_PASSWORD'] for p in profiles] == [
+        {'$parts': [{'env': 'MAGE_TEST_POSTGRES_PASSWORD'}]},
+    ] * 2
+    build_rust_blocks(directory)
+    run_service(directory, pipeline, tmp_path, dict(schema=profile_schema))
+    assert query(pg, f'SELECT count(*) FROM {profile_schema}.dst')[0][0] == len(source_rows)
+    assert round_trip_problems(pg, profile_schema) == {}
+
+
+TLS_CASES = r'''
+use std::collections::HashMap;
+
+use mage::postgres::Postgres;
+use mage::prelude::*;
+
+fn settings(mode: Option<&str>, root: Option<&str>) -> HashMap<String, String> {
+    let mut settings = HashMap::new();
+    for (key, variable) in [
+        ("POSTGRES_HOST", "MAGE_TEST_POSTGRES_HOST"),
+        ("POSTGRES_PORT", "MAGE_TEST_POSTGRES_PORT"),
+        ("POSTGRES_DBNAME", "MAGE_TEST_POSTGRES_DBNAME"),
+        ("POSTGRES_USER", "MAGE_TEST_POSTGRES_USER"),
+        ("POSTGRES_PASSWORD", "MAGE_TEST_POSTGRES_PASSWORD"),
+    ] {
+        settings.insert(key.to_string(), std::env::var(variable).unwrap());
+    }
+    if let Some(mode) = mode {
+        settings.insert("POSTGRES_SSLMODE".into(), mode.into());
+    }
+    if let Some(root) = root {
+        settings.insert("POSTGRES_SSLROOTCERT".into(), root.into());
+    }
+    settings
+}
+
+fn load_data(vars: Vars) -> Result<DataFrame> {
+    let ca: String = vars.get("ca")?;
+    let env = |name: &str| std::env::var(name).unwrap();
+    let url = format!(
+        "postgresql://{}:{}@{}:{}/{}?sslmode=verify-ca&sslrootcert={ca}",
+        env("MAGE_TEST_POSTGRES_USER"), env("MAGE_TEST_POSTGRES_PASSWORD"),
+        env("MAGE_TEST_POSTGRES_HOST"), env("MAGE_TEST_POSTGRES_PORT"),
+        env("MAGE_TEST_POSTGRES_DBNAME"),
+    );
+    let root = Some(ca.as_str());
+    let cases = [
+        ("default", None, None),
+        ("disable", Some("disable"), None),
+        ("require", Some("require"), None),
+        ("require+root", Some("require"), root),
+        ("verify-ca", Some("verify-ca"), root),
+        ("verify-ca unknown", Some("verify-ca"), None),
+        ("verify-full", Some("verify-full"), root),
+    ];
+    let mut attempts: Vec<(&str, Result<Postgres>)> = cases
+        .iter()
+        .map(|(name, mode, root)| (*name, Postgres::connect_settings(&settings(*mode, *root))))
+        .collect();
+    attempts.push(("url", Postgres::connect_url(&url)));
+    let (mut names, mut ssl, mut errors) = (vec![], vec![], vec![]);
+    for (name, connection) in attempts {
+        names.push(name.to_string());
+        match connection.and_then(|mut c| {
+            c.query("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+        }) {
+            Ok(frame) => {
+                ssl.push(frame.column("ssl")?.bool()?.get(0));
+                errors.push(String::new());
+            }
+            Err(error) => {
+                ssl.push(None);
+                errors.push(format!("{error:#}"));
+            }
+        }
+    }
+    Ok(df!("case" => names, "ssl" => ssl, "error" => errors)?)
+}
+'''
+
+
+def test_tls_modes_connect_as_libpq_does(mage_project):
+    """The test server's certificate names db.test and chains to the test CA."""
+    from integration_tests.postgres.test_sql_block_matrix import output
+    from integration_tests.tls_certs import CERTS
+
+    pipeline = rust_pipeline(mage_project, dict(uuid='load', type='data_loader', code=TLS_CASES))
+    run = execute_pipeline(pipeline, ca=str(CERTS / 'ca.pem'))
+    assert run.status.value == 'completed', error_of(run)
+    frame = output(pipeline, run, 'load')
+    rows = frame.to_dicts() if hasattr(frame, 'to_dicts') else frame.to_dict('records')
+    results = {row['case']: bool(row['ssl']) if not row['error'] else row['error'] for row in rows}
+    assert {k: v for k, v in results.items() if isinstance(v, bool)} == {
+        'default': True,       # prefer: TLS when the server offers it
+        'disable': False,
+        'require': True,       # no certificate check
+        'require+root': True,  # a root makes it verify-ca
+        'verify-ca': True,     # the chain is checked, not the name
+        'url': True,
+    }
+    assert 'invalid peer certificate' in results['verify-ca unknown'], results
+    assert 'Unknown' in results['verify-ca unknown'], results
+    assert 'not valid for name "127.0.0.1"' in results['verify-full'], results
 
 
 @pytest.fixture(autouse=True)
