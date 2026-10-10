@@ -24,8 +24,10 @@ import { Edit } from '@oracle/icons';
 import { ICON_SIZE_SMALL } from '@oracle/styles/units/icons';
 import { LOCAL_TIMEZONE_TOOLTIP_PROPS, storeLocalTimezoneSetting } from './utils';
 import { PADDING_UNITS, UNITS_BETWEEN_SECTIONS } from '@oracle/styles/units/spacing';
+import { ThemeModeEnum } from '@oracle/styles/themes/mode';
 import { capitalizeRemoveUnderscoreLower } from '@utils/string';
 import { ignoreKeys } from '@utils/hash';
+import { getThemeMode, setThemeMode } from '@oracle/styles/themes/utils';
 import { onSuccess } from '@api/utils/response';
 import { useError } from '@context/Error';
 
@@ -145,6 +147,39 @@ function Preferences({
           <Text default={!!projectUUID} monospace muted={!projectUUID}>
             {projectUUID || 'Not required'}
           </Text>
+        </Spacing>
+
+        <Divider light />
+
+        <Spacing p={PADDING_UNITS}>
+          <FlexContainer
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <Flex flexDirection="column">
+              <Spacing mb={1}>
+                <Headline level={5}>
+                  Light theme
+                </Headline>
+              </Spacing>
+
+              <Text default>
+                Use light colors in this browser. Dark is the default; the page reloads to
+                apply the change.
+              </Text>
+            </Flex>
+
+            <Spacing mr={PADDING_UNITS} />
+
+            <ToggleSwitch
+              checked={getThemeMode() === ThemeModeEnum.LIGHT}
+              compact
+              id="light_theme_toggle"
+              onCheck={() => setThemeMode(
+                getThemeMode() === ThemeModeEnum.LIGHT ? ThemeModeEnum.DARK : ThemeModeEnum.LIGHT,
+              )}
+            />
+          </FlexContainer>
         </Spacing>
 
         <Divider light />

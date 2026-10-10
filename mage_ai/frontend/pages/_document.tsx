@@ -2,6 +2,8 @@ import Document, { DocumentContext, Head, Html, Main, NextScript } from 'next/do
 import { BaseCSS } from 'styled-bootstrap-grid';
 import { ServerStyleSheet } from 'styled-components';
 
+import { THEME_BOOT_SCRIPT } from '@oracle/styles/themes/mode';
+
 // @ts-ignore
 export default class MyDocument extends Document {
   static async getInitialProps(ctx: DocumentContext) {
@@ -40,6 +42,7 @@ export default class MyDocument extends Document {
     return (
       <Html lang="en">
         <Head>
+          <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
           <script
             dangerouslySetInnerHTML={{
               __html: `

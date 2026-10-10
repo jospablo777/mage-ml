@@ -49,7 +49,7 @@ const ToggleSwitchStyle = styled.label<
   & span {
     position: absolute;
     cursor: ${({ disabled }) => (disabled ? 'not-allowed' : 'pointer')};
-    background-color: ${({ disabled }) => (disabled ? dark.monotone.white : dark.monotone.black)};
+    background-color: ${({ disabled }) => (disabled ? dark.monotone.white : dark.interactive.toggleOff)};
     border-radius: 13px;
     ${({ disabled, compact }) => (disabled && !compact) && `border: 1px solid ${dark.monotone.grey200}`};
     top: 0;

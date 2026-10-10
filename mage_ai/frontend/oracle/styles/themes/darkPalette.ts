@@ -220,6 +220,7 @@ export default {
     linkTextLight: BLUE_SKY,
     purple: PURPLE2,
     rowHoverBackground: 'rgba(0, 0, 0, 0.1)',
+    toggleOff: BLACK,
     transparent: 'rgba(255, 255, 255, 0)',
   },
   loader: {

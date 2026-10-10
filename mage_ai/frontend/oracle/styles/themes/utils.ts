@@ -2,56 +2,64 @@
 import Cookies from 'js-cookie';
 import ServerCookie from 'next-cookies';
 
-import dark from '@oracle/styles/themes/dark';
-import light from '@oracle/styles/themes/light';
+import darkPalette from '@oracle/styles/themes/darkPalette';
+import lightPalette from '@oracle/styles/themes/light';
 import { SHARED_OPTS } from '@api/utils/token';
+import {
+  THEME_COOKIE,
+  THEME_DARK,
+  THEME_LIGHT,
+  ThemeModeEnum,
+  themeModeFromCookie,
+} from '@oracle/styles/themes/mode';
 
-export const LOCAL_STORAGE_KEY_THEME: 'current_theme' = 'current_theme';
-const LOCAL_STORAGE_KEY_THEME_DARK: number = 0;
-const LOCAL_STORAGE_KEY_THEME_LIGHT: number = 1;
+export const LOCAL_STORAGE_KEY_THEME = THEME_COOKIE;
+const V2_THEME_SETTINGS = 'theme_settings';
 
-export function getCurrentTheme(ctx: any, invertedTheme = 1) {
-  let currentTheme;
-
-  if (ctx) {
-    const cookie = ServerCookie(ctx);
-    currentTheme = cookie[LOCAL_STORAGE_KEY_THEME];
-  } else {
-    currentTheme = Cookies.get(LOCAL_STORAGE_KEY_THEME);
-  }
-
-  if (Number(currentTheme) === invertedTheme) {
-    if (invertedTheme === LOCAL_STORAGE_KEY_THEME_DARK) {
-      return light;
-    } else {
-      return dark;
-    }
-  }
-
-  if (invertedTheme === LOCAL_STORAGE_KEY_THEME_LIGHT) {
-    return dark;
-  } else {
-    return light;
-  }
-
-  return dark;
+export function getThemeMode(ctx?: any): ThemeModeEnum {
+  const value = ctx ? ServerCookie(ctx)?.[THEME_COOKIE] : Cookies.get(THEME_COOKIE);
+  return themeModeFromCookie(value);
 }
 
-export function getCurrentInvertedTheme(ctx) {
-  return getCurrentTheme(ctx, LOCAL_STORAGE_KEY_THEME_DARK);
+export function paletteForMode(mode: ThemeModeEnum) {
+  return mode === ThemeModeEnum.LIGHT ? lightPalette : darkPalette;
 }
 
-export function setCurrentTheme(theme) {
+export function getCurrentTheme(ctx?: any) {
+  return paletteForMode(getThemeMode(ctx));
+}
+
+export function getCurrentInvertedTheme(ctx?: any) {
+  return getThemeMode(ctx) === ThemeModeEnum.LIGHT ? darkPalette : lightPalette;
+}
+
+// Saves the choice and reloads, since styles computed when the app loaded use the palette.
+export function setThemeMode(mode: ThemeModeEnum, reload: boolean = true) {
   // @ts-ignore
-  Cookies.set(LOCAL_STORAGE_KEY_THEME, theme, { ...SHARED_OPTS, expires: 9999 });
+  Cookies.set(THEME_COOKIE, String(mode === ThemeModeEnum.LIGHT ? THEME_LIGHT : THEME_DARK), {
+    ...SHARED_OPTS,
+    expires: 9999,
+  });
+  try {
+    // The v2 pages keep their own settings; give them the same mode.
+    const settings = JSON.parse(decodeURIComponent(Cookies.get(V2_THEME_SETTINGS) || '{}'));
+    // @ts-ignore
+    Cookies.set(V2_THEME_SETTINGS, JSON.stringify({ ...settings, mode, theme: undefined }), {
+      ...SHARED_OPTS,
+      expires: 9999,
+    });
+  } catch {
+    // An unreadable v2 cookie keeps the v2 default.
+  }
+  if (reload && typeof window !== 'undefined') {
+    window.location.reload();
+  }
+}
+
+export function setCurrentTheme(theme: number) {
+  setThemeMode(Number(theme) === THEME_LIGHT ? ThemeModeEnum.LIGHT : ThemeModeEnum.DARK);
 }
 
 export function toggleTheme() {
-  const currentTheme = Cookies.get(LOCAL_STORAGE_KEY_THEME);
-
-  return setCurrentTheme(
-    Number(currentTheme) === LOCAL_STORAGE_KEY_THEME_DARK || currentTheme === null
-      ? LOCAL_STORAGE_KEY_THEME_LIGHT
-      : LOCAL_STORAGE_KEY_THEME_DARK,
-  );
+  setThemeMode(getThemeMode() === ThemeModeEnum.LIGHT ? ThemeModeEnum.DARK : ThemeModeEnum.LIGHT);
 }

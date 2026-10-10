@@ -782,3 +782,53 @@ textarea {
 .react-calendar--selectRange .react-calendar__tile--hover {
   background-color: #4E4E4E;
 }
+
+/* Light theme: the rules above are written for the dark theme. */
+html[data-theme="light"] body {
+  background-color: #FFFFFF;
+}
+
+html[data-theme="light"] input[type="radio"] {
+  border-color: #9AA0AA;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+html[data-theme="light"] input[type="radio"]:checked {
+  background-color: #2A60FE;
+}
+
+html[data-theme="light"] .react-calendar,
+html[data-theme="light"] .react-calendar__navigation__next-button,
+html[data-theme="light"] .react-calendar__navigation__next2-button,
+html[data-theme="light"] .react-calendar__navigation__prev-button,
+html[data-theme="light"] .react-calendar__navigation__prev2-button,
+html[data-theme="light"] .react-calendar__navigation__label,
+html[data-theme="light"] .react-calendar__decade-view__years__year,
+html[data-theme="light"] .react-calendar__year-view__months__month,
+html[data-theme="light"] .react-calendar__month-view__weekdays__weekday,
+html[data-theme="light"] .react-calendar__month-view__days__day,
+html[data-theme="light"] .react-calendar__month-view__days__day--weekend {
+  color: #16181D;
+}
+
+html[data-theme="light"] .react-calendar__month-view__days__day--neighboringMonth {
+  color: #9AA0AA;
+}
+
+html[data-theme="light"] .react-calendar__navigation button:enabled:hover,
+html[data-theme="light"] .react-calendar__navigation button:enabled:focus,
+html[data-theme="light"] .react-calendar__tile:enabled:hover,
+html[data-theme="light"] .react-calendar__tile:enabled:focus,
+html[data-theme="light"] .react-calendar--selectRange .react-calendar__tile--hover {
+  background-color: #E8EAEE;
+}
+
+html[data-theme="light"] .react-calendar__tile--now,
+html[data-theme="light"] .react-calendar__tile--now:enabled:hover,
+html[data-theme="light"] .react-calendar__tile--now:enabled:focus {
+  background: #EEF1F6;
+}
+
+html[data-theme="light"] .react-calendar__tile--active {
+  color: #FFFFFF;
+}

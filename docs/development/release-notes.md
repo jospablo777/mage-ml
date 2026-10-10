@@ -464,6 +464,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Light theme.** Settings > Preferences > Light theme, or Light theme in the user menu,
+  switches this browser to light colors; dark stays the default. The choice is a cookie,
+  so the static export starts in it without a dark flash. The code editors use GitHub's
+  light colors, code blocks Prism's One Light, and ColumnAtlas and the charts follow the
+  theme. `mage-console --light` does the same for the terminal console.
 - **ColumnAtlas**, the block output explorer, replaces the table of pandas and Polars
   outputs in the notebook and on block runs. It reads the whole stored output, not a
   sample: column profiles in the headers (distribution and missing share), sort and

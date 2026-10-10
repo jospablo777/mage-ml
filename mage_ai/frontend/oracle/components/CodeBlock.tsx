@@ -2,9 +2,13 @@ import React, { useContext } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { ThemeContext } from 'styled-components';
-import { dark as darkStyle } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import {
+  dark as darkStyle,
+  oneLight as lightStyle,
+} from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 import dark from '@oracle/styles/themes/dark';
+import { isLightTheme } from '@oracle/styles/themes/mode';
 import {
   MONO_FONT_FAMILY_REGULAR as FONT_FAMILY_REGULAR,
 } from '@oracle/styles/fonts/primary';
@@ -51,7 +55,7 @@ function CodeBlock({
           color: (themeContext.content || dark.content).muted,
         }}
         showLineNumbers={showLineNumbers}
-        style={darkStyle}
+        style={isLightTheme() ? lightStyle : darkStyle}
         useInlineStyles
         wrapLines={wrapLines}
       >

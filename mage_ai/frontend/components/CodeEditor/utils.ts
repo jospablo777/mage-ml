@@ -63,12 +63,14 @@ export async function defineTheme(theme: string): Promise<boolean> {
       import(`monaco-themes/themes/${monacoThemes[theme]}.json`),
     ]);
     const themeData = themeModule.default || themeModule;
+    // Dark editors sit on black, light ones on white, matching the app's code cells.
+    const light = themeData.base === 'vs';
     monaco.editor.defineTheme(theme, {
       ...themeData,
       colors: {
         ...themeData.colors,
-        'editor.background': '#000000',
-        'editor.foreground': '#FFFFFF',
+        'editor.background': light ? '#FFFFFF' : '#000000',
+        'editor.foreground': light ? '#16181D' : '#FFFFFF',
       },
     });
     return true;

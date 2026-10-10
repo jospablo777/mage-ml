@@ -154,6 +154,7 @@ export type ThemeType = {
     hoverBorder: string;
     linkPrimary: string;
     linkSecondary: string;
+    toggleOff?: string;
   };
   loader: {
     color: string;

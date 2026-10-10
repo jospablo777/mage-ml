@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import App, { AppProps } from 'next/app';
 import Cookies from 'js-cookie';
 import LoadingBar from 'react-top-loading-bar';
@@ -39,7 +39,8 @@ import {
 import { SheetProvider } from '@context/Sheet/SheetProvider';
 import { ThemeType } from '@oracle/styles/themes/constants';
 import { addPageHistory } from '@storage/CommandCenter/utils';
-import { getCurrentTheme } from '@oracle/styles/themes/utils';
+import { ThemeModeEnum } from '@oracle/styles/themes/mode';
+import { getCurrentTheme, getThemeMode } from '@oracle/styles/themes/utils';
 import { gridTheme as gridThemeDefault, theme as stylesTheme } from '@styles/theme';
 import { isDemo } from '@utils/environment';
 import { queryFromUrl, queryString, redirectToUrl } from '@utils/url';
@@ -76,6 +77,23 @@ function MyApp(props: MyAppProps & AppProps) {
   const { Component, currentTheme, pageProps, router } = props;
   const { defaultTitle, themeProps = {}, title } = pageProps;
 
+  // A static export's HTML is built in the dark theme. In the browser the theme comes from
+  // the user's choice; when it is light, the app mounts again in it after hydration.
+  const [themeHydrated, setThemeHydrated] = useState(false);
+  useEffect(() => setThemeHydrated(true), []);
+  const themeMode = themeHydrated ? getThemeMode() : ThemeModeEnum.DARK;
+  const palette = themeHydrated ? getCurrentTheme() : themeProps?.currentTheme || currentTheme;
+  const theme = useMemo(() => ({ ...stylesTheme, ...palette }), [palette]);
+  // The command center renders in its own root from an event listener added once.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  useEffect(() => {
+    if (themeHydrated) {
+      document.documentElement.setAttribute('data-theme', themeMode);
+      document.documentElement.setAttribute('data-theme-ready', '');
+    }
+  }, [themeHydrated, themeMode]);
+
   const { featureEnabled, featureUUIDs } = useProject();
   const commandCenterEnabled = useMemo(
     () => featureEnabled?.(featureUUIDs?.COMMAND_CENTER),
@@ -103,7 +121,7 @@ function MyApp(props: MyAppProps & AppProps) {
   }, [savePageHistory]);
 
   useEffect(() => {
-    const handleRouteChangeComplete = (url: URL) => {
+    const handleRouteChangeComplete = () => {
       refLoadingBar?.current?.complete?.();
       savePageHistory();
     };
@@ -134,9 +152,7 @@ function MyApp(props: MyAppProps & AppProps) {
       if (commandCenterRootRef?.current) {
         commandCenterRootRef?.current?.render(
           <KeyboardContext.Provider value={keyboardContextValue}>
-            <ThemeProvider
-              theme={Object.assign(stylesTheme, themeProps?.currentTheme || currentTheme)}
-            >
+            <ThemeProvider theme={themeRef.current}>
               <GridThemeProvider gridTheme={gridThemeDefault}>
                 <ModalProvider>
                   <SheetProvider>
@@ -294,7 +310,7 @@ function MyApp(props: MyAppProps & AppProps) {
   return (
     <>
       <KeyboardContext.Provider value={keyboardContextValue}>
-        <ThemeProvider theme={Object.assign(stylesTheme, themeProps?.currentTheme || currentTheme)}>
+        <ThemeProvider key={themeMode} theme={theme}>
           <GridThemeProvider gridTheme={gridThemeDefault}>
             <ModalProvider>
               <SheetProvider>

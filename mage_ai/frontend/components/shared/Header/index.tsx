@@ -51,6 +51,8 @@ import { redirectToUrl } from '@utils/url';
 import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils';
 import { useModal } from '@context/Modal';
 import { useError } from '@context/Error';
+import { ThemeModeEnum } from '@oracle/styles/themes/mode';
+import { getThemeMode, toggleTheme } from '@oracle/styles/themes/utils';
 
 export type BreadcrumbType = BreadcrumbTypeOrig;
 
@@ -312,13 +314,9 @@ function Header({
         uuid: 'user_settings',
       },
       {
-        label: () => 'Light mode',
-        linkProps: {
-          href: 'https://www.mage.ai/build?ref=oss',
-          openNewWindow: true,
-        },
-        tag: 'Pro',
-        uuid: 'light_mode',
+        label: () => (getThemeMode() === ThemeModeEnum.LIGHT ? 'Dark theme' : 'Light theme'),
+        onClick: () => toggleTheme(),
+        uuid: 'theme_mode',
       },
     ];
 
