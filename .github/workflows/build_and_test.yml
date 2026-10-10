@@ -223,13 +223,15 @@ jobs:
         run: make -C integration_tests ci PYTEST_ARGS='-n 4'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
-        run: make -C integration_tests test-soak
+        run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
       # The same with block fusion: chains run as stages, through crashes and retries.
       - name: Run the scheduler soak test with block fusion
-        run: make -C integration_tests test-soak-fusion
+        run: make -C integration_tests test-soak-fusion PYTEST_ARGS='--junitxml=integration_tests/soak-fusion-results.xml'
       - name: Failed tests
         if: failure()
-        run: python3 scripts/junit_annotations.py integration_tests/results.xml
+        run: >-
+          python3 scripts/junit_annotations.py integration_tests/results.xml
+          integration_tests/soak-results.xml integration_tests/soak-fusion-results.xml
       - name: Service states
         if: failure()
         run: python3 scripts/compose_states.py integration_tests/compose.yaml
@@ -240,7 +242,10 @@ jobs:
         if: always()
         with:
           name: integration-test-results
-          path: integration_tests/results.xml
+          path: |
+            integration_tests/results.xml
+            integration_tests/soak-results.xml
+            integration_tests/soak-fusion-results.xml
           retention-days: 7
 
   test_backend:
