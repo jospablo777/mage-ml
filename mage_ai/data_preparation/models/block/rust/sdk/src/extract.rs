@@ -8,16 +8,27 @@ use crate::context::{BlockContext, Vars};
 use crate::prelude::*;
 use crate::protocol::{FrameFormat, Input};
 
+/// One upstream output: a file Mage wrote, or, inside a chain of Rust blocks run as one
+/// process, the previous block's output in memory.
+#[derive(Clone)]
+pub(crate) enum Item {
+    File(Input),
+    /// A table, still a lazy plan: the next block's query extends it, and Polars
+    /// optimizes the blocks' queries together.
+    Lazy(Box<LazyFrame>),
+    Json(Value),
+}
+
 pub struct Inputs<'a> {
     pub(crate) context: &'a BlockContext,
     pub(crate) job_dir: &'a Path,
-    pub(crate) items: std::vec::IntoIter<Input>,
+    pub(crate) items: std::vec::IntoIter<Item>,
     /// The number of upstream outputs taken so far, for error messages.
     pub(crate) taken: usize,
 }
 
 impl Inputs<'_> {
-    fn next(&mut self, wanted: &str) -> anyhow::Result<(usize, Input)> {
+    fn next(&mut self, wanted: &str) -> anyhow::Result<(usize, Item)> {
         let index = self.taken;
         match self.items.next() {
             Some(input) => {
@@ -61,14 +72,15 @@ pub trait FromInput: Sized {
 /// block's query uses.
 impl FromInput for LazyFrame {
     fn from_input(inputs: &mut Inputs<'_>) -> anyhow::Result<Self> {
-        let (index, input) = inputs.next("a table")?;
-        match input {
-            Input::Frame { format, path } => scan(inputs.job_dir, format, &path),
-            Input::Json { .. } => bail!(
+        let (index, item) = inputs.next("a table")?;
+        match item {
+            Item::File(Input::Frame { format, path }) => scan(inputs.job_dir, format, &path),
+            Item::Lazy(frame) => Ok(*frame),
+            Item::File(Input::Json { .. }) | Item::Json(_) => bail!(
                 "Upstream output {} is not a table; take it as serde_json::Value",
                 index + 1
             ),
-            Input::Empty => bail!(
+            Item::File(Input::Empty) => bail!(
                 "Upstream output {} is empty; take it as Option<LazyFrame>",
                 index + 1
             ),
@@ -93,7 +105,7 @@ impl<T: FromInput> FromInput for Option<T> {
             return Ok(None);
         }
         let mut peek = inputs.items.clone();
-        if matches!(peek.next(), Some(Input::Empty)) {
+        if matches!(peek.next(), Some(Item::File(Input::Empty))) {
             inputs.items.next();
             inputs.taken += 1;
             return Ok(None);
@@ -125,14 +137,15 @@ impl FromInput for Vec<DataFrame> {
 /// The next upstream output that is not a table, such as a dict or a list.
 impl FromInput for Value {
     fn from_input(inputs: &mut Inputs<'_>) -> anyhow::Result<Self> {
-        let (index, input) = inputs.next("a JSON value")?;
-        match input {
-            Input::Json { path } => {
+        let (index, item) = inputs.next("a JSON value")?;
+        match item {
+            Item::File(Input::Json { path }) => {
                 let bytes = std::fs::read(inputs.job_dir.join(path))?;
                 Ok(serde_json::from_slice(&bytes)?)
             }
-            Input::Empty => Ok(Value::Null),
-            Input::Frame { .. } => Err(anyhow!(
+            Item::Json(value) => Ok(value),
+            Item::File(Input::Empty) => Ok(Value::Null),
+            Item::File(Input::Frame { .. }) | Item::Lazy(_) => Err(anyhow!(
                 "Upstream output {} is a table; take it as LazyFrame or DataFrame",
                 index + 1
             )),

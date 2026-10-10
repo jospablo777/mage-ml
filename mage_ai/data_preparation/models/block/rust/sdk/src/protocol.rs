@@ -29,6 +29,43 @@ pub struct Job {
     pub variables: Map<String, Value>,
     /// Where outputs go; relative to the job directory.
     pub output_dir: PathBuf,
+    /// A chain of blocks to run in this process, each taking the previous block's output
+    /// in memory (see `run_chain`); `block_uuid` and `block_type` are the first block's.
+    #[serde(default)]
+    pub chain: Option<Vec<ChainStep>>,
+}
+
+/// One block of a chain.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChainStep {
+    pub block_uuid: String,
+    pub block_type: String,
+    /// The block's name in the binary.
+    pub entry: String,
+    /// Write the block's output, for Mage to store, though the chain does not need it.
+    #[serde(default)]
+    pub keep_output: bool,
+}
+
+/// What a chain reports: the last block's outputs, every block's tests (named
+/// `block: test`), and each block's time and kept outputs.
+#[derive(Debug, Serialize)]
+pub struct ChainResult {
+    pub api_version: u32,
+    pub outputs: Vec<OutputRecord>,
+    pub tests: Vec<TestRecord>,
+    pub blocks: Vec<ChainBlockRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChainBlockRecord {
+    pub block_uuid: String,
+    pub seconds: f64,
+    pub outputs: Vec<OutputRecord>,
+    /// The block's output went to the next block as a plan: its work ran in the next
+    /// block that computed its output.
+    pub planned: bool,
 }
 
 /// One upstream output, in the order of the block's upstream blocks.
@@ -87,6 +124,9 @@ pub struct ErrorRecord {
     pub message: String,
     /// file:line:column of a panic.
     pub location: Option<String>,
+    /// In a chain, the block that failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_uuid: Option<String>,
 }
 
 impl Job {

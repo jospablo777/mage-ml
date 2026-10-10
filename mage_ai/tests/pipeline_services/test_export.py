@@ -478,6 +478,12 @@ class RustBundleTest(unittest.TestCase):
         )
         (sdk / 'src' / 'lib.rs').write_text(
             'pub fn main(block: fn(), _tests: Vec<()>) -> ! { block(); std::process::exit(0) }\n'
+            'pub struct ChainBlock(fn());\n'
+            'pub fn chain_block(block: fn(), _tests: Vec<()>) -> ChainBlock { ChainBlock(block) }\n'
+            'pub fn run_chain(entries: Vec<(&\'static str, fn() -> ChainBlock)>) -> ! {\n'
+            '    for (_, make) in entries { (make().0)() }\n'
+            '    std::process::exit(0)\n'
+            '}\n'
         )
         crates = []
         for name in ('a', 'b'):
@@ -508,6 +514,9 @@ class RustBundleTest(unittest.TestCase):
             result = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                     env=dict(os.environ, MAGE_BLOCK=crate))
             self.assertEqual((result.returncode, result.stdout), (0, f'block {name}\n'))
+        chain = subprocess.run([binary, 'job'], capture_output=True, text=True,
+                               env=dict(os.environ, MAGE_CHAIN='1'))
+        self.assertEqual((chain.returncode, chain.stdout), (0, 'block a\nblock b\n'))
         result = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                 env=dict(os.environ, MAGE_BLOCK='block_missing'))
         self.assertEqual(result.returncode, 2)

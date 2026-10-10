@@ -32,7 +32,7 @@ pub mod runtime;
 pub use context::{BlockContext, Vars};
 /// The Polars version the SDK uses; add features in the project's Cargo.toml.
 pub use polars;
-pub use runtime::{main, run_job, test};
+pub use runtime::{ChainBlock, ChainEntries, chain_block, main, run_chain, run_job, test};
 
 pub mod prelude {
     pub use crate::context::{BlockContext, Vars};

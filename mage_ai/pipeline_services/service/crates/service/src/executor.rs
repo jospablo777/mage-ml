@@ -143,6 +143,11 @@ async fn run_blocks(
         .into_iter()
         .cloned()
         .collect();
+    let chains = rust_chains(pipeline, &order);
+    let chained: HashSet<String> = chains
+        .values()
+        .flat_map(|chain| chain.iter().skip(1).map(|b| b.uuid.clone()))
+        .collect();
     let mut outputs: HashMap<String, Vec<Value>> = HashMap::new();
     let mut started: HashSet<String> = HashSet::new();
     let mut tasks: JoinSet<BlockOutcome> = JoinSet::new();
@@ -152,6 +157,7 @@ async fn run_blocks(
         if failure.is_none() && !cancel.is_cancelled() {
             for block in &order {
                 if started.contains(&block.uuid)
+                    || chained.contains(&block.uuid)
                     || !block.upstream.iter().all(|u| outputs.contains_key(u))
                 {
                     continue;
@@ -159,6 +165,26 @@ async fn run_blocks(
                 started.insert(block.uuid.clone());
                 let inputs: Vec<Vec<Value>> =
                     block.upstream.iter().map(|u| outputs[u].clone()).collect();
+                if let Some(chain) = chains.get(&block.uuid) {
+                    for member in chain {
+                        started.insert(member.uuid.clone());
+                    }
+                    let task = ChainTask {
+                        service: service.clone(),
+                        blocks: chain.clone(),
+                        pipeline_uuid: pipeline.uuid.clone(),
+                        run_id: run_id.to_string(),
+                        output_dir: run_dir
+                            .join("blocks")
+                            .join(format!("{}__chain", sanitize(&block.uuid))),
+                        log: log.clone(),
+                        kwargs: kwargs.clone(),
+                        inputs,
+                        cancel: cancel.clone(),
+                    };
+                    tasks.spawn(task.run());
+                    continue;
+                }
                 let task = BlockTask {
                     service: service.clone(),
                     block: block.clone(),
@@ -228,6 +254,56 @@ fn mark_downstream_failed(service: &Service, pipeline: &Pipeline, run_id: &str, 
             }
         }
     }
+}
+
+/// Chains of Rust blocks that run as one process, keyed by their first block: in a
+/// service's one binary (`entry`), each block of a chain is the only downstream block of
+/// the one before and has no other upstream block, so nothing else needs the outputs in
+/// between. Each block's query then extends the previous block's lazy plan, and Polars
+/// optimizes the chain as one. MAGE_SERVICE_RUST_CHAINS=off runs each block on its own.
+fn rust_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, Vec<Block>> {
+    let mut chains = HashMap::new();
+    if std::env::var("MAGE_SERVICE_RUST_CHAINS").is_ok_and(|v| v == "off") {
+        return chains;
+    }
+    let downstream = pipeline.downstream();
+    let by_uuid: HashMap<&str, &Block> = order.iter().map(|b| (b.uuid.as_str(), b)).collect();
+    let chainable = |block: &Block| block.language == Language::Rust && block.entry.is_some();
+    let mut assigned: HashSet<&str> = HashSet::new();
+    for block in order {
+        if assigned.contains(block.uuid.as_str()) || !chainable(block) {
+            continue;
+        }
+        let mut chain = vec![block.clone()];
+        // One process has one MAGE_IO_CONFIG: blocks with different profiles split.
+        let mut profile = block.io_config.clone();
+        loop {
+            let last = chain.last().expect("a chain has a block");
+            let next = match downstream.get(last.uuid.as_str()).map(Vec::as_slice) {
+                Some([only]) => by_uuid.get(only).copied(),
+                _ => None,
+            };
+            let Some(next) = next else { break };
+            let compatible = match (&profile, &next.io_config) {
+                (Some(a), Some(b)) => a == b,
+                _ => true,
+            };
+            if !chainable(next) || next.upstream.len() != 1 || !compatible {
+                break;
+            }
+            if profile.is_none() {
+                profile = next.io_config.clone();
+            }
+            chain.push(next.clone());
+        }
+        if chain.len() > 1 {
+            for member in &chain {
+                assigned.insert(by_uuid[member.uuid.as_str()].uuid.as_str());
+            }
+            chains.insert(block.uuid.clone(), chain);
+        }
+    }
+    chains
 }
 
 pub fn sanitize(uuid: &str) -> String {
@@ -445,19 +521,7 @@ impl BlockTask {
             .as_ref()
             .map(|b| self.service.service_dir.join(b))
             .ok_or_else(|| BlockFailure::fatal("this Rust block has no binary"))?;
-        let mut inputs = Vec::with_capacity(self.inputs.len());
-        for (position, records) in self.inputs.iter().enumerate() {
-            inputs.push(rust_input(records).map_err(|reason| {
-                BlockFailure::fatal(format!(
-                    "upstream {} of this Rust block {reason}",
-                    self.block
-                        .upstream
-                        .get(position)
-                        .map(String::as_str)
-                        .unwrap_or("?")
-                ))
-            })?);
-        }
+        let inputs = rust_inputs(&self.block, &self.inputs)?;
         let job = json!({
             "api_version": 1,
             "block_uuid": self.block.uuid,
@@ -469,162 +533,511 @@ impl BlockTask {
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string())
             .map_err(|e| BlockFailure::retryable(format!("could not write the job: {e}")))?;
-
-        let mut command = tokio::process::Command::new(&binary);
-        command
-            .arg(&self.output_dir)
-            .current_dir(self.service.project_dir())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true)
-            .envs(self.service.extra_env.iter().cloned());
-        if let Some(entry) = &self.block.entry {
-            command.env("MAGE_BLOCK", entry);
-        }
-        if let Some(profile) = &self.block.io_config {
-            let extra = &self.service.extra_env;
-            let lookup = |name: &str| {
-                extra
-                    .iter()
-                    .find(|(k, _)| k == name)
-                    .map(|(_, v)| v.clone())
-                    .or_else(|| std::env::var(name).ok())
-            };
-            command.env(
-                "MAGE_IO_CONFIG",
-                io_config::render(profile, &lookup).to_string(),
-            );
-        }
-        let mut child = command.spawn().map_err(|e| {
-            BlockFailure::fatal(format!("could not start {}: {e}", binary.display()))
-        })?;
-        let pid = child.id().unwrap_or(0);
-        let mut readers = Vec::new();
-        for (stream, name) in [
-            (
-                child
-                    .stdout
-                    .take()
-                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-                "stdout",
-            ),
-            (
-                child
-                    .stderr
-                    .take()
-                    .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-                "stderr",
-            ),
-        ] {
-            if let Some(stream) = stream {
-                let log = self.log.clone();
-                let block = self.block.uuid.clone();
-                readers.push(tokio::spawn(async move {
-                    use tokio::io::AsyncBufReadExt;
-                    let mut lines = tokio::io::BufReader::new(stream).lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        log.write("info", Some(&block), Some(name), &line);
-                    }
-                }));
-            }
-        }
-        let waited = async {
-            match timeout {
-                Some(limit) => tokio::time::timeout(limit, child.wait())
-                    .await
-                    .map_err(|_| limit),
-                None => Ok(child.wait().await),
-            }
-        };
-        let status = tokio::select! {
-            status = waited => status,
-            _ = self.cancel.cancelled() => {
-                crate::python::kill_group(pid);
-                return Err(BlockFailure::fatal("the run was cancelled"));
-            }
-        };
-        let status = match status {
-            Ok(Ok(status)) => status,
-            Ok(Err(error)) => {
-                return Err(BlockFailure::retryable(format!(
-                    "waiting for the block failed: {error}"
-                )));
-            }
-            Err(limit) => {
-                crate::python::kill_group(pid);
-                return Err(BlockFailure::retryable(format!(
-                    "the block ran longer than {} seconds and was stopped",
-                    limit.as_secs()
-                )));
-            }
-        };
-        for reader in readers {
-            let _ = reader.await;
-        }
+        let env: Vec<(String, String)> = self
+            .block
+            .entry
+            .iter()
+            .map(|entry| ("MAGE_BLOCK".to_string(), entry.clone()))
+            .collect();
+        let status = run_rust_binary(
+            &self.service,
+            &binary,
+            &self.output_dir,
+            env,
+            self.block.io_config.as_ref(),
+            &self.log,
+            &self.block.uuid,
+            timeout,
+            &self.cancel,
+        )
+        .await?;
         let result_path = self.output_dir.join("result.json");
         if status.success() && result_path.exists() {
-            let text = std::fs::read_to_string(&result_path)
-                .map_err(|e| BlockFailure::retryable(format!("could not read the result: {e}")))?;
-            let result: Value = serde_json::from_str(&text)
-                .map_err(|e| BlockFailure::retryable(format!("invalid result: {e}")))?;
-            let tests = result
-                .get("tests")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let failed: Vec<String> = tests
-                .iter()
-                .filter(|t| t.get("passed").and_then(Value::as_bool) == Some(false))
-                .map(|t| {
-                    format!(
-                        "{}: {}",
-                        t.get("name").and_then(Value::as_str).unwrap_or("test"),
-                        t.get("message").and_then(Value::as_str).unwrap_or("failed")
-                    )
-                })
-                .collect();
-            if !failed.is_empty() {
-                return Err(BlockFailure::retryable(format!(
-                    "{} of {} tests failed: {}",
-                    failed.len(),
-                    tests.len(),
-                    failed.join("; ")
-                )));
-            }
-            let records = result
-                .get("outputs")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|mut record| {
-                    if let Some(path) = record.get("path").and_then(Value::as_str) {
-                        record["path"] = json!(self.output_dir.join(path));
-                    }
-                    record
-                })
-                .collect();
-            return Ok(records);
+            let result = read_result(&result_path)?;
+            test_failures(&result)?;
+            return Ok(output_records(&result, &self.output_dir));
         }
-        let error_path = self.output_dir.join("error.json");
-        let message = std::fs::read_to_string(&error_path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .map(|error| {
-                let message = error
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                match error.get("location").and_then(Value::as_str) {
-                    Some(location) => format!("{message} (at {location})"),
-                    None => message,
+        Err(rust_failure(&self.output_dir, status).0)
+    }
+}
+
+/// A Rust block's inputs for its job.json: the upstream outputs' files.
+fn rust_inputs(block: &Block, inputs: &[Vec<Value>]) -> Result<Vec<Value>, BlockFailure> {
+    let mut items = Vec::with_capacity(inputs.len());
+    for (position, records) in inputs.iter().enumerate() {
+        items.push(rust_input(records).map_err(|reason| {
+            BlockFailure::fatal(format!(
+                "upstream {} of this Rust block {reason}",
+                block
+                    .upstream
+                    .get(position)
+                    .map(String::as_str)
+                    .unwrap_or("?")
+            ))
+        })?);
+    }
+    Ok(items)
+}
+
+/// Runs a Rust binary on its job directory and returns its exit status. Its output goes
+/// to the run's log under `tag`; a chain of blocks prints a marker before each block, and
+/// the lines after it go under that block.
+#[allow(clippy::too_many_arguments)]
+async fn run_rust_binary(
+    service: &Service,
+    binary: &Path,
+    job_dir: &Path,
+    env: Vec<(String, String)>,
+    io_config_profile: Option<&Value>,
+    log: &RunLog,
+    tag: &str,
+    timeout: Option<Duration>,
+    cancel: &CancellationToken,
+) -> Result<std::process::ExitStatus, BlockFailure> {
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .arg(job_dir)
+        .current_dir(service.project_dir())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true)
+        .envs(service.extra_env.iter().cloned())
+        .envs(env);
+    if let Some(profile) = io_config_profile {
+        let extra = &service.extra_env;
+        let lookup = |name: &str| {
+            extra
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+                .or_else(|| std::env::var(name).ok())
+        };
+        command.env(
+            "MAGE_IO_CONFIG",
+            io_config::render(profile, &lookup).to_string(),
+        );
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| BlockFailure::fatal(format!("could not start {}: {e}", binary.display())))?;
+    let pid = child.id().unwrap_or(0);
+    let current = Arc::new(std::sync::Mutex::new(tag.to_string()));
+    let mut readers = Vec::new();
+    for (stream, name) in [
+        (
+            child
+                .stdout
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+            "stdout",
+        ),
+        (
+            child
+                .stderr
+                .take()
+                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+            "stderr",
+        ),
+    ] {
+        if let Some(stream) = stream {
+            let log = log.clone();
+            let current = current.clone();
+            readers.push(tokio::spawn(async move {
+                use tokio::io::AsyncBufReadExt;
+                let mut lines = tokio::io::BufReader::new(stream).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(block) = line.strip_prefix(BLOCK_MARKER) {
+                        *current.lock().unwrap_or_else(|p| p.into_inner()) = block.to_string();
+                        continue;
+                    }
+                    let block = current.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    log.write("info", Some(&block), Some(name), &line);
                 }
+            }));
+        }
+    }
+    let waited = async {
+        match timeout {
+            Some(limit) => tokio::time::timeout(limit, child.wait())
+                .await
+                .map_err(|_| limit),
+            None => Ok(child.wait().await),
+        }
+    };
+    let status = tokio::select! {
+        status = waited => status,
+        _ = cancel.cancelled() => {
+            crate::python::kill_group(pid);
+            return Err(BlockFailure::fatal("the run was cancelled"));
+        }
+    };
+    let status = match status {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => {
+            return Err(BlockFailure::retryable(format!(
+                "waiting for the block failed: {error}"
+            )));
+        }
+        Err(limit) => {
+            crate::python::kill_group(pid);
+            return Err(BlockFailure::retryable(format!(
+                "the block ran longer than {} seconds and was stopped",
+                limit.as_secs()
+            )));
+        }
+    };
+    for reader in readers {
+        let _ = reader.await;
+    }
+    Ok(status)
+}
+
+/// The marker a chain prints before each block (mage::runtime::BLOCK_MARKER).
+const BLOCK_MARKER: &str = "\u{1e}mage-block ";
+
+fn read_result(path: &Path) -> Result<Value, BlockFailure> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| BlockFailure::retryable(format!("could not read the result: {e}")))?;
+    serde_json::from_str(&text).map_err(|e| BlockFailure::retryable(format!("invalid result: {e}")))
+}
+
+fn test_failures(result: &Value) -> Result<(), BlockFailure> {
+    let tests = result
+        .get("tests")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let failed: Vec<String> = tests
+        .iter()
+        .filter(|t| t.get("passed").and_then(Value::as_bool) == Some(false))
+        .map(|t| {
+            format!(
+                "{}: {}",
+                t.get("name").and_then(Value::as_str).unwrap_or("test"),
+                t.get("message").and_then(Value::as_str).unwrap_or("failed")
+            )
+        })
+        .collect();
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(BlockFailure::retryable(format!(
+        "{} of {} tests failed: {}",
+        failed.len(),
+        tests.len(),
+        failed.join("; ")
+    )))
+}
+
+/// The output records of a result, with paths made absolute.
+fn output_records(result: &Value, output_dir: &Path) -> Vec<Value> {
+    result
+        .get("outputs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut record| {
+            if let Some(path) = record.get("path").and_then(Value::as_str) {
+                record["path"] = json!(output_dir.join(path));
+            }
+            record
+        })
+        .collect()
+}
+
+/// Why a Rust binary failed, and the block that failed when it ran a chain.
+fn rust_failure(
+    job_dir: &Path,
+    status: std::process::ExitStatus,
+) -> (BlockFailure, Option<String>) {
+    let error = std::fs::read_to_string(job_dir.join("error.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let block = error
+        .as_ref()
+        .and_then(|e| e.get("block_uuid"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let message = error
+        .map(|error| {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            match error.get("location").and_then(Value::as_str) {
+                Some(location) => format!("{message} (at {location})"),
+                None => message,
+            }
+        })
+        .unwrap_or_else(|| format!("the block exited with {status}"));
+    (BlockFailure::retryable(message), block)
+}
+
+/// A chain of Rust blocks (rust_chains) run as one process. Every block keeps its block
+/// run: the chain's attempts start them all, and each finishes with its own time.
+struct ChainTask {
+    service: Arc<Service>,
+    blocks: Vec<Block>,
+    pipeline_uuid: String,
+    run_id: String,
+    output_dir: PathBuf,
+    log: RunLog,
+    kwargs: Arc<Map<String, Value>>,
+    inputs: Vec<Vec<Value>>,
+    cancel: CancellationToken,
+}
+
+impl ChainTask {
+    async fn run(self) -> BlockOutcome {
+        let head = &self.blocks[0];
+        let tail = &self.blocks[self.blocks.len() - 1];
+        let attempts = self
+            .blocks
+            .iter()
+            .map(|b| b.retry.retries)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let timeout = self
+            .blocks
+            .iter()
+            .map(|b| b.timeout_seconds)
+            .sum::<Option<u64>>()
+            .map(Duration::from_secs);
+        self.log.info(
+            Some(&head.uuid),
+            &format!(
+                "Runs with {} as one compiled chain of {} Rust blocks.",
+                self.blocks[1..]
+                    .iter()
+                    .map(|b| b.uuid.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                self.blocks.len()
+            ),
+        );
+        let mut failure: (String, Option<String>) = (String::new(), None);
+        for attempt in 1..=attempts {
+            if self.cancel.is_cancelled() {
+                break;
+            }
+            for block in &self.blocks {
+                let _ = self
+                    .service
+                    .ledger
+                    .start_block(&self.run_id, &block.uuid, attempt);
+            }
+            if attempt > 1 {
+                self.log.info(
+                    Some(&head.uuid),
+                    &format!("Attempt {attempt} of {attempts} of the chain."),
+                );
+            }
+            let _ = std::fs::remove_dir_all(&self.output_dir);
+            if let Err(error) = std::fs::create_dir_all(&self.output_dir) {
+                failure = (
+                    format!("could not create {}: {error}", self.output_dir.display()),
+                    None,
+                );
+                break;
+            }
+            match self.run_once(timeout).await {
+                Ok((records, seconds)) => {
+                    for (position, block) in self.blocks.iter().enumerate() {
+                        let last = position + 1 == self.blocks.len();
+                        let (elapsed, planned) =
+                            seconds.get(position).copied().unwrap_or((0.0, false));
+                        // The block whose computation ran this block's query too.
+                        let computed_in = self.blocks[position..]
+                            .iter()
+                            .zip(&seconds[position.min(seconds.len())..])
+                            .find(|(_, (_, planned))| !planned)
+                            .map(|(b, _)| b.uuid.as_str())
+                            .unwrap_or(tail.uuid.as_str());
+                        let _ = self.service.ledger.finish_block(
+                            &self.run_id,
+                            &block.uuid,
+                            BlockStatus::Completed,
+                            None,
+                            if last { &records } else { &[] },
+                        );
+                        let message = if planned {
+                            format!(
+                                "Planned in the compiled chain; its work ran with {computed_in}."
+                            )
+                        } else {
+                            format!("Completed in {elapsed:.2} s in the compiled chain.")
+                        };
+                        self.log.info(Some(&block.uuid), &message);
+                        self.service.observe_block(
+                            &self.pipeline_uuid,
+                            &block.uuid,
+                            Duration::from_secs_f64(elapsed),
+                            true,
+                        );
+                    }
+                    return BlockOutcome {
+                        block: tail.uuid.clone(),
+                        result: Ok(records),
+                        cancelled: false,
+                    };
+                }
+                Err((
+                    BlockFailure {
+                        message,
+                        details,
+                        retryable,
+                    },
+                    block,
+                )) => {
+                    let failed = block.clone().unwrap_or_else(|| head.uuid.clone());
+                    self.service
+                        .observe_block(&self.pipeline_uuid, &failed, Duration::ZERO, false);
+                    let mut text = message.clone();
+                    if !details.is_empty() {
+                        text.push('\n');
+                        text.push_str(details.trim_end());
+                    }
+                    self.log.error(Some(&failed), &text);
+                    failure = (message, block);
+                    if !retryable || attempt == attempts || self.cancel.is_cancelled() {
+                        break;
+                    }
+                    let delay = head.retry.delay(attempt + 1);
+                    self.log
+                        .info(Some(&head.uuid), &format!("Retrying in {delay:.1} s."));
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs_f64(delay)) => {}
+                        _ = self.cancel.cancelled() => break,
+                    }
+                }
+            }
+        }
+        let cancelled = self.cancel.is_cancelled();
+        let (message, block) = failure;
+        if cancelled {
+            for block in &self.blocks {
+                let _ = self.service.ledger.finish_block(
+                    &self.run_id,
+                    &block.uuid,
+                    BlockStatus::Cancelled,
+                    Some("the run was cancelled"),
+                    &[],
+                );
+            }
+            return BlockOutcome {
+                block: head.uuid.clone(),
+                result: Err("the run was cancelled".into()),
+                cancelled: true,
+            };
+        }
+        // The blocks before the one that failed returned; the run marks the ones after it
+        // upstream_failed.
+        let failed = block.unwrap_or_else(|| head.uuid.clone());
+        for block in &self.blocks {
+            if block.uuid == failed {
+                let _ = self.service.ledger.finish_block(
+                    &self.run_id,
+                    &block.uuid,
+                    BlockStatus::Failed,
+                    Some(&message),
+                    &[],
+                );
+                break;
+            }
+            let _ = self.service.ledger.finish_block(
+                &self.run_id,
+                &block.uuid,
+                BlockStatus::Completed,
+                None,
+                &[],
+            );
+        }
+        BlockOutcome {
+            block: failed,
+            result: Err(message),
+            cancelled: false,
+        }
+    }
+
+    async fn run_once(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<(Vec<Value>, Vec<(f64, bool)>), (BlockFailure, Option<String>)> {
+        let head = &self.blocks[0];
+        let binary = head
+            .binary
+            .as_ref()
+            .map(|b| self.service.service_dir.join(b))
+            .ok_or_else(|| (BlockFailure::fatal("this Rust block has no binary"), None))?;
+        let inputs = rust_inputs(head, &self.inputs).map_err(|f| (f, None))?;
+        let steps: Vec<Value> = self
+            .blocks
+            .iter()
+            .map(|b| {
+                json!({
+                    "block_uuid": b.uuid,
+                    "block_type": b.block_type.as_str(),
+                    "entry": b.entry,
+                })
             })
-            .unwrap_or_else(|| format!("the block exited with {status}"));
-        Err(BlockFailure::retryable(message))
+            .collect();
+        let job = json!({
+            "api_version": 1,
+            "block_uuid": head.uuid,
+            "block_type": head.block_type.as_str(),
+            "pipeline_uuid": self.pipeline_uuid,
+            "inputs": inputs,
+            "variables": *self.kwargs,
+            "output_dir": ".",
+            "chain": steps,
+        });
+        std::fs::write(self.output_dir.join("job.json"), job.to_string()).map_err(|e| {
+            (
+                BlockFailure::retryable(format!("could not write the job: {e}")),
+                None,
+            )
+        })?;
+        let profile = self.blocks.iter().find_map(|b| b.io_config.as_ref());
+        let status = run_rust_binary(
+            &self.service,
+            &binary,
+            &self.output_dir,
+            vec![("MAGE_CHAIN".to_string(), "1".to_string())],
+            profile,
+            &self.log,
+            &head.uuid,
+            timeout,
+            &self.cancel,
+        )
+        .await
+        .map_err(|f| (f, None))?;
+        let result_path = self.output_dir.join("result.json");
+        if status.success() && result_path.exists() {
+            let result = read_result(&result_path).map_err(|f| (f, None))?;
+            test_failures(&result).map_err(|f| (f, None))?;
+            let seconds = result
+                .get("blocks")
+                .and_then(Value::as_array)
+                .map(|blocks| {
+                    blocks
+                        .iter()
+                        .map(|b| {
+                            (
+                                b.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+                                b.get("planned").and_then(Value::as_bool).unwrap_or(false),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Ok((output_records(&result, &self.output_dir), seconds));
+        }
+        Err(rust_failure(&self.output_dir, status))
     }
 }
 
@@ -689,6 +1102,70 @@ fn rust_input(records: &[Value]) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pipeline(blocks: Value) -> Pipeline {
+        serde_json::from_value(
+            json!({"uuid": "p", "name": "p", "max_concurrent_runs": 1, "blocks": blocks}),
+        )
+        .unwrap()
+    }
+
+    fn rust(uuid: &str, upstream: &[&str]) -> Value {
+        json!({"uuid": uuid, "type": "transformer", "language": "rust", "file": "x.rs",
+               "sha256": "0", "upstream": upstream, "binary": "bin/mage-blocks",
+               "entry": format!("block_{uuid}")})
+    }
+
+    fn chains_of(pipeline: &Pipeline) -> Vec<Vec<String>> {
+        let order: Vec<Block> = pipeline
+            .topological_order()
+            .unwrap()
+            .into_iter()
+            .cloned()
+            .collect();
+        let mut chains: Vec<Vec<String>> = rust_chains(pipeline, &order)
+            .into_values()
+            .map(|c| c.into_iter().map(|b| b.uuid).collect())
+            .collect();
+        chains.sort();
+        chains
+    }
+
+    #[test]
+    fn rust_chains_are_linear_runs_of_bundled_rust_blocks() {
+        let python = json!({"uuid": "py", "type": "transformer", "language": "python",
+                            "file": "py.py", "sha256": "0", "upstream": ["c"]});
+        // a -> b -> c, and c feeds both py and f: the chain is a, b, c and ends at c.
+        let fanned = pipeline(json!([
+            rust("a", &[]),
+            rust("b", &["a"]),
+            rust("c", &["b"]),
+            python,
+            rust("f", &["c"]),
+        ]));
+        assert_eq!(chains_of(&fanned), vec![vec!["a", "b", "c"]]);
+
+        // g has two upstream blocks, so it starts no chain with either.
+        let joined = pipeline(json!([
+            rust("d", &[]),
+            rust("e", &[]),
+            rust("g", &["d", "e"]),
+            rust("h", &["g"]),
+        ]));
+        assert_eq!(chains_of(&joined), vec![vec!["g", "h"]]);
+
+        // Different connection profiles cannot share one process.
+        let mut x = rust("x", &[]);
+        x["io_config"] = json!({"POSTGRES_HOST": "a"});
+        let mut y = rust("y", &["x"]);
+        y["io_config"] = json!({"POSTGRES_HOST": "b"});
+        assert!(chains_of(&pipeline(json!([x, y]))).is_empty());
+
+        // Blocks without the service's one binary run on their own.
+        let mut own = rust("o", &[]);
+        own.as_object_mut().unwrap().remove("entry");
+        assert!(chains_of(&pipeline(json!([own, rust("p2", &["o"])]))).is_empty());
+    }
 
     #[test]
     fn upstream_outputs_become_arguments_as_in_mage() {

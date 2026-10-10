@@ -8,11 +8,11 @@ use std::sync::Mutex;
 use crate::prelude::*;
 
 use crate::context::{BlockContext, Vars};
-use crate::extract::{FromInput, Inputs};
+use crate::extract::{FromInput, Inputs, Item};
 use crate::output::{IntoOutputs, Output, read_frame, write_output};
 use crate::protocol::{
-    API_VERSION, ERROR_FILE, ErrorRecord, Job, OutputRecord, RESULT_FILE, RunResult, TestRecord,
-    write_json_atomic,
+    API_VERSION, ChainBlockRecord, ChainResult, ERROR_FILE, ErrorRecord, Job, OutputRecord,
+    RESULT_FILE, RunResult, TestRecord, write_json_atomic,
 };
 
 /// A block function: any function whose parameters are [`FromInput`] values and whose
@@ -189,6 +189,7 @@ fn install_panic_hook() {
                 kind: "panic",
                 message,
                 location,
+                block_uuid: current_block(),
             });
         }
     }));
@@ -236,7 +237,12 @@ pub fn run_job<Args, F: BlockFn<Args>>(
     let mut inputs = Inputs {
         context: &context,
         job_dir,
-        items: job.inputs.into_iter(),
+        items: job
+            .inputs
+            .into_iter()
+            .map(Item::File)
+            .collect::<Vec<_>>()
+            .into_iter(),
         taken: 0,
     };
     timings.mark("job");
@@ -406,6 +412,7 @@ pub fn main<Args, F: BlockFn<Args>>(block: F, tests: Vec<Test>) -> ! {
             kind: "error",
             message: describe(&error),
             location: None,
+            block_uuid: None,
         },
         Err(_) => PANIC
             .lock()
@@ -415,10 +422,245 @@ pub fn main<Args, F: BlockFn<Args>>(block: F, tests: Vec<Test>) -> ! {
                 kind: "panic",
                 message: "The block panicked".to_string(),
                 location: None,
+                block_uuid: None,
             }),
     };
     if let Err(error) = write_json_atomic(&job_dir.join(ERROR_FILE), &record) {
         eprintln!("Could not report the error to Mage: {error}");
     }
     std::process::exit(1);
+}
+
+// ---- chains -----------------------------------------------------------------------------
+
+/// The line a chain prints before each block's output, so the logs name the block.
+pub const BLOCK_MARKER: &str = "\u{1e}mage-block ";
+
+static CURRENT_BLOCK: Mutex<Option<String>> = Mutex::new(None);
+
+fn current_block() -> Option<String> {
+    CURRENT_BLOCK.lock().ok().and_then(|slot| slot.clone())
+}
+
+fn set_current_block(uuid: &str) {
+    if let Ok(mut slot) = CURRENT_BLOCK.lock() {
+        *slot = Some(uuid.to_string());
+    }
+}
+
+/// A block's function and tests, for a chain: what the generated library of a block
+/// returns from `mage_block`.
+type BlockCall = Box<dyn FnOnce(&mut Inputs<'_>) -> anyhow::Result<Vec<Output>>>;
+
+/// The blocks a chain binary holds: each block's name and the function that returns it.
+pub type ChainEntries = Vec<(&'static str, fn() -> ChainBlock)>;
+
+pub struct ChainBlock {
+    call: BlockCall,
+    tests: Vec<Test>,
+}
+
+/// Wraps a block function and its tests for [`run_chain`].
+pub fn chain_block<Args, F>(function: F, tests: Vec<Test>) -> ChainBlock
+where
+    F: BlockFn<Args> + 'static,
+{
+    ChainBlock {
+        call: Box::new(move |inputs: &mut Inputs<'_>| function.call(inputs)),
+        tests,
+    }
+}
+
+/// The entry point of a binary that runs a chain of blocks: `binary <job directory>`,
+/// with the chain in job.json. Each block takes the previous block's output in memory;
+/// a table stays a lazy plan, so Polars optimizes the chain's queries as one (a filter
+/// reaches the scan of the first block, the join streams into the aggregation). A
+/// block's output is computed on its own only when Mage keeps it, its tests check it,
+/// or it is the last block's.
+pub fn run_chain(entries: ChainEntries) -> ! {
+    let Some(job_dir) = std::env::args_os().nth(1).map(PathBuf::from) else {
+        eprintln!("This runs Mage blocks; Mage runs it with a job directory.");
+        std::process::exit(2);
+    };
+    install_panic_hook();
+    exit_with_parent();
+    let outcome = panic::catch_unwind(AssertUnwindSafe(|| run_chain_job(&entries, &job_dir)));
+    let record = match outcome {
+        Ok(Ok(())) => std::process::exit(0),
+        Ok(Err(error)) => ErrorRecord {
+            kind: "error",
+            message: describe(&error),
+            location: None,
+            block_uuid: current_block(),
+        },
+        Err(_) => PANIC
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .unwrap_or(ErrorRecord {
+                kind: "panic",
+                message: "The block panicked".to_string(),
+                location: None,
+                block_uuid: current_block(),
+            }),
+    };
+    if let Err(error) = write_json_atomic(&job_dir.join(ERROR_FILE), &record) {
+        eprintln!("Could not report the error to Mage: {error}");
+    }
+    std::process::exit(1);
+}
+
+fn run_tests(
+    block: &str,
+    tests: &[Test],
+    subject: &TestSubject,
+) -> anyhow::Result<Vec<TestRecord>> {
+    let records: Vec<TestRecord> = tests
+        .iter()
+        .map(|test| {
+            let outcome = panic::catch_unwind(AssertUnwindSafe(|| (test.check)(subject)))
+                .unwrap_or_else(|_| Err(take_panic_message()));
+            TestRecord {
+                name: format!("{block}: {}", test.name),
+                passed: outcome.is_ok(),
+                message: outcome.err(),
+            }
+        })
+        .collect();
+    let failed: Vec<String> = records
+        .iter()
+        .filter(|t| !t.passed)
+        .map(|t| format!("{} ({})", t.name, t.message.as_deref().unwrap_or("failed")))
+        .collect();
+    if !failed.is_empty() {
+        bail!(
+            "{} of {} tests failed: {}",
+            failed.len(),
+            records.len(),
+            failed.join("; ")
+        );
+    }
+    Ok(records)
+}
+
+fn run_chain_job(entries: &ChainEntries, job_dir: &Path) -> anyhow::Result<()> {
+    let job = Job::read(job_dir).context("Reading the job from Mage")?;
+    let steps = job
+        .chain
+        .clone()
+        .ok_or_else(|| anyhow!("The job names no chain of blocks"))?;
+    let output_dir = job_dir.join(&job.output_dir);
+    std::fs::create_dir_all(&output_dir)?;
+    let scratch_dir = job_dir.join("scratch");
+    std::fs::create_dir_all(&scratch_dir)?;
+    let mut items: Vec<Item> = job.inputs.into_iter().map(Item::File).collect();
+    let mut blocks = Vec::with_capacity(steps.len());
+    let mut tests = Vec::new();
+    let mut final_outputs = Vec::new();
+
+    for (position, step) in steps.iter().enumerate() {
+        set_current_block(&step.block_uuid);
+        println!("{BLOCK_MARKER}{}", step.block_uuid);
+        let started = std::time::Instant::now();
+        let make = entries
+            .iter()
+            .find(|(name, _)| *name == step.entry)
+            .map(|(_, make)| *make)
+            .ok_or_else(|| anyhow!("This binary has no block {}", step.entry))?;
+        let block = make();
+        let context = BlockContext {
+            block_uuid: step.block_uuid.clone(),
+            block_type: step.block_type.clone(),
+            pipeline_uuid: job.pipeline_uuid.clone(),
+            execution_partition: job.execution_partition.clone(),
+            variables: Vars(job.variables.clone()),
+            scratch_dir: scratch_dir.clone(),
+        };
+        let mut inputs = Inputs {
+            context: &context,
+            job_dir,
+            items: std::mem::take(&mut items).into_iter(),
+            taken: 0,
+        };
+        let outputs = (block.call)(&mut inputs)?;
+        let mut kept = Vec::new();
+        let mut planned = false;
+        if position + 1 == steps.len() {
+            for (index, output) in outputs.into_iter().enumerate() {
+                final_outputs.push(write_output(&output_dir, job_dir, index, output)?);
+            }
+            if !block.tests.is_empty() {
+                let subject = test_subject(job_dir, &final_outputs)?;
+                tests.extend(run_tests(&step.block_uuid, &block.tests, &subject)?);
+            }
+        } else {
+            let materialize = step.keep_output || !block.tests.is_empty();
+            let mut subject = TestSubject {
+                frame: None,
+                json: None,
+                decision: None,
+            };
+            let block_dir = output_dir.join("chain").join(position.to_string());
+            for (index, output) in outputs.into_iter().enumerate() {
+                let item = match output {
+                    Output::Lazy(frame) if !materialize => {
+                        planned = true;
+                        Item::Lazy(frame)
+                    }
+                    Output::Lazy(frame) => {
+                        let frame = frame
+                            .collect()
+                            .with_context(|| format!("Computing output {index}"))?;
+                        materialized(frame, &mut subject)
+                    }
+                    Output::Frame(frame) => materialized(frame, &mut subject),
+                    Output::Json(value) => {
+                        if subject.json.is_none() {
+                            subject.json = Some(value.clone());
+                        }
+                        Item::Json(value)
+                    }
+                    Output::Decision(_) => {
+                        bail!("A conditional block cannot run in a chain of blocks")
+                    }
+                };
+                if step.keep_output {
+                    std::fs::create_dir_all(&block_dir)?;
+                    let output = match &item {
+                        Item::Lazy(frame) => Output::Frame(frame.as_ref().clone().collect()?),
+                        Item::Json(value) => Output::Json(value.clone()),
+                        Item::File(_) => unreachable!("chain outputs are in memory"),
+                    };
+                    kept.push(write_output(&block_dir, job_dir, index, output)?);
+                }
+                items.push(item);
+            }
+            if !block.tests.is_empty() {
+                tests.extend(run_tests(&step.block_uuid, &block.tests, &subject)?);
+            }
+        }
+        blocks.push(ChainBlockRecord {
+            block_uuid: step.block_uuid.clone(),
+            seconds: started.elapsed().as_secs_f64(),
+            outputs: kept,
+            planned,
+        });
+    }
+    write_json_atomic(
+        &job_dir.join(RESULT_FILE),
+        &ChainResult {
+            api_version: API_VERSION,
+            outputs: final_outputs,
+            tests,
+            blocks,
+        },
+    )
+}
+
+/// A computed table: the next block takes it as a plan over the data in memory.
+fn materialized(frame: DataFrame, subject: &mut TestSubject) -> Item {
+    if subject.frame.is_none() {
+        subject.frame = Some(frame.clone());
+    }
+    Item::Lazy(Box::new(frame.lazy()))
 }
