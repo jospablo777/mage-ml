@@ -128,7 +128,11 @@ RUN mkdir -p /tmp/rust-warmup/transformers && \
       > /tmp/rust-warmup/transformers/warmup.rs && \
     mage rust build /tmp/rust-warmup && \
     find /opt/mage-rust/target/release -maxdepth 1 -type f -name 'block_warmup*' -delete && \
-    rm -rf /opt/mage-rust/bin /tmp/rust-warmup /opt/mage-rust/target/release/incremental
+    rm -rf /opt/mage-rust/bin /tmp/rust-warmup /opt/mage-rust/target/release/incremental \
+      /opt/cargo/registry/src
+# Cargo extracts crate sources again from registry/cache when a block needs them. Shipped
+# sources carry the crates' own Cargo.lock files, which scanners report as vulnerable
+# dependencies of the image.
 ENV MAGE_DATA_DIR=/home/src/mage_data \
     PYTHONPATH=/home/src
 WORKDIR /home/src

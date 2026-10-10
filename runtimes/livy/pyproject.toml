@@ -6,8 +6,8 @@ dependencies = [
   "sparkmagic==0.23.0",
   "pandas>=2.3,<3",
   "requests>=2.33.0",
-  "urllib3>=2.7,<3",
-  "tornado>=6.5.7",
+  "urllib3>=2.8,<3",
+  "tornado>=6.5.9",
   "jupyter-server>=2.20.0",
 ]
 

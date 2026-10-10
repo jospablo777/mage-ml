@@ -22,7 +22,7 @@ members = [
 ]
 constraints = [
     { name = "pyopenssl", specifier = ">=25.1.0" },
-    { name = "tornado", specifier = ">=6.5.8" },
+    { name = "tornado", specifier = ">=6.5.9" },
 ]
 
 [[package]]
@@ -4700,13 +4700,13 @@ requires-dist = [
     { name = "tables", marker = "extra == 'hdf5'", specifier = ">=3.11.1" },
     { name = "terminado", specifier = ">=0.18.1" },
     { name = "thefuzz", specifier = ">=0.22.1" },
-    { name = "tornado", specifier = ">=6.5.8" },
+    { name = "tornado", specifier = ">=6.5.9" },
     { name = "transformers", marker = "extra == 'qdrant'", specifier = ">=5.10,<6" },
     { name = "trino", marker = "extra == 'dbt'", specifier = "~=0.326" },
     { name = "trino", marker = "extra == 'trino'", specifier = "~=0.326" },
     { name = "typer", specifier = ">=0.18" },
     { name = "typing-extensions", specifier = ">=4.13.2" },
-    { name = "urllib3", specifier = ">=2.7,<3" },
+    { name = "urllib3", specifier = ">=2.8,<3" },
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
