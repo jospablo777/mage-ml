@@ -108,6 +108,23 @@ instead of starting another, so a client can retry safely.
 `MAGE_SERVICE_READ_TOKEN` sets a second token that can read runs, logs and the snapshot but
 cannot start, cancel or change anything; give it to dashboards and monitoring.
 
+## Watch it from a terminal
+
+`mage-console` is a terminal dashboard for a running service: per pipeline, its succeeded,
+failed, running and queued runs, run durations with their p95, throughput, the recent runs
+with their errors, the next scheduled run, and the embedded models. It refreshes every
+second, shows when its data is stale or the connection is lost, and is read-only unless
+started with `--allow-control`, which enables pause, resume and concurrency changes checked
+against the pipeline's settings revision.
+
+```bash
+cargo build --release --manifest-path sales-service/build/mage_service/Cargo.toml -p mage-console
+MAGE_SERVICE_READ_TOKEN=... sales-service/build/mage_service/target/release/mage-console \
+  --endpoint http://localhost:8080
+```
+
+Remote services need HTTPS or a tunnel; plain HTTP is accepted only on localhost.
+
 ## Schedules
 
 The service carries the pipelines' time triggers, but it runs them only with

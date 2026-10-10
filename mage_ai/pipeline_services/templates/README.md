@@ -65,6 +65,23 @@ at export with its version, run, flavors, signature, params and metrics
 built with. Export again to ship a new version: `mage export service ... --model
 fraud=models:/fraud@champion`.
 
+## Watch it from a terminal
+
+`mage-console` shows the service live: each pipeline's runs, durations, throughput, recent
+runs with their errors, the next scheduled run and the embedded models. It is read-only
+unless started with `--allow-control`, which adds pause, resume and concurrency changes
+that the service checks against the settings' revision. Build it once from this folder
+(it needs Rust) and point it at the service:
+
+```bash
+cargo build --release --manifest-path build/mage_service/Cargo.toml -p mage-console
+export MAGE_SERVICE_READ_TOKEN=...   # or MAGE_SERVICE_TOKEN
+build/mage_service/target/release/mage-console --endpoint http://localhost:8080
+```
+
+The console accepts plain HTTP only on localhost; use HTTPS, or an SSH tunnel, for a remote
+service.
+
 ## Configuration and secrets
 
 The blocks and `io_config.yaml` read these environment variables. Values are never

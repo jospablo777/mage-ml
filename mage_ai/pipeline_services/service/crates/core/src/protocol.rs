@@ -129,7 +129,7 @@ pub struct RunDetail {
 }
 
 /// `GET /v1/snapshot`: everything the console draws, in one bounded response.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Snapshot {
     pub service_id: String,
     pub revision: String,
@@ -153,7 +153,7 @@ pub struct ModelSnapshot {
     pub flavors: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct PipelineSnapshot {
     pub id: String,
     /// `idle`, `running` or `paused`.
