@@ -91,6 +91,24 @@ class WorkspaceTest(TestCase):
         ws.sync_sdk(workspace)
         self.assertEqual(lib.stat().st_mtime_ns, modified)
 
+    def test_the_sdk_digest_skips_build_output_and_sees_changed_files(self):
+        from unittest import mock
+
+        sdk = Path(tempfile.mkdtemp())
+        (sdk / 'src').mkdir()
+        (sdk / 'src' / 'lib.rs').write_text('pub fn a() {}\n')
+        (sdk / 'target' / 'release').mkdir(parents=True)
+        (sdk / 'target' / 'release' / 'big').write_bytes(b'x' * 100)
+        with mock.patch.object(ws, 'SDK_SOURCE', sdk), mock.patch.object(
+            ws, '_sdk_digest_cache', None,
+        ):
+            first = ws.sdk_digest()
+            (sdk / 'target' / 'release' / 'other').write_bytes(b'y')
+            (sdk / 'Cargo.lock').write_text('# lock\n')
+            self.assertEqual(ws.sdk_digest(), first)
+            (sdk / 'src' / 'lib.rs').write_text('pub fn b() {}\n')
+            self.assertNotEqual(ws.sdk_digest(), first)
+
     def test_a_workspace_without_the_sdk_dependency_is_explained(self):
         workspace = ws.init(tempfile.mkdtemp())
         workspace.cargo_toml.write_text('[workspace]\nmembers = []\n')

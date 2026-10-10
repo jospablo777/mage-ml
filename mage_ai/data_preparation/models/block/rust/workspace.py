@@ -18,7 +18,7 @@ import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 SDK_SOURCE = Path(__file__).parent / 'sdk'
 RUST_VERSION = '1.98.0'
@@ -146,18 +146,40 @@ def init(repo_path: str) -> Workspace:
     return workspace
 
 
+def _sdk_files() -> List[Path]:
+    """The SDK's source files, without build output: a checkout's target/ holds gigabytes."""
+    files = []
+    for directory, subdirectories, names in os.walk(SDK_SOURCE):
+        subdirectories[:] = [name for name in subdirectories if name not in _SKIP]
+        files.extend(
+            Path(directory, name) for name in names
+            if name not in _SKIP and name != 'Cargo.lock'
+        )
+    return sorted(files)
+
+
+# (size and modification time of each SDK file, their digest): every Rust block run asks
+# for the digest, and the files only change when Mage is upgraded or edited.
+_sdk_digest_cache: Optional[Tuple[Tuple, str]] = None
+
+
 def sdk_digest() -> str:
+    global _sdk_digest_cache
+
+    files = _sdk_files()
+    fingerprint = tuple(
+        (str(path), stat.st_size, stat.st_mtime_ns) for path in files for stat in [path.stat()]
+    )
+    cached = _sdk_digest_cache
+    if cached is not None and cached[0] == fingerprint:
+        return cached[1]
     digest = hashlib.sha256()
-    for path in sorted(SDK_SOURCE.rglob('*')):
-        relative = path.relative_to(SDK_SOURCE)
-        if path.is_dir() or any(part in _SKIP for part in relative.parts):
-            continue
-        if relative.name == 'Cargo.lock':
-            continue
-        digest.update(relative.as_posix().encode())
+    for path in files:
+        digest.update(path.relative_to(SDK_SOURCE).as_posix().encode())
         digest.update(b'\0')
         digest.update(path.read_bytes())
-    return digest.hexdigest()
+    _sdk_digest_cache = (fingerprint, digest.hexdigest())
+    return _sdk_digest_cache[1]
 
 
 def sync_sdk(workspace: Workspace) -> str:
