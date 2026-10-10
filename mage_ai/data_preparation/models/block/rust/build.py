@@ -304,11 +304,33 @@ def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str)
     return RustBuildError(f'{verb} the Rust block failed:\n\n{tail}', diagnostics)
 
 
-def _touch(path: Path) -> None:
+def _used_marker(binary: Path) -> Path:
+    return binary.with_name(f'.{binary.name}.used')
+
+
+def _mark_used(binary: Path) -> None:
+    """
+    Records that the binary ran, for the cache's least-recently-used cleanup, in a file
+    beside it. Never in the binary's own modification time: macOS checks an executable
+    again on its next run after that changes, half a second for a block.
+    """
+    marker = _used_marker(binary)
     try:
-        os.utime(path)
+        os.utime(marker)
+    except FileNotFoundError:
+        try:
+            marker.touch()
+        except OSError:
+            pass
     except OSError:
         pass
+
+
+def _last_used(binary: Path, stat: os.stat_result) -> float:
+    try:
+        return _used_marker(binary).stat().st_mtime
+    except OSError:
+        return stat.st_mtime
 
 
 def prune_binary_cache(crate: Optional[str] = None) -> None:
@@ -332,12 +354,13 @@ def prune_binary_cache(crate: Optional[str] = None) -> None:
                 stat = binary.stat()
             except OSError:
                 continue
-            entries.append((stat.st_mtime, stat.st_size, binary))
+            entries.append((_last_used(binary, stat), stat.st_size, binary))
     entries.sort(reverse=True)
 
     def remove(binary: Path) -> None:
         try:
             binary.unlink()
+            _used_marker(binary).unlink(missing_ok=True)
             binary.parent.rmdir()
         except OSError:
             pass
@@ -364,8 +387,7 @@ def build(prepared: Prepared, stream: bool = True) -> Built:
     """The block's binary, from the cache or built now."""
     cached = binary_cache_dir() / prepared.key / prepared.crate
     if cached.exists():
-        # Marks it as used, for the cache's least-recently-used cleanup.
-        _touch(cached)
+        _mark_used(cached)
         return Built(binary=cached, cached=True, seconds=0.0)
     started = time.monotonic()
     with _LOCK:
@@ -396,7 +418,7 @@ def build(prepared: Prepared, stream: bool = True) -> Built:
         staging = cached.with_name(f'.{prepared.crate}.{os.getpid()}.tmp')
         shutil.copy2(binary, staging)
         os.replace(staging, cached)
-        _touch(cached)
+        _mark_used(cached)
         prune_binary_cache(prepared.crate)
     warnings = [
         item for item in parse_messages(result.stdout, prepared)

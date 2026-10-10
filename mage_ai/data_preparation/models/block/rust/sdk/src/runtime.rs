@@ -218,6 +218,7 @@ pub fn run_job<Args, F: BlockFn<Args>>(
     tests: Vec<Test>,
     job_dir: &Path,
 ) -> anyhow::Result<()> {
+    let mut timings = Timings::start();
     let job = Job::read(job_dir).context("Reading the job from Mage")?;
     let output_dir = job_dir.join(&job.output_dir);
     std::fs::create_dir_all(&output_dir)?;
@@ -238,7 +239,9 @@ pub fn run_job<Args, F: BlockFn<Args>>(
         items: job.inputs.into_iter(),
         taken: 0,
     };
+    timings.mark("job");
     let outputs = block.call(&mut inputs)?;
+    timings.mark("function");
     if inputs.taken < upstream {
         eprintln!(
             "Note: the block has {upstream} upstream outputs and its function takes {}; the \
@@ -258,6 +261,7 @@ pub fn run_job<Args, F: BlockFn<Args>>(
         records.push(write_output(&output_dir, job_dir, index, output)?);
     }
 
+    timings.mark("outputs");
     let results = if tests.is_empty() {
         Vec::new()
     } else {
@@ -276,6 +280,8 @@ pub fn run_job<Args, F: BlockFn<Args>>(
             .collect()
     };
 
+    timings.mark("tests");
+    timings.report();
     write_json_atomic(
         &job_dir.join(RESULT_FILE),
         &RunResult {
@@ -284,6 +290,44 @@ pub fn run_job<Args, F: BlockFn<Args>>(
             tests: results,
         },
     )
+}
+
+/// Phase times inside the block process, printed when MAGE_RUST_TIMINGS=1. A lazy
+/// output computes in `outputs`, where it is written.
+struct Timings {
+    enabled: bool,
+    last: std::time::Instant,
+    phases: Vec<(&'static str, f64)>,
+}
+
+impl Timings {
+    fn start() -> Timings {
+        Timings {
+            enabled: std::env::var("MAGE_RUST_TIMINGS").is_ok_and(|v| v == "1"),
+            last: std::time::Instant::now(),
+            phases: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, phase: &'static str) {
+        if self.enabled {
+            let now = std::time::Instant::now();
+            self.phases
+                .push((phase, now.duration_since(self.last).as_secs_f64()));
+            self.last = now;
+        }
+    }
+
+    fn report(&self) {
+        if self.enabled {
+            let phases: Vec<String> = self
+                .phases
+                .iter()
+                .map(|(name, seconds)| format!("{name} {seconds:.3} s"))
+                .collect();
+            println!("[timings] {}", phases.join(", "));
+        }
+    }
 }
 
 fn take_panic_message() -> String {

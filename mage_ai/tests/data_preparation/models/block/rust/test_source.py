@@ -191,3 +191,49 @@ class ProjectFilesTest(TestCase):
             (BlockType.DATA_LOADER, 'files/read', 'data_loaders/files/read.rs'),
             (BlockType.TRANSFORMER, 'clean', 'transformers/clean.rs'),
         ])
+
+
+class BinaryCacheTest(TestCase):
+    """Cached block binaries: their use is recorded beside them, never in their own
+    modification time, which makes macOS check the executable again (0.5 s a run)."""
+
+    def setUp(self):
+        from unittest import mock
+
+        from mage_ai.data_preparation.models.block.rust import build
+
+        super().setUp()
+        self.build = build
+        self.root = Path(tempfile.mkdtemp())
+        patch = mock.patch.object(build, 'binary_cache_dir', lambda: self.root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def binary(self, key: str, crate: str, size: int = 10) -> Path:
+        path = self.root / key / crate
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'x' * size)
+        os.utime(path, (1_000_000, 1_000_000))
+        return path
+
+    def test_a_cache_hit_leaves_the_binary_untouched(self):
+        from types import SimpleNamespace
+
+        binary = self.binary('key', 'block_a')
+        built = self.build.build(SimpleNamespace(key='key', crate='block_a'))
+        self.assertTrue(built.cached)
+        self.assertEqual(binary.stat().st_mtime, 1_000_000)
+        self.assertTrue(self.build._used_marker(binary).exists())
+
+    def test_the_least_recently_run_binary_goes_first(self):
+        from unittest import mock
+
+        old_build_recent_run = self.binary('k1', 'block_a', size=600_000)
+        recent_build_old_run = self.binary('k2', 'block_b', size=600_000)
+        os.utime(recent_build_old_run, (2_000_000, 2_000_000))
+        self.build._mark_used(old_build_recent_run)
+        with mock.patch.object(self.build, 'BINARY_CACHE_MB', 1):
+            self.build.prune_binary_cache()
+        self.assertTrue(old_build_recent_run.exists())
+        self.assertFalse(recent_build_old_run.exists())
+        self.assertFalse((self.root / 'k2').exists())
