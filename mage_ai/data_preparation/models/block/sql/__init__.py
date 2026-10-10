@@ -182,6 +182,7 @@ def execute_sql_code(
                 disable_query_preprocessing=disable_query_preprocessing,
                 configuration=configuration,
                 should_query=should_query,
+                limit=limit,
             )
         else:
             loader.export(
@@ -241,6 +242,7 @@ def execute_sql_code(
                 disable_query_preprocessing=disable_query_preprocessing,
                 configuration=configuration,
                 should_query=should_query,
+                limit=limit,
             )
         else:
             loader.export(
@@ -283,6 +285,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -328,6 +331,7 @@ def execute_sql_code(
                 disable_query_preprocessing=disable_query_preprocessing,
                 configuration=configuration,
                 should_query=should_query,
+                limit=limit,
             )
         else:
             loader.export(
@@ -374,6 +378,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -422,6 +427,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -470,6 +476,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -482,7 +489,11 @@ def execute_sql_code(
 
                 if should_query:
                     return [
-                        load_result(loader, f'SELECT * FROM {schema}.{table_name}', limit),
+                        load_result(
+                            loader,
+                            f'SELECT * FROM {loader._full_table_name(schema, table_name)}',
+                            limit,
+                        ),
                     ]
     elif DataSource.REDSHIFT.value == data_provider:
         from mage_ai.io.redshift import Redshift
@@ -513,6 +524,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -572,6 +584,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -630,6 +643,7 @@ def execute_sql_code(
                     disable_query_preprocessing=disable_query_preprocessing,
                     configuration=configuration,
                     should_query=should_query,
+                    limit=limit,
                 )
             else:
                 loader.export(
@@ -668,6 +682,7 @@ def execute_raw_sql(
     configuration: Dict = None,
     should_query: bool = False,
     disable_query_preprocessing: bool = False,
+    limit: int = 1000,
 ) -> List[Any]:
     """
     Execute raw SQL queries with optional preprocessing and post-processing.
@@ -719,7 +734,9 @@ def execute_raw_sql(
     if should_query and (has_create_or_insert or has_update):
         full_table_name = extract_full_table_name(query_string)
         if full_table_name:
-            queries.append(f'SELECT * FROM {full_table_name} LIMIT 1000')
+            # The block's output: what downstream blocks get, within the block's limit.
+            # It was 1000 rows, so a downstream block silently got a part of the table.
+            queries.append(f'SELECT * FROM {full_table_name} LIMIT {int(limit)}')
             fetch_query_at_indexes.append(full_table_name)
 
     if should_query:

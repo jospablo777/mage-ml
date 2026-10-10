@@ -65,6 +65,32 @@ SELECT 5 AS id;
         self.assertEqual(queries[2], """INSERT INTO schema_2.table_v2 SELECT 3 AS id UNION ALL
 SELECT 5 AS id""")
 
+    def test_split_query_string_keeps_semicolons_of_strings_bodies_and_comments(self):
+        script = """
+-- A comment; with a semicolon
+INSERT INTO t VALUES (1, 'semi;colon', E'it\\'s; escaped', 'it''s; doubled');
+CREATE FUNCTION f() RETURNS int AS $body$
+    -- not a comment of the script; part of the body
+    SELECT 1;
+$body$ LANGUAGE sql;
+SELECT "odd;name", $$x;y$$ /* a /* nested */ block; comment */ FROM t;
+/* only a comment; */
+-- INSERT INTO t VALUES (3);
+UPDATE t SET price = price * 1.1
+"""
+        self.assertEqual(split_query_string(script), [
+            "INSERT INTO t VALUES (1, 'semi;colon', E'it\\'s; escaped', 'it''s; doubled')",
+            'CREATE FUNCTION f() RETURNS int AS $body$\n'
+            '    -- not a comment of the script; part of the body\n'
+            '    SELECT 1;\n'
+            '$body$ LANGUAGE sql',
+            'SELECT "odd;name", $$x;y$$ /* a /* nested */ block; comment */ FROM t',
+            'UPDATE t SET price = price * 1.1',
+        ])
+        self.assertEqual(split_query_string('SELECT $1, price$ FROM t; SELECT 2'),
+                         ['SELECT $1, price$ FROM t', 'SELECT 2'])
+        self.assertEqual(split_query_string('  ;; -- nothing\n'), [])
+
     def test_table_name_parts_from_query(self):
         query1 = 'select * from demo_db1.demo_schema1.demo_table1'
         query2 = 'SELECT * FROM demo_db2.demo_schema2.demo_table2;'

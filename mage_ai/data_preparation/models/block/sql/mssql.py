@@ -68,6 +68,7 @@ def execute_raw_sql(
     configuration: Dict = None,
     should_query: bool = False,
     disable_query_preprocessing: bool = False,
+    limit: int = 1000,
 ) -> List[Any]:
     if configuration is None:
         configuration = {}
@@ -92,7 +93,8 @@ def execute_raw_sql(
             fetch_query_at_indexes.append(True)
 
     if should_query and has_create_or_insert:
-        queries.append(f'SELECT TOP(1000) * FROM {block.full_table_name}')
+        # Within the block's limit, as for the other databases; it was 1000 rows.
+        queries.append(f'SELECT TOP({int(limit)}) * FROM {block.full_table_name}')
         fetch_query_at_indexes.append(block.full_table_name)
 
     results = loader.execute_queries(

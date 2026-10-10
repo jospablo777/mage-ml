@@ -427,9 +427,10 @@ def create_upstream_block_tables(
                 )
 
             no_data = False
-            if isinstance(df, DataFrame):
-                if len(df.index) == 0:
-                    no_data = True
+            if isinstance(df, DataFrame) or type(df).__name__ == 'DataFrame':
+                # An empty frame is exported too: its table has the columns and no rows.
+                # Skipped, the block read the table an earlier run left, with its rows.
+                no_data = False
             elif hasattr(df, '__len__'):
                 # Covers dicts, lists, Series, arrays and polars frames, whose
                 # truthiness raises instead of answering.
@@ -473,7 +474,12 @@ def create_upstream_block_tables(
             # The block's SQL refers to the frame's columns by their names. Exporters
             # prefixed names on their reserved word list, such as date, name and text,
             # with an underscore, so SELECT date FROM {{ df_1 }} failed.
-            if 'allow_reserved_words' in inspect.signature(loader.export).parameters:
+            parameters = inspect.signature(loader.export).parameters
+            if 'allow_reserved_words' in parameters:
                 kwargs['allow_reserved_words'] = True
+            # And by their exact names: cleaned, MixedCase became mixedcase and
+            # "with space" with_space, so SELECT "MixedCase" FROM {{ df_1 }} failed.
+            if 'auto_clean_name' in parameters:
+                kwargs['auto_clean_name'] = False
 
             loader.export(df, **kwargs)

@@ -1,5 +1,6 @@
 import io
-from typing import Dict, List, Union
+import re
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import polars as pl
@@ -65,6 +66,35 @@ def register_numpy_adapters() -> None:
 
 
 register_numpy_adapters()
+
+
+# A name PostgreSQL reads unquoted: it folds it to lower case, as SQL that writes the
+# name unquoted would.
+_PLAIN_IDENTIFIER = re.compile(r'[A-Za-z_\u0080-\U0010ffff][A-Za-z0-9_$\u0080-\U0010ffff]*')
+
+
+def identifier(name: str) -> str:
+    """
+    A schema or table name as written in a statement. A plain name stays unquoted, so a
+    name configured as MyTable is the table mytable, as `SELECT * FROM MyTable` reads it;
+    any other name (with a space, a dash or a leading digit) is quoted as it is.
+    """
+    name = str(name)
+    if len(name) >= 2 and name.startswith('"') and name.endswith('"'):
+        return name
+    if _PLAIN_IDENTIFIER.fullmatch(name):
+        return name
+    return '"' + name.replace('"', '""') + '"'
+
+
+def stored_name(name: str) -> str:
+    """The name PostgreSQL stores for a name written as identifier() writes it."""
+    name = str(name)
+    if len(name) >= 2 and name.startswith('"') and name.endswith('"'):
+        return name[1:-1].replace('""', '"')
+    if _PLAIN_IDENTIFIER.fullmatch(name):
+        return name.lower()
+    return name
 
 
 class Postgres(BaseSQL):
@@ -348,7 +378,8 @@ class Postgres(BaseSQL):
         self,
         schema_name: str
     ) -> str:
-        clean_schema_name = schema_name.strip('"')
+        clean_schema_name = stored_name(schema_name).replace("'", "''")
+        create = f'CREATE SCHEMA {identifier(schema_name)}'.replace("'", "''")
         return f"""
         DO $$
         BEGIN
@@ -357,20 +388,26 @@ class Postgres(BaseSQL):
                 FROM information_schema.schemata
                 WHERE schema_name = '{clean_schema_name}'
             ) THEN
-                EXECUTE 'CREATE SCHEMA {schema_name}';
+                EXECUTE '{create}';
             END IF;
         END
         $$;
         """
 
     def table_exists(self, schema_name: str, table_name: str) -> bool:
+        # The stored names: a table configured as MyTable is mytable, which the exact
+        # name never matched, so replacing it failed with "already exists".
         with self.conn.cursor() as cur:
-            table_name = table_name.replace('"', '')
             cur.execute(
-                f'SELECT * FROM pg_tables WHERE schemaname = \'{schema_name}\' AND '
-                f'tablename = \'{table_name}\''
+                'SELECT 1 FROM pg_tables WHERE schemaname = %s AND tablename = %s',
+                (stored_name(schema_name or self.default_schema()), stored_name(table_name)),
             )
             return bool(cur.rowcount)
+
+    def _full_table_name(self, schema_name: Optional[str], table_name: str) -> str:
+        if schema_name:
+            return f'{identifier(schema_name)}.{identifier(table_name)}'
+        return identifier(table_name)
 
     def _table_column_types(self, full_table_name: str) -> Dict[str, str]:
         with self.conn.cursor() as cursor:
@@ -484,7 +521,7 @@ class Postgres(BaseSQL):
             raise Exception('Please provide a table_name argument in the export method.')
         if schema_name is None:
             schema_name = self.default_schema()
-        full_table_name = f'{schema_name}.{table_name}' if schema_name else table_name
+        full_table_name = self._full_table_name(schema_name, table_name)
 
         method = self._conflict_method(unique_conflict_method)
         # Without unique_constraints there is no ON CONFLICT target, and rows go through COPY.
@@ -584,8 +621,8 @@ class Postgres(BaseSQL):
                     # The keys are passed already cleaned, so they match the column names.
                     cursor.execute(self.build_create_table_command(
                         target_types,
-                        schema_name,
-                        table_name,
+                        identifier(schema_name) if schema_name else schema_name,
+                        identifier(table_name),
                         auto_clean_name=False,
                         case_sensitive=case_sensitive,
                         unique_constraints=key_columns,
