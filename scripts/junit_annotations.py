@@ -34,16 +34,20 @@ def _cases(path: Path):
 
 
 def main(paths) -> int:
-    counts = {'failure': 0, 'error': 0, 'skipped': 0}
+    cases = []
     for path in map(Path, paths):
         if not path.is_file():
             print(f'::warning title=No test results::{_escape(str(path))} does not exist')
             continue
-        for kind, name, file, line, detail in _cases(path):
-            counts[kind] += 1
-            level = 'warning' if kind == 'skipped' else 'error'
-            if counts[kind] > LIMIT:
-                continue
+        cases.extend(_cases(path))
+    failed = [c for c in cases if c[0] != 'skipped']
+    skipped = [c for c in cases if c[0] == 'skipped']
+    if failed:
+        # GitHub shows 10 annotations of a level per step, so the first lists every failure.
+        names = '\n'.join(name for _, name, _, _, _ in failed[:200])
+        print(f'::error title={len(failed)} failed tests::{_escape(names)}')
+    for level, group in (('error', failed[:LIMIT - 1]), ('warning', skipped[:LIMIT])):
+        for _, name, file, line, detail in group:
             location = ''
             if file:
                 location = f'file={_property(file)},'
@@ -51,8 +55,7 @@ def main(paths) -> int:
                     location += f'line={int(line) + 1},'
             print(f'::{level} {location}title={_property(name)}::'
                   f'{_escape(detail[-MESSAGE_CHARS:])}')
-    failed = counts['failure'] + counts['error']
-    print(f'::notice title=Test results::{failed} failed, {counts["skipped"]} skipped')
+    print(f'::notice title=Test results::{len(failed)} failed, {len(skipped)} skipped')
     return 0
 
 
