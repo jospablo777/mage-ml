@@ -10,10 +10,10 @@ import sys
 import threading
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
-from sqlalchemy import exists, select, update
+from sqlalchemy import exists, func, select, update
 
 from mage_ai.data_preparation.models.constants import (
     BlockLanguage,
@@ -244,12 +244,20 @@ def _now():
     return datetime.now(tz=pytz.UTC)
 
 
-def claim_first(block_run_id: int, pipeline_run_id: int) -> bool:
-    """Marks the first block run of a stage RUNNING if it is still waiting to run."""
+def claim_block_run(block_run_id: int, pipeline_run_id: int) -> Optional[int]:
+    """
+    Marks a block run RUNNING if it is still waiting to run and its pipeline run is
+    running, and returns its new attempt; None when another worker or the scheduler got
+    there first.
+    """
     return _claim(block_run_id, pipeline_run_id, [
         BlockRun.BlockRunStatus.INITIAL,
         BlockRun.BlockRunStatus.QUEUED,
     ])
+
+
+# The first block run of a stage is claimed as any block run.
+claim_first = claim_block_run
 
 
 def complete_and_claim(
@@ -257,12 +265,18 @@ def complete_and_claim(
     next_id: Optional[int],
     pipeline_run_id: int,
     metrics: Optional[Dict] = None,
-) -> bool:
+    attempt: Optional[int] = None,
+) -> Tuple[bool, Optional[int]]:
     """
     In one transaction: marks a block run COMPLETED and the next block run of the stage
     RUNNING, if the next one is still INITIAL and the pipeline run still RUNNING. The
     scheduler never sees the completed run with its next run waiting, so it never starts
-    the next run on its own. Returns whether the next run was claimed.
+    the next run on its own.
+
+    With attempt, the completion applies only while the block run is RUNNING in that
+    attempt: a stage whose block run was reset, timed out or cancelled meanwhile records
+    nothing and claims nothing. Returns whether the completion was recorded and the next
+    run's attempt, None when it was not claimed.
     """
     session = db_connection.session
     try:
@@ -270,10 +284,22 @@ def complete_and_claim(
         values = dict(status=BlockRun.BlockRunStatus.COMPLETED, completed_at=_now())
         if metrics:
             values['metrics'] = dict(completed.metrics or {}, **metrics)
-        session.execute(update(BlockRun).where(BlockRun.id == completed_id).values(**values))
-        claimed = False
+        statement = update(BlockRun).where(BlockRun.id == completed_id)
+        if attempt is not None:
+            statement = statement.where(
+                BlockRun.attempt == attempt,
+                BlockRun.status == BlockRun.BlockRunStatus.RUNNING,
+            )
+        result = session.execute(
+            statement.values(**values).execution_options(synchronize_session=False),
+        )
+        if result.rowcount != 1:
+            session.rollback()
+            session.expire_all()
+            return False, None
+        next_attempt = None
         if next_id is not None:
-            claimed = _claim_statement(session, next_id, pipeline_run_id, [
+            next_attempt = _claim_statement(session, next_id, pipeline_run_id, [
                 BlockRun.BlockRunStatus.INITIAL,
             ])
         session.commit()
@@ -281,22 +307,23 @@ def complete_and_claim(
         session.rollback()
         raise
     session.expire_all()
-    return claimed
+    return True, next_attempt
 
 
-def _claim(block_run_id: int, pipeline_run_id: int, statuses: List) -> bool:
+def _claim(block_run_id: int, pipeline_run_id: int, statuses: List) -> Optional[int]:
     session = db_connection.session
     try:
-        claimed = _claim_statement(session, block_run_id, pipeline_run_id, statuses)
+        attempt = _claim_statement(session, block_run_id, pipeline_run_id, statuses)
         session.commit()
     except Exception:
         session.rollback()
         raise
     session.expire_all()
-    return claimed
+    return attempt
 
 
-def _claim_statement(session, block_run_id: int, pipeline_run_id: int, statuses) -> bool:
+def _claim_statement(session, block_run_id: int, pipeline_run_id: int, statuses) -> Optional[int]:
+    """The claim's attempt, or None when the block run was not claimable."""
     running = exists(select(PipelineRun.id).where(
         PipelineRun.id == pipeline_run_id,
         PipelineRun.status == PipelineRun.PipelineRunStatus.RUNNING,
@@ -304,10 +331,19 @@ def _claim_statement(session, block_run_id: int, pipeline_run_id: int, statuses)
     result = session.execute(
         update(BlockRun)
         .where(BlockRun.id == block_run_id, BlockRun.status.in_(statuses), running)
-        .values(status=BlockRun.BlockRunStatus.RUNNING, started_at=_now())
+        .values(
+            status=BlockRun.BlockRunStatus.RUNNING,
+            started_at=_now(),
+            attempt=func.coalesce(BlockRun.attempt, 0) + 1,
+        )
         .execution_options(synchronize_session=False)
     )
-    return result.rowcount == 1
+    if result.rowcount != 1:
+        return None
+    # Read in the same transaction: the claim made this block run ours.
+    return session.execute(
+        select(BlockRun.attempt).where(BlockRun.id == block_run_id),
+    ).scalar_one()
 
 
 class ProcessState:

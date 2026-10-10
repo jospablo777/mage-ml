@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from statistics import stdev
-from typing import DefaultDict, Dict, List
+from typing import DefaultDict, Dict, List, Optional
 
 import dateutil.parser
 import pytz
@@ -1684,6 +1684,9 @@ class BlockRun(BlockRunProjectPlatformMixin, BaseModel):
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     metrics = Column(JSON)
+    # Incremented by each claim of the block run by a worker (fusion.claim_block_run).
+    # The worker's status writes apply only while the attempt is still its own.
+    attempt = Column(Integer, default=0, server_default='0', nullable=False)
 
     pipeline_run = relationship(PipelineRun, back_populates='block_runs')
 
@@ -1708,6 +1711,26 @@ class BlockRun(BlockRunProjectPlatformMixin, BaseModel):
             partition=self.pipeline_run.execution_partition,
             repo_config=pipeline.repo_config,
         ).get_logs_async()
+
+    @classmethod
+    def update_if_attempt(
+        cls, block_run_id: int, attempt: Optional[int], **values,
+    ) -> bool:
+        """
+        Applies values to a RUNNING block run if its attempt is still attempt; a worker
+        whose attempt was superseded (its block run was reset, timed out, cancelled or
+        claimed again) changes nothing. Without an attempt, updates as before.
+        """
+        query = BlockRun.query.filter(BlockRun.id == block_run_id)
+        if attempt is not None:
+            query = query.filter(
+                BlockRun.attempt == attempt,
+                BlockRun.status == BlockRun.BlockRunStatus.RUNNING,
+            )
+        count = query.update(values, synchronize_session=False)
+        db_connection.session.commit()
+        db_connection.session.expire_all()
+        return count == 1
 
     @classmethod
     @safe_db_query

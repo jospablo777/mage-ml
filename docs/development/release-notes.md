@@ -13,6 +13,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Block outputs
 
+- **Block runs have attempts.** Each claim of a block run by a worker increments
+  `block_run.attempt` (a database migration adds the column), and the worker's COMPLETED
+  and FAILED writes apply only while the block run is RUNNING in its attempt. A worker
+  the scheduler gave up on (crash reset, timeout, cancel, retry) no longer overwrites the
+  newer state; its result is discarded with a warning. Retrying blocks stops their
+  running jobs first. See `docs/development/durable-execution.md`.
 - **Set, frozenset and tuple columns keep their type.** A pandas output with such a
   column came back with numpy arrays in it; the values are now stored as tagged JSON and
   read back as sets, frozensets and tuples. The MySQL exporter writes sets as sorted JSON

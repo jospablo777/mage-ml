@@ -376,6 +376,20 @@ class PipelineRunResource(DatabaseResource):
                         )
                     )
 
+            # Jobs still running a block run that is retried are stopped first: the reset
+            # fences their results out, and a live job would keep the new attempt from
+            # being queued until it ended.
+            if pipeline.type not in (PipelineType.STREAMING, PipelineType.INTEGRATION):
+                from mage_ai.orchestration.job_manager import get_job_manager
+
+                job_manager = get_job_manager()
+                for br in block_runs_to_retry:
+                    if br.status in (
+                        BlockRun.BlockRunStatus.QUEUED,
+                        BlockRun.BlockRunStatus.RUNNING,
+                    ):
+                        job_manager.kill_block_run_job(br.id)
+
             BlockRun.reset_for_retry([b.id for b in block_runs_to_retry])
 
             from mage_ai.orchestration.execution_process_manager import (

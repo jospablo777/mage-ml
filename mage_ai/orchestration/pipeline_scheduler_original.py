@@ -26,11 +26,6 @@ from mage_ai.data_preparation.models.triggers import (
 )
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.shared.retry import resolve_retry_config
-from mage_ai.orchestration.fusion import (
-    fusion_enabled,
-    stage_block_runs,
-    verification_mode,
-)
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
@@ -41,6 +36,11 @@ from mage_ai.orchestration.db.models.schedules import (
     GenericJob,
     PipelineRun,
     PipelineSchedule,
+)
+from mage_ai.orchestration.fusion import (
+    fusion_enabled,
+    stage_block_runs,
+    verification_mode,
 )
 from mage_ai.orchestration.job_manager import JobType, get_job_manager
 from mage_ai.orchestration.metrics.pipeline_run import (
@@ -87,6 +87,9 @@ class PipelineScheduler:
     ) -> None:
         self.pipeline_run = pipeline_run
         self.pipeline_schedule = pipeline_run.pipeline_schedule
+        # The attempt each block run this worker claimed has; its status writes apply
+        # only while that attempt is the block run's (BlockRun.update_if_attempt).
+        self.attempts: Dict[int, int] = {}
         self.pipeline = get_pipeline_from_platform(
             pipeline_run.pipeline_uuid,
             repo_path=self.pipeline_schedule.repo_path if self.pipeline_schedule else None,
@@ -378,6 +381,42 @@ class PipelineScheduler:
         # Cancel block runs that are still in progress for the pipeline run.
         cancel_block_runs_and_jobs(self.pipeline_run, self.pipeline)
 
+    def __update_claimed(self, block_run: BlockRun, **values) -> bool:
+        """
+        Writes a status this worker reached. A block run claimed by this worker is updated
+        only while its attempt is still this worker's: after a reset, a timeout, a cancel
+        or a claim by another worker, the late result is discarded.
+        """
+        attempt = self.attempts.get(block_run.id)
+        if attempt is None:
+            block_run.update(**values)
+            return True
+        if BlockRun.update_if_attempt(block_run.id, attempt, **values):
+            return True
+        block_run.refresh()
+        self.logger.warning(
+            f'BlockRun {block_run.id} (block_uuid: {block_run.block_uuid}) attempt {attempt} '
+            f'was superseded (now {block_run.status}, attempt {block_run.attempt}); its '
+            f'result {values.get("status")} is discarded.',
+            **self.build_tags(block_run_id=block_run.id, block_uuid=block_run.block_uuid),
+        )
+        return False
+
+    def __record_completion(self, block_run: BlockRun, metrics: Dict = None) -> bool:
+        @retry(retries=2, delay=5)
+        def update_status(metrics=metrics) -> bool:
+            metrics_prev = block_run.metrics or {}
+            if metrics:
+                metrics_prev.update(metrics)
+            return self.__update_claimed(
+                block_run,
+                status=BlockRun.BlockRunStatus.COMPLETED,
+                completed_at=datetime.now(tz=pytz.UTC),
+                metrics=metrics_prev,
+            )
+
+        return update_status()
+
     @safe_db_query
     def on_block_complete(
         self,
@@ -385,20 +424,8 @@ class PipelineScheduler:
         metrics: Dict = None,
     ) -> None:
         block_run = BlockRun.get(pipeline_run_id=self.pipeline_run.id, block_uuid=block_uuid)
-
-        @retry(retries=2, delay=5)
-        def update_status(metrics=metrics):
-            metrics_prev = block_run.metrics or {}
-            if metrics:
-                metrics_prev.update(metrics)
-
-            block_run.update(
-                status=BlockRun.BlockRunStatus.COMPLETED,
-                completed_at=datetime.now(tz=pytz.UTC),
-                metrics=metrics_prev,
-            )
-
-        update_status()
+        if not self.__record_completion(block_run, metrics):
+            return
 
         self.logger.info(
             f'BlockRun {block_run.id} (block_uuid: {block_uuid}) completes.',
@@ -421,20 +448,8 @@ class PipelineScheduler:
         metrics: Dict = None,
     ) -> None:
         block_run = BlockRun.get(pipeline_run_id=self.pipeline_run.id, block_uuid=block_uuid)
-
-        @retry(retries=2, delay=5)
-        def update_status(metrics=metrics):
-            metrics_prev = block_run.metrics or {}
-            if metrics:
-                metrics_prev.update(metrics)
-
-            block_run.update(
-                status=BlockRun.BlockRunStatus.COMPLETED,
-                completed_at=datetime.now(tz=pytz.UTC),
-                metrics=metrics_prev,
-            )
-
-        update_status()
+        if not self.__record_completion(block_run, metrics):
+            return
 
         self.logger.info(
             f'BlockRun {block_run.id} (block_uuid: {block_uuid}) completes.',
@@ -451,8 +466,9 @@ class PipelineScheduler:
         metrics = block_run.metrics or {}
 
         @retry(retries=2, delay=5)
-        def update_status():
-            block_run.update(
+        def update_status() -> bool:
+            return self.__update_claimed(
+                block_run,
                 metrics=metrics,
                 status=BlockRun.BlockRunStatus.FAILED,
             )
@@ -465,7 +481,8 @@ class PipelineScheduler:
                 message=error.get('message'),
             )
 
-        update_status()
+        if not update_status():
+            return
 
         tags = self.build_tags(
             block_run_id=block_run.id, block_uuid=block_run.block_uuid, error=error.get('error')
@@ -691,6 +708,7 @@ class PipelineScheduler:
                     )
                     for br in self.pipeline_run.block_runs
                 ],
+                True,
             )
 
     def __schedule_integration_streams(self, block_runs: List[BlockRun] = None) -> None:
@@ -1295,9 +1313,14 @@ def run_block(
     schedule_after_complete: bool = False,
     template_runtime_configuration: Dict = None,
     block_run_dicts: List[Dict] = None,
+    claim: bool = False,
 ) -> Any:
     """Execute a block within a pipeline run.
     Only run block that's with INITIAL or QUEUED status.
+
+    With claim, as the scheduler enqueues it, the block run starts only if this worker
+    claims it (INITIAL or QUEUED to RUNNING, while the pipeline run is RUNNING), and the
+    worker's status writes apply only while its claim's attempt is the block run's.
 
     Args:
         pipeline_run_id (int): The ID of the pipeline run.
@@ -1323,21 +1346,35 @@ def run_block(
     if pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
         return {}
 
-    block_run = BlockRun.get_by_id(block_run_id)
-    if block_run.status not in [
-        BlockRun.BlockRunStatus.INITIAL,
-        BlockRun.BlockRunStatus.QUEUED,
-        BlockRun.BlockRunStatus.RUNNING,
-    ]:
-        return {}
+    attempt = None
+    if claim:
+        from mage_ai.orchestration.fusion import claim_block_run
 
-    block_run_data = dict(status=BlockRun.BlockRunStatus.RUNNING)
-    if not block_run.started_at or (block_run.metrics and not block_run.metrics.get('controller')):
-        block_run_data['started_at'] = datetime.now(tz=pytz.UTC)
+        attempt = claim_block_run(block_run_id, pipeline_run_id)
+        if attempt is None:
+            # Cancelled, timed out, reset or claimed by another worker since it was queued.
+            return {}
+        block_run = BlockRun.get_by_id(block_run_id)
+    else:
+        block_run = BlockRun.get_by_id(block_run_id)
+        if block_run.status not in [
+            BlockRun.BlockRunStatus.INITIAL,
+            BlockRun.BlockRunStatus.QUEUED,
+            BlockRun.BlockRunStatus.RUNNING,
+        ]:
+            return {}
 
-    block_run.update(**block_run_data)
+        block_run_data = dict(status=BlockRun.BlockRunStatus.RUNNING)
+        if not block_run.started_at or (
+            block_run.metrics and not block_run.metrics.get('controller')
+        ):
+            block_run_data['started_at'] = datetime.now(tz=pytz.UTC)
+
+        block_run.update(**block_run_data)
 
     pipeline_scheduler = PipelineScheduler(pipeline_run)
+    if attempt is not None:
+        pipeline_scheduler.attempts[block_run.id] = attempt
     pipeline_schedule = pipeline_run.pipeline_schedule
     pipeline = pipeline_scheduler.pipeline
 
@@ -1414,10 +1451,12 @@ def run_stage(
     pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
     if pipeline_run is None or pipeline_run.status != PipelineRun.PipelineRunStatus.RUNNING:
         return
-    if not block_run_ids or not fusion.claim_first(block_run_ids[0], pipeline_run_id):
+    first_attempt = fusion.claim_first(block_run_ids[0], pipeline_run_id) if block_run_ids else None
+    if first_attempt is None:
         return
 
     pipeline_scheduler = PipelineScheduler(pipeline_run)
+    pipeline_scheduler.attempts[block_run_ids[0]] = first_attempt
     pipeline = pipeline_scheduler.pipeline
     pipeline_schedule = pipeline_run.pipeline_schedule
     stage = f'{pipeline_run_id}_{block_run_ids[0]}'
@@ -1470,9 +1509,21 @@ def run_stage(
                 # The next block run points at this process before it is RUNNING, so
                 # crash detection, timeouts and cancellation find this job for it.
                 register_job_alias(f'{JobType.BLOCK_RUN}_{next_id}')
-            claimed_next['value'] = fusion.complete_and_claim(
+            recorded, next_attempt = fusion.complete_and_claim(
                 block_run_id, next_id, pipeline_run_id, metrics,
+                attempt=pipeline_scheduler.attempts.get(block_run_id),
             )
+            if not recorded:
+                pipeline_scheduler.logger.warning(
+                    f'BlockRun {block_run_id} (block_uuid: {completed_uuid}) was superseded '
+                    'while this stage ran it; its result is discarded and the stage stops.',
+                    **member_tags,
+                )
+                claimed_next['value'] = False
+                return
+            claimed_next['value'] = next_attempt is not None
+            if next_attempt is not None:
+                pipeline_scheduler.attempts[next_id] = next_attempt
             pipeline_scheduler.logger.info(
                 f'BlockRun {block_run_id} (block_uuid: {completed_uuid}) completes.',
                 **member_tags,
