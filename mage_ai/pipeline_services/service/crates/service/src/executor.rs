@@ -480,6 +480,9 @@ impl BlockTask {
             .process_group(0)
             .kill_on_drop(true)
             .envs(self.service.extra_env.iter().cloned());
+        if let Some(entry) = &self.block.entry {
+            command.env("MAGE_BLOCK", entry);
+        }
         if let Some(profile) = &self.block.io_config {
             let extra = &self.service.extra_env;
             let lookup = |name: &str| {

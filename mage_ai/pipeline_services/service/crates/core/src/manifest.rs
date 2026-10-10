@@ -141,6 +141,10 @@ pub struct Block {
     /// A Rust block's prebuilt binary, relative to the service directory.
     #[serde(default)]
     pub binary: Option<String>,
+    /// The block in a binary that holds several (MAGE_BLOCK); None for a block's own
+    /// binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
     /// A SQL block's table name and its upstream blocks' language, type and
     /// configuration, which the SQL runner needs to name and reuse their tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]

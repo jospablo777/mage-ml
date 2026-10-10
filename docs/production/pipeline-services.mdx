@@ -50,8 +50,10 @@ What the export takes:
 Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
 [SQL](/guides/blocks/sql-blocks) blocks are supported.
 
-- **Rust** blocks are compiled when the image builds, so the service runs native binaries
-  and needs no Rust installation. The export brings `rust/Cargo.lock` up to date for the
+- **Rust** blocks are compiled when the image builds, into one binary for all of them
+  (`bin/mage-blocks`), so the service runs native code and needs no Rust installation. One
+  binary instead of one per block keeps the image small (Polars is linked once, about
+  75 MB) and loads once per run. The export brings `rust/Cargo.lock` up to date for the
   exported blocks and keeps the locked versions, so the image builds the crates you ran.
   A Rust block that connects with its io_config profile (`mage::postgres`) gets it from
   the service, which fills in `env_var()` and `mage_secret_var()` from its environment

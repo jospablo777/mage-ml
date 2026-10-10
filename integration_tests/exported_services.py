@@ -38,25 +38,27 @@ def export_service(project, pipeline: str, out: Path) -> Path:
 
 
 def build_rust_blocks(directory: Path) -> None:
-    """Builds the service's Rust blocks into bin/, as its Dockerfile does, reusing the
+    """Builds the service's Rust binaries into bin/, as its Dockerfile does, reusing the
     compiled dependencies of Mage's own Rust builds."""
     from mage_ai.data_preparation.models.block.rust import workspace
 
     manifest = json.loads((directory / 'service.json').read_text())
-    crates = sorted({
+    binaries = sorted({
         Path(block['binary']).name
         for pipeline in manifest['pipelines'] for block in pipeline['blocks']
         if block.get('binary')
     })
+    if not binaries:
+        return
     target = workspace.target_dir()
     subprocess.run(
         ['cargo', 'build', '--release', '--manifest-path', str(directory / 'rust/Cargo.toml'),
-         *[a for crate in crates for a in ('-p', crate)]],
+         *[a for binary in binaries for a in ('-p', binary)]],
         check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
     )
     (directory / 'bin').mkdir(exist_ok=True)
-    for crate in crates:
-        shutil.copy2(target / 'release' / crate, directory / 'bin' / crate)
+    for binary in binaries:
+        shutil.copy2(target / 'release' / binary, directory / 'bin' / binary)
 
 
 def run_service(directory: Path, pipeline: str, out: Path, variables=None, timeout: int = 600):

@@ -440,7 +440,8 @@ class CargoLockTest(unittest.TestCase):
         self.assertIn('name = "block_a"', (self.workspace / 'Cargo.lock').read_text())
         self.assertIn('Cargo.lock was updated', ' '.join(self.capture.notes))
         self.capture.rust_locked = True
-        self.assertIn('cargo build --release --locked --manifest-path rust/Cargo.toml -p block_a',
+        self.assertIn('cargo build --release --locked --manifest-path rust/Cargo.toml '
+                      '-p mage-blocks',
                       export._dockerfile(self.capture))
 
     def test_a_lock_cargo_cannot_resolve_builds_unlocked(self):
@@ -450,8 +451,67 @@ class CargoLockTest(unittest.TestCase):
         )
         self.assertFalse(export._sync_cargo_lock(self.capture, self.workspace))
         self.assertIn('could not be updated', ' '.join(self.capture.notes))
-        self.assertIn('cargo build --release --manifest-path rust/Cargo.toml -p block_a',
+        self.assertIn('cargo build --release --manifest-path rust/Cargo.toml -p mage-blocks',
                       export._dockerfile(self.capture))
+
+
+@unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
+class RustBundleTest(unittest.TestCase):
+    """The service's Rust blocks become one binary that runs the block MAGE_BLOCK names."""
+
+    def test_the_bundle_runs_each_block(self):
+        from mage_ai.data_preparation.models.block.rust import source as block_source
+        from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / 'Cargo.toml').write_text(
+            '[workspace]\nresolver = "3"\nmembers = [".mage/blocks/*"]\n\n'
+            '[workspace.dependencies]\nmage-block = { path = ".mage/sdk" }\n'
+        )
+        # A stand-in for the mage crate: main calls the block function and exits.
+        sdk = root / '.mage' / 'sdk'
+        (sdk / 'src').mkdir(parents=True)
+        (sdk / 'Cargo.toml').write_text(
+            '[package]\nname = "mage-block"\nversion = "0.1.0"\nedition = "2024"\n'
+            '[lib]\nname = "mage"\n'
+        )
+        (sdk / 'src' / 'lib.rs').write_text(
+            'pub fn main(block: fn(), _tests: Vec<()>) -> ! { block(); std::process::exit(0) }\n'
+        )
+        crates = []
+        for name in ('a', 'b'):
+            crate = ws.crate_name(name)
+            crates.append(crate)
+            directory = root / '.mage' / 'blocks' / crate
+            (directory / 'src').mkdir(parents=True)
+            (directory / 'Cargo.toml').write_text(ws.block_manifest(crate, ['mage-block']))
+            code = f'fn helper() -> &\'static str {{ "block {name}" }}\n' \
+                f'fn load_data() {{ println!("{{}}", helper()); }}\n'
+            (directory / 'src' / 'main.rs').write_text(
+                f'{code}include!("{block_source.MAIN_FILE}");\n'
+            )
+            (directory / 'src' / block_source.MAIN_FILE).write_text(
+                f'{block_source.GENERATED_MARKER}\nfn main() {{\n'
+                '    mage::main(load_data, vec![\n    ]);\n}\n'
+            )
+            export._block_library(directory)
+        export._write_bundle(root, crates)
+        self.assertIn('".mage/bundle"', (root / 'Cargo.toml').read_text())
+        target = root / 'target'
+        subprocess.run(
+            ['cargo', 'build', '-q', '-p', export.RUST_BUNDLE], cwd=root, check=True,
+            env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
+        )
+        binary = target / 'debug' / export.RUST_BUNDLE
+        for name, crate in zip(('a', 'b'), crates):
+            result = subprocess.run([binary, 'job'], capture_output=True, text=True,
+                                    env=dict(os.environ, MAGE_BLOCK=crate))
+            self.assertEqual((result.returncode, result.stdout), (0, f'block {name}\n'))
+        result = subprocess.run([binary, 'job'], capture_output=True, text=True,
+                                env=dict(os.environ, MAGE_BLOCK='block_missing'))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('no Rust block "block_missing"', result.stderr)
 
 
 class RustIoConfigTest(unittest.TestCase):

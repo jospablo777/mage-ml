@@ -276,8 +276,8 @@ Rust blocks run in pipeline runs, triggers and backfills like other blocks, and 
 with Python, R and SQL blocks. The playground's `rust_session_scores` pipeline is a working
 example.
 
-`mage export service` compiles a pipeline's Rust blocks into the service image, which runs
-them without Mage or a Rust installation. A block's io_config profile goes with it, with
+`mage export service` compiles a pipeline's Rust blocks into one binary in the service
+image, which runs them without Mage or a Rust installation. A block's io_config profile goes with it, with
 `env_var()` and `mage_secret_var()` kept as references that the service fills in from its
 environment, so no password is written into the image. See
 [Pipeline services](/production/pipeline-services).

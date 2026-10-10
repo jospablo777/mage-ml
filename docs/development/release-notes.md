@@ -513,6 +513,9 @@ Each item says what changed, which pipelines it affects, and what to do.
   3.5 s less (dbt, scikit-learn and others load where used). The 5-block benchmark chain
   runs block by block in about 11 s instead of 20 s. `MAGE_RUST_TIMINGS=1` also prints
   the phases inside a block. See `docs/development/rust-pipeline-optimization.md`.
+- **Exported services build their Rust blocks into one binary.** Each block's binary held
+  its own copy of Polars (about 75 MB): five Rust blocks were 361 MB of the image, now
+  73 MB, and a run loads the code once.
 - **Rust blocks read and write PostgreSQL.** `mage::postgres` streams binary `COPY` both
   ways with typed columns, keeps `numeric` values exact, handles nested arrays, and
   connects with the block's io_config profile. TLS modes are libpq's (`prefer` by
