@@ -13,6 +13,7 @@ class RunRecordPresenter(BasePresenter):
         'experiments',
         'git',
         'id',
+        'monitors',
         'outputs',
         'pipeline_run_id',
         'pipeline_uuid',

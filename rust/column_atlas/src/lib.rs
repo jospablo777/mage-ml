@@ -6,6 +6,7 @@ pub mod contract;
 pub mod engine;
 pub mod error;
 pub mod format;
+pub mod profile;
 pub mod schema;
 pub mod summary;
 pub mod view;

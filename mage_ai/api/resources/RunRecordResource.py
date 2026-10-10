@@ -127,6 +127,10 @@ class RunRecordResource(GenericResource):
                 b.block_uuid: (b.metrics or {}).get('mlflow') for b in run.block_runs
                 if (b.metrics or {}).get('mlflow')
             },
+            monitors={
+                b.block_uuid: (b.metrics or {}).get('monitors') for b in run.block_runs
+                if (b.metrics or {}).get('monitors')
+            },
             waiting={
                 b.block_uuid: (b.metrics or {}).get('waiting') for b in run.block_runs
                 if (b.metrics or {}).get('waiting') and str(b.status) == 'initial'

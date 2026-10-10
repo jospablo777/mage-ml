@@ -672,6 +672,7 @@ class BlockExecutor:
                             raise RuntimeError(f'{type(err).__name__}: {err}') from err
 
                     self._tracked_block_run_id = block_run_id
+                    self._tracked_pipeline_run = pipeline_run
                     with self._tracking(block_run_id, pipeline_run):
                         result = __execute_with_retry()
                     self._recorded = self._output_record()
@@ -1297,11 +1298,52 @@ class BlockExecutor:
                 self.logger.warning(f'The release check of the block failed: {error}')
             if evaluations:
                 recorded['releases'] = evaluations
+        pipeline_run = getattr(self, '_tracked_pipeline_run', None)
+        if pipeline_run is not None and block_run_id is not None:
+            from mage_ai.orchestration import monitors
+
+            try:
+                records = monitors.check_block_run(
+                    self.pipeline, self.block_uuid, pipeline_run, block_run_id,
+                )
+            except Exception as error:
+                records = [dict(monitor='?', result='error', error=str(error), checks=[])]
+                self.logger.warning(f'A monitor of the block failed to run: {error}')
+            if records:
+                self._notify_monitors(records, pipeline_run)
+                recorded['monitors'] = [monitors.without_profile(r) for r in records]
         return recorded or None
+
+    def _notify_monitors(self, records: List[Dict], pipeline_run) -> None:
+        """Sends the pipeline's notifications for monitors that failed."""
+        from mage_ai.orchestration import monitors
+        from mage_ai.orchestration.notification.config import NotificationConfig
+        from mage_ai.orchestration.notification.sender import NotificationSender
+        from mage_ai.shared.hash import merge_dict
+
+        failed = [r for r in records if r.get('result') == 'fail' and r.get('notify')]
+        if not failed:
+            return
+        try:
+            sender = NotificationSender(NotificationConfig.load(config=merge_dict(
+                self.pipeline.repo_config.notification_config,
+                self.pipeline.notification_config,
+            )))
+            details = '\n\n'.join(monitors.summary(r) for r in failed)
+            sender.send(
+                title=f'Monitor failed: {self.pipeline.uuid} / {self.block_uuid}',
+                summary=(
+                    f'{len(failed)} monitor(s) of block {self.block_uuid} failed in pipeline '
+                    f'run {pipeline_run.id} of {self.pipeline.uuid}.'
+                ),
+                details=details,
+            )
+        except Exception as error:
+            self.logger.warning(f'Sending the monitor notifications failed: {error}')
 
     def _check_releases(self, recorded: Optional[Dict], tags: Dict) -> None:
         """Logs each release check; fails the block run if a policy says a failure does."""
-        from mage_ai.orchestration import releases
+        from mage_ai.orchestration import monitors, releases
 
         failed = []
         for evaluation in (recorded or {}).get('releases') or []:
@@ -1309,9 +1351,20 @@ class BlockExecutor:
                 continue
             self.logger.info(releases.summary(evaluation), **tags)
             if evaluation['decision'] == 'fail' and evaluation.get('fail_block'):
-                failed.append(f'{evaluation["model"]} version {evaluation["version"]}')
+                failed.append(f'the release check of {evaluation["model"]} version '
+                              f'{evaluation["version"]}')
+        for record in (recorded or {}).get('monitors') or []:
+            if 'checks' not in record or record.get('result') == 'error':
+                continue
+            text = monitors.summary(record)
+            if record['result'] in ('warn', 'fail'):
+                self.logger.warning(text, **tags)
+            else:
+                self.logger.info(text, **tags)
+            if record['result'] == 'fail' and record.get('fail_block'):
+                failed.append(f'monitor {record["monitor"]}')
         if failed:
-            raise Exception(f'The release check failed for {", ".join(failed)}.')
+            raise Exception(f'Failed: {", ".join(failed)}.')
 
     def _execute_conditional(
         self,

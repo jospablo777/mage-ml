@@ -1,0 +1,90 @@
+---
+title: "Monitoring block outputs"
+sidebarTitle: "Monitoring"
+icon: "chart-line"
+description: "Watch a block's output across runs: drift, missing values, row counts and freshness, with alerts."
+---
+
+## Overview
+
+A pipeline run can succeed and still produce bad data: a feature whose distribution
+shifted, a column that's suddenly half empty, a source that stopped updating. A monitor
+watches one block's output across pipeline runs and compares each run with a baseline
+run. It checks:
+
+- **drift**: how much each column's distribution moved (Jensen–Shannon divergence);
+- **missing values**: the share of missing values, and how much it grew;
+- **row counts**: the number of rows, and how much it changed;
+- **freshness**: how old the newest value of a timestamp column is.
+
+The whole stored output is profiled, not a sample, by the Rust engine that ColumnAtlas
+uses.
+
+## Write a monitor
+
+Create `monitors/<name>.yaml` in the project:
+
+```yaml
+# monitors/churn_scores.yaml
+pipeline: churn_scoring
+block: score
+baseline: previous         # the previous run (default), or run:<pipeline run id>
+columns: [score, segment]  # every column by default
+drift:
+  warn: 0.1                # Jensen-Shannon divergence, from 0 (same) to 0.69 (disjoint)
+  fail: 0.2
+missing:
+  max: 0.2                 # at most 20% missing
+  max_increase: 0.05       # at most 5 points more than the baseline
+rows:
+  min: 1000
+  max_change: 0.5          # at most 50% more or fewer rows than the baseline
+freshness:
+  column: event_time
+  max_age: 6h              # newest value at most 6 hours before the run's execution date
+min_rows: 30               # fewer rows, now or in the baseline, hold the drift checks
+fail_block: false          # true: a failed check fails the block run
+notify: true               # a failed check sends the pipeline's notifications
+```
+
+Durations take `s`, `m`, `h`, `d` or `w`. Only the checks you configure run, except
+drift, which runs with warn 0.1 and fail 0.2 by default.
+
+## Results
+
+Each check gives one result:
+
+- **pass**
+- **warn**: drift past `warn`, short of `fail`.
+- **fail**
+- **hold**: not enough data to decide. Examples: the first run, which has no baseline;
+  fewer than `min_rows` rows; a column with no values; no timestamps for freshness.
+
+The monitor's result is its worst check. Results show:
+
+- on the pipeline run's page, under **Run record**, with the checks that didn't pass;
+- in the block run's logs;
+- in the history from `mage monitor-status <project path> <monitor> [--runs 10]`.
+
+A failed monitor sends the pipeline's notifications (Slack, email, Teams and the others
+set in its notification settings), unless `notify: false`. With `fail_block: true` it
+also fails the block run, so downstream blocks don't run.
+
+## How drift is measured
+
+- **Numeric columns** are split into 20 bins (`bins:` changes it) at the quantiles of
+  the baseline's values. The current run is counted in the same bins, plus a bin below
+  the lowest edge and a bin above the highest.
+- **Text and boolean columns** compare the baseline's 20 most frequent values
+  (`top:` changes it), with everything else as one group.
+- The divergence is 0 for identical distributions and ln 2 (0.69) for distributions
+  with nothing in common. Missing values and NaN are counted separately, by the
+  missing checks, and never as a bin.
+- Thresholds depend on the data. Run the monitor for a few runs with `fail_block:
+  false` and look at the values before relying on a threshold.
+
+## Storage
+
+Each checked run's profile and checks are stored with the pipeline variables in
+`.monitoring/<monitor>/<pipeline run id>.json`. The profile is a summary (bin edges and
+counts, frequent values, missing counts), not the data.

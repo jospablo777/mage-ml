@@ -635,6 +635,7 @@
               "guides/pipelines/experiments",
               "guides/pipelines/model-releases",
               "guides/pipelines/resources",
+              "guides/pipelines/monitoring",
               "guides/community-examples"
             ]
           },

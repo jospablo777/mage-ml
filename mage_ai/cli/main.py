@@ -621,6 +621,30 @@ def release_rollback(
     typer.echo(f'{model} {entry["alias"]} is back to version {entry["version"]}.')
 
 
+@app.command('monitor-status')
+def monitor_status(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    monitor: str = typer.Argument(..., help='name of the monitor (monitors/<name>.yaml).'),
+    runs: int = typer.Option(10, help='how many of the latest runs to show.'),
+):
+    """Show a monitor's checks for the latest pipeline runs it watched."""
+    from mage_ai.orchestration import monitors
+
+    project_path = os.path.abspath(project_path)
+    try:
+        definition = monitors.load_monitor(monitor, project_path)
+        pipeline = _run_records_setup(project_path, definition.pipeline)
+    except monitors.MonitorError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    history = monitors.saved(pipeline, definition)[-runs:]
+    if not history:
+        typer.echo(f'Monitor {monitor} has not checked a run yet.')
+        return
+    for record in history:
+        typer.echo(f'Pipeline run {record["pipeline_run_id"]}: ' + monitors.summary(record))
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the Mage project.'),

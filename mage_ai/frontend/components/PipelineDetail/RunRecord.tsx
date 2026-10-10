@@ -92,6 +92,20 @@ type RunRecordType = {
   };
   releases?: { [blockUUID: string]: ReleaseType[] };
   waiting?: { [blockUUID: string]: string };
+  monitors?: {
+    [blockUUID: string]: {
+      baseline_run_id?: number;
+      checks: {
+        check: string;
+        column?: string;
+        detail: string;
+        result: string;
+      }[];
+      error?: string;
+      monitor: string;
+      result: string;
+    }[];
+  };
   environment?: {
     mage?: string;
     packages?: number;
@@ -367,6 +381,36 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
                 </Spacing>
               ))}
             </Spacing>
+          ))}
+          {Object.entries(record.monitors || {}).map(([blockUUID, records]) => records.map(
+            monitor => (
+              <Spacing key={`${blockUUID}-${monitor.monitor}`} mt={1}>
+                <Text small>
+                  Monitor {monitor.monitor} of {blockUUID}:{' '}
+                  <Text
+                    danger={['error', 'fail'].includes(monitor.result)}
+                    inline
+                    small
+                    success={monitor.result === 'pass'}
+                    warning={['hold', 'warn'].includes(monitor.result)}
+                  >
+                    {monitor.result}
+                  </Text>
+                  {' '}({monitor.baseline_run_id
+                    ? `against run ${monitor.baseline_run_id}`
+                    : 'no baseline yet'})
+                </Text>
+                {monitor.error && <Text danger small>{monitor.error}</Text>}
+                {monitor.checks.filter(check => check.result !== 'pass').map(check => (
+                  <Row
+                    key={`${check.check}-${check.column || ''}`}
+                    label={[check.check, check.column].filter(Boolean).join(' ')}
+                  >
+                    {check.result}; {check.detail}
+                  </Row>
+                ))}
+              </Spacing>
+            ),
           ))}
           {record.code_changed_between_starts && (
             <Text small warning>

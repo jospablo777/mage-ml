@@ -107,12 +107,23 @@ fn infer_contract(py: Python<'_>, path: String, name: String) -> PyResult<String
     json(&draft)
 }
 
+/// Column profiles of a Parquet file (JSON), for monitoring: missing values, bin counts
+/// of numeric columns, frequent values, temporal ranges.
+#[pyfunction]
+fn profile_columns(py: Python<'_>, path: String, request: String) -> PyResult<String> {
+    let result = py
+        .detach(|| crate::profile::profile(&path, &request))
+        .map_err(to_python)?;
+    json(&result)
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeTable>()?;
     module.add_function(wrap_pyfunction!(validate_contract, module)?)?;
     module.add_function(wrap_pyfunction!(infer_contract, module)?)?;
     module.add_function(wrap_pyfunction!(check_contract, module)?)?;
+    module.add_function(wrap_pyfunction!(profile_columns, module)?)?;
     module.add("MAX_ROWS", crate::engine::MAX_ROWS)?;
     module.add("MAX_COLUMNS", crate::engine::MAX_COLUMNS)?;
     module.add("MAX_SUMMARY_COLUMNS", crate::engine::MAX_SUMMARY_COLUMNS)?;

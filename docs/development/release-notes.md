@@ -507,6 +507,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Monitoring block outputs.** A monitor (`monitors/<name>.yaml`) watches a block's
+  output across pipeline runs against a baseline run. It checks drift of each column
+  (Jensen–Shannon divergence over the baseline's bins or frequent values), missing
+  values, row counts and the freshness of a timestamp column. The whole output is
+  profiled in Rust. Results show on the run page and in `mage monitor-status`, and a
+  failed monitor sends the pipeline's notifications or fails the block run. See
+  `docs/guides/pipelines/monitoring.mdx`.
 - **Resources and shared limits.** A block can declare the memory, CPUs, GPUs and shared
   limits it needs (block settings > Resources), and the project declares what exists
   (`resources` in its metadata.yaml: limits such as `warehouse: 4`, a memory budget and
