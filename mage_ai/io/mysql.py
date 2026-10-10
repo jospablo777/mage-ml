@@ -336,6 +336,12 @@ class MySQL(BaseSQL):
         **kwargs,
     ) -> None:
         def serialize_obj(val):
+            if isinstance(val, (set, frozenset)):
+                # A JSON array, in a fixed order.
+                try:
+                    val = sorted(val)
+                except TypeError:
+                    val = sorted(val, key=repr)
             if isinstance(val, (dict, list, tuple, np.ndarray)):
                 return simplejson.dumps(
                     val,
@@ -419,7 +425,8 @@ class MySQL(BaseSQL):
             PandasTypes.COMPLEX,
         ):
             if len(values) and all(
-                isinstance(value, (dict, list, tuple, np.ndarray)) for value in values
+                isinstance(value, (dict, list, tuple, set, frozenset, np.ndarray))
+                for value in values
             ):
                 return 'JSON'
             return 'LONGTEXT'

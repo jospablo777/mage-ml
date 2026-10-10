@@ -216,6 +216,23 @@ class VariableDtypeTest(DBTestCase):
         self.assertEqual(back['labels'].tolist(), [1, 'a', True])
         self.assertEqual(back['big'].tolist(), [2**70, -(2**70), None])
 
+    def test_set_frozenset_and_tuple_columns_keep_their_type(self):
+        """Sets came back as numpy arrays, so a downstream block got another type."""
+        frame = pd.DataFrame({
+            'tags': pd.Series([{'b', 'a'}, set(), None], dtype=object),
+            'frozen': pd.Series([frozenset({1, 2}), frozenset(), None], dtype=object),
+            'pairs': pd.Series([(1, 'x'), (2,), None], dtype=object),
+        })
+
+        back = self.write_and_read('collections', frame)
+        sample = self.write_and_read('collections', frame, sample=True, sample_count=2)
+
+        self.assertEqual(back['tags'].tolist(), [{'a', 'b'}, set(), None])
+        self.assertEqual(back['frozen'].tolist(), [frozenset({1, 2}), frozenset(), None])
+        self.assertEqual(back['pairs'].tolist(), [(1, 'x'), (2,), None])
+        self.assertEqual(sample['tags'].tolist(), [{'a', 'b'}, set()])
+        self.assertIs(type(back['pairs'].tolist()[0]), tuple)
+
     def test_column_labels_and_index_round_trip(self):
         """
         Parquet needs string column names. Labels used to come back as text, so df[0] on a

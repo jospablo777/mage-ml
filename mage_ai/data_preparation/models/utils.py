@@ -119,7 +119,29 @@ DECODERS = {
     'uuid': uuid.UUID,
     'complex': lambda parts: complex(float(parts[0]), float(parts[1])),
     'interval': lambda parts: pd.Interval(parts[0], parts[1], closed=parts[2]),
+    'set': set,
+    'frozenset': frozenset,
+    'tuple': tuple,
 }
+
+# Object columns of sets, frozensets or tuples: stored as tagged JSON, since Parquet would
+# return their values as numpy arrays.
+COLLECTION_COLUMN_TYPES = {'set': set, 'frozenset': frozenset, 'tuple': tuple}
+
+
+def _ordered(values: Any) -> List[Any]:
+    """A set's values in a fixed order, so the stored text does not depend on hashing."""
+    try:
+        return sorted(values)
+    except TypeError:
+        return sorted(values, key=lambda v: (type(v).__name__, repr(v)))
+
+
+def serialize_collection_value(value: Any, column_type: str) -> Any:
+    if _is_missing(value):
+        return None
+    items = _ordered(value) if isinstance(value, (set, frozenset)) else list(value)
+    return _TAGGED_ENCODER.encode(_tag(column_type, items))
 
 
 def _decode_tagged(obj: Dict) -> Any:
@@ -372,6 +394,12 @@ def serialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
                 index=df.index,
                 dtype=object,
             )
+        elif column_type in COLLECTION_COLUMN_TYPES:
+            df[column] = pd.Series(
+                [serialize_collection_value(v, column_type) for v in df[column].tolist()],
+                index=df.index,
+                dtype=object,
+            )
         elif column_type in TEXT_COLUMN_TYPES:
             to_text = TEXT_COLUMN_TYPES[column_type][0]
             df[column] = pd.Series(
@@ -442,7 +470,7 @@ def deserialize_columns(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
                 index=df.index,
                 dtype=object,
             )
-        elif column_type == OBJECT_JSON_COLUMN_TYPE:
+        elif column_type in (OBJECT_JSON_COLUMN_TYPE, *COLLECTION_COLUMN_TYPES):
             df[column] = pd.Series(
                 [deserialize_json_value(v) for v in df[column].tolist()],
                 index=df.index,
@@ -479,6 +507,7 @@ def should_serialize_pandas(column_types: Dict) -> bool:
             column_type in JSON_SERIALIZABLE_COLUMN_TYPES
             or column_type in STRING_SERIALIZABLE_COLUMN_TYPES
             or column_type in TEXT_COLUMN_TYPES
+            or column_type in COLLECTION_COLUMN_TYPES
             or column_type == OBJECT_JSON_COLUMN_TYPE
         ):
             return True
@@ -492,6 +521,7 @@ def should_deserialize_pandas(column_types: Dict) -> bool:
         if (
             column_type in JSON_SERIALIZABLE_COLUMN_TYPES
             or column_type in TEXT_COLUMN_TYPES
+            or column_type in COLLECTION_COLUMN_TYPES
             or column_type == OBJECT_JSON_COLUMN_TYPE
         ):
             return True

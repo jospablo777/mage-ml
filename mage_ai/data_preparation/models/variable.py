@@ -32,6 +32,7 @@ from mage_ai.data_preparation.models.constants import (
 from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     AMBIGUOUS_COLUMN_TYPES,
     CATEGORY_CODES_COLUMN_TYPE,
+    COLLECTION_COLUMN_TYPES,
     DECIMAL_COLUMN_TYPE,
     FLOAT_COLUMN_TYPE,
     OBJECT_JSON_COLUMN_TYPE,
@@ -1539,6 +1540,13 @@ class Variable:
                     values = series_non_null.tolist()
                     if all(isinstance(v, uuid.UUID) for v in values):
                         column_types[c] = UUID_COLUMN_TYPE
+                        continue
+                    collection = type(values[0]).__name__
+                    if collection in COLLECTION_COLUMN_TYPES and all(
+                        type(v) is COLLECTION_COLUMN_TYPES[collection] for v in values
+                    ):
+                        # Parquet would return the values as numpy arrays.
+                        column_types[c] = collection
                         continue
                     if needs_object_json(values):
                         # Casting to the type of the first value turned 2.5 into 2 in a
