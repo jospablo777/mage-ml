@@ -80,6 +80,19 @@ except SQLAlchemyError:
         )
 
 
+
+
+def _forget_inherited_connections() -> None:
+    # A forked process (a job from the forkserver, or a fork of a process that already
+    # queried) shares its parent's pooled connections, and two processes on one
+    # connection lose writes. The child opens its own; the parent keeps its.
+    engine.dispose(close=False)
+
+
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_forget_inherited_connections)
+
+
 session_factory = sessionmaker(
     class_=SessionWithCaching,
     bind=engine,

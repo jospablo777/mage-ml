@@ -435,6 +435,13 @@ class Worker(mp.Process):
         self.redis_url = redis_url
         self.client_id = client_id
         self.dsn = SENTRY_DSN
+
+    def _set_up_process(self) -> None:
+        """
+        In the worker, not in the pool that creates it: a worker started with spawn
+        (macOS) inherits none of the pool's state, so it had no error reporting, New Relic
+        or log format.
+        """
         if self.dsn:
             sentry_sdk.init(
                 self.dsn,
@@ -452,7 +459,6 @@ class Worker(mp.Process):
             level=SERVER_VERBOSITY,
         )
 
-    @newrelic.agent.background_task(name='worker-run', group='Task')
     def run(self):
         """
         The entry point for the worker process.
@@ -460,6 +466,11 @@ class Worker(mp.Process):
         Executes the job and updates the job status in the job dictionary.
 
         """
+        self._set_up_process()
+        self._run_job()
+
+    @newrelic.agent.background_task(name='worker-run', group='Task')
+    def _run_job(self):
         global _current_job
         job_id, target, args, kwargs = self.job
         print(f'Run worker for job {job_id}')
