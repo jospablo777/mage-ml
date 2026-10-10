@@ -305,17 +305,47 @@ def _performance_settings(raw: Any, name: str) -> Dict:
 
 
 def monitors_for(repo_path: str, pipeline_uuid: str, block_uuid: str) -> List[Monitor]:
+    """
+    The monitors that watch the block. A monitor file that does not load is left out: it
+    stopped every other monitor of the project. If it names this block, its error is
+    raised by broken_monitors_for, which check_block_run records.
+    """
+    return [m for m in _scan(repo_path) if isinstance(m, Monitor)
+            and m.pipeline == pipeline_uuid and m.block == block_uuid]
+
+
+def broken_monitors_for(repo_path: str, pipeline_uuid: str, block_uuid: str) -> List[Dict]:
+    """(name, error) of monitor files that name the block and do not load."""
+    broken = []
+    for entry in _scan(repo_path):
+        if isinstance(entry, Monitor):
+            continue
+        name, error, document = entry
+        if document.get('pipeline') == pipeline_uuid and document.get('block') in (
+            block_uuid, None,
+        ):
+            broken.append(dict(monitor=name, error=error))
+    return broken
+
+
+def _scan(repo_path: str) -> List[Any]:
     folder = os.path.join(repo_path, MONITORS_FOLDER)
     if not os.path.isdir(folder):
         return []
-    found = []
+    found: List[Any] = []
     for name in sorted(os.listdir(folder)):
         stem, suffix = os.path.splitext(name)
         if suffix not in ('.yaml', '.yml') or not _NAME.match(stem):
             continue
-        monitor = load_monitor(stem, repo_path)
-        if monitor.pipeline == pipeline_uuid and monitor.block == block_uuid:
-            found.append(monitor)
+        try:
+            found.append(load_monitor(stem, repo_path))
+        except MonitorError as error:
+            try:
+                with open(os.path.join(folder, name), encoding='utf-8') as file:
+                    document = yaml.safe_load(file) or {}
+            except (OSError, yaml.YAMLError):
+                document = {}
+            found.append((stem, str(error), document if isinstance(document, dict) else {}))
     return found
 
 
@@ -754,7 +784,11 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
 
     from mage_ai.data_preparation import contracts
 
-    records = []
+    records = [
+        dict(monitor=broken['monitor'], result='error', error=broken['error'], checks=[],
+             pipeline_run_id=pipeline_run.id)
+        for broken in broken_monitors_for(pipeline.repo_path, pipeline.uuid, block_uuid)
+    ]
     for monitor in monitors_for(pipeline.repo_path, pipeline.uuid, block_uuid):
         baseline = _baseline(pipeline, monitor, pipeline_run.id)
         edges = _reference_edges(pipeline, monitor, baseline)

@@ -139,6 +139,14 @@ const DEFAULT_NAV_ITEMS = ({
           },
         },
         {
+          Icon: Insights,
+          id: 'monitors',
+          label: () => 'Monitors',
+          linkProps: {
+            href: '/monitors',
+          },
+        },
+        {
           Icon: HexagonAll,
           id: 'global-data-products',
           label: () => 'Global data products',
