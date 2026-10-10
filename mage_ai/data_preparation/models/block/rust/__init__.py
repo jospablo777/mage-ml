@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -26,6 +25,7 @@ from mage_ai.data_preparation.models.block.rust import exchange
 from mage_ai.data_preparation.models.block.rust import inputs as rust_inputs
 from mage_ai.data_preparation.models.block.rust.source import RustSourceError
 from mage_ai.data_preparation.models.constants import BlockType
+from mage_ai.shared.processes import HAS_PROCESS_GROUPS, stop_process_group
 
 # Conditional blocks run through ConditionalBlock.execute_conditional; Rust conditionals
 # come with their own scheduler tests.
@@ -64,17 +64,6 @@ def _process_env() -> Dict[str, str]:
     return env
 
 
-def _stop(process: subprocess.Popen) -> None:
-    try:
-        if hasattr(os, 'killpg'):
-            os.killpg(process.pid, signal.SIGKILL)
-        else:
-            process.kill()
-    except (ProcessLookupError, PermissionError):
-        pass
-    process.wait()
-
-
 def _run_binary(
     binary: str,
     job_dir: str,
@@ -92,14 +81,14 @@ def _run_binary(
         text=True,
         encoding='utf-8',
         errors='replace',
-        start_new_session=hasattr(os, 'killpg'),
+        start_new_session=HAS_PROCESS_GROUPS,
     )
     timed_out = threading.Event()
     timer = None
     if timeout:
         def stop():
             timed_out.set()
-            _stop(process)
+            stop_process_group(process)
 
         # A timer, not a check between lines: a block can compute without printing.
         timer = threading.Timer(timeout, stop)
@@ -111,7 +100,7 @@ def _run_binary(
         code = process.wait()
     except BaseException:
         # An interrupted or failed run leaves no Rust process computing.
-        _stop(process)
+        stop_process_group(process)
         raise
     finally:
         if timer is not None:

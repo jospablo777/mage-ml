@@ -412,6 +412,15 @@ Each item says what changed, which pipelines it affects, and what to do.
   be lost. Blocks mark their function with `#* @transformer` and the other annotations,
   and their tests with `#* @test`; blocks that define `load_data()`, `transform()` or
   `export_data()` still run.
+- **R blocks run from the editor keep their annotations.** The notebook removed every
+  line starting with `#` from the code it sent to the kernel, including the block's code,
+  so a block whose function was not named `load_data`, `transform` or `export_data`
+  failed with "The block has no function". Only Python comment lines are removed now;
+  lines in strings stay, which also keeps Rust attributes such as `#[derive(...)]`.
+- **An R block stops when its run is interrupted or the process running it is gone.**
+  Interrupting an R block in the notebook, or killing the kernel or worker, left R
+  computing. Rscript now runs under a small supervisor that stops it, with the processes
+  it started, once its parent is gone; this adds about 15 ms to a block run.
 - The Docker image installs R 4.6 from CRAN and rv 0.20, in place of Debian's R with
   pacman and renv.
 - **R environments install on Linux arm64 and other platforms without binaries.** The

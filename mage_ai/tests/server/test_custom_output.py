@@ -75,3 +75,76 @@ class CustomOutputTemplateTests(TestCase):
 
         # Fails with ImportError on pandas 3.x before the fix.
         ignore_setting_with_copy_warning()
+
+
+R_BLOCK = '''library(dplyr)
+
+#* @data_loader
+load_orders <- function(...) {
+  # One row per order.
+  read_sql("SELECT * FROM orders")
+}
+'''
+
+RUST_BLOCK = '''use mage::prelude::*;
+
+#[derive(Debug, Clone)]
+struct Row {
+    id: i64,
+}
+
+fn transform(data: LazyFrame) -> Result<LazyFrame> {
+    Ok(data)
+}
+'''
+
+
+class RemoveCommentsTests(TestCase):
+    def test_python_comment_lines_are_removed(self):
+        code = '# a comment\nx = 1  # stays\n    # indented comment\ny = 2'
+        self.assertEqual(
+            output_display.remove_comments(code.split('\n')),
+            ['x = 1  # stays', 'y = 2'],
+        )
+
+    def test_lines_inside_strings_that_start_with_hash_are_kept(self):
+        code = "text = '''\n# a heading\n#* @data_loader\n#[derive(Debug)]\n'''\n# gone\ntext"
+        self.assertEqual(
+            output_display.remove_comments(code.split('\n')),
+            ["text = '''", '# a heading', '#* @data_loader', '#[derive(Debug)]', "'''", 'text'],
+        )
+
+    def test_code_that_does_not_tokenize_drops_comment_lines_as_before(self):
+        code = "x = '''\n# open string"
+        self.assertEqual(output_display.remove_comments(code.split('\n')), ["x = '''"])
+
+    def _executed_code(self, block_code: str) -> str:
+        block = MagicMock()
+        block.uuid = 'test_block'
+        block.pipeline.uuid = 'test_pipeline'
+        block.pipeline.repo_path = '/home/src/test'
+        script = output_display.add_execution_code(
+            'test_pipeline', 'test_block', block_code, 'dict()', '/home/src/test',
+        )
+        with patch.multiple(
+            output_display,
+            has_reduce_output_from_upstreams=MagicMock(return_value=False),
+            is_dynamic_block=MagicMock(return_value=False),
+            is_dynamic_block_child=MagicMock(return_value=False),
+        ):
+            return output_display.add_internal_output_info(block, script)
+
+    def test_r_annotations_reach_the_kernel(self):
+        """
+        The notebook ran R blocks without their `#* @data_loader` line, so R blocks that
+        name their function freely failed with "The block has no function".
+        """
+        code = self._executed_code(R_BLOCK)
+        ast.parse(code)
+        self.assertIn('#* @data_loader\nload_orders <- function(...) {', code)
+        self.assertIn('  # One row per order.', code)
+
+    def test_rust_attributes_reach_the_kernel(self):
+        code = self._executed_code(RUST_BLOCK)
+        ast.parse(code)
+        self.assertIn('#[derive(Debug, Clone)]\nstruct Row {', code)

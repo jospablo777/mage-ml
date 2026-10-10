@@ -28,14 +28,20 @@ import hashlib
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from mage_ai.shared.processes import (
+    HAS_PROCESS_GROUPS,
+    stop_process_group,
+    supervised_command,
+)
 
 DEFAULT_R_VERSION = '4.6'
 R_PROJECT_DIRECTORY = 'r'
@@ -711,12 +717,13 @@ def run_rscript(
 ) -> int:
     """
     Run an R script, printing its output as it comes so it reaches the block's logs, and
-    return its exit code. A run longer than the timeout is stopped with its child
-    processes.
+    return its exit code. R stops, with the processes it started, when the run times out,
+    is interrupted, or the process running it is gone.
     """
-    new_session = hasattr(os, 'killpg')
     process = subprocess.Popen(
-        [_executable(config.rscript, 'Rscript'), '--vanilla', str(script), *args],
+        supervised_command(
+            [_executable(config.rscript, 'Rscript'), '--vanilla', str(script), *args],
+        ),
         cwd=cwd,
         env=tool_env(config, env),
         stdout=subprocess.PIPE,
@@ -724,32 +731,29 @@ def run_rscript(
         text=True,
         encoding='utf-8',
         errors='replace',
-        start_new_session=new_session,
+        start_new_session=HAS_PROCESS_GROUPS,
     )
-    timed_out = []
+    timed_out = threading.Event()
     timer = None
     if config.timeout:
-        import threading
-
         def stop():
-            timed_out.append(True)
-            try:
-                if new_session:
-                    os.killpg(process.pid, signal.SIGKILL)
-                else:
-                    process.kill()
-            except ProcessLookupError:
-                pass
+            timed_out.set()
+            stop_process_group(process)
 
         timer = threading.Timer(config.timeout, stop)
+        timer.daemon = True
         timer.start()
     try:
         for line in process.stdout:
             sys.stdout.write(line)
         code = process.wait()
+    except BaseException:
+        # An interrupted run, such as one stopped in the notebook, leaves no R computing.
+        stop_process_group(process)
+        raise
     finally:
         if timer is not None:
             timer.cancel()
-    if timed_out:
+    if timed_out.is_set():
         raise TimeoutError(f'The R block ran longer than {config.timeout:g} seconds.')
     return code

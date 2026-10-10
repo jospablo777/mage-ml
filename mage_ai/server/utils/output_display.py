@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
+import tokenize
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from mage_ai.data_preparation.models.block.dynamic.utils import (
@@ -19,15 +21,32 @@ from mage_ai.server.kernels import KernelName
 from mage_ai.shared.code import is_pyspark_code
 
 REGEX_PATTERN = r'^[ ]{2,}[\w]+'
+_LAYOUT_TOKENS = frozenset([
+    tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER,
+])
 
 
 def remove_comments(code_lines: List[str]) -> List[str]:
-    return list(
-        filter(
-            lambda x: not re.search(r'^\#', str(x).strip()),
-            code_lines,
-        )
-    )
+    """
+    The lines without Python comment lines. Lines inside strings stay: the code of R and
+    Rust blocks reaches the kernel in a string, and its `#* @transformer` annotations
+    and `#[derive(...)]` attributes start with #. Removing every line that starts with #
+    removed them from the code that ran.
+    """
+    code = '\n'.join(str(line) for line in code_lines)
+    comment_lines = set()
+    code_lines_seen = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(code).readline):
+            if token.type == tokenize.COMMENT:
+                comment_lines.add(token.start[0])
+            elif token.type not in _LAYOUT_TOKENS:
+                code_lines_seen.update(range(token.start[0], token.end[0] + 1))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # Code that does not tokenize fails when it runs; its comment lines go as before.
+        return [line for line in code_lines if not str(line).strip().startswith('#')]
+    removed = comment_lines - code_lines_seen
+    return [line for number, line in enumerate(code_lines, start=1) if number not in removed]
 
 
 def remove_empty_last_lines(code_lines: List[str]) -> List[str]:

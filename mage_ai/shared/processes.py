@@ -7,14 +7,18 @@ another one, so each block run ran twice and one of the two failed writing its o
 """
 import os
 import signal
+import subprocess
+import sys
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Sequence
 
 import psutil
 
 PARENT_CHECK_SECONDS = 1.0
 TERMINATE_TIMEOUT_SECONDS = 5.0
+SUPERVISOR = os.path.join(os.path.dirname(__file__), 'supervise.py')
+HAS_PROCESS_GROUPS = hasattr(os, 'killpg')
 
 
 def terminate_descendants(timeout: float = TERMINATE_TIMEOUT_SECONDS) -> None:
@@ -103,3 +107,26 @@ def stop_on_terminate(cleanup: Optional[Callable[[], None]] = None) -> None:
         os._exit(128 + signum)
 
     signal.signal(signal.SIGTERM, handle)
+
+
+def supervised_command(args: Sequence[str]) -> List[str]:
+    """
+    The command that runs args and stops it, with the processes it starts, once this
+    process is gone. Start it with `start_new_session=HAS_PROCESS_GROUPS` and stop it with
+    stop_process_group. Without process groups, as on Windows, it is args.
+    """
+    if not HAS_PROCESS_GROUPS:
+        return list(args)
+    return [sys.executable, '-I', '-S', SUPERVISOR, str(os.getpid()), *args]
+
+
+def stop_process_group(process: subprocess.Popen) -> None:
+    """Kills a process started in a new session, with every process in its group."""
+    try:
+        if HAS_PROCESS_GROUPS:
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+    process.wait()

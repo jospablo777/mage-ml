@@ -10,7 +10,12 @@ import unittest
 import psutil
 
 from mage_ai.orchestration.queue.process_queue import _kill_process_tree
-from mage_ai.shared.processes import exit_with_parent, stop_on_terminate
+from mage_ai.shared.processes import (
+    HAS_PROCESS_GROUPS,
+    exit_with_parent,
+    stop_on_terminate,
+    supervised_command,
+)
 
 SLEEPER = [sys.executable, '-c', 'import time; time.sleep(120)']
 
@@ -132,3 +137,78 @@ class ProcessLifetimeTest(unittest.TestCase):
         self.assertEqual(_wait_gone([grandchild]), [])
         # A process that is gone already is not an error.
         _kill_process_tree(process.pid)
+
+
+# Writes its pid and the pid of a process it starts, then sleeps.
+TREE = (
+    'import os, subprocess, sys, time; '
+    f'p = subprocess.Popen({SLEEPER!r}); '
+    'open(sys.argv[1] + ".tmp", "w").write(f"{os.getpid()} {p.pid}"); '
+    'os.replace(sys.argv[1] + ".tmp", sys.argv[1]); time.sleep(120)'
+)
+
+
+def _start_supervised(path):
+    """A Mage process that runs TREE supervised, as R blocks run Rscript."""
+    script = (
+        'import subprocess, sys, time\n'
+        'from mage_ai.shared.processes import supervised_command\n'
+        f'subprocess.Popen(supervised_command([sys.executable, "-c", {TREE!r}, {path!r}]), '
+        'start_new_session=True)\n'
+        'time.sleep(120)\n'
+    )
+    return subprocess.Popen([sys.executable, '-c', script])
+
+
+@unittest.skipUnless(HAS_PROCESS_GROUPS, 'supervision needs process groups')
+class SupervisedCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), 'pids')
+
+    def test_the_command_stops_with_its_children_when_the_parent_is_killed(self):
+        parent = _start_supervised(self.path)
+        command, grandchild = _read_pids(self.path, 2)
+        self.assertTrue(_alive(command))
+
+        parent.kill()
+        parent.wait()
+
+        self.assertEqual(_wait_gone([command, grandchild], timeout=10), [])
+
+    def test_the_command_runs_while_the_parent_lives(self):
+        parent = _start_supervised(self.path)
+        command, grandchild = _read_pids(self.path, 2)
+        time.sleep(1.5)
+        try:
+            self.assertTrue(_alive(command))
+            self.assertTrue(_alive(grandchild))
+        finally:
+            parent.kill()
+            parent.wait()
+        self.assertEqual(_wait_gone([command, grandchild], timeout=10), [])
+
+    def test_the_exit_code_and_output_are_the_commands(self):
+        result = subprocess.run(
+            supervised_command([sys.executable, '-c', 'print("out"); raise SystemExit(3)']),
+            capture_output=True, text=True, start_new_session=True,
+        )
+        self.assertEqual((result.returncode, result.stdout), (3, 'out\n'))
+
+        result = subprocess.run(
+            supervised_command([sys.executable, '-c', 'import os; os.kill(os.getpid(), 9)']),
+            start_new_session=True,
+        )
+        self.assertEqual(result.returncode, 128 + signal.SIGKILL)
+
+    def test_sigint_reaches_the_command_and_its_exit_code_comes_back(self):
+        process = subprocess.Popen(
+            supervised_command([sys.executable, '-c', TREE, self.path]), start_new_session=True,
+        )
+        command, grandchild = _read_pids(self.path, 2)
+
+        os.killpg(process.pid, signal.SIGINT)
+
+        # Python ends with SIGINT on an uncaught KeyboardInterrupt; the sleeper is in the
+        # same group and gets it too.
+        self.assertEqual(process.wait(15), 128 + signal.SIGINT)
+        self.assertEqual(_wait_gone([command, grandchild]), [])

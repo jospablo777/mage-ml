@@ -1,7 +1,12 @@
+import io
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
+import time
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -424,3 +429,94 @@ class RigTest(TestCase):
             names = [step['name'] for step in runtime.setup_steps('4.6')]
 
         self.assertFalse(any('libraries' in name for name in names))
+
+
+# Writes its pid, prints a line and computes for a minute.
+SLEEPING_SCRIPT = """
+args <- commandArgs(trailingOnly = TRUE)
+writeLines(as.character(Sys.getpid()), paste0(args[1], ".tmp"))
+file.rename(paste0(args[1], ".tmp"), args[1])
+cat("started\\n")
+Sys.sleep(60)
+"""
+
+
+def _alive(pid: int) -> bool:
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
+def _wait_for(condition, timeout: float = 30) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+@unittest.skipUnless(shutil.which('Rscript'), 'needs Rscript')
+class RunRscriptTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.directory = Path(tempfile.mkdtemp())
+        self.script = self.directory / 'script.R'
+        self.script.write_text(SLEEPING_SCRIPT)
+        self.pid_file = self.directory / 'pid'
+        self.config = runtime.RConfig(project_dir=None, rscript='Rscript', rv='rv')
+
+    def r_pid(self) -> int:
+        self.assertTrue(_wait_for(self.pid_file.exists), 'R did not start')
+        return int(self.pid_file.read_text())
+
+    def test_output_and_exit_code(self):
+        script = self.directory / 'fails.R'
+        script.write_text('cat("one\\ntwo\\n"); quit(status = 4)')
+        output = io.StringIO()
+        with patch.object(runtime.sys, 'stdout', output):
+            code = runtime.run_rscript(self.config, script, [], env={}, cwd=self.directory)
+        self.assertEqual((code, output.getvalue()), (4, 'one\ntwo\n'))
+
+    def test_a_timeout_stops_r(self):
+        config = runtime.RConfig(project_dir=None, rscript='Rscript', rv='rv', timeout=3)
+        with self.assertRaisesRegex(TimeoutError, 'longer than 3 seconds'):
+            runtime.run_rscript(
+                config, self.script, [str(self.pid_file)], env={}, cwd=self.directory,
+            )
+        self.assertTrue(_wait_for(lambda: not _alive(int(self.pid_file.read_text())), 10))
+
+    def test_an_interrupt_stops_r(self):
+        """Interrupting an R block in the notebook left R computing."""
+        class Interrupting(io.StringIO):
+            def write(self, text):
+                raise KeyboardInterrupt
+
+        with patch.object(runtime.sys, 'stdout', Interrupting()):
+            with self.assertRaises(KeyboardInterrupt):
+                runtime.run_rscript(
+                    self.config, self.script, [str(self.pid_file)], env={}, cwd=self.directory,
+                )
+        self.assertTrue(_wait_for(lambda: not _alive(self.r_pid()), 10))
+
+    def test_r_stops_when_the_process_running_the_block_is_killed(self):
+        """A killed kernel or worker left its R block running."""
+        code = (
+            'import sys\n'
+            'from pathlib import Path\n'
+            'from mage_ai.data_preparation.models.block.r import runtime\n'
+            "config = runtime.RConfig(project_dir=None, rscript='Rscript', rv='rv')\n"
+            f'runtime.run_rscript(config, Path({str(self.script)!r}), '
+            f'[{str(self.pid_file)!r}], env={{}}, cwd=Path({str(self.directory)!r}))\n'
+        )
+        process = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.DEVNULL)
+        pid = self.r_pid()
+        self.assertTrue(_alive(pid))
+
+        process.kill()
+        process.wait()
+
+        self.assertTrue(_wait_for(lambda: not _alive(pid), 10), 'R is still running')
