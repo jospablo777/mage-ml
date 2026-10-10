@@ -35,6 +35,7 @@ struct Options {
     render_once: bool,
     render_svg: bool,
     reduced_motion: bool,
+    light: bool,
     width: u16,
     height: u16,
     frame: u64,
@@ -49,6 +50,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let Some(options) = options()? else {
         return Ok(());
     };
+    if options.light {
+        ui::set_palette(ui::LIGHT);
+    }
     let mut app = App::new(options.mode, options.allow_control);
     app.reduced_motion = options.reduced_motion;
     app.set_animation_frame(options.frame);
@@ -136,6 +140,7 @@ fn parse_options(
         render_once: false,
         render_svg: false,
         reduced_motion: false,
+        light: std::env::var("MAGE_CONSOLE_THEME").is_ok_and(|t| t.eq_ignore_ascii_case("light")),
         width: 150,
         height: 44,
         frame: 0,
@@ -160,6 +165,7 @@ fn parse_options(
             "--render-once" => options.render_once = true,
             "--render-svg" => options.render_svg = true,
             "--reduce-motion" => options.reduced_motion = true,
+            "--light" => options.light = true,
             "--width" => {
                 options.width = args
                     .next()
@@ -189,7 +195,7 @@ fn parse_options(
             }
             "--help" | "-h" => {
                 println!(
-                    "mage-console [--endpoint URL] [--allow-control] [--reduce-motion]\nmage-console --demo [--render-once | --render-svg]\nmage-console --snapshot FILE [--render-once | --render-svg]\n\nOffline render options: --width 150 --height 44 --frame 0\nUse --reduce-motion or press m to stop activity animation.\nLive reads use MAGE_SERVICE_READ_TOKEN or MAGE_SERVICE_TOKEN. Controls need MAGE_SERVICE_TOKEN.\nHTTP is allowed on loopback; remote connections require HTTPS."
+                    "mage-console [--endpoint URL] [--allow-control] [--reduce-motion] [--light]\nmage-console --demo [--render-once | --render-svg]\nmage-console --snapshot FILE [--render-once | --render-svg]\n\nOffline render options: --width 150 --height 44 --frame 0\nUse --reduce-motion or press m to stop activity animation. --light (or\nMAGE_CONSOLE_THEME=light) uses colors for terminals with a light background.\nLive reads use MAGE_SERVICE_READ_TOKEN or MAGE_SERVICE_TOKEN. Controls need MAGE_SERVICE_TOKEN.\nHTTP is allowed on loopback; remote connections require HTTPS."
                 );
                 return Ok(None);
             }

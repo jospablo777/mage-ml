@@ -121,7 +121,8 @@ failed, running and queued runs, run durations with their p95, throughput, the r
 with their errors, the next scheduled run, and the embedded models. It refreshes every
 second, shows when its data is stale or the connection is lost, and is read-only unless
 started with `--allow-control`, which enables pause, resume and concurrency changes checked
-against the pipeline's settings revision.
+against the pipeline's settings revision. `--light` (or `MAGE_CONSOLE_THEME=light`) uses colors for terminals with a
+light background.
 
 ```bash
 cargo build --release --manifest-path sales-service/build/mage_service/Cargo.toml -p mage-console
@@ -157,7 +158,7 @@ The service takes values from several places; a variable set directly always win
 | Source | How |
 | --- | --- |
 | Environment | `-e NAME=value`, `--env-file`, Kubernetes `secretKeyRef`, ECS `secrets`, Code Engine `--env-from-secret` |
-| A secret file | `NAME_FILE=/run/secrets/name` sets `NAME` from the file |
+| A secret file | `NAME_FILE=/run/secrets/name` sets `NAME` from the file, for the variables the code reads, `MAGE_SECRET_*`, the service tokens and the cloud credentials; other `*_FILE` variables such as `SSL_CERT_FILE` are left to their tools. Files over 128 KiB are refused |
 | A directory of secret files | `MAGE_SERVICE_SECRETS_DIR=/run/secrets`: one variable per file |
 | A secrets provider | `MAGE_SERVICE_SECRETS`, read at start (below) |
 

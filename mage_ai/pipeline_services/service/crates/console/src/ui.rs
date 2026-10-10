@@ -13,23 +13,74 @@ use ratatui::{
 
 use crate::{App, Mode, clean, unix_ms};
 
-const CANVAS: Color = Color::Rgb(24, 24, 28);
-const PANEL: Color = Color::Rgb(35, 36, 41);
-const BORDER: Color = Color::Rgb(68, 68, 79);
-const TEXT: Color = Color::Rgb(249, 250, 252);
-const MUTED: Color = Color::Rgb(180, 184, 192);
-const PURPLE: Color = Color::Rgb(149, 111, 255);
-const LAVENDER: Color = Color::Rgb(196, 185, 239);
-const RUST_ACCENT: Color = Color::Rgb(232, 139, 97);
-const ICE: Color = Color::Rgb(149, 236, 226);
-const GREEN: Color = Color::Rgb(47, 203, 82);
-const WARNING: Color = Color::Rgb(255, 204, 25);
-const ERROR: Color = Color::Rgb(255, 84, 125);
-const SELECTED: Color = Color::Rgb(53, 43, 78);
+/// The console's colors. Dark is the default; `--light` picks the light palette for
+/// terminals with a light background.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    canvas: Color,
+    panel: Color,
+    border: Color,
+    text: Color,
+    muted: Color,
+    purple: Color,
+    lavender: Color,
+    rust_accent: Color,
+    ice: Color,
+    green: Color,
+    warning: Color,
+    error: Color,
+    selected: Color,
+}
+
+pub const DARK: Palette = Palette {
+    canvas: Color::Rgb(24, 24, 28),
+    panel: Color::Rgb(35, 36, 41),
+    border: Color::Rgb(68, 68, 79),
+    text: Color::Rgb(249, 250, 252),
+    muted: Color::Rgb(180, 184, 192),
+    purple: Color::Rgb(149, 111, 255),
+    lavender: Color::Rgb(196, 185, 239),
+    rust_accent: Color::Rgb(232, 139, 97),
+    ice: Color::Rgb(149, 236, 226),
+    green: Color::Rgb(47, 203, 82),
+    warning: Color::Rgb(255, 204, 25),
+    error: Color::Rgb(255, 84, 125),
+    selected: Color::Rgb(53, 43, 78),
+};
+
+pub const LIGHT: Palette = Palette {
+    canvas: Color::Rgb(250, 251, 252),
+    panel: Color::Rgb(255, 255, 255),
+    border: Color::Rgb(201, 205, 212),
+    text: Color::Rgb(22, 24, 29),
+    muted: Color::Rgb(91, 98, 112),
+    purple: Color::Rgb(107, 80, 215),
+    lavender: Color::Rgb(78, 50, 188),
+    rust_accent: Color::Rgb(183, 80, 32),
+    ice: Color::Rgb(0, 128, 140),
+    green: Color::Rgb(0, 138, 21),
+    warning: Color::Rgb(160, 110, 0),
+    error: Color::Rgb(204, 0, 54),
+    selected: Color::Rgb(232, 226, 252),
+};
+
+static PALETTE: std::sync::OnceLock<Palette> = std::sync::OnceLock::new();
+
+/// Picks the palette before the first frame; later calls keep the first choice.
+pub fn set_palette(palette: Palette) {
+    let _ = PALETTE.set(palette);
+}
+
+fn palette() -> &'static Palette {
+    PALETTE.get_or_init(|| DARK)
+}
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    frame.render_widget(Block::default().style(style(TEXT).bg(CANVAS)), area);
+    frame.render_widget(
+        Block::default().style(style(palette().text).bg(palette().canvas)),
+        area,
+    );
     if area.width < 60 || area.height < 18 {
         frame.render_widget(
             Paragraph::new("MageML / pipeline console\nResize to at least 60 x 18\nq quits")
@@ -79,9 +130,9 @@ fn strong(color: Color) -> Style {
 fn panel(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(style(BORDER))
-        .style(style(TEXT).bg(PANEL))
-        .title_style(strong(MUTED))
+        .border_style(style(palette().border))
+        .style(style(palette().text).bg(palette().panel))
+        .title_style(strong(palette().muted))
         .title(title)
 }
 
@@ -104,17 +155,17 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
                 Line::from("█ ▀ █ █  "),
                 Line::from("▀   ▀ ▀▀▀"),
             ])
-            .style(strong(RUST_ACCENT)),
+            .style(strong(palette().rust_accent)),
             Rect::new(area.x + 14, area.y + 2, 9, 3),
         );
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
-                    Span::styled("Mage", strong(TEXT)),
-                    Span::styled("ML", strong(RUST_ACCENT)),
+                    Span::styled("Mage", strong(palette().text)),
+                    Span::styled("ML", strong(palette().rust_accent)),
                 ]),
-                Line::from(Span::styled("pipeline console", style(LAVENDER))),
-                Line::from(Span::styled("", style(MUTED))),
+                Line::from(Span::styled("pipeline console", style(palette().lavender))),
+                Line::from(Span::styled("", style(palette().muted))),
             ]),
             Rect::new(area.x + 25, area.y + 2, 18, 3),
         );
@@ -123,8 +174,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
         );
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(Span::styled(service, strong(TEXT))),
-                Line::from(Span::styled(revision, style(MUTED))),
+                Line::from(Span::styled(service, strong(palette().text))),
+                Line::from(Span::styled(revision, style(palette().muted))),
                 Line::from(vec![
                     Span::styled(
                         if simulated {
@@ -132,14 +183,18 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
                         } else {
                             "exported service"
                         },
-                        style(if simulated { WARNING } else { LAVENDER }),
+                        style(if simulated {
+                            palette().warning
+                        } else {
+                            palette().lavender
+                        }),
                     ),
                     Span::styled(
                         format!(
                             "  /  {} pipelines",
                             app.snapshot.as_ref().map_or(0, |s| s.pipelines.len())
                         ),
-                        style(MUTED),
+                        style(palette().muted),
                     ),
                 ]),
             ]),
@@ -151,8 +206,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
                     format!(" {} {state} ", activity(app)),
                     strong(state_color),
                 )),
-                Line::from(Span::styled(sample_age(app), style(MUTED))),
-                Line::from(Span::styled(control_label(app), style(LAVENDER))),
+                Line::from(Span::styled(sample_age(app), style(palette().muted))),
+                Line::from(Span::styled(control_label(app), style(palette().lavender))),
             ])
             .alignment(Alignment::Right),
             columns[1],
@@ -162,14 +217,17 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
         let columns = Layout::horizontal([Constraint::Min(20), Constraint::Length(23)]).split(top);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" Mage ", strong(TEXT).bg(Color::Rgb(125, 85, 236))),
-                Span::styled("ML", strong(RUST_ACCENT)),
+                Span::styled(
+                    " Mage ",
+                    strong(Color::Rgb(249, 250, 252)).bg(Color::Rgb(125, 85, 236)),
+                ),
+                Span::styled("ML", strong(palette().rust_accent)),
                 Span::styled(
                     format!(
                         "  {}",
                         fit_text(&service, columns[0].width.saturating_sub(10))
                     ),
-                    strong(LAVENDER),
+                    strong(palette().lavender),
                 ),
             ])),
             columns[0],
@@ -188,12 +246,16 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
             sample_age(app)
         };
         frame.render_widget(
-            Paragraph::new(description).style(style(if simulated { WARNING } else { MUTED })),
+            Paragraph::new(description).style(style(if simulated {
+                palette().warning
+            } else {
+                palette().muted
+            })),
             bottom[0],
         );
         frame.render_widget(
             Paragraph::new(control_label(app))
-                .style(style(LAVENDER))
+                .style(style(palette().lavender))
                 .right_aligned(),
             bottom[1],
         );
@@ -202,18 +264,18 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, wide: bool) {
     frame.render_widget(
         Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(style(BORDER)),
+            .border_style(style(palette().border)),
         area,
     );
 }
 
 fn connection_state(app: &App) -> (&'static str, Color) {
     match app.mode {
-        Mode::Demo => ("Demo fixture", WARNING),
-        Mode::Snapshot => ("Saved snapshot", MUTED),
-        Mode::Live if !app.connected => ("Disconnected", ERROR),
-        Mode::Live if app.stale() => ("Stale / clock skew", WARNING),
-        Mode::Live => ("Connected", ICE),
+        Mode::Demo => ("Demo fixture", palette().warning),
+        Mode::Snapshot => ("Saved snapshot", palette().muted),
+        Mode::Live if !app.connected => ("Disconnected", palette().error),
+        Mode::Live if app.stale() => ("Stale / clock skew", palette().warning),
+        Mode::Live => ("Connected", palette().ice),
     }
 }
 
@@ -291,7 +353,7 @@ fn draw_logo(frame: &mut Frame, area: Rect) {
             .rev()
             .find(|(_, polygon)| inside(point, polygon));
         match shape {
-            None => CANVAS,
+            None => palette().canvas,
             Some((layer, _)) => {
                 let t = f64::from(x) / f64::from(area.width.max(1));
                 let opacity = if layer == 0 { 0.4 } else { 1.0 };
@@ -358,26 +420,34 @@ fn draw_rail(frame: &mut Frame, area: Rect, app: &App) {
         .sum();
     frame.render_widget(
         Paragraph::new(vec![
-            summary_line("Active runs", active.to_string(), ICE),
+            summary_line("Active runs", active.to_string(), palette().ice),
             summary_line(
                 "Queued runs",
                 queued.to_string(),
-                if queued > 0 { WARNING } else { TEXT },
+                if queued > 0 {
+                    palette().warning
+                } else {
+                    palette().text
+                },
             ),
-            summary_line("Paused pipelines", paused.to_string(), WARNING),
+            summary_line("Paused pipelines", paused.to_string(), palette().warning),
             Line::from(""),
             summary_line(
                 "Lifetime failures",
                 failures.to_string(),
-                if failures > 0 { ERROR } else { MUTED },
+                if failures > 0 {
+                    palette().error
+                } else {
+                    palette().muted
+                },
             ),
             summary_line(
                 "Embedded models",
                 snapshot.models.len().to_string(),
                 if snapshot.models.is_empty() {
-                    MUTED
+                    palette().muted
                 } else {
-                    LAVENDER
+                    palette().lavender
                 },
             ),
         ])
@@ -388,22 +458,25 @@ fn draw_rail(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let mut lines = vec![
-        Line::from(Span::styled(control_label(app), strong(LAVENDER))),
+        Line::from(Span::styled(control_label(app), strong(palette().lavender))),
         Line::from(Span::styled(
             if app.mode == Mode::Demo {
                 "Fixture / no commands"
             } else {
                 "Revision-checked commands"
             },
-            style(MUTED),
+            style(palette().muted),
         )),
-        Line::from(Span::styled("?  keyboard reference", style(MUTED))),
+        Line::from(Span::styled(
+            "?  keyboard reference",
+            style(palette().muted),
+        )),
     ];
     if rows[4].height >= 7 {
         lines.insert(2, Line::from(""));
         lines.push(Line::from(Span::styled(
             "q  close this console",
-            style(MUTED),
+            style(palette().muted),
         )));
     }
     frame.render_widget(
@@ -414,7 +487,7 @@ fn draw_rail(frame: &mut Frame, area: Rect, app: &App) {
 
 fn summary_line(label: &str, value: String, color: Color) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<19}"), style(MUTED)),
+        Span::styled(format!("{label:<19}"), style(palette().muted)),
         Span::styled(
             number_text(value.parse::<u128>().unwrap_or(0), 6),
             strong(color),
@@ -439,7 +512,11 @@ fn draw_pipelines(frame: &mut Frame, area: Rect, app: &App) {
             let mut lines = vec![
                 Line::from(Span::styled(
                     fit_text(&p.id, area.width.saturating_sub(5)),
-                    if selected { strong(TEXT) } else { style(TEXT) },
+                    if selected {
+                        strong(palette().text)
+                    } else {
+                        style(palette().text)
+                    },
                 )),
                 Line::from(vec![
                     Span::styled(
@@ -461,7 +538,7 @@ fn draw_pipelines(frame: &mut Frame, area: Rect, app: &App) {
                         number_text(u128::from(p.in_flight), 5),
                         number_text(u128::from(p.queued), 5)
                     ),
-                    style(MUTED),
+                    style(palette().muted),
                 )),
             ];
             if area.height >= 15 {
@@ -476,12 +553,13 @@ fn draw_pipelines(frame: &mut Frame, area: Rect, app: &App) {
             .block(
                 panel(format!(" Pipelines / {} ", snapshot.pipelines.len()))
                     .title_bottom(
-                        Line::from(Span::styled(" ↑↓ select ", style(LAVENDER))).right_aligned(),
+                        Line::from(Span::styled(" ↑↓ select ", style(palette().lavender)))
+                            .right_aligned(),
                     )
                     .padding(Padding::new(0, 0, u16::from(area.height >= 15), 0)),
             )
             .highlight_symbol("▎ ")
-            .highlight_style(Style::default().bg(SELECTED)),
+            .highlight_style(Style::default().bg(palette().selected)),
         area,
         &mut state,
     );
@@ -574,7 +652,7 @@ fn schedule_text(app: &App, p: &PipelineSnapshot) -> Option<(String, Color)> {
         return None;
     }
     if !snapshot.schedules_enabled {
-        return Some(("schedules off".into(), WARNING));
+        return Some(("schedules off".into(), palette().warning));
     }
     let now = i128::from(snapshot.sampled_at_unix_ms);
     let next = active
@@ -588,18 +666,18 @@ fn schedule_text(app: &App, p: &PipelineSnapshot) -> Option<(String, Color)> {
             clean(&next.0.name, 40),
             duration_text(wait)
         ),
-        ICE,
+        palette().ice,
     ))
 }
 
 fn draw_recent_runs(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
     let rows = p.recent_runs.iter().map(|run| {
         let (mark, color) = match run.status {
-            mage_service_core::protocol::RunStatus::Completed => ("✓ completed", GREEN),
-            mage_service_core::protocol::RunStatus::Failed => ("✗ failed", ERROR),
-            mage_service_core::protocol::RunStatus::Cancelled => ("■ cancelled", WARNING),
-            mage_service_core::protocol::RunStatus::Running => ("● running", PURPLE),
-            mage_service_core::protocol::RunStatus::Queued => ("○ queued", MUTED),
+            mage_service_core::protocol::RunStatus::Completed => ("✓ completed", palette().green),
+            mage_service_core::protocol::RunStatus::Failed => ("✗ failed", palette().error),
+            mage_service_core::protocol::RunStatus::Cancelled => ("■ cancelled", palette().warning),
+            mage_service_core::protocol::RunStatus::Running => ("● running", palette().purple),
+            mage_service_core::protocol::RunStatus::Queued => ("○ queued", palette().muted),
         };
         let started = run
             .started_at
@@ -610,10 +688,11 @@ fn draw_recent_runs(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
             .replace('T', " ");
         Row::new(vec![
             Cell::from(mark).style(style(color)),
-            Cell::from(clean(&run.source, 40)).style(style(MUTED)),
+            Cell::from(clean(&run.source, 40)).style(style(palette().muted)),
             Cell::from(started),
             Cell::from(run.duration_ms.map(duration_text).unwrap_or_default()),
-            Cell::from(clean(run.error.as_deref().unwrap_or(""), 300)).style(style(ERROR)),
+            Cell::from(clean(run.error.as_deref().unwrap_or(""), 300))
+                .style(style(palette().error)),
         ])
     });
     let table = Table::new(
@@ -628,13 +707,15 @@ fn draw_recent_runs(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
     )
     .header(
         Row::new(["Status", "Started by", "Started (UTC)", "Duration", "Error"])
-            .style(style(MUTED))
+            .style(style(palette().muted))
             .bottom_margin(1),
     )
     .column_spacing(1)
     .block(
         panel(format!(" Recent runs / {} ", clean(&p.id, 60)))
-            .title_bottom(Line::from(Span::styled(" newest first ", style(MUTED))).right_aligned())
+            .title_bottom(
+                Line::from(Span::styled(" newest first ", style(palette().muted))).right_aligned(),
+            )
             .padding(Padding::new(1, 1, 1, 0)),
     );
     frame.render_widget(table, area);
@@ -648,8 +729,11 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
-                Span::styled(format!("{:02} / ", app.selected + 1), style(PURPLE)),
-                Span::styled(clean(&p.id, 100), strong(TEXT)),
+                Span::styled(
+                    format!("{:02} / ", app.selected + 1),
+                    style(palette().purple),
+                ),
+                Span::styled(clean(&p.id, 100), strong(palette().text)),
             ]),
             Line::from(vec![
                 Span::styled(
@@ -666,7 +750,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
                 ),
                 Span::styled(
                     format!("   config revision {}", p.config_revision),
-                    style(MUTED),
+                    style(palette().muted),
                 ),
             ])
             .spans
@@ -691,17 +775,17 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
             "Active / limit   {} / {}",
             p.in_flight, p.max_in_flight
         ))
-        .style(style(MUTED)),
+        .style(style(palette().muted)),
         right[0],
     );
     frame.render_widget(
         LineGauge::default()
             .filled_style(style(if p.in_flight > p.max_in_flight {
-                WARNING
+                palette().warning
             } else {
-                PURPLE
+                palette().purple
             }))
-            .unfilled_style(style(BORDER))
+            .unfilled_style(style(palette().border))
             .line_set(symbols::line::THICK)
             .label("")
             .ratio(capacity(p)),
@@ -726,7 +810,7 @@ fn draw_metrics(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         "Succeeded",
         p.runs_succeeded.to_string(),
         "service lifetime",
-        ICE,
+        palette().ice,
     );
     metric(
         frame,
@@ -734,7 +818,11 @@ fn draw_metrics(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         "Failed",
         p.runs_failed.to_string(),
         "service lifetime",
-        if p.runs_failed > 0 { ERROR } else { MUTED },
+        if p.runs_failed > 0 {
+            palette().error
+        } else {
+            palette().muted
+        },
     );
     metric(
         frame,
@@ -742,7 +830,7 @@ fn draw_metrics(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         "In flight",
         p.in_flight.to_string(),
         "active runs",
-        LAVENDER,
+        palette().lavender,
     );
     metric(
         frame,
@@ -750,7 +838,11 @@ fn draw_metrics(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         "Queued",
         p.queued.to_string(),
         "waiting runs",
-        if p.queued > 0 { WARNING } else { TEXT },
+        if p.queued > 0 {
+            palette().warning
+        } else {
+            palette().text
+        },
     );
 }
 
@@ -783,7 +875,7 @@ fn metric(frame: &mut Frame, area: Rect, label: &str, value: String, caption: &s
                 .style(strong(color))
             })
             .chain(std::iter::once(
-                Line::from(caption.to_owned()).style(style(MUTED)),
+                Line::from(caption.to_owned()).style(style(palette().muted)),
             ))
             .collect();
         frame.render_widget(Paragraph::new(lines), inner);
@@ -802,7 +894,7 @@ fn metric(frame: &mut Frame, area: Rect, label: &str, value: String, caption: &s
                         _ => caption,
                     }
                     .to_owned(),
-                    style(MUTED),
+                    style(palette().muted),
                 )),
             ]),
             inner,
@@ -826,7 +918,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         &p.latency_ms,
         format!(" Run duration / p95 {duration} "),
         format!("{} completions · order →", p.latency_ms.len()),
-        PURPLE,
+        palette().purple,
     );
     let unit = window_unit(p.window_seconds);
     let latest = p.throughput.last().map_or("n/a".into(), |v| {
@@ -841,7 +933,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         &p.throughput,
         format!(" Throughput / {latest} "),
         format!("{} windows of 1 {unit} →", p.throughput.len()),
-        ICE,
+        palette().ice,
     );
 }
 
@@ -865,13 +957,17 @@ fn series(
     let block = panel(title)
         .title_style(strong(color))
         .title_bottom(
-            Line::from(Span::styled(format!(" {caption} "), style(MUTED))).right_aligned(),
+            Line::from(Span::styled(format!(" {caption} "), style(palette().muted)))
+                .right_aligned(),
         )
         .padding(Padding::new(1, 1, 1, 0));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if values.is_empty() {
-        frame.render_widget(Paragraph::new("No samples").style(style(MUTED)), inner);
+        frame.render_widget(
+            Paragraph::new("No samples").style(style(palette().muted)),
+            inner,
+        );
         return;
     }
     let peak = values.iter().copied().max().unwrap_or(0).max(1);
@@ -891,7 +987,7 @@ fn series(
         Dataset::default()
             .marker(symbols::Marker::Braille)
             .graph_type(GraphType::Line)
-            .style(style(BORDER))
+            .style(style(palette().border))
             .data(&middle),
         Dataset::default()
             .marker(symbols::Marker::Braille)
@@ -905,29 +1001,29 @@ fn series(
     ];
     frame.render_widget(
         Chart::new(datasets)
-            .style(style(TEXT).bg(PANEL))
+            .style(style(palette().text).bg(palette().panel))
             .x_axis(
                 Axis::default()
                     .bounds([0.0, end])
-                    .style(style(BORDER))
+                    .style(style(palette().border))
                     .labels([
-                        Span::styled("first", style(MUTED)),
-                        Span::styled("latest", style(MUTED)),
+                        Span::styled("first", style(palette().muted)),
+                        Span::styled("latest", style(palette().muted)),
                     ]),
             )
             .y_axis(
                 Axis::default()
                     .bounds([0.0, 1_000.0])
-                    .style(style(BORDER))
+                    .style(style(palette().border))
                     .labels(if inner.height < 7 {
                         vec![
-                            Span::styled("0", style(MUTED)),
-                            Span::styled(short_number(peak), style(MUTED)),
+                            Span::styled("0", style(palette().muted)),
+                            Span::styled(short_number(peak), style(palette().muted)),
                         ]
                     } else {
                         vec!["0".to_owned(), short_number(peak / 2), short_number(peak)]
                             .into_iter()
-                            .map(|value| Span::styled(value, style(MUTED)))
+                            .map(|value| Span::styled(value, style(palette().muted)))
                             .collect()
                     }),
             ),
@@ -977,9 +1073,14 @@ fn draw_overview(frame: &mut Frame, area: Rect, app: &App) {
         Row::new(vec![
             Cell::from(clean(&p.id, 80)),
             Cell::from(clean(&p.status, 24)).style(status_style(&p.status)),
-            Cell::from(number_text(u128::from(p.runs_succeeded), 6)).style(style(ICE)),
-            Cell::from(number_text(u128::from(p.runs_failed), 6))
-                .style(style(if p.runs_failed > 0 { ERROR } else { MUTED })),
+            Cell::from(number_text(u128::from(p.runs_succeeded), 6)).style(style(palette().ice)),
+            Cell::from(number_text(u128::from(p.runs_failed), 6)).style(style(
+                if p.runs_failed > 0 {
+                    palette().error
+                } else {
+                    palette().muted
+                },
+            )),
         ])
     });
     let table = Table::new(
@@ -993,16 +1094,17 @@ fn draw_overview(frame: &mut Frame, area: Rect, app: &App) {
     )
     .header(
         Row::new(["Pipeline", "Status", "Pass", "Fail"])
-            .style(style(MUTED))
+            .style(style(palette().muted))
             .bottom_margin(1),
     )
     .column_spacing(1)
-    .row_highlight_style(Style::default().bg(SELECTED))
+    .row_highlight_style(Style::default().bg(palette().selected))
     .highlight_symbol("▎ ")
     .block(
         panel(format!(" Service overview ({}) ", snapshot.pipelines.len()))
             .title_bottom(
-                Line::from(Span::styled(" service lifetime ", style(MUTED))).right_aligned(),
+                Line::from(Span::styled(" service lifetime ", style(palette().muted)))
+                    .right_aligned(),
             )
             .padding(Padding::new(1, 1, 1, 0)),
     );
@@ -1011,7 +1113,11 @@ fn draw_overview(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_failure(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
-    let color = if p.last_error.is_some() { ERROR } else { MUTED };
+    let color = if p.last_error.is_some() {
+        palette().error
+    } else {
+        palette().muted
+    };
     let mut lines = vec![
         Line::from(Span::styled(
             if p.last_error.is_some() {
@@ -1024,7 +1130,10 @@ fn draw_failure(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
         Line::from(""),
     ];
     if let Some(error) = &p.last_error {
-        lines.push(Line::from(Span::styled(clean(error, 1_024), style(TEXT))));
+        lines.push(Line::from(Span::styled(
+            clean(error, 1_024),
+            style(palette().text),
+        )));
     }
     frame.render_widget(
         Paragraph::new(lines)
@@ -1063,7 +1172,7 @@ fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
             app.selected + 1,
             fit_text(&p.id, top[0].width.saturating_sub(8))
         ))
-        .style(strong(LAVENDER)),
+        .style(strong(palette().lavender)),
         top[0],
     );
     frame.render_widget(
@@ -1085,7 +1194,7 @@ fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
             " ↑↓ select   Active / limit {}/{}   config {}",
             p.in_flight, p.max_in_flight, p.config_revision
         ))
-        .style(style(MUTED)),
+        .style(style(palette().muted)),
         Rect::new(rows[0].x, rows[0].y + 1, rows[0].width, 1),
     );
     draw_metrics(frame, rows[1], p);
@@ -1100,7 +1209,11 @@ fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(vec![
             Line::from(Span::styled(
                 "Last recorded failure",
-                strong(if p.last_error.is_some() { ERROR } else { MUTED }),
+                strong(if p.last_error.is_some() {
+                    palette().error
+                } else {
+                    palette().muted
+                }),
             )),
             Line::from(error),
         ])
@@ -1110,14 +1223,22 @@ fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
-    let key = |text: &'static str| Span::styled(format!(" {text} "), strong(LAVENDER).bg(SELECTED));
-    let mut hints = vec![key("↑↓"), Span::styled(" pipeline  ", style(MUTED))];
+    let key = |text: &'static str| {
+        Span::styled(
+            format!(" {text} "),
+            strong(palette().lavender).bg(palette().selected),
+        )
+    };
+    let mut hints = vec![
+        key("↑↓"),
+        Span::styled(" pipeline  ", style(palette().muted)),
+    ];
     if area.width >= 100 {
         hints.extend([
             key("p"),
-            Span::styled(" pause/resume  ", style(MUTED)),
+            Span::styled(" pause/resume  ", style(palette().muted)),
             key("+/-"),
-            Span::styled(" limit  ", style(MUTED)),
+            Span::styled(" limit  ", style(palette().muted)),
         ]);
     }
     hints.extend([
@@ -1128,12 +1249,12 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 " motion on  "
             },
-            style(MUTED),
+            style(palette().muted),
         ),
         key("?"),
-        Span::styled(" help  ", style(MUTED)),
+        Span::styled(" help  ", style(palette().muted)),
         key("q"),
-        Span::styled(" quit", style(MUTED)),
+        Span::styled(" quit", style(palette().muted)),
     ]);
     let message = if app.mode == Mode::Demo && app.message.starts_with("Connected.") {
         "Fixture values. Select a pipeline to inspect its metrics.".to_owned()
@@ -1146,16 +1267,16 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             Line::from(Span::styled(
                 message,
                 style(if app.retry_request.is_some() {
-                    WARNING
+                    palette().warning
                 } else {
-                    MUTED
+                    palette().muted
                 }),
             )),
         ])
         .block(
             Block::default()
                 .borders(Borders::TOP)
-                .border_style(style(BORDER)),
+                .border_style(style(palette().border)),
         ),
         area,
     );
@@ -1163,10 +1284,10 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
 
 fn status_style(status: &str) -> Style {
     strong(match status {
-        "running" | "ready" | "succeeded" => GREEN,
-        "failed" | "degraded" => ERROR,
-        "paused" | "draining" => WARNING,
-        _ => MUTED,
+        "running" | "ready" | "succeeded" => palette().green,
+        "failed" | "degraded" => palette().error,
+        "paused" | "draining" => palette().warning,
+        _ => palette().muted,
     })
 }
 
@@ -1195,7 +1316,7 @@ fn draw_help(frame: &mut Frame) {
             Line::from("m         Toggle reduced motion"),
             Line::from("? / Esc   Close help       q / Ctrl-C  Quit"),
             Line::from(""),
-            Line::from(Span::styled("Metric definitions", strong(ICE))),
+            Line::from(Span::styled("Metric definitions", strong(palette().ice))),
             Line::from("Duration: completed runs, includes failures."),
             Line::from("Throughput: runs per supplied 1-second UTC window."),
             Line::from("Counters: service lifetime. Missing data: n/a."),
@@ -1203,9 +1324,10 @@ fn draw_help(frame: &mut Frame) {
         ])
         .block(
             panel(" MageML / keyboard reference ")
-                .border_style(style(PURPLE))
+                .border_style(style(palette().purple))
                 .title_bottom(
-                    Line::from(Span::styled(" ? / Esc close ", strong(LAVENDER))).right_aligned(),
+                    Line::from(Span::styled(" ? / Esc close ", strong(palette().lavender)))
+                        .right_aligned(),
                 )
                 .padding(Padding::horizontal(1)),
         ),
@@ -1228,10 +1350,10 @@ fn draw_confirmation(frame: &mut Frame, app: &App) {
         Paragraph::new(vec![
             Line::from(Span::styled(
                 format!("Pipeline: {}", clean(&request.pipeline_id, 256)),
-                strong(TEXT),
+                strong(palette().text),
             )),
             Line::from(""),
-            Line::from(Span::styled(command, style(WARNING))),
+            Line::from(Span::styled(command, style(palette().warning))),
             Line::from(format!(
                 "Expected config revision: {}",
                 request.expected_config_revision
@@ -1241,7 +1363,7 @@ fn draw_confirmation(frame: &mut Frame, app: &App) {
         .wrap(Wrap { trim: false })
         .block(
             panel(" Review control request ")
-                .border_style(style(WARNING))
+                .border_style(style(palette().warning))
                 .title_bottom(
                     Line::from(Span::styled(
                         if app.can_control() {
@@ -1249,7 +1371,7 @@ fn draw_confirmation(frame: &mut Frame, app: &App) {
                         } else {
                             " Submission unavailable · Esc dismiss "
                         },
-                        strong(WARNING),
+                        strong(palette().warning),
                     ))
                     .centered(),
                 )
