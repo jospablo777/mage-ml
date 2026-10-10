@@ -46,6 +46,11 @@ What the export takes:
 | Python packages | Only those the blocks' imports load, pinned to your Mage environment's versions |
 | MLflow models the blocks load | Their files and metadata (see [Models](#models)) |
 
+Python and [Rust](/guides/blocks/rust-blocks) blocks are supported. Rust blocks are
+compiled when the image builds, so the service runs native binaries and needs no Rust
+installation; the export brings `rust/Cargo.lock` up to date for the exported blocks and
+keeps the locked versions, so the image builds the same crates you ran in Mage.
+
 Blocks the service cannot run stop the export with the block named and the reason, so
 nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, R and SQL
 blocks are not supported yet. Chart and markdown blocks are notebook only and are left out.

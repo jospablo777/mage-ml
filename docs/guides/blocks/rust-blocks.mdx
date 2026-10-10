@@ -1,0 +1,240 @@
+---
+title: "Rust blocks"
+sidebarTitle: "Rust"
+icon: "gear"
+description: "Write data loaders, transformers, exporters and custom blocks in Rust with Polars, compiled once and run as native code."
+---
+
+A Rust block is a function written in Rust. Mage compiles it into a native binary, passes it
+the upstream outputs as Polars tables, and stores what it returns like any other block's
+output. Downstream Python, R or SQL blocks read it as usual.
+
+Use Rust for the parts of a pipeline where speed matters: row-wise logic that Polars
+expressions do not cover, CPU-heavy scoring, large joins and aggregations, or loaders that
+parse many files.
+
+## Requirements
+
+- **Docker:** the Mage image has Rust installed and its dependencies prebuilt. Nothing to do.
+- **Local install:** install Rust with [rustup](https://rustup.rs). The project pins its Rust
+  version in `rust/rust-toolchain.toml`, and rustup installs it on the first build.
+
+## Add a Rust block
+
+1. Open a pipeline.
+2. Add a data loader, transformer, data exporter or custom block.
+3. Select **Rust**, then a template.
+4. Run the block. The first build of a project compiles Polars and takes a few minutes;
+   after that a block compiles in about a second.
+
+While you type, the editor checks the block with the Rust compiler and underlines errors and
+warnings on their lines. Errors at run time name the block's file and line.
+
+## Block functions
+
+Each block type has one function, found by name:
+
+| Block type | Function |
+| --- | --- |
+| Data loader | `fn load_data` |
+| Transformer | `fn transform` |
+| Data exporter | `fn export_data` |
+| Custom | `fn custom` |
+
+Functions whose names start with `test_` are the block's tests. They receive the output and
+fail the block when they return an error.
+
+Every block starts with `use mage::prelude::*;`, which brings in Polars, `anyhow`
+(`Result`, `bail!`, `ensure!`, `.context()`), `serde_json` (`Value`, `json!`), `Vars` and
+`BlockContext`.
+
+### Data loader
+
+```rust
+use mage::prelude::*;
+
+fn load_data(vars: Vars) -> Result<DataFrame> {
+    let rows: i64 = vars.get_or("rows", 1_000)?;
+    let ids: Vec<i64> = (1..=rows).collect();
+    let frame = df!(
+        "id" => ids.clone(),
+        "value" => ids.iter().map(|id| (*id as f64) * 1.5).collect::<Vec<f64>>(),
+    )?;
+    Ok(frame)
+}
+
+fn test_output(output: &DataFrame) -> Result<()> {
+    ensure!(output.height() > 0, "The block returned no rows");
+    Ok(())
+}
+```
+
+To read files, use Polars readers such as `LazyCsvReader` or `LazyFrame::scan_parquet` and
+return the `LazyFrame`.
+
+### Transformer
+
+```rust
+use mage::prelude::*;
+
+fn transform(data: LazyFrame) -> Result<LazyFrame> {
+    Ok(data
+        .filter(col("value").is_not_null())
+        .with_columns([(col("value") * lit(2.0)).alias("value_doubled")]))
+}
+```
+
+A `LazyFrame` parameter reads the upstream table lazily: Polars reads only the columns and
+rows the query uses, and the whole query is optimized before it runs.
+
+### Data exporter
+
+```rust
+use mage::prelude::*;
+
+fn export_data(data: LazyFrame, vars: Vars) -> Result<()> {
+    let path: String = vars.get_or("output_path", "output.parquet".to_string())?;
+    let mut frame = data.collect()?;
+    let file = std::fs::File::create(&path).with_context(|| format!("Creating {path}"))?;
+    ParquetWriter::new(file)
+        .with_compression(ParquetCompression::Zstd(None))
+        .finish(&mut frame)?;
+    println!("Wrote {} rows to {path}", frame.height());
+    Ok(())
+}
+```
+
+### Custom block
+
+```rust
+use mage::prelude::*;
+
+fn custom(vars: Vars, context: BlockContext) -> Result<Value> {
+    println!("Running {} in pipeline {:?}", context.block_uuid, context.pipeline_uuid);
+    Ok(json!({ "variables": vars.raw().len() }))
+}
+```
+
+## Inputs
+
+Parameters are filled in order. Each table parameter takes the next upstream block's output.
+
+| Parameter | What it receives |
+| --- | --- |
+| `LazyFrame` | The next upstream table, read lazily |
+| `DataFrame` | The next upstream table, in memory |
+| `Option<LazyFrame>`, `Option<DataFrame>` | The next upstream table, or `None` when there is none |
+| `Vec<LazyFrame>`, `Vec<DataFrame>` | All remaining upstream tables |
+| `Value` | The next upstream output that is a dict, list or scalar |
+| `Vars` | The pipeline's variables |
+| `BlockContext` | The block and pipeline ids, the execution partition, the variables and a scratch directory that Mage removes after the run |
+
+Upstream pandas DataFrames, Polars DataFrames and Arrow tables arrive as Polars tables with
+their column types; a meaningful pandas index becomes a column. When an upstream table is
+stored as one local Parquet file, the block reads that file directly, so Polars reads only
+the columns and rows the block uses and the table never passes through Python. Dicts,
+lists and scalars arrive as `Value`.
+
+A parameter of another type is a compile error that lists the allowed types.
+
+### Variables
+
+`Vars` reads pipeline and runtime variables with their types:
+
+```rust
+let day: String = vars.get("day")?;                    // error when missing
+let limit: usize = vars.get_or("limit", 10_000)?;     // default when missing
+let all = vars.raw();                                  // the JSON map
+```
+
+A variable of the wrong type fails with a message that shows its value.
+
+## Outputs
+
+| Return type | Output |
+| --- | --- |
+| `LazyFrame`, `DataFrame` | One table; downstream blocks receive a Polars DataFrame |
+| `Value` | A dict, list or scalar |
+| `()` | No output |
+| A tuple or `Vec` of tables | Several outputs, in order |
+| `Option<T>` | No output when `None` |
+| `Result<T>` | Any of the above; an `Err` fails the block with its message |
+
+Tables cross between Mage and the block as Arrow IPC files, so no data is encoded or copied
+row by row.
+
+## Crates
+
+The project's Rust environment is a Cargo workspace in `<project>/rust`:
+
+| File | |
+| --- | --- |
+| `rust/Cargo.toml` | The crates every block can use, under `[workspace.dependencies]` |
+| `rust/Cargo.lock` | The resolved versions |
+| `rust/rust-toolchain.toml` | The Rust version |
+| `rust/.mage/` | Generated: Mage's `mage` crate and one crate per block. Do not edit |
+
+Commit the first three. To use a crate, add it under `[workspace.dependencies]` and run the
+block:
+
+```toml
+[workspace.dependencies]
+regex = "1"
+```
+
+New projects come with `anyhow`, `serde`, `serde_json`, `rayon` and `ureq` (HTTP with
+rustls). Polars comes with the `mage` crate; to enable more Polars features, add `polars`
+with the same version and the features you need.
+
+## Templates
+
+| Block type | Templates |
+| --- | --- |
+| Data loader | Generic, local file, HTTP API (paginated JSON into a table) |
+| Transformer | Generic, clean, aggregate, join, window features, parallel (Rayon) |
+| Data exporter | Generic, local file, HTTP API (batched JSON) |
+| Custom | Generic |
+
+The parallel template computes a value per row on every core with Rayon, for logic Polars
+expressions cannot express.
+
+## Logs and errors
+
+Everything the block prints with `println!` or `eprintln!` shows in the block's output as it
+runs. A failed test, an `Err` or a panic fails the block with the message and the line in
+your code. After a build, the block's output starts with how long it took, followed by
+the compiler's warnings.
+
+## Pipelines and services
+
+Rust blocks run in pipeline runs, triggers and backfills like other blocks, and mix freely
+with Python, R and SQL blocks. The playground's `rust_session_scores` pipeline is a working
+example.
+
+`mage export service` compiles a pipeline's Rust blocks into the service image, which runs
+them without Mage or a Rust installation. See
+[Pipeline services](/production/pipeline-services).
+
+## Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `MAGE_RUST_THREADS` | every core | Threads for Polars and Rayon in a block |
+| `MAGE_RUST_TIMEOUT_SECONDS` | none | Stops a block that runs longer |
+| `MAGE_RUST_BUILD_TIMEOUT_SECONDS` | `1800` | Stops a build that takes longer |
+| `MAGE_RUST_BINARY_CACHE_MB` | `5000` | Size of the cache of compiled blocks |
+| `MAGE_RUST_TARGET_DIR` | `~/.cache/mage/rust/target` | Where compiled code goes; shared by every project on the machine |
+| `MAGE_RUST_PROJECT_DIR` | `<project>/rust` | Another location for the workspace |
+| `MAGE_RUST_TIMINGS` | off | `1` prints build and run times |
+
+## Troubleshooting
+
+| Problem | What to do |
+| --- | --- |
+| `Rust blocks need Rust` | Install Rust with rustup, or run Mage in Docker |
+| The first run takes minutes | Polars compiles once per machine; later builds take about a second |
+| `cannot be a parameter of a Mage block function` | Use one of the input types above |
+| `cannot be returned by a Mage block function` | Return a table, a `Value`, `()` or a tuple of tables |
+| `The pipeline has no variable X` | Pass the variable in the run or trigger, or use `vars.get_or` |
+| A crate is not found | Add it under `[workspace.dependencies]` in `rust/Cargo.toml` |
+| The block is slow | Return a `LazyFrame` instead of collecting, and check `MAGE_RUST_THREADS` |

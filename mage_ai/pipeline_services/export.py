@@ -81,6 +81,8 @@ class Capture:
     unresolved_imports: Set[str] = field(default_factory=set)
     # (name, uri) of each ML model to embed.
     models: List[Tuple[str, str]] = field(default_factory=list)
+    # Whether the copied Cargo.lock matches the exported crates, so the image builds --locked.
+    rust_locked: bool = False
 
     @property
     def needs_python(self) -> bool:
@@ -813,6 +815,52 @@ def _copy_rust_workspace(capture_: Capture, target: Path) -> None:
     for _, crate in capture_.rust_blocks:
         _copy_tree(root / '.mage' / 'blocks' / crate, target / '.mage' / 'blocks' / crate,
                    ['target'])
+    capture_.rust_locked = _sync_cargo_lock(capture_, target)
+
+
+def _sync_cargo_lock(capture_: Capture, workspace: Path) -> bool:
+    """
+    Brings the copied Cargo.lock in line with the exported crates: Mage builds blocks
+    without --locked, so a project's lock can lag behind its Cargo.toml, and the export
+    leaves out the crates of other pipelines. Locked versions are kept. Returns whether
+    the image can build with --locked.
+    """
+    from mage_ai.data_preparation.models.block.rust.build import RustBuildError, _cargo
+
+    lock = workspace / 'Cargo.lock'
+    before = lock.read_bytes() if lock.is_file() else None
+    try:
+        cargo = _cargo()
+    except RustBuildError:
+        capture_.notes.append(
+            'Cargo is not installed here, so Cargo.lock was not checked; the image resolves '
+            'crate versions when it builds.'
+        )
+        return False
+    error = ''
+    for offline in (['--offline'], []):
+        try:
+            result = subprocess.run(
+                [cargo, 'metadata', '--format-version', '1', *offline],
+                capture_output=True, cwd=workspace, text=True, timeout=600,
+            )
+        except subprocess.TimeoutExpired:
+            error = 'cargo metadata timed out'
+            continue
+        if result.returncode == 0:
+            break
+        error = (result.stderr.strip().splitlines() or ['cargo metadata failed'])[-1]
+    else:
+        capture_.notes.append(
+            f'Cargo.lock could not be updated ({error}); the image resolves crate versions '
+            'when it builds.'
+        )
+        return False
+    if before is not None and lock.read_bytes() != before:
+        capture_.notes.append(
+            'Cargo.lock was updated for the exported crates; locked versions were kept.'
+        )
+    return lock.is_file()
 
 
 def _copy_service_source(target: Path) -> None:
@@ -843,12 +891,13 @@ def _dockerfile(capture_: Capture) -> str:
         copies = ' && '.join(
             f'cp rust/target/release/{crate} /out/bin/{crate}' for _, crate in capture_.rust_blocks
         )
+        locked = '--locked ' if capture_.rust_locked else ''
         rust_blocks = f'''
 # The Rust blocks, compiled once here; the service runs the binaries.
 COPY rust ./rust
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     --mount=type=cache,target=/build/rust/target \\
-    cargo build --release --locked --manifest-path rust/Cargo.toml {crates} && \\
+    cargo build --release {locked}--manifest-path rust/Cargo.toml {crates} && \\
     mkdir -p /out/bin && {copies}
 '''
         copy_blocks = 'COPY --from=build --chown=mage:mage /out/bin ./bin\n'

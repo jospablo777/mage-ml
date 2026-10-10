@@ -356,3 +356,43 @@ class ModelTest(ExportTestCase):
         problems = '\n'.join(caught.exception.problems)
         self.assertIn('is not NAME=URI', problems)
         self.assertIn('must use letters', problems)
+
+
+@unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
+class CargoLockTest(unittest.TestCase):
+    def setUp(self):
+        self.workspace = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.workspace, ignore_errors=True)
+        (self.workspace / 'Cargo.toml').write_text(
+            '[workspace]\nresolver = "3"\nmembers = ["blocks/*"]\n'
+        )
+        crate = self.workspace / 'blocks' / 'block_a'
+        (crate / 'src').mkdir(parents=True)
+        (crate / 'Cargo.toml').write_text(
+            '[package]\nname = "block_a"\nversion = "0.1.0"\nedition = "2024"\n'
+        )
+        (crate / 'src' / 'main.rs').write_text('fn main() {}\n')
+        self.capture = export.Capture(
+            name='lock', project=self.workspace, manifest={'pipelines': []},
+            rust_blocks=[('a', 'block_a')],
+        )
+
+    def test_a_stale_lock_is_updated_and_the_image_builds_locked(self):
+        # A lock written before block_a existed, as when Mage built only other blocks.
+        (self.workspace / 'Cargo.lock').write_text('version = 4\n')
+        self.assertTrue(export._sync_cargo_lock(self.capture, self.workspace))
+        self.assertIn('name = "block_a"', (self.workspace / 'Cargo.lock').read_text())
+        self.assertIn('Cargo.lock was updated', ' '.join(self.capture.notes))
+        self.capture.rust_locked = True
+        self.assertIn('cargo build --release --locked --manifest-path rust/Cargo.toml -p block_a',
+                      export._dockerfile(self.capture))
+
+    def test_a_lock_cargo_cannot_resolve_builds_unlocked(self):
+        (self.workspace / 'blocks' / 'block_a' / 'Cargo.toml').write_text(
+            '[package]\nname = "block_a"\nversion = "0.1.0"\nedition = "2024"\n'
+            '[dependencies]\nmissing = { path = "../nowhere" }\n'
+        )
+        self.assertFalse(export._sync_cargo_lock(self.capture, self.workspace))
+        self.assertIn('could not be updated', ' '.join(self.capture.notes))
+        self.assertIn('cargo build --release --manifest-path rust/Cargo.toml -p block_a',
+                      export._dockerfile(self.capture))

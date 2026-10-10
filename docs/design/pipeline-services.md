@@ -1,8 +1,8 @@
 # Pipeline services: pipelines exported as standalone Docker services
 
 Status: phase 1 implemented (Python and pandas/Polars pipelines, secrets providers, models,
-IBM Cloud and Kubernetes deploy files); Rust and R blocks in services and the console are
-next. User guide: `docs/production/pipeline-services.mdx`.
+IBM Cloud and Kubernetes deploy files, the console); Rust blocks are compiled into the
+image. R and SQL blocks are next. User guide: `docs/production/pipeline-services.mdx`.
 
 ## Goal
 

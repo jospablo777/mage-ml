@@ -2,87 +2,343 @@
 title: "R blocks"
 sidebarTitle: "R"
 icon: "flask"
-description: "You can write R language to transform data in blocks."
+description: "Write data loaders, transformers, data exporters and custom blocks in R, with packages locked by rv."
 ---
+
+An R block is an R script with one annotated function. Mage runs it in its own `Rscript`
+process, passes it the upstream outputs (data frames as tibbles), and stores what it
+returns like any other block's output. R blocks mix with Python, SQL, Polars and Rust blocks
+in any order.
 
 ## Requirements
 
-<Warning>
-R blocks are only supported when running Mage using [Docker](/getting-started/setup#using-docker).
-</Warning>
+R blocks need R (4.6 by default) and [rv](https://github.com/A2-ai/rv), the package manager of the
+project's R environment.
 
-## Add R block to pipeline
+- **Docker:** the Mage image has R 4.6, rv and the system libraries R packages build with.
+- **Local install:** run `mage r setup` to check for R, rv and
+  [rig](https://github.com/r-lib/rig) (optional, installs R versions). It prints the
+  install commands for your platform for whatever is missing.
 
-1. Create a new pipeline or open an existing pipeline.
-1. Add a data loader, transformer, or data exporter block.
-1. Select `R`.
+Then create the project's R environment, in Docker or locally:
 
-## Example pipeline
-
-1. Data loader
-    ```R
-    load_data <- function() {
-        # Specify your data loading logic here
-        # Return value: loaded dataframe
-        df <- read.csv(url('https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv'))
-        df
-    }
-    ```
-1. Transformer
-    ```R
-    library("pacman")
-    p_load(dplyr)
-
-    transform <- function(df_1, ...) {
-        # Specify your transformation logic here
-        # Return value: transformed dataframe.
-        df_1 <- filter(df_1, Pclass < 3)
-        df_1
-    }
-    ```
-1. Data exporter
-    ```R
-    export_data <- function(df_1, ...) {
-        # Specify your data exporting logic here
-        # Return value: exported dataframe
-        write.csv(df_1, "titanic_filtered.csv", row.names = FALSE)
-    }
-    ```
-
-## Install R packages
-
-Add the following at the start of your code in your R block:
-
-```R
-pacman::p_load(package1, package2, package3)
+```bash
+mage r setup path/to/project      # checks R, rv and rig
+mage r init path/to/project       # creates <project>/r and installs its packages
+mage r status path/to/project     # checks that R blocks can run
 ```
 
-Or
+`mage r init --install-r` installs the R version with rig when it is missing.
+`mage r init --r-version 4.5` creates an environment for another R version.
 
-```R
-library("pacman")
-p_load(dplyr)
-```
+Without an R environment, R blocks run with the library of the `Rscript` on `PATH`, which
+must have the `arrow`, `bit64`, `jsonlite` and `tibble` packages.
 
-> Note
->
-> When you run the R block for the 1st time, the package will be installed.
-> The 2nd time you run the R block, the package won’t need to be installed again.
+## Add an R block
 
-### What is `pacman`?
+1. Open a pipeline.
+2. Add a data loader, transformer, data exporter or custom block.
+3. Select **R**, then a template.
 
-`pacman` is an R package management tool. You can use `p_library()` to view all the available packages.
+| Block type | Templates |
+| --- | --- |
+| Data loader | Generic, local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
+| Transformer | Generic, clean, aggregate, join, reshape |
+| Data exporter | Generic, local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
+| Custom | Generic |
 
-Here is the documentation for `pacman` where you can find more useful methods: https://www.rdocumentation.org/packages/pacman/versions/0.5.1
+## Annotations
 
-## Runtime variables
-Runtime variables can be accessed via `global_vars` vector, like `global_vars['execution_date']`.
+R has no decorators. Mage reads comments that start with `#*` above a function:
 
-Example code:
-```R
-load_data <- function() {
-    df <- read.csv(file='titanic_clean.csv')
-    df['date'] <- global_vars['execution_date']
-    df
+| Annotation | Marks |
+| --- | --- |
+| `#* @data_loader` | The function of a data loader |
+| `#* @transformer` | The function of a transformer |
+| `#* @data_exporter` | The function of a data exporter |
+| `#* @custom` | The function of a custom block |
+| `#* @test` | A test of the block's output; a block can have several |
+
+A block has one function, and its annotation must match the block type. The function's
+name is up to you. Blocks that define `load_data()`, `transform()`, `export_data()` or
+`custom()` without an annotation still run.
+
+Annotations are comments, so a block file also runs in any R session, where you can call
+and test its functions. From code, `data_loader(f)`, `transformer(f)`, `data_exporter(f)`,
+`custom(f)` and `test(f)` register functions the same way.
+
+## Examples
+
+### Data loader
+
+```r
+suppressPackageStartupMessages(library(tidyverse))
+
+#* @data_loader
+load_data <- function(...) {
+  # Return a data frame, such as a tibble, for the downstream blocks.
+  # Pipeline variables: variable("execution_date"), or global_vars.
+  # read_csv("data.csv", show_col_types = FALSE)
+  tibble(id = 1:3, name = c("a", "b", "c"))
+}
+
+#* @test
+output_has_rows <- function(output) {
+  stopifnot("The output is empty" = nrow(output) > 0)
 }
 ```
+
+### Transformer
+
+```r
+suppressPackageStartupMessages(library(tidyverse))
+
+# Joins the outputs of two upstream blocks: df_1 is the first, df_2 the
+# second. Replace id with the columns that match their rows.
+#* @transformer
+transform <- function(df_1, df_2, ...) {
+  df_1 |>
+    left_join(df_2, by = join_by(id))
+}
+```
+
+### Data exporter
+
+```r
+suppressPackageStartupMessages(library(tidyverse))
+
+# Writes df_1 in the format the extension tells: CSV, TSV, Parquet,
+# Feather/Arrow, JSON, NDJSON or RDS, creating the directory. Relative paths
+# start at the Mage project.
+#* @data_exporter
+export_data <- function(df_1, ...) {
+  write_file(df_1, "output/result.parquet")
+}
+```
+
+A data exporter has no output: what its function returns is passed to its tests, but not
+stored.
+
+### Custom block
+
+```r
+#* @custom
+custom <- function(...) {
+  # A custom block takes the outputs of its upstream blocks, if any, in their
+  # order, and returns anything: a data frame, a list, a value or nothing.
+  # context() names the block and pipeline; variable("name") reads a pipeline
+  # variable.
+  inputs <- list(...)
+  list(
+    block = context()$block_uuid,
+    inputs = length(inputs)
+  )
+}
+```
+
+### Test
+
+```r
+#* @test
+output_has_rows <- function(output) {
+  stopifnot("The output is empty" = nrow(output) > 0)
+}
+```
+
+Mage calls each test with the block's output after the block's function returns, or with
+no arguments when the test takes none. A test fails when it raises an error, as
+`stopifnot()` and testthat's expectations do. The output is stored first, then a failed
+test fails the block, as with Python's `@test`. Tests are reported with their function
+names.
+
+## Upstream inputs
+
+The block's function receives the upstream outputs as arguments, in the order of the
+upstream blocks. The same values are also in the variables `df_1`, `df_2` and so on.
+
+- Data frames from pandas, Polars or other R blocks arrive as tibbles.
+- Other values (dicts, lists, numbers, text) arrive decoded from JSON, as `jsonlite`
+  reads them: objects become named lists.
+
+Data frames cross between Python and R as Arrow IPC files, so column types are kept:
+int64 becomes R's integer when every value fits and `bit64::integer64` otherwise, dates
+and time zones are kept, list columns become lists, and struct, map and mixed columns
+become lists decoded from JSON. Decimals become doubles. Column names must be unique.
+The full type mapping and its limits are in [R blocks: types](/development/r-blocks#types).
+
+## Outputs
+
+| The function returns | Stored output |
+| --- | --- |
+| A data frame or tibble | A table; Python blocks receive a pandas DataFrame |
+| Any other value | JSON; Python blocks receive a dict, list or scalar |
+| `NULL` | No output |
+
+R's integers and `integer64` come back as `Int64`. Dates and date-times (naive or zoned)
+keep their types, and date-times, `difftime` and `hms` columns keep microseconds. Downstream SQL blocks read the
+output like any pandas output, and Rust blocks receive it as a Polars table. A Polars block
+converts it with `pl.from_pandas()`:
+
+```python
+import polars as pl
+
+
+@transformer
+def transform(scores, *args, **kwargs):
+    frame = pl.from_pandas(scores)
+    return frame
+```
+
+## Variables and context
+
+`variable(name, default)` returns a pipeline variable, such as `execution_date` or a
+runtime variable. Without a default, a missing variable is an error. All variables are
+also in the named list `global_vars`. Variables cross as JSON, so dates and date-times
+arrive as text:
+
+```r
+day <- as.Date(variable("execution_date"))
+limit <- variable("limit", default = 100)
+```
+
+`context()` returns a named list with `block_uuid`, `block_type`, `pipeline_uuid` and
+`execution_partition`.
+
+`variable()`, `context()`, the registration functions and the I/O functions below come
+from Mage's `mageml` package and are available in every block without `library()`. Their
+help pages are in R, such as `?mageml::write_table`.
+
+## Databases, files and S3
+
+| Function | |
+| --- | --- |
+| `read_sql(query, database, profile, params)` | Runs a query on a database of `io_config.yaml` and returns a tibble |
+| `write_table(df, table, database, profile, schema, if_exists)` | Writes a data frame to a table; `if_exists` is `"replace"`, `"append"` or `"fail"` |
+| `db_connect(database, profile)` | A DBI connection; close it with `DBI::dbDisconnect()` |
+| `io_config(profile)` | The database settings of a profile |
+| `read_file(path, format)`, `write_file(df, path, format)` | A local CSV, TSV, Parquet, Feather/Arrow, JSON, NDJSON or RDS file, in the format its extension tells |
+| `read_s3(uri, profile, format)`, `write_s3(df, uri, profile, format)` | The same on S3, such as `s3://bucket/orders.parquet` |
+| `s3_filesystem(profile)` | An arrow S3 file system with a profile's AWS settings |
+
+`database` is `"postgres"` (needs RPostgres), `"mysql"` (RMariaDB) or `"duckdb"` (duckdb).
+Only direct connections are supported. Relative file paths start at the Mage project, which
+is the working directory of R blocks.
+
+```r
+suppressPackageStartupMessages(library(tidyverse))
+
+#* @data_loader
+load_data <- function(...) {
+  read_sql(
+    "SELECT * FROM your_table WHERE updated_at >= $1",
+    database = "postgres",
+    profile = "default",
+    params = list(as.Date(variable("execution_date")))
+  )
+}
+```
+
+Mage passes R the Postgres, MySQL, DuckDB and AWS settings of the
+[`io_config.yaml`](/development/io_config_setup) profiles whose names appear as text in the
+block, and of `default`. Write the profile name as a string literal: a name built at run
+time is not passed. The settings file is readable by its owner only and is removed after
+the block runs.
+
+### Secrets
+
+Keep credentials in `io_config.yaml` with `env_var()`, `mage_secret_var()` or
+`aws_secret_var()`; Mage resolves them before passing the settings to R. See
+[Secrets](/development/variables/secrets). The R process inherits Mage's environment, so
+`Sys.getenv("API_TOKEN")` reads an environment variable.
+
+## Packages
+
+The project's R environment is an rv project in `<project>/r`:
+
+| File | |
+| --- | --- |
+| `r/rproject.toml` | The R version, the package repositories and the packages |
+| `r/rv.lock` | The locked package versions |
+| `r/rv/library` | The installed packages. Generated, do not commit |
+
+Commit `rproject.toml` and `rv.lock`. To add packages, use rv in that directory, then load
+them in the block with `library()`:
+
+```bash
+cd path/to/project/r
+rv add pointblank janitor
+rv add --git https://github.com/org/pkg.git pkg
+```
+
+On another machine, `mage r sync` installs the locked versions.
+
+`mage r init` installs the tidyverse, the packages Mage exchanges data with (`arrow`,
+`bit64`, `jsonlite`, `tibble`), and the packages the templates use: `DBI`, `RPostgres`,
+`RMariaDB`, `duckdb`, `RSQLite` and `httr2`. `mage r init -p dplyr -p readr` installs the
+listed packages plus the exchange packages instead. Packages come from Posit Package
+Manager, then CRAN.
+
+R blocks run with `Rscript --vanilla` and see only the rv library, R's base packages and
+`mageml`. Site and user libraries are left out, so a pipeline runs with the locked packages
+only. Before a block runs, Mage checks that the library matches `rv.lock` (see
+`MAGE_R_SYNC`).
+
+When the `Rscript` on `PATH` is not the R version in `rproject.toml`, Mage uses the matching
+version that rig installed. On macOS, rig's R versions run only as the default one; switch
+with `rig default 4.6`.
+
+## Logs, errors, timeouts and cancellation
+
+Printed output, messages and warnings show in the block's output as they come. An R error
+fails the block with R's message and the block's calls, with their lines in `block.R`:
+
+```
+R block checker failed: expected 5 rows, got 1
+
+R calls:
+block.R#2: validate(df_1)
+block.R#6: stop("expected 5 rows, got ", nrow(df))
+```
+
+`MAGE_R_TIMEOUT` stops a block that runs longer, with the processes it started. Stopping a
+run, in the notebook or by cancelling a pipeline run, also stops its R process.
+
+Each run starts a new `Rscript` process; nothing is kept between runs except stored
+outputs. `mage export service` does not export R blocks; [pipeline
+services](/production/pipeline-services) run Python and Rust blocks.
+
+## Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `MAGE_R_PROJECT_DIR` | `<project>/r`, then `<project>` | The directory with `rproject.toml`. Relative paths start at the project |
+| `MAGE_RSCRIPT` | `Rscript` on `PATH`, else rig's matching version | The Rscript executable |
+| `MAGE_RV` | `rv` on `PATH` | The rv executable |
+| `MAGE_RIG` | `rig` on `PATH` | The rig executable |
+| `MAGE_R_SYNC` | `check` | `check` fails a block when the library does not match `rv.lock`; `auto` runs `rv sync` first; `off` skips the check |
+| `MAGE_R_TIMEOUT` | none | Seconds after which an R block is stopped |
+| `MAGE_R_CACHE_DIR` | `~/.cache/mage-ml/r` | Where Mage installs the `mageml` package |
+| `MAGE_R_TZ` | `UTC` | The time zone of R sessions |
+
+## Troubleshooting
+
+| Error | What to do |
+| --- | --- |
+| `Rscript (Rscript) was not found` or `rv (rv) was not found` | Install it (`mage r setup` prints how), or set `MAGE_RSCRIPT` or `MAGE_RV` |
+| `The R environment in ... is for R 4.6, but ... runs R 4.5` | Install R 4.6 with `rig add 4.6`, run `rig default 4.6` on macOS, or set `MAGE_RSCRIPT` |
+| `The R library in ... is not synced with rv.lock` | Run `mage r sync`, or set `MAGE_R_SYNC=auto` |
+| `R blocks need the R packages arrow, ...` | Run `rv add` with the listed packages in `<project>/r` |
+| `R packages ... are not installed in the R environment` | Run `rv add` with the listed packages, or `mage r init` if the project has no R environment |
+| `MAGE_R_PROJECT_DIR is ..., which has no rproject.toml` | Point it at the rv project, or create one with `mage r init` |
+| `The mageml R package, which runs R blocks, failed to install` | Install `arrow`, `bit64`, `jsonlite` and `tibble` in the R environment |
+| `The block has no function` | Annotate the function with the block type, such as `#* @transformer` |
+| `This is a transformer block; register its function with transformer()` | The annotation does not match the block type; change it |
+| `The block registers more than one transformer function` | Keep one annotated function per block |
+| `block.R line N has the unknown annotation @...` | Use `@data_loader`, `@transformer`, `@data_exporter`, `@custom` or `@test` |
+| `block.R line N starts an annotation with #'` | Start annotations with `#*`, not `#'` |
+| `The pipeline has no variable ...` | Pass the variable in the run or trigger, or give `variable()` a default |
+| `io_config.yaml has no profile ... with database settings` | Write the profile name as text in the block, and check the profile exists |
+| `db_connect() supports direct Postgres connections only` | Connect directly; SSH tunnels are not supported from R |
+| `R blocks need unique column names` | Rename the duplicate columns in the upstream block |
+| `The R block ran longer than N seconds` | Raise `MAGE_R_TIMEOUT`, or make the block faster |
+| `Variables ... cannot be written as JSON and are not in global_vars` | A warning: those variables are not available in R |

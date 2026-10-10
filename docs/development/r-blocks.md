@@ -1,13 +1,13 @@
 # R blocks
 
-Data loaders, transformers and data exporters can be written in R. They run with R 4.6
+Data loaders, transformers, data exporters and custom blocks can be written in R. They run with R 4.6
 and an R environment that [rv](https://github.com/A2-ai/rv) manages, without Docker. R
 blocks and Python and SQL blocks pass data frames to each other in any order.
 
 ## Setup
 
 ```bash
-pip install "mage-ml[r]"          # Mage; R itself is not a Python package
+pip install mage-ml               # Mage; R, rv and rig are installed outside Python
 mage r setup path/to/project      # checks R, rv and rig, and prints how to install them
 mage r init path/to/project       # creates the project's R environment
 mage r status path/to/project     # checks that R blocks can run
@@ -80,13 +80,15 @@ takes it from CRAN, which has.
 ## Templates
 
 In the notebook, add a block and choose R: data loaders, transformers and data exporters
-each offer a generic template and these, each with a test:
+each offer a generic template and these, each with a test; custom blocks offer a generic
+template:
 
 | Block | Templates |
 | --- | --- |
 | Data loader | Local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
 | Transformer | Clean data, Aggregate, Join, Reshape |
 | Data exporter | Local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
+| Custom | Generic |
 
 ## Writing blocks
 
@@ -108,9 +110,10 @@ totals_are_positive <- function(output) {
 }
 ```
 
-- `#* @data_loader`, `#* @transformer` or `#* @data_exporter` marks the block's function.
-  It receives the outputs of the upstream blocks in order, data frames as tibbles. A data
-  loader or transformer returns its output.
+- `#* @data_loader`, `#* @transformer`, `#* @data_exporter` or `#* @custom` marks the
+  block's function. It receives the outputs of the upstream blocks in order, data frames
+  as tibbles. A data loader, transformer or custom block returns its output; a custom
+  block can return a data frame, a list, a value or nothing.
 - `#* @test` marks a test. Mage calls it with the block's output after the block runs.
   A test fails when it raises an error, as `stopifnot()` and testthat's expectations do.
   The output is stored first, then failed tests fail the block, as with Python's `@test`.
