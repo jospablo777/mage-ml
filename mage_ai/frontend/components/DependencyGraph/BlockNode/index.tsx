@@ -148,7 +148,7 @@ function BlockNode({
     },
   );
 
-  const tagsText = useMemo(() => blockTagsText(block), [block]);
+  const tagsText = useMemo(() => blockTagsText(block, pipeline), [block, pipeline]);
 
   const iconEl = useMemo(() => {
     const El = ICON_MAPPING[type] || Union;

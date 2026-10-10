@@ -1,7 +1,8 @@
 # Block fusion: blocks that run together without losing their boundaries
 
 Status: phase 1 is implemented (`mage_ai/orchestration/fusion.py`, `run_stage` in the
-scheduler) and tested; "verify fusion" and the benchmark test are not built yet. User docs:
+scheduler) and tested, with `mage verify-fusion` (`mage_ai/orchestration/fusion_verify.py`)
+and a benchmark test (`integration_tests/benchmark`). User docs:
 `docs/design/data-pipeline-management.mdx`. Measurements are from a 5-block pandas chain
 on 3 million rows (load, clean, enrich, aggregate, export), run from an API trigger
 through `mage start` on macOS.
@@ -70,10 +71,15 @@ against about 14.5 s.
   yet.
 - **A failure names its block.** Each block keeps its block run, status, log file and
   error. Log lines carry a `stage` tag next to the block's tags.
-- **Verify fusion (not built yet).** An action that runs the pipeline once fused and
-  once block by block, compares every stored output, and names the first block whose
-  output differs. Until then, the type matrix in
-  `mage_ai/tests/orchestration/test_fusion_types.py` and the flow tests hold the rule.
+- **Verify fusion.** `mage verify-fusion` runs the pipeline once block by block and once
+  fused, from the same variables and execution date, and compares every stored output; it
+  names the first block whose output differs. Both runs go through the scheduler and
+  `run_block`/`run_stage`, with each job in its own spawned process, so process state
+  leaks between blocks only where a stage would let it. The runs carry the
+  `verify_fusion` metric, which sets their fusion mode and makes schedulers skip them,
+  and each mode has its own inactive trigger, so the outputs land in separate
+  partitions. Floats that differ by at most 1e-9 relative are reported as close: Polars
+  sums depend on how the input is chunked.
 
 ## Which blocks join a chain
 
@@ -238,9 +244,13 @@ nothing"; until then a missing output is not an error.
   - outputs equal those of the default mode for every type.
 - **The soak test with fusion on:** many concurrent pipelines, killed workers, no lost or
   duplicated block runs.
-- **The benchmark above (not automated yet).** The numbers in the table come from
-  `mage start` runs; an integration test that fails when fused runs stop being faster is
-  still to be written.
+- **The benchmark**, `make -C integration_tests test-benchmark`: the 5-block chain runs
+  block by block and fused through the scheduler, each job in its own process, and the
+  test fails when the fused run takes more than 75% of the time
+  (`MAGE_BENCHMARK_MAX_SHARE`) or the outputs differ. On macOS (M-series, 14 cores),
+  1 million rows took 16.9 s block by block and 6.3 s fused; 3 million rows took 17.7 s
+  and 5.3 s. These runs skip the web server, so they are shorter than the `mage start`
+  numbers in the table.
 - **Faults with real processes, run by hand against `mage start`:** a stage killed with
   SIGKILL mid-block resumed and completed; a run cancelled mid-stage killed the stage and
   cancelled the rest; a block that passed its timeout failed and the rest were cancelled.

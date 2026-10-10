@@ -477,6 +477,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
   `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
+- **`mage verify-fusion`** runs a pipeline block by block and fused, compares every
+  block's stored outputs and names the first block whose output differs. Floats that differ
+  only by rounding are reported as close. See "Verify fusion before turning it on" in
+  `docs/design/data-pipeline-management.mdx`.
 - **Rust blocks**: data loaders, transformers, data exporters and custom blocks written in
   Rust. A block is one function named for its type; its parameters are the upstream
   tables (`LazyFrame` or `DataFrame`), pipeline variables or JSON values, and its return

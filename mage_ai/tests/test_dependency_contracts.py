@@ -80,7 +80,7 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual(
             self.command_names,
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
-             'create-spark-cluster', 'r', 'rust'],
+             'create-spark-cluster', 'verify-fusion', 'r', 'rust'],
         )
 
     def test_rust_commands(self):

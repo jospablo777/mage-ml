@@ -350,6 +350,45 @@ block alone" in its settings, or set `fusion: false` in its configuration.
   half of the machine's memory (`MAGE_STAGE_MAX_MEMORY_SHARE`) or a block leaves a thread
   running.
 
+### Verify fusion before turning it on
+
+```bash
+mage verify-fusion [project_path] [pipeline_uuid]
+```
+
+Runs the pipeline twice, block by block and fused, from the same variables and execution
+date, and compares every block's stored outputs. It prints the stages and one line per
+block, and names the first block whose output differs:
+
+```
+Stage 1: load_sales -> clean_sales -> summarize -> export_summary
+
+  load_sales      same
+  clean_sales     same
+  summarize       close
+                    output_0: revenue: 3 values differ by up to 8.2e-16 (relative)
+  export_summary  same
+
+Fusion verified: outputs are the same, except float rounding in summarize ...
+```
+
+- **same**: identical values, dtypes, column names and order, and index.
+- **close**: only floats differ, by at most 1e-9 relative. Polars and NumPy sums depend on
+  how the input is chunked, and an input from memory is chunked differently from one read
+  back from storage. `--exact` counts this as a difference.
+- **differs**: the column, how many rows differ and the first one. A common cause is state a
+  block leaves in its process, such as a module attribute or a cache, which the next block
+  of a stage sees and a block in its own process does not.
+- **failed**: the block failed in both runs, so nothing was compared.
+
+Each block of the block-by-block run starts in its own process, and each stage of the fused
+run in one process, as on a worker. The two runs appear on the pipeline's runs page under
+the triggers "Verify fusion: block by block" and "Verify fusion: fused". Both runs execute
+the whole pipeline, exporters included, so the command asks before it starts (`--yes` skips
+the question). `--runtime-vars` sets variables as in `mage run`, and `--report` writes the
+result as JSON. The exit code is 0 when fusion is verified, 1 when an output differs or a
+run fails, and 2 when fusion cannot apply to the pipeline.
+
 ## Cache block output in memory
 
 By default, Mage persists block output on disk. In pipeline's metadata.yaml, you have the option to configure the pipeline to cache

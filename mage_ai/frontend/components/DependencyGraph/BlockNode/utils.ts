@@ -8,6 +8,7 @@ import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import { BORDER_WIDTH } from './index.style';
 import { PADDING_UNITS, UNIT } from '@oracle/styles/units/spacing';
 import { buildTags } from '@components/CodeBlock/utils';
+import { fusionStagePositions, fusionStageText } from '@utils/models/fusion';
 import { getModelAttributes } from '@utils/models/dbt';
 import { parse } from 'yaml';
 
@@ -40,7 +41,7 @@ const BADGE_PADDING_TOTAL = 2 * 2;
 const BADGE_SPACING_HORIZONTAL = 4;
 const BADGE_SPACING_VERTICAL = 4;
 
-export function blockTagsText(block: BlockType): string {
+function blockTagsTextWithoutStage(block: BlockType): string {
   const tags = buildTags(block || {});
 
   if (tags?.length >= 1) {
@@ -55,6 +56,18 @@ export function blockTagsText(block: BlockType): string {
   }
 
   return ABBREV_BLOCK_LANGUAGE_MAPPING[block?.language] || '';
+}
+
+// With block fusion on, a block of a chain names its stage, so the graph shows which
+// blocks run together.
+export function blockTagsText(block: BlockType, pipeline?: PipelineType): string {
+  const text = blockTagsTextWithoutStage(block);
+  const stage = fusionStageText(fusionStagePositions(pipeline)?.[block?.uuid]);
+  if (!stage) {
+    return text;
+  }
+
+  return text ? `${text} · ${stage}` : stage;
 }
 
 export function displayTextForBlock(block: BlockType, pipeline: PipelineType): {
@@ -168,7 +181,7 @@ export function getBlockNodeHeight(block: BlockType, pipeline: PipelineType, opt
   const width = getBlockNodeWidth(block, pipeline, opts);
   const widthWithoutPadding = width - (NODE_WIDTH + (UNIT * 2));
 
-  const tagsText = blockTagsText(block);
+  const tagsText = blockTagsText(block, pipeline);
   const tagsTextWidth = tagsText?.length * WIDTH_OF_SMALL_CHARACTER;
 
   if (tagsTextWidth >= 1) {
@@ -231,7 +244,7 @@ export function getBlockNodeWidth(block: BlockType, pipeline: PipelineType, opts
     getBlockHeaderSubtitle(block, pipeline)?.length * WIDTH_OF_SMALL_CHARACTER,
   );
 
-  const tagsText = blockTagsText(block);
+  const tagsText = blockTagsText(block, pipeline);
   const tagsTextWidth = tagsText?.length * WIDTH_OF_SMALL_CHARACTER;
 
   const {

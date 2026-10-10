@@ -35,6 +35,7 @@ from mage_ai.orchestration.db.models.schedules import (
     PipelineRun,
     PipelineSchedule,
 )
+from mage_ai.orchestration.fusion import verification_mode
 from mage_ai.orchestration.job_manager import JobType, get_job_manager
 from mage_ai.orchestration.metrics.pipeline_run import (
     calculate_destination_metrics,
@@ -1724,6 +1725,9 @@ def schedule_all():
     logger.info(f'Active pipeline runs: {[p.id for p in active_pipeline_runs]}')
 
     for r in active_pipeline_runs:
+        if verification_mode(r):
+            # `mage verify-fusion` runs it in its own process.
+            continue
         try:
             r.refresh()
             PipelineScheduler(r).schedule()

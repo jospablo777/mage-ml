@@ -26,7 +26,11 @@ from mage_ai.data_preparation.models.triggers import (
 )
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.shared.retry import resolve_retry_config
-from mage_ai.orchestration.fusion import fusion_enabled, stage_block_runs
+from mage_ai.orchestration.fusion import (
+    fusion_enabled,
+    stage_block_runs,
+    verification_mode,
+)
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
@@ -634,7 +638,7 @@ class PipelineScheduler:
             if block_run_quota <= 0:
                 return
 
-        fused = fusion_enabled(self.pipeline)
+        fused = fusion_enabled(self.pipeline, self.pipeline_run)
         for b in block_runs_to_schedule[:block_run_quota]:
             tags = dict(
                 block_run_id=b.id,
@@ -2123,6 +2127,9 @@ def schedule_all():
     logger.info(f'Active pipeline runs: {[p.id for p in active_pipeline_runs]}')
 
     for r in active_pipeline_runs:
+        if verification_mode(r):
+            # `mage verify-fusion` runs it in its own process.
+            continue
         try:
             r.refresh()
             PipelineScheduler(r).schedule()

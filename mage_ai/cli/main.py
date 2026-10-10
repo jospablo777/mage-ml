@@ -325,6 +325,62 @@ def create_spark_cluster(
     create_cluster(project_path)
 
 
+@app.command('verify-fusion')
+def verify_fusion(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    runtime_vars: Union[str, None] = RUN_RUNTIME_VARS_DEFAULT,
+    yes: bool = typer.Option(False, '--yes', '-y', help='run without asking first.'),
+    report: Union[str, None] = typer.Option(None, help='also write the result as JSON here.'),
+    exact: bool = typer.Option(
+        False, help='count floats that differ only by rounding as a difference.',
+    ),
+):
+    """
+    Run a pipeline block by block, then with block fusion, and compare every block's
+    stored outputs. Names the first block whose output differs. Both runs execute the
+    whole pipeline, so exporters write twice.
+    """
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+    sys.path.append(os.path.dirname(project_path))
+
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.data_preparation.variable_manager import get_global_variables
+    from mage_ai.orchestration.db import db_connection
+    from mage_ai.orchestration.fusion_verify import (
+        FusionVerificationError,
+        format_report,
+    )
+    from mage_ai.orchestration.fusion_verify import verify_fusion as verify
+    from mage_ai.shared.hash import merge_dict
+
+    db_connection.start_session()
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path)
+    if not yes and not typer.confirm(
+        f'This runs {pipeline_uuid} twice, exporters included. Continue?',
+    ):
+        raise typer.Exit(code=1)
+    variables = merge_dict(
+        get_global_variables(pipeline_uuid),
+        parse_runtime_variables(runtime_vars) if runtime_vars else {},
+    )
+    try:
+        verification = verify(pipeline, variables=variables, exact=exact)
+    except FusionVerificationError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    if report:
+        with open(report, 'w') as file:
+            json.dump(verification.to_dict(), file, indent=2)
+    # Plain text: rich would read brackets in values as markup.
+    typer.echo(format_report(verification))
+    if not verification.passed:
+        raise typer.Exit(code=1)
+
+
 r_app = typer.Typer(
     cls=OrderCommands,
     help='Manage the rv environment that R blocks run in.',

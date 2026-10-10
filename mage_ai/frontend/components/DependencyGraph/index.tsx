@@ -70,6 +70,7 @@ import {
   hasErrorOrOutput,
 } from '@components/CodeBlock/utils';
 import { getModelAttributes } from '@utils/models/dbt';
+import { fusionStagePositions } from '@utils/models/fusion';
 import { onSuccess } from '@api/utils/response';
 import { pauseEvent } from '@utils/events';
 import { recenterCanvas } from './recenter';
@@ -331,6 +332,8 @@ function DependencyGraph({
   const upstreamBlocksEditingCount = useMemo(() => upstreamBlocksEditing.length, [
     upstreamBlocksEditing,
   ]);
+
+  const fusionPositions = useMemo(() => fusionStagePositions(pipeline), [pipeline]);
 
   const blocksInit = useMemo(() => (blocksOverride || pipeline?.blocks)?.filter(({
     type,
@@ -1902,6 +1905,13 @@ function DependencyGraph({
               edgeClassNames.push('group');
             }
 
+            // Consecutive blocks of a fusion stage run in one process: their edge is wider.
+            const sourceStage = fusionPositions?.[blockUUID];
+            const targetStage = fusionPositions?.[blockUUIDMapping?.[edge?.target]?.uuid];
+            const withinStage = !!sourceStage && !!targetStage
+              && sourceStage.stage === targetStage.stage
+              && targetStage.position === sourceStage.position + 1;
+
             return (
               <Edge
                 {...edge}
@@ -1922,7 +1932,7 @@ function DependencyGraph({
                   stroke: anotherBlockSelected && !selected
                     ? colorData?.accentLight
                     : colorData?.accent,
-                  strokeWidth: STROKE_WIDTH,
+                  strokeWidth: withinStage ? STROKE_WIDTH * 3 : STROKE_WIDTH,
                 }}
               />
             );

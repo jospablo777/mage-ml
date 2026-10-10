@@ -59,12 +59,28 @@ SPECIAL_METRICS = frozenset([
 MAX_MEMORY_SHARE = float(os.getenv('MAGE_STAGE_MAX_MEMORY_SHARE') or 0.5)
 
 
-def fusion_enabled(pipeline) -> bool:
+# A pipeline run with this metric is run in process by `mage verify-fusion`, with fusion
+# set by its value, BLOCK_FUSION_CHAINS or BLOCK_FUSION_OFF, whatever the pipeline says.
+# Schedulers leave such runs alone.
+VERIFY_FUSION_METRIC = 'verify_fusion'
+BLOCK_FUSION_OFF = 'off'
+
+
+def verification_mode(pipeline_run) -> Optional[str]:
+    if pipeline_run is None:
+        return None
+    return (pipeline_run.metrics or {}).get(VERIFY_FUSION_METRIC)
+
+
+def fusion_enabled(pipeline, pipeline_run=None) -> bool:
     from mage_ai.settings.server import MEMORY_MANAGER_V2
 
+    mode = verification_mode(pipeline_run)
+    if mode is None and pipeline is not None:
+        mode = pipeline.block_fusion
     return (
         pipeline is not None
-        and pipeline.block_fusion == BLOCK_FUSION_CHAINS
+        and mode == BLOCK_FUSION_CHAINS
         and pipeline.type == PipelineType.PYTHON
         and not pipeline.run_pipeline_in_one_process
         and not MEMORY_MANAGER_V2

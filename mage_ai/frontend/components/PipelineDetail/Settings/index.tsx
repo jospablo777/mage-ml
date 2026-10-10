@@ -35,9 +35,8 @@ import {
 import { get, set } from '@storage/localStorage';
 import { isEqual } from '@utils/hash';
 import { capitalize, isJsonString } from '@utils/string';
+import { BLOCK_FUSION_CHAINS } from '@utils/models/fusion';
 import { pushUnique } from '@utils/array';
-
-const BLOCK_FUSION_CHAINS = 'chains';
 
 type PipelineSettingsProps = {
   isPipelineUpdating?: boolean;
@@ -236,8 +235,11 @@ function PipelineSettings({
 
               {pipelineAttributes?.block_fusion === BLOCK_FUSION_CHAINS && (
                 <Spacing mt={1}>
-                  {fusionStages?.length ? fusionStages.map(stage => (
+                  {fusionStages?.length ? fusionStages.map((stage, stageIndex) => (
                     <FlexContainer alignItems="center" flexWrap="wrap" key={stage.join('>')}>
+                      <Text muted small>
+                        Stage {stageIndex + 1}:&nbsp;
+                      </Text>
                       {stage.map((uuid, index) => (
                         <Text key={uuid} monospace small>
                           {index ? `→ ${uuid}` : uuid}&nbsp;
