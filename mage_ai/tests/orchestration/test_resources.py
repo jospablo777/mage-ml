@@ -53,7 +53,8 @@ class DecisionTest(TestCase):
 
         gpu = resources.decide(resources.Request(gpu=1), policy, held, 'p', 'me')
         self.assertEqual(gpu.held['gpus'], ['1'])
-        self.assertFalse(resources.decide(resources.Request(gpu=2), policy, held, 'p', 'me').admitted)
+        two = resources.decide(resources.Request(gpu=2), policy, held, 'p', 'me')
+        self.assertFalse(two.admitted)
 
         for request, reason in [
             (resources.Request(uses=('lake',)), 'not declared'),
