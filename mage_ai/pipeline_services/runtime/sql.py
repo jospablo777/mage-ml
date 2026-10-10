@@ -1,12 +1,12 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
-(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL and DuckDB
-branches):
+(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB and
+ClickHouse branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
 2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL, the table
-   alone on MySQL and DuckDB.
+   alone on MySQL, DuckDB and ClickHouse.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -43,6 +43,11 @@ PROVIDERS = {
     ),
     'duckdb': dict(
         profile_keys=('DUCKDB_DATABASE', 'DUCKDB_SCHEMA'),
+        no_schema=True,
+        full_names=False,
+    ),
+    'clickhouse': dict(
+        profile_keys=('CLICKHOUSE_DATABASE', 'CLICKHOUSE_HOST', 'CLICKHOUSE_PORT'),
         no_schema=True,
         full_names=False,
     ),
@@ -193,7 +198,7 @@ def _no_data(value: Any) -> bool:
 
 def upload_upstream_tables(
     loader, configuration: Dict, upstreams: List[Dict], inputs: List, query: str, io_config: str,
-    provider: Dict,
+    provider: Dict, database: Optional[str] = None,
 ) -> None:
     import inspect
 
@@ -223,6 +228,8 @@ def upload_upstream_tables(
             index=False,
             verbose=False,
         )
+        if database:
+            options['database'] = database
         if 'allow_reserved_words' in inspect.signature(loader.export).parameters:
             options['allow_reserved_words'] = True
         loader.export(value, **options)
@@ -334,6 +341,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.mysql import MySQL
 
         return MySQL.with_config(config_loader)
+    if provider == 'clickhouse':
+        from mage_ai.io.clickhouse import ClickHouse
+
+        return ClickHouse.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -375,6 +386,18 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
     )
 
     loader = _loader(name, config_loader)
+    if name == 'clickhouse':
+        # Mage's ClickHouse branch: no with block, upstream tables in the block's database.
+        database = configuration.get('data_provider_database') or loader.default_database()
+        upload_upstream_tables(
+            loader, configuration, upstreams, inputs, query, io_config, provider, database,
+        )
+        query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
+        query = render(query, variables)
+        if configuration.get('use_raw_sql'):
+            return execute_raw_sql(loader, query, configuration)
+        loader.export(None, table_name=table, database=database, query_string=query, **options)
+        return [loader.load(f'SELECT * FROM {database}.{table}', verbose=False)]
     if name == 'duckdb':
         # Mage's DuckDB branch uses the loader without a with block, and the schema
         # falls back to the profile's before the upstream tables are written.
