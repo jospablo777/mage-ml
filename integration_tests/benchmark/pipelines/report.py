@@ -352,10 +352,10 @@ PAGE = '''<!doctype html>
 :root {{ --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --card: #f6f8fa; }}
 @media (prefers-color-scheme: dark) {{
   :root:not([data-theme="light"]) {{ --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1;
-    --line: #3d444d; --card: #151b23; }}
+    --line: #3d444d; --card: #151b23; color-scheme: dark; }}
 }}
 :root[data-theme="dark"] {{ --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d;
-  --card: #151b23; }}
+  --card: #151b23; color-scheme: dark; }}
 body {{ background: var(--bg); color: var(--fg); margin: 0;
   font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }}
 main {{ max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }}

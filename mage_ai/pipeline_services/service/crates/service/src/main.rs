@@ -375,10 +375,18 @@ fn data_dir(common: &Common) -> PathBuf {
         .unwrap_or_else(|| common.dir.join("data"))
 }
 
+/// When the Python worker starts: before the service accepts runs (serve, so a broken
+/// Python fails at start-up), or alongside a one-shot run of a pipeline that needs it.
+enum WarmPython {
+    Now,
+    WithRunOf(String),
+}
+
 async fn start_service(
     common: &Common,
     schedules_enabled: bool,
     retention_days: u32,
+    warm: WarmPython,
 ) -> Result<Arc<Service>, String> {
     let manifest = load_manifest(common)?;
     let secrets = load_secrets(&manifest);
@@ -479,17 +487,37 @@ async fn start_service(
         ledger,
         python.clone(),
     );
-    if let Some(python) = python
-        && let Err(error) = python.warm().await
-    {
-        return Err(format!("Python blocks cannot run: {error}"));
+    if let Some(python) = python {
+        match warm {
+            WarmPython::Now => {
+                if let Err(error) = python.warm().await {
+                    return Err(format!("Python blocks cannot run: {error}"));
+                }
+            }
+            WarmPython::WithRunOf(pipeline) => {
+                let needs_python = service.manifest.pipeline(&pipeline).is_some_and(|p| {
+                    p.blocks.iter().any(|b| {
+                        matches!(b.language, Language::Python | Language::R | Language::Sql)
+                    })
+                });
+                if needs_python {
+                    python.warm_in_background().await;
+                }
+            }
+        }
     }
     Ok(service)
 }
 
 async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     let schedules_enabled = args.schedules == Switch::On;
-    let service = start_service(&common, schedules_enabled, args.retention_days).await?;
+    let service = start_service(
+        &common,
+        schedules_enabled,
+        args.retention_days,
+        WarmPython::Now,
+    )
+    .await?;
     let from_files = load_secrets(&service.manifest);
     let token_value = args
         .token
@@ -657,7 +685,13 @@ async fn run_once(common: Common, args: RunArgs) -> Result<ExitCode, String> {
     // The run's summary, or its JSON, is alone on stdout; logs go to stderr.
     log::to_stderr();
     let variables = parse_variables(&args.variables)?;
-    let service = start_service(&common, false, 0).await?;
+    let service = start_service(
+        &common,
+        false,
+        0,
+        WarmPython::WithRunOf(args.pipeline.clone()),
+    )
+    .await?;
     if service.manifest.pipeline(&args.pipeline).is_none() {
         let names: Vec<_> = service
             .manifest

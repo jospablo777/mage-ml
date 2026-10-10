@@ -63,6 +63,9 @@ pub struct PythonPool {
     config: PythonConfig,
     idle: Mutex<Vec<Worker>>,
     slots: Semaphore,
+    /// A worker starting in the background (warm_in_background), which the first block
+    /// that needs a worker takes instead of starting another.
+    warming: tokio::sync::Mutex<Option<tokio::task::JoinHandle<Result<Worker, WorkerError>>>>,
 }
 
 impl PythonPool {
@@ -72,7 +75,25 @@ impl PythonPool {
             config,
             idle: Mutex::new(Vec::new()),
             slots,
+            warming: tokio::sync::Mutex::new(None),
         })
+    }
+
+    /// Starts one worker while the run's first blocks run: a run whose first blocks are
+    /// Rust does not wait for Python to start. A worker that cannot start fails the first
+    /// block that needs it, with the reason.
+    pub async fn warm_in_background(self: &Arc<Self>) {
+        let pool = self.clone();
+        *self.warming.lock().await = Some(tokio::spawn(async move { pool.spawn().await }));
+    }
+
+    async fn take_warming(&self) -> Option<Result<Worker, WorkerError>> {
+        let handle = self.warming.lock().await.take()?;
+        Some(
+            handle.await.unwrap_or_else(|e| {
+                Err(WorkerError::Start(format!("the worker task failed: {e}")))
+            }),
+        )
     }
 
     /// Starts one worker ahead of the first block, so the first run starts at once.
@@ -226,7 +247,10 @@ impl PythonPool {
         let pooled = self.idle.lock().unwrap_or_else(|p| p.into_inner()).pop();
         let mut worker = match pooled {
             Some(worker) => worker,
-            None => self.spawn().await?,
+            None => match self.take_warming().await {
+                Some(started) => started?,
+                None => self.spawn().await?,
+            },
         };
         let id = uuid::Uuid::new_v4().to_string();
         request["id"] = json!(id);
@@ -316,8 +340,11 @@ impl PythonPool {
     }
 
     pub async fn shutdown(&self) {
-        let workers: Vec<Worker> =
+        let mut workers: Vec<Worker> =
             std::mem::take(&mut *self.idle.lock().unwrap_or_else(|p| p.into_inner()));
+        if let Some(Ok(worker)) = self.take_warming().await {
+            workers.push(worker);
+        }
         for worker in workers {
             retire(worker).await;
         }
