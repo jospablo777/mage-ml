@@ -897,6 +897,25 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('stopped 2 times', block_run.metrics['error']['message'])
 
+    def test_schedule_releases_its_lock_after_the_tick(self):
+        """The lock expired on its own after 10 seconds, so ticks in between were skipped."""
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        lock = pipeline_scheduler_original.lock
+        key = f'pipeline_run_{pipeline_run.id}'
+        with patch.object(lock, 'try_acquire_lock', return_value=True) as acquire, \
+                patch.object(lock, 'release_lock') as release, \
+                patch.object(
+                    scheduler, '_PipelineScheduler__schedule', side_effect=RuntimeError('tick'),
+                ):
+            with self.assertRaises(RuntimeError):
+                scheduler.schedule()
+        acquire.assert_called_once_with(
+            key, timeout=pipeline_scheduler_original.SCHEDULE_LOCK_SECONDS,
+        )
+        release.assert_called_once_with(key)
+
     def test_on_block_failure_allow_blocks_to_fail(self):
         pipeline_run = create_pipeline_run_with_schedule(
             pipeline_uuid='test_pipeline',

@@ -1,7 +1,7 @@
 # Durable execution: block run attempts
 
-Status: block run fencing and interruption accounting are implemented (`BlockRun.attempt`, `fusion.claim_block_run`,
-`BlockRun.update_if_attempt`) and tested, including a worker killed in a real scheduler
+Status: block run fencing and interruption accounting are implemented
+(`BlockRun.attempt`, `fusion.claim_block_run`, `BlockRun.update_if_attempt`) and tested, including a worker killed in a real scheduler
 run and a scheduler killed and restarted
 (`integration_tests/soak/test_worker_crash.py`). The remaining gaps are listed below.
 
@@ -55,8 +55,9 @@ So the implementation adds attempts to block runs instead of a new queue.
 2. **Stale outputs.** Outputs are stored per partition and block without an attempt, so a
    superseded worker can still overwrite the files of a newer attempt before its status
    write is rejected.
-3. **Locks are not leases.** The scheduler's per-run Redis lock (10 s) is neither renewed
-   nor released, so a long tick allows a second replica in; without `REDIS_URL` replicas
+3. **Locks are not leases.** The scheduler's per-run Redis lock is now held for a tick and
+   released after it (60 s expiry for a holder that died), but it is not renewed, so a
+   tick longer than a minute allows a second replica in; without `REDIS_URL` replicas
    share no job ownership at all.
 4. **PID reuse.** A reused pid keeps a dead worker's block run RUNNING until its timeout.
 5. **Integration pipelines and Kubernetes.** Stream jobs and Kubernetes block runs write
