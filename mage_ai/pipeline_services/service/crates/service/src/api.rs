@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs/{id}/logs", get(logs))
         .route("/v1/runs/{id}/cancel", post(cancel))
         .route("/v1/snapshot", get(snapshot))
+        .route("/v1/models", get(models))
         .route("/v1/control", post(control))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(state)
@@ -382,6 +383,36 @@ async fn cancel(
     }
     let cancelled = state.service.cancel(&id)?;
     Ok(Json(json!({"id": id, "cancelling": cancelled})))
+}
+
+/// The embedded models with the metadata recorded at export: version, run, flavors,
+/// signature, params and metrics.
+async fn models(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let mut models = Vec::new();
+    for model in &state.service.manifest.models {
+        let metadata_path = state
+            .service
+            .service_dir
+            .join(&model.path)
+            .join("mage-model.json");
+        let metadata = tokio::fs::read_to_string(&metadata_path)
+            .await
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .unwrap_or(Value::Null);
+        models.push(json!({
+            "name": model.name,
+            "uri": model.uri,
+            "version": model.version,
+            "run_id": model.run_id,
+            "flavors": model.flavors,
+            "sha256": model.sha256,
+            "size_bytes": model.size_bytes,
+            "metadata": metadata,
+        }));
+    }
+    Ok(Json(json!({"models": models})))
 }
 
 async fn snapshot(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {

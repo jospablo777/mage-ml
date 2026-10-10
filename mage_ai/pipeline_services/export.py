@@ -79,6 +79,8 @@ class Capture:
     requirements: Dict[str, str] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
     unresolved_imports: Set[str] = field(default_factory=set)
+    # (name, uri) of each ML model to embed.
+    models: List[Tuple[str, str]] = field(default_factory=list)
 
     @property
     def needs_python(self) -> bool:
@@ -102,6 +104,7 @@ def capture(
     pipeline_uuids: List[str],
     name: Optional[str] = None,
     max_concurrent_runs: Optional[int] = None,
+    models: Optional[List[str]] = None,
 ) -> Capture:
     """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
@@ -163,9 +166,46 @@ def capture(
         pipelines=pipelines,
     )
     capture_.manifest['environment'] = _environment(capture_)
+    capture_.models = _models(capture_, models or [])
     if capture_.needs_python:
         capture_.requirements = _requirements(capture_)
     return capture_
+
+
+def _models(capture_: Capture, options: List[str]) -> List[Tuple[str, str]]:
+    """The models from --model, and those the code loads with literal names and uris."""
+    from mage_ai.pipeline_services import model_export
+
+    problems = []
+    explicit: Dict[str, str] = {}
+    for option in options:
+        try:
+            name, uri = model_export.parse_model_option(option)
+        except ValueError as error:
+            problems.append(str(error))
+            continue
+        explicit[name] = uri
+    detected: Dict[str, str] = {}
+    for path in sorted(capture_.files):
+        if path.suffix != '.py':
+            continue
+        for name, uri in model_export.detect(path):
+            where = path.relative_to(capture_.project)
+            if name in explicit:
+                continue
+            if name in detected and detected[name] != uri:
+                problems.append(
+                    f'Model {name} is loaded with two uris, {detected[name]} and {uri} (in '
+                    f'{where}); choose one with --model {name}=<uri>.'
+                )
+                continue
+            if name not in detected:
+                capture_.notes.append(f'Model {name} ({uri}) is loaded in {where}; it is embedded.')
+            detected[name] = uri
+    if problems:
+        raise ExportError(problems)
+    chosen = {**detected, **explicit}
+    return sorted(chosen.items())
 
 
 def _mage_version() -> str:
@@ -629,11 +669,13 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         target = project_out / path.relative_to(capture_.project)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+    model_requirements = _embed_models(capture_, out_dir)
     (out_dir / 'service.json').write_text(json.dumps(capture_.manifest, indent=2) + '\n')
 
     if capture_.needs_python:
         _copy_mage_python(out_dir / 'python' / 'mage_ai')
         lines = [f'{name}=={version}' for name, version in capture_.requirements.items()]
+        lines += model_requirements
         project_requirements = capture_.project / 'requirements.txt'
         if project_requirements.is_file():
             lines.append('-r ' + f'{capture_.project.name}/requirements.txt')
@@ -654,6 +696,62 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     _write_deploy_files(capture_, out_dir)
     (out_dir / 'report.txt').write_text(report(capture_))
     return out_dir
+
+
+def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
+    """Downloads each model with its metadata; returns requirements the image adds."""
+    from mage_ai.pipeline_services import model_export
+
+    capture_.manifest['models'] = []
+    if not capture_.models:
+        return []
+    problems = []
+    extra: Dict[str, str] = {}
+    for name, uri in capture_.models:
+        try:
+            metadata = model_export.download(name, uri, out_dir / 'models' / name)
+        except Exception as error:
+            problems.append(f'Model {name} ({uri}) could not be downloaded: {error}')
+            continue
+        capture_.manifest['models'].append(dict(
+            name=name,
+            uri=uri,
+            path=f'models/{name}',
+            sha256=metadata['sha256'],
+            version=metadata.get('version'),
+            run_id=metadata.get('run_id'),
+            flavors=metadata.get('flavors') or [],
+            size_bytes=metadata.get('size_bytes'),
+        ))
+        for requirement in metadata.get('requirements') or []:
+            match = re.match(r'^([A-Za-z0-9_.\-]+)', requirement)
+            package = match.group(1).lower().replace('_', '-') if match else requirement
+            pinned = capture_.requirements.get(package)
+            if pinned and requirement != f'{package}=={pinned}' and '==' in requirement:
+                capture_.notes.append(
+                    f'Model {name} was logged with {requirement}; the blocks use '
+                    f'{package}=={pinned}, which the image keeps.'
+                )
+                continue
+            if package not in capture_.requirements:
+                extra[package] = requirement
+        capture_.notes.append(
+            f"Model {name}: version {metadata.get('version') or '-'}, run "
+            f"{metadata.get('run_id') or '-'}, {metadata.get('size_bytes', 0):,} bytes."
+        )
+    if problems:
+        raise ExportError(problems)
+    if 'mlflow' not in extra and 'mlflow-skinny' not in capture_.requirements:
+        for distribution in ('mlflow-skinny', 'mlflow'):
+            try:
+                extra.setdefault(
+                    distribution,
+                    f'{distribution}=={importlib.metadata.version(distribution)}',
+                )
+                break
+            except importlib.metadata.PackageNotFoundError:
+                continue
+    return sorted(extra.values())
 
 
 # Deployment files, rendered with the service's name: (template, destination).
@@ -773,6 +871,12 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
         runtime = 'FROM debian:bookworm-slim\n'
         python_env = ''
         copy_python = ''
+    if capture_.models:
+        copy_models = 'COPY --chown=mage:mage models ./models\n'
+        models_env = ' \\\n    MAGE_SERVICE_MODELS_DIR=/srv/mage-service/models'
+    else:
+        copy_models = ''
+        models_env = ''
     return f'''# syntax=docker/dockerfile:1.7
 # {capture_.name}: pipelines exported from the Mage project {project}.
 # docker build -t {capture_.name} .
@@ -791,12 +895,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     chown mage:mage /var/lib/mage-service
 WORKDIR /srv/mage-service
 COPY --from=build /out/mage-service /usr/local/bin/mage-service
-{copy_python}{copy_blocks}COPY --chown=mage:mage {project} ./{project}
+{copy_python}{copy_blocks}{copy_models}COPY --chown=mage:mage {project} ./{project}
 COPY --chown=mage:mage service.json ./service.json
 ENV MAGE_SERVICE_DIR=/srv/mage-service \\
     MAGE_SERVICE_DATA=/var/lib/mage-service \\
     MAGE_SERVICE_HOST=0.0.0.0 \\
-    MAGE_SERVICE_PORT=8080{python_env}
+    MAGE_SERVICE_PORT=8080{models_env}{python_env}
 USER mage
 VOLUME /var/lib/mage-service
 EXPOSE 8080
@@ -858,9 +962,20 @@ def _readme(capture_: Capture) -> str:
         )
     else:
         environment = 'The exported code reads no environment variables.'
+    models = capture_.manifest.get('models') or []
+    if models:
+        models_text = '| Model | MLflow URI | Version | Flavors |\n| --- | --- | --- | --- |\n' + \
+            '\n'.join(
+                f"| `{m['name']}` | `{m['uri']}` | {m.get('version') or '-'} | "
+                f"{', '.join(m.get('flavors') or []) or '-'} |"
+                for m in models
+            )
+    else:
+        models_text = 'This service embeds no models.'
     template = string.Template((TEMPLATES / 'README.md').read_text())
     return template.safe_substitute(
         environment=environment,
+        models=models_text,
         name=capture_.name,
         project=capture_.project.name,
         exported_at=capture_.manifest['service']['exported_at'],

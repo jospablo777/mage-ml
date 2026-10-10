@@ -141,6 +141,16 @@ pub struct Snapshot {
     pub schedules_enabled: bool,
     #[serde(default)]
     pub started_at_unix_ms: u64,
+    #[serde(default)]
+    pub models: Vec<ModelSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct ModelSnapshot {
+    pub name: String,
+    pub uri: String,
+    pub version: Option<String>,
+    pub flavors: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

@@ -497,8 +497,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   secrets at start-up from a provider, `[NAME=]provider:reference[#field]`; the first
   providers are IBM Cloud Secrets Manager (API key or Code Engine trusted profile) and files.
   Each export includes deployment files for IBM Cloud Code Engine, a Tekton pipeline for IBM
-  Cloud Continuous Delivery and a Kubernetes manifest. See
-  `docs/design/pipeline-services.md`.
+  Cloud Continuous Delivery and a Kubernetes manifest. Blocks that load a model with
+  `load_model('fraud', uri='models:/fraud@champion')` run the same code in Mage, where the
+  model comes from MLflow, and in the service, where the export has embedded the model with
+  its version, run, params, metrics and requirements (`GET /v1/models`). Guide:
+  `docs/production/pipeline-services.mdx`; design: `docs/design/pipeline-services.md`.
 - **Faster block imports**: `mage_ai.io.postgres` no longer imports SciPy, paramiko and
   sshtunnel unless an SSH tunnel or a sparse matrix is used (1.1 s to 0.7 s), and
   `io_config.yaml` loads secrets support only when it reads a secret.

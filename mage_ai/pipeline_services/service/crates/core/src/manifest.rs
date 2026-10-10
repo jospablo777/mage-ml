@@ -22,6 +22,27 @@ pub struct Manifest {
     /// Environment variables the exported code reads; values are never exported.
     #[serde(default)]
     pub environment: Vec<EnvironmentVariable>,
+    /// ML models embedded in the image, from MLflow.
+    #[serde(default)]
+    pub models: Vec<Model>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Model {
+    pub name: String,
+    pub uri: String,
+    /// Relative to the service directory; holds artifacts/ and mage-model.json.
+    pub path: String,
+    pub sha256: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub flavors: Vec<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -228,6 +249,25 @@ impl Manifest {
         }
         if self.pipelines.is_empty() {
             problems.push("The service has no pipelines.".into());
+        }
+        let mut model_names = BTreeSet::new();
+        for model in &self.models {
+            if !model_names.insert(model.name.as_str()) {
+                problems.push(format!("Model {} appears twice.", model.name));
+            }
+            if !safe_relative(&model.path) {
+                problems.push(format!(
+                    "Model {} has path {:?} outside the service.",
+                    model.name, model.path
+                ));
+            } else if let Some(service_dir) = project_dir.and_then(Path::parent)
+                && !service_dir.join(&model.path).join("artifacts").is_dir()
+            {
+                problems.push(format!(
+                    "Model {} needs {}/artifacts, which is not in the service.",
+                    model.name, model.path
+                ));
+            }
         }
         for pipeline in &self.pipelines {
             if !pipeline_ids.insert(pipeline.uuid.as_str()) {

@@ -447,9 +447,17 @@ async fn start_service(
             project_dir: common.dir.join(&manifest.service.project),
             max_workers: common.python_workers.unwrap_or(cpus.min(8)),
             max_blocks_per_worker: common.python_max_blocks.max(1),
-            env: std::iter::once(("MAGE_SERVICE".to_string(), "1".to_string()))
-                .chain(extra_env.iter().cloned())
-                .collect(),
+            env: [
+                ("MAGE_SERVICE".to_string(), "1".to_string()),
+                ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
+                (
+                    "MAGE_SERVICE_MODELS_DIR".to_string(),
+                    common.dir.join("models").display().to_string(),
+                ),
+            ]
+            .into_iter()
+            .chain(extra_env.iter().cloned())
+            .collect(),
         }))
     } else {
         None

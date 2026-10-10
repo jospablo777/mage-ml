@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use mage_service_core::manifest::{Manifest, Pipeline, TriggerKind};
 use mage_service_core::protocol::{
-    API_VERSION, PipelineSnapshot, RunStatus, RunSummary, Snapshot, TriggerSnapshot,
+    API_VERSION, ModelSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot, TriggerSnapshot,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -434,6 +434,17 @@ impl Service {
             api_version: API_VERSION,
             schedules_enabled: self.schedules_enabled,
             started_at_unix_ms: self.started_at.timestamp_millis().max(0) as u64,
+            models: self
+                .manifest
+                .models
+                .iter()
+                .map(|m| ModelSnapshot {
+                    name: m.name.clone(),
+                    uri: m.uri.clone(),
+                    version: m.version.clone(),
+                    flavors: m.flavors.clone(),
+                })
+                .collect(),
         })
     }
 

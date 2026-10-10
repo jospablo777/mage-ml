@@ -1,0 +1,239 @@
+---
+title: "Pipeline services: run pipelines without Mage"
+sidebarTitle: "Pipeline services"
+icon: "cube"
+description: "Export pipelines as a standalone Docker service with an HTTP API, schedules, run history, logs, metrics, secrets and embedded ML models."
+---
+
+A pipeline service is a Docker image that runs one pipeline, or several, without Mage: no
+web server, no scheduler, no metadata database. It starts in under a second and gives you:
+
+- an HTTP API to start runs and read their outcome, block by block;
+- the pipelines' schedules;
+- a run history that survives restarts, and every line the blocks print;
+- Prometheus metrics and a health check;
+- retries, timeouts and cancellation, as configured in Mage;
+- secrets from the environment, files, IBM Cloud Secrets Manager and other providers;
+- ML models from MLflow, embedded in the image.
+
+You build pipelines in Mage as always, then ship them where they need to run: next to an
+application, in a Kubernetes cluster, on IBM Cloud Code Engine or AWS ECS.
+
+## 1. Export
+
+```bash
+mage export service path/to/project sales_pipeline --out ./sales-service
+```
+
+The command reads the project and writes a Docker build context to `./sales-service`. It
+prints a report: the blocks, the triggers, the project files it copied, the Python packages
+the image needs and the environment variables the code reads. Several pipelines go in one
+service by listing them:
+
+```bash
+mage export service path/to/project load_orders score_orders --out ./orders-service --name orders
+```
+
+What the export takes:
+
+| From the project | In the service |
+| --- | --- |
+| The blocks of the selected pipelines | Their files, unchanged |
+| Modules the blocks import (`from my_project.utils.x import y`) | Those modules, found by following imports |
+| `io_config.yaml`, `requirements.txt` | Copied; values are never resolved at export |
+| Retries and timeouts of blocks, pipelines and the project | Applied the same way |
+| Triggers in `triggers.yaml` and in Mage's database | Schedules and API triggers |
+| Python packages | Only those the blocks' imports load, pinned to your Mage environment's versions |
+| MLflow models the blocks load | Their files and metadata (see [Models](#models)) |
+
+Blocks the service cannot run stop the export with the block named and the reason, so
+nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, R and SQL
+blocks are not supported yet. Chart and markdown blocks are notebook only and are left out.
+
+## 2. Build and run
+
+```bash
+cd sales-service
+docker build -t sales-service .
+docker run --rm -p 8080:8080 \
+  -e MAGE_SERVICE_TOKEN=change-me \
+  --env-file .env \
+  -v sales-service-data:/var/lib/mage-service \
+  sales-service
+```
+
+`.env.example` lists every variable the code reads; copy it to `.env` and fill it in.
+`docker compose up --build` does the same with `compose.yaml`.
+
+To run a pipeline once and exit, for a cron job, a Kubernetes Job or a CI step:
+
+```bash
+docker run --rm --env-file .env sales-service run sales_pipeline --var day=2026-10-09
+```
+
+The exit code is 0 when every block completes and 1 otherwise, and the run prints a table
+of its blocks with their durations and errors.
+
+## 3. Call it
+
+Every call needs the token: `Authorization: Bearer <token>`. Without
+`MAGE_SERVICE_TOKEN`, the service makes a token at start and prints it in its log.
+
+```bash
+export TOKEN=change-me
+# Start a run and wait up to 10 minutes for its outcome:
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "http://localhost:8080/v1/pipelines/sales_pipeline/runs?wait=600" \
+  -d '{"variables": {"day": "2026-10-09"}, "idempotency_key": "sales-2026-10-09"}'
+```
+
+The response holds the run's status and each block's status, attempts, duration, error and
+outputs. With an `idempotency_key`, sending the same request again returns the first run
+instead of starting another, so a client can retry safely.
+
+| Endpoint | |
+| --- | --- |
+| `POST /v1/pipelines/{id}/runs` | Start a run; `?wait=SECONDS` returns when it ends |
+| `GET /v1/runs?pipeline=&status=&limit=` | Runs, newest first |
+| `GET /v1/runs/{id}` | One run with its blocks |
+| `GET /v1/runs/{id}/logs?block=&tail=&format=text` | Everything the blocks printed |
+| `POST /v1/runs/{id}/cancel` | Cancel a queued or running run |
+| `GET /v1/pipelines` | The pipelines, their blocks and triggers |
+| `GET /v1/models` | Embedded models and their MLflow metadata |
+| `GET /v1/snapshot` | Counts, durations and triggers per pipeline |
+| `POST /v1/control` | Pause, resume, change a pipeline's concurrency |
+| `GET /metrics` | Prometheus metrics; no token needed |
+| `GET /healthz` | Health; no token needed |
+
+`MAGE_SERVICE_READ_TOKEN` sets a second token that can read runs, logs and the snapshot but
+cannot start, cancel or change anything; give it to dashboards and monitoring.
+
+## Schedules
+
+The service carries the pipelines' time triggers, but it runs them only with
+`MAGE_SERVICE_SCHEDULES=on`. That way a service built next to a running Mage does not run
+the same schedule twice; turn it on when the service takes over. Its log says so at start,
+and the snapshot shows each trigger's next run.
+
+Each occurrence runs once, even across restarts, and one service owns the schedules at a
+time when several share a data volume. Occurrences missed while the service was stopped
+are not run; `skip_if_previous_running` is honored.
+
+## Configuration and secrets
+
+The export lists the environment variables the code reads, in `io_config.yaml`
+(`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`), and marks those that look
+secret. `mage-service env` shows which are set:
+
+```bash
+docker run --rm --env-file .env sales-service env
+```
+
+The service takes values from several places; a variable set directly always wins.
+
+| Source | How |
+| --- | --- |
+| Environment | `-e NAME=value`, `--env-file`, Kubernetes `secretKeyRef`, ECS `secrets`, Code Engine `--env-from-secret` |
+| A secret file | `NAME_FILE=/run/secrets/name` sets `NAME` from the file |
+| A directory of secret files | `MAGE_SERVICE_SECRETS_DIR=/run/secrets`: one variable per file |
+| A secrets provider | `MAGE_SERVICE_SECRETS`, read at start (below) |
+
+`MAGE_SERVICE_SECRETS` lists secrets to fetch, one per comma or line:
+`[NAME=]provider:reference[#field]`.
+
+```bash
+MAGE_SERVICE_SECRETS='PGPASSWORD=ibm:3f1c...e2, PGUSER=ibm:3f1c...e2#username, API_KEY=file:/run/keys/api'
+```
+
+| Provider | Reference | Settings |
+| --- | --- | --- |
+| `ibm` | An IBM Cloud Secrets Manager secret id | `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL`, and `IBM_CLOUD_API_KEY` or a Code Engine trusted profile (`MAGE_SERVICE_IBM_TRUSTED_PROFILE`) |
+| `file` | A path | none |
+
+An IBM arbitrary secret gives its payload, a username and password secret its password
+(`#username` for the user), an IAM credentials secret its API key. A key-value secret
+listed without a name sets one variable per key.
+
+Secret values, and every value read from a file or a provider, are replaced by `***` in
+logs and stored errors. Mage secrets read with `mage_secret_var('name')` come from
+`MAGE_SECRET_<NAME>`. With `MAGE_SERVICE_STRICT_ENV=on`, the service refuses to start while
+a variable the code requires is missing.
+
+## Models
+
+A block that loads its model with Mage's helper runs the same code in Mage and in the
+service:
+
+```python
+from mage_ai.pipeline_services.models import load_model
+
+@transformer
+def score(orders, *args, **kwargs):
+    model = load_model('fraud', uri='models:/fraud@champion')
+    return orders.assign(fraud=model.predict(orders))
+```
+
+In Mage, `load_model` downloads the model from MLflow (`MLFLOW_TRACKING_URI`) once per
+process. At export, Mage finds these calls, downloads each model with its metadata (registry
+version, run, params, metrics, flavors, signature) and puts it in the image, with the
+model's Python requirements. In the service the same call loads the embedded copy: the
+service never calls MLflow and always runs the version it was built with. `model_path()`
+returns the model's files, for frameworks you load yourself; `model_metadata()` returns its
+metadata, which `GET /v1/models` also serves.
+
+Models loaded another way can be embedded with `--model`:
+
+```bash
+mage export service project scoring --out ./scoring --model fraud=models:/fraud/7
+```
+
+## Deploy
+
+Every export includes ready-to-use deployment files:
+
+| Target | Files |
+| --- | --- |
+| IBM Cloud Code Engine | `deploy/ibm/code-engine.sh`: builds and deploys the folder; `deploy/ibm/README.md` |
+| IBM Cloud Continuous Delivery | `.tekton/`: clone, build with kaniko, push to IBM Cloud Container Registry, deploy to Code Engine by digest |
+| Kubernetes (IKS, OpenShift, EKS, GKE, AKS) | `deploy/kubernetes.yaml`: Deployment with health probes, a read-only root filesystem and a volume for the run history |
+| One machine | `compose.yaml` |
+
+Any platform that runs containers works: the image needs its environment and, to keep the
+run history, a volume at `/var/lib/mage-service`.
+
+## Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `MAGE_SERVICE_TOKEN` | made at start | Token for every API call (`_FILE` works) |
+| `MAGE_SERVICE_READ_TOKEN` | none | Read-only token |
+| `MAGE_SERVICE_SCHEDULES` | `off` | `on` runs the time triggers |
+| `MAGE_SERVICE_MAX_RUNS` | `8` | Runs of all pipelines at once |
+| `MAGE_SERVICE_PYTHON_WORKERS` | CPUs, at most 8 | Python blocks at once |
+| `MAGE_SERVICE_RETENTION_DAYS` | `30` | Days runs and their outputs are kept |
+| `MAGE_SERVICE_SHUTDOWN_SECONDS` | `60` | Time running runs get to finish after SIGTERM |
+| `MAGE_SERVICE_LOG_FORMAT` | `text` | `json` for log collectors |
+| `MAGE_SERVICE_SECRETS` | none | Secrets to fetch at start |
+| `MAGE_SERVICE_SECRETS_DIR` | none | Directory of secret files |
+| `MAGE_SERVICE_STRICT_ENV` | `off` | Refuse to start without required variables |
+
+## How it runs your blocks
+
+The service is written in Rust. Python blocks run in long-lived Python worker processes, so
+a block pays no interpreter or import start-up; each block runs in a fresh namespace with
+Mage's decorators, gets its upstream outputs in argument order and the run's variables as
+`kwargs`, and its `@test` functions run on its outputs. Tables pass between blocks as Arrow
+IPC files and keep their types and index. Independent branches run at the same time.
+
+A block that fails is retried as configured; when it still fails, no new block starts, the
+blocks after it are marked `upstream_failed`, and the run fails with the block's error. A
+block that runs past its timeout, or a cancelled run, is stopped with its child processes.
+On SIGTERM, the service stops accepting runs, lets running ones finish up to
+`MAGE_SERVICE_SHUTDOWN_SECONDS`, then cancels them. A run interrupted by a crash is marked
+failed when the service starts again.
+
+## Check that it works like Mage
+
+`mage-service validate` checks the image's files at build time. To compare outputs, run the
+pipeline in Mage and with `mage-service run` from the export directory, and compare the
+block outputs: the tests in `mage_ai/tests/pipeline_services` do exactly that.

@@ -42,8 +42,28 @@ curl -H "Authorization: Bearer $TOKEN" "http://localhost:8080/v1/runs/RUN_ID/log
 | `GET /v1/runs/{id}/logs` | Everything the blocks printed; `?block=`, `?tail=`, `?format=text` |
 | `POST /v1/runs/{id}/cancel` | Cancel a queued or running run |
 | `GET /v1/snapshot` | Pipelines, counts, durations, triggers; what the console shows |
+| `GET /v1/models` | Embedded models with their MLflow metadata |
 | `GET /metrics` | Prometheus metrics, without a token |
 | `GET /healthz` | Health, without a token |
+
+## Models
+
+$models
+
+Blocks load a model the same way in Mage and in this service:
+
+```python
+from mage_ai.pipeline_services.models import load_model, model_metadata, model_path
+
+model = load_model('fraud', uri='models:/fraud/3')   # MLflow pyfunc
+path = model_path('fraud', uri='models:/fraud/3')    # the model's files
+```
+
+In Mage the model comes from MLflow; in the service it is the copy in the image, recorded
+at export with its version, run, flavors, signature, params and metrics
+(`GET /v1/models`). The service never calls MLflow, so it runs the exact version it was
+built with. Export again to ship a new version: `mage export service ... --model
+fraud=models:/fraud@champion`.
 
 ## Configuration and secrets
 

@@ -261,3 +261,98 @@ class EnvironmentTest(ExportTestCase):
             self.assertEqual(secret('payments api'), 'k-123')
             with self.assertRaisesRegex(KeyError, 'MAGE_SECRET_OTHER'):
                 secret('other')
+
+
+SCORE = '''
+    import pandas as pd
+
+    from mage_ai.pipeline_services.models import load_model
+
+
+    @transformer
+    def score(frame, *args, **kwargs):
+        model = load_model('scorer', uri='models:/scorer/1')
+        return frame.assign(score=model.predict(frame[['amount']]))
+'''
+
+
+class ModelTest(ExportTestCase):
+    def setUp(self):
+        super().setUp()
+        import mlflow
+
+        self.tracking = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tracking, True)
+        uri = f'sqlite:///{self.tracking}/mlflow.db'
+        os.environ['MLFLOW_TRACKING_URI'] = uri
+        self.addCleanup(os.environ.pop, 'MLFLOW_TRACKING_URI', None)
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_experiment('scoring')
+
+        class Doubler(mlflow.pyfunc.PythonModel):
+            def predict(self, context, model_input, params=None):
+                return model_input['amount'] * 2
+
+        with mlflow.start_run() as run:
+            mlflow.log_param('factor', 2)
+            mlflow.log_metric('rmse', 0.125)
+            mlflow.pyfunc.log_model(
+                name='model', python_model=Doubler(), registered_model_name='scorer',
+                pip_requirements=['pandas'],
+            )
+        self.run_id = run.info.run_id
+
+    def test_a_model_the_blocks_load_is_embedded_with_its_metadata(self):
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        self.add('score', 'transformer', SCORE, upstream=[load])
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        self.assertEqual(captured.models, [('scorer', 'models:/scorer/1')])
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(captured, str(out), force=True)
+
+        model_dir = out / 'models' / 'scorer'
+        self.assertTrue((model_dir / 'artifacts' / 'MLmodel').is_file())
+        metadata = json.loads((model_dir / 'mage-model.json').read_text())
+        self.assertEqual(metadata['version'], '1')
+        self.assertEqual(metadata['run_id'], self.run_id)
+        self.assertEqual(metadata['params'], {'factor': '2'})
+        self.assertEqual(metadata['metrics'], {'rmse': 0.125})
+        self.assertIn('python_function', metadata['flavors'])
+        manifest = json.loads((out / 'service.json').read_text())
+        self.assertEqual(manifest['models'][0]['name'], 'scorer')
+        self.assertEqual(manifest['models'][0]['sha256'], metadata['sha256'])
+        requirements = (out / 'requirements.txt').read_text()
+        self.assertTrue('mlflow-skinny==' in requirements or 'mlflow==' in requirements)
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('COPY --chown=mage:mage models ./models', dockerfile)
+        self.assertIn('MAGE_SERVICE_MODELS_DIR=/srv/mage-service/models', dockerfile)
+
+        if not SERVICE_BINARY.is_file():
+            return
+        # The service runs the embedded model with no MLflow server.
+        env = dict(
+            os.environ, MAGE_SERVICE_DIR=str(out), MAGE_SERVICE_WORKER=str(WORKER),
+            MAGE_SERVICE_PYTHON=os.sys.executable, PYTHONPATH=str(REPO),
+            MLFLOW_TRACKING_URI='http://127.0.0.1:9/unreachable',
+        )
+        result = subprocess.run(
+            [str(SERVICE_BINARY), 'run', self.pipeline.uuid, '--var', 'rows=3', '--json'],
+            capture_output=True, text=True, env=env, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+        run = json.loads(result.stdout[result.stdout.index('{'):])
+        scored = next(b for b in run['blocks'] if b['block'].endswith('score'))
+        import pyarrow.ipc as ipc
+
+        frame = ipc.open_file(scored['outputs'][0]['path']).read_all().to_pandas()
+        self.assertEqual(frame['score'].tolist(), [0.0, 3.0, 6.0])
+
+    def test_conflicting_and_invalid_model_options_are_explained(self):
+        self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(self.repo_path, [self.pipeline.uuid], models=['no-uri', 'bad name=x'])
+        problems = '\n'.join(caught.exception.problems)
+        self.assertIn('is not NAME=URI', problems)
+        self.assertIn('must use letters', problems)

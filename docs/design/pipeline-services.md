@@ -1,7 +1,8 @@
 # Pipeline services: pipelines exported as standalone Docker services
 
-Status: design, implementation in progress. Source proposal and starter code:
-`do_not_commit/export_pipelines_as_microservices/` (not committed).
+Status: phase 1 implemented (Python and pandas/Polars pipelines, secrets providers, models,
+IBM Cloud and Kubernetes deploy files); Rust and R blocks in services and the console are
+next. User guide: `docs/production/pipeline-services.mdx`.
 
 ## Goal
 

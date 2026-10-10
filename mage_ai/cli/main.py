@@ -586,6 +586,12 @@ app.add_typer(export_app, name='export')
 
 EXPORT_PROJECT_PATH = typer.Argument(..., help='path of the Mage project.')
 EXPORT_PIPELINES = typer.Argument(..., help='uuids of the pipelines to export.')
+EXPORT_MODELS = typer.Option(
+    [], '--model', '-m',
+    help='an MLflow model to embed, NAME=URI (models:/name/3, models:/name@alias, '
+         'runs:/<run id>/model); repeat for more. Calls to load_model("name", uri="...") '
+         'in the blocks are found without it.',
+)
 
 
 @export_app.command('service')
@@ -600,6 +606,7 @@ def export_service(
     build: bool = typer.Option(False, help='also build the Docker image.'),
     tag: Union[str, None] = typer.Option(None, help='image tag for --build; defaults to the name.'),
     force: bool = typer.Option(False, help='replace a non-empty output directory.'),
+    model: List[str] = EXPORT_MODELS,
 ):
     """
     Export pipelines as a standalone Docker service: an HTTP API, schedules, run history
@@ -609,7 +616,9 @@ def export_service(
     from mage_ai.pipeline_services import export
 
     try:
-        captured = export.capture(project_path, pipelines, name=name, max_concurrent_runs=max_runs)
+        captured = export.capture(
+            project_path, pipelines, name=name, max_concurrent_runs=max_runs, models=model,
+        )
         out_dir = export.write(captured, out, force=force)
     except export.ExportError as error:
         typer.echo('The pipelines cannot be exported:', err=True)
