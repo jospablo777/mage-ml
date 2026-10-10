@@ -34,7 +34,9 @@ FUSIBLE_BLOCK_TYPES = frozenset([
     BlockType.DATA_LOADER,
     BlockType.TRANSFORMER,
 ])
-FUSIBLE_LANGUAGES = frozenset([BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.SQL])
+FUSIBLE_LANGUAGES = frozenset([
+    BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.RUST, BlockLanguage.SQL,
+])
 LOCAL_EXECUTOR_TYPES = frozenset([ExecutorType.LOCAL_PYTHON, ExecutorType.LOCAL_PYTHON_FORCE])
 # Block run metrics that mean the run is not the plain run of a block: dynamic children,
 # data integration controllers and streams, replicas, hooks.

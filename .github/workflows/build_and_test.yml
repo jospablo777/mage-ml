@@ -115,13 +115,25 @@ jobs:
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/column_atlas -> target
+          workspaces: |
+            rust/column_atlas -> target
+            mage_ai/data_preparation/models/block/rust/sdk -> target
       - name: Format
         run: cargo fmt --check
       - name: Clippy
         run: cargo clippy --all-targets --features python -- -D warnings
       - name: Test
         run: cargo test
+      # The `mage` crate that Rust blocks build with.
+      - name: Block SDK format
+        working-directory: mage_ai/data_preparation/models/block/rust/sdk
+        run: cargo fmt --check
+      - name: Block SDK clippy
+        working-directory: mage_ai/data_preparation/models/block/rust/sdk
+        run: cargo clippy --release --all-targets -- -D warnings
+      - name: Block SDK tests
+        working-directory: mage_ai/data_preparation/models/block/rust/sdk
+        run: cargo test --release
 
   packaging:
     name: Packaging

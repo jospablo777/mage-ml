@@ -801,8 +801,53 @@ R_TEMPLATES = [
 ]
 TEMPLATES += R_TEMPLATES
 
-# By name, which R templates share with Python ones; R templates are left out.
+
+def _rust_template(block_type, name, file_name, description, groups=None):
+    folder = {
+        BlockType.DATA_LOADER: 'data_loaders',
+        BlockType.DATA_EXPORTER: 'data_exporters',
+        BlockType.TRANSFORMER: 'transformers',
+        BlockType.CUSTOM: 'custom',
+    }[block_type]
+    return dict(
+        block_type=block_type,
+        description=description,
+        groups=groups or [],
+        language=BlockLanguage.RUST,
+        name=name,
+        path=f'{folder}/rust/{file_name}',
+    )
+
+
+RUST_TEMPLATES = [
+    _rust_template(
+        BlockType.DATA_LOADER, 'Local file', 'file.rs',
+        'Read a CSV or Parquet file lazily with Polars.', [GROUP_FILES],
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Aggregate', 'aggregate.rs',
+        'Totals per group with a Polars lazy query.',
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Join', 'join.rs',
+        'Join the outputs of two upstream blocks.',
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Clean data', 'clean.rs',
+        'Remove duplicates and missing ids, trim text, fill missing numbers.',
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Parallel computation', 'parallel.rs',
+        'Compute a value per row on every core with Rayon.',
+    ),
+]
+TEMPLATES += RUST_TEMPLATES
+
+# By name, which R and Rust templates share with Python ones; they are left out.
 TEMPLATES_BY_UUID = index_by(
     lambda x: x['name'],
-    [t for t in TEMPLATES + TEMPLATES_ONLY_FOR_V2 if t['language'] != BlockLanguage.R],
+    [
+        t for t in TEMPLATES + TEMPLATES_ONLY_FOR_V2
+        if t['language'] not in (BlockLanguage.R, BlockLanguage.RUST)
+    ],
 )

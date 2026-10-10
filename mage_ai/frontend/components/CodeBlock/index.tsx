@@ -67,6 +67,7 @@ import usePrevious from '@utils/usePrevious';
 import useProject from '@utils/models/project/useProject';
 import useStatus from '@utils/models/status/useStatus';
 import useAutoScroll from '@components/CodeEditor/useAutoScroll';
+import useRustDiagnostics from './useRustDiagnostics';
 import { ANIMATION_DURATION_CONTENT } from '@oracle/components/Accordion/AccordionPanel';
 import {
   ArrowDown,
@@ -650,6 +651,12 @@ function CodeBlock(
   const isDBT = useMemo(() => BlockTypeEnum.DBT === blockType, [blockType]);
   const isSQLBlock = BlockLanguageEnum.SQL === blockLanguage;
   const isRBlock = BlockLanguageEnum.R === blockLanguage;
+  const isRustBlock = BlockLanguageEnum.RUST === blockLanguage;
+  const rustDiagnostics = useRustDiagnostics({
+    blockUUID: block?.uuid,
+    enabled: isRustBlock && !replicatedBlockUUID,
+    pipelineUUID,
+  });
   const isMarkdown = BlockTypeEnum.MARKDOWN === blockType;
 
   const isDataIntegration: boolean = useMemo(
@@ -1473,14 +1480,16 @@ function CodeBlock(
               : (val: string) => {
                   setContent(val);
                   onChange?.(val);
+                  rustDiagnostics.onChange();
                 }
           }
           onContentSizeChangeCallback={sideBySideEnabled ? () => dispatchEventChanged() : null}
           onDidChangeCursorPosition={isReplicated ? null : onDidChangeCursorPosition}
-          onMountCallback={editor => {
+          onMountCallback={(editor, monaco) => {
             if (sideBySideEnabled) {
               setMounted(true);
             }
+            rustDiagnostics.onMount(editor, monaco);
 
             if (onMountCallback) {
               onMountCallback?.(editor);
@@ -3383,7 +3392,9 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                           <Spacing mr={1} pt={1}>
                             <Text muted small>
                               {!isSQLBlock &&
-                                `Positional arguments for ${isRBlock ? '' : 'decorated '}function:`}
+                                (isRustBlock
+                                  ? 'Parameters of the block function, in this order:'
+                                  : `Positional arguments for ${isRBlock ? '' : 'decorated '}function:`)}
                               {isSQLBlock && (
                                 <>
                                   The interpolated tables below are available in queries from
@@ -3403,7 +3414,17 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                             </Text>
                           </Spacing>
                           <Spacing my={1}>
-                            {!isSQLBlock && !isRBlock && (
+                            {isRustBlock && (
+                              <Text monospace muted small>
+                                fn{' '}
+                                {(BlockTypeEnum.DATA_EXPORTER === blockType && 'export_data') ||
+                                  (BlockTypeEnum.DATA_LOADER === blockType && 'load_data') ||
+                                  (BlockTypeEnum.TRANSFORMER === blockType && 'transform') ||
+                                  (BlockTypeEnum.CUSTOM === blockType && 'custom')}
+                                (
+                              </Text>
+                            )}
+                            {!isSQLBlock && !isRBlock && !isRustBlock && (
                               <>
                                 <Text monospace muted small>
                                   {BlockTypeEnum.DATA_EXPORTER === blockType && '@data_exporter'}
@@ -3459,9 +3480,15 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
 
                                 return (
                                   <div key={blockUUID}>
-                                    {!isSQLBlock && !isRBlock && (
+                                    {!isSQLBlock && !isRBlock && !isRustBlock && (
                                       <Text inline monospace muted small>
                                         &nbsp;&nbsp;&nbsp;&nbsp;data{i >= 1 ? `_${i + 1}` : null}
+                                      </Text>
+                                    )}
+                                    {isRustBlock && (
+                                      <Text inline monospace muted small>
+                                        &nbsp;&nbsp;&nbsp;&nbsp;
+                                        {`data${i >= 1 ? `_${i + 1}` : ''}: LazyFrame,`}
                                       </Text>
                                     )}
                                     {isSQLBlock && (

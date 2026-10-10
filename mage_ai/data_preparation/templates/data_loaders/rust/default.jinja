@@ -1,0 +1,18 @@
+use mage::prelude::*;
+
+/// Returns the block's output. Read files with Polars (LazyCsvReader, scan_parquet) or
+/// build a table, as here. Pipeline variables come with `vars`.
+fn load_data(vars: Vars) -> Result<DataFrame> {
+    let rows: i64 = vars.get_or("rows", 1_000)?;
+    let ids: Vec<i64> = (1..=rows).collect();
+    let frame = df!(
+        "id" => ids.clone(),
+        "value" => ids.iter().map(|id| (*id as f64) * 1.5).collect::<Vec<f64>>(),
+    )?;
+    Ok(frame)
+}
+
+fn test_output(output: &DataFrame) -> Result<()> {
+    ensure!(output.height() > 0, "The block returned no rows");
+    Ok(())
+}

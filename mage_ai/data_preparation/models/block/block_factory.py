@@ -6,6 +6,7 @@ from mage_ai.data_preparation.models.block.integration import (
     TransformerBlock,
 )
 from mage_ai.data_preparation.models.block.r import RBlock
+from mage_ai.data_preparation.models.block.rust import RustBlock
 from mage_ai.data_preparation.models.block.sql import SQLBlock
 from mage_ai.data_preparation.models.constants import (
     BlockLanguage,
@@ -50,6 +51,8 @@ class BlockFactory:
             return SQLBlock
         elif BlockLanguage.R == language:
             return RBlock
+        elif BlockLanguage.RUST == language:
+            return RustBlock
         return BLOCK_TYPE_TO_CLASS.get(block_type)
 
     @classmethod

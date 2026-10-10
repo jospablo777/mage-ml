@@ -257,6 +257,25 @@ function ButtonItems({
       label: () => 'R',
       uuid: `${BlockLanguageEnum.R}/${blockType}`,
     },
+    {
+      items: [
+        {
+          label: () => 'Base template (generic)',
+          onClick: () => {
+            addNewBlock({
+              language: BlockLanguageEnum.RUST,
+              type: blockType,
+            });
+          },
+          uuid: `${BlockLanguageEnum.RUST}/${blockType}/Base template (generic)`,
+        },
+        ...flattenTemplateGroups(
+          blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.RUST]?.items,
+        ),
+      ],
+      label: () => 'Rust',
+      uuid: `${BlockLanguageEnum.RUST}/${blockType}`,
+    },
   ], [
     addNewBlock,
     blockTemplatesByBlockType,

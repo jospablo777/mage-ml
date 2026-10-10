@@ -138,37 +138,55 @@ export function flattenTemplateGroups(items?: FlyoutMenuItemType[]): FlyoutMenuI
     : [item]));
 }
 
-function RMenuItems(
+// The generic template and the templates of an R or Rust block type.
+function languageMenuItems(
+  language: BlockLanguageEnum.R | BlockLanguageEnum.RUST,
+  label: string,
   addNewBlock: (block: BlockRequestPayloadType) => void,
   blockType: BlockTypeEnum,
   templates?: FlyoutMenuItemType[],
 ) {
   const generic = () => addNewBlock({
-    language: BlockLanguageEnum.R,
+    language,
     type: blockType,
   });
 
   if (!templates?.length) {
     return {
-      label: () => 'R',
+      label: () => label,
       onClick: generic,
-      uuid: `${blockType}/r`,
+      uuid: `${blockType}/${language}`,
     };
   }
 
-  // The R templates of the block type, after the generic one.
   return {
     items: [
       {
         label: () => 'Base template (generic)',
         onClick: generic,
-        uuid: `${blockType}/r/generic`,
+        uuid: `${blockType}/${language}/generic`,
       },
       ...flattenTemplateGroups(templates),
     ],
-    label: () => 'R',
-    uuid: `${blockType}/r`,
+    label: () => label,
+    uuid: `${blockType}/${language}`,
   };
+}
+
+function RMenuItems(
+  addNewBlock: (block: BlockRequestPayloadType) => void,
+  blockType: BlockTypeEnum,
+  templates?: FlyoutMenuItemType[],
+) {
+  return languageMenuItems(BlockLanguageEnum.R, 'R', addNewBlock, blockType, templates);
+}
+
+function RustMenuItems(
+  addNewBlock: (block: BlockRequestPayloadType) => void,
+  blockType: BlockTypeEnum,
+  templates?: FlyoutMenuItemType[],
+) {
+  return languageMenuItems(BlockLanguageEnum.RUST, 'Rust', addNewBlock, blockType, templates);
 }
 
 export const getNonPythonMenuItems = (
@@ -177,6 +195,7 @@ export const getNonPythonMenuItems = (
 ) => ([
   SQLMenuItems(addNewBlock, blockType),
   RMenuItems(addNewBlock, blockType),
+  RustMenuItems(addNewBlock, blockType),
 ]);
 
 export function groupBlockTemplates(
@@ -384,6 +403,14 @@ export const getdataSourceMenuItems = (
         addNewBlock,
         blockType,
         blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.R]?.items,
+      ));
+    }
+    if (!languages || languages?.includes(BlockLanguageEnum.RUST)) {
+      // @ts-ignore
+      arr.push(RustMenuItems(
+        addNewBlock,
+        blockType,
+        blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.RUST]?.items,
       ));
     }
 

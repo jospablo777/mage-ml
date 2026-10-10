@@ -80,8 +80,18 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual(
             self.command_names,
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
-             'create-spark-cluster', 'r'],
+             'create-spark-cluster', 'r', 'rust'],
         )
+
+    def test_rust_commands(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        output = CliRunner().invoke(app, ['rust', '--help']).output
+        for name in ['init', 'build', 'status']:
+            with self.subTest(command=name):
+                self.assertIn(name, output)
 
     def test_r_commands(self):
         from typer.testing import CliRunner

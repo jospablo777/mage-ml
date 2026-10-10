@@ -465,6 +465,22 @@ Each item says what changed, which pipelines it affects, and what to do.
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
   `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
+- **Rust blocks**: data loaders, transformers, data exporters and custom blocks written in
+  Rust. A block is one function named for its type; its parameters are the upstream
+  tables (`LazyFrame` or `DataFrame`), pipeline variables or JSON values, and its return
+  value is its output; `test_*` functions test it. Blocks build with Mage's `mage` crate
+  (Polars, anyhow, serde) in a Cargo workspace in `<project>/rust`, where projects add
+  crates. A block rebuilds in about a second after an edit and runs a cached binary when
+  unchanged. Compile errors are marked in the editor as you type and shown in the output
+  at the block's own lines; panics report their location. Upstream tables stored as
+  Parquet reach the block by path, without passing through Python. Outputs are Mage
+  outputs: ColumnAtlas, downstream Python and R blocks, retries and pipeline runs work as
+  for any block. `mage rust init`, `mage rust build` and `mage rust status` manage the
+  workspace. Measured through Mage's block execution: per-row logic that has no
+  vectorized form ran in 0.12 s on 1 million rows, against 0.75 s with pandas and 0.68 s
+  with Python Polars; a Polars aggregation of 5 million rows ran in 0.11 s, against
+  0.08 s in Python Polars, which uses the same engine. Conditional Rust blocks are not
+  supported yet. Rust blocks need Rust (`rustup`).
 - **Playground** (`make playground`): Mage built from this repository, PostgreSQL 17 with
   a seeded shop (1.5 million order lines, a million web events, generated with Faker),
   and pipelines in pandas, Polars with block fusion, R (dplyr, tidyr, lubridate,

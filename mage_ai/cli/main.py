@@ -454,5 +454,71 @@ def r_status(project_path: str = R_PROJECT_PATH_DEFAULT):
     print('R blocks can run.')
 
 
+rust_app = typer.Typer(
+    cls=OrderCommands,
+    help='Manage the Cargo workspace that Rust blocks build in.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(rust_app, name='rust')
+
+RUST_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the Mage project.')
+
+
+@rust_app.command('init')
+def rust_init(project_path: str = RUST_PROJECT_PATH_DEFAULT):
+    """
+    Create the project's Rust environment in <project>/rust: the crates Rust blocks use.
+    """
+    from mage_ai.data_preparation.models.block.rust import workspace
+
+    created = workspace.init(os.path.abspath(project_path))
+    print(
+        f'The Rust environment is in {created.root}. Add crates under '
+        f'[workspace.dependencies] in {created.cargo_toml}.'
+    )
+
+
+@rust_app.command('build')
+def rust_build(project_path: str = RUST_PROJECT_PATH_DEFAULT):
+    """
+    Build every Rust block of the project, so runs start without compiling. Use it when
+    deploying, or to compile the dependencies once.
+    """
+    from mage_ai.data_preparation.models.block.rust import project
+
+    reports = project.build_all(os.path.abspath(project_path))
+    if not reports:
+        print('The project has no Rust blocks.')
+        return
+    for report in reports:
+        if report.ok:
+            how = 'cached' if report.cached else f'built in {report.seconds:.1f} s'
+            print(f'[green]✓[/green] {report.block.label}: {how}')
+        else:
+            print(f'[red]✗[/red] {report.block.label}\n{report.error}')
+    failed = sum(not report.ok for report in reports)
+    if failed:
+        print(f'[red]{failed} of {len(reports)} Rust blocks do not build.[/red]')
+        raise typer.Exit(code=1)
+    print(f'All {len(reports)} Rust blocks are built.')
+
+
+@rust_app.command('status')
+def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
+    """
+    Check that Rust blocks can build: cargo, rustc, the workspace and its crates.
+    """
+    from mage_ai.data_preparation.models.block.rust import project
+
+    report = project.status(os.path.abspath(project_path))
+    for key, value in report['details'].items():
+        print(f'{key}: {value}')
+    for problem in report['problems']:
+        print(f'[red]{problem}[/red]')
+    if report['problems']:
+        raise typer.Exit(code=1)
+    print('Rust blocks can build.')
+
+
 if __name__ == '__main__':
     app()

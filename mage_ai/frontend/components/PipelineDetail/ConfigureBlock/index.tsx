@@ -418,6 +418,7 @@ function ConfigureBlock({
               BlockLanguageEnum.PYTHON,
               BlockLanguageEnum.SQL,
               BlockLanguageEnum.R,
+              BlockLanguageEnum.RUST,
               BlockLanguageEnum.YAML,
             ].reduce((acc, v: string) => {
               const language =

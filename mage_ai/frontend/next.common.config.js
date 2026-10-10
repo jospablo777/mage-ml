@@ -30,7 +30,7 @@ module.exports = {
 
       config.plugins.push(
         new MonacoWebpackPlugin({
-          languages: ['json', 'python', 'r', 'sql', 'typescript', 'yaml'],
+          languages: ['json', 'python', 'r', 'rust', 'sql', 'typescript', 'yaml'],
         }),
       );
     }

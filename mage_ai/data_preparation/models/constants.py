@@ -41,6 +41,7 @@ class BlockLanguage(StrEnum):
     MARKDOWN = 'markdown'
     PYTHON = 'python'
     R = 'r'
+    RUST = 'rust'
     SQL = 'sql'
     YAML = 'yaml'
 
@@ -121,6 +122,7 @@ BLOCK_LANGUAGE_TO_FILE_EXTENSION = {
     BlockLanguage.MARKDOWN: 'md',
     BlockLanguage.PYTHON: 'py',
     BlockLanguage.R: 'r',
+    BlockLanguage.RUST: 'rs',
     BlockLanguage.SQL: 'sql',
     BlockLanguage.YAML: 'yaml',
 }
@@ -137,6 +139,7 @@ FILE_EXTENSION_TO_BLOCK_LANGUAGE = {
     'md': BlockLanguage.MARKDOWN,
     'py': BlockLanguage.PYTHON,
     'r': BlockLanguage.R,
+    'rs': BlockLanguage.RUST,
     'sql': BlockLanguage.SQL,
     'yaml': BlockLanguage.YAML,
 }

@@ -1,0 +1,5 @@
+# Match rust/column_atlas/rust-toolchain.toml.
+[toolchain]
+channel = "1.98.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

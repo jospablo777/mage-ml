@@ -23,6 +23,7 @@ export enum BlockLanguageEnum {
   MARKDOWN = 'markdown',
   PYTHON = 'python',
   R = 'r',
+  RUST = 'rust',
   SQL = 'sql',
   YAML = 'yaml',
 }
@@ -31,6 +32,7 @@ export const ABBREV_BLOCK_LANGUAGE_MAPPING = {
   [BlockLanguageEnum.MARKDOWN]: 'MD',
   [BlockLanguageEnum.PYTHON]: 'PY',
   [BlockLanguageEnum.R]: 'R',
+  [BlockLanguageEnum.RUST]: 'RS',
   [BlockLanguageEnum.SQL]: 'SQL',
   [BlockLanguageEnum.YAML]: 'YAML',
 };
@@ -40,6 +42,7 @@ export const LANGUAGE_DISPLAY_MAPPING = {
   [BlockLanguageEnum.MARKDOWN]: 'Markdown',
   [BlockLanguageEnum.PYTHON]: 'Python',
   [BlockLanguageEnum.R]: 'R',
+  [BlockLanguageEnum.RUST]: 'Rust',
   [BlockLanguageEnum.SQL]: 'SQL',
   [BlockLanguageEnum.YAML]: 'YAML',
 };

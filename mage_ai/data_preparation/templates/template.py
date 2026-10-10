@@ -60,7 +60,9 @@ def fetch_template_source(
 ) -> str:
     template_source = ''
 
-    if language not in [BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.YAML]:
+    if language not in [
+        BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.RUST, BlockLanguage.YAML,
+    ]:
         return template_source
 
     if 'template_path' in config:
@@ -155,6 +157,9 @@ def __fetch_data_loader_templates(
     elif language == BlockLanguage.R:
         template_folder = 'data_loaders/r'
         file_extension = 'r'
+    elif language == BlockLanguage.RUST:
+        template_folder = 'data_loaders/rust'
+        file_extension = 'rs'
     else:
         template_folder = 'data_loaders'
 
@@ -189,7 +194,7 @@ def __fetch_transformer_templates(
     if suggested_action:
         return build_template_from_suggestion(suggested_action)
 
-    if data_source is not None and language != BlockLanguage.R:
+    if data_source is not None and language not in (BlockLanguage.R, BlockLanguage.RUST):
         return __fetch_transformer_data_warehouse_template(data_source)
     elif action_type is not None and axis is not None:
         return __fetch_transformer_action_template(action_type, axis, existing_code)
@@ -200,6 +205,8 @@ def __fetch_transformer_templates(
             template_path = 'transformers/default_streaming.jinja'
         elif language == BlockLanguage.R:
             template_path = 'transformers/r/default.r'
+        elif language == BlockLanguage.RUST:
+            template_path = 'transformers/rust/default.rs'
         else:
             template_path = 'transformers/default.jinja'
         return (
@@ -279,6 +286,9 @@ def __fetch_data_exporter_templates(
     elif language == BlockLanguage.R:
         template_folder = 'data_exporters/r'
         file_extension = 'r'
+    elif language == BlockLanguage.RUST:
+        template_folder = 'data_exporters/rust'
+        file_extension = 'rs'
     else:
         template_folder = 'data_exporters'
 
@@ -320,9 +330,12 @@ def __fetch_custom_templates(
     config: Mapping[str, str],
     language: BlockLanguage = BlockLanguage.PYTHON,
 ) -> str:
-    if language != BlockLanguage.PYTHON:
+    if language == BlockLanguage.RUST:
+        template_path = 'custom/rust/default.rs'
+    elif language != BlockLanguage.PYTHON:
         return ''
-    template_path = 'custom/python/default.jinja'
+    else:
+        template_path = 'custom/python/default.jinja'
     return (
         template_env.get_template(template_path).render(
             code=config.get('existing_code', ''),
