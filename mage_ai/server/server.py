@@ -571,6 +571,8 @@ async def main(
     project_type: ProjectType = ProjectType.STANDALONE,
     status_only: bool = False,
 ):
+    stop_main_task_on_terminate()
+
     if not status_only:
         from mage_ai.server.active_kernel import switch_active_kernel
         from mage_ai.server.kernels import DEFAULT_KERNEL_NAME
@@ -827,7 +829,8 @@ def start_server(
 
         # SIGTERM ended the server at once and left the scheduler running, which kept
         # running pipelines next to the scheduler of the next server. It now exits the
-        # event loop, so the scheduler stops first.
+        # event loop, so the scheduler stops first. Until main runs, and where the event
+        # loop cannot handle signals, the handler raises SystemExit.
         signal.signal(signal.SIGTERM, _exit_on_terminate)
         try:
             # Start web server
@@ -840,12 +843,42 @@ def start_server(
                     status_only=run_web_server_with_status_only,
                 )
             )
+        except asyncio.CancelledError:
+            if not _terminated:
+                raise
+            raise SystemExit(128 + signal.SIGTERM)
         finally:
             scheduler_manager.stop_scheduler()
 
 
+_terminated = False
+
+
 def _exit_on_terminate(signum, _frame):
     raise SystemExit(128 + signum)
+
+
+def stop_main_task_on_terminate() -> None:
+    """
+    On SIGTERM, cancels the running task, which ends asyncio.run. Call it from the main
+    task. A SystemExit raised by a signal handler is lost when the signal arrives while
+    Python runs a finalizer: a server stopped while a zmq context was being collected
+    printed "Exception ignored in: Context.__del__" and kept running. The event loop
+    runs this handler as a callback instead.
+    """
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+
+    def terminate():
+        global _terminated
+        _terminated = True
+        task.cancel()
+
+    try:
+        loop.add_signal_handler(signal.SIGTERM, terminate)
+    except (NotImplementedError, RuntimeError):
+        # Windows event loops have no signal handlers.
+        pass
 
 
 if __name__ == '__main__':

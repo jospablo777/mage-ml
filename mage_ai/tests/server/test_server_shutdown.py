@@ -130,3 +130,46 @@ class ServerShutdownTest(unittest.TestCase):
         self.server.wait(10)
 
         self._assert_all_gone(children)
+
+
+# SIGTERM arrives while a finalizer runs; the server must still stop.
+SIGNAL_IN_FINALIZER = """
+import asyncio, gc, os, signal, sys, time
+from mage_ai.server import server
+
+class Collected:
+    def __del__(self):
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.2)
+
+async def main():
+    server.stop_main_task_on_terminate()
+    item = Collected()
+    item.cycle = item
+    del item
+    gc.collect()
+    await asyncio.sleep(20)
+
+signal.signal(signal.SIGTERM, server._exit_on_terminate)
+try:
+    asyncio.run(main())
+except asyncio.CancelledError:
+    print('stopped' if server._terminated else 'cancelled')
+"""
+
+
+@unittest.skipIf(sys.platform == 'win32', 'SIGTERM is POSIX')
+class TerminateInFinalizerTest(unittest.TestCase):
+    def test_sigterm_during_a_finalizer_stops_the_event_loop(self):
+        """
+        The handler raised SystemExit; Python ignores exceptions raised in __del__, and a
+        server stopped while a zmq context was collected kept running.
+        """
+        started = time.monotonic()
+        result = subprocess.run(
+            [sys.executable, '-c', SIGNAL_IN_FINALIZER],
+            capture_output=True, cwd=ROOT, env=dict(os.environ, PYTHONPATH=ROOT),
+            text=True, timeout=60,
+        )
+        self.assertEqual(result.stdout.strip(), 'stopped', result.stderr[-2000:])
+        self.assertLess(time.monotonic() - started, 15)

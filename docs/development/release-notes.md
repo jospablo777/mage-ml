@@ -393,6 +393,9 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Passwords** are truncated to 72 bytes before hashing, as bcrypt 4 did, so existing
   hashes keep verifying with bcrypt 5.
 - **Publishing** the image and the distributions runs on manual dispatch only.
+- **A server stopped with SIGTERM while Python ran a finalizer kept running.** The signal
+  handler raised SystemExit, which Python ignores inside `__del__`; a zmq context collected
+  at that moment left the server and its scheduler up. The event loop now handles SIGTERM.
 - **The scheduler's memory check works outside containers on every platform.** It ran
   Linux's `free` command, which macOS lacks, so it printed an error on every heartbeat
   and never checked memory there; on Linux, `free -t` counted swap in the total. It reads
