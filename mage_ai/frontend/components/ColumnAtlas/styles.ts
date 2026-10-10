@@ -236,6 +236,25 @@ export const AtlasRoot = styled.section<{ $mode: 'inline' | 'expanded' }>`
     width: 64px;
   }
   .ca-spark rect { fill: var(--ca-accent); }
+  .ca-spark rect.ca-spark-hover, .ca-histogram rect.ca-spark-hover { fill: var(--ca-accent-alt); }
+  .ca-spark rect.ca-hit, .ca-histogram rect.ca-hit { cursor: default; fill: transparent; }
+  .ca-spark-shares rect.ca-spark-hover { opacity: 0.75; }
+  .ca-tip {
+    background: var(--ca-elevated);
+    border: 1px solid var(--ca-border-strong);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    color: var(--ca-text);
+    font-family: ${MONO};
+    font-size: 11px;
+    line-height: 16px;
+    overflow-wrap: anywhere;
+    padding: 4px 8px;
+    pointer-events: none;
+    position: absolute;
+    white-space: pre-line;
+    z-index: 30;
+  }
   .ca-spark .ca-spark-track { fill: var(--ca-border); }
   .ca-share-0, .ca-bar .ca-share-0 { fill: var(--ca-accent); background: var(--ca-accent); }
   .ca-share-1, .ca-bar .ca-share-1 { fill: var(--ca-share-1); background: var(--ca-share-1); }
@@ -442,7 +461,6 @@ export const AtlasRoot = styled.section<{ $mode: 'inline' | 'expanded' }>`
   .ca-histogram { margin: 12px 0 4px; }
   .ca-histogram svg { display: block; height: auto; width: 100%; }
   .ca-histogram rect { fill: var(--ca-accent); }
-  .ca-histogram rect:hover { fill: var(--ca-accent-alt); }
   .ca-histogram figcaption {
     color: var(--ca-muted);
     display: flex;

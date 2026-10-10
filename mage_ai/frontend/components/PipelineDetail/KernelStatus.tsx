@@ -220,7 +220,10 @@ function KernelStatus({
 
   useEffect(() => {
     const hide = get(LOCAL_STORAGE_KEY_HIDE_KERNEL_WARNING, 0);
-    if (kernelPid !== kernelPidPrevious && isBusy && !hide) {
+    // A restart changes the pid from one value to another. The first usage response only
+    // sets it, and warned of a restart whenever a block was already running.
+    const restarted = !!kernelPidPrevious && !!kernelPid && kernelPid !== kernelPidPrevious;
+    if (restarted && isBusy && !hide) {
       showKernelWarning();
       setRunningBlocks([]);
     }

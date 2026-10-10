@@ -26,7 +26,7 @@ import {
   scrollTopFor,
   visibleColumns,
 } from './logic';
-import { HeaderProfile, SummaryDetail } from './Profile';
+import { HeaderProfile, SummaryDetail, TipLayer } from './Profile';
 import { sourceKey, useAtlasViewState } from './store';
 import { AtlasRoot, themeVariables } from './styles';
 import { AtlasColumn, AtlasMetadata, AtlasSource, AtlasView, ColumnKind } from './types';
@@ -352,24 +352,25 @@ export function ColumnAtlas({
       ref={rootRef}
       style={{ ...themeVariables(theme), ...(mode === 'inline' ? { height } : {}) }}
     >
-      <header className="ca-toolbar">
-        <div className="ca-title">
-          <strong title={metadata.label}>{metadata.label}</strong>
-          <span>
-            {count === null && !countError ? 'Counting rows…' : `${formatCount(count)} rows`}
-            {view.filters.length > 0 && count !== null && ` of ${formatCount(metadata.row_count)}`}
-            {` × ${formatCount(columns.length)} columns`}
-          </span>
-        </div>
-        <div className="ca-actions">
-          <button
+      <TipLayer rootRef={rootRef}>
+        <header className="ca-toolbar">
+          <div className="ca-title">
+            <strong title={metadata.label}>{metadata.label}</strong>
+            <span>
+              {count === null && !countError ? 'Counting rows…' : `${formatCount(count)} rows`}
+              {view.filters.length > 0 && count !== null && ` of ${formatCount(metadata.row_count)}`}
+              {` × ${formatCount(columns.length)} columns`}
+            </span>
+          </div>
+          <div className="ca-actions">
+            <button
             className="ca-button"
             onClick={() => setEditor(editor ? null : { column: selection?.column ?? null })}
             type="button"
           >
-            Filter
-          </button>
-          {(view.filters.length > 0 || view.sort.length > 0) && (
+              Filter
+            </button>
+            {(view.filters.length > 0 || view.sort.length > 0) && (
             <button
               className="ca-button"
               onClick={() => setState(previous => ({ ...previous, filters: [], sort: [] }))}
@@ -378,28 +379,28 @@ export function ColumnAtlas({
               Reset
             </button>
           )}
-          <button
+            <button
             aria-pressed={panelOpen}
             className={`ca-button${panelOpen ? ' ca-button-active' : ''}`}
             onClick={() => setPanelOpen(open => !open)}
             type="button"
           >
-            Columns
-          </button>
-          {mode === 'inline' && onExpand && (
+              Columns
+            </button>
+            {mode === 'inline' && onExpand && (
             <button className="ca-button" onClick={onExpand} title="Open in a full window" type="button">
               Expand
             </button>
           )}
-          {mode === 'expanded' && onClose && (
+            {mode === 'expanded' && onClose && (
             <button className="ca-button" onClick={onClose} title="Close (Esc)" type="button">
               Close
             </button>
           )}
-        </div>
-      </header>
+          </div>
+        </header>
 
-      {(view.filters.length > 0 || view.sort.length > 0 || editor) && (
+        {(view.filters.length > 0 || view.sort.length > 0 || editor) && (
         <div className="ca-filterbar">
           {view.filters.map((filter, index) => (
             <span className="ca-chip" key={`${index}-${filter.column_id}`}>
@@ -435,9 +436,9 @@ export function ColumnAtlas({
         </div>
       )}
 
-      <div className={`ca-body${panelOpen ? ' ca-body-panel' : ''}`}>
-        <div className="ca-grid-area">
-          <div
+        <div className={`ca-body${panelOpen ? ' ca-body-panel' : ''}`}>
+          <div className="ca-grid-area">
+            <div
             aria-colcount={columns.length + 1}
             aria-label={`${metadata.label} rows`}
             aria-rowcount={total + 1}
@@ -448,13 +449,13 @@ export function ColumnAtlas({
             role="grid"
             tabIndex={0}
           >
-            <div className="ca-stage" style={{ height: geometry.scrollHeight, width: totalWidth }}>
-              <div className="ca-header" role="row" style={{ height: HEADER_HEIGHT, width: totalWidth }}>
-                <div className="ca-corner" role="columnheader" style={{ width: indexColumnWidth }}>
-                  #
-                </div>
-                {shownColumns.map(index => (
-                  <HeaderCell
+              <div className="ca-stage" style={{ height: geometry.scrollHeight, width: totalWidth }}>
+                <div className="ca-header" role="row" style={{ height: HEADER_HEIGHT, width: totalWidth }}>
+                  <div className="ca-corner" role="columnheader" style={{ width: indexColumnWidth }}>
+                    #
+                  </div>
+                  {shownColumns.map(index => (
+                    <HeaderCell
                     column={columns[index]}
                     descending={view.sort.find(sortKey => sortKey.column_id === index)?.descending}
                     key={index}
@@ -472,10 +473,10 @@ export function ColumnAtlas({
                     width={columnWidths[index]}
                   />
                 ))}
+                </div>
+                {rowElements}
               </div>
-              {rowElements}
-            </div>
-            {count === 0 && (
+              {count === 0 && (
               <div className="ca-empty">
                 <p>No rows match the filters.</p>
                 <button className="ca-button" onClick={() => setFilters([])} type="button">
@@ -483,13 +484,13 @@ export function ColumnAtlas({
                 </button>
               </div>
             )}
-          </div>
-          {(rowError || countError) && (
+            </div>
+            {(rowError || countError) && (
             <div className="ca-banner" role="alert">
               {rowError || countError}
             </div>
           )}
-          {inspecting && selection && (
+            {inspecting && selection && (
             <div aria-label="Cell value" className="ca-inspector" role="dialog">
               <div className="ca-inspector-head">
                 <span>
@@ -510,41 +511,41 @@ export function ColumnAtlas({
               )}
             </div>
           )}
-          <footer className="ca-status">
-            <span>
-              {total > 0
+            <footer className="ca-status">
+              <span>
+                {total > 0
                 ? `Rows ${formatCount(geometry.firstRow + 1)} to ${formatCount(lastShownRow)}`
                   + ` of ${formatCount(total)}`
                 : ''}
-            </span>
-            {loading && <span aria-label="Loading" className="ca-spinner" />}
-            {copied && <span>Copied</span>}
-            {selection && !inspecting && (
+              </span>
+              {loading && <span aria-label="Loading" className="ca-spinner" />}
+              {copied && <span>Copied</span>}
+              {selection && !inspecting && (
               <span className="ca-hint">
                 Enter to open the cell, {navigator?.platform?.includes('Mac') ? '⌘' : 'Ctrl'}+C to copy
               </span>
             )}
-            <form
+              <form
               className="ca-jump"
               onSubmit={event => {
                 event.preventDefault();
                 goToRow();
               }}
             >
-              <label>
-                Row
-                <input
+                <label>
+                  Row
+                  <input
                   inputMode="numeric"
                   onChange={event => setJump(event.target.value)}
                   placeholder={formatCount(total || 1)}
                   value={jump}
                 />
-              </label>
-            </form>
-          </footer>
-        </div>
+                </label>
+              </form>
+            </footer>
+          </div>
 
-        {panelOpen && (
+          {panelOpen && (
           <aside aria-label="Columns" className="ca-panel">
             <div className="ca-panel-head">
               <input
@@ -595,7 +596,8 @@ export function ColumnAtlas({
             )}
           </aside>
         )}
-      </div>
+        </div>
+      </TipLayer>
     </AtlasRoot>
   );
 }

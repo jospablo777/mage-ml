@@ -1,3 +1,14 @@
+import {
+  createContext,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  RefObject,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
+
 import { formatCount, formatNumber, formatPercent } from './logic';
 import { SummaryState } from './data';
 import { AtlasColumn, ColumnSummary, HistogramBin } from './types';
@@ -6,6 +17,71 @@ function binLabel(bin: HistogramBin): string {
   const start = bin.start_label ?? formatNumber(bin.start);
   const end = bin.end_label ?? formatNumber(bin.end);
   return start === end ? start : `${start} to ${end}`;
+}
+
+type Tip = { text: string; x: number; y: number };
+type TipApi = { hide: () => void; show: (text: string, event: ReactMouseEvent) => void };
+
+const TipContext = createContext<TipApi>({ hide: () => undefined, show: () => undefined });
+
+const TIP_WIDTH = 260;
+
+// The tooltip of the mini charts, drawn at the explorer's root: inside the grid it would be
+// clipped by the scrolled panes. It shows at once, unlike a native title.
+export function TipLayer({ children, rootRef }: { children: ReactNode; rootRef: RefObject<HTMLElement> }) {
+  const [tip, setTip] = useState<Tip | null>(null);
+  const api = useMemo<TipApi>(() => ({
+    hide: () => setTip(null),
+    show: (text, event) => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = event.clientX - rect.left;
+      setTip({
+        text,
+        x: x + 12 + TIP_WIDTH > rect.width ? Math.max(4, x - TIP_WIDTH - 8) : x + 12,
+        y: event.clientY - rect.top + 16,
+      });
+    },
+  }), [rootRef]);
+  return (
+    <TipContext.Provider value={api}>
+      {children}
+      {tip && (
+        <div className="ca-tip" role="tooltip" style={{ left: tip.x, maxWidth: TIP_WIDTH, top: tip.y }}>
+          {tip.text}
+        </div>
+      )}
+    </TipContext.Provider>
+  );
+}
+
+// Props that show text in the tooltip while the pointer is over an element. Nested
+// elements with their own text win over their container.
+function useTip() {
+  const { hide, show } = useContext(TipContext);
+  return useCallback((text: string, onEnter?: () => void, onLeave?: () => void) => ({
+    onMouseEnter: (event: ReactMouseEvent) => {
+      onEnter?.();
+      show(text, event);
+    },
+    onMouseLeave: () => {
+      onLeave?.();
+      hide();
+    },
+    onMouseMove: (event: ReactMouseEvent) => {
+      event.stopPropagation();
+      show(text, event);
+    },
+  }), [hide, show]);
+}
+
+function binTip(bin: HistogramBin, present: number): string {
+  return `${binLabel(bin)}\n${formatCount(bin.count)} rows (${formatPercent(bin.count, present)})`;
+}
+
+function valueTip(value: string | null, count: number, present: number): string {
+  const name = value === '' ? '(empty)' : value ?? '(missing)';
+  return `${name}\n${formatCount(count)} rows (${formatPercent(count, present)})`;
 }
 
 export function Sparkline({
@@ -17,6 +93,9 @@ export function Sparkline({
   summary: ColumnSummary;
   width?: number;
 }) {
+  const tip = useTip();
+  const [hovered, setHovered] = useState<number | null>(null);
+  const present = Math.max(1, summary.count - summary.missing);
   if (summary.histogram.length) {
     const bins = summary.histogram;
     const max = Math.max(1, ...bins.map(bin => bin.count));
@@ -26,23 +105,34 @@ export function Sparkline({
         {bins.map((bin, index) => {
           const barHeight = bin.count ? Math.max(1.5, (bin.count / max) * (height - 2)) : 0;
           return (
-            <rect
-              height={barHeight}
-              key={index}
-              rx={1}
-              width={Math.max(1, unit - 1)}
-              x={index * unit}
-              y={height - barHeight}
-            />
+            <g key={index}>
+              <rect
+                className={hovered === index ? 'ca-spark-hover' : undefined}
+                height={barHeight}
+                rx={1}
+                width={Math.max(1, unit - 1)}
+                x={index * unit}
+                y={height - barHeight}
+              />
+              {/* The whole slot answers to the pointer, so short bars are easy to hover. */}
+              <rect
+                className="ca-hit"
+                height={height}
+                width={unit}
+                x={index * unit}
+                y={0}
+                {...tip(binTip(bin, present), () => setHovered(index), () => setHovered(null))}
+              />
+            </g>
           );
         })}
       </svg>
     );
   }
   if (summary.top_values.length) {
-    const present = Math.max(1, summary.count - summary.missing);
     let left = 0;
     const shown = summary.top_values.slice(0, 4);
+    const rest = present - shown.reduce((total, entry) => total + entry.count, 0);
     return (
       <svg
         aria-hidden
@@ -56,17 +146,32 @@ export function Sparkline({
           const share = (entry.count / present) * width;
           const element = (
             <rect
-              className={`ca-share-${index}`}
+              className={`ca-share-${index}${hovered === index ? ' ca-spark-hover' : ''}`}
               height={8}
               key={index}
               width={Math.max(0, share - 1)}
               x={left}
               y={height - 8}
+              {...tip(
+                valueTip(entry.value, entry.count, present),
+                () => setHovered(index),
+                () => setHovered(null),
+              )}
             />
           );
           left += share;
           return element;
         })}
+        {rest > 0 && (
+          <rect
+            className="ca-hit"
+            height={8}
+            width={Math.max(0, width - left)}
+            x={left}
+            y={height - 8}
+            {...tip(`Other values\n${formatCount(rest)} rows (${formatPercent(rest, present)})`)}
+          />
+        )}
       </svg>
     );
   }
@@ -81,18 +186,28 @@ export function HeaderProfile({ state }: { state?: SummaryState }) {
   if ('error' in state) {
     return <div className="ca-profile" title={state.error} />;
   }
-  const missing = state.missing;
+  return <HeaderProfileSummary summary={state} />;
+}
+
+function HeaderProfileSummary({ summary }: { summary: ColumnSummary }) {
+  const tip = useTip();
+  const missing = summary.missing;
   return (
-    <div className="ca-profile" title={profileTitle(state)}>
-      {spreadThin(state) ? (
+    <div className="ca-profile" {...tip(profileTitle(summary))}>
+      {spreadThin(summary) ? (
         <span className="ca-distinct-mark">
-          {state.distinct_exact ? '' : '≈'}{formatCount(state.distinct)} distinct
+          {summary.distinct_exact ? '' : '≈'}{formatCount(summary.distinct)} distinct
         </span>
       ) : (
-        <Sparkline height={18} summary={state} width={100} />
+        <Sparkline height={18} summary={summary} width={100} />
       )}
       {missing > 0 && (
-        <span className="ca-missing-mark">{formatPercent(missing, state.count)} missing</span>
+        <span
+          className="ca-missing-mark"
+          {...tip(`${formatCount(missing)} of ${formatCount(summary.count)} rows missing`)}
+        >
+          {formatPercent(missing, summary.count)} missing
+        </span>
       )}
     </div>
   );
@@ -127,6 +242,8 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 function Histogram({ summary }: { summary: ColumnSummary }) {
+  const tip = useTip();
+  const [hovered, setHovered] = useState<number | null>(null);
   const width = 280;
   const height = 96;
   const bins = summary.histogram;
@@ -134,22 +251,32 @@ function Histogram({ summary }: { summary: ColumnSummary }) {
   const unit = width / bins.length;
   const first = bins[0];
   const last = bins[bins.length - 1];
+  const present = Math.max(1, summary.count - summary.missing);
   return (
     <figure className="ca-histogram">
       <svg aria-label="Distribution of the values" role="img" viewBox={`0 0 ${width} ${height}`}>
         {bins.map((bin, index) => {
           const barHeight = bin.count ? Math.max(1.5, (bin.count / max) * (height - 4)) : 0;
           return (
-            <rect
-              height={barHeight}
-              key={index}
-              rx={1.5}
-              width={Math.max(1, unit - 1.5)}
-              x={index * unit}
-              y={height - barHeight}
-            >
-              <title>{`${binLabel(bin)}: ${formatCount(bin.count)}`}</title>
-            </rect>
+            <g key={index}>
+              <rect
+                className={hovered === index ? 'ca-spark-hover' : undefined}
+                height={barHeight}
+                rx={1.5}
+                width={Math.max(1, unit - 1.5)}
+                x={index * unit}
+                y={height - barHeight}
+              />
+              <rect
+                aria-label={binTip(bin, present).replace('\n', ': ')}
+                className="ca-hit"
+                height={height}
+                width={unit}
+                x={index * unit}
+                y={0}
+                {...tip(binTip(bin, present), () => setHovered(index), () => setHovered(null))}
+              />
+            </g>
           );
         })}
       </svg>
@@ -162,11 +289,12 @@ function Histogram({ summary }: { summary: ColumnSummary }) {
 }
 
 function TopValues({ summary }: { summary: ColumnSummary }) {
+  const tip = useTip();
   const present = Math.max(1, summary.count - summary.missing);
   return (
     <ol className="ca-top-values">
       {summary.top_values.map((entry, index) => (
-        <li key={`${entry.value}-${index}`}>
+        <li key={`${entry.value}-${index}`} {...tip(valueTip(entry.value, entry.count, present))}>
           <div className="ca-top-value-head">
             <span className={entry.value === '' ? 'ca-muted-text' : ''} title={entry.value ?? ''}>
               {entry.value === '' ? '(empty)' : entry.value}
@@ -182,7 +310,12 @@ function TopValues({ summary }: { summary: ColumnSummary }) {
         </li>
       ))}
       {(summary.other_count ?? 0) > 0 && (
-        <li className="ca-top-other">
+        <li
+          className="ca-top-other"
+          {...tip(`Other values\n${formatCount(summary.other_count)} rows (${formatPercent(
+            summary.other_count ?? 0, present,
+          )})`)}
+        >
           <span>Other values</span>
           <span className="ca-numeric-text">
             {formatCount(summary.other_count)}
@@ -191,6 +324,21 @@ function TopValues({ summary }: { summary: ColumnSummary }) {
         </li>
       )}
     </ol>
+  );
+}
+
+function Completeness({ present, summary }: { present: number; summary: ColumnSummary }) {
+  const tip = useTip();
+  return (
+    <div
+      className="ca-completeness"
+      {...tip(
+        `${formatCount(present)} present (${formatPercent(present, summary.count)})\n`
+        + `${formatCount(summary.missing)} missing (${formatPercent(summary.missing, summary.count)})`,
+      )}
+    >
+      <span style={{ width: `${summary.count ? (100 * present) / summary.count : 0}%` }} />
+    </div>
   );
 }
 
@@ -216,12 +364,7 @@ export function SummaryDetail({
         <strong title={column.name}>{column.name}</strong>
         <code>{column.dtype}</code>
       </div>
-      <div
-        className="ca-completeness"
-        title={`${formatCount(present)} present, ${formatCount(summary.missing)} missing`}
-      >
-        <span style={{ width: `${summary.count ? (100 * present) / summary.count : 0}%` }} />
-      </div>
+      <Completeness present={present} summary={summary} />
       <dl className="ca-metrics">
         <Metric label="Rows" value={formatCount(summary.count)} />
         <Metric

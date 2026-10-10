@@ -393,6 +393,10 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Passwords** are truncated to 72 bytes before hashing, as bcrypt 4 did, so existing
   hashes keep verifying with bcrypt 5.
 - **Publishing** the image and the distributions runs on manual dispatch only.
+- **The notebook warned that the kernel had restarted when it had not.** The warning
+  compared the kernel's process id with the previous one, which is unset on the page's
+  first usage response, so running a block right after opening the editor showed it and
+  cleared the running-block indicators.
 - **A server stopped with SIGTERM while Python ran a finalizer kept running.** The signal
   handler raised SystemExit, which Python ignores inside `__del__`; a zmq context collected
   at that moment left the server and its scheduler up. The event loop now handles SIGTERM.
@@ -470,7 +474,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   output arrive in 4 to 20 ms. Other outputs and outputs on S3 or GCS show the plain
   table. Printed text and errors show in full, as before. `MAGE_COLUMN_ATLAS=0` turns it off. See `docs/design/column-atlas.mdx` and
   `column-atlas.md`. Building Mage from source now needs Rust (`rustup`); the Docker
-  image has it in the build stage only.
+  image has it in the build stage only. Hovering a mini chart shows its numbers at once:
+  a histogram bar its range, row count and share; a category its name, count and share;
+  the completeness bar and missing marks their counts. All are computed over the whole
+  output.
 - **Block fusion** (`block_fusion: chains`, or "Run chains of blocks together" in the
   pipeline settings): blocks that form a chain run as one stage, in one process, and each
   block receives the previous block's output from memory. Every block keeps its block run,
