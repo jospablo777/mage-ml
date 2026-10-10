@@ -153,7 +153,7 @@ class CustomTemplateResource(GenericResource):
     async def delete(self, **kwargs):
         cache = await BlockActionObjectCache.initialize_cache()
         cache.update_custom_block_template(self.model, remove=True)
-        self.model.delete
+        self.model.delete()
 
     async def update(self, payload, **kwargs):
         template_uuid = payload.get('template_uuid')
