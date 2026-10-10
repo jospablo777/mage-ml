@@ -1,0 +1,83 @@
+---
+title: "ColumnAtlas: explore block outputs"
+sidebarTitle: "ColumnAtlas"
+icon: "table-cells"
+---
+
+ColumnAtlas shows a block's DataFrame output where the plain table used to be: every row
+of the stored output, not a sample, with a profile of each column. It reads the stored
+Parquet file through a Rust engine built on Polars, so scrolling, sorting and filtering
+millions of rows stay fast and never load the output into the web server.
+
+It opens for pandas, Polars and GeoDataFrame outputs, in the notebook and on the block
+runs of a pipeline run. Geometry columns show as WKT text, such as `POINT (-84.09 9.93)`,
+with their geometry type in the header. Other outputs, and outputs stored on S3 or GCS, show the
+plain table as before. Printed text and errors show above the output, in full, as
+always.
+
+## What it shows
+
+- **Column headers** carry the name, the type, a distribution (a histogram for numbers
+  and dates, the shares of the most frequent values for text and booleans, or the number
+  of distinct values when no value is frequent) and the share of missing values.
+- **The grid** holds every row. Columns past the edge render as you scroll. Missing
+  values read `missing`; nested values (lists and structs) show as JSON.
+- **Expand** opens the output in a full window with the column panel: search the
+  columns and select one to see its summary.
+
+## Summaries
+
+| Column type | Summary |
+| --- | --- |
+| Numbers | Minimum, quartiles, median, maximum, mean, standard deviation, zeros, negative values, NaN and infinite counts, histogram |
+| Text and categories | Distinct values, the 10 most frequent with their shares, empty strings, length |
+| Booleans | True and false counts |
+| Dates and times | Earliest, latest, histogram |
+
+Every statistic is exact except the distinct count of number and date columns, which is
+an estimate and shows `≈`. Statistics follow the filters: filter the rows and the
+headers describe the rows that remain.
+
+## Sort and filter
+
+- Click a column name to sort ascending, again for descending, and once more to stop
+  sorting. Shift-click adds the column as another sort key. Missing values sort last.
+- The filter button on a header, or **Filter** in the toolbar, adds a condition. The
+  conditions depend on the type: comparisons and ranges for numbers and dates, contains,
+  starts with and equals for text, true or false for booleans, missing or not for every
+  column. Filters combine with AND; remove one with its `×`.
+- Dates and times compare in the column's time zone: `2024-01-31 12:00:00` on a
+  `America/Costa_Rica` column means noon in Costa Rica.
+- NaN is not greater or smaller than any number, so comparisons leave it out. The
+  `is NaN` condition finds it.
+
+Sorting and filtering run on the server against the whole output. The view is shared by
+the inline card and the full window, and kept while you move between blocks.
+
+## Keyboard
+
+| Key | Action |
+| --- | --- |
+| Arrow keys, Page Up, Page Down, Home, End | Move the selected cell |
+| Enter | Open the selected cell's full value |
+| Ctrl+C or ⌘+C | Copy the selected cell |
+| Escape | Close the cell value; in the full window, close the window |
+
+**Row** in the status bar jumps to a row number.
+
+## Settings
+
+Set these in the environment of the Mage server.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAGE_COLUMN_ATLAS` | `1` | `0` turns ColumnAtlas off; outputs show the plain table |
+| `MAGE_COLUMN_ATLAS_WORKERS` | `2` | Query processes |
+| `MAGE_COLUMN_ATLAS_THREADS` | `2` | Threads of each query process |
+| `MAGE_COLUMN_ATLAS_TIMEOUT_SECONDS` | `30` | Deadline of one query; a query past it stops its process, and a new one starts |
+| `MAGE_COLUMN_ATLAS_WORKER_MEMORY_MB` | `4096` | Memory limit of a query process, on Linux |
+| `MAGE_COLUMN_ATLAS_CACHE_MB` | `32` | Results cached in the server process |
+
+Queries run in their own processes, so a slow or failing query never blocks the web
+server or the notebook kernel. Anyone who can view a pipeline can explore its outputs;
+the same permissions apply as for the plain table.

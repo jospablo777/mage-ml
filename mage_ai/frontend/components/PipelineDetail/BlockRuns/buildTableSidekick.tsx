@@ -121,6 +121,15 @@ export default function ({
           if (dataType) {
             el = (
               <OutputRenderer
+                atlasSource={
+                  pipeline?.uuid && selectedRun?.id
+                    ? {
+                        block_run_id: selectedRun.id,
+                        block_uuid: selectedRun.block_uuid,
+                        pipeline_uuid: pipeline.uuid,
+                      }
+                    : undefined
+                }
                 block={selectedBlock}
                 contained
                 containerWidth={width}

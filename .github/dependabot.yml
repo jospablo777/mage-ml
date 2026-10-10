@@ -31,6 +31,15 @@ updates:
           - minor
           - patch
 
+  # The ColumnAtlas extension. Polars is pinned exactly: its Rust API changes between
+  # minor versions, so each bump needs the crate's tests.
+  - package-ecosystem: cargo
+    directory: /rust/column_atlas
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

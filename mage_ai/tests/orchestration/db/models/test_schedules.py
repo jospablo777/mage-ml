@@ -1318,6 +1318,18 @@ class PipelineRunTests(DBTestCase):
         self.pipeline.delete()
         super().tearDown()
 
+    def test_pipeline_type_of_a_deleted_pipeline(self):
+        gone = create_pipeline_with_blocks('gone pipeline', self.repo_path)
+        pipeline_run = create_pipeline_run(pipeline_uuid=gone.uuid)
+        self.assertEqual(pipeline_run.pipeline_type, PipelineType.PYTHON)
+
+        gone.delete()
+
+        self.assertIsNone(pipeline_run.pipeline_type)
+        data = pipeline_run.to_dict(include_attributes=['pipeline_type', 'pipeline_tags'])
+        self.assertIsNone(data['pipeline_type'])
+        self.assertEqual(data['pipeline_tags'], [])
+
     def test_block_runs_count(self):
         pipeline_run = create_pipeline_run(pipeline_uuid='test_pipeline')
         block_count = len(self.pipeline.get_executable_blocks())

@@ -1,10 +1,9 @@
 import multiprocessing as mp
 import os
 import queue as queue_module
-import signal
 import time
-from multiprocessing import Manager
 from dataclasses import dataclass
+from multiprocessing.managers import SyncManager
 from typing import Any, Callable, Dict, List, Optional
 
 import newrelic.agent
@@ -28,6 +27,7 @@ from mage_ai.settings import (
 )
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
+from mage_ai.shared.processes import exit_with_parent
 
 # Seconds a scheduler process's liveness key lives; its worker pool renews it every
 # second. Another process treats this one's jobs as running while the key exists, so a
@@ -77,7 +77,10 @@ class ProcessQueue(Queue):
         self.process_queue_config = self.queue_config.process_queue_config
         self.queue = mp.Queue()
         self.size = queue_config.concurrency or os.cpu_count()
-        self.mp_manager = Manager()
+        # The manager is a process of its own; it ends with the process that owns the
+        # queue, so a killed scheduler leaves no manager behind.
+        self.mp_manager = SyncManager()
+        self.mp_manager.start(exit_with_parent)
         self.job_dict = self.mp_manager.dict()
         # Whether clean_up_jobs removed a finished job since jobs_finished last ran.
         self.removed_finished_job = False
@@ -227,10 +230,7 @@ class ProcessQueue(Queue):
             if job == os.getpid():
                 # Update the job status before the process is killed
                 self.job_dict[job_id] = JobStatus.CANCELLED
-            try:
-                os.kill(job, signal.SIGKILL)
-            except Exception as err:
-                print(err)
+            _kill_process_tree(job)
         self.job_dict[job_id] = JobStatus.CANCELLED
         self.__unset_kill_job(job_id)
 
@@ -321,6 +321,25 @@ class ProcessQueue(Queue):
             return False
         value = self.redis_client.get(self.__redis_key_kill_job(job_id))
         return value is not None
+
+
+def _kill_process_tree(pid: int) -> None:
+    """
+    Kills a job's process and the processes it started. Killing only the job's process
+    left the processes a block started, such as R, running.
+    """
+    try:
+        process = psutil.Process(pid)
+        children = process.children(recursive=True)
+    except psutil.Error as error:
+        print(error)
+        return
+    for victim in children + [process]:
+        try:
+            # SIGKILL on POSIX, TerminateProcess on Windows.
+            victim.kill()
+        except psutil.Error as error:
+            print(error)
 
 
 @dataclass
@@ -436,6 +455,7 @@ class Worker(mp.Process):
             print(f'Skip job {job_id} with status {status}')
             return
         self.job_dict[job_id] = self.pid
+        exit_with_parent()
         redis_client = init_redis_client(self.redis_url) if self.redis_url else None
         _current_job = _CurrentJob(
             aliases=[],
@@ -474,6 +494,8 @@ def poll_job_and_execute(
         job_dict: The shared job dictionary.
 
     """
+    # The pool and its workers end with the scheduler that started them.
+    exit_with_parent()
     pid = os.getpid()
     redis_client = init_redis_client(redis_url) if redis_url else None
     workers = []

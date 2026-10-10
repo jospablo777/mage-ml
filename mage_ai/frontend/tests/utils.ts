@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { Locator, Page, expect } from '@playwright/test';
 
 import { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import { capitalizeRemoveUnderscoreLower } from '@utils/string';
@@ -68,4 +68,13 @@ export async function enableSettings(
   }
 
   await page.getByRole('button', { name: 'Save project settings' }).click();
+}
+
+// ColumnAtlas renders only the columns in view; scroll its grid to show the last ones.
+export async function scrollOutputToLastColumn(scope: Page | Locator) {
+  const grid = scope.locator('.ca-scroll').first();
+  await expect(grid).toBeVisible({ timeout: 90000 });
+  await grid.evaluate(element => {
+    element.scrollLeft = element.scrollWidth;
+  });
 }

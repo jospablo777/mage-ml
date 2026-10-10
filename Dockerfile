@@ -64,17 +64,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential libkrb5-dev unixodbc-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Rust compiles the ColumnAtlas extension (rust/column_atlas) here. The runtime image
+# copies the installed environment only, so it carries no toolchain. Match
+# rust/column_atlas/rust-toolchain.toml.
+ARG RUST_VERSION=1.98.0
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH="/opt/cargo/bin:$PATH"
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | \
+      sh -s -- -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION" && \
+    rustc --version
+
 WORKDIR /build/mage
 COPY pyproject.toml uv.lock README.md MANIFEST.in ./
 COPY mage_integrations ./mage_integrations
 COPY vendor ./vendor
+COPY rust ./rust
 COPY mage_ai ./mage_ai
 COPY --from=frontend /build/mage_ai/server/frontend_dist ./mage_ai/server/frontend_dist
 COPY --from=frontend /build/mage_ai/server/frontend_dist_base_path_template ./mage_ai/server/frontend_dist_base_path_template
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/opt/cargo/registry \
     UV_LINK_MODE=copy uv sync --locked --no-editable --no-default-groups \
       --extra all --extra integrations && \
     uv pip check --python /opt/mage/bin/python && \
+    /opt/mage/bin/python -c 'import column_atlas_native' && \
     uv export --locked --no-default-groups --extra all --extra integrations \
       --no-emit-workspace --no-hashes --no-header --output-file "$MAGE_RUNTIME_CONSTRAINTS"
 
@@ -104,6 +118,12 @@ FROM runtime AS development
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential libkrb5-dev unixodbc-dev && \
     rm -rf /var/lib/apt/lists/*
+# The editable install below builds the ColumnAtlas extension from the source tree.
+COPY --from=python-build /opt/rustup /opt/rustup
+COPY --from=python-build /opt/cargo /opt/cargo
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH="/opt/cargo/bin:$PATH"
 COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend /opt/yarn-v1.22.22 /opt/yarn-v1.22.22
 RUN ln -s /opt/yarn-v1.22.22/bin/yarn /usr/local/bin/yarn

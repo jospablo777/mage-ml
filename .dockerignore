@@ -20,6 +20,7 @@ venv3/
 dist/
 build/
 *.egg-info/
+**/target/
 
 # Local only, never part of an image
 do_not_commit/

@@ -216,6 +216,7 @@
             "group": "Concepts",
             "pages": [
               "design/data-pipeline-management",
+              "design/column-atlas",
               {
                 "group": "Blocks",
                 "icon": "block-brick",

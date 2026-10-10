@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import errno
 import io
 import os
 import shutil
@@ -86,6 +87,9 @@ from mage_ai.shared.utils import clean_name
 from mage_ai.system.memory.manager import MemoryManager
 from mage_ai.system.models import ResourceUsage
 from mage_ai.system.storage.utils import size_of_path
+
+# Renames tried when other writers of the same variable keep replacing its directory.
+SWAP_ATTEMPTS = 5
 
 
 class Variable:
@@ -202,13 +206,41 @@ class Variable:
         finally:
             self._staging_path = None
 
-        if os.path.isdir(final_path):
-            previous_path = f'{staging_path}.previous'
-            os.rename(final_path, previous_path)
-            os.rename(staging_path, final_path)
-            shutil.rmtree(previous_path, ignore_errors=True)
-        else:
-            os.rename(staging_path, final_path)
+        self.__swap_in(staging_path, final_path)
+
+    @staticmethod
+    def __swap_in(staging_path: str, final_path: str) -> None:
+        """
+        Moves the staging directory to the final path, replacing the directory there.
+        Another process writing the same variable can put its directory in place between
+        two renames; the rename then failed with "Directory not empty" and the block run
+        failed. The newer directory is moved aside and the rename tried again, so the last
+        writer wins.
+        """
+        previous_paths = []
+        try:
+            for attempt in range(SWAP_ATTEMPTS):
+                if os.path.isdir(final_path):
+                    previous_path = f'{staging_path}.previous{attempt}'
+                    try:
+                        os.rename(final_path, previous_path)
+                        previous_paths.append(previous_path)
+                    except FileNotFoundError:
+                        # The other writer moved it first.
+                        pass
+                try:
+                    os.rename(staging_path, final_path)
+                    return
+                except OSError as error:
+                    taken = error.errno in (errno.ENOTEMPTY, errno.EEXIST)
+                    if not taken or attempt == SWAP_ATTEMPTS - 1:
+                        raise
+        except BaseException:
+            shutil.rmtree(staging_path, ignore_errors=True)
+            raise
+        finally:
+            for previous_path in previous_paths:
+                shutil.rmtree(previous_path, ignore_errors=True)
 
     @property
     def metadata_path(self):

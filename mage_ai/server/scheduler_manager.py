@@ -19,8 +19,10 @@ from mage_ai.settings import (
 )
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
+from mage_ai.shared.processes import exit_with_parent, stop_on_terminate
 
 SCHEDULER_AUTO_RESTART_INTERVAL = 20_000  # in milliseconds
+SCHEDULER_STOP_TIMEOUT_SECONDS = 15
 
 logger = Logger().new_server_logger(__name__)
 
@@ -30,6 +32,15 @@ def run_scheduler():
     from mage_ai.orchestration.triggers.loop_time_trigger import LoopTimeTrigger
 
     job_manager = get_job_manager()
+
+    def stop_jobs():
+        if job_manager is not None:
+            job_manager.stop()
+
+    # The scheduler stops its block runs and exits with the web server: one left behind
+    # kept running pipelines next to the scheduler of the next server.
+    stop_on_terminate(stop_jobs)
+    exit_with_parent(stop_jobs)
 
     sentry_dsn = SENTRY_DSN
     if sentry_dsn:
@@ -122,7 +133,12 @@ class SchedulerManager:
 
         logger.info('Stop scheduler.')
         if self.is_alive:
+            # SIGTERM: the scheduler stops its block runs, then exits.
             self.scheduler_process.terminate()
+            self.scheduler_process.join(SCHEDULER_STOP_TIMEOUT_SECONDS)
+            if self.scheduler_process.is_alive():
+                self.scheduler_process.kill()
+                self.scheduler_process.join()
             if job_manager is not None:
                 job_manager.stop()
             self.scheduler_process = None

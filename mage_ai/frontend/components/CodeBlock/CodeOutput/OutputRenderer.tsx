@@ -7,7 +7,7 @@ import HTMLOutput from './HTMLOutput';
 import ImageOutput from './ImageOutput';
 import MultiOutput from './MultiOutput';
 import Spacing from '@oracle/elements/Spacing';
-import TableOutput from './TableOutput';
+import TableOutput, { TableOutputSource } from './TableOutput';
 import ProgressOutput from './ProgressOutput';
 import Text from '@oracle/elements/Text';
 import TextOutput from './TextOutput';
@@ -19,6 +19,8 @@ import { getColorsForBlockType } from '../index.style';
 import { ignoreKeys, isObject } from '@utils/hash';
 
 type OutputRendererProps = {
+  // Where the block's outputs are stored, so tables open in ColumnAtlas.
+  atlasSource?: TableOutputSource;
   block: BlockType;
   containerWidth?: number;
   disableSpacingBetweenGroups?: boolean;
@@ -31,6 +33,7 @@ type OutputRendererProps = {
 } & OutputRowProps;
 
 function OutputRenderer({
+  atlasSource,
   block,
   containerWidth,
   index,
@@ -97,6 +100,7 @@ function OutputRenderer({
 
                 <OutputRenderer
                   {...outputRowSharedProps}
+                  atlasSource={atlasSource}
                   block={block}
                   containerWidth={containerWidth}
                   disableSpacingBetweenGroups={disableSpacingBetweenGroups}
@@ -136,6 +140,7 @@ function OutputRenderer({
   } else if (DataTypeEnum.TABLE === dataType) {
     return (
       <TableOutput
+        atlasSource={atlasSource}
         containerWidth={containerWidth}
         maxHeight={height}
         output={output}

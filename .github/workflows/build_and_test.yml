@@ -7,6 +7,7 @@ on:
       - "mage_integrations/**"
       - "vendor/**"
       - "runtimes/**"
+      - "rust/**"
       - "scripts/run_app.sh"
       - "pyproject.toml"
       - "uv.lock"
@@ -17,6 +18,7 @@ on:
       - "mage_integrations/**"
       - "vendor/**"
       - "runtimes/**"
+      - "rust/**"
       - "scripts/run_app.sh"
       - "pyproject.toml"
       - "uv.lock"
@@ -29,6 +31,8 @@ env:
   UV_VERSION: "0.11.29"
   # Match RV_VERSION in Dockerfile.
   RV_VERSION: "0.20.0"
+  # Match rust/column_atlas/rust-toolchain.toml and RUST_VERSION in Dockerfile.
+  RUST_VERSION: "1.98.0"
 
 jobs:
   lint:
@@ -99,11 +103,37 @@ jobs:
               ], check=True)
           PY
 
+  rust:
+    name: Rust extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust/column_atlas
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --features python -- -D warnings
+      - name: Test
+        run: cargo test
+
   packaging:
     name: Packaging
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -122,6 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -181,6 +217,12 @@ jobs:
         python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v5
+      # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
@@ -224,6 +266,7 @@ jobs:
       - name: Build frontend, start server, and run Playwright tests
         run: |
           yarn install --frozen-lockfile --non-interactive &&
+          yarn test:unit &&
           yarn export_prod &&
           yarn playwright install --with-deps chromium &&
           yarn playwright test -c playwright.config.ci.ts &&
@@ -248,6 +291,12 @@ jobs:
         python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v5
+      # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
+      - name: Set up Rust
+        run: rustup toolchain install "$env:RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:

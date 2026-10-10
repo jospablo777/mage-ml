@@ -216,6 +216,33 @@ class RVersionTest(unittest.TestCase):
         self.assertIn(f'r_version = "{DEFAULT_R_VERSION}"', test_environment)
 
 
+class RustVersionTest(unittest.TestCase):
+    """
+    The ColumnAtlas extension compiles with one Rust version in local builds, the image
+    and CI.
+    """
+
+    def test_rust_versions_match(self):
+        toolchain = (REPO_ROOT / 'rust/column_atlas/rust-toolchain.toml').read_text(
+            encoding='utf-8',
+        )
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+        workflow = (REPO_ROOT / '.github/workflows/build_and_test.yml').read_text(
+            encoding='utf-8',
+        )
+
+        version = re.search(r'channel = "(?P<version>[\d.]+)"', toolchain).group('version')
+        image = re.search(r'ARG RUST_VERSION=(?P<version>[\d.]+)', dockerfile)
+        ci = re.search(r'RUST_VERSION: "(?P<version>[\d.]+)"', workflow)
+
+        self.assertIsNotNone(image)
+        self.assertIsNotNone(ci)
+        self.assertEqual(image.group('version'), version)
+        self.assertEqual(ci.group('version'), version)
+        # The image builds the extension next to the rest of the workspace.
+        self.assertIn('COPY rust ./rust', dockerfile)
+
+
 class DependencyUpdateTest(unittest.TestCase):
     def test_dependabot_covers_every_lockfile(self):
         config = yaml.safe_load((REPO_ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))
@@ -226,7 +253,8 @@ class DependencyUpdateTest(unittest.TestCase):
                 directories.add(update['directory'])
 
         ecosystems = {update['package-ecosystem'] for update in config['updates']}
-        self.assertEqual(ecosystems, {'uv', 'npm', 'github-actions', 'docker'})
+        self.assertEqual(ecosystems, {'uv', 'npm', 'github-actions', 'docker', 'cargo'})
+        self.assertIn('/rust/column_atlas', directories)
 
         for lockfile in REPO_ROOT.glob('runtimes/*/uv.lock'):
             with self.subTest(runtime=lockfile.parent.name):

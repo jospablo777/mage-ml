@@ -670,6 +670,11 @@ function CodeOutput(
       ) {
         arrContent.push(
           <OutputRenderer
+            atlasSource={
+              pipeline?.uuid && block?.uuid
+                ? { block_uuid: block.uuid, pipeline_uuid: pipeline.uuid }
+                : undefined
+            }
             block={block}
             contained
             containerWidth={mainContainerWidth}

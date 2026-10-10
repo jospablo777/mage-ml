@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import traceback
 import webbrowser
@@ -734,7 +735,8 @@ async def main(
         )
         periodic_callback.start()
 
-    get_memory_manager_controller().events
+    # Creates the singleton here, in the main thread.
+    get_memory_manager_controller()
 
     update_settings_on_metadata_change()
     observer = Observer()
@@ -823,16 +825,27 @@ def start_server(
             except Exception:
                 traceback.print_exc()
 
-        # Start web server
-        asyncio.run(
-            main(
-                host=host,
-                port=port,
-                project=project,
-                project_type=project_type,
-                status_only=run_web_server_with_status_only,
+        # SIGTERM ended the server at once and left the scheduler running, which kept
+        # running pipelines next to the scheduler of the next server. It now exits the
+        # event loop, so the scheduler stops first.
+        signal.signal(signal.SIGTERM, _exit_on_terminate)
+        try:
+            # Start web server
+            asyncio.run(
+                main(
+                    host=host,
+                    port=port,
+                    project=project,
+                    project_type=project_type,
+                    status_only=run_web_server_with_status_only,
+                )
             )
-        )
+        finally:
+            scheduler_manager.stop_scheduler()
+
+
+def _exit_on_terminate(signum, _frame):
+    raise SystemExit(128 + signum)
 
 
 if __name__ == '__main__':

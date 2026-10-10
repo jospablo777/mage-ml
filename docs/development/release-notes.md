@@ -20,6 +20,8 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Outputs are written atomically.** On local storage, a block output is written to a
   hidden staging directory (`.output_0.<id>.staging`) and swapped in when complete. A
   killed process can leave such a directory behind; it is ignored and safe to delete.
+  Two processes writing the same output no longer fail with `Directory not empty`; the
+  last writer wins.
 - **LazyFrame outputs are data.** A block that returns a Polars LazyFrame has the result
   streamed to Parquet; the next block receives `pl.scan_parquet` of it, on local storage
   and on S3. The query plan used to be pickled and run again by the next block, against
@@ -322,6 +324,16 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Runtime
 
+- **Stopping the server stops the scheduler and every block run process.** SIGTERM, or
+  killing the server, left the scheduler, its worker pool, block workers and
+  multiprocessing managers running. A scheduler left behind kept running pipelines next
+  to the scheduler of the next server, so block runs ran twice and one copy failed. The
+  server now stops the scheduler on SIGTERM, the scheduler stops its block runs, and
+  each of these processes exits when its parent is gone. Cancelling a block run kills
+  the processes the block started, such as R, along with it.
+- **Listing pipeline runs works after a pipeline is deleted.** With
+  `include_pipeline_type`, the list failed with an error once any run's pipeline was
+  gone; such runs have no type.
 - **A block run whose process keeps dying fails after 3 crashes**
   (`MAGE_BLOCK_RUN_MAX_CRASHES`). Crashed block runs were run again with no limit, so a
   block that ran out of memory restarted forever. The crash count is in the block run's
@@ -436,6 +448,17 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **ColumnAtlas**, the block output explorer, replaces the table of pandas and Polars
+  outputs in the notebook and on block runs. It reads the whole stored output, not a
+  sample: column profiles in the headers (distribution and missing share), sort and
+  filter on the server, a full window with per-column summaries, keyboard navigation and
+  a cell inspector. GeoDataFrame outputs open too, with geometry as WKT. The engine is a
+  Rust extension on Polars (`rust/column_atlas`), run
+  in worker processes with deadlines and memory limits; 128 rows of a 2-million-row
+  output arrive in 4 to 20 ms. Other outputs and outputs on S3 or GCS show the plain
+  table. Printed text and errors show in full, as before. `MAGE_COLUMN_ATLAS=0` turns it off. See `docs/design/column-atlas.mdx` and
+  `column-atlas.md`. Building Mage from source now needs Rust (`rustup`); the Docker
+  image has it in the build stage only.
 - **Block fusion** (`block_fusion: chains`, or "Run chains of blocks together" in the
   pipeline settings): blocks that form a chain run as one stage, in one process, and each
   block receives the previous block's output from memory. Every block keeps its block run,
@@ -477,6 +500,9 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### CI
 
+- A Rust job runs `cargo fmt`, clippy and the engine tests; the frontend unit tests run
+  with `yarn test:unit`. The publish workflow builds the extension's wheels for
+  manylinux, macOS and Windows.
 - The Docker image workflow builds the image and pushes it nowhere. It used to log in
   to the GitHub container registry and push when run by hand.
 

@@ -137,6 +137,58 @@ class VariableAtomicWriteTest(DBTestCase):
         self.assertNotIn('data_column_types.json', os.listdir(self.variable().variable_path))
         self.assertEqual(self.entries(), ['output_0'])
 
+    def _concurrent_writer(self, when: str):
+        """
+        Patches os.rename so that another writer's output_0 appears either before the
+        swap or between moving the old directory aside and moving the staging one in.
+        """
+        real_rename = os.rename
+        final_path = self.variable().variable_path
+        state = dict(done=False)
+
+        def rename(source, destination):
+            staging = '.staging' in os.path.basename(source) and destination == final_path
+            moving_aside = source == final_path
+            if not state['done'] and (
+                (when == 'before' and (staging or moving_aside))
+                or (when == 'between' and staging)
+            ):
+                state['done'] = True
+                other = os.path.join(os.path.dirname(final_path), '.other.staging')
+                os.makedirs(other)
+                Path(other, 'marker').write_text('other writer')
+                if os.path.isdir(final_path):
+                    real_rename(final_path, f'{other}.old')
+                real_rename(other, final_path)
+            return real_rename(source, destination)
+
+        return patch('mage_ai.data_preparation.models.variable.os.rename', side_effect=rename)
+
+    def test_a_concurrent_writer_before_the_swap_does_not_fail_the_write(self):
+        with self._concurrent_writer('before'):
+            self.variable().write_data(pd.DataFrame({'a': [1, 2]}))
+
+        back = self.variable().read_data(raise_exception=True)
+        assert_frame_equal(back, pd.DataFrame({'a': [1, 2]}))
+        # The last writer wins and no staging or previous directory is left.
+        self.assertNotIn('marker', os.listdir(self.variable().variable_path))
+        self.assertEqual(
+            [e for e in self.entries() if not e.endswith('.old')], ['output_0'],
+        )
+
+    def test_a_concurrent_writer_between_the_renames_does_not_fail_the_write(self):
+        self.variable().write_data(pd.DataFrame({'a': [0]}))
+
+        with self._concurrent_writer('between'):
+            self.variable().write_data(pd.DataFrame({'a': [1, 2]}))
+
+        back = self.variable().read_data(raise_exception=True)
+        assert_frame_equal(back, pd.DataFrame({'a': [1, 2]}))
+        self.assertNotIn('marker', os.listdir(self.variable().variable_path))
+        self.assertEqual(
+            [e for e in self.entries() if not e.endswith('.old')], ['output_0'],
+        )
+
     def test_staging_directories_are_not_listed_as_variables(self):
         manager = VariableManager(repo_path=self.repo_path)
         variable = self.variable()

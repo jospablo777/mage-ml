@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "column-atlas-native"
+version = "0.1.0"
+description = "Read-only Parquet queries for ColumnAtlas, the block output explorer of Mage"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+
+[tool.maturin]
+module-name = "column_atlas_native"
+features = ["extension-module"]
+profile = "release"
+# Without debug symbols the wheel is several times smaller.
+strip = true
+
+# uv rebuilds the extension when any of these change, not only pyproject.toml.
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "Cargo.lock" },
+  { file = "rust-toolchain.toml" },
+  { file = "src/**/*.rs" },
+]

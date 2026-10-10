@@ -2,6 +2,7 @@ import InnerHTML from 'dangerously-set-html-content';
 import { useMemo } from 'react';
 
 import DataTable from '@components/DataTable';
+import { AtlasSource, ColumnAtlasOutput } from '@components/ColumnAtlas';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
@@ -12,7 +13,11 @@ import { SCROLLBAR_WIDTH } from '@oracle/styles/scrollbars';
 import { containsOnlySpecialCharacters, containsHTML, pluralize } from '@utils/string';
 import { isObject } from '@utils/hash';
 
+// The stored output a table shows, without its variable: ColumnAtlas explores it.
+export type TableOutputSource = Omit<AtlasSource, 'variable_uuid'>;
+
 type TableOutputProps = {
+  atlasSource?: TableOutputSource;
   containerWidth?: number;
   dataInit?: {
     multi_output?: boolean;
@@ -28,7 +33,7 @@ type TableOutputProps = {
   uuid?: string;
 };
 
-function TableOutput({
+function PlainTableOutput({
   borderTop,
   containerWidth,
   maxHeight,
@@ -218,6 +223,30 @@ function TableOutput({
         {resourcesDisplay}
       </Spacing>
     </>
+  );
+}
+
+const OUTPUT_VARIABLE = /^output_\d+$/;
+
+function TableOutput(props: TableOutputProps) {
+  const { atlasSource, output } = props;
+  const variableUuid = output?.variable_uuid;
+  const plain = <PlainTableOutput {...props} />;
+  if (!atlasSource?.pipeline_uuid || !atlasSource?.block_uuid || !OUTPUT_VARIABLE.test(variableUuid || '')) {
+    return plain;
+  }
+  // @ts-ignore
+  const shape = output?.shape || (isObject(output?.data) ? output?.data?.shape : null);
+  // The notebook sends a new output message each time the block runs.
+  const sample: any = isObject(output?.data) ? output?.data : null;
+  const refreshKey = JSON.stringify([shape, sample?.columns, sample?.rows?.slice?.(0, 3)]);
+  return (
+    <ColumnAtlasOutput
+      fallback={plain}
+      refreshKey={refreshKey}
+      rowCountHint={Array.isArray(shape) ? shape[0] : undefined}
+      source={{ ...atlasSource, variable_uuid: variableUuid }}
+    />
   );
 }
 

@@ -862,7 +862,14 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
 
     @property
     def pipeline_type(self) -> PipelineType:
-        pipeline = self.pipeline
+        # Runs outlive their pipelines: listing runs with their types failed with an error
+        # once any of their pipelines was deleted.
+        if project_platform_activated():
+            pipeline = self.pipeline_project_platform
+        else:
+            pipeline = Pipeline.get(
+                self.pipeline_uuid, repo_path=get_repo_path(), check_if_exists=True,
+            )
         return pipeline.type if pipeline is not None else None
 
     @property

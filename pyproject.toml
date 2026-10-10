@@ -17,6 +17,8 @@ classifiers = [
 dependencies = [
   "cachetools",
   "click>=8.3.3",
+  # ColumnAtlas, the block output explorer: a Rust extension built from rust/column_atlas.
+  "column-atlas-native",
   "Faker>=40.41",
   "GitPython>=3.2,<4",
   "Jinja2>=3.1.6",
@@ -280,10 +282,11 @@ constraint-dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["mage_integrations", "vendor/singer-python"]
+members = ["mage_integrations", "vendor/singer-python", "rust/column_atlas"]
 exclude = ["runtimes/*"]
 
 [tool.uv.sources]
+column-atlas-native = { workspace = true }
 mage-integrations = { workspace = true }
 singer-python = { workspace = true }
 

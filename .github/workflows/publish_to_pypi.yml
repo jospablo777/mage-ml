@@ -21,7 +21,43 @@ env:
   UV_VERSION: "0.11.29"
 
 jobs:
+  # The ColumnAtlas extension has one wheel per platform; the stable ABI covers every
+  # Python from 3.11. PyPI accepts Linux wheels with a manylinux tag only, which a plain
+  # build does not give.
+  native_wheels:
+    name: column-atlas-native (${{ matrix.os }} ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: "2_28"
+          - os: ubuntu-latest
+            target: aarch64
+            manylinux: "2_28"
+          - os: macos-latest
+            target: aarch64
+          - os: macos-latest
+            target: x86_64
+          - os: windows-latest
+            target: x64
+    steps:
+    - uses: actions/checkout@v5
+    - uses: PyO3/maturin-action@v1
+      with:
+        working-directory: rust/column_atlas
+        target: ${{ matrix.target }}
+        manylinux: ${{ matrix.manylinux || 'auto' }}
+        args: --release --out dist
+    - uses: actions/upload-artifact@v4
+      with:
+        name: native-wheels-${{ matrix.os }}-${{ matrix.target }}
+        path: rust/column_atlas/dist/*.whl
+        retention-days: 14
+
   build_and_publish:
+    needs: native_wheels
     runs-on: ubuntu-latest
     # The secrets context is rejected in a step's if condition, so the token is
     # read here and the condition tests the environment instead.
@@ -40,10 +76,17 @@ jobs:
         pip install "uv==${{ env.UV_VERSION }}"
     # mage_integrations and the vendored singer package are installed alongside
     # mage-ml, so every workspace member is built here.
+    # The extension's sdist is built here; its wheels come from native_wheels.
     - name: Build distributions
       run: |
         rm -rf dist
         uv build --all-packages
+        rm dist/column_atlas_native-*.whl
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: native-wheels-*
+        path: dist
+        merge-multiple: true
     - uses: actions/upload-artifact@v4
       with:
         name: distributions
