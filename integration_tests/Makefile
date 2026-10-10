@@ -57,7 +57,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark ci r-env
+.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -76,6 +76,13 @@ test: up r-env
 # Block fusion against block by block; needs no services. MAGE_BENCHMARK_ROWS sets the rows.
 test-benchmark:
 	cd .. && $(PYTHON) -m pytest integration_tests/benchmark -s $(PYTEST_ARGS)
+
+# Whole pipelines (pandas, Polars, R, Rust and a staggered pandas-to-Rust series) run with
+# mage run, the scheduler, fused stages and exported services; see
+# integration_tests/benchmark/pipelines/run.py. Writes results and a report under
+# integration_tests/benchmark/results/. BENCHMARK_ARGS='--rows 1000000 --repeats 3'.
+benchmark-pipelines: r-env
+	cd .. && $(PYTHON) -m integration_tests.benchmark.pipelines $(BENCHMARK_ARGS)
 
 test-postgres: up
 	cd .. && $(PYTHON) -m pytest integration_tests/postgres $(PYTEST_ARGS)

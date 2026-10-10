@@ -209,4 +209,5 @@ do_not_commit/
 integration_tests/results.xml
 integration_tests/soak-results.xml
 integration_tests/soak-fusion-results.xml
+integration_tests/benchmark/results/
 integration_tests/.certs/
