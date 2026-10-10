@@ -1321,7 +1321,7 @@ class BlockExecutor:
         from mage_ai.orchestration.notification.sender import NotificationSender
         from mage_ai.shared.hash import merge_dict
 
-        failed = [r for r in records if r.get('result') == 'fail' and r.get('notify')]
+        failed = [r for r in records if r.get('should_notify')]
         if not failed:
             return
         try:

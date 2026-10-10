@@ -44,8 +44,19 @@ RECORDS_FOLDER = '.monitoring'
 _NAME = re.compile(r'^[A-Za-z0-9][\w.\-]{0,127}$')
 _KEYS = {
     'pipeline', 'block', 'output', 'baseline', 'columns', 'drift', 'missing', 'rows',
-    'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top',
+    'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top', 'rolling',
+    'performance',
 }
+DRIFT_METHODS = {
+    # Jensen-Shannon divergence, natural log: 0 to ln 2.
+    'js': dict(warn=0.1, fail=0.2),
+    # Population stability index: under 0.1 stable, 0.1 to 0.25 moderate, above large.
+    'psi': dict(warn=0.1, fail=0.25),
+}
+CLASSIFICATION_METRICS = ('accuracy', 'precision', 'recall', 'f1', 'roc_auc', 'log_loss')
+REGRESSION_METRICS = ('mae', 'rmse', 'mape', 'r2')
+# Metrics where a larger value is worse.
+LOWER_IS_BETTER = {'log_loss', 'mae', 'rmse', 'mape'}
 _DURATION = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$')
 _SECONDS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
 RESULT_ORDER = {'pass': 0, 'hold': 1, 'warn': 2, 'fail': 3}
@@ -69,9 +80,15 @@ class Monitor:
     freshness: Dict[str, Any] = field(default_factory=dict)
     min_rows: int = 30
     fail_block: bool = False
-    notify: bool = True
+    # True: every failed run notifies; on_change: only a run whose result turns to fail.
+    notify: Any = True
     bins: int = 20
     top: int = 20
+    # Per column: {column: {drift: {...}, missing: {...}}}, over the monitor's settings.
+    column_rules: Dict[str, Dict] = field(default_factory=dict)
+    # The baseline is the sum of this many earlier runs (previous baseline only).
+    rolling: int = 1
+    performance: Dict[str, Any] = field(default_factory=dict)
 
 
 def parse_duration(value: Any, what: str) -> float:
@@ -117,11 +134,7 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         raise MonitorError(
             f'The baseline of monitor {name} must be previous or run:<pipeline run id>.'
         )
-    drift = dict(warn=0.1, fail=0.2)
-    drift.update({
-        k: _number(v, f'drift {k} of {name}') for k, v in (document.get('drift') or {}).items()
-        if k in ('warn', 'fail')
-    })
+    drift = _drift_settings(document.get('drift'), name)
     missing = {
         k: _number(v, f'missing {k} of {name}')
         for k, v in (document.get('missing') or {}).items() if k in ('max', 'max_increase')
@@ -138,10 +151,35 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
             freshness.get('max_age'), f'The freshness max_age of {name}',
         )
     columns = document.get('columns')
-    if columns is not None and (
+    column_rules: Dict[str, Dict] = {}
+    if isinstance(columns, dict):
+        for column, rules in columns.items():
+            rules = rules or {}
+            if not isinstance(rules, dict) or set(rules) - {'drift', 'missing'}:
+                raise MonitorError(
+                    f'The rules of column {column} in monitor {name} take drift and missing.'
+                )
+            column_rules[str(column)] = dict(
+                drift=_drift_settings(rules.get('drift'), name, drift) if 'drift' in rules
+                else None,
+                missing={
+                    k: _number(v, f'missing {k} of {column} in {name}')
+                    for k, v in (rules.get('missing') or {}).items()
+                    if k in ('max', 'max_increase')
+                } if 'missing' in rules else None,
+            )
+        columns = list(columns)
+    elif columns is not None and (
         not isinstance(columns, list) or not all(isinstance(c, str) for c in columns)
     ):
-        raise MonitorError(f'The columns of monitor {name} must be a list of names.')
+        raise MonitorError(f'The columns of monitor {name} must be a list or a mapping.')
+    notify = document.get('notify', True)
+    if notify not in (True, False, 'on_change'):
+        raise MonitorError(f'The notify of monitor {name} is true, false or on_change.')
+    rolling = document.get('rolling', 1)
+    if isinstance(rolling, bool) or not isinstance(rolling, int) or rolling < 1:
+        raise MonitorError(f'The rolling of monitor {name} is a number of runs, 1 or more.')
+    performance = _performance_settings(document.get('performance'), name)
     return Monitor(
         name=name,
         pipeline=str(document['pipeline']),
@@ -155,9 +193,81 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         freshness=freshness,
         min_rows=int(document.get('min_rows', 30)),
         fail_block=bool(document.get('fail_block', False)),
-        notify=bool(document.get('notify', True)),
+        notify=notify,
         bins=int(document.get('bins', 20)),
         top=int(document.get('top', 20)),
+        column_rules=column_rules,
+        rolling=rolling,
+        performance=performance,
+    )
+
+
+def _drift_settings(raw: Any, name: str, defaults: Optional[Dict] = None) -> Dict:
+    raw = raw or {}
+    if not isinstance(raw, dict) or set(raw) - {'method', 'warn', 'fail'}:
+        raise MonitorError(f'The drift of monitor {name} takes method, warn and fail.')
+    method = raw.get('method') or (defaults or {}).get('method') or 'js'
+    if method not in DRIFT_METHODS:
+        raise MonitorError(
+            f'The drift method of monitor {name} is one of {", ".join(DRIFT_METHODS)}.'
+        )
+    settings = dict(DRIFT_METHODS[method])
+    if defaults and defaults.get('method') == method:
+        settings.update(warn=defaults['warn'], fail=defaults['fail'])
+    settings.update({
+        k: _number(v, f'drift {k} of {name}') for k, v in raw.items() if k in ('warn', 'fail')
+    })
+    settings['method'] = method
+    return settings
+
+
+def _performance_settings(raw: Any, name: str) -> Dict:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise MonitorError(f'The performance of monitor {name} must be a mapping.')
+    unknown = set(raw) - {
+        'task', 'target', 'prediction', 'score', 'positive', 'metrics', 'min', 'max',
+        'max_drop',
+    }
+    if unknown:
+        raise MonitorError(
+            f'The performance of monitor {name} has unknown settings: '
+            f'{", ".join(sorted(unknown))}.'
+        )
+    task = raw.get('task') or 'classification'
+    if task not in ('classification', 'regression'):
+        raise MonitorError(f'The performance task of {name} is classification or regression.')
+    for required in ('target', 'prediction'):
+        if not raw.get(required):
+            raise MonitorError(f'The performance of monitor {name} needs a {required} column.')
+    allowed = CLASSIFICATION_METRICS if task == 'classification' else REGRESSION_METRICS
+    metrics = list(raw.get('metrics') or (
+        ['accuracy', 'f1'] + (['roc_auc'] if raw.get('score') else [])
+        if task == 'classification' else ['mae', 'rmse', 'r2']
+    ))
+    unknown = [m for m in metrics if m not in allowed]
+    if unknown:
+        raise MonitorError(
+            f'Monitor {name} cannot compute {", ".join(unknown)} for {task}; '
+            f'the metrics are {", ".join(allowed)}.'
+        )
+    if any(m in ('roc_auc', 'log_loss') for m in metrics) and not raw.get('score'):
+        raise MonitorError(f'roc_auc and log_loss of monitor {name} need a score column.')
+    bounds = {}
+    for key in ('min', 'max', 'max_drop'):
+        values = raw.get(key) or {}
+        if not isinstance(values, dict):
+            raise MonitorError(f'The performance {key} of {name} maps metrics to numbers.')
+        bounds[key] = {m: _number(v, f'performance {key} {m} of {name}') for m, v in values.items()}
+    return dict(
+        task=task,
+        target=str(raw['target']),
+        prediction=str(raw['prediction']),
+        score=raw.get('score'),
+        positive=raw.get('positive', 1),
+        metrics=metrics,
+        **bounds,
     )
 
 
@@ -192,6 +302,26 @@ def jensen_shannon(first: List[float], second: List[float]) -> Optional[float]:
         return sum(a * math.log(a / b) for a, b in zip(x, y) if a > 0)
 
     return max(0.0, (kl(p, m) + kl(q, m)) / 2)
+
+
+def population_stability(first: List[float], second: List[float]) -> Optional[float]:
+    """
+    Population stability index of two count vectors. Empty bins count as 0.0001 of their
+    side, the usual guard against log(0); None if one side is empty.
+    """
+    total_a, total_b = sum(first), sum(second)
+    if total_a <= 0 or total_b <= 0:
+        return None
+    psi = 0.0
+    for a, b in zip(first, second):
+        p = max(a / total_a, 1e-4)
+        q = max(b / total_b, 1e-4)
+        psi += (q - p) * math.log(q / p)
+    return psi
+
+
+DIVERGENCES = {'js': jensen_shannon, 'psi': population_stability}
+DIVERGENCE_NAMES = {'js': 'Jensen-Shannon divergence', 'psi': 'population stability index'}
 
 
 def _category_counts(column: Dict, keys: List[str]) -> List[float]:
@@ -248,20 +378,24 @@ def compare(
     baseline_columns = {c['name']: c for c in (baseline or {}).get('columns') or []}
     for column in current['columns']:
         name = column['name']
+        rules = monitor.column_rules.get(name) or {}
+        missing_rules = rules.get('missing') if rules.get('missing') is not None \
+            else monitor.missing
+        drift_rules = rules.get('drift') or monitor.drift
         share = column['missing'] / column['rows'] if column['rows'] else 0.0
         reference = baseline_columns.get(name)
-        if 'max' in monitor.missing:
+        if 'max' in missing_rules:
             checks.append(dict(
                 check='missing', column=name, value=round(share, 4),
-                result='fail' if share > monitor.missing['max'] else 'pass',
-                detail=f'{share:.1%} missing; at most {monitor.missing["max"]:.1%}',
+                result='fail' if share > missing_rules['max'] else 'pass',
+                detail=f'{share:.1%} missing; at most {missing_rules["max"]:.1%}',
             ))
-        if 'max_increase' in monitor.missing and reference:
+        if 'max_increase' in missing_rules and reference:
             before = reference['missing'] / reference['rows'] if reference['rows'] else 0.0
             increase = share - before
             checks.append(dict(
                 check='missing_increase', column=name, value=round(increase, 4),
-                result='fail' if increase > monitor.missing['max_increase'] else 'pass',
+                result='fail' if increase > missing_rules['max_increase'] else 'pass',
                 detail=f'{share:.1%} missing against {before:.1%}',
             ))
 
@@ -283,18 +417,20 @@ def compare(
             keys = [value for value, _ in reference.get('top') or []]
             first = _category_counts(reference, keys)
             second = _category_counts(column, keys)
-        divergence = jensen_shannon(first, second) if len(first) == len(second) else None
+        method = drift_rules.get('method', 'js')
+        divergence = DIVERGENCES[method](first, second) if len(first) == len(second) else None
         if divergence is None:
             checks.append(dict(check='drift', column=name, value=None, result='hold',
                                detail='no values to compare'))
             continue
         result = (
-            'fail' if divergence >= monitor.drift['fail']
-            else 'warn' if divergence >= monitor.drift['warn'] else 'pass'
+            'fail' if divergence >= drift_rules['fail']
+            else 'warn' if divergence >= drift_rules['warn'] else 'pass'
         )
         checks.append(dict(
             check='drift', column=name, value=round(divergence, 4), result=result,
-            detail=f'Jensen-Shannon divergence {divergence:.4f}',
+            method=method,
+            detail=f'{DIVERGENCE_NAMES[method]} {divergence:.4f}',
         ))
 
     if monitor.freshness:
@@ -314,7 +450,95 @@ def compare(
                 result='fail' if age > monitor.freshness['max_age'] else 'pass',
                 detail=f'newest value {age / 3600:.1f} h before the run',
             ))
+    checks.extend(_performance_checks(
+        monitor, current.get('performance'), (baseline or {}).get('performance'),
+    ))
     return dict(result=_worst([c['result'] for c in checks]), checks=checks)
+
+
+def _performance_checks(monitor: Monitor, current: Optional[Dict], baseline: Optional[Dict]):
+    settings = monitor.performance
+    if not settings:
+        return []
+    if not current or current.get('error'):
+        return [dict(check='performance', column=None, value=None, result='hold',
+                     detail=(current or {}).get('error') or 'no labeled rows')]
+    checks = []
+    for metric in settings['metrics']:
+        value = current.get(metric)
+        if value is None or not math.isfinite(value):
+            checks.append(dict(check=metric, column=None, value=None, result='hold',
+                               detail=f'{metric} could not be computed'))
+            continue
+        result, reasons = 'pass', []
+        if metric in settings['min'] and value < settings['min'][metric]:
+            result = 'fail'
+            reasons.append(f'below the min {settings["min"][metric]}')
+        if metric in settings['max'] and value > settings['max'][metric]:
+            result = 'fail'
+            reasons.append(f'above the max {settings["max"][metric]}')
+        before = (baseline or {}).get(metric)
+        if metric in settings['max_drop'] and before is not None:
+            drop = (value - before) if metric in LOWER_IS_BETTER else (before - value)
+            if drop > settings['max_drop'][metric]:
+                result = 'fail'
+                reasons.append(f'{drop:.4g} worse than the baseline ({before:.4g})')
+        checks.append(dict(
+            check=metric, column=None, value=round(value, 6), result=result,
+            detail=f'{metric} {value:.4g} on {current.get("rows", 0)} labeled rows'
+                   + (f'; {"; ".join(reasons)}' if reasons else ''),
+        ))
+    return checks
+
+
+def performance(settings: Dict, path: str) -> Dict:
+    """The performance metrics of a model's predictions in an output with their labels."""
+    import numpy as np
+    import pyarrow.parquet as pq
+    from sklearn import metrics as sk
+
+    columns = [settings['target'], settings['prediction']]
+    if settings.get('score'):
+        columns.append(settings['score'])
+    try:
+        frame = pq.read_table(path, columns=list(dict.fromkeys(columns))).to_pandas()
+    except Exception as error:
+        return dict(error=f'the performance columns could not be read: {error}')
+    frame = frame.dropna(subset=columns)
+    if frame.empty:
+        return dict(error='no rows have both a label and a prediction', rows=0)
+    target, prediction = frame[settings['target']], frame[settings['prediction']]
+    result: Dict[str, Any] = dict(rows=int(len(frame)))
+    for metric in settings['metrics']:
+        try:
+            if metric == 'accuracy':
+                value = sk.accuracy_score(target, prediction)
+            elif metric in ('precision', 'recall', 'f1'):
+                binary = target.nunique() <= 2 and settings.get('positive') in set(target)
+                kwargs = dict(pos_label=settings['positive'], average='binary') if binary \
+                    else dict(average='macro')
+                function = dict(
+                    precision=sk.precision_score, recall=sk.recall_score, f1=sk.f1_score,
+                )[metric]
+                value = function(target, prediction, zero_division=0, **kwargs)
+            elif metric == 'roc_auc':
+                value = sk.roc_auc_score(target == settings['positive'], frame[settings['score']])
+            elif metric == 'log_loss':
+                value = sk.log_loss(
+                    target == settings['positive'], frame[settings['score']], labels=[False, True],
+                )
+            elif metric == 'mae':
+                value = sk.mean_absolute_error(target, prediction)
+            elif metric == 'rmse':
+                value = float(np.sqrt(sk.mean_squared_error(target, prediction)))
+            elif metric == 'mape':
+                value = sk.mean_absolute_percentage_error(target, prediction)
+            else:
+                value = sk.r2_score(target, prediction)
+            result[metric] = float(value)
+        except Exception:
+            result[metric] = None
+    return result
 
 
 # ---- profiles of runs ---------------------------------------------------------------
@@ -337,13 +561,69 @@ def saved(pipeline, monitor: Monitor) -> List[Dict]:
     return [storage.read_json_file(os.path.join(folder, f'{i}.json')) for i in ids]
 
 
+def _merged(records: List[Dict]) -> Dict:
+    """One baseline record from several, whose profiles share their bin edges."""
+    if len(records) == 1:
+        return records[0]
+    newest = records[-1]
+    columns = {}
+    for record in records:
+        for column in record['profile']['columns']:
+            merged = columns.get(column['name'])
+            if merged is None:
+                columns[column['name']] = json.loads(json.dumps(column))
+                continue
+            merged['rows'] += column['rows']
+            merged['missing'] += column['missing']
+            if column.get('counts') and merged.get('edges') == column.get('edges'):
+                merged['counts'] = [a + b for a, b in zip(merged['counts'], column['counts'])]
+            if 'top' in column:
+                tally = {value: count for value, count in merged.get('top') or []}
+                for value, count in column['top']:
+                    tally[value] = tally.get(value, 0) + count
+                merged['top'] = sorted(tally.items(), key=lambda item: (-item[1], item[0]))
+                merged['other'] = merged.get('other', 0) + column.get('other', 0)
+    profile = dict(
+        rows=sum(r['profile']['rows'] for r in records),
+        columns=list(columns.values()),
+    )
+    performances = [r['profile'].get('performance') for r in records]
+    if all(p and not p.get('error') for p in performances):
+        keys = {k for p in performances for k, v in p.items() if isinstance(v, (int, float))}
+        weights = [p.get('rows', 0) for p in performances]
+        profile['performance'] = {
+            key: sum((p.get(key) or 0) * w for p, w in zip(performances, weights))
+            / max(sum(weights), 1)
+            for key in keys if key != 'rows'
+        }
+    return dict(newest, profile=profile,
+                pipeline_run_id=newest['pipeline_run_id'],
+                baseline_runs=[r['pipeline_run_id'] for r in records])
+
+
 def _baseline(pipeline, monitor: Monitor, run_id: int) -> Optional[Dict]:
     records = [r for r in saved(pipeline, monitor) if r['pipeline_run_id'] != run_id]
     if monitor.baseline == 'previous':
         earlier = [r for r in records if r['pipeline_run_id'] < run_id]
-        return earlier[-1] if earlier else None
+        return _merged(earlier[-monitor.rolling:]) if earlier else None
     wanted = int(monitor.baseline.split(':', 1)[1])
     return next((r for r in records if r['pipeline_run_id'] == wanted), None)
+
+
+def _reference_edges(pipeline, monitor: Monitor, baseline: Optional[Dict]) -> Dict:
+    """
+    The bin edges every run of the monitor is counted in: the baseline run's for a fixed
+    baseline, else the first checked run's, so all runs compare and roll up.
+    """
+    if monitor.baseline != 'previous':
+        source = baseline
+    else:
+        records = saved(pipeline, monitor)
+        source = records[0] if records else None
+    return {
+        c['name']: c['edges'] for c in (source or {}).get('profile', {}).get('columns', [])
+        if c.get('edges')
+    }
 
 
 def _output_file(pipeline, block_uuid: str, output: str, partition: Optional[str]):
@@ -372,10 +652,7 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
     records = []
     for monitor in monitors_for(pipeline.repo_path, pipeline.uuid, block_uuid):
         baseline = _baseline(pipeline, monitor, pipeline_run.id)
-        edges = {
-            c['name']: c['edges'] for c in (baseline or {}).get('profile', {}).get('columns', [])
-            if c.get('edges')
-        }
+        edges = _reference_edges(pipeline, monitor, baseline)
         request = dict(bins=monitor.bins, top=monitor.top, edges=edges)
         if monitor.columns:
             columns = list(monitor.columns)
@@ -397,14 +674,25 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
                 profile = json.loads(column_atlas_native.profile_columns(path, json.dumps(request)))
             except ValueError as error:
                 raise MonitorError(f'Monitor {monitor.name}: {error}')
+            if monitor.performance:
+                profile['performance'] = performance(monitor.performance, path)
         result = compare(
             monitor, profile, (baseline or {}).get('profile'), pipeline_run.execution_date,
+        )
+        previous = saved(pipeline, monitor)
+        earlier = [r for r in previous if r['pipeline_run_id'] < pipeline_run.id]
+        turned = result['result'] == 'fail' and (
+            not earlier or earlier[-1].get('result') != 'fail'
         )
         record = dict(
             monitor=monitor.name,
             pipeline_run_id=pipeline_run.id,
             block_run_id=block_run_id,
             baseline_run_id=(baseline or {}).get('pipeline_run_id'),
+            baseline_runs=(baseline or {}).get('baseline_runs'),
+            should_notify=result['result'] == 'fail' and (
+                monitor.notify is True or (monitor.notify == 'on_change' and turned)
+            ),
             checked_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
             result=result['result'],
             checks=result['checks'],

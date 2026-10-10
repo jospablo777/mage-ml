@@ -50,6 +50,45 @@ notify: true               # a failed check sends the pipeline's notifications
 Durations take `s`, `m`, `h`, `d` or `w`. Only the checks you configure run, except
 drift, which runs with warn 0.1 and fail 0.2 by default.
 
+### More settings
+
+```yaml
+drift:
+  method: psi              # js (default) or psi, the population stability index
+  warn: 0.1                # psi defaults: 0.1 warn, 0.25 fail
+  fail: 0.25
+columns:                   # a mapping instead of a list sets rules per column
+  score:
+    drift: {fail: 0.4}
+  referrer:
+    missing: {max: 0.9}
+baseline: previous
+rolling: 7                 # the baseline is the last 7 runs together
+notify: on_change          # notify when the result turns to fail, not on every failed run
+```
+
+### Model performance
+
+When the block's output holds the labels next to the predictions, the monitor can check
+the model's metrics, against bounds and against the baseline's values:
+
+```yaml
+performance:
+  task: classification     # or regression
+  target: label            # the true value
+  prediction: prediction   # the model's prediction
+  score: probability       # the positive class's probability, for roc_auc and log_loss
+  positive: 1              # the positive class (default 1)
+  metrics: [accuracy, f1, roc_auc]
+  min: {accuracy: 0.8}
+  max_drop: {roc_auc: 0.03}    # at most 0.03 worse than the baseline
+```
+
+Classification metrics are `accuracy`, `precision`, `recall`, `f1`, `roc_auc` and
+`log_loss`. Regression metrics are `mae`, `rmse`, `mape` and `r2`, with `max` bounds for
+errors. Rows without a label or a prediction are left out. The metrics come from
+scikit-learn, over every labeled row of the output.
+
 ## Results
 
 Each check gives one result:
@@ -73,12 +112,15 @@ also fails the block run, so downstream blocks don't run.
 ## How drift is measured
 
 - **Numeric columns** are split into 20 bins (`bins:` changes it) at the quantiles of
-  the baseline's values. The current run is counted in the same bins, plus a bin below
+  the monitor's reference run: the baseline run with `baseline: run:<id>`, otherwise
+  the first run the monitor checked. Every run is counted in those bins, so runs compare
+  and roll up. The current run is counted in the same bins, plus a bin below
   the lowest edge and a bin above the highest.
 - **Text and boolean columns** compare the baseline's 20 most frequent values
   (`top:` changes it), with everything else as one group.
-- The divergence is 0 for identical distributions and ln 2 (0.69) for distributions
-  with nothing in common. Missing values and NaN are counted separately, by the
+- Jensen–Shannon divergence is 0 for identical distributions and ln 2 (0.69) for
+  distributions with nothing in common. The population stability index is 0 for identical
+  distributions and has no upper bound; empty bins count as 0.0001 of their side. Missing values and NaN are counted separately, by the
   missing checks, and never as a bin.
 - Thresholds depend on the data. Run the monitor for a few runs with `fail_block:
   false` and look at the values before relying on a threshold.

@@ -512,7 +512,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   (Jensen–Shannon divergence over the baseline's bins or frequent values), missing
   values, row counts and the freshness of a timestamp column. The whole output is
   profiled in Rust. Results show on the run page and in `mage monitor-status`, and a
-  failed monitor sends the pipeline's notifications or fails the block run. See
+  failed monitor sends the pipeline's notifications or fails the block run. Monitors
+  also check model performance when the output holds labels (accuracy, F1, ROC AUC,
+  RMSE and others, against bounds and the baseline), offer the population stability
+  index, per-column thresholds, rolling baselines and notifications on change only. See
   `docs/guides/pipelines/monitoring.mdx`.
 - **Resources and shared limits.** A block can declare the memory, CPUs, GPUs and shared
   limits it needs (block settings > Resources), and the project declares what exists

@@ -66,6 +66,54 @@ class CompareTest(TestCase):
         self.assertEqual(monitors.compare(monitor, baseline, None)['result'], 'hold')
 
 
+class ExpandedCompareTest(TestCase):
+    def test_population_stability_and_per_column_thresholds(self):
+        self.assertEqual(monitors.population_stability([10, 10], [10, 10]), 0)
+        self.assertGreater(monitors.population_stability([90, 10], [10, 90]), 1)
+        monitor = monitors.Monitor(
+            name='m', pipeline='p', block='b', min_rows=1,
+            drift=dict(method='psi', warn=0.1, fail=0.25),
+            column_rules=dict(loose=dict(drift=dict(method='psi', warn=5, fail=10),
+                                         missing=None)),
+        )
+        column = dict(kind='numeric', rows=100, missing=0, edges=[0.0], counts=[90, 10])
+        moved = dict(column, counts=[10, 90])
+        baseline = dict(rows=100, columns=[dict(column, name='x'), dict(column, name='loose')])
+        current = dict(rows=100, columns=[dict(moved, name='x'), dict(moved, name='loose')])
+        checks = monitors.compare(monitor, current, baseline)['checks']
+        results = {c['column']: c['result'] for c in checks}
+        self.assertEqual(results, {'x': 'fail', 'loose': 'pass'})
+
+    def test_rolling_baselines_add_up_runs_with_the_same_edges(self):
+        def record(run, counts, top):
+            return dict(pipeline_run_id=run, profile=dict(rows=sum(counts), columns=[
+                dict(name='x', kind='numeric', rows=sum(counts), missing=1, edges=[0.0, 1.0],
+                     counts=counts),
+                dict(name='s', kind='string', rows=sum(counts), missing=0, top=top, other=0),
+            ]))
+
+        merged = monitors._merged([
+            record(1, [1, 2, 3], [['a', 6]]), record(2, [3, 2, 1], [['b', 6]]),
+        ])
+        x, s = merged['profile']['columns']
+        self.assertEqual(x['counts'], [4, 4, 4])
+        self.assertEqual(x['missing'], 2)
+        self.assertEqual(dict(s['top']), {'a': 6, 'b': 6})
+        self.assertEqual(merged['baseline_runs'], [1, 2])
+
+    def test_performance_settings_are_checked(self):
+        with self.assertRaises(monitors.MonitorError) as caught:
+            monitors._performance_settings(
+                dict(target='y', prediction='p', metrics=['roc_auc']), 'm',
+            )
+        self.assertIn('need a score column', str(caught.exception))
+        with self.assertRaises(monitors.MonitorError) as caught:
+            monitors._performance_settings(
+                dict(task='regression', target='y', prediction='p', metrics=['f1']), 'm',
+            )
+        self.assertIn('cannot compute f1', str(caught.exception))
+
+
 class MonitorFlowTest(DBTestCase):
     def setUp(self):
         super().setUp()
@@ -176,3 +224,95 @@ class MonitorFlowTest(DBTestCase):
         with self.assertRaises(monitors.MonitorError) as caught:
             monitors.load_monitor(self.pipeline.uuid, self.repo_path)
         self.assertIn('unknown settings: drfit', str(caught.exception))
+
+
+MODEL = """
+import numpy as np
+import pandas as pd
+
+
+@transformer
+def score(*args, **kwargs):
+    rng = np.random.default_rng(int(kwargs.get('seed', 0)))
+    rows = 3000
+    noise = float(kwargs.get('noise', 0.0))
+    x = rng.normal(0, 1, rows)
+    label = (x > 0).astype(int)
+    probability = 1 / (1 + np.exp(-(x + rng.normal(0, noise, rows)) * 4))
+    return pd.DataFrame({
+        'x': x, 'label': label, 'probability': probability,
+        'prediction': (probability > 0.5).astype(int),
+        'amount': x * 10, 'estimate': x * 10 + rng.normal(0, noise * 10, rows),
+    })
+"""
+
+
+class PerformanceFlowTest(DBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        block = Block.create(
+            f'{self.pipeline.uuid}_score', 'transformer', self.repo_path, pipeline=self.pipeline,
+        )
+        Path(block.file_path).write_text(textwrap.dedent(MODEL))
+        self.block_uuid = block.uuid
+        self.monitors = Path(self.repo_path, 'monitors')
+        self.monitors.mkdir(exist_ok=True)
+
+    def write(self, name, text):
+        path = self.monitors / f'{self.pipeline.uuid}_{name}.yaml'
+        path.write_text(textwrap.dedent(text).format(
+            pipeline=self.pipeline.uuid, block=self.block_uuid,
+        ))
+        self.addCleanup(path.unlink, missing_ok=True)
+
+    def run_pipeline(self, **variables):
+        run = run_in_process(
+            trigger_pipeline(self.pipeline.uuid, variables=variables), log=lambda _l: None,
+        )
+        block_run = next(b for b in run.block_runs if b.block_uuid == self.block_uuid)
+        return {r['monitor'].rsplit('_', 1)[-1]: r for r in block_run.metrics['monitors']}
+
+    def test_classification_and_regression_metrics_against_the_baseline(self):
+        self.write('classifier', """
+            pipeline: {pipeline}
+            block: {block}
+            columns: [x]
+            performance:
+              target: label
+              prediction: prediction
+              score: probability
+              metrics: [accuracy, f1, roc_auc]
+              min: {{accuracy: 0.7}}
+              max_drop: {{roc_auc: 0.05}}
+            notify: on_change
+        """)
+        self.write('regressor', """
+            pipeline: {pipeline}
+            block: {block}
+            columns: [x]
+            performance:
+              task: regression
+              target: amount
+              prediction: estimate
+              max: {{rmse: 5}}
+        """)
+        first = self.run_pipeline(seed=1, noise=0.0)
+        values = {c['check']: c['value'] for c in first['classifier']['checks']}
+        self.assertEqual(values['accuracy'], 1.0)
+        self.assertEqual(values['roc_auc'], 1.0)
+        # The first run has no baseline: drift holds, and rmse passes its bound.
+        rmse = next(c for c in first['regressor']['checks'] if c['check'] == 'rmse')
+        self.assertEqual((rmse['result'], rmse['value']), ('pass', 0.0))
+
+        worse = self.run_pipeline(seed=2, noise=1.5)
+        failed = {c['check'] for c in worse['classifier']['checks'] if c['result'] == 'fail'}
+        self.assertIn('roc_auc', failed, monitors.summary(worse['classifier']))
+        self.assertTrue(worse['classifier']['should_notify'])
+        regression = {c['check']: c for c in worse['regressor']['checks']}
+        self.assertEqual(regression['rmse']['result'], 'fail')
+
+        # Still failing: on_change does not notify again.
+        again = self.run_pipeline(seed=3, noise=1.5)
+        self.assertEqual(again['classifier']['result'], 'fail')
+        self.assertFalse(again['classifier']['should_notify'])
