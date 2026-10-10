@@ -22,7 +22,6 @@ from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
 from mage_ai.io.sql import BaseSQL
-from mage_ai.shared.ssh import SSHTunnelForwarder
 from mage_ai.shared.utils import clean_name
 
 # Rows per INSERT statement when a unique constraint rules out COPY.
@@ -159,6 +158,9 @@ class Postgres(BaseSQL):
                     ssh_setting['ssh_pkey'] = self.settings['ssh_pkey']
                 else:
                     ssh_setting['ssh_password'] = self.settings['ssh_password']
+
+                # paramiko and sshtunnel load only for a tunnel.
+                from mage_ai.shared.ssh import SSHTunnelForwarder
 
                 self.ssh_tunnel = SSHTunnelForwarder(
                     (self.settings['ssh_host'], int(self.settings['ssh_port'] or 22)),

@@ -117,6 +117,7 @@ jobs:
         with:
           workspaces: |
             rust/column_atlas -> target
+            mage_ai/pipeline_services/service -> target
             mage_ai/data_preparation/models/block/rust/sdk -> target
       - name: Format
         run: cargo fmt --check
@@ -134,6 +135,15 @@ jobs:
       - name: Block SDK tests
         working-directory: mage_ai/data_preparation/models/block/rust/sdk
         run: cargo test --release
+      - name: Pipeline service format
+        working-directory: mage_ai/pipeline_services/service
+        run: cargo fmt --all --check
+      - name: Pipeline service clippy
+        working-directory: mage_ai/pipeline_services/service
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Pipeline service tests
+        working-directory: mage_ai/pipeline_services/service
+        run: cargo test --locked
 
   packaging:
     name: Packaging

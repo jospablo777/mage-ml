@@ -155,3 +155,31 @@ class PolarsToDictSplitTests(TestCase):
         )
         # simplejson decodes bytes as UTF-8 itself; json passes them to default.
         self.assertEqual(json.dumps(b'\x00\xff', default=encode_complex), '"00ff"')
+
+
+class SparseMatrixTests(TestCase):
+    def test_sparse_matrices_round_trip_without_an_eager_scipy_import(self):
+        import subprocess
+        import sys
+
+        # Importing the parsers no longer imports SciPy.
+        loaded = subprocess.run(
+            [sys.executable, '-c', 'import sys, mage_ai.shared.parsers; '
+             'print("scipy" in sys.modules)'],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        self.assertEqual(loaded, 'False')
+
+        import scipy.sparse
+
+        from mage_ai.shared.parsers import (
+            convert_matrix_to_dataframe,
+            deserialize_matrix,
+        )
+
+        matrix = scipy.sparse.csr_matrix([[0, 1], [2, 0]])
+        encoded = encode_complex(matrix)
+        self.assertEqual(encoded['__type__'], 'scipy.sparse.csr_matrix')
+        self.assertEqual((deserialize_matrix(encoded) != matrix).nnz, 0)
+        self.assertEqual(convert_matrix_to_dataframe(matrix).values.tolist(), [[0, 1], [2, 0]])
+        self.assertEqual(convert_matrix_to_dataframe([1]), [1])

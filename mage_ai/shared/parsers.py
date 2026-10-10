@@ -1,6 +1,7 @@
 import base64
 import inspect
 import io
+import sys
 import traceback
 import uuid
 from collections.abc import Generator
@@ -12,12 +13,18 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 import polars as pl
-import scipy
 
 from mage_ai.data_preparation.models.variables.constants import VariableType
 from mage_ai.orchestration.db.models.base import BaseModel
 from mage_ai.shared.complex import is_model_sklearn, is_model_xgboost
 from mage_ai.shared.pandas_utils import missing_as_none
+
+
+def _is_csr_matrix(obj: Any) -> bool:
+    # SciPy is imported only for sparse matrices; an object can be one only once SciPy is
+    # loaded. Importing it here cost every block run a second and pulled it into images.
+    sparse = sys.modules.get('scipy.sparse')
+    return sparse is not None and isinstance(obj, sparse.csr_matrix)
 
 
 def is_numpy_subdtype(dtype, numpy_type) -> bool:
@@ -105,7 +112,7 @@ def encode_complex(obj):
         return obj.to_dicts()
     elif isinstance(obj, (pd.Index, pd.Series, pl.Series)):
         return obj.to_list()
-    elif isinstance(obj, scipy.sparse.csr_matrix):
+    elif _is_csr_matrix(obj):
         return serialize_matrix(obj)
     elif is_model_sklearn(obj) or is_model_xgboost(obj) or inspect.isclass(obj):
         return object_to_uuid(obj)
@@ -180,7 +187,9 @@ def sample_output(obj):
     return obj, False
 
 
-def serialize_matrix(csr_matrix: scipy.sparse._csr.csr_matrix) -> Dict:
+def serialize_matrix(csr_matrix: 'scipy.sparse.csr_matrix') -> Dict:  # noqa: F821
+    import scipy.sparse
+
     with io.BytesIO() as buffer:
         scipy.sparse.save_npz(buffer, csr_matrix)
         buffer.seek(0)
@@ -189,7 +198,9 @@ def serialize_matrix(csr_matrix: scipy.sparse._csr.csr_matrix) -> Dict:
     return {'__type__': 'scipy.sparse.csr_matrix', '__data__': data}
 
 
-def deserialize_matrix(json_dict: Dict) -> scipy.sparse._csr.csr_matrix:
+def deserialize_matrix(json_dict: Dict) -> 'scipy.sparse.csr_matrix':  # noqa: F821
+    import scipy.sparse
+
     data = json_dict['__data__']
     data = base64.b64decode(data.encode('ascii'))
 
@@ -200,8 +211,8 @@ def deserialize_matrix(json_dict: Dict) -> scipy.sparse._csr.csr_matrix:
     return csr_matrix
 
 
-def convert_matrix_to_dataframe(csr_matrix: scipy.sparse.csr_matrix) -> pd.DataFrame:
-    if isinstance(csr_matrix, scipy.sparse.csr_matrix):
+def convert_matrix_to_dataframe(csr_matrix: Any) -> pd.DataFrame:
+    if _is_csr_matrix(csr_matrix):
         n_columns = csr_matrix.shape[1]
         return pd.DataFrame(csr_matrix.toarray(), columns=[str(i) for i in range(n_columns)])
     return csr_matrix

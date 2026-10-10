@@ -33,7 +33,7 @@ class PostgresConnectionTest(unittest.TestCase):
                 self.assertEqual(connect.call_args.kwargs['port'], port)
                 loader.close()
 
-    @patch('mage_ai.io.postgres.SSHTunnelForwarder')
+    @patch('mage_ai.shared.ssh.SSHTunnelForwarder')
     @patch('mage_ai.io.postgres.connect')
     def test_tunnel_uses_loopback_and_an_assigned_port(self, connect, forwarder):
         forwarder.return_value.local_bind_port = 15432
@@ -49,7 +49,7 @@ class PostgresConnectionTest(unittest.TestCase):
         forwarder.return_value.stop.assert_called_once()
         connect.return_value.close.assert_called_once()
 
-    @patch('mage_ai.io.postgres.SSHTunnelForwarder')
+    @patch('mage_ai.shared.ssh.SSHTunnelForwarder')
     @patch('mage_ai.io.postgres.connect', side_effect=OperationalError('connection failed'))
     def test_connection_failure_stops_tunnel(self, connect, forwarder):
         loader = self.loader(connection_method='ssh_tunnel')
@@ -60,7 +60,7 @@ class PostgresConnectionTest(unittest.TestCase):
         forwarder.return_value.stop.assert_called_once()
         self.assertIsNone(loader.ssh_tunnel)
 
-    @patch('mage_ai.io.postgres.SSHTunnelForwarder')
+    @patch('mage_ai.shared.ssh.SSHTunnelForwarder')
     @patch('mage_ai.io.postgres.connect')
     def test_tunnel_failure_stops_tunnel(self, connect, forwarder):
         forwarder.return_value.start.side_effect = RuntimeError('tunnel failed')

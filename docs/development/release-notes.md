@@ -484,6 +484,20 @@ Each item says what changed, which pipelines it affects, and what to do.
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
   `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
+- **Pipeline services: `mage export service PROJECT PIPELINE...`** turns pipelines into a
+  Docker image that runs them without Mage: an HTTP API to start runs (with
+  `?wait=SECONDS` to get the outcome in the same call), schedules, a SQLite run history,
+  logs per block, Prometheus metrics, retries, timeouts and cancellation. The runtime is
+  Rust (`mage_ai/pipeline_services/service`); Python blocks run in long-lived worker
+  processes, and tables pass between blocks as Arrow IPC files. The export pins only the
+  packages the blocks' imports load (18 for a pandas and PostgreSQL pipeline), lists the
+  environment variables the code reads, and takes secrets from the environment, `NAME_FILE`
+  or a directory of secret files, redacting them from logs. `mage-service run PIPELINE`
+  runs once and exits, for cron jobs and Kubernetes Jobs. See
+  `docs/design/pipeline-services.md`.
+- **Faster block imports**: `mage_ai.io.postgres` no longer imports SciPy, paramiko and
+  sshtunnel unless an SSH tunnel or a sparse matrix is used (1.1 s to 0.7 s), and
+  `io_config.yaml` loads secrets support only when it reads a secret.
 - **`mage verify-fusion`** runs a pipeline block by block and fused, compares every
   block's stored outputs and names the first block whose output differs. Floats that differ
   only by rounding are reported as close. See "Verify fusion before turning it on" in

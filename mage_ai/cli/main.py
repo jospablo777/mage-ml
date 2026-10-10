@@ -576,5 +576,60 @@ def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
     print('Rust blocks can build.')
 
 
+export_app = typer.Typer(
+    cls=OrderCommands,
+    help='Export pipelines to run without Mage.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(export_app, name='export')
+
+
+EXPORT_PROJECT_PATH = typer.Argument(..., help='path of the Mage project.')
+EXPORT_PIPELINES = typer.Argument(..., help='uuids of the pipelines to export.')
+
+
+@export_app.command('service')
+def export_service(
+    project_path: str = EXPORT_PROJECT_PATH,
+    pipelines: List[str] = EXPORT_PIPELINES,
+    out: str = typer.Option(..., '--out', '-o', help='directory for the Docker build context.'),
+    name: Union[str, None] = typer.Option(None, help='service name; defaults to the pipeline.'),
+    max_runs: Union[int, None] = typer.Option(
+        None, help='runs of each pipeline at once; defaults to the pipeline setting or 1.',
+    ),
+    build: bool = typer.Option(False, help='also build the Docker image.'),
+    tag: Union[str, None] = typer.Option(None, help='image tag for --build; defaults to the name.'),
+    force: bool = typer.Option(False, help='replace a non-empty output directory.'),
+):
+    """
+    Export pipelines as a standalone Docker service: an HTTP API, schedules, run history
+    and logs, without Mage. Writes a build context with a Dockerfile, compose.yaml and a
+    README that shows how to run and call it.
+    """
+    from mage_ai.pipeline_services import export
+
+    try:
+        captured = export.capture(project_path, pipelines, name=name, max_concurrent_runs=max_runs)
+        out_dir = export.write(captured, out, force=force)
+    except export.ExportError as error:
+        typer.echo('The pipelines cannot be exported:', err=True)
+        for problem in error.problems:
+            typer.echo(f'  - {problem}', err=True)
+        raise typer.Exit(code=1)
+    typer.echo(export.report(captured))
+    typer.echo(f'Build context: {out_dir}')
+    if build:
+        image = tag or captured.name
+        try:
+            export.build_image(out_dir, image)
+        except export.ExportError as error:
+            typer.echo(error.problems[0], err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f'Image {image} is built. Run it with:')
+        typer.echo(f'  docker run --rm -p 8080:8080 -e MAGE_SERVICE_TOKEN=change-me {image}')
+    else:
+        typer.echo(f'Build the image with: docker build -t {captured.name} {out_dir}')
+
+
 if __name__ == '__main__':
     app()

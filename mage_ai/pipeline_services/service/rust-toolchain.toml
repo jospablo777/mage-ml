@@ -1,0 +1,5 @@
+# CI, the Docker image and local builds compile with the same Rust.
+[toolchain]
+channel = "1.98.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
