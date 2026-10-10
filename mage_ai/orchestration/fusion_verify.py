@@ -328,6 +328,11 @@ def _differing_rows(mask, left_values, right_values, what: str) -> Tuple[str, st
     )
 
 
+COLUMN_ORDER_HINT = (
+    'The same columns in another order: the block\'s column order is not deterministic, as '
+    'with a pivot, whose columns follow the order values appear. Select the columns in a '
+    'fixed order.'
+)
 ORDER_HINT = (
     'The same rows in another order: the block\'s output order is not deterministic, so it '
     'depends on how its input is chunked. Sort the output on a unique key, as after a '
@@ -367,6 +372,11 @@ def _compare_pandas(expected, actual) -> Tuple[str, str]:
         expected = expected.to_frame(name=expected.name if expected.name is not None else 0)
         actual = actual.to_frame(name=actual.name if actual.name is not None else 0)
     if list(expected.columns) != list(actual.columns):
+        if (
+            sorted(map(str, expected.columns)) == sorted(map(str, actual.columns))
+            and _compare_pandas(expected, actual[list(expected.columns)])[0] == 'same'
+        ):
+            return 'differs', COLUMN_ORDER_HINT
         return 'differs', (
             f'columns {list(expected.columns)} block by block, {list(actual.columns)} fused'
         )
@@ -422,6 +432,11 @@ def _compare_polars(expected, actual) -> Tuple[str, str]:
     if isinstance(expected, pl.Series):
         expected, actual = expected.to_frame(), actual.to_frame()
     if expected.columns != actual.columns:
+        if (
+            sorted(expected.columns) == sorted(actual.columns)
+            and _compare_polars(expected, actual.select(expected.columns))[0] == 'same'
+        ):
+            return 'differs', COLUMN_ORDER_HINT
         return 'differs', f'columns {expected.columns} block by block, {actual.columns} fused'
     if expected.height != actual.height:
         return 'differs', f'{expected.height} rows block by block, {actual.height} fused'

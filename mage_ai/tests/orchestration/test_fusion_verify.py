@@ -258,6 +258,12 @@ class CompareValuesTest(TestCase):
         pandas_frame = frame.to_pandas()
         result, detail = fusion_verify.compare_values(pandas_frame, pandas_frame.iloc[::-1])
         self.assertIn('same rows in another order', detail)
+        result, detail = fusion_verify.compare_values(frame, frame.select('device', 'session'))
+        self.assertIn('same columns in another order', detail)
+        result, detail = fusion_verify.compare_values(
+            pandas_frame, pandas_frame[['device', 'session']],
+        )
+        self.assertIn('same columns in another order', detail)
         changed = frame.with_columns(pl.Series('device', ['web', 'android', 'ios']))
         self.assertNotIn("another order", fusion_verify.compare_values(frame, changed)[1])
 
