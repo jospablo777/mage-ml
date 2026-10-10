@@ -1016,3 +1016,71 @@ def test_the_same_pipeline_run_twice_in_a_row_is_idempotent(mage_project, pg, pr
     for rows in (3, 3, 2):
         run_pipeline(pipeline, rows=rows)
     assert query(pg, f'SELECT id FROM {profile_schema}.twice ORDER BY id') == [(2,), (4,)]
+
+
+# ---- the notebook ---------------------------------------------------------------------------
+
+
+def test_the_notebook_uses_the_preview_limit_and_runs_use_theirs(
+    mage_project, pg, profile_schema,
+):
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    pipeline = build(mage_project, [
+        dict(
+            uuid='load', type='data_loader', language='sql',
+            config=dict(PG, limit=5, export_write_policy='replace'),
+            code='SELECT g AS id FROM generate_series(1, 50) g ORDER BY g',
+        ),
+    ])
+    block = Pipeline.get(pipeline).get_block(block_uuid(pipeline, 'load'))
+    block.execute_sync(from_notebook=True)
+    preview = Pipeline.get(pipeline).variable_manager.get_variable(
+        pipeline, block.uuid, 'output_0',
+    )
+    assert preview['id'].tolist() == [1, 2, 3, 4, 5]
+
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    assert len(output(pipeline, run, 'load')) == 50
+
+
+def test_block_output_reads_an_upstream_frame_in_a_template(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'id': [1, 2, 3], 'keep': [True, False, True]})
+        '''),
+        dict(
+            uuid='use', type='transformer', language='sql', upstream=['load'],
+            config=dict(PG, export_write_policy='replace'),
+            code='''
+                SELECT g AS id FROM generate_series(1, 3) g
+                WHERE g IN ({{ block_output('@load@', parse=lambda df, *a, **k: ', '.join(
+                    str(i) for i in df[df['keep']]['id'].tolist())) }})
+                ORDER BY g
+            ''',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    assert output(pipeline, run, 'use')['id'].tolist() == [1, 3]
+
+
+def test_without_a_write_policy_a_blocks_table_and_output_accumulate(
+    mage_project, pg, profile_schema,
+):
+    """Append is the default: each run adds its rows, and the output is the whole table."""
+    pipeline = build(mage_project, [
+        dict(
+            uuid='load', type='data_loader', language='sql', config=dict(PG),
+            code='SELECT g AS id FROM generate_series(1, 3) g',
+        ),
+    ])
+    run_pipeline(pipeline)
+    run = run_pipeline(pipeline)
+    assert sorted(output(pipeline, run, 'load')['id'].tolist()) == [1, 1, 2, 2, 3, 3]

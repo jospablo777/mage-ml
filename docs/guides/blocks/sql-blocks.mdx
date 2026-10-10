@@ -64,6 +64,11 @@ There are 4 - 5 fields that must be configured for each SQL block:
 | Replace | Delete the existing data.        |
 | Fail    | Raise an error during execution. |
 
+Append is the default. A SQL block's output, which downstream blocks receive, is its
+whole table. So a data loader or transformer left on Append adds its rows to its table on
+every run, including runs in the notebook, and passes all of them on. Use Replace for
+blocks whose output should be only the current run's rows.
+
 
 #### YAML configuration
 
