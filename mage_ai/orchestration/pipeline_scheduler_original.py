@@ -2,7 +2,7 @@ import collections
 import os
 import traceback
 from datetime import datetime, timedelta
-from typing import Any, Dict, Generator, List, Set, Tuple
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 import pytz
 from dateutil.relativedelta import relativedelta
@@ -662,10 +662,14 @@ class PipelineScheduler:
                 block_uuid=b.block_uuid,
             )
 
+            job_manager = get_job_manager()
+            # Which scheduler process runs the job: a job lost when that process stopped
+            # is an interruption, not a crash of the block.
+            launcher = _launcher(job_manager)
             b.update(
+                metrics=dict(b.metrics or {}, launched_by=launcher) if launcher else b.metrics,
                 status=BlockRun.BlockRunStatus.QUEUED,
             )
-            job_manager = get_job_manager()
             stage = stage_block_runs(
                 self.pipeline, b, self.pipeline_run.block_runs,
             ) if fused else [b]
@@ -936,6 +940,7 @@ class PipelineScheduler:
             ]
         ]
         job_manager = get_job_manager()
+        launcher = _launcher(job_manager)
         crashed_runs = []
         for br in running_or_queued_block_runs:
             if job_manager.has_block_run_job(
@@ -945,17 +950,36 @@ class PipelineScheduler:
             ):
                 continue
             metrics = dict(br.metrics or {})
+            message = None
             if br.status == BlockRun.BlockRunStatus.RUNNING:
-                # Its process died while the block ran: out of memory, a crash in native
-                # code, or a kill. Such a block was run again with no limit, so one that
-                # runs out of memory restarted forever.
-                metrics['crashes'] = int(metrics.get('crashes') or 0) + 1
-            if int(metrics.get('crashes') or 0) >= BLOCK_RUN_MAX_CRASHES:
+                launched_by = metrics.get('launched_by')
+                if launcher and launched_by and launched_by != launcher:
+                    # The scheduler process that ran it stopped (a restart, a deploy, a
+                    # lost replica); the block itself did not crash.
+                    metrics['interruptions'] = int(metrics.get('interruptions') or 0) + 1
+                    self.logger.warning(
+                        f'BlockRun {br.id} (block_uuid: {br.block_uuid}) was interrupted '
+                        f'when the scheduler that ran it ({launched_by}) stopped; it runs '
+                        'again.',
+                        **self.build_tags(block_run_id=br.id, block_uuid=br.block_uuid),
+                    )
+                    if metrics['interruptions'] >= BLOCK_RUN_MAX_INTERRUPTIONS:
+                        message = (
+                            f'The scheduler running this block stopped '
+                            f'{metrics["interruptions"]} times while it ran.'
+                        )
+                else:
+                    # Its process died while the block ran: out of memory, a crash in
+                    # native code, or a kill. Such a block was run again with no limit, so
+                    # one that runs out of memory restarted forever.
+                    metrics['crashes'] = int(metrics.get('crashes') or 0) + 1
+            if message is None and int(metrics.get('crashes') or 0) >= BLOCK_RUN_MAX_CRASHES:
                 message = (
                     f'The process died while this block ran, {metrics["crashes"]} times. '
                     'It may run out of memory or crash in native code; its logs show how '
                     'far it got.'
                 )
+            if message is not None:
                 metrics['error'] = dict(error=message, message=message)
                 br.update(
                     completed_at=datetime.now(tz=pytz.UTC),
@@ -1296,8 +1320,16 @@ def run_integration_stream(
                     )
 
 
+def _launcher(job_manager) -> Optional[str]:
+    """The scheduler process the job manager's queue belongs to, as HOST_<host>_PID_<pid>."""
+    client_id = getattr(getattr(job_manager, 'queue', None), 'client_id', None)
+    return client_id if isinstance(client_id, str) else None
+
+
 # Times a block run's process may die while it runs before the block run fails.
 BLOCK_RUN_MAX_CRASHES = int(os.getenv('MAGE_BLOCK_RUN_MAX_CRASHES') or 3)
+# Scheduler stops (restarts, deploys) while a block runs before the block run fails.
+BLOCK_RUN_MAX_INTERRUPTIONS = int(os.getenv('MAGE_BLOCK_RUN_MAX_INTERRUPTIONS') or 10)
 
 
 def run_block(
@@ -1457,6 +1489,8 @@ def run_stage(
 
     pipeline_scheduler = PipelineScheduler(pipeline_run)
     pipeline_scheduler.attempts[block_run_ids[0]] = first_attempt
+    # The scheduler process that launched this stage launched each block run it claims.
+    launched_by = (BlockRun.get_by_id(block_run_ids[0]).metrics or {}).get('launched_by')
     pipeline = pipeline_scheduler.pipeline
     pipeline_schedule = pipeline_run.pipeline_schedule
     stage = f'{pipeline_run_id}_{block_run_ids[0]}'
@@ -1524,6 +1558,9 @@ def run_stage(
             claimed_next['value'] = next_attempt is not None
             if next_attempt is not None:
                 pipeline_scheduler.attempts[next_id] = next_attempt
+                if launched_by:
+                    next_run = BlockRun.get_by_id(next_id)
+                    next_run.update(metrics=dict(next_run.metrics or {}, launched_by=launched_by))
             pipeline_scheduler.logger.info(
                 f'BlockRun {block_run_id} (block_uuid: {completed_uuid}) completes.',
                 **member_tags,

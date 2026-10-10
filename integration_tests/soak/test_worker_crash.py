@@ -88,96 +88,153 @@ def wait_for(condition, seconds: float, what: str):
     raise AssertionError(f'Timed out waiting for {what}.')
 
 
-@pytest.mark.skipif(
+class Scheduler:
+    """Mage's scheduler process for a project, with its metadata database and results."""
+
+    def __init__(self, postgres_settings, redis_url, tmp_path, fused: bool):
+        suffix = secrets.token_hex(6)
+        self.metadata_db, self.schema = f'crash_meta_{suffix}', f'crash_{suffix}'
+        self.settings = postgres_settings
+        self.tmp_path = tmp_path
+        self.admin = psycopg2.connect(**postgres_settings)
+        self.admin.autocommit = True
+        with self.admin.cursor() as cursor:
+            cursor.execute(f'CREATE DATABASE {self.metadata_db}')
+            cursor.execute(f'CREATE SCHEMA {self.schema}')
+            cursor.execute(
+                f'CREATE TABLE {self.schema}.results (pipeline_uuid text, '
+                'pipeline_run_id bigint, trigger_name text, total bigint, run_in_frame bigint, '
+                'load_pid bigint, export_pid bigint, written_at timestamptz DEFAULT now())'
+            )
+            cursor.execute(f'CREATE TABLE {self.schema}.starts (pid bigint)')
+        root = tmp_path / 'project'
+        write_project(root, fused)
+        settings = postgres_settings
+        self.env = {k: v for k, v in os.environ.items() if k != 'ENV'}
+        self.env.update(
+            MAGE_REPO_PATH=str(root),
+            MAGE_DATA_DIR=str(tmp_path / 'data'),
+            MAGE_DATABASE_CONNECTION_URL=(
+                f"postgresql+psycopg2://{settings['user']}:{settings['password']}@"
+                f"{settings['host']}:{settings['port']}/{self.metadata_db}"
+            ),
+            REDIS_URL=redis_url.rsplit('/', 1)[0] + '/1',
+            SCHEDULER_TRIGGER_INTERVAL='1',
+            PYTHONUNBUFFERED='1',
+            SOAK_SCHEMA=self.schema,
+        )
+        self.root = root
+        self.log = (tmp_path / 'scheduler.log').open('a')
+        self.process = None
+        self.start()
+        self.meta = psycopg2.connect(**dict(settings, dbname=self.metadata_db))
+        self.meta.autocommit = True
+        self.results = psycopg2.connect(**settings)
+        self.results.autocommit = True
+
+    def start(self):
+        self.process = subprocess.Popen(
+            [sys.executable, '-c',
+             'from mage_ai.server.scheduler_manager import run_scheduler; run_scheduler()'],
+            cwd=self.root, env=self.env, stdout=self.log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    def kill(self):
+        """The scheduler and its workers, at once, as a crashed host or a forced deploy."""
+        os.killpg(self.process.pid, signal.SIGKILL)
+        self.process.wait(timeout=30)
+
+    def starts(self):
+        return [pid for (pid,) in query(self.results, f'SELECT pid FROM {self.schema}.starts')]
+
+    def wait_for_completion(self):
+        status = wait_for(
+            lambda: [s for (s,) in query(
+                self.meta, 'SELECT lower(status::text) FROM pipeline_run',
+            ) if s in ('completed', 'failed', 'cancelled')],
+            180, 'the run to finish',
+        )
+        self.log.flush()
+        assert status == ['completed'], (self.tmp_path / 'scheduler.log').read_text()[-4000:]
+
+    def loader_block_run(self):
+        (row,) = query(self.meta, """
+            SELECT attempt, (metrics->>'crashes')::int, (metrics->>'interruptions')::int,
+                lower(status::text)
+            FROM block_run WHERE block_uuid = 'crash_load'
+        """)
+        return row
+
+    def close(self):
+        for connection in (self.meta, self.results):
+            connection.close()
+        if self.process.poll() is None:
+            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                self.process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.process.pid, signal.SIGKILL)
+        self.log.close()
+        with self.admin.cursor() as cursor:
+            cursor.execute(
+                'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s',
+                (self.metadata_db,),
+            )
+            cursor.execute(f'DROP DATABASE IF EXISTS {self.metadata_db}')
+            cursor.execute(f'DROP SCHEMA {self.schema} CASCADE')
+        self.admin.close()
+
+
+SKIP_IN_FUSION_PASS = pytest.mark.skipif(
     bool(os.getenv('MAGE_TEST_SOAK_FUSION')),
     reason='Covers both modes itself; runs once, in the non-fusion soak pass.',
 )
+
+
+@SKIP_IN_FUSION_PASS
 @pytest.mark.parametrize('fused', [False, True], ids=['block_by_block', 'fused'])
 def test_a_killed_worker_is_replaced_and_the_exporter_writes_once(
     fused, postgres_settings, redis_url, tmp_path,
 ):
-    suffix = secrets.token_hex(6)
-    metadata_db, schema = f'crash_meta_{suffix}', f'crash_{suffix}'
-    admin = psycopg2.connect(**postgres_settings)
-    admin.autocommit = True
-    with admin.cursor() as cursor:
-        cursor.execute(f'CREATE DATABASE {metadata_db}')
-        cursor.execute(f'CREATE SCHEMA {schema}')
-        cursor.execute(
-            f'CREATE TABLE {schema}.results (pipeline_uuid text, pipeline_run_id bigint, '
-            'trigger_name text, total bigint, run_in_frame bigint, load_pid bigint, '
-            'export_pid bigint, written_at timestamptz DEFAULT now())'
-        )
-        cursor.execute(f'CREATE TABLE {schema}.starts (pid bigint)')
-    root = tmp_path / 'project'
-    write_project(root, fused)
-    settings = postgres_settings
-    env = {k: v for k, v in os.environ.items() if k != 'ENV'}
-    env.update(
-        MAGE_REPO_PATH=str(root),
-        MAGE_DATA_DIR=str(tmp_path / 'data'),
-        MAGE_DATABASE_CONNECTION_URL=(
-            f"postgresql+psycopg2://{settings['user']}:{settings['password']}@"
-            f"{settings['host']}:{settings['port']}/{metadata_db}"
-        ),
-        REDIS_URL=redis_url.rsplit('/', 1)[0] + '/1',
-        SCHEDULER_TRIGGER_INTERVAL='1',
-        PYTHONUNBUFFERED='1',
-        SOAK_SCHEMA=schema,
-    )
-    log = (tmp_path / 'scheduler.log').open('w')
-    process = subprocess.Popen(
-        [sys.executable, '-c',
-         'from mage_ai.server.scheduler_manager import run_scheduler; run_scheduler()'],
-        cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-    )
-    meta = psycopg2.connect(**dict(settings, dbname=metadata_db))
-    meta.autocommit = True
-    results = psycopg2.connect(**settings)
-    results.autocommit = True
+    scheduler = Scheduler(postgres_settings, redis_url, tmp_path, fused)
     try:
-        first = wait_for(
-            lambda: query(results, f'SELECT pid FROM {schema}.starts'), 120,
-            'the loader to start',
-        )[0][0]
+        first = wait_for(scheduler.starts, 120, 'the loader to start')[0]
         os.kill(first, signal.SIGKILL)
+        scheduler.wait_for_completion()
 
-        status = wait_for(
-            lambda: [s for (s,) in query(
-                meta, 'SELECT lower(status::text) FROM pipeline_run',
-            ) if s in ('completed', 'failed', 'cancelled')],
-            180, 'the run to finish',
-        )
-        log.flush()
-        assert status == ['completed'], (tmp_path / 'scheduler.log').read_text()[-4000:]
-
-        starts = [pid for (pid,) in query(results, f'SELECT pid FROM {schema}.starts')]
+        starts = scheduler.starts()
         assert len(starts) == 2 and starts[1] != first, starts
-        written = query(results, f'SELECT total, load_pid FROM {schema}.results')
+        written = query(
+            scheduler.results, f'SELECT total, load_pid FROM {scheduler.schema}.results',
+        )
         assert written == [(project.CHAIN_TOTAL, starts[1])], written
-
-        (attempt, crashes, block_status), = query(meta, '''
-            SELECT attempt, (metrics->>'crashes')::int, lower(status::text)
-            FROM block_run WHERE block_uuid = 'crash_load'
-        ''')
-        assert block_status == 'completed'
-        assert crashes == 1
+        attempt, crashes, interruptions, status = scheduler.loader_block_run()
+        assert (status, crashes, interruptions) == ('completed', 1, None)
         assert attempt == 2, 'The replacement worker claims the next attempt.'
     finally:
-        for connection in (meta, results):
-            connection.close()
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-        log.close()
-        with admin.cursor() as cursor:
-            cursor.execute(
-                'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s',
-                (metadata_db,),
-            )
-            cursor.execute(f'DROP DATABASE IF EXISTS {metadata_db}')
-            cursor.execute(f'DROP SCHEMA {schema} CASCADE')
-        admin.close()
+        scheduler.close()
+
+
+@SKIP_IN_FUSION_PASS
+def test_a_scheduler_restart_interrupts_a_block_without_counting_a_crash(
+    postgres_settings, redis_url, tmp_path,
+):
+    """
+    The scheduler and its worker are killed while a block runs, and a new scheduler starts:
+    the block runs again as an interruption, not as a crash of the block.
+    """
+    scheduler = Scheduler(postgres_settings, redis_url, tmp_path, fused=False)
+    try:
+        wait_for(scheduler.starts, 120, 'the loader to start')
+        scheduler.kill()
+        scheduler.start()
+        scheduler.wait_for_completion()
+
+        assert len(scheduler.starts()) == 2
+        written = query(scheduler.results, f'SELECT total FROM {scheduler.schema}.results')
+        assert written == [(project.CHAIN_TOTAL,)], written
+        attempt, crashes, interruptions, status = scheduler.loader_block_run()
+        assert (status, crashes, interruptions, attempt) == ('completed', None, 1, 2)
+    finally:
+        scheduler.close()

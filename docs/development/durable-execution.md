@@ -1,8 +1,9 @@
 # Durable execution: block run attempts
 
-Status: block run fencing is implemented (`BlockRun.attempt`, `fusion.claim_block_run`,
+Status: block run fencing and interruption accounting are implemented (`BlockRun.attempt`, `fusion.claim_block_run`,
 `BlockRun.update_if_attempt`) and tested, including a worker killed in a real scheduler
-run (`integration_tests/soak/test_worker_crash.py`). The remaining gaps are listed below.
+run and a scheduler killed and restarted
+(`integration_tests/soak/test_worker_crash.py`). The remaining gaps are listed below.
 
 ## Review of the starter
 
@@ -41,12 +42,16 @@ So the implementation adds attempts to block runs instead of a new queue.
   (FAILED) or a cancel (CANCELLED) changes the status, so the superseded worker's write
   matches nothing.
 - Retrying blocks stops their running jobs before resetting them.
+- Each queued block run records the scheduler process that launched it
+  (`metrics.launched_by`, the queue's `HOST_<host>_PID_<pid>`). A lost job counts as a
+  crash (`MAGE_BLOCK_RUN_MAX_CRASHES`, default 3) only if this scheduler launched it; a
+  block interrupted when its scheduler stopped (a restart, a deploy, a lost replica) runs
+  again and counts as an interruption (`MAGE_BLOCK_RUN_MAX_INTERRUPTIONS`, default 10).
 
 ## Remaining gaps
 
-1. **Restarts count as crashes.** After a scheduler restart every RUNNING block run looks
-   crashed, is run again and counts toward `MAGE_BLOCK_RUN_MAX_CRASHES`; three deploys
-   during a long block fail it.
+1. **Interrupted blocks start over.** A block interrupted by a scheduler restart runs
+   again from the beginning; long blocks need their own checkpoints.
 2. **Stale outputs.** Outputs are stored per partition and block without an attempt, so a
    superseded worker can still overwrite the files of a newer attempt before its status
    write is rejected.

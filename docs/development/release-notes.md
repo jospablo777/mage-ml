@@ -19,6 +19,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   the scheduler gave up on (crash reset, timeout, cancel, retry) no longer overwrites the
   newer state; its result is discarded with a warning. Retrying blocks stops their
   running jobs first. See `docs/development/durable-execution.md`.
+- **Scheduler restarts are not block crashes.** A block run interrupted when the
+  scheduler running it stopped runs again and counts as an interruption
+  (`MAGE_BLOCK_RUN_MAX_INTERRUPTIONS`, default 10). It counted as a crash, so three
+  deploys during a long block failed it as running out of memory.
 - **Set, frozenset and tuple columns keep their type.** A pandas output with such a
   column came back with numpy arrays in it; the values are now stored as tagged JSON and
   read back as sets, frozensets and tuples. The MySQL exporter writes sets as sorted JSON

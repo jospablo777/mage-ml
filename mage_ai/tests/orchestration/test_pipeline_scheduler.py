@@ -854,6 +854,49 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('3 times', block_run.metrics['error']['message'])
 
+    def test_a_block_run_interrupted_by_a_scheduler_stop_is_not_a_crash(self):
+        """
+        After a restart every RUNNING block run looked crashed: three deploys during a long
+        block failed it as running out of memory.
+        """
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        fetch = scheduler._PipelineScheduler__fetch_crashed_block_runs
+        job_manager = pipeline_scheduler_original.get_job_manager()
+        current = job_manager.queue.client_id
+
+        with patch.object(job_manager, 'has_block_run_job', return_value=False), \
+                patch.object(pipeline_scheduler_original, 'BLOCK_RUN_MAX_INTERRUPTIONS', 2):
+            block_run.update(
+                status=BlockRun.BlockRunStatus.RUNNING,
+                metrics=dict(launched_by='HOST_old_PID_1'),
+            )
+            self.assertEqual([b.id for b in fetch()], [block_run.id])
+            block_run.refresh()
+            self.assertEqual(block_run.status, BlockRun.BlockRunStatus.INITIAL)
+            self.assertEqual(block_run.metrics['interruptions'], 1)
+            self.assertNotIn('crashes', block_run.metrics)
+
+            # Launched by this scheduler: its process died, a crash.
+            block_run.update(
+                status=BlockRun.BlockRunStatus.RUNNING,
+                metrics=dict(block_run.metrics, launched_by=current),
+            )
+            fetch()
+            block_run.refresh()
+            self.assertEqual(block_run.metrics['crashes'], 1)
+
+            block_run.update(
+                status=BlockRun.BlockRunStatus.RUNNING,
+                metrics=dict(block_run.metrics, launched_by='HOST_old_PID_2'),
+            )
+            self.assertEqual(fetch(), [])
+        block_run.refresh()
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
+        self.assertIn('stopped 2 times', block_run.metrics['error']['message'])
+
     def test_on_block_failure_allow_blocks_to_fail(self):
         pipeline_run = create_pipeline_run_with_schedule(
             pipeline_uuid='test_pipeline',
