@@ -865,9 +865,11 @@ class PipelineSchedulerTests(DBTestCase):
         block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
         fetch = scheduler._PipelineScheduler__fetch_crashed_block_runs
         job_manager = pipeline_scheduler_original.get_job_manager()
-        current = job_manager.queue.client_id
+        # This scheduler's id; other tests may leave the job manager with a mock queue.
+        current = 'HOST_test_PID_1'
 
         with patch.object(job_manager, 'has_block_run_job', return_value=False), \
+                patch.object(pipeline_scheduler_original, '_launcher', return_value=current), \
                 patch.object(pipeline_scheduler_original, 'BLOCK_RUN_MAX_INTERRUPTIONS', 2):
             block_run.update(
                 status=BlockRun.BlockRunStatus.RUNNING,
