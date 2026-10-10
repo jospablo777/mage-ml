@@ -105,6 +105,13 @@ class RustBlockTest(DBTestCase):
             with self.subTest(template=f'{folder}/{name}'):
                 code = template_env.get_template(f'{folder}/rust/{name}').render(code='')
                 block_type = folders[folder]
+                if name == 'postgres.rs':
+                    # Needs a database: compiled here, run by integration_tests/postgres.
+                    prepared = rust_build.prepare(
+                        code, block_type, f'template_{folder}_postgres', self.rust_repo,
+                    )
+                    rust_build.build(prepared)
+                    continue
                 if block_type in (BlockType.DATA_LOADER, BlockType.CUSTOM, BlockType.CONDITIONAL):
                     inputs = []
                 elif name == 'join.rs':

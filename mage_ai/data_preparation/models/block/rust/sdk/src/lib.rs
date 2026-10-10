@@ -24,6 +24,8 @@
 pub mod context;
 pub mod extract;
 pub mod output;
+#[cfg(feature = "postgres")]
+pub mod postgres;
 pub mod protocol;
 pub mod runtime;
 

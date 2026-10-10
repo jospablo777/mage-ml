@@ -228,6 +228,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "block_peaceful_lake_4a66a30d"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "block_rust_engagement_score_7f710446"
 version = "0.0.0"
 dependencies = [

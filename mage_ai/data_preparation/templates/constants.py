@@ -830,8 +830,16 @@ RUST_TEMPLATES = [
         'Load JSON records from an HTTP API into a table.',
     ),
     _rust_template(
+        BlockType.DATA_LOADER, 'PostgreSQL', 'postgres.rs',
+        'Read a query from PostgreSQL with binary COPY, with exact types.', [GROUP_DATABASES],
+    ),
+    _rust_template(
         BlockType.DATA_EXPORTER, 'Local file', 'file.rs',
         'Write a Parquet (zstd) or CSV file.', [GROUP_FILES],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'PostgreSQL', 'postgres.rs',
+        'Write a table to PostgreSQL with binary COPY, in one transaction.', [GROUP_DATABASES],
     ),
     _rust_template(
         BlockType.DATA_EXPORTER, 'API', 'api.rs',

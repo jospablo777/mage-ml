@@ -70,12 +70,13 @@ def _run_binary(
     cwd: str,
     timeout: Optional[int],
     relabel: Callable[[str], str] = lambda line: line,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> int:
     """Runs the block, printing its output as it comes; stops it with its children."""
     process = subprocess.Popen(
         [binary, job_dir],
         cwd=cwd,
-        env=_process_env(),
+        env={**_process_env(), **(extra_env or {})},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -140,8 +141,13 @@ def execute_rust_code(
     pipeline_uuid: str = None,
     execution_partition: str = None,
     label: str = None,
+    io_config: Optional[Dict] = None,
 ) -> RustRun:
-    """Builds the code as a block of block_type when it changed, then runs it."""
+    """
+    Builds the code as a block of block_type when it changed, then runs it. io_config is
+    the block's rendered io_config profile, which mage::postgres connects with; it goes to
+    the process in its environment, never to a file.
+    """
     if block_type not in EXECUTABLE_BLOCK_TYPES:
         raise RustBlockError(f'Rust blocks cannot be {block_type} blocks.')
     try:
@@ -186,6 +192,8 @@ def execute_rust_code(
             cwd,
             _settings_int('MAGE_RUST_TIMEOUT_SECONDS'),
             relabel=lambda line: _relabel(line, prepared, job_dir),
+            extra_env=dict(MAGE_IO_CONFIG=json.dumps(io_config, default=str))
+            if io_config else None,
         )
         seconds = time.monotonic() - started
         if exit_code != 0:
@@ -222,6 +230,28 @@ def execute_rust_code(
         )
     finally:
         shutil.rmtree(job_dir, ignore_errors=True)
+
+
+def block_io_config(block) -> Optional[Dict]:
+    """
+    The block's io_config profile (data_provider_profile, or default), rendered with its
+    variables and secrets; None when the project has no io_config.yaml or no such profile.
+    """
+    from mage_ai.io.config import ConfigFileLoader
+
+    repo_path = getattr(block, 'repo_path', None)
+    if not repo_path:
+        return None
+    path = os.path.join(repo_path, 'io_config.yaml')
+    if not os.path.isfile(path):
+        return None
+    profile = (block.configuration or {}).get('data_provider_profile') or 'default'
+    try:
+        loader = ConfigFileLoader(path, profile)
+    except Exception:
+        return None
+    config = getattr(loader, 'config', None) or {}
+    return {str(key): value for key, value in config.items() if value is not None}
 
 
 def _replayed_test(result: Dict) -> Callable:
@@ -264,6 +294,7 @@ class RustBlock(Block):
             label=label,
             pipeline_uuid=self.pipeline_uuid,
             repo_path=self.repo_path,
+            io_config=block_io_config(self),
         )
         # The tests ran in Rust with the output; run_tests reports them as Mage reports
         # the tests of Python blocks, after the output is stored.
