@@ -222,6 +222,9 @@ jobs:
       # The same with block fusion: chains run as stages, through crashes and retries.
       - name: Run the scheduler soak test with block fusion
         run: make -C integration_tests test-soak-fusion
+      - name: Failed tests
+        if: failure()
+        run: python3 scripts/junit_annotations.py integration_tests/results.xml
       - name: Service logs
         if: failure()
         run: docker compose -f integration_tests/compose.yaml logs
@@ -270,9 +273,12 @@ jobs:
             mage_ai/tests/data_preparation/sync
       - name: Run unit tests
         run: |
-          python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests
+          python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests --junitxml=unit-results.xml
         env:
           OPENAI_API_KEY: abcdefg
+      - name: Failed tests
+        if: failure()
+        run: python3 scripts/junit_annotations.py unit-results.xml
       # Run Playwright once per matrix.
       - name: Set up Node
         uses: actions/setup-node@v6

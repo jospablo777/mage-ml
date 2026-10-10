@@ -1,4 +1,5 @@
 import os
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -123,6 +124,8 @@ Cache the triggers config by pipeline uuid
   Value: {"updated_at": xxx, "triggers": []}
 """
 triggers_cache = dict()
+# How old triggers.yaml must be before its mtime and size identify its content.
+CACHE_SETTLE_NS = 2_000_000_000
 
 
 def get_triggers_file_path(
@@ -190,22 +193,18 @@ def get_triggers_by_pipeline_with_cache(
         repo_path=repo_path,
     )
 
-    if not os.path.exists(trigger_file_path):
+    try:
+        stat = os.stat(trigger_file_path)
+    except FileNotFoundError:
         return [], False
+    trigger_file_updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    signature = (stat.st_mtime_ns, stat.st_size)
 
-    trigger_file_updated_at = datetime.fromtimestamp(
-        os.path.getmtime(trigger_file_path),
-        tz=timezone.utc,
-    )
-
-    if trigger_file_path in triggers_cache:
-        # Try reading triggers from cache first
-        triggers_config = triggers_cache[trigger_file_path]
-        last_updated_at = triggers_config.get('updated_at')
-        triggers = triggers_config.get('triggers')
-        if last_updated_at and triggers and last_updated_at >= trigger_file_updated_at:
-            # Trigger file not modified since last time
-            return triggers, True
+    cached = triggers_cache.get(trigger_file_path)
+    # A file written within the file system's timestamp granularity of an earlier write
+    # keeps its mtime, so a signature is trusted only once the file is older than that.
+    if cached and cached.get('stable') and cached.get('signature') == signature:
+        return cached['triggers'], True
 
     try:
         content = load_triggers_file_content(
@@ -221,6 +220,8 @@ def get_triggers_by_pipeline_with_cache(
         triggers_cache[trigger_file_path] = {
             'updated_at': trigger_file_updated_at,
             'triggers': triggers,
+            'signature': signature,
+            'stable': time.time_ns() - stat.st_mtime_ns > CACHE_SETTLE_NS,
         }
     except Exception:
         traceback.print_exc()

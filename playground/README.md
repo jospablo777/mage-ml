@@ -100,6 +100,20 @@ the exported tables with their row counts.
   unchanged code start at once. The Cargo workspace is `shop_lab/rust`.
 - **Types**: decimals, zoned timestamps, nullable integers, uuid, jsonb, text[] and NaN
   are all in the data; check them in the outputs and in the exported tables.
+- **Pipeline services**: export a pipeline as a Docker service that runs without Mage,
+  and run it once against the playground database. From the repository root:
+
+  ```bash
+  mage export service playground/shop_lab rust_session_scores --out /tmp/rust-scores
+  docker build -t rust-scores /tmp/rust-scores
+  docker run --rm --network mage-playground_default \
+    -e PGHOST=postgres -e PGPORT=5432 -e PGUSER=mage -e PGPASSWORD=mage \
+    -e PGDATABASE=playground rust-scores run rust_session_scores
+  ```
+
+  It writes `analytics.rust_session_scores`, the same rows as the pipeline run in Mage.
+  Without `run`, the service starts its HTTP API; see
+  [Pipeline services](../docs/production/pipeline-services.mdx).
 
 ## Reset
 
