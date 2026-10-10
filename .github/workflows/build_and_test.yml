@@ -214,6 +214,11 @@ jobs:
           fi
       # Same target as a local run. It starts the services in integration_tests/compose.yaml
       # and fails when any test is skipped.
+      # Separate steps so a failure names its stage in the run's summary.
+      - name: Start the integration services
+        run: make -C integration_tests up
+      - name: Install the R test environment
+        run: make -C integration_tests r-env
       - name: Run integration tests
         run: make -C integration_tests ci PYTEST_ARGS='-n 4'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
@@ -225,6 +230,11 @@ jobs:
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py integration_tests/results.xml
+      - name: Service states
+        if: failure()
+        run: >-
+          docker compose -f integration_tests/compose.yaml ps --all --format json
+          | python3 scripts/compose_states.py
       - name: Service logs
         if: failure()
         run: docker compose -f integration_tests/compose.yaml logs
