@@ -21,6 +21,7 @@ from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.block.rust import (
     RustBlock,
     RustBlockError,
+    RustConditionalBlock,
 )
 from mage_ai.data_preparation.models.block.rust import build as rust_build
 from mage_ai.data_preparation.models.block.rust import execute_rust_code
@@ -89,6 +90,7 @@ class RustBlockTest(DBTestCase):
         data_file = os.path.join(self.rust_repo, 'data.parquet')
         frame.write_parquet(data_file)
         folders = {
+            'conditionals': BlockType.CONDITIONAL,
             'custom': BlockType.CUSTOM,
             'data_exporters': BlockType.DATA_EXPORTER,
             'data_loaders': BlockType.DATA_LOADER,
@@ -103,7 +105,7 @@ class RustBlockTest(DBTestCase):
             with self.subTest(template=f'{folder}/{name}'):
                 code = template_env.get_template(f'{folder}/rust/{name}').render(code='')
                 block_type = folders[folder]
-                if block_type in (BlockType.DATA_LOADER, BlockType.CUSTOM):
+                if block_type in (BlockType.DATA_LOADER, BlockType.CUSTOM, BlockType.CONDITIONAL):
                     inputs = []
                 elif name == 'join.rs':
                     inputs = [frame, customers]
@@ -122,6 +124,8 @@ class RustBlockTest(DBTestCase):
                     ),
                 )
                 self.assertTrue(all(test['passed'] for test in run.tests), run.tests)
+                if block_type == BlockType.CONDITIONAL:
+                    self.assertEqual(run.outputs, [True])
         # The API exporter sent every row, in batches of 3.
         self.assertEqual([len(batch) for batch in self.received], [3, 1])
 
@@ -303,6 +307,59 @@ class RustBlockTest(DBTestCase):
         self.assertIn('transformers/broken.rs:3', plain(reports['broken'].error))
         again = project.build_all(repo, stream=False)
         self.assertTrue([report.cached for report in again if report.ok] == [True])
+
+    def test_a_rust_condition_decides_whether_its_block_runs(self):
+        pipeline = Pipeline.create('rust condition', repo_path=self.repo_path)
+        loader = Block.create('rows', BlockType.DATA_LOADER, self.repo_path, pipeline=pipeline)
+        with open(loader.file_path, 'w') as file:
+            file.write(
+                'import polars as pl\n'
+                '@data_loader\n'
+                'def load(**kwargs):\n'
+                "    return pl.DataFrame({'value': [1.0, 2.0, 3.0]})\n",
+            )
+        Block.create(
+            'consumer',
+            BlockType.TRANSFORMER,
+            self.repo_path,
+            pipeline=pipeline,
+            upstream_block_uuids=['rows'],
+        )
+        condition = Block.create(
+            'enough_rows',
+            BlockType.CONDITIONAL,
+            self.repo_path,
+            language=BlockLanguage.RUST,
+            pipeline=pipeline,
+        )
+        self.assertIsInstance(condition, RustConditionalBlock)
+        self.assertTrue(condition.file_path.endswith('.rs'))
+        self.assertIn('fn condition(vars: Vars) -> Result<bool>', open(condition.file_path).read())
+        with open(condition.file_path, 'w') as file:
+            file.write(
+                'use mage::prelude::*;\n\n'
+                'fn condition(data: DataFrame, vars: Vars) -> Result<bool> {\n'
+                '    let minimum: usize = vars.get_or("minimum", 1)?;\n'
+                '    println!("{} rows", data.height());\n'
+                '    Ok(data.height() >= minimum)\n'
+                '}\n',
+            )
+        pipeline.add_block(condition)
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        pipeline.get_block('rows').execute_sync()
+        condition = pipeline.get_block('enough_rows', block_type=BlockType.CONDITIONAL)
+        self.assertIsInstance(condition, RustConditionalBlock)
+        parent = pipeline.get_block('consumer')
+        self.assertTrue(condition.execute_conditional(parent, global_vars={'minimum': 3}))
+        self.assertFalse(condition.execute_conditional(parent, global_vars={'minimum': 4}))
+
+        with open(condition.file_path, 'w') as file:
+            file.write('use mage::prelude::*;\n\nfn condition() -> Result<()> {\n    Ok(())\n}\n')
+        condition = Pipeline.get(pipeline.uuid, repo_path=self.repo_path).get_block(
+            'enough_rows', block_type=BlockType.CONDITIONAL,
+        )
+        with self.assertRaisesRegex(RustBlockError, 'A conditional block returns a bool'):
+            condition.execute_conditional(parent, global_vars={})
 
     def test_a_python_to_rust_to_python_pipeline(self):
         pipeline = Pipeline.create('rust pipeline', repo_path=self.repo_path)

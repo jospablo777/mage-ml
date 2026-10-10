@@ -144,7 +144,10 @@ function AddonBlock({
     pipelineType,
     {
       blockTemplatesByBlockType,
-      languages: [BlockLanguageEnum.PYTHON],
+      // Conditions can be written in Rust too.
+      languages: BlockTypeEnum.CONDITIONAL === addOnBlockType
+        ? [BlockLanguageEnum.PYTHON, BlockLanguageEnum.RUST]
+        : [BlockLanguageEnum.PYTHON],
       showBrowseTemplates,
     },
   ), [

@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.block import Block, ConditionalBlock
 from mage_ai.data_preparation.models.block.rust import build as rust_build
 from mage_ai.data_preparation.models.block.rust import exchange
 from mage_ai.data_preparation.models.block.rust import inputs as rust_inputs
@@ -27,11 +27,11 @@ from mage_ai.data_preparation.models.block.rust.source import RustSourceError
 from mage_ai.data_preparation.models.constants import BlockType
 from mage_ai.shared.processes import HAS_PROCESS_GROUPS, stop_process_group
 
-# Conditional blocks run through ConditionalBlock.execute_conditional; Rust conditionals
-# come with their own scheduler tests.
 BLOCK_TYPES = (
     BlockType.CUSTOM, BlockType.DATA_EXPORTER, BlockType.DATA_LOADER, BlockType.TRANSFORMER,
 )
+# Conditional blocks run through RustConditionalBlock.execute_conditional.
+EXECUTABLE_BLOCK_TYPES = BLOCK_TYPES + (BlockType.CONDITIONAL,)
 JOB_API_VERSION = 1
 
 
@@ -142,7 +142,7 @@ def execute_rust_code(
     label: str = None,
 ) -> RustRun:
     """Builds the code as a block of block_type when it changed, then runs it."""
-    if block_type not in BLOCK_TYPES:
+    if block_type not in EXECUTABLE_BLOCK_TYPES:
         raise RustBlockError(f'Rust blocks cannot be {block_type} blocks.')
     try:
         prepared = rust_build.prepare(code, block_type, block_uuid, repo_path, label=label)
@@ -309,3 +309,58 @@ class RustBlock(Block):
         # The tests are Rust functions; updating them would run the block's code as Python.
         kwargs['update_tests'] = False
         return super().run_tests(*args, **kwargs)
+
+
+class RustConditionalBlock(ConditionalBlock):
+    """A condition written in Rust: `fn condition(...) -> Result<bool>`."""
+
+    def execute_conditional(
+        self,
+        parent_block: Block,
+        dynamic_block_index: Optional[int] = None,
+        dynamic_upstream_block_uuids: Optional[List[str]] = None,
+        execution_partition: Optional[str] = None,
+        global_vars: Optional[Dict] = None,
+        logger=None,
+        logging_tags: Optional[Dict] = None,
+        **kwargs,
+    ) -> bool:
+        with self._redirect_streams(logger=logger, logging_tags=logging_tags):
+            global_vars = self._create_global_vars(
+                global_vars,
+                parent_block,
+                dynamic_block_index=dynamic_block_index,
+                **kwargs,
+            )
+            variables = global_vars.copy()
+            input_vars = []
+            if parent_block is not None:
+                input_vars, kwargs_vars, _ = parent_block.fetch_input_variables(
+                    None,
+                    execution_partition=execution_partition,
+                    global_vars=global_vars,
+                    dynamic_block_index=dynamic_block_index,
+                    dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                )
+                for kwargs_var in kwargs_vars:
+                    variables.update(kwargs_var)
+            label = None
+            if self.file_path and self.repo_path:
+                label = os.path.relpath(self.file_path, self.repo_path)
+            run = execute_rust_code(
+                BlockType.CONDITIONAL,
+                self.content or '',
+                block_uuid=self.uuid,
+                execution_partition=execution_partition,
+                global_vars=variables,
+                input_vars=input_vars,
+                label=label,
+                pipeline_uuid=self.pipeline_uuid,
+                repo_path=self.repo_path,
+            )
+            decisions = [value for value in run.outputs if isinstance(value, bool)]
+            if not decisions:
+                raise RustBlockError(
+                    f'The condition {self.uuid} returned no decision; it must return bool.',
+                )
+            return all(decisions)

@@ -117,7 +117,7 @@ def fetch_template_source(
     elif block_type == BlockType.CALLBACK:
         template_source = __fetch_callback_templates()
     elif block_type == BlockType.CONDITIONAL:
-        template_source = __fetch_conditional_templates()
+        template_source = __fetch_conditional_templates(language)
 
     return template_source
 
@@ -354,8 +354,10 @@ def __fetch_callback_templates() -> str:
     )
 
 
-def __fetch_conditional_templates() -> str:
+def __fetch_conditional_templates(language: BlockLanguage = BlockLanguage.PYTHON) -> str:
     template_path = 'conditionals/base.jinja'
+    if language == BlockLanguage.RUST:
+        template_path = 'conditionals/rust/default.rs'
     return (
         template_env.get_template(template_path).render()
         + '\n'

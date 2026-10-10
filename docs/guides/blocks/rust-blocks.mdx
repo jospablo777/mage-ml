@@ -22,7 +22,8 @@ parse many files.
 ## Add a Rust block
 
 1. Open a pipeline.
-2. Add a data loader, transformer, data exporter or custom block.
+2. Add a data loader, transformer, data exporter or custom block, or a conditional from a
+   block's Conditionals panel.
 3. Select **Rust**, then a template.
 4. Run the block. The first build of a project compiles Polars and takes a few minutes;
    after that a block compiles in about a second.
@@ -40,6 +41,7 @@ Each block type has one function, found by name:
 | Transformer | `fn transform` |
 | Data exporter | `fn export_data` |
 | Custom | `fn custom` |
+| Conditional | `fn condition`, returning `bool` |
 
 Functions whose names start with `test_` are the block's tests. They receive the output and
 fail the block when they return an error.
@@ -112,6 +114,21 @@ use mage::prelude::*;
 fn custom(vars: Vars, context: BlockContext) -> Result<Value> {
     println!("Running {} in pipeline {:?}", context.block_uuid, context.pipeline_uuid);
     Ok(json!({ "variables": vars.raw().len() }))
+}
+```
+
+### Conditional block
+
+Add a conditional from a block's **Conditionals** panel and pick **Rust**. The condition
+gets the same upstream outputs as the block it is attached to, and that block runs only
+when every condition returns `true`.
+
+```rust
+use mage::prelude::*;
+
+fn condition(data: DataFrame, vars: Vars) -> Result<bool> {
+    let minimum: usize = vars.get_or("minimum", 1)?;
+    Ok(data.height() >= minimum)
 }
 ```
 
@@ -194,6 +211,7 @@ with the same version and the features you need.
 | Transformer | Generic, clean, aggregate, join, window features, parallel (Rayon) |
 | Data exporter | Generic, local file, HTTP API (batched JSON) |
 | Custom | Generic |
+| Conditional | Generic |
 
 The parallel template computes a value per row on every core with Rayon, for logic Polars
 expressions cannot express.
