@@ -307,7 +307,8 @@ def markdown(results: Dict, summary: Dict) -> str:
         '# Pipeline benchmark',
         '',
         f'Run from {results["started_at"]} to {results.get("finished_at", "?")}, on '
-        f'{machine["processor"]} ({machine["cpus"]} cores, {machine["memory_gb"]} GB), '
+        f'{machine["processor"]} ({machine["cpus"]} cores, {machine["memory_gb"]} GB, '
+        f'{machine.get("memory_available_gb", "?")} GB available at the start), '
         f'{machine["platform"]}.',
         f'Python {machine["python"]}, '
         + ', '.join(f'{k} {v}' for k, v in machine['packages'].items() if v)

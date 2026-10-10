@@ -45,6 +45,25 @@ The process of a cached Rust block now starts in about 10 ms. Inside a fused sta
 Rust block on 1 million rows spends about 10 ms writing its input, 30 to 50 ms in its
 process and 10 ms reading its output.
 
+## Cold starts and one binary per service
+
+A Rust block's binary links Polars statically, about 75 MB. After a couple of minutes
+idle, a run loads each block's binary from disk again (and macOS checks it again): the
+5-block Rust pipeline as an exported service took 350 to 413 ms cold against 45 to 50 ms
+warm, the first phase of each block 20 times slower. Pipelines triggered every few
+minutes or hours always start cold.
+
+Exported services now link all their Rust blocks into one binary, `mage-blocks`, which
+runs the block `MAGE_BLOCK` names (5e9f58ceb). The block's code stays its crate's root,
+compiled as a library. Measured on the same pipeline, 20,000 rows:
+
+| Service binaries | Size | Warm run | Run after 130 s idle |
+| --- | --- | --- | --- |
+| One per block | 361 MB | 44 to 53 ms | 350 to 372 ms |
+| One for all blocks | 73 MB | 42 to 50 ms | 143 to 145 ms |
+
+Mage's own runs keep a binary per block: a block edited in the editor rebuilds alone.
+
 ## What was evaluated and not done
 
 - **One binary for a chain of Rust blocks**, passing frames and lazy plans in memory.

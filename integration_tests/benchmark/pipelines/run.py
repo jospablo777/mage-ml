@@ -373,6 +373,7 @@ def machine() -> Dict:
         processor=_version(['sysctl', '-n', 'machdep.cpu.brand_string']) or platform.processor(),
         cpus=os.cpu_count(),
         memory_gb=round(psutil.virtual_memory().total / 2**30, 1),
+        memory_available_gb=round(psutil.virtual_memory().available / 2**30, 1),
         python=platform.python_version(),
         packages={name: package(name) for name in ('pandas', 'polars', 'pyarrow', 'numpy')},
         r=_version(['Rscript', '--version']),
