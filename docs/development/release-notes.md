@@ -34,6 +34,7 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Raw SQL recognizes `CREATE OR REPLACE TABLE`, `CREATE TEMP TABLE` and `CREATE TABLE
   ... AS` without parentheses** as creating a table, and passes that table on; it passed
   the statement's status.
+- **MySQL appends write columns by name** too.
 - **DuckDB appends write columns by name** (`INSERT ... BY NAME`), and a DuckDB SQL block
   closes its connection when it fails, which kept the database file from other
   connections of the process.

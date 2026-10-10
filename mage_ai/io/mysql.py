@@ -125,6 +125,20 @@ class MySQL(BaseSQL):
             return f"`{schema_name.replace('`', '``')}`.{name}"
         return name
 
+    def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:
+        """
+        INSERT ... SELECT by column name: by position, a query whose columns came in
+        another order wrote values into the wrong columns.
+        """
+        cursor.execute(f'SELECT * FROM ({query_string}) AS mage_append_query LIMIT 0')
+        names = [d[0] for d in cursor.description]
+        cursor.fetchall()
+        columns = ', '.join('`' + name.replace('`', '``') + '`' for name in names)
+        return (
+            f'INSERT INTO {full_table_name} ({columns})\n'
+            f'SELECT {columns} FROM ({query_string}) AS mage_append_query'
+        )
+
     def open(self) -> None:
         with self.printer.print_msg('Opening connection to MySQL database'):
             self._ctx = connect(**self.settings)
