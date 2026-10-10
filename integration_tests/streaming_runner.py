@@ -26,19 +26,32 @@ def _run_trigger(pipeline_run_id, variables):
 
 
 class Run:
-    def __init__(self, process, messages=None):
+    def __init__(self, process, messages=None, pipeline_run=None):
         self.process = process
         self.messages = messages if messages is not None else []
+        self.pipeline_run = pipeline_run
 
     def text(self):
         lines = []
         for message in list(self.messages):
             value = message.get('message')
             lines.extend(value if isinstance(value, list) else [str(value)])
+        if self.pipeline_run is not None:
+            # A trigger's run sends no messages; its logs say what it did.
+            lines.extend(_run_logs(self.pipeline_run))
         return '\n'.join(lines)
 
     def check_alive(self):
         assert self.process.is_alive(), f'The pipeline stopped:\n{self.text()[-4000:]}'
+
+
+def _run_logs(pipeline_run):
+    try:
+        pipeline_run.refresh()
+        logs = [*pipeline_run.logs, *(b.logs for b in pipeline_run.block_runs)]
+    except Exception as error:
+        return [f'(the run logs could not be read: {error})']
+    return [log.get('content') or '' for log in logs if isinstance(log, dict)]
 
 
 @contextmanager
@@ -52,7 +65,7 @@ def streaming_pipeline(pipeline_uuid, mode, **variables):
         process = multiprocessing.Process(
             target=_run_trigger, args=(pipeline_run.id, pipeline_run.get_variables()),
         )
-        run = Run(process)
+        run = Run(process, pipeline_run=pipeline_run)
     else:
         from mage_ai.server.websocket_server import run_pipeline
 

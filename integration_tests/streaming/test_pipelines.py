@@ -39,15 +39,38 @@ def kafka_topics(kafka_bootstrap):
     admin.close()
 
 
-def read_topic(bootstrap, topic, count, timeout_ms=1000):
-    from kafka import KafkaConsumer
+def read_topic(bootstrap, topic, count, timeout_s=10):
+    """
+    The topic's messages once it holds count of them, else None. It reads every partition
+    up to its end offset, assigned directly: a consumer that joins a group can take more
+    than a second to get its partitions under load, and one that stopped after a second
+    without messages read nothing, every time.
+    """
+    import time
+
+    from kafka import KafkaConsumer, TopicPartition
 
     consumer = KafkaConsumer(
-        topic, bootstrap_servers=bootstrap, auto_offset_reset='earliest',
-        consumer_timeout_ms=timeout_ms, value_deserializer=json.loads,
+        bootstrap_servers=bootstrap, enable_auto_commit=False, value_deserializer=json.loads,
     )
-    values = [m.value for m in consumer]
-    consumer.close()
+    try:
+        partitions = [
+            TopicPartition(topic, p) for p in sorted(consumer.partitions_for_topic(topic) or [])
+        ]
+        if not partitions:
+            return None
+        consumer.assign(partitions)
+        consumer.seek_to_beginning(*partitions)
+        ends = consumer.end_offsets(partitions)
+        values = []
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline and any(
+            consumer.position(p) < ends[p] for p in partitions
+        ):
+            for messages in consumer.poll(timeout_ms=500).values():
+                values.extend(m.value for m in messages)
+    finally:
+        consumer.close()
     return values if len(values) >= count else None
 
 
