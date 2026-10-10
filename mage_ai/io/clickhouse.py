@@ -153,9 +153,14 @@ class ClickHouse(BaseSQLDatabase):
         query_string = self._clean_query(query_string)
 
         with self.printer.print_msg(print_message):
-            return self.client.query_df(
-                self._enforce_limit(query_string, limit), **kwargs
-            )
+            query = self._enforce_limit(query_string, limit)
+            frame = self.client.query_df(query, **kwargs)
+            if len(frame.columns) == 0:
+                # clickhouse-connect returns an empty result without its columns; DESCRIBE
+                # names them.
+                described = self.client.query(f'DESCRIBE ({query})')
+                frame = DataFrame(columns=[row[0] for row in described.result_rows])
+            return frame
 
     def get_type(self, column: Series, dtype: str = None) -> str:
         return clickhouse_types.nullable(clickhouse_types.column_type(column))
@@ -266,8 +271,16 @@ CREATE TABLE IF NOT EXISTS {full_name} ENGINE = {TABLE_ENGINE} EMPTY AS
 {query_string}
 """)
 
+                columns = ''
+                if not should_create_table:
+                    # By column name: by position, a query whose columns came in another
+                    # order wrote values into the wrong columns of the existing table.
+                    described = self.client.query(f'DESCRIBE ({query_string})')
+                    columns = '(' + ', '.join(
+                        clickhouse_types.quote(row[0]) for row in described.result_rows
+                    ) + ')'
                 self.client.command(f"""
-INSERT INTO {full_name}
+INSERT INTO {full_name} {columns}
 {query_string}
 """)
             else:
