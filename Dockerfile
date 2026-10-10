@@ -107,6 +107,21 @@ COPY --from=python-build /opt/mage /opt/mage
 COPY --from=python-build /opt/mage-livy /opt/mage-livy
 COPY --from=python-build /root/.sparkmagic /root/.sparkmagic
 COPY --chmod=0755 scripts/install_other_dependencies.py scripts/run_app.sh /app/
+# Rust blocks compile in the container. The image has the toolchain and the compiled
+# dependencies of Mage's `mage` crate, built once here, so a project's first Rust block
+# compiles in seconds; the warm-up block itself is removed.
+COPY --from=python-build /opt/rustup /opt/rustup
+COPY --from=python-build /opt/cargo /opt/cargo
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH="/opt/cargo/bin:$PATH" \
+    MAGE_RUST_TARGET_DIR=/opt/mage-rust/target
+RUN mkdir -p /tmp/rust-warmup/transformers && \
+    printf 'use mage::prelude::*;\n\nfn transform(data: LazyFrame) -> LazyFrame {\n    data\n}\n' \
+      > /tmp/rust-warmup/transformers/warmup.rs && \
+    mage rust build /tmp/rust-warmup && \
+    find /opt/mage-rust/target/release -maxdepth 1 -type f -name 'block_warmup*' -delete && \
+    rm -rf /opt/mage-rust/bin /tmp/rust-warmup /opt/mage-rust/target/release/incremental
 ENV MAGE_DATA_DIR=/home/src/mage_data \
     PYTHONPATH=/home/src
 WORKDIR /home/src
@@ -118,12 +133,8 @@ FROM runtime AS development
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential libkrb5-dev unixodbc-dev && \
     rm -rf /var/lib/apt/lists/*
-# The editable install below builds the ColumnAtlas extension from the source tree.
-COPY --from=python-build /opt/rustup /opt/rustup
-COPY --from=python-build /opt/cargo /opt/cargo
-ENV RUSTUP_HOME=/opt/rustup \
-    CARGO_HOME=/opt/cargo \
-    PATH="/opt/cargo/bin:$PATH"
+# The runtime stage has Rust; the editable install below builds the ColumnAtlas
+# extension from the source tree with it.
 COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend /opt/yarn-v1.22.22 /opt/yarn-v1.22.22
 RUN ln -s /opt/yarn-v1.22.22/bin/yarn /usr/local/bin/yarn
