@@ -1,4 +1,4 @@
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: $name-clone
@@ -30,7 +30,7 @@ spec:
         cd "$(workspaces.source.path)/repo"
         git rev-parse --short=12 HEAD | tr -d '\n' > "$(results.commit.path)"
 ---
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: $name-build
@@ -90,7 +90,7 @@ spec:
         printf '%s@%s' "${image%:*}" "$(cat /tmp/digest)" > "$(results.image.path)"
         rm -f "$(workspaces.source.path)/.docker/config.json"
 ---
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: $name-deploy

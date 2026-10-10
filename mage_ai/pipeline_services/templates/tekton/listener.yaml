@@ -29,7 +29,7 @@ spec:
     - name: trusted-profile
       default: ""
   resourcetemplates:
-    - apiVersion: tekton.dev/v1beta1
+    - apiVersion: tekton.dev/v1
       kind: PipelineRun
       metadata:
         generateName: $name-run-
@@ -37,19 +37,19 @@ spec:
         pipelineRef:
           name: $name-pipeline
         params:
-          - {name: repository, value: $(params.repository)}
-          - {name: branch, value: $(params.branch)}
-          - {name: git-token, value: $(params.git-token)}
-          - {name: context-dir, value: $(params.context-dir)}
-          - {name: apikey, value: $(params.apikey)}
-          - {name: region, value: $(params.region)}
-          - {name: resource-group, value: $(params.resource-group)}
-          - {name: registry-namespace, value: $(params.registry-namespace)}
-          - {name: image-name, value: $(params.image-name)}
-          - {name: code-engine-project, value: $(params.code-engine-project)}
-          - {name: app-name, value: $(params.app-name)}
-          - {name: env-secret, value: $(params.env-secret)}
-          - {name: trusted-profile, value: $(params.trusted-profile)}
+          - {name: repository, value: $(tt.params.repository)}
+          - {name: branch, value: $(tt.params.branch)}
+          - {name: git-token, value: $(tt.params.git-token)}
+          - {name: context-dir, value: $(tt.params.context-dir)}
+          - {name: apikey, value: $(tt.params.apikey)}
+          - {name: region, value: $(tt.params.region)}
+          - {name: resource-group, value: $(tt.params.resource-group)}
+          - {name: registry-namespace, value: $(tt.params.registry-namespace)}
+          - {name: image-name, value: $(tt.params.image-name)}
+          - {name: code-engine-project, value: $(tt.params.code-engine-project)}
+          - {name: app-name, value: $(tt.params.app-name)}
+          - {name: env-secret, value: $(tt.params.env-secret)}
+          - {name: trusted-profile, value: $(tt.params.trusted-profile)}
         workspaces:
           - name: source
             volumeClaimTemplate:

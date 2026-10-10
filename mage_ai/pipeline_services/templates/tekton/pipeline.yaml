@@ -1,7 +1,7 @@
 # IBM Cloud Continuous Delivery: build the service image, push it to IBM Cloud Container
 # Registry and deploy it to Code Engine. The pipeline's properties set the params; see
 # deploy/ibm/README.md.
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: $name-pipeline
