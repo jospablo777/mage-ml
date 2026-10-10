@@ -81,13 +81,20 @@ COPY mage_integrations ./mage_integrations
 COPY vendor ./vendor
 COPY rust ./rust
 COPY mage_ai ./mage_ai
+COPY scripts/check_installed_source.py ./scripts/check_installed_source.py
 COPY --from=frontend /build/mage_ai/server/frontend_dist ./mage_ai/server/frontend_dist
 COPY --from=frontend /build/mage_ai/server/frontend_dist_base_path_template ./mage_ai/server/frontend_dist_base_path_template
+# uv rebuilds a local project only when its pyproject.toml changes, and the cache mount
+# keeps the wheel it built last time, so images carried old Mage code. The workspace
+# packages are rebuilt from the copied source every time.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/opt/cargo/registry \
     UV_LINK_MODE=copy uv sync --locked --no-editable --no-default-groups \
-      --extra all --extra integrations && \
+      --extra all --extra integrations \
+      --reinstall-package mage-ml --reinstall-package mage-integrations \
+      --reinstall-package singer-python --reinstall-package column-atlas-native && \
     uv pip check --python /opt/mage/bin/python && \
+    /opt/mage/bin/python scripts/check_installed_source.py mage_ai && \
     /opt/mage/bin/python -c 'import column_atlas_native' && \
     uv export --locked --no-default-groups --extra all --extra integrations \
       --no-emit-workspace --no-hashes --no-header --output-file "$MAGE_RUNTIME_CONSTRAINTS"
