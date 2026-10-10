@@ -2,6 +2,7 @@
 
 mod api;
 mod executor;
+mod ibm;
 mod ledger;
 mod log;
 mod python;
@@ -334,6 +335,7 @@ fn env_report(common: &Common) -> Result<ExitCode, String> {
             Some(secrets::Source::Environment) => "set",
             Some(secrets::Source::File) => "set (file)",
             Some(secrets::Source::Directory) => "set (dir)",
+            Some(secrets::Source::Provider) => "set (provider)",
             None => {
                 if variable.required {
                     missing_required = true;

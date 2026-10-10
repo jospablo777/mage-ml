@@ -1,0 +1,68 @@
+# $name on Kubernetes (IBM Cloud Kubernetes Service, OpenShift, EKS, GKE, AKS).
+#   kubectl create secret generic $name-env --from-env-file=.env
+#   kubectl apply -f deploy/kubernetes.yaml
+# Replace the image with the one you pushed. One replica runs the schedules; more replicas
+# need a shared volume for the run history.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: $name-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $name
+  labels: {app: $name}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: $name}
+  template:
+    metadata:
+      labels: {app: $name}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      terminationGracePeriodSeconds: 75
+      containers:
+        - name: service
+          image: $name:latest
+          ports: [{containerPort: 8080, name: http}]
+          envFrom:
+            - secretRef: {name: $name-env, optional: true}
+          env:
+            - {name: MAGE_SERVICE_SCHEDULES, value: "off"}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/mage-service}
+            - {name: tmp, mountPath: /tmp}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: $name-data}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $name
+spec:
+  selector: {app: $name}
+  ports: [{port: 80, targetPort: http, name: http}]

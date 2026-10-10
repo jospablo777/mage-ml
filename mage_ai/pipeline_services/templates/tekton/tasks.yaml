@@ -1,0 +1,140 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: $name-clone
+spec:
+  params:
+    - name: repository
+    - name: branch
+    - name: git-token
+      default: ""
+  results:
+    - name: commit
+  workspaces:
+    - name: source
+  steps:
+    - name: clone
+      image: alpine/git:2.47.2
+      env:
+        - name: GIT_TOKEN
+          value: $(params.git-token)
+      script: |
+        #!/bin/sh
+        set -eu
+        url="$(params.repository)"
+        if [ -n "$GIT_TOKEN" ]; then
+          url=$(echo "$url" | sed "s#https://#https://x-token-auth:${GIT_TOKEN}@#")
+        fi
+        rm -rf "$(workspaces.source.path)/repo"
+        git clone --depth 1 --branch "$(params.branch)" "$url" "$(workspaces.source.path)/repo"
+        cd "$(workspaces.source.path)/repo"
+        git rev-parse --short=12 HEAD | tr -d '\n' > "$(results.commit.path)"
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: $name-build
+spec:
+  params:
+    - name: context-dir
+    - name: apikey
+    - name: region
+    - name: registry-namespace
+    - name: image-name
+    - name: commit
+  results:
+    - name: image
+  workspaces:
+    - name: source
+  steps:
+    - name: registry-login
+      image: busybox:1.37
+      env:
+        - name: APIKEY
+          value: $(params.apikey)
+      script: |
+        #!/bin/sh
+        set -eu
+        case "$(params.region)" in
+          us-south|us-east) host=us.icr.io ;;
+          eu-gb) host=uk.icr.io ;;
+          eu-de) host=de.icr.io ;;
+          eu-es) host=es.icr.io ;;
+          eu-fr2) host=fr2.icr.io ;;
+          jp-tok) host=jp.icr.io ;;
+          jp-osa) host=jp2.icr.io ;;
+          au-syd) host=au.icr.io ;;
+          br-sao) host=br.icr.io ;;
+          ca-tor) host=ca.icr.io ;;
+          *) host=icr.io ;;
+        esac
+        auth=$(printf 'iamapikey:%s' "$APIKEY" | base64 | tr -d '\n')
+        mkdir -p "$(workspaces.source.path)/.docker"
+        printf '{"auths":{"%s":{"auth":"%s"}}}' "$host" "$auth" > "$(workspaces.source.path)/.docker/config.json"
+        echo "$host/$(params.registry-namespace)/$(params.image-name):$(params.commit)" > "$(workspaces.source.path)/.image"
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.23.2-debug
+      env:
+        - name: DOCKER_CONFIG
+          value: $(workspaces.source.path)/.docker
+      script: |
+        #!/busybox/sh
+        set -eu
+        image=$(cat "$(workspaces.source.path)/.image")
+        /kaniko/executor \
+          --context "$(workspaces.source.path)/repo/$(params.context-dir)" \
+          --dockerfile Dockerfile \
+          --destination "$image" \
+          --digest-file /tmp/digest \
+          --cache=true --cache-repo "${image%:*}-cache"
+        printf '%s@%s' "${image%:*}" "$(cat /tmp/digest)" > "$(results.image.path)"
+        rm -f "$(workspaces.source.path)/.docker/config.json"
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: $name-deploy
+spec:
+  params:
+    - name: apikey
+    - name: region
+    - name: resource-group
+    - name: code-engine-project
+    - name: app-name
+    - name: image
+    - name: env-secret
+      default: ""
+    - name: trusted-profile
+      default: ""
+  steps:
+    - name: deploy
+      image: icr.io/continuous-delivery/pipeline/pipeline-base-ubi:3.46
+      env:
+        - name: IBMCLOUD_API_KEY
+          value: $(params.apikey)
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        ibmcloud config --check-version=false
+        ibmcloud login --apikey "$IBMCLOUD_API_KEY" -r "$(params.region)" -g "$(params.resource-group)" -q
+        ibmcloud plugin install code-engine -f -q >/dev/null 2>&1 || true
+        ibmcloud ce project select --name "$(params.code-engine-project)" -q
+        image="$(params.image)"
+        host="${image%%/*}"
+        # Code Engine pulls from the registry with this secret.
+        ibmcloud ce registry get --name mage-icr >/dev/null 2>&1 || \
+          ibmcloud ce registry create --name mage-icr --server "$host" --username iamapikey --password "$IBMCLOUD_API_KEY" -q
+        args=(--name "$(params.app-name)" --image "$image" --registry-secret mage-icr --port 8080 \
+              --min-scale 1 --max-scale 1 --env MAGE_SERVICE_HOST=0.0.0.0)
+        if [ -n "$(params.env-secret)" ]; then
+          args+=(--env-from-secret "$(params.env-secret)")
+        fi
+        if [ -n "$(params.trusted-profile)" ]; then
+          args+=(--trusted-profiles-enabled --env MAGE_SERVICE_IBM_TRUSTED_PROFILE="$(params.trusted-profile)")
+        fi
+        if ibmcloud ce app get --name "$(params.app-name)" >/dev/null 2>&1; then
+          ibmcloud ce app update "${args[@]}" --wait
+        else
+          ibmcloud ce app create "${args[@]}" --wait
+        fi
+        ibmcloud ce app get --name "$(params.app-name)" --output url

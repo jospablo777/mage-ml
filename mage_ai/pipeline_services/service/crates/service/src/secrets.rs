@@ -8,8 +8,13 @@
 //!   Vault agent, the AWS and IBM CSI secret drivers);
 //! - `MAGE_SERVICE_SECRETS_DIR=/dir` sets one variable per file, named after the file.
 //!
-//! A variable set directly wins over a file. Values marked secret, and every value read
-//! from a file, are replaced by `***` in logs and stored errors.
+//! - `MAGE_SERVICE_SECRETS` fetches secrets from a provider at start-up, one reference per
+//!   comma or line: `[NAME=]provider:reference[#field]`. Providers: `file` (a path) and
+//!   `ibm` (IBM Cloud Secrets Manager, see `ibm.rs`). A provider runs only when a reference
+//!   uses it.
+//!
+//! A variable set directly wins over every other source. Values marked secret, and every
+//! value read from a file or a provider, are replaced by `***` in logs and stored errors.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -32,6 +37,7 @@ pub enum Source {
     Environment,
     File,
     Directory,
+    Provider,
 }
 
 #[derive(Debug, Default)]
@@ -41,6 +47,51 @@ pub struct Secrets {
     sources: BTreeMap<String, Source>,
     redacted: Vec<String>,
     pub problems: Vec<String>,
+}
+
+pub const SECRETS: &str = "MAGE_SERVICE_SECRETS";
+
+/// One entry of `MAGE_SERVICE_SECRETS`: `[NAME=]provider:reference[#field]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    /// None when the secret holds several values, each becoming a variable.
+    pub variable: Option<String>,
+    pub provider: String,
+    pub id: String,
+    pub field: Option<String>,
+}
+
+pub fn parse_references(text: &str) -> Result<Vec<Reference>, String> {
+    let mut references = Vec::new();
+    for item in text
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|i| !i.is_empty())
+    {
+        let (variable, rest) = match item.split_once('=') {
+            Some((variable, rest)) => (Some(variable.trim().to_string()), rest.trim()),
+            None => (None, item),
+        };
+        if let Some(variable) = &variable
+            && !valid_name(variable)
+        {
+            return Err(format!("{SECRETS}: {variable:?} is not a variable name"));
+        }
+        let (provider, reference) = rest.split_once(':').ok_or_else(|| {
+            format!("{SECRETS}: {item:?} needs a provider, such as ibm:<secret id> or file:<path>")
+        })?;
+        let (id, field) = match reference.rsplit_once('#') {
+            Some((id, field)) => (id.trim().to_string(), Some(field.trim().to_string())),
+            None => (reference.trim().to_string(), None),
+        };
+        references.push(Reference {
+            variable,
+            provider: provider.trim().to_ascii_lowercase(),
+            id,
+            field,
+        });
+    }
+    Ok(references)
 }
 
 pub fn looks_secret(name: &str) -> bool {
@@ -116,6 +167,9 @@ impl Secrets {
                 Err(error) => secrets.problems.push(format!("{name}: {error}")),
             }
         }
+        if let Some(text) = environment.get(SECRETS) {
+            secrets.load_references(text, environment);
+        }
         for variable in &manifest.environment {
             if (variable.secret || looks_secret(&variable.name))
                 && let Some(value) = environment.get(&variable.name)
@@ -134,6 +188,65 @@ impl Secrets {
         secrets.redacted.sort_by_key(|v| std::cmp::Reverse(v.len()));
         secrets.redacted.dedup();
         secrets
+    }
+
+    fn load_references(&mut self, text: &str, environment: &BTreeMap<String, String>) {
+        let references = match parse_references(text) {
+            Ok(references) => references,
+            Err(error) => {
+                self.problems.push(error);
+                return;
+            }
+        };
+        let mut ibm = Vec::new();
+        let mut values = Vec::new();
+        for reference in references {
+            match reference.provider.as_str() {
+                "file" => match &reference.variable {
+                    Some(name) => match read_secret(Path::new(&reference.id)) {
+                        Ok(value) => values.push((name.clone(), value)),
+                        Err(error) => self.problems.push(format!("{SECRETS} {name}: {error}")),
+                    },
+                    None => self.problems.push(format!(
+                        "{SECRETS}: file:{} needs a variable name, NAME=file:<path>",
+                        reference.id
+                    )),
+                },
+                "ibm" => match crate::ibm::Mapping::new(
+                    reference.variable,
+                    &reference.id,
+                    reference.field,
+                ) {
+                    Ok(mapping) => ibm.push(mapping),
+                    Err(error) => self.problems.push(error),
+                },
+                other => self.problems.push(format!(
+                    "{SECRETS}: unknown provider {other:?}; the providers are file and ibm"
+                )),
+            }
+        }
+        if !ibm.is_empty() {
+            let api_key = environment
+                .get("IBM_CLOUD_API_KEY")
+                .filter(|k| !k.is_empty())
+                .cloned()
+                .or_else(|| self.additions.get("IBM_CLOUD_API_KEY").cloned());
+            if let Some(key) = &api_key {
+                self.redact(key);
+            }
+            match crate::ibm::fetch(environment, api_key.as_deref(), &ibm) {
+                Ok(fetched) => values.extend(fetched),
+                Err(error) => self
+                    .problems
+                    .push(format!("IBM Cloud Secrets Manager: {error}")),
+            }
+        }
+        for (name, value) in values {
+            if environment.get(&name).is_some_and(|v| !v.is_empty()) {
+                continue;
+            }
+            self.add(&name, value, Source::Provider);
+        }
     }
 
     fn add(&mut self, name: &str, value: String, source: Source) {
@@ -264,6 +377,42 @@ mod tests {
         assert_eq!(redact("direct-value", &secrets.redacted_values()), "***");
         let (required, _) = secrets.missing(&manifest());
         assert_eq!(required, vec!["PGHOST".to_string()]);
+    }
+
+    #[test]
+    fn references_name_a_provider_and_unknown_ones_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("key"), "api-key-value").unwrap();
+        let parsed = parse_references("A=ibm:abc-1#password, ibm:kv-2").unwrap();
+        assert_eq!(parsed[0].provider, "ibm");
+        assert_eq!(parsed[0].field.as_deref(), Some("password"));
+        assert_eq!(parsed[1].variable, None);
+        assert!(
+            parse_references("A=abc")
+                .unwrap_err()
+                .contains("needs a provider")
+        );
+
+        let env: BTreeMap<String, String> = [(
+            SECRETS.to_string(),
+            format!(
+                "API_KEY=file:{}, X=vault:secret/x",
+                dir.path().join("key").display()
+            ),
+        )]
+        .into();
+        let secrets = Secrets::load(&manifest(), &env);
+        assert_eq!(secrets.get("API_KEY"), Some("api-key-value"));
+        assert_eq!(secrets.source("API_KEY"), Some(Source::Provider));
+        assert!(
+            secrets.problems[0].contains("unknown provider \"vault\""),
+            "{:?}",
+            secrets.problems
+        );
+        assert_eq!(
+            redact("key api-key-value", &secrets.redacted_values()),
+            "key ***"
+        );
     }
 
     #[test]

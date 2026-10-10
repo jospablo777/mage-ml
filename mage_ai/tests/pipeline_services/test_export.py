@@ -153,6 +153,23 @@ class CaptureTest(ExportTestCase):
         manifest = json.loads((out / 'service.json').read_text())
         self.assertEqual(manifest['schema_version'], 1)
 
+        # Deployment files for IBM Cloud and Kubernetes, named after the service.
+        import yaml
+
+        for name in ('.tekton/pipeline.yaml', '.tekton/tasks.yaml', '.tekton/listener.yaml',
+                     'deploy/kubernetes.yaml'):
+            documents = list(yaml.safe_load_all((out / name).read_text()))
+            self.assertTrue(documents, name)
+            self.assertNotIn('$name', (out / name).read_text(), name)
+        kinds = {d['kind'] for d in yaml.safe_load_all((out / '.tekton/listener.yaml').read_text())}
+        self.assertEqual(kinds, {'TriggerTemplate', 'TriggerBinding', 'EventListener'})
+        script = out / 'deploy/ibm/code-engine.sh'
+        self.assertTrue(os.access(script, os.X_OK))
+        subprocess.run(['bash', '-n', str(script)], check=True)
+        self.assertIn(captured.name, script.read_text())
+        ignored = (out / '.dockerignore').read_text()
+        self.assertIn('.env', ignored)
+
         # A second export to the same directory replaces the first.
         export.write(captured, str(out))
         with self.assertRaises(export.ExportError):

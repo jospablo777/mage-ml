@@ -645,12 +645,39 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         _copy_rust_workspace(capture_, out_dir / 'rust')
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
-    (out_dir / '.dockerignore').write_text('**/__pycache__\n**/target\ndata/\n')
+    (out_dir / '.dockerignore').write_text(
+        '**/__pycache__\n**/target\ndata/\n.tekton/\ndeploy/\n.env\n.env.*\n'
+    )
     (out_dir / 'compose.yaml').write_text(_compose(capture_))
     (out_dir / 'README.md').write_text(_readme(capture_))
     (out_dir / '.env.example').write_text(_env_example(capture_))
+    _write_deploy_files(capture_, out_dir)
     (out_dir / 'report.txt').write_text(report(capture_))
     return out_dir
+
+
+# Deployment files, rendered with the service's name: (template, destination).
+DEPLOY_FILES = (
+    ('tekton/pipeline.yaml', '.tekton/pipeline.yaml'),
+    ('tekton/tasks.yaml', '.tekton/tasks.yaml'),
+    ('tekton/listener.yaml', '.tekton/listener.yaml'),
+    ('deploy/ibm/code-engine.sh', 'deploy/ibm/code-engine.sh'),
+    ('deploy/ibm/README.md', 'deploy/ibm/README.md'),
+    ('deploy/kubernetes.yaml', 'deploy/kubernetes.yaml'),
+)
+
+
+def _write_deploy_files(capture_: Capture, out_dir: Path) -> None:
+    for template, destination in DEPLOY_FILES:
+        text = string.Template((TEMPLATES / template).read_text()).safe_substitute(
+            name=capture_.name,
+            project=capture_.project.name,
+        )
+        target = out_dir / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        if target.suffix == '.sh':
+            target.chmod(0o755)
 
 
 def _copy_mage_python(target: Path) -> None:

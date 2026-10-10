@@ -493,7 +493,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   packages the blocks' imports load (18 for a pandas and PostgreSQL pipeline), lists the
   environment variables the code reads, and takes secrets from the environment, `NAME_FILE`
   or a directory of secret files, redacting them from logs. `mage-service run PIPELINE`
-  runs once and exits, for cron jobs and Kubernetes Jobs. See
+  runs once and exits, for cron jobs and Kubernetes Jobs. `MAGE_SERVICE_SECRETS` fetches
+  secrets at start-up from a provider, `[NAME=]provider:reference[#field]`; the first
+  providers are IBM Cloud Secrets Manager (API key or Code Engine trusted profile) and files.
+  Each export includes deployment files for IBM Cloud Code Engine, a Tekton pipeline for IBM
+  Cloud Continuous Delivery and a Kubernetes manifest. See
   `docs/design/pipeline-services.md`.
 - **Faster block imports**: `mage_ai.io.postgres` no longer imports SciPy, paramiko and
   sshtunnel unless an SSH tunnel or a sparse matrix is used (1.1 s to 0.7 s), and

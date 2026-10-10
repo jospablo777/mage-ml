@@ -60,8 +60,9 @@ secrets mounted as files:
 | Your shell or a `.env` file | `docker run --env-file .env ...`; compose reads `.env` (see `.env.example`) |
 | A file, such as a Docker or Kubernetes secret | `NAME_FILE=/run/secrets/name`: the service sets `NAME` from the file |
 | A directory of secret files | `MAGE_SERVICE_SECRETS_DIR=/run/secrets`: one variable per file, named after it |
+| IBM Cloud Secrets Manager | The service reads it at start-up: `MAGE_SERVICE_SECRETS='PGPASSWORD=ibm:<secret id>'` with `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL` and a trusted profile or API key; see `deploy/ibm/README.md` |
 | AWS Secrets Manager or Parameter Store | ECS task definition `secrets: [{name: PGPASSWORD, valueFrom: <secret ARN>}]`, or the Secrets Store CSI driver on EKS with `MAGE_SERVICE_SECRETS_DIR` |
-| IBM Cloud Secrets Manager | Code Engine: `ibmcloud ce secret create --name db --from-env-file .env`, then `ibmcloud ce app create ... --env-from-secret db` |
+| A Code Engine secret | `ibmcloud ce secret create --name db --from-env-file .env`, then `ibmcloud ce app create ... --env-from-secret db` |
 | Kubernetes Secret | `envFrom: [{secretRef: {name: $name-secrets}}]`, or mount it and set `MAGE_SERVICE_SECRETS_DIR` |
 | HashiCorp Vault | Vault Agent renders files; point `NAME_FILE` or `MAGE_SERVICE_SECRETS_DIR` at them |
 
@@ -71,6 +72,17 @@ with `mage_secret_var('name')` come from `MAGE_SECRET_<NAME>`. With
 `MAGE_SERVICE_STRICT_ENV=on` the service refuses to start while a required variable is
 missing; otherwise it warns. The service's own tokens can come from files too:
 `MAGE_SERVICE_TOKEN_FILE`, `MAGE_SERVICE_READ_TOKEN_FILE`.
+
+## Deploy
+
+| Where | Files |
+| --- | --- |
+| IBM Cloud Code Engine, by hand or with IBM Cloud Continuous Delivery (Tekton) | `deploy/ibm/README.md`, `deploy/ibm/code-engine.sh`, `.tekton/` |
+| Kubernetes: IBM Cloud Kubernetes Service, OpenShift, EKS, GKE, AKS | `deploy/kubernetes.yaml` |
+| One machine | `compose.yaml` |
+
+Any platform that runs a container works: the image needs only its environment and a
+volume at `/var/lib/mage-service` for the run history.
 
 ## Settings
 
@@ -84,5 +96,8 @@ missing; otherwise it warns. The service's own tokens can come from files too:
 | `MAGE_SERVICE_RETENTION_DAYS` | `30` | Days runs and their outputs are kept |
 | `MAGE_SERVICE_SHUTDOWN_SECONDS` | `60` | Time runs get to finish after SIGTERM |
 | `MAGE_SERVICE_LOG_FORMAT` | `text` | `json` for log collectors |
+| `MAGE_SERVICE_SECRETS` | none | Secrets fetched at start-up: `[NAME=]provider:reference[#field]`, providers `ibm` and `file` |
+| `MAGE_SERVICE_SECRETS_DIR` | none | A directory of secret files, one variable per file |
+| `MAGE_SERVICE_STRICT_ENV` | `off` | `on` refuses to start while a required variable is missing |
 
 See `report.txt` for what the export included and left out.
