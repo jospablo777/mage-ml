@@ -1,0 +1,36 @@
+blocks:
+- downstream_blocks: [rust_category_margin, rust_customer_value]
+  language: rust
+  name: rust_pg_order_lines
+  type: data_loader
+  upstream_blocks: []
+  uuid: rust_pg_order_lines
+- downstream_blocks: [rust_pg_export_category_margin]
+  language: rust
+  name: rust_category_margin
+  type: transformer
+  upstream_blocks: [rust_pg_order_lines]
+  uuid: rust_category_margin
+- downstream_blocks: [rust_pg_export_customer_value]
+  language: rust
+  name: rust_customer_value
+  type: transformer
+  upstream_blocks: [rust_pg_order_lines]
+  uuid: rust_customer_value
+- downstream_blocks: []
+  language: rust
+  name: rust_pg_export_category_margin
+  type: data_exporter
+  upstream_blocks: [rust_category_margin]
+  uuid: rust_pg_export_category_margin
+- downstream_blocks: []
+  language: rust
+  name: rust_pg_export_customer_value
+  type: data_exporter
+  upstream_blocks: [rust_customer_value]
+  uuid: rust_pg_export_customer_value
+description: 'All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, computes
+  exact margins per category and customer value tiers, writes both back with binary COPY.'
+name: rust_postgres_margins
+type: python
+uuid: rust_postgres_margins

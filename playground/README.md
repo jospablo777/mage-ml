@@ -73,6 +73,7 @@ The values are random but the same on every seed.
 | `geo_store_coverage` | geopandas: GeoDataFrames pass between blocks with their CRS; nearest store with `sjoin_nearest` |
 | `explore_web_events` | A million-row output and a wide one (about 60 columns), to explore |
 | `rust_session_scores` | Rust blocks: sessions from a million events with Polars expressions, then a per-row engagement score on every core with Rayon; block tests in Rust |
+| `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, computes exact decimal margins per day and category and customer value tiers in two parallel branches, writes both back with binary COPY |
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one
 by one. Exported tables are in `analytics`:
@@ -98,6 +99,9 @@ the exported tables with their row counts.
   editor as you type and shown in the output at the block's line. The first run of a
   block compiles it (a few seconds, the image has the dependencies built); later runs of
   unchanged code start at once. The Cargo workspace is `shop_lab/rust`.
+  `rust_postgres_margins` has no Python at all: `mage::postgres` reads and writes the
+  database with the `default` profile of `io_config.yaml`, and the exported decimals
+  match PostgreSQL's own sums to the cent.
 - **Types**: decimals, zoned timestamps, nullable integers, uuid, jsonb, text[] and NaN
   are all in the data; check them in the outputs and in the exported tables.
 - **Pipeline services**: export a pipeline as a Docker service that runs without Mage,

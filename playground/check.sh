@@ -12,6 +12,7 @@ pipelines=(
   geo_store_coverage
   explore_web_events
   rust_session_scores
+  rust_postgres_margins
 )
 
 failed=()
