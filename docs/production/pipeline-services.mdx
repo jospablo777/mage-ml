@@ -204,6 +204,16 @@ Models loaded another way can be embedded with `--model`:
 mage export service project scoring --out ./scoring --model fraud=models:/fraud/7
 ```
 
+## Feature stores and APIs
+
+Blocks that call HTTP APIs run unchanged: the export pins the client packages they import,
+and URLs and credentials come from the environment like any other variable. The
+integration tests export two pipelines that use the Feast feature server's REST API, one
+reading online features (`/get-online-features`) and pushing derived features
+(`/push`), the other streaming historical features into Polars, writing them with Mage's
+PostgreSQL exporter and materializing them, and check that the service gives the same
+results as Mage.
+
 ## Deploy
 
 Every export includes ready-to-use deployment files:
