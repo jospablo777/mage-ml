@@ -157,6 +157,8 @@ services:
   rabbitmq:
     image: rabbitmq:4.3-alpine
     mem_limit: 512m
+    # It exited at boot once on a CI runner; a restart is cheaper than a failed run.
+    restart: on-failure:3
     environment:
       RABBITMQ_DEFAULT_USER: mage
       RABBITMQ_DEFAULT_PASS: "p@ss/w:rd%"

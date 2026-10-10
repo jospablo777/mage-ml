@@ -232,9 +232,7 @@ jobs:
         run: python3 scripts/junit_annotations.py integration_tests/results.xml
       - name: Service states
         if: failure()
-        run: >-
-          docker compose -f integration_tests/compose.yaml ps --all --format json
-          | python3 scripts/compose_states.py
+        run: python3 scripts/compose_states.py integration_tests/compose.yaml
       - name: Service logs
         if: failure()
         run: docker compose -f integration_tests/compose.yaml logs
