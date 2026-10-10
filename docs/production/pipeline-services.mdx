@@ -53,6 +53,9 @@ Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
 - **Rust** blocks are compiled when the image builds, so the service runs native binaries
   and needs no Rust installation. The export brings `rust/Cargo.lock` up to date for the
   exported blocks and keeps the locked versions, so the image builds the crates you ran.
+  A Rust block that connects with its io_config profile (`mage::postgres`) gets it from
+  the service, which fills in `env_var()` and `mage_secret_var()` from its environment
+  for each run; set those variables as for Python blocks.
 - **R** blocks run with Mage's R runner and the project's rv environment: the image
   installs R 4.6 and the packages `rv.lock` pins, so the export needs that lock file
   (`mage r init`, then `mage r sync`). Packages install from binaries where Posit has them,

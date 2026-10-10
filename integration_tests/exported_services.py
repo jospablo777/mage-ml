@@ -5,6 +5,7 @@ of Mage's Python code and the repository for integration_tests.data.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,20 +16,52 @@ BINARY = SERVICE / 'target' / 'debug' / 'mage-service'
 
 
 def service_binary() -> Path:
-    if not BINARY.is_file():
-        subprocess.run(['cargo', 'build', '-p', 'mage-service'], cwd=SERVICE, check=True)
+    # Always: cargo returns at once when the binary is current, and a stale one would test
+    # old code.
+    subprocess.run(['cargo', 'build', '-q', '-p', 'mage-service'], cwd=SERVICE, check=True)
     return BINARY
 
 
 def run_exported(project, pipeline: str, out: Path, variables=None, timeout: int = 600):
     """Exports the pipeline to out, runs it once and returns the run; every block must
     complete."""
+    return run_service(export_service(project, pipeline, out), pipeline, out, variables, timeout)
+
+
+def export_service(project, pipeline: str, out: Path) -> Path:
     from mage_ai.pipeline_services import export
 
-    directory = export.write(
+    return Path(export.write(
         export.capture(project, [pipeline], name=pipeline.replace('_', '-')),
         str(out / 'service'), force=True,
+    ))
+
+
+def build_rust_blocks(directory: Path) -> None:
+    """Builds the service's Rust blocks into bin/, as its Dockerfile does, reusing the
+    compiled dependencies of Mage's own Rust builds."""
+    from mage_ai.data_preparation.models.block.rust import workspace
+
+    manifest = json.loads((directory / 'service.json').read_text())
+    crates = sorted({
+        Path(block['binary']).name
+        for pipeline in manifest['pipelines'] for block in pipeline['blocks']
+        if block.get('binary')
+    })
+    target = workspace.target_dir()
+    subprocess.run(
+        ['cargo', 'build', '--release', '--manifest-path', str(directory / 'rust/Cargo.toml'),
+         *[a for crate in crates for a in ('-p', crate)]],
+        check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
     )
+    (directory / 'bin').mkdir(exist_ok=True)
+    for crate in crates:
+        shutil.copy2(target / 'release' / crate, directory / 'bin' / crate)
+
+
+def run_service(directory: Path, pipeline: str, out: Path, variables=None, timeout: int = 600):
+    """Runs the exported service's pipeline once and returns the run; every block must
+    complete."""
     arguments = []
     for key, value in (variables or {}).items():
         arguments += ['--var', f'{key}={value}']

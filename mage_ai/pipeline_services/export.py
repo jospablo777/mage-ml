@@ -465,6 +465,9 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
             if crate:
                 entry['binary'] = f'bin/{crate}'
                 capture_.rust_blocks.append((block.uuid, crate))
+            profile = _rust_io_config(block, path, project, problems, where)
+            if profile is not None:
+                entry['io_config'] = profile
         capture_.files.add(path)
         blocks.append(entry)
     # Upstream blocks that were left out (notebook blocks) are not dependencies.
@@ -500,6 +503,88 @@ def _prepare_rust_block(block, project: Path, problems: List[str], where: str) -
         problems.append(f'{where}: {error}')
         return None
     return prepared.crate
+
+
+VARIABLE_MARK = re.compile(r'__mage_var_([0-9a-f]+)__')
+# Rust code that reads the io_config profile the service passes in MAGE_IO_CONFIG.
+READS_IO_CONFIG = re.compile(r'Postgres::connect\(\s*\)|MAGE_IO_CONFIG')
+
+
+def _variable_mark(name: str, default=None) -> str:
+    reference = dict(env=name) if default is None else dict(env=name, default=default)
+    return f'__mage_var_{json.dumps(reference).encode().hex()}__'
+
+
+def _io_config_parts(value):
+    """value with each text that reads variables replaced by {"$parts": [...]}."""
+    if isinstance(value, dict):
+        return {str(k): _io_config_parts(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_io_config_parts(v) for v in value]
+    if not isinstance(value, str) or not VARIABLE_MARK.search(value):
+        return value
+    parts, position = [], 0
+    for match in VARIABLE_MARK.finditer(value):
+        if match.start() > position:
+            parts.append(value[position:match.start()])
+        parts.append(json.loads(bytes.fromhex(match.group(1))))
+        position = match.end()
+    if position < len(value):
+        parts.append(value[position:])
+    return {'$parts': parts}
+
+
+def compile_io_config(text: str, profile: str) -> Optional[Dict]:
+    """
+    The io_config.yaml profile with env_var() and mage_secret_var() kept as references
+    the service fills in at run time, so no secret is written into the service. None when
+    there is no such profile. Raises ValueError for templates a service can't fill in.
+    """
+    import jinja2
+    import yaml
+
+    def unsupported(name):
+        def function(*args, **kwargs):
+            raise ValueError(
+                f'io_config.yaml uses {name}(), which services can\'t fill in for Rust '
+                'blocks; read the value with env_var() and set it in the service\'s '
+                'environment or with MAGE_SERVICE_SECRETS.'
+            )
+        return function
+
+    environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+    try:
+        rendered = environment.from_string(text).render(
+            env_var=_variable_mark,
+            mage_secret_var=lambda name: _variable_mark(secret_variable_name(name)),
+            json_value=unsupported('json_value'),
+            aws_secret_var=unsupported('aws_secret_var'),
+            azure_secret_var=unsupported('azure_secret_var'),
+        )
+    except jinja2.TemplateError as error:
+        raise ValueError(f'io_config.yaml has a template services can\'t fill in: {error}')
+    config = yaml.safe_load(rendered) or {}
+    settings = config.get(profile) if isinstance(config, dict) else None
+    if not isinstance(settings, dict):
+        return None
+    return {k: v for k, v in _io_config_parts(settings).items() if v is not None}
+
+
+def _rust_io_config(
+    block, path: Path, project: Path, problems: List[str], where: str,
+) -> Optional[Dict]:
+    """The profile a Rust block gets in MAGE_IO_CONFIG, as Mage passes it when it runs."""
+    config_path = project / 'io_config.yaml'
+    if not config_path.is_file():
+        return None
+    profile = (block.configuration or {}).get('data_provider_profile') or 'default'
+    try:
+        return compile_io_config(config_path.read_text(), profile)
+    except Exception as error:
+        # Only blocks that read the profile need it.
+        if READS_IO_CONFIG.search(path.read_text(errors='replace')):
+            problems.append(f'{where}: {error}')
+        return None
 
 
 def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:

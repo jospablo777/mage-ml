@@ -452,3 +452,60 @@ class CargoLockTest(unittest.TestCase):
         self.assertIn('could not be updated', ' '.join(self.capture.notes))
         self.assertIn('cargo build --release --manifest-path rust/Cargo.toml -p block_a',
                       export._dockerfile(self.capture))
+
+
+class RustIoConfigTest(unittest.TestCase):
+    """A Rust block's io_config profile goes into the manifest with its variables kept as
+    references, which the service fills in from its environment for each run."""
+
+    CONFIG = textwrap.dedent('''
+        default:
+          POSTGRES_HOST: "{{ env_var('PG_HOST') }}"
+          POSTGRES_PORT: {{ env_var('PG_PORT', 5432) }}
+          POSTGRES_PASSWORD: "{{ mage_secret_var('pg password') }}"
+          POSTGRES_DBNAME: shop
+          POSTGRES_CONNECT_TIMEOUT: 10
+          POSTGRES_SCHEMA:
+          URL: "postgresql://{{ env_var('PG_USER', 'mage') }}@db/shop"
+        other:
+          POSTGRES_HOST: elsewhere
+    ''')
+
+    def test_variables_and_secrets_become_references(self):
+        self.assertEqual(export.compile_io_config(self.CONFIG, 'default'), {
+            'POSTGRES_HOST': {'$parts': [{'env': 'PG_HOST'}]},
+            'POSTGRES_PORT': {'$parts': [{'env': 'PG_PORT', 'default': 5432}]},
+            'POSTGRES_PASSWORD': {'$parts': [{'env': 'MAGE_SECRET_PG_PASSWORD'}]},
+            'POSTGRES_DBNAME': 'shop',
+            'POSTGRES_CONNECT_TIMEOUT': 10,
+            'URL': {'$parts': ['postgresql://', {'env': 'PG_USER', 'default': 'mage'},
+                               '@db/shop']},
+        })
+        self.assertEqual(export.compile_io_config(self.CONFIG, 'other'),
+                         {'POSTGRES_HOST': 'elsewhere'})
+        self.assertIsNone(export.compile_io_config(self.CONFIG, 'missing'))
+
+    def test_templates_a_service_cannot_fill_in_are_explained(self):
+        text = 'default:\n  KEY: "{{ json_value(env_var(\'X\'), \'k\') }}"\n'
+        with self.assertRaisesRegex(ValueError, 'json_value'):
+            export.compile_io_config(text, 'default')
+        with self.assertRaisesRegex(ValueError, 'unknown_function'):
+            export.compile_io_config('default:\n  A: "{{ unknown_function() }}"\n', 'default')
+
+    def test_only_blocks_that_read_the_profile_need_it(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / 'io_config.yaml').write_text('default:\n  A: "{{ json_value(1) }}"\n')
+            reads = project / 'reads.rs'
+            reads.write_text('fn load_data() -> Result<DataFrame> { Postgres::connect()?; }\n')
+            plain = project / 'plain.rs'
+            plain.write_text('fn load_data() -> Result<DataFrame> { todo!() }\n')
+            block = SimpleNamespace(configuration={})
+            problems = []
+            self.assertIsNone(export._rust_io_config(block, plain, project, problems, 'a'))
+            self.assertEqual(problems, [])
+            self.assertIsNone(export._rust_io_config(block, reads, project, problems, 'b'))
+            self.assertEqual(len(problems), 1)
+            self.assertIn('json_value', problems[0])

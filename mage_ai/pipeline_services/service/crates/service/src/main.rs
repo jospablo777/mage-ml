@@ -536,6 +536,8 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|e| format!("Could not listen on {address}: {e}"))?;
+    // The bound address: port 0 picks a free port.
+    let address = listener.local_addr().unwrap_or(address);
 
     let manifest = &service.manifest;
     log::info(&format!(

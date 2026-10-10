@@ -12,6 +12,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mage_service_core::io_config;
 use mage_service_core::manifest::{Block, Language, Pipeline};
 use mage_service_core::protocol::{BlockStatus, RunStatus};
 use serde_json::{Map, Value, json};
@@ -479,6 +480,20 @@ impl BlockTask {
             .process_group(0)
             .kill_on_drop(true)
             .envs(self.service.extra_env.iter().cloned());
+        if let Some(profile) = &self.block.io_config {
+            let extra = &self.service.extra_env;
+            let lookup = |name: &str| {
+                extra
+                    .iter()
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| v.clone())
+                    .or_else(|| std::env::var(name).ok())
+            };
+            command.env(
+                "MAGE_IO_CONFIG",
+                io_config::render(profile, &lookup).to_string(),
+            );
+        }
         let mut child = command.spawn().map_err(|e| {
             BlockFailure::fatal(format!("could not start {}: {e}", binary.display()))
         })?;

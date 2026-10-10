@@ -6,7 +6,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -22,12 +22,11 @@ fn python() -> String {
     std::env::var("MAGE_SERVICE_TEST_PYTHON").unwrap_or_else(|_| "python3".into())
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+/// The port in the service's "serves ... on http://host:port" line.
+fn listening_port(log: &str) -> Option<u16> {
+    let line = log.lines().find(|l| l.contains(" serves "))?;
+    let address = line.split("on http://").nth(1)?.split_whitespace().next()?;
+    address.rsplit(':').next()?.parse().ok()
 }
 
 struct Service {
@@ -113,36 +112,51 @@ impl Service {
         .unwrap();
         Service {
             dir,
-            port: free_port(),
+            port: 0,
             child: None,
         }
     }
 
     fn start(&mut self, extra: &[(&str, &str)]) {
+        let log_path = self.dir.path().join("service.log");
+        let log = std::fs::File::create(&log_path).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_mage-service"));
         command
             .arg("serve")
             .env("MAGE_SERVICE_DIR", self.dir.path())
             .env("MAGE_SERVICE_WORKER", worker())
             .env("MAGE_SERVICE_PYTHON", python())
-            .env("MAGE_SERVICE_PORT", self.port.to_string())
+            // The service picks a free port and logs it: a port chosen here could be taken
+            // before the service binds it.
+            .env("MAGE_SERVICE_PORT", "0")
             .env("MAGE_SERVICE_TOKEN", TOKEN)
             .env("MAGE_SERVICE_READ_TOKEN", READ_TOKEN)
             .env("MAGE_SERVICE_SHUTDOWN_SECONDS", "2")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(log.try_clone().unwrap())
+            .stderr(log);
         for (key, value) in extra {
             command.env(key, value);
         }
         self.child = Some(command.spawn().unwrap());
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline {
-            if let Ok((200, _)) = self.request("GET", "/healthz", None, None) {
-                return;
+            let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+            if let Some(port) = listening_port(&text) {
+                self.port = port;
+                if let Ok((200, _)) = self.request("GET", "/healthz", None, None) {
+                    return;
+                }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            if self.child.as_mut().unwrap().try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-        panic!("the service did not start");
+        let exited = self.child.as_mut().unwrap().try_wait().unwrap();
+        let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let lines: Vec<&str> = text.lines().collect();
+        let tail = lines[lines.len().saturating_sub(30)..].join("\n");
+        panic!("the service did not start (exited: {exited:?}):\n{tail}");
     }
 
     fn request(

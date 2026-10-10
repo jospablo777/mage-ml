@@ -145,6 +145,9 @@ pub struct Block {
     /// configuration, which the SQL runner needs to name and reuse their tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sql: Option<Value>,
+    /// A Rust block's io_config profile; see `io_config`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub io_config: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
