@@ -1,28 +1,32 @@
 name: Build and test
 
+# Paused on 2026-10-10 until the release work: no runs on push, pull request or
+# schedule; start it by hand from the Actions tab. The triggers to restore:
+# on:
+#   push:
+#     paths:
+#       - "mage_ai/**"
+#       - "mage_integrations/**"
+#       - "vendor/**"
+#       - "runtimes/**"
+#       - "rust/**"
+#       - "scripts/run_app.sh"
+#       - "pyproject.toml"
+#       - "uv.lock"
+#       - ".github/workflows/build_and_test.yml"
+#   pull_request:
+#     paths:
+#       - "mage_ai/**"
+#       - "mage_integrations/**"
+#       - "vendor/**"
+#       - "runtimes/**"
+#       - "rust/**"
+#       - "scripts/run_app.sh"
+#       - "pyproject.toml"
+#       - "uv.lock"
+#       - ".github/workflows/build_and_test.yml"
 on:
-  push:
-    paths:
-      - "mage_ai/**"
-      - "mage_integrations/**"
-      - "vendor/**"
-      - "runtimes/**"
-      - "rust/**"
-      - "scripts/run_app.sh"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/build_and_test.yml"
-  pull_request:
-    paths:
-      - "mage_ai/**"
-      - "mage_integrations/**"
-      - "vendor/**"
-      - "runtimes/**"
-      - "rust/**"
-      - "scripts/run_app.sh"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/build_and_test.yml"
+  workflow_dispatch:
 
 env:
   ENV: test_mage

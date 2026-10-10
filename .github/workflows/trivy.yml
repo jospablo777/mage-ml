@@ -5,14 +5,18 @@
 
 name: Container validation
 
+# Paused on 2026-10-10 until the release work: no runs on push, pull request or
+# schedule; start it by hand from the Actions tab. The triggers to restore:
+# on:
+#   push:
+#     branches: [ "master", "alpha" ]
+#   pull_request:
+#     # The branches below must be a subset of the branches above
+#     branches: [ "master" ]
+#   schedule:
+#     - cron: '35 1 * * 2'
 on:
-  push:
-    branches: [ "master", "alpha" ]
-  pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ "master" ]
-  schedule:
-    - cron: '35 1 * * 2'
+  workflow_dispatch:
 
 permissions:
   contents: read

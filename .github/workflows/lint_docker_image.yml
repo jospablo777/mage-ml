@@ -1,9 +1,13 @@
 name: Lint Docker Images
 
+# Paused on 2026-10-10 until the release work: no runs on push, pull request or
+# schedule; start it by hand from the Actions tab. The triggers to restore:
+# on:
+#   pull_request:
+#     paths:
+#       - '*Dockerfile'
 on:
-  pull_request:
-    paths:
-      - '*Dockerfile'
+  workflow_dispatch:
 
 jobs:
   changed-images:

@@ -1,29 +1,33 @@
 name: Dependency audit
 
+# Paused on 2026-10-10 until the release work: no runs on push, pull request or
+# schedule; start it by hand from the Actions tab. The triggers to restore:
+# on:
+#   pull_request:
+#     paths:
+#       - pyproject.toml
+#       - uv.lock
+#       - mage_integrations/pyproject.toml
+#       - vendor/singer-python/pyproject.toml
+#       - runtimes/**
+#       - mage_ai/frontend/package.json
+#       - mage_ai/frontend/yarn.lock
+#       - .github/workflows/dependency_audit.yml
+#   push:
+#     branches: [master]
+#     paths:
+#       - pyproject.toml
+#       - uv.lock
+#       - mage_integrations/pyproject.toml
+#       - vendor/singer-python/pyproject.toml
+#       - runtimes/**
+#       - mage_ai/frontend/package.json
+#       - mage_ai/frontend/yarn.lock
+#       - .github/workflows/dependency_audit.yml
+#   schedule:
+#     - cron: '20 6 * * 1'
+#   workflow_dispatch:
 on:
-  pull_request:
-    paths:
-      - pyproject.toml
-      - uv.lock
-      - mage_integrations/pyproject.toml
-      - vendor/singer-python/pyproject.toml
-      - runtimes/**
-      - mage_ai/frontend/package.json
-      - mage_ai/frontend/yarn.lock
-      - .github/workflows/dependency_audit.yml
-  push:
-    branches: [master]
-    paths:
-      - pyproject.toml
-      - uv.lock
-      - mage_integrations/pyproject.toml
-      - vendor/singer-python/pyproject.toml
-      - runtimes/**
-      - mage_ai/frontend/package.json
-      - mage_ai/frontend/yarn.lock
-      - .github/workflows/dependency_audit.yml
-  schedule:
-    - cron: '20 6 * * 1'
   workflow_dispatch:
 
 permissions:
