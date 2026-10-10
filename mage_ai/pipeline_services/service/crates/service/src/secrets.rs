@@ -9,9 +9,10 @@
 //! - `MAGE_SERVICE_SECRETS_DIR=/dir` sets one variable per file, named after the file.
 //!
 //! - `MAGE_SERVICE_SECRETS` fetches secrets from a provider at start-up, one reference per
-//!   comma or line: `[NAME=]provider:reference[#field]`. Providers: `file` (a path) and
-//!   `ibm` (IBM Cloud Secrets Manager, see `ibm.rs`). A provider runs only when a reference
-//!   uses it.
+//!   comma or line: `[NAME=]provider:reference[#field]`. Providers: `file` (a path), `ibm`
+//!   (IBM Cloud Secrets Manager, see `ibm.rs`), `aws` (AWS Secrets Manager) and `aws-ssm`
+//!   (AWS Systems Manager Parameter Store, see `aws.rs`). A provider runs only when a
+//!   reference uses it.
 //!
 //! A variable set directly wins over every other source. Values marked secret, and every
 //! value read from a file or a provider, are replaced by `***` in logs and stored errors.
@@ -199,6 +200,7 @@ impl Secrets {
             }
         };
         let mut ibm = Vec::new();
+        let mut aws = Vec::new();
         let mut values = Vec::new();
         for reference in references {
             match reference.provider.as_str() {
@@ -220,8 +222,22 @@ impl Secrets {
                     Ok(mapping) => ibm.push(mapping),
                     Err(error) => self.problems.push(error),
                 },
+                "aws" | "aws-ssm" => match crate::aws::Mapping::new(
+                    if reference.provider == "aws" {
+                        crate::aws::Store::SecretsManager
+                    } else {
+                        crate::aws::Store::ParameterStore
+                    },
+                    reference.variable,
+                    &reference.id,
+                    reference.field,
+                ) {
+                    Ok(mapping) => aws.push(mapping),
+                    Err(error) => self.problems.push(format!("{SECRETS}: {error}")),
+                },
                 other => self.problems.push(format!(
-                    "{SECRETS}: unknown provider {other:?}; the providers are file and ibm"
+                    "{SECRETS}: unknown provider {other:?}; the providers are file, ibm, aws \
+                     and aws-ssm"
                 )),
             }
         }
@@ -239,6 +255,17 @@ impl Secrets {
                 Err(error) => self
                     .problems
                     .push(format!("IBM Cloud Secrets Manager: {error}")),
+            }
+        }
+        if !aws.is_empty() {
+            for name in ["AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"] {
+                if let Some(value) = environment.get(name) {
+                    self.redact(value);
+                }
+            }
+            match crate::aws::fetch(environment, &aws) {
+                Ok(fetched) => values.extend(fetched),
+                Err(error) => self.problems.push(format!("AWS: {error}")),
             }
         }
         for (name, value) in values {

@@ -13,7 +13,8 @@ web server, no scheduler, no metadata database. It starts in under a second and 
 - a run history that survives restarts, and every line the blocks print;
 - Prometheus metrics and a health check;
 - retries, timeouts and cancellation, as configured in Mage;
-- secrets from the environment, files, IBM Cloud Secrets Manager and other providers;
+- secrets from the environment, files, IBM Cloud Secrets Manager, AWS Secrets Manager and
+  Parameter Store;
 - ML models from MLflow, embedded in the image.
 
 You build pipelines in Mage as always, then ship them where they need to run: next to an
@@ -165,16 +166,37 @@ The service takes values from several places; a variable set directly always win
 
 ```bash
 MAGE_SERVICE_SECRETS='PGPASSWORD=ibm:3f1c...e2, PGUSER=ibm:3f1c...e2#username, API_KEY=file:/run/keys/api'
+MAGE_SERVICE_SECRETS='aws:prod/db, API_KEY=aws-ssm:/scoring/api-key'
 ```
 
 | Provider | Reference | Settings |
 | --- | --- | --- |
 | `ibm` | An IBM Cloud Secrets Manager secret id | `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL`, and `IBM_CLOUD_API_KEY` or a Code Engine trusted profile (`MAGE_SERVICE_IBM_TRUSTED_PROFILE`) |
+| `aws` | An AWS Secrets Manager secret name or ARN | `AWS_REGION` (or the ARN's region) and AWS credentials (below) |
+| `aws-ssm` | An AWS Systems Manager parameter name, such as `/app/key` | The same; SecureString parameters are decrypted |
 | `file` | A path | none |
 
 An IBM arbitrary secret gives its payload, a username and password secret its password
 (`#username` for the user), an IAM credentials secret its API key. A key-value secret
 listed without a name sets one variable per key.
+
+An AWS secret gives its string. `#key` picks one key of a JSON secret, such as the
+`username` of an RDS secret, and a JSON secret listed without a name sets one variable per
+key. The service finds AWS credentials as the AWS SDKs do, so on AWS no key is stored:
+
+1. `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`;
+2. EKS IAM roles for service accounts (`AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`);
+3. ECS task roles and EKS Pod Identity (the container credentials endpoint);
+4. the EC2 instance profile.
+
+The role needs `secretsmanager:GetSecretValue` or `ssm:GetParameter` on the secrets it
+reads, and `kms:Decrypt` when a customer managed key encrypts them.
+`AWS_ENDPOINT_URL_SECRETS_MANAGER`, `AWS_ENDPOINT_URL_SSM` and `AWS_ENDPOINT_URL` point the
+requests at a VPC endpoint.
+
+Platforms that inject secrets themselves need no provider: ECS task definition `secrets`,
+Kubernetes `secretKeyRef` and the Secrets Store CSI driver (with `MAGE_SERVICE_SECRETS_DIR`)
+set the variables before the service starts.
 
 Secret values, and every value read from a file or a provider, are replaced by `***` in
 logs and stored errors. Mage secrets read with `mage_secret_var('name')` come from

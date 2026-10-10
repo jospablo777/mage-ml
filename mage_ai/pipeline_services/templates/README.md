@@ -98,7 +98,7 @@ secrets mounted as files:
 | A file, such as a Docker or Kubernetes secret | `NAME_FILE=/run/secrets/name`: the service sets `NAME` from the file |
 | A directory of secret files | `MAGE_SERVICE_SECRETS_DIR=/run/secrets`: one variable per file, named after it |
 | IBM Cloud Secrets Manager | The service reads it at start-up: `MAGE_SERVICE_SECRETS='PGPASSWORD=ibm:<secret id>'` with `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL` and a trusted profile or API key; see `deploy/ibm/README.md` |
-| AWS Secrets Manager or Parameter Store | ECS task definition `secrets: [{name: PGPASSWORD, valueFrom: <secret ARN>}]`, or the Secrets Store CSI driver on EKS with `MAGE_SERVICE_SECRETS_DIR` |
+| AWS Secrets Manager or Parameter Store | The service reads it at start-up with the task's or pod's IAM role: `MAGE_SERVICE_SECRETS='PGPASSWORD=aws:prod/db#password, API_KEY=aws-ssm:/app/key'` with `AWS_REGION`. ECS task definition `secrets` and the Secrets Store CSI driver on EKS (`MAGE_SERVICE_SECRETS_DIR`) work too |
 | A Code Engine secret | `ibmcloud ce secret create --name db --from-env-file .env`, then `ibmcloud ce app create ... --env-from-secret db` |
 | Kubernetes Secret | `envFrom: [{secretRef: {name: $name-secrets}}]`, or mount it and set `MAGE_SERVICE_SECRETS_DIR` |
 | HashiCorp Vault | Vault Agent renders files; point `NAME_FILE` or `MAGE_SERVICE_SECRETS_DIR` at them |

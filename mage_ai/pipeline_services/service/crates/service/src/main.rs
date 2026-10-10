@@ -1,6 +1,7 @@
 //! mage-service: runs pipelines exported from a Mage project, without Mage.
 
 mod api;
+mod aws;
 mod executor;
 mod ibm;
 mod ledger;

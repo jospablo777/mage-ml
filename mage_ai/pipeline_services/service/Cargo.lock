@@ -1069,12 +1069,14 @@ name = "mage-service"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "clap",
  "croner",
  "libc",
  "mage-service-core",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
