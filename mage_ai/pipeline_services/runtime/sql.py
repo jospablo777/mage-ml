@@ -189,8 +189,9 @@ def should_upload(
 def _no_data(value: Any) -> bool:
     import pandas as pd
 
-    if isinstance(value, pd.DataFrame):
-        return len(value.index) == 0
+    # An empty frame is uploaded as a table with its columns and no rows, as Mage does.
+    if isinstance(value, pd.DataFrame) or type(value).__name__ == 'DataFrame':
+        return False
     if hasattr(value, '__len__'):
         return len(value) == 0
     return not value
@@ -230,8 +231,12 @@ def upload_upstream_tables(
         )
         if database:
             options['database'] = database
-        if 'allow_reserved_words' in inspect.signature(loader.export).parameters:
+        parameters = inspect.signature(loader.export).parameters
+        if 'allow_reserved_words' in parameters:
             options['allow_reserved_words'] = True
+        # The frame's column names as they are, as Mage uploads them.
+        if 'auto_clean_name' in parameters:
+            options['auto_clean_name'] = False
         loader.export(value, **options)
 
 
@@ -310,7 +315,7 @@ def interpolate_input(
     return query
 
 
-def execute_raw_sql(loader, query: str, configuration: Dict) -> List:
+def execute_raw_sql(loader, query: str, configuration: Dict, limit: int = 1000) -> List:
     helpers = statements()
     if configuration.get('disable_query_preprocessing'):
         result = loader.execute_query_raw(query, configuration=configuration)
@@ -325,7 +330,7 @@ def execute_raw_sql(loader, query: str, configuration: Dict) -> List:
     if has_create_or_insert or has_update:
         full_name = helpers.extract_full_table_name(query)
         if full_name:
-            queries.append(f'SELECT * FROM {full_name} LIMIT 1000')
+            queries.append(f'SELECT * FROM {full_name} LIMIT {int(limit)}')
             fetch.append(full_name)
     results = loader.execute_queries(queries, commit=True, fetch_query_at_indexes=fetch)
     last = results[-1] if results else None
@@ -395,7 +400,7 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
         query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
         query = render(query, variables)
         if configuration.get('use_raw_sql'):
-            return execute_raw_sql(loader, query, configuration)
+            return execute_raw_sql(loader, query, configuration, limit)
         loader.export(None, table_name=table, database=database, query_string=query, **options)
         return [loader.load(f'SELECT * FROM {database}.{table}', verbose=False)]
     if name == 'duckdb':
@@ -412,15 +417,18 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             query = interpolate_input(loader, configuration, upstreams, query)
             query = render(query, variables)
             schema = schema or loader.default_schema()
+            exact = bool(configuration.get('exact_numbers'))
             if configuration.get('use_raw_sql'):
-                return execute_raw_sql(loader, query, configuration)
+                loader.exact_numbers = exact
+                return execute_raw_sql(loader, query, configuration, limit)
             loader.export(None, schema, table, query_string=query, **options)
             from mage_ai.io.postgres_types import with_float_numbers
 
-            return [with_float_numbers(loader.load(
-                f'SELECT * FROM {schema}.{table}', limit=limit, verbose=False,
-                exact_types=True,
-            ))]
+            frame = loader.load(
+                f'SELECT * FROM {loader._full_table_name(schema, table)}', limit=limit,
+                verbose=False, exact_types=True,
+            )
+            return [frame if exact else with_float_numbers(frame)]
         return _run_on(loader, name, provider, configuration, upstreams, inputs, query,
                        io_config, variables, schema, table, limit, options)
 
@@ -432,7 +440,7 @@ def _run_on(loader, name, provider, configuration, upstreams, inputs, query, io_
     query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
     query = render(query, variables)
     if configuration.get('use_raw_sql'):
-        return execute_raw_sql(loader, query, configuration)
+        return execute_raw_sql(loader, query, configuration, limit)
     if name == 'mysql':
         loader.export(None, None, table, query_string=query, **options)
         return [loader.load(

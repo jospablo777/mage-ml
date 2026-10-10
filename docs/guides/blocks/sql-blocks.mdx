@@ -87,6 +87,19 @@ In addition to the fields mentioned in the table above. Here are some extra fiel
 | --------------------- | ------------------------ | --------------------------------------------------------------------------------|
 | limit                 | No                       | The maximum number of rows to return in notebook.                               |
 | limit_in_pipeline_run | No                       | The maximum number of rows to return when running the block in the pipeline run.|
+| data_provider_table   | No                       | The table the block writes, instead of an automatic name. In PostgreSQL a name like `MyTable` is the table `mytable`, as SQL that writes it unquoted reads it; names that can't be written unquoted (`with space`, `2024-sales`) are quoted as they are. |
+| exact_numbers         | No                       | PostgreSQL: return `numeric` values as `Decimal` instead of float. A float keeps 15 to 17 significant digits, so a `numeric(38, 10)` value read as float can lose digits, or round up past what its column holds when written back. |
+
+A raw SQL block that creates or fills a table passes that table's rows to downstream
+blocks, within `limit_in_pipeline_run` (it used to pass 1000 rows).
+
+With **Append**, PostgreSQL SQL blocks insert the query's columns into the existing
+table by name, each cast to its column's type. A query column the table doesn't have
+fails the block.
+
+The profile's schema is where tables are written. It doesn't change PostgreSQL's
+search path, so an unqualified table name in a query still resolves in `public` (or the
+user's search path). Qualify tables with their schema.
 
 
 #### Dynamic `data_provider_profile`
@@ -202,6 +215,9 @@ When writing raw SQL, you must use at least 1 of the following statements:
 #### Multiple SQL statements
 
 You can execute multiple SQL statements in a SQL block. Separate your SQL statements using a semi-colon (`;`).
+Semicolons inside strings (`'a;b'`, `E'a;b'`), quoted names, dollar-quoted bodies
+(`$$ ... $$`, as in `DO` blocks and function definitions) and comments don't end a
+statement.
 
 ### Automatic naming of tables
 
@@ -220,6 +236,10 @@ Where block UUID is the name of the SQL block you are running.
 
 If your SQL block depends on upstream blocks that aren’t SQL blocks (e.g. Python
 code blocks), then those blocks will also automatically create tables.
+
+These tables keep the frame's column names as they are, so a column `MixedCase` is
+selected as `"MixedCase"`. An empty frame creates an empty table with its columns, so a
+query never reads rows an earlier run left.
 
 The name of those tables follows the same naming convention mentioned above.
 

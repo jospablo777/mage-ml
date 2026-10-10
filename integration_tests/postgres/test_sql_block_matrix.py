@@ -513,3 +513,419 @@ def test_pandas_types_become_postgres_types(mage_project, pg, profile_schema):
     assert json.loads(rows[0][11]) == {'k': [1, None]}
     assert bytes(rows[0][12]) == b'\x00\xff' and bytes(rows[2][12]) == b''
     assert rows[1][7:13] == (None, None, None, None, None, None)
+
+
+# ---- more configurations -----------------------------------------------------------------
+
+
+def test_polars_frames_reach_sql_with_their_types(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import datetime as dt
+
+            import polars as pl
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pl.DataFrame({
+                    'id': [1, 2, 3],
+                    'big': pl.Series([2**63 - 1, None, -(2**63)], dtype=pl.Int64),
+                    'u': pl.Series([0, 2**32, None], dtype=pl.UInt64),
+                    'f': [1.25, None, float('nan')],
+                    'when': [dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc), None,
+                             dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)],
+                    'day': [dt.date(2024, 2, 29), None, dt.date(1999, 12, 31)],
+                    'tags': [['a'], None, []],
+                    'cat': pl.Series(['x', None, 'y'], dtype=pl.Categorical),
+                })
+        '''),
+        dict(
+            uuid='pick', type='transformer', language='sql', upstream=['load'],
+            config=dict(PG, export_write_policy='replace'),
+            code='SELECT id, big, u, f, "when", day, cardinality(tags) AS n, cat '
+                 'FROM {{ df_1 }} ORDER BY id',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    frame = output(pipeline, run, 'pick')
+    assert frame['big'].tolist()[0] == 2**63 - 1 and frame['big'].tolist()[2] == -(2**63)
+    assert frame['u'].tolist()[1] == 2**32
+    assert frame['n'].tolist()[0] == 1 and frame['n'].tolist()[2] == 0
+    assert frame['cat'].tolist()[0] == 'x' and frame['cat'].isna().tolist()[1]
+    assert str(frame['day'].iloc[0])[:10] == '2024-02-29'
+
+
+def test_the_profile_can_come_from_a_variable(mage_project, pg, profile_schema):
+    """The profile names the schema exports go to (it does not set the search path)."""
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(
+                data_provider='postgres',
+                data_provider_profile="{{ variables('profile') }}",
+                data_provider_table='from_variable_profile',
+                export_write_policy='replace',
+            ),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline, profile='test_schema', rows=2)
+    assert run.status.value == 'completed', error_of(run)
+    assert query(
+        pg, f'SELECT count(*) FROM {profile_schema}.from_variable_profile',
+    )[0][0] == 2
+
+
+def test_raw_sql_without_preprocessing_runs_as_one_script(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(
+            uuid='script', type='data_exporter', language='sql',
+            config=dict(PG, use_raw_sql=True, disable_query_preprocessing=True),
+            code=f'''
+                CREATE TABLE {profile_schema}.scripted (id int);
+                INSERT INTO {profile_schema}.scripted SELECT generate_series(1, 3);
+                DO $$ BEGIN
+                    INSERT INTO {profile_schema}.scripted VALUES (4);
+                END $$;
+            ''',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    assert query(pg, f'SELECT count(*) FROM {profile_schema}.scripted')[0][0] == 4
+
+
+def test_null_only_and_wide_frames(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                frame = pd.DataFrame({'id': [1, 2], 'nothing': [None, None]})
+                for index in range(300):
+                    frame[f'c{index}'] = [index, index + 1]
+                return frame
+        '''),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table='wide', export_write_policy='replace'),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    assert query(pg, f'SELECT nothing, c299 FROM {profile_schema}.wide ORDER BY id') == [
+        (None, 299), (None, 300),
+    ]
+
+
+def test_duplicate_column_names_in_a_result_are_explained(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(
+            uuid='load', type='data_loader', language='sql',
+            config=dict(PG, export_write_policy='replace'),
+            code='SELECT 1 AS a, 2 AS a',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'failed'
+    assert 'a' in error_of(run, 'load')
+    assert 'specified more than once' in error_of(run, 'load')
+
+
+def test_a_nul_character_fails_with_the_column_named(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'id': [1], 'text': ['a\\x00b']})
+        '''),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table='nul', export_write_policy='replace'),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'failed'
+    message = error_of(run, 'export')
+    assert 'NUL' in message or '0x00' in message, message
+
+
+def test_replacing_a_table_a_view_depends_on_says_so(mage_project, pg, profile_schema):
+    table = 'viewed'
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table=table, export_write_policy='replace'),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    run_pipeline(pipeline, rows=2)
+    execute(pg, f'CREATE VIEW {profile_schema}.v AS SELECT * FROM {profile_schema}.{table}')
+    run = execute_pipeline(pipeline, rows=3)
+    assert run.status.value == 'failed'
+    assert 'depend' in error_of(run, 'export')
+    assert query(pg, f'SELECT count(*) FROM {profile_schema}.v')[0][0] == 2
+
+
+def test_an_upstream_dict_becomes_a_one_row_table(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code="""
+            @data_loader
+            def load(*args, **kwargs):
+                return {'name': 'a table', 'size': 3}
+        """),
+        dict(
+            uuid='use', type='transformer', language='sql', upstream=['load'],
+            config=dict(PG, export_write_policy='replace'),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    frame = output(pipeline, run, 'use')
+    assert frame.to_dict('records') == [{'name': 'a table', 'size': 3}]
+
+
+def test_sql_loader_types_reach_pandas(mage_project, pg, profile_schema, source_table):
+    pipeline = build(mage_project, [
+        dict(
+            uuid='load', type='data_loader', language='sql', config=dict(PG),
+            code=f'SELECT * FROM {profile_schema}.{source_table} ORDER BY id',
+        ),
+        dict(uuid='check', type='transformer', upstream=['load'], code='''
+            import datetime as dt
+            import uuid
+
+            import pandas as pd
+
+
+            @transformer
+            def check(frame, *args, **kwargs):
+                problems = []
+                expect = {
+                    'c_smallint': 'Int64', 'c_integer': 'Int64', 'c_bigint': 'Int64',
+                    'c_bool': ('boolean', 'bool', 'object'),
+                }
+                for column, dtypes in expect.items():
+                    if str(frame[column].dtype) not in (
+                        dtypes if isinstance(dtypes, tuple) else (dtypes,)
+                    ):
+                        problems.append(f'{column}: {frame[column].dtype}')
+                value = frame['c_timestamptz'].dropna().iloc[0]
+                if getattr(value, 'tzinfo', None) is None:
+                    problems.append(f'c_timestamptz has no time zone: {value!r}')
+                value = frame['c_jsonb'].dropna().iloc[0]
+                if not isinstance(value, (dict, list, str, int, float, bool)):
+                    problems.append(f'c_jsonb: {type(value)}')
+                value = frame['c_int_array'].dropna().iloc[0]
+                if not hasattr(value, '__len__'):
+                    problems.append(f'c_int_array: {type(value)}')
+                assert not problems, problems
+                return frame.head(1)
+        '''),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+
+
+# ---- round trips of every type ----------------------------------------------------------
+
+POLARS_MIDDLE = '''
+import json
+
+import polars as pl
+
+
+@transformer
+def middle(frame, *args, **kwargs):
+    assert len(frame) == int(kwargs['expected_rows']), len(frame)
+    # Polars columns have one type: JSON of mixed shapes goes as text, as do numbers past
+    # the 76 digits of its decimals.
+    frame = frame.assign(
+        c_json=frame['c_json'].map(lambda v: None if v is None else json.dumps(v)),
+        c_jsonb=frame['c_jsonb'].map(lambda v: None if v is None else json.dumps(v)),
+        c_numeric_free=frame['c_numeric_free'].map(lambda v: None if v is None else str(v)),
+    )
+    return pl.from_pandas(frame)
+'''
+
+PANDAS_MIDDLE = '''
+@transformer
+def middle(frame, *args, **kwargs):
+    assert len(frame) == int(kwargs['expected_rows']), len(frame)
+    return frame
+'''
+
+
+def raw_insert(schema: str) -> str:
+    """INSERT ... SELECT with each column cast to the source table's type."""
+    from integration_tests.data import postgres_dataset
+
+    values = []
+    for name, sql_type in postgres_dataset.COLUMNS:
+        sql_type = sql_type.format(schema=schema)
+        if name == 'c_int_matrix':
+            # Nested lists reach PostgreSQL as jsonb.
+            values.append(f"translate({name}::text, '[]', '{{}}')::{sql_type}")
+        else:
+            values.append(f'{name}::text::{sql_type}' if name in (
+                'c_uuid', 'c_enum', 'c_json', 'c_jsonb', 'c_uuid_array', 'c_numeric_free',
+            ) else f'{name}::{sql_type}')
+    return (
+        f'INSERT INTO {schema}.dst\nSELECT {", ".join(values)}\n'
+        'FROM {{ df_1 }}'
+    )
+
+
+def round_trip_problems(
+    pg, schema: str, exact_numbers: bool, skip: tuple = (), nan_is_null: bool = False,
+) -> Dict[str, list]:
+    """
+    Each source column against the stored one. In a table of the source's types values
+    compare as they are; in a table Mage made, by the types it chose (round trips of
+    test_sql_blocks.ROUND_TRIP). Without exact_numbers numeric goes through float.
+    """
+    from integration_tests.data import postgres_dataset
+    from integration_tests.postgres.test_sql_blocks import ROUND_TRIP
+
+    source_types = dict(postgres_dataset._format_types(pg, schema, 'src'))
+    target_types = dict(postgres_dataset._format_types(pg, schema, 'dst'))
+    problems = {}
+    for name in postgres_dataset.COLUMN_NAMES:
+        if name in skip:
+            continue
+        if name not in target_types:
+            problems[name] = ['<missing column>']
+            continue
+        same_type = target_types[name] == source_types[name]
+        if name in ('c_json', 'c_jsonb'):
+            comparison = f'd.{name}::jsonb = s.{name}::jsonb'
+        elif name in ('c_numeric', 'c_numeric_free') and not exact_numbers:
+            comparison = f'd.{name}::double precision = s.{name}::double precision'
+        elif name == 'c_real':
+            comparison = f'd.{name}::text::double precision = s.{name}::text::double precision'
+        elif same_type:
+            comparison = f'd.{name} = s.{name}'
+        elif name in ('c_numeric', 'c_numeric_free'):
+            comparison = f'd.{name}::numeric = s.{name}'
+        else:
+            comparison = ROUND_TRIP.get(name, f'd.{name} = s.{name}')
+        nan_as_null = (
+            f"AND NOT (s.{name}::text = 'NaN' AND d.{name} IS NULL)"
+            if nan_is_null and name in ('c_real', 'c_double', 'c_numeric', 'c_numeric_free')
+            else ''
+        )
+        rows = query(pg, f'''
+            SELECT s.id, s.{name}::text, d.{name}::text
+            FROM {schema}.src s JOIN {schema}.dst d USING (id)
+            WHERE ((s.{name} IS NULL) <> (d.{name} IS NULL)
+               OR NOT coalesce({comparison}, s.{name} IS NULL)) {nan_as_null}
+            ORDER BY s.id LIMIT 3
+        ''')
+        if rows:
+            problems[name] = rows
+    return problems
+
+
+@pytest.mark.parametrize('exporter', ['create', 'append_typed', 'raw_insert'])
+@pytest.mark.parametrize('middle', ['pandas', 'polars'])
+@pytest.mark.parametrize('loader', ['sql', 'raw_sql', 'sql_exact', 'raw_sql_exact'])
+def test_every_type_round_trips_through_python(
+    mage_project, pg, profile_schema, source_table, source_rows, loader, middle, exporter,
+):
+    from integration_tests.data import postgres_dataset
+
+    if exporter != 'create':
+        postgres_dataset.create_like_table(pg, profile_schema, 'src', 'dst')
+    exact = loader.endswith('_exact')
+    loader_config = dict(PG, use_raw_sql=loader.startswith('raw_sql'))
+    if exact:
+        loader_config['exact_numbers'] = True
+    if exporter == 'raw_insert':
+        export = dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['middle'],
+            config=dict(PG, use_raw_sql=True),
+            # Raw SQL is the author's: uuid and enum values arrive as text and need casts.
+            code=raw_insert(profile_schema),
+        )
+    else:
+        export = dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['middle'],
+            config=dict(
+                PG, data_provider_table='dst',
+                export_write_policy='replace' if exporter == 'create' else 'append',
+            ),
+            code='SELECT * FROM {{ df_1 }}',
+        )
+    pipeline = build(mage_project, [
+        dict(
+            uuid='load', type='data_loader', language='sql', config=loader_config,
+            code=f'SELECT * FROM {profile_schema}.{source_table} ORDER BY id',
+        ),
+        dict(
+            uuid='middle', type='transformer', upstream=['load'],
+            code=POLARS_MIDDLE if middle == 'polars' else PANDAS_MIDDLE,
+        ),
+        export,
+    ])
+    run = execute_pipeline(pipeline, expected_rows=len(source_rows))
+    if not exact and exporter != 'create':
+        # Read as float, the largest numeric(38, 10) value rounds up to 10^28, which the
+        # column cannot hold: exact_numbers is how numeric values round trip.
+        assert run.status.value == 'failed'
+        assert 'numeric field overflow' in error_of(run, 'export')
+        return
+    assert run.status.value == 'completed', error_of(run)
+    assert query(pg, f'SELECT count(*) FROM {profile_schema}.dst')[0][0] == len(source_rows)
+    # In the Polars block: a Polars time has no time zone, so timetz loses its offset;
+    # pandas holds a NULL float as NaN, so from_pandas cannot keep NULL and NaN apart.
+    polars = middle == 'polars'
+    assert round_trip_problems(
+        pg, profile_schema, exact, skip=('c_timetz',) if polars else (), nan_is_null=polars,
+    ) == {}
+
+
+def test_append_writes_columns_by_name_not_position(mage_project, pg, profile_schema):
+    execute(pg, f'CREATE TABLE {profile_schema}.ordered (id bigint, label text, n bigint)')
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'n': [10, 20], 'id': [1, 2], 'label': ['a', 'b']})
+        '''),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table='ordered', export_write_policy='append'),
+            code='SELECT n, label, id FROM {{ df_1 }}',
+        ),
+    ])
+    run_pipeline(pipeline)
+    assert query(pg, f'SELECT id, label, n FROM {profile_schema}.ordered ORDER BY id') == [
+        (1, 'a', 10), (2, 'b', 20),
+    ]
+
+    extra = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table='ordered', export_write_policy='append'),
+            code='SELECT id, name AS surprise FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(extra)
+    assert run.status.value == 'failed'
+    assert 'surprise' in error_of(run, 'export')

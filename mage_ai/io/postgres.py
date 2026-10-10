@@ -372,7 +372,11 @@ class Postgres(BaseSQL):
         """
         register_type(UUID_ARRAY, cursor)
         cursor.execute(query)
-        return postgres_types.with_float_numbers(postgres_types.frame_from_cursor(cursor))
+        frame = postgres_types.frame_from_cursor(cursor)
+        # A SQL block with exact_numbers keeps numeric values as Decimal.
+        if getattr(self, 'exact_numbers', False):
+            return frame
+        return postgres_types.with_float_numbers(frame)
 
     def build_create_schema_command(
         self,
@@ -403,6 +407,41 @@ class Postgres(BaseSQL):
                 (stored_name(schema_name or self.default_schema()), stored_name(table_name)),
             )
             return bool(cur.rowcount)
+
+    def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:
+        """
+        INSERT ... SELECT by column name, each value cast to its column's type. By
+        position, a query whose columns came in another order wrote values into the wrong
+        columns, and text values (uuid and enum columns read as text) failed for uuid and
+        enum columns. JSON lists go into array columns as array literals.
+        """
+        cursor.execute(f'SELECT * FROM ({query_string}) AS mage_append_query LIMIT 0')
+        query_columns = [(d.name, d.type_code) for d in cursor.description]
+        cursor.execute(
+            'SELECT oid::int, typname FROM pg_type WHERE oid = ANY(%s)',
+            ([oid for _, oid in query_columns],),
+        )
+        type_names = dict(cursor.fetchall())
+        target_types = self._table_column_types(full_table_name)
+        missing = [name for name, _ in query_columns if name not in target_types]
+        if missing:
+            raise ValueError(
+                f'The query has columns that table {full_table_name} does not: '
+                f'{", ".join(missing)}. Append writes columns by name.'
+            )
+        names, values = [], []
+        for name, oid in query_columns:
+            target = target_types[name]
+            column = '"' + name.replace('"', '""') + '"'
+            value = f'mage_append_query.{column}'
+            if type_names.get(oid) in ('json', 'jsonb') and target.endswith('[]'):
+                value = f"translate({value}::text, '[]', '{{}}')"
+            names.append(column)
+            values.append(f'{value}::{target}')
+        return (
+            f'INSERT INTO {full_table_name} ({", ".join(names)})\n'
+            f'SELECT {", ".join(values)}\nFROM ({query_string}) AS mage_append_query'
+        )
 
     def _full_table_name(self, schema_name: Optional[str], table_name: str) -> str:
         if schema_name:

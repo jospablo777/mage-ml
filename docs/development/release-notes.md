@@ -11,6 +11,26 @@ error; the per-service findings are in `docs/development/*-integration.md` and
 
 Each item says what changed, which pipelines it affects, and what to do.
 
+#### SQL blocks
+
+- **Raw SQL statements are split by a lexer.** Semicolons inside dollar-quoted bodies
+  (`DO $$ ... $$`, function definitions), `E''` strings, quoted names and comments no
+  longer split a statement; such scripts failed with a syntax error.
+- **Raw SQL that creates or fills a table passes all its rows downstream**, within
+  `limit_in_pipeline_run`. It passed 1000 rows, so a downstream Python block silently
+  worked on part of the table.
+- **An empty upstream frame becomes an empty table.** It was skipped, and the SQL block
+  read the rows an earlier run had left in the table.
+- **Upstream frames keep their column names** in the tables SQL blocks read. They were
+  cleaned (`MixedCase` became `mixedcase`, `with space` became `with_space`).
+- **Append writes PostgreSQL columns by name.** `INSERT INTO table <query>` matched
+  columns by position, so a query with another column order wrote values into the wrong
+  columns. Values are cast to the column types (uuid and enum values read as text no
+  longer fail).
+- **PostgreSQL table names that need quotes work**, such as `with space`, and replacing a
+  table configured as `MyTable` finds `mytable`.
+- New `exact_numbers` setting for PostgreSQL SQL blocks: `numeric` values as `Decimal`.
+
 #### Block outputs
 
 - **Block runs have attempts.** Each claim of a block run by a worker increments

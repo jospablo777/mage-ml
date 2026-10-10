@@ -234,6 +234,10 @@ class BaseSQL(BaseSQLConnection):
                 **kwargs,
             )
 
+    def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:
+        """The statement that appends a query's rows to an existing table."""
+        return 'INSERT INTO {}\n{}'.format(full_table_name, query_string)
+
     def _full_table_name(self, schema_name: Optional[str], table_name: str) -> str:
         """The table name as written in statements. Clients that quote names override it."""
         if schema_name:
@@ -369,10 +373,7 @@ class BaseSQL(BaseSQLConnection):
                     )
 
                     if ExportWritePolicy.APPEND == if_exists and table_exists:
-                        query = 'INSERT INTO {}\n{}'.format(
-                            full_table_name,
-                            query_string,
-                        )
+                        query = self._append_query(cur, full_table_name, query_string)
                     cur.execute(query)
                 else:
                     db_dtypes = {col: self.get_type(df[col], dtypes[col]) for col in dtypes}

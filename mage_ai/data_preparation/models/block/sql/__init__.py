@@ -469,6 +469,7 @@ def execute_sql_code(
             schema = schema or loader.default_schema()
 
             if use_raw_sql:
+                loader.exact_numbers = bool(configuration.get('exact_numbers'))
                 return execute_raw_sql(
                     loader,
                     block,
@@ -493,6 +494,7 @@ def execute_sql_code(
                             loader,
                             f'SELECT * FROM {loader._full_table_name(schema, table_name)}',
                             limit,
+                            exact_numbers=bool(configuration.get('exact_numbers')),
                         ),
                     ]
     elif DataSource.REDSHIFT.value == data_provider:
@@ -750,16 +752,21 @@ def execute_raw_sql(
     return []
 
 
-def load_result(loader, query: str, limit: int):
+def load_result(loader, query: str, limit: int, exact_numbers: bool = False):
     """
     Load the result of a PostgreSQL SQL block. pandas read_sql turned integer columns
     with NULLs into float64, which rounds values above 2**53: 9223372036854775807 became
     9.223372036854776e18. Integer columns stay integers, as nullable Int64; numeric and
-    float columns are float, as read_sql returned them.
+    float columns are float, as read_sql returned them, unless the block sets
+    exact_numbers, which keeps numeric values as Decimal (a float has 15 to 17
+    significant digits, so numeric(38, 10) values lost theirs).
     """
     from mage_ai.io.postgres_types import with_float_numbers
 
-    return with_float_numbers(loader.load(query, limit=limit, verbose=False, exact_types=True))
+    frame = loader.load(query, limit=limit, verbose=False, exact_types=True)
+    if exact_numbers:
+        return frame
+    return with_float_numbers(frame)
 
 
 class SQLBlock(Block):
