@@ -91,6 +91,23 @@ UPDATE t SET price = price * 1.1
                          ['SELECT $1, price$ FROM t', 'SELECT 2'])
         self.assertEqual(split_query_string('  ;; -- nothing\n'), [])
 
+    def test_the_table_a_create_statement_makes(self):
+        from mage_ai.data_preparation.models.block.sql.utils.statements import (
+            extract_create_statement_table_name,
+        )
+
+        for statement, table in [
+            ('CREATE TABLE s.t (id int)', 's.t'),
+            ('create table if not exists s.t(id int)', 's.t'),
+            ('CREATE OR REPLACE TABLE main.made AS SELECT range FROM range(5)', 'main.made'),
+            ('CREATE TABLE s.t AS SELECT * FROM other', 's.t'),
+            ('CREATE TEMP TABLE x AS SELECT 1', 'x'),
+            ('CREATE TABLE "My Schema"."My Table" AS SELECT 1', '"My Schema"."My Table"'),
+            ('CREATE UNLOGGED TABLE IF NOT EXISTS a.b (x int);', 'a.b'),
+            ('SELECT 1', None),
+        ]:
+            self.assertEqual(extract_create_statement_table_name(statement), table, statement)
+
     def test_table_name_parts_from_query(self):
         query1 = 'select * from demo_db1.demo_schema1.demo_table1'
         query2 = 'SELECT * FROM demo_db2.demo_schema2.demo_table2;'

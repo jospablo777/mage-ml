@@ -42,26 +42,23 @@ def remove_comments(text: str) -> str:
 
 
 def extract_create_statement_table_name(text: str) -> Optional[str]:
-    create_table_pattern = r'create table(?: if not exists)*'
-
-    statement_partial, _ = extract_and_replace_text_between_strings(
-        remove_comments(text),
-        create_table_pattern,
-        r'\(',
+    # CREATE [OR REPLACE] [TEMP | TEMPORARY | UNLOGGED | ...] TABLE [IF NOT EXISTS]: CREATE
+    # OR REPLACE TABLE (DuckDB, Snowflake) was not recognized, so a raw SQL block passed
+    # the statement's status on instead of the table.
+    create_table_pattern = (
+        r'create(?:\s+or\s+replace)?'
+        r'(?:\s+(?:temp|temporary|unlogged|global|local|transient|external))*'
+        r'\s+table(?:\s+if\s+not\s+exists)?'
     )
-    if not statement_partial:
-        return None
 
-    match1 = re.match(create_table_pattern, statement_partial, re.IGNORECASE)
-    if match1:
-        idx_start, idx_end = match1.span()
-        new_statement = statement_partial[0:idx_start] + statement_partial[idx_end:]
-        match2 = re.search(r'[^\s]+', new_statement.strip())
-        if match2:
-            return match2.group(0)
-
-    parts = statement_partial[:len(statement_partial) - 1].strip().split(' ')
-    return parts[-1]
+    # The name after the pattern: quoted, or up to a space or a parenthesis. A statement
+    # without a parenthesis (CREATE TABLE t AS SELECT * FROM s) was not recognized.
+    match = re.search(
+        create_table_pattern + r'\s+((?:"(?:[^"]|"")*"|[^\s(;])+)',
+        remove_comments(text),
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
 
 
 def extract_insert_statement_table_names(text: str) -> List[str]:

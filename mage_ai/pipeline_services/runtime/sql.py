@@ -447,4 +447,6 @@ def _run_on(loader, name, provider, configuration, upstreams, inputs, query, io_
             f'SELECT * FROM {table}', limit=limit, verbose=False, nullable_integers=True,
         )]
     loader.export(None, schema, table_name=table, query_string=query, **options)
+    if configuration.get('exact_numbers'):
+        return [loader.load(f'SELECT * FROM {schema}.{table}', verbose=False, exact_types=True)]
     return [loader.load(f'SELECT * FROM {schema}.{table}', verbose=False, nullable_integers=True)]

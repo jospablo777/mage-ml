@@ -929,3 +929,90 @@ def test_append_writes_columns_by_name_not_position(mage_project, pg, profile_sc
     run = execute_pipeline(extra)
     assert run.status.value == 'failed'
     assert 'surprise' in error_of(run, 'export')
+
+
+# ---- failures ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('raw', [False, True], ids=['sql', 'raw_sql'])
+def test_a_failing_replace_keeps_the_previous_table(mage_project, pg, profile_schema, raw):
+    table = f'kept_{"raw" if raw else "sql"}'
+    if raw:
+        code = f'''
+            DROP TABLE IF EXISTS {profile_schema}.{table};
+            CREATE TABLE {profile_schema}.{table} AS
+            SELECT id, 1 / (id - {{{{ variables("zero_at") }}}}) AS x FROM {{{{ df_1 }}}};
+        '''
+        config = dict(PG, use_raw_sql=True)
+    else:
+        code = 'SELECT id, 1 / (id - {{ variables("zero_at") }}) AS x FROM {{ df_1 }}'
+        config = dict(PG, data_provider_table=table, export_write_policy='replace')
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(uuid='export', type='data_exporter', language='sql', upstream=['load'],
+             config=config, code=code),
+    ])
+    run_pipeline(pipeline, rows=3, zero_at=100)
+    failed = execute_pipeline(pipeline, rows=5, zero_at=4)
+    assert failed.status.value == 'failed'
+    assert 'division by zero' in error_of(failed, 'export')
+    # The statements ran in one transaction, rolled back: the earlier rows remain.
+    assert query(pg, f'SELECT count(*) FROM {profile_schema}.{table}')[0][0] == 3
+
+
+def test_a_missing_column_names_the_column(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(
+            uuid='use', type='transformer', language='sql', upstream=['load'],
+            config=dict(PG, export_write_policy='replace'),
+            code='SELECT id, nmae FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'failed'
+    assert 'nmae' in error_of(run, 'use')
+
+
+def test_large_text_and_long_arrays(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({
+                    'id': [1],
+                    'big': ['x' * 5_000_000],
+                    'many': [list(range(100_000))],
+                })
+        '''),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['load'],
+            config=dict(PG, data_provider_table='large', export_write_policy='replace'),
+            code='SELECT id, length(big) AS n, cardinality(many) AS m FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    assert query(pg, f'SELECT n, m FROM {profile_schema}.large') == [(5_000_000, 100_000)]
+
+
+def test_the_same_pipeline_run_twice_in_a_row_is_idempotent(mage_project, pg, profile_schema):
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code=PANDAS_ROWS),
+        dict(
+            uuid='middle', type='transformer', language='sql', upstream=['load'],
+            config=dict(PG, export_write_policy='replace'),
+            code='SELECT id * 2 AS id, name FROM {{ df_1 }}',
+        ),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['middle'],
+            config=dict(PG, data_provider_table='twice', export_write_policy='replace'),
+            code='SELECT * FROM {{ df_1 }}',
+        ),
+    ])
+    for rows in (3, 3, 2):
+        run_pipeline(pipeline, rows=rows)
+    assert query(pg, f'SELECT id FROM {profile_schema}.twice ORDER BY id') == [(2,), (4,)]

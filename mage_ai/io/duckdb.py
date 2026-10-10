@@ -82,6 +82,13 @@ class DuckDB(BaseSQL):
                 **conn_kwargs,
             )
 
+    def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:
+        """
+        Appends by column name: by position, a query whose columns came in another order
+        wrote values into the wrong columns.
+        """
+        return f'INSERT INTO {full_table_name} BY NAME\n{query_string}'
+
     def load(
         self,
         query_string: str,

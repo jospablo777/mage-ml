@@ -88,7 +88,7 @@ In addition to the fields mentioned in the table above. Here are some extra fiel
 | limit                 | No                       | The maximum number of rows to return in notebook.                               |
 | limit_in_pipeline_run | No                       | The maximum number of rows to return when running the block in the pipeline run.|
 | data_provider_table   | No                       | The table the block writes, instead of an automatic name. In PostgreSQL a name like `MyTable` is the table `mytable`, as SQL that writes it unquoted reads it; names that can't be written unquoted (`with space`, `2024-sales`) are quoted as they are. |
-| exact_numbers         | No                       | PostgreSQL: return `numeric` values as `Decimal` instead of float. A float keeps 15 to 17 significant digits, so a `numeric(38, 10)` value read as float can lose digits, or round up past what its column holds when written back. |
+| exact_numbers         | No                       | PostgreSQL: return `numeric` values as `Decimal` instead of float; DuckDB: return exact decimals (in pyarrow-backed columns). A float keeps 15 to 17 significant digits, so a `numeric(38, 10)` value read as float can lose digits, or round up past what its column holds when written back. |
 
 A raw SQL block that creates or fills a table passes that table's rows to downstream
 blocks, within `limit_in_pipeline_run` (it used to pass 1000 rows).

@@ -29,7 +29,14 @@ Each item says what changed, which pipelines it affects, and what to do.
   longer fail).
 - **PostgreSQL table names that need quotes work**, such as `with space`, and replacing a
   table configured as `MyTable` finds `mytable`.
-- New `exact_numbers` setting for PostgreSQL SQL blocks: `numeric` values as `Decimal`.
+- New `exact_numbers` setting for PostgreSQL SQL blocks (`numeric` values as `Decimal`)
+  and DuckDB SQL blocks (exact decimals in pyarrow-backed columns).
+- **Raw SQL recognizes `CREATE OR REPLACE TABLE`, `CREATE TEMP TABLE` and `CREATE TABLE
+  ... AS` without parentheses** as creating a table, and passes that table on; it passed
+  the statement's status.
+- **DuckDB appends write columns by name** (`INSERT ... BY NAME`), and a DuckDB SQL block
+  closes its connection when it fails, which kept the database file from other
+  connections of the process.
 
 #### Block outputs
 
