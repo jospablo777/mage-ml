@@ -230,7 +230,9 @@ class ProcessQueue(Queue):
             if job == os.getpid():
                 # Update the job status before the process is killed
                 self.job_dict[job_id] = JobStatus.CANCELLED
-            _kill_process_tree(job)
+                _kill_process_tree(job)
+            elif self.__is_process_alive(job):
+                _kill_process_tree(job)
         self.job_dict[job_id] = JobStatus.CANCELLED
         self.__unset_kill_job(job_id)
 
@@ -292,7 +294,22 @@ class ProcessQueue(Queue):
         return self.worker_pool_proc.is_alive()
 
     def __is_process_alive(self, pid: int) -> bool:
-        return psutil.pid_exists(pid)
+        """
+        Whether pid is still one of this queue's workers. A pid alone was not enough:
+        after a worker died its pid could belong to another process, which kept the block
+        run RUNNING until its timeout and which kill_job would have killed.
+        """
+        try:
+            process = psutil.Process(pid)
+            if process.status() == psutil.STATUS_ZOMBIE:
+                return False
+            pool = self.worker_pool_proc
+            pool_pid = getattr(pool, 'pid', None) if pool is not None else None
+            if not pool_pid:
+                return True
+            return any(parent.pid == pool_pid for parent in process.parents())
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return False
 
     def __redis_key_job(self, job_id):
         return f'{self.redis_namespace}:{job_id}'

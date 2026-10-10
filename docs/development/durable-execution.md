@@ -47,6 +47,9 @@ So the implementation adds attempts to block runs instead of a new queue.
   crash (`MAGE_BLOCK_RUN_MAX_CRASHES`, default 3) only if this scheduler launched it; a
   block interrupted when its scheduler stopped (a restart, a deploy, a lost replica) runs
   again and counts as an interruption (`MAGE_BLOCK_RUN_MAX_INTERRUPTIONS`, default 10).
+- A job's pid counts as its worker only while that process is a live descendant of the
+  queue's worker pool, so a reused pid neither keeps a dead block run RUNNING nor gets
+  killed by `kill_job`.
 
 ## Remaining gaps
 
@@ -59,6 +62,5 @@ So the implementation adds attempts to block runs instead of a new queue.
    released after it (60 s expiry for a holder that died), but it is not renewed, so a
    tick longer than a minute allows a second replica in; without `REDIS_URL` replicas
    share no job ownership at all.
-4. **PID reuse.** A reused pid keeps a dead worker's block run RUNNING until its timeout.
-5. **Integration pipelines and Kubernetes.** Stream jobs and Kubernetes block runs write
+4. **Integration pipelines and Kubernetes.** Stream jobs and Kubernetes block runs write
    status on other paths that are not fenced yet.

@@ -18,7 +18,7 @@ class ProcessQueueTests(TestCase):
     def test_init(self):
         self.assertEqual(self.queue.size, 100)
 
-    @patch('mage_ai.orchestration.queue.process_queue.psutil.pid_exists')
+    @patch.object(ProcessQueue, '_ProcessQueue__is_process_alive')
     def test_clean_up_jobs(self, mock_pid_exists):
         mock_pid_exists.return_value = True
 
@@ -34,7 +34,7 @@ class ProcessQueueTests(TestCase):
         self.assertFalse('block_run_4' in self.queue.job_dict)
 
     @patch.object(ProcessQueue, 'start_worker_pool')
-    @patch('mage_ai.orchestration.queue.process_queue.psutil.pid_exists')
+    @patch.object(ProcessQueue, '_ProcessQueue__is_process_alive')
     def test_has_job(self, mock_pid_exists, mock_start_worker_pool):
         mock_start_worker_pool.return_value = None
         mock_pid_exists.return_value = True
@@ -59,6 +59,39 @@ class ProcessQueueTests(TestCase):
         mock_pid_exists.return_value = False
         self.assertTrue(self.queue.has_job('block_run_1'))
         self.assertFalse(self.queue.has_job('block_run_2'))
+
+
+class WorkerOwnershipTests(TestCase):
+    """A job's pid counts as its worker only while that process is under the pool."""
+
+    def setUp(self):
+        self.queue = ProcessQueue(queue_config=QueueConfig.load(config=dict(concurrency=1)))
+        self.alive = self.queue._ProcessQueue__is_process_alive
+
+    def test_a_pid_reused_by_a_process_outside_the_pool_is_not_the_worker(self):
+        import os
+        from types import SimpleNamespace
+
+        # This test process stands in for a worker; its parent stands in for the pool.
+        self.queue.worker_pool_proc = SimpleNamespace(pid=os.getppid())
+        self.assertTrue(self.alive(os.getpid()))
+        # The same pid under another parent: a reused pid, not this queue's worker.
+        self.queue.worker_pool_proc = SimpleNamespace(pid=2**22 + 17)
+        self.assertFalse(self.alive(os.getpid()))
+        self.assertFalse(self.alive(2**22 + 19), 'A pid with no process is dead.')
+
+    def test_kill_job_leaves_a_process_that_is_not_its_worker_alone(self):
+        import os
+        from types import SimpleNamespace
+
+        self.queue.worker_pool_proc = SimpleNamespace(pid=2**22 + 17)
+        self.queue.job_dict['block_run_7'] = os.getppid()
+        with patch(
+            'mage_ai.orchestration.queue.process_queue._kill_process_tree',
+        ) as kill:
+            self.queue.kill_job('block_run_7')
+        kill.assert_not_called()
+        self.assertEqual(self.queue.job_dict['block_run_7'], JobStatus.CANCELLED)
 
 
 class ProcessQueueRaceTests(TestCase):
