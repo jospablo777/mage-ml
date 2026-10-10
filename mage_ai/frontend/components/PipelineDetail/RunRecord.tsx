@@ -63,6 +63,23 @@ type MlflowRunType = {
   url?: string;
 };
 
+type ReleaseType = {
+  alias: string;
+  champion?: string;
+  decision: 'fail' | 'hold' | 'pass';
+  error?: string;
+  model: string;
+  rules: {
+    champion?: number;
+    metric: string;
+    reasons: string[];
+    result: string;
+    value?: number;
+  }[];
+  status: string;
+  version: string;
+};
+
 type RunRecordType = {
   captured_at?: string;
   captures?: number;
@@ -73,6 +90,7 @@ type RunRecordType = {
   experiments?: {
     [blockUUID: string]: { runs: MlflowRunType[]; tracking_uri?: string };
   };
+  releases?: { [blockUUID: string]: ReleaseType[] };
   environment?: {
     mage?: string;
     packages?: number;
@@ -202,6 +220,20 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
   const reproduction = record?.reproduction;
   const running = reproduction?.status === 'running';
 
+  const [approved, setApproved] = useState<{ [key: string]: string }>({});
+  const [release, { isLoading: isReleasing }] = useMutation(
+    api.model_releases.useCreate(),
+    {
+      onSuccess: (response: any) => onSuccess(response, {
+        callback: ({ model_release: updated }) => setApproved(prev => ({
+          ...prev,
+          [updated.model]: updated.champion,
+        })),
+        onErrorCallback: (response, errors) => showError({ errors, response }),
+      }),
+    },
+  );
+
   const [start, { isLoading: isStarting }] = useMutation(
     api.run_records.useCreate(),
     {
@@ -272,6 +304,58 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
                     </>
                   )}
                 </Row>
+              ))}
+            </Spacing>
+          ))}
+          {Object.entries(record.releases || {}).map(([blockUUID, evaluations]) => (
+            <Spacing key={blockUUID} mt={1}>
+              {evaluations.filter(e => e.decision).map(evaluation => (
+                <Spacing key={`${evaluation.model}-${evaluation.version}`} mt={1}>
+                  <Text small>
+                    Release check of {evaluation.model} version {evaluation.version}:{' '}
+                    <Text
+                      danger={evaluation.decision === 'fail'}
+                      inline
+                      small
+                      success={evaluation.decision === 'pass'}
+                      warning={evaluation.decision === 'hold'}
+                    >
+                      {evaluation.decision}
+                    </Text>
+                    {' '}({approved[evaluation.model] === evaluation.version
+                      ? 'promoted'
+                      : evaluation.status}; {evaluation.alias} was{' '}
+                    {evaluation.champion || 'none'})
+                  </Text>
+                  {evaluation.rules.map(rule => (
+                    <Row key={rule.metric} label={rule.metric}>
+                      {String(rule.value ?? 'missing')}: {rule.result}
+                      {rule.reasons.length ? `; ${rule.reasons.join(', ')}` : ''}
+                    </Row>
+                  ))}
+                  {evaluation.decision === 'pass'
+                    && evaluation.status === 'awaiting approval'
+                    && approved[evaluation.model] !== evaluation.version && (
+                    <Spacing mt={1}>
+                      <Button
+                        compact
+                        loading={isReleasing}
+                        // @ts-ignore
+                        onClick={() => release({
+                          model_release: {
+                            action: 'promote',
+                            expected_champion: evaluation.champion,
+                            model: evaluation.model,
+                            version: evaluation.version,
+                          },
+                        })}
+                        primary
+                      >
+                        Approve promotion to {evaluation.alias}
+                      </Button>
+                    </Spacing>
+                  )}
+                </Spacing>
               ))}
             </Spacing>
           ))}

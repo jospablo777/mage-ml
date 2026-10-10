@@ -524,6 +524,103 @@ def reproduce_run(
         json.dump(result, file)
 
 
+def _releases_setup(project_path: str):
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+    return project_path
+
+
+@app.command('release-status')
+def release_status(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    model: str = typer.Argument(..., help='name of the registered model.'),
+    version: Union[str, None] = typer.Option(None, help='evaluate this version now.'),
+):
+    """
+    Show a model's release policy, the version holding its alias and its release log;
+    with --version, evaluate that version against the policy and the current champion.
+    """
+    from mage_ai.orchestration import releases
+
+    project_path = _releases_setup(project_path)
+    try:
+        policy = releases.load_policy(model, project_path)
+        if policy is None:
+            print(f'[red]{model} has no release policy in releases/.[/red]')
+            raise typer.Exit(code=2)
+        champion = releases.champion_of(releases._client(), policy)
+        typer.echo(
+            f'{model}: {policy.alias} is version {champion.version if champion else "none"}; '
+            f'approval {policy.approval}.'
+        )
+        for entry in releases.release_log(project_path, model)[-10:]:
+            typer.echo(
+                f'- {entry["at"]} {entry["action"]} to version {entry["version"]} '
+                f'(was {entry["previous"] or "none"}) by {entry["actor"]}'
+            )
+        if version:
+            typer.echo(releases.summary(releases.evaluate_version(policy, version)))
+    except releases.ReleaseError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+
+
+@app.command('release-promote')
+def release_promote(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    model: str = typer.Argument(..., help='name of the registered model.'),
+    version: str = typer.Argument(..., help='the version to promote.'),
+    force: bool = typer.Option(False, help='promote even if the release check does not pass.'),
+):
+    """
+    Evaluate a version against the model's release policy and, if it passes, move the
+    policy's alias to it.
+    """
+    import getpass
+
+    from mage_ai.orchestration import releases
+
+    project_path = _releases_setup(project_path)
+    try:
+        policy = releases.load_policy(model, project_path)
+        if policy is None:
+            print(f'[red]{model} has no release policy in releases/.[/red]')
+            raise typer.Exit(code=2)
+        evaluation = releases.evaluate_version(policy, version)
+        typer.echo(releases.summary(evaluation))
+        if evaluation['decision'] != 'pass' and not force:
+            print('[red]Not promoted; pass --force to promote anyway.[/red]')
+            raise typer.Exit(code=1)
+        entry = releases.promote(
+            project_path, model, version, evaluation['champion'], getpass.getuser(),
+        )
+    except releases.ReleaseError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    typer.echo(f'{model} {entry["alias"]} is now version {entry["version"]}.')
+
+
+@app.command('release-rollback')
+def release_rollback(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    model: str = typer.Argument(..., help='name of the registered model.'),
+):
+    """Give the model's alias back to the version that held it before the last promotion."""
+    import getpass
+
+    from mage_ai.orchestration import releases
+
+    project_path = _releases_setup(project_path)
+    try:
+        entry = releases.rollback(project_path, model, getpass.getuser())
+    except releases.ReleaseError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    typer.echo(f'{model} {entry["alias"]} is back to version {entry["version"]}.')
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the Mage project.'),

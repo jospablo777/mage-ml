@@ -1,0 +1,86 @@
+---
+title: "Model release checks"
+sidebarTitle: "Model releases"
+icon: "rocket"
+description: "Check each new model version against release rules, and promote it by moving an MLflow alias."
+---
+
+## Overview
+
+A training pipeline registers a new model version on every run, but not every version
+should replace the one in use. A release policy states what a new version must achieve.
+Mage checks each version a block registers in MLflow against it, and against the version
+in use (the **champion**). A version that passes is promoted by moving an MLflow alias,
+either automatically or after someone approves it.
+
+Consumers load the released version by alias, such as `models:/churn_model@champion`, so
+a promotion or a rollback changes what they load without changing their code.
+
+This builds on [MLflow linking](/guides/pipelines/experiments): the block registers its
+model with MLflow as usual.
+
+## Write a policy
+
+Create `releases/<registered model name>.yaml` in the project:
+
+```yaml
+# releases/churn_model.yaml
+alias: champion        # the alias of the released version (default: champion)
+approval: manual       # manual (default) or automatic
+fail_block: false      # true: a failed check fails the block run
+rules:
+  - metric: auc
+    min: 0.75
+    max_regression: 0.01     # at most 0.01 worse than the champion
+  - metric: log_loss
+    max: 0.5
+    higher_is_better: false  # for max_regression: lower is better
+  - metric: eval_rows
+    min: 1000                # enough rows evaluated
+```
+
+The metrics are the ones the version's MLflow run logged with `mlflow.log_metric`.
+
+| Rule | Meaning |
+| --- | --- |
+| `metric` | The MLflow metric's name. |
+| `min`, `max` | Bounds on the metric. |
+| `max_regression` | How much worse than the champion's value it may be. With no champion yet (the first release) the rule passes. |
+| `higher_is_better` | The metric's direction for `max_regression`; `true` by default. |
+
+## Decisions
+
+Each version gets one decision:
+
+- **pass**: every rule holds.
+- **fail**: at least one rule doesn't.
+- **hold**: no rule fails, but at least one can't be checked: the metric is missing or
+  not a finite number, or the champion lacks it.
+
+The block run's logs show the decision and each rule's value and reason. The pipeline
+run's page shows them under **Run record**.
+
+## Promotion
+
+- With `approval: automatic`, a passing version becomes the champion at once.
+- With `approval: manual`, a passing version waits. **Approve promotion to champion** on
+  the pipeline run's page (editors and owners) or `mage release-promote` moves the alias.
+
+A promotion first checks that the champion is still the version the candidate was
+compared with. If another version was promoted meanwhile, the approval is refused and the
+candidate must be checked again:
+
+```bash
+mage release-status <project path> <model> [--version 7]   # policy, champion, log; check a version
+mage release-promote <project path> <model> <version>      # check, then promote if it passes
+mage release-rollback <project path> <model>               # back to the previous champion
+```
+
+`release-promote --force` promotes a version that doesn't pass, and records who did it.
+
+## Release log and rollback
+
+Every promotion and rollback is appended to the model's release log, with the version,
+the previous champion, who did it and when. It's stored with the project's variables in
+`.releases/<model>.jsonl`. `mage release-rollback` gives the alias back to the version
+that held it before the current champion was promoted.

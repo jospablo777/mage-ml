@@ -478,6 +478,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Model release checks.** A policy in `releases/<model>.yaml` lists metric rules (min,
+  max, at most this much worse than the champion). Each version a block registers in
+  MLflow is checked against it and decided pass, hold or fail. A passing version is
+  promoted by moving an MLflow alias (`champion`), at once or after **Approve promotion**
+  on the run page. A stale approval is refused, and every promotion and rollback is
+  logged. CLI: `mage release-status`, `release-promote`, `release-rollback`. See
+  `docs/guides/pipelines/model-releases.mdx`.
 - **MLflow runs linked to Mage runs.** MLflow runs that a block starts during a pipeline
   run are tagged with the project, pipeline, pipeline run, block, block run and code
   digest (`mage.*` tags), and the block run records them: experiment, status, latest

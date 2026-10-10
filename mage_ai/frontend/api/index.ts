@@ -76,6 +76,7 @@ export const INTERACTIONS: 'interactions' = 'interactions';
 export const KERNELS: 'kernels' = 'kernels';
 export const LLMS = 'llms';
 export const LOGS = 'logs';
+export const MODEL_RELEASES: 'model_releases' = 'model_releases';
 export const MONITOR_STATS = 'monitor_stats';
 export const OAUTHS = 'oauths';
 export const OUTPUTS = 'outputs';
@@ -180,6 +181,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [KERNELS],
   [LLMS],
   [LOGS, PIPELINES],
+  [MODEL_RELEASES],
   [MONITOR_STATS],
   [OAUTHS],
   [OUTPUTS, BLOCK_RUNS],

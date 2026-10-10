@@ -633,6 +633,7 @@
               "guides/pipelines/pipeline-environments",
               "guides/pipelines/run-records",
               "guides/pipelines/experiments",
+              "guides/pipelines/model-releases",
               "guides/community-examples"
             ]
           },

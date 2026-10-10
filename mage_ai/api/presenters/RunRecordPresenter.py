@@ -16,6 +16,7 @@ class RunRecordPresenter(BasePresenter):
         'outputs',
         'pipeline_run_id',
         'pipeline_uuid',
+        'releases',
         'reproduction',
         'variables',
     ]

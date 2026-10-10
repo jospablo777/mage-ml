@@ -127,6 +127,10 @@ class RunRecordResource(GenericResource):
                 b.block_uuid: (b.metrics or {}).get('mlflow') for b in run.block_runs
                 if (b.metrics or {}).get('mlflow')
             },
+            releases={
+                b.block_uuid: (b.metrics or {}).get('releases') for b in run.block_runs
+                if (b.metrics or {}).get('releases')
+            },
         )
         try:
             recorded = run_records.manifests(pipeline, run.id)

@@ -674,6 +674,8 @@ class BlockExecutor:
                     self._tracked_block_run_id = block_run_id
                     with self._tracking(block_run_id, pipeline_run):
                         result = __execute_with_retry()
+                    self._recorded = self._output_record()
+                    self._check_releases(self._recorded, tags)
                 except Exception as error:
                     self.logger.exception(
                         f'Failed to execute block {self.block.uuid}',
@@ -757,7 +759,7 @@ class BlockExecutor:
 
                 # This is passed in from the pipeline scheduler
                 if on_complete is not None:
-                    recorded = self._output_record()
+                    recorded = getattr(self, '_recorded', None)
                     if recorded:
                         on_complete(self.block_uuid, metrics=recorded)
                     else:
@@ -1283,7 +1285,33 @@ class BlockExecutor:
                     recorded['mlflow'] = runs
             except Exception as error:
                 self.logger.warning(f'Looking up the MLflow runs of the block failed: {error}')
+        if recorded.get('mlflow'):
+            from mage_ai.orchestration import releases
+
+            try:
+                evaluations = releases.evaluate_block_run(
+                    self.pipeline.repo_path, recorded['mlflow'], actor='scheduler',
+                )
+            except Exception as error:
+                evaluations = [dict(error=str(error))]
+                self.logger.warning(f'The release check of the block failed: {error}')
+            if evaluations:
+                recorded['releases'] = evaluations
         return recorded or None
+
+    def _check_releases(self, recorded: Optional[Dict], tags: Dict) -> None:
+        """Logs each release check; fails the block run if a policy says a failure does."""
+        from mage_ai.orchestration import releases
+
+        failed = []
+        for evaluation in (recorded or {}).get('releases') or []:
+            if 'decision' not in evaluation:
+                continue
+            self.logger.info(releases.summary(evaluation), **tags)
+            if evaluation['decision'] == 'fail' and evaluation.get('fail_block'):
+                failed.append(f'{evaluation["model"]} version {evaluation["version"]}')
+        if failed:
+            raise Exception(f'The release check failed for {", ".join(failed)}.')
 
     def _execute_conditional(
         self,
