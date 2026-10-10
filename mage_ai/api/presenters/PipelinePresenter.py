@@ -18,6 +18,7 @@ class PipelinePresenter(BasePresenter):
         'created_at',
         'data_integration',
         'description',
+        'environment',
         'executor_config',
         'executor_count',
         'executor_type',

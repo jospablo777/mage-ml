@@ -511,7 +511,11 @@ def _reply(channel, message: Dict) -> None:
 
 def serve(requests=None, channel=None) -> None:
     requests = requests or sys.stdin
-    channel = channel or io.TextIOWrapper(os.fdopen(3, 'wb', buffering=0), encoding='utf-8')
+    # Replies go to file descriptor 3, or the one MAGE_WORKER_REPLY_FD names.
+    reply_fd = int(os.environ.get('MAGE_WORKER_REPLY_FD') or 3)
+    channel = channel or io.TextIOWrapper(
+        os.fdopen(reply_fd, 'wb', buffering=0), encoding='utf-8',
+    )
     _reply(channel, dict(type='ready', protocol=PROTOCOL_VERSION, pid=os.getpid(),
                          python=sys.version.split()[0]))
     for line in requests:

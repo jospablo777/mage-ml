@@ -89,6 +89,20 @@ from mage_ai.shared.yaml import load_yaml, yaml
 CYCLE_DETECTION_ERR_MESSAGE = 'A cycle was detected in this pipeline'
 
 
+def normalized_environment(environment) -> Optional[Dict]:
+    """The environment setting with empty fields left out; None when nothing is set."""
+    if not isinstance(environment, dict):
+        return environment or None
+    normalized = {}
+    for key in ('requirements', 'python'):
+        value = environment.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+        if value:
+            normalized[key] = value
+    return normalized or None
+
+
 class Pipeline:
     def __init__(
         self,
@@ -107,6 +121,8 @@ class Pipeline:
         self.blocks_by_uuid = {}
         # 'chains' runs each chain of blocks as one stage; see block-fusion.md.
         self.block_fusion = None
+        # Its own Python packages for the Python blocks; see data_preparation/environments.py.
+        self.environment = None
         # Can only be set True when run_pipeline_in_one_process is True
         self.cache_block_output_in_memory = False
         self.concurrency_config = dict()
@@ -880,6 +896,7 @@ class Pipeline:
 
         self.block_configs = config.get('blocks') or []
         self.block_fusion = config.get('block_fusion')
+        self.environment = config.get('environment')
         self.cache_block_output_in_memory = config.get('cache_block_output_in_memory', False)
         self.callback_configs = config.get('callbacks') or []
         self.concurrency_config = config.get('concurrency_config') or dict()
@@ -1067,6 +1084,8 @@ class Pipeline:
         # Saved only when set, so pipelines without it keep their metadata.yaml as is.
         if self.block_fusion:
             base['block_fusion'] = self.block_fusion
+        if self.environment:
+            base['environment'] = self.environment
 
         if (
             include_execution_framework
@@ -1329,9 +1348,13 @@ class Pipeline:
                 should_save = True
                 should_update_block_cache = True
 
+        if 'environment' in data:
+            data = {**data, 'environment': normalized_environment(data.get('environment'))}
+
         for key in [
             'block_fusion',
             'cache_block_output_in_memory',
+            'environment',
             'concurrency_config',
             'data_integration',
             'executor_type',

@@ -30,7 +30,7 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from mage_ai.pipeline_services.secrets import secret_variable_name
 
@@ -87,6 +87,8 @@ class Capture:
     rust_locked: bool = False
     # The rv environment R blocks run with (rproject.toml and rv.lock).
     r_project: Optional[Path] = None
+    # The pipeline environment (metadata.yaml `environment`) the Python blocks run in.
+    environment: Optional[Any] = None
 
     @property
     def needs_r(self) -> bool:
@@ -141,6 +143,7 @@ def capture(
     repo_config = get_repo_config(str(project_path))
     capture_ = Capture(name=service, project=project_path, manifest={}, notes=notes)
     pipelines = []
+    environments = {}
     for uuid in dict.fromkeys(pipeline_uuids):
         try:
             pipeline = Pipeline.get(uuid, repo_path=str(project_path), check_if_exists=True)
@@ -154,6 +157,10 @@ def capture(
                                 max_concurrent_runs)
         if entry:
             pipelines.append(entry)
+        environments[uuid] = _pipeline_environment(pipeline, problems)
+    if problems:
+        raise ExportError(problems)
+    capture_.environment = _shared_environment(environments, problems)
     if problems:
         raise ExportError(problems)
 
@@ -185,7 +192,74 @@ def capture(
     capture_.models = _models(capture_, models or [])
     if capture_.needs_python:
         capture_.requirements = _requirements(capture_)
+        if capture_.environment is not None:
+            _apply_environment(capture_)
     return capture_
+
+
+def _pipeline_environment(pipeline, problems: List[str]):
+    from mage_ai.data_preparation import environments
+
+    try:
+        return environments.pipeline_environment(pipeline)
+    except environments.PipelineEnvironmentError as error:
+        problems.append(str(error))
+        return None
+
+
+def _shared_environment(environments: Dict[str, Any], problems: List[str]):
+    """
+    The one environment the exported pipelines run in. A service image has one Python
+    environment, so pipelines that declare different ones are exported separately.
+    """
+    declared = {uuid: env for uuid, env in environments.items() if env is not None}
+    if not declared:
+        return None
+    if len(declared) < len(environments) or len(set(declared.values())) > 1:
+        described = ', '.join(
+            f'{uuid} ({kind})' for uuid, kind in (
+                (uuid, 'its own environment' if env else "Mage's packages")
+                for uuid, env in environments.items()
+            )
+        )
+        problems.append(
+            'The pipelines run in different Python environments and a service has one: '
+            f'{described}. Export them as separate services.'
+        )
+        return None
+    return next(iter(declared.values()))
+
+
+def _apply_environment(capture_: Capture) -> None:
+    """
+    Pins the packages of the pipeline environment over the versions resolved from Mage's
+    own: the blocks run with the environment's packages in Mage, so the service does too.
+    The environment is built first when it does not exist yet.
+    """
+    from mage_ai.data_preparation import environments
+
+    environment = capture_.environment
+    try:
+        environments.ensure(environment, log=lambda _line: None)
+    except environments.PipelineEnvironmentError as error:
+        raise ExportError([f'Building the pipeline environment failed: {error}'])
+    marker = json.loads((environment.directory / environments.MARKER).read_text())
+    for line in marker.get('packages') or []:
+        match = re.match(r'\s*([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)\s*$', line)
+        if match is None:
+            capture_.notes.append(
+                f'The pipeline environment installs {line.strip()}, which is not a pinned '
+                'release; add it to the project requirements.txt if the blocks need it.'
+            )
+            continue
+        name = match.group(1).lower().replace('_', '-')
+        if name not in EXCLUDED_DISTRIBUTIONS:
+            capture_.requirements[name] = match.group(2)
+    capture_.requirements = dict(sorted(capture_.requirements.items()))
+    capture_.notes.append(
+        f'The Python blocks run in the pipeline environment {environment.directory.name} '
+        f'(Python {environment.python}); the image installs its packages.'
+    )
 
 
 SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb', 'clickhouse')
@@ -1029,6 +1103,8 @@ def _dockerfile(capture_: Capture) -> str:
     project = capture_.project.name
     rust = _rust_version()
     python_version = f'{sys.version_info.major}.{sys.version_info.minor}'
+    if capture_.environment is not None:
+        python_version = capture_.environment.python
     rust_blocks = ''
     copy_blocks = ''
     if capture_.rust_blocks:

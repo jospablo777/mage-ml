@@ -38,7 +38,11 @@ def main(argv) -> int:
     # command's exit code.
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: None)
-    child = subprocess.Popen(argv[2:])
+    # Descriptors the command needs besides stdin, stdout and stderr, such as a reply pipe.
+    pass_fds = tuple(
+        int(fd) for fd in os.environ.get('MAGE_SUPERVISE_PASS_FDS', '').split(',') if fd
+    )
+    child = subprocess.Popen(argv[2:], pass_fds=pass_fds)
 
     def watch():
         # An orphan gets a new parent, so the parent id changes when the parent is gone.

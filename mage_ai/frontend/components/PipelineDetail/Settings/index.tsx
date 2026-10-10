@@ -278,6 +278,60 @@ function PipelineSettings({
           description={(
             <>
               <Text muted small>
+                The Python data loaders, transformers, data exporters and custom blocks run
+                in a virtual environment with the packages this file lists, instead of
+                Mage&apos;s. The path is relative to the pipeline&apos;s folder. uv builds the
+                environment on the first run that needs it, and later runs reuse it.
+              </Text>
+              {Array.isArray(pipelineAttributes?.environment?.requirements) && (
+                <Text small warning>
+                  The requirements are listed in metadata.yaml; edit them there.
+                </Text>
+              )}
+            </>
+          )}
+          textInput={Array.isArray(pipelineAttributes?.environment?.requirements) ? null : {
+            monospace: true,
+            onChange: e => setPipelineAttributes(prev => ({
+              ...prev,
+              environment: {
+                ...prev?.environment,
+                requirements: e.target.value,
+              },
+            })),
+            placeholder: 'requirements.txt',
+            value: (pipelineAttributes?.environment?.requirements as string) || '',
+          }}
+          title="Pipeline environment requirements"
+        />
+
+        {!!pipelineAttributes?.environment?.requirements && (
+          <SetupSectionRow
+            description={(
+              <Text muted small>
+                The Python version of the environment; the server&apos;s when empty.
+              </Text>
+            )}
+            textInput={{
+              monospace: true,
+              onChange: e => setPipelineAttributes(prev => ({
+                ...prev,
+                environment: {
+                  ...prev?.environment,
+                  python: e.target.value,
+                },
+              })),
+              placeholder: '3.12',
+              value: pipelineAttributes?.environment?.python || '',
+            }}
+            title="Pipeline environment Python version"
+          />
+        )}
+
+        <SetupSectionRow
+          description={(
+            <>
+              <Text muted small>
                 Every time a trigger is created or updated in this pipeline,
                 it’ll be automatically be persisted it in code.
               </Text>
@@ -609,6 +663,7 @@ function PipelineSettings({
             onClick={() => updatePipeline({
               concurrency_config: pipelineAttributes?.concurrency_config,
               description: pipelineAttributes?.description,
+              environment: pipelineAttributes?.environment || null,
               executor_type: pipelineAttributes?.executor_type,
               name: pipelineAttributes?.name,
               retry_config: pipelineAttributes?.retry_config,

@@ -1,0 +1,89 @@
+---
+title: "Pipeline environments"
+sidebarTitle: "Environments"
+icon: "box-archive"
+description: "Run a pipeline's Python blocks with their own package versions."
+---
+
+## Overview
+
+All pipelines in a Mage project share the packages installed on the server. A pipeline
+that needs another version of a library (an older scikit-learn for a model trained with
+it, a client pinned by a vendor) conflicts with the others.
+
+A pipeline environment gives one pipeline its own Python packages. Its Python blocks
+run in a virtual environment built from a requirements file. Mage builds the environment
+the first time a block needs it and reuses it afterwards.
+
+## Set it up
+
+1. Put a requirements file in the pipeline's folder, `pipelines/<pipeline uuid>/`:
+
+   ```text
+   scikit-learn==1.5.2
+   six==1.16.0
+   ```
+
+2. Open the pipeline's **Settings**, enter the file name under **Pipeline environment
+   requirements** and save. To use a different Python version, enter it under **Pipeline
+   environment Python version** (such as `3.11`); the server's version is the default.
+
+The setting is saved in the pipeline's `metadata.yaml`:
+
+```yaml
+environment:
+  requirements: requirements.txt   # relative to the pipeline's folder
+  python: '3.11'                    # optional
+```
+
+`requirements` can also be a list of requirement lines in `metadata.yaml`.
+
+Clear the requirements field and save to run the blocks with Mage's packages again.
+
+## What runs in the environment
+
+- Python data loaders, transformers, data exporters and custom blocks, with their `@test`
+  functions. This applies everywhere a block runs: the notebook, triggers, backfills,
+  retries and block fusion.
+- Sensors, scratchpads, callbacks, conditionals, SQL, R and Rust blocks run as before.
+- Dynamic and replicated blocks can't run in an environment yet. They fail with a
+  message that says so.
+
+A block receives its upstream outputs and keyword variables as it would in Mage. Tables
+pass as Arrow files. Other values pass as JSON, or as pickle when JSON can't hold them.
+Variables that can't be written as JSON (such as an open client object) are left out.
+Everything the block prints shows in its output and logs while it runs.
+
+## Package versions
+
+pandas, pyarrow, Polars and NumPy carry tables between Mage and the block, so the
+environment gets Mage's versions of them. A requirements file that names one of them
+pins its own version instead. Pin a version Mage can read. A pandas or pyarrow much
+older than Mage's may write outputs Mage reads differently.
+
+Blocks can import Mage's helpers, such as `mage_ai.data_preparation.shared.secrets`, as
+long as the environment has the packages those helpers import. Add them to the
+requirements file when a block fails with a missing module.
+
+## Builds and the cache
+
+- [uv](https://docs.astral.sh/uv/) builds the environments. The Mage Docker image
+  includes it; install it on other servers.
+- Environments are stored in `~/.cache/mage/environments`. Set `MAGE_ENVIRONMENTS_DIR`
+  to put them elsewhere, such as a volume that survives container restarts.
+- Each environment's folder name comes from a hash of its Python version,
+  requirements, pinned packages, platform and uv version. Changing the requirements
+  builds a new environment, and the old one stays until you delete its folder.
+- A build goes to a temporary folder and is moved into place only when it finishes, so
+  a failed or interrupted build is never used. Two processes that need the same
+  environment build it once (on Linux and macOS).
+- A build that takes longer than 30 minutes fails. Set
+  `MAGE_ENVIRONMENT_BUILD_TIMEOUT_SECONDS` to change the limit.
+- `mage-environment.json` in each environment's folder lists every package it installed.
+
+## Pipeline services
+
+`mage export service` installs the environment's packages, at the versions the
+environment has, in the service image, and uses the environment's Python version as the
+image's. Pipelines exported into one service must share an environment. Export
+pipelines with different environments as separate services.

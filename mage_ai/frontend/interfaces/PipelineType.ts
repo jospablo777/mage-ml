@@ -144,6 +144,11 @@ export default interface PipelineType {
     catalog: CatalogType;
   };
   description?: string;
+  // Its own Python packages for the Python blocks (pipelines/<uuid>/metadata.yaml).
+  environment?: {
+    python?: string;
+    requirements?: string | string[];
+  };
   executor_type?: ExecutorTypeEnum;
   execution_framework?: PipelineExecutionFrameworkUUIDEnum;
   extensions?: PipelineExtensionsType;

@@ -478,6 +478,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Pipeline environments.** A pipeline can give its Python blocks their own packages:
+  name a requirements file in the pipeline's settings (or `environment:` in its
+  metadata.yaml) and its data loaders, transformers, data exporters and custom blocks run
+  in a virtual environment uv builds from it, in the notebook and in triggered runs. The
+  environment is built once and reused; pandas, pyarrow, Polars and NumPy stay at Mage's
+  versions unless the file pins them. `mage export service` installs the environment's
+  packages in the image. See `docs/guides/pipelines/pipeline-environments.mdx`.
 - **Pipeline services run R and SQL blocks.** `mage export service` exports R blocks with
   the project's rv environment (the image installs R 4.6 and the packages rv.lock pins)
   and SQL blocks on PostgreSQL, MySQL, DuckDB and ClickHouse, which run as in a Mage pipeline run. Rust blocks are

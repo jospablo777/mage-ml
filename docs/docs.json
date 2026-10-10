@@ -629,6 +629,7 @@
                 ]
               },
               "guides/pipelines/importing-pipelines",
+              "guides/pipelines/pipeline-environments",
               "guides/community-examples"
             ]
           },

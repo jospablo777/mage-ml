@@ -2042,6 +2042,10 @@ class Block(
             check_connection(self.type, code or '', global_vars)
             return []
 
+        environment = self._pipeline_environment()
+        if environment is not None:
+            return self._execute_in_environment(environment, custom_code, input_vars, global_vars)
+
         decorated_functions = []
         preprocesser_functions = []
         test_functions = []
@@ -3290,6 +3294,55 @@ class Block(
             **kwargs,
         )
 
+    def _pipeline_environment(self):
+        """The pipeline's own environment when this Python block runs in it, else None."""
+        if (
+            self.language != BlockLanguage.PYTHON
+            or self.pipeline is None
+            or not getattr(self.pipeline, 'environment', None)
+        ):
+            return None
+        from mage_ai.data_preparation import environments
+
+        if str(getattr(self.type, 'value', self.type)) not in environments.SUPPORTED_BLOCK_TYPES:
+            return None
+        environment = environments.pipeline_environment(self.pipeline)
+        if environment is not None:
+            from mage_ai.data_preparation.models.block.dynamic.utils import (
+                is_dynamic_block,
+                is_dynamic_block_child,
+                is_replicated_block,
+            )
+
+            if is_dynamic_block(self) or is_dynamic_block_child(self) or is_replicated_block(self):
+                raise environments.PipelineEnvironmentError(
+                    f'Block {self.uuid} is dynamic or replicated, which cannot run in a pipeline '
+                    'environment yet; remove the environment from the pipeline settings or '
+                    'make the block static.'
+                )
+        return environment
+
+    def _execute_in_environment(self, environment, custom_code, input_vars, global_vars) -> List:
+        from mage_ai.data_preparation import environments
+
+        code = custom_code if custom_code is not None and custom_code.strip() else None
+        outputs, tests = environments.run_block(
+            self, environment, code, input_vars, global_vars or {},
+        )
+
+        # The tests ran in the environment with the outputs; run_tests reports them.
+        def replayed(result: Dict) -> Callable:
+            def test(*args, **kwargs):
+                if not result.get('passed'):
+                    raise AssertionError(result.get('message') or 'The test failed.')
+
+            test.__name__ = str(result.get('name') or 'test')
+            return test
+
+        self.test_functions = [replayed(result) for result in tests]
+        self._tests_ran_in_environment = True
+        return outputs
+
     def run_tests(
         self,
         build_block_output_stdout: Callable[..., object] = None,
@@ -3323,6 +3376,9 @@ class Block(
             return
 
         test_functions = []
+        if getattr(self, '_tests_ran_in_environment', False):
+            # Running the test functions here would need the environment's packages.
+            update_tests = False
         if update_tests:
             results = {
                 'test': self._block_decorator(test_functions),
