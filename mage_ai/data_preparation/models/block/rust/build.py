@@ -6,6 +6,7 @@ target directory, and copies the binary to a cache keyed by everything that dete
 it. A run finds a cached binary without starting cargo. A check runs `cargo check` and
 returns the compiler's diagnostics in the block's own lines, for the editor.
 """
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import shutil
 import subprocess
 import threading
 import time
+import tomllib
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -179,12 +181,35 @@ def parse_messages(stdout: str, prepared: 'Prepared') -> List[Diagnostic]:
     return diagnostics
 
 
+def _lock_fingerprint(lock: Path) -> str:
+    """
+    Cargo.lock without the entries of the block crates themselves. Every block is a
+    workspace member, so building one adds its entry to the lock; with the whole file in
+    the key, adding or renaming any block rebuilt every other block on its next run.
+    Nothing depends on a block crate, so the other entries say all a block compiles from.
+    """
+    try:
+        text = lock.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return '<missing>'
+    try:
+        packages = tomllib.loads(text).get('package') or []
+    except tomllib.TOMLDecodeError:
+        return hashlib.sha256(text.encode()).hexdigest()
+    kept = [
+        package for package in packages
+        if not (str(package.get('name', '')).startswith('block_') and 'source' not in package)
+    ]
+    return hashlib.sha256(json.dumps(kept, sort_keys=True).encode()).hexdigest()
+
+
 def _cache_key(workspace: ws.Workspace, crate: str, main: str, sdk: str) -> str:
     """Everything that determines the binary: code, dependencies, compiler and runtime."""
     return ws.digest_files(
-        [workspace.cargo_toml, workspace.cargo_lock, workspace.toolchain_toml],
+        [workspace.cargo_toml, workspace.toolchain_toml],
         dict(
             crate=crate,
+            lock=_lock_fingerprint(workspace.cargo_lock),
             main=main,
             rustc=_rustc_version(str(workspace.root)),
             sdk=sdk,

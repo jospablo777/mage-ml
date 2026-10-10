@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import textwrap
 from pathlib import Path
 
 import pandas as pd
@@ -237,3 +238,30 @@ class BinaryCacheTest(TestCase):
         self.assertTrue(old_build_recent_run.exists())
         self.assertFalse(recent_build_old_run.exists())
         self.assertFalse((self.root / 'k2').exists())
+
+    def test_new_blocks_in_the_lock_keep_the_other_blocks_cached(self):
+        lock = self.root / 'Cargo.lock'
+        base = textwrap.dedent('''
+            version = 4
+
+            [[package]]
+            name = "anyhow"
+            version = "1.0.99"
+            source = "registry+https://github.com/rust-lang/crates.io-index"
+
+            [[package]]
+            name = "block_a_1234abcd"
+            version = "0.0.0"
+            dependencies = ["anyhow", "mage-block"]
+        ''')
+        lock.write_text(base)
+        before = self.build._lock_fingerprint(lock)
+        lock.write_text(base + textwrap.dedent('''
+            [[package]]
+            name = "block_b_5678abcd"
+            version = "0.0.0"
+            dependencies = ["anyhow", "mage-block"]
+        '''))
+        self.assertEqual(self.build._lock_fingerprint(lock), before)
+        lock.write_text(base.replace('1.0.99', '1.0.100'))
+        self.assertNotEqual(self.build._lock_fingerprint(lock), before)
