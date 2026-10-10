@@ -5,7 +5,9 @@
 //! IBM Code Engine `--env-from-secret`. Secrets mounted as files work too:
 //!
 //! - `NAME_FILE=/path` sets `NAME` to the file's content (Docker and Kubernetes secrets,
-//!   Vault agent, the AWS and IBM CSI secret drivers);
+//!   Vault agent, the AWS and IBM CSI secret drivers), for the variables the code reads and
+//!   the service's own credentials. Other `*_FILE` variables, such as `SSL_CERT_FILE` or
+//!   `AWS_WEB_IDENTITY_TOKEN_FILE`, mean what their tools say and are left alone;
 //! - `MAGE_SERVICE_SECRETS_DIR=/dir` sets one variable per file, named after the file.
 //!
 //! - `MAGE_SERVICE_SECRETS` fetches secrets from a provider at start-up, one reference per
@@ -22,7 +24,17 @@ use std::path::Path;
 
 use mage_service_core::manifest::Manifest;
 
-const MAX_SECRET_BYTES: u64 = 1024 * 1024;
+// Linux refuses to start a process with an environment string over 128 KiB.
+const MAX_SECRET_BYTES: u64 = 128 * 1024 - 256;
+/// Variables besides the manifest's whose `NAME_FILE` the service reads.
+const FILE_VARIABLES: [&str; 6] = [
+    "MAGE_SERVICE_TOKEN",
+    "MAGE_SERVICE_READ_TOKEN",
+    "IBM_CLOUD_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+];
 const SECRET_HINTS: [&str; 7] = [
     "PASS",
     "SECRET",
@@ -112,7 +124,11 @@ fn read_secret(path: &Path) -> Result<String, String> {
         return Err(format!("{} is not a file", path.display()));
     }
     if metadata.len() > MAX_SECRET_BYTES {
-        return Err(format!("{} is larger than 1 MiB", path.display()));
+        return Err(format!(
+            "{} is larger than 128 KiB, too large for an environment variable; mount it and \
+             read the file from the block instead",
+            path.display()
+        ));
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // Files written by editors and `echo` end with a newline that is not part of the value.
@@ -161,6 +177,12 @@ impl Secrets {
                 continue;
             };
             if !valid_name(base) || environment.get(base).is_some_and(|v| !v.is_empty()) {
+                continue;
+            }
+            let wanted = FILE_VARIABLES.contains(&base)
+                || base.starts_with("MAGE_SECRET_")
+                || manifest.environment.iter().any(|v| v.name == base);
+            if !wanted {
                 continue;
             }
             match read_secret(Path::new(path)) {
@@ -277,6 +299,12 @@ impl Secrets {
     }
 
     fn add(&mut self, name: &str, value: String, source: Source) {
+        if value.len() as u64 > MAX_SECRET_BYTES {
+            self.problems.push(format!(
+                "{name} is larger than 128 KiB, too large for an environment variable"
+            ));
+            return;
+        }
         self.redact(&value);
         self.sources.insert(name.to_string(), source);
         self.additions.insert(name.to_string(), value);
@@ -387,6 +415,44 @@ mod tests {
         assert_eq!(optional, vec!["API_URL".to_string()]);
     }
 
+    /// SSL_CERT_FILE holds a CA bundle of over 200 KiB; read as a variable it made every
+    /// block process fail to start on Linux (E2BIG).
+    #[test]
+    fn other_tools_file_variables_are_left_alone_and_large_files_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("ca.crt");
+        std::fs::write(&bundle, "x".repeat(224 * 1024)).unwrap();
+        std::fs::write(dir.path().join("token"), "web-identity").unwrap();
+        let env: BTreeMap<String, String> = [
+            ("SSL_CERT_FILE".to_string(), bundle.display().to_string()),
+            (
+                "AWS_WEB_IDENTITY_TOKEN_FILE".to_string(),
+                dir.path().join("token").display().to_string(),
+            ),
+            ("DB_TOKEN_FILE".to_string(), bundle.display().to_string()),
+            (
+                "MAGE_SERVICE_TOKEN_FILE".to_string(),
+                dir.path().join("token").display().to_string(),
+            ),
+        ]
+        .into();
+
+        let secrets = Secrets::load(&manifest(), &env);
+
+        assert_eq!(secrets.get("SSL_CERT"), None);
+        assert_eq!(secrets.get("AWS_WEB_IDENTITY_TOKEN"), None);
+        assert_eq!(secrets.get("MAGE_SERVICE_TOKEN"), Some("web-identity"));
+        assert_eq!(secrets.get("DB_TOKEN"), None);
+        assert!(
+            secrets
+                .problems
+                .iter()
+                .any(|p| p.contains("DB_TOKEN_FILE") && p.contains("128 KiB")),
+            "{:?}",
+            secrets.problems
+        );
+    }
+
     #[test]
     fn a_variable_set_directly_wins_over_its_file_and_missing_ones_are_listed() {
         let dir = tempfile::tempdir().unwrap();
@@ -445,13 +511,13 @@ mod tests {
     #[test]
     fn unreadable_files_are_reported() {
         let env: BTreeMap<String, String> = [(
-            "API_TOKEN_FILE".to_string(),
+            "DB_TOKEN_FILE".to_string(),
             "/nonexistent/token".to_string(),
         )]
         .into();
         let secrets = Secrets::load(&manifest(), &env);
         assert!(
-            secrets.problems[0].contains("API_TOKEN_FILE"),
+            secrets.problems[0].contains("DB_TOKEN_FILE"),
             "{:?}",
             secrets.problems
         );
