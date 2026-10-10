@@ -11,6 +11,7 @@ pipelines=(
   polyglot_churn
   geo_store_coverage
   explore_web_events
+  rust_session_scores
 )
 
 failed=()

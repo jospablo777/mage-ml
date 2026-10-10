@@ -22,6 +22,9 @@ a build cache, so later builds, also after changes to Mage, reuse them.
 `seed` fills the database on the first start (about 1.5 million rows, a minute or two)
 and does nothing on later starts.
 
+Sign in with `admin@admin.com` and password `admin`; user authentication is on, as in a
+deployment.
+
 | Command | |
 | --- | --- |
 | `make playground` | Build, start and wait for Mage |
@@ -69,6 +72,7 @@ The values are random but the same on every seed.
 | `polyglot_churn` | pandas loads, R scores customers with dplyr, Polars summarizes, Python exports the R output |
 | `geo_store_coverage` | geopandas: GeoDataFrames pass between blocks with their CRS; nearest store with `sjoin_nearest` |
 | `explore_web_events` | A million-row output and a wide one (about 60 columns), to explore |
+| `rust_session_scores` | Rust blocks: sessions from a million events with Polars expressions, then a per-row engagement score on every core with Rayon; block tests in Rust |
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one
 by one. Exported tables are in `analytics`:
@@ -90,6 +94,10 @@ the exported tables with their row counts.
   block run, logs and output, and the chain runs in one process.
 - **R and polyglot**: in `polyglot_churn`, the R block receives the pandas frame as a
   tibble and its factor reaches Polars as a category.
+- **Rust**: open `rust_session_scores` in the editor. A compile error is marked in the
+  editor as you type and shown in the output at the block's line. The first run of a
+  block compiles it (a few seconds, the image has the dependencies built); later runs of
+  unchanged code start at once. The Cargo workspace is `shop_lab/rust`.
 - **Types**: decimals, zoned timestamps, nullable integers, uuid, jsonb, text[] and NaN
   are all in the data; check them in the outputs and in the exported tables.
 
