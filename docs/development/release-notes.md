@@ -478,6 +478,14 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Run records and reproducing runs.** Every pipeline run records its code (each source
+  file's SHA-256, with one copy kept per distinct set of files), Python, Mage and package
+  versions, variable names and git commit; each block run records its outputs' SHA-256.
+  A run's page shows the record, compares it with another run (changed files with diffs,
+  package versions, variables, which outputs differ), and **Reproduce** runs the pipeline
+  again with the run's own code, variables and execution date, then compares every
+  block's outputs. CLI: `mage run-diff` and `mage reproduce`. `MAGE_RUN_RECORDS=0` turns
+  recording off. See `docs/guides/pipelines/run-records.mdx`.
 - **Data contracts.** A YAML file in the project's `contracts` folder declares what a
   block's output must look like: columns, types, missing values, ranges, allowed values,
   patterns, unique keys and row counts. Choose it in the block's settings, and every run

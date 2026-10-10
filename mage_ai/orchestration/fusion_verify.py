@@ -610,7 +610,13 @@ def _outputs(pipeline, block_uuid: str, run: PipelineRun) -> Dict[str, Any]:
     }
 
 
-def compare_runs(pipeline, unfused: PipelineRun, fused: PipelineRun) -> List[BlockResult]:
+def compare_runs(
+    pipeline,
+    unfused: PipelineRun,
+    fused: PipelineRun,
+    labels: Tuple[str, str] = ('block by block', 'fused'),
+) -> List[BlockResult]:
+    """The outputs of each block in two runs of the pipeline, compared."""
     stage_of = {
         uuid: index for index, stage in enumerate(_chains(fusion.fusion_plan(pipeline)), start=1)
         for uuid in stage
@@ -620,7 +626,7 @@ def compare_runs(pipeline, unfused: PipelineRun, fused: PipelineRun) -> List[Blo
 
     def errors(uuid: str) -> str:
         texts = []
-        for label, runs in zip(('block by block', 'fused'), block_runs):
+        for label, runs in zip(labels, block_runs):
             error = ((getattr(runs.get(uuid), 'metrics', None) or {}).get('error') or {})
             text = error.get('message') or error.get('error')
             if text and text != 'None':
@@ -633,7 +639,7 @@ def compare_runs(pipeline, unfused: PipelineRun, fused: PipelineRun) -> List[Blo
         stage = stage_of.get(uuid)
         before, after = statuses[0].get(uuid), statuses[1].get(uuid)
         if before != after:
-            detail = f'Block run {before} block by block, {after} fused.'
+            detail = f'Block run {before} {labels[0]}, {after} {labels[1]}.'
             results.append(BlockResult(
                 uuid, 'differs', '\n'.join(filter(None, [detail, errors(uuid)])), stage,
             ))
@@ -656,7 +662,7 @@ def compare_runs(pipeline, unfused: PipelineRun, fused: PipelineRun) -> List[Blo
         if list(expected) != list(actual):
             results.append(BlockResult(
                 uuid, 'differs',
-                f'Outputs {list(expected)} block by block, {list(actual)} fused.', stage,
+                f'Outputs {list(expected)} {labels[0]}, {list(actual)} {labels[1]}.', stage,
             ))
             continue
         compared = []

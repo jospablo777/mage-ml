@@ -15,6 +15,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import Headline from '@oracle/elements/Headline';
 import Paginate, { MAX_PAGES } from '@components/shared/Paginate';
 import PipelineDetailPage from '@components/PipelineDetailPage';
+import RunRecord from '@components/PipelineDetail/RunRecord';
 import PipelineRunType, {
   COMPLETED_STATUSES,
   RUNNING_STATUSES,
@@ -357,6 +358,12 @@ function PipelineBlockRuns({
       <Divider light mt={PADDING_UNITS} short />
       {tableBlockRuns}
       {paginationEl}
+
+      {pipelineRunProp?.id && (
+        <Spacing mt={PADDING_UNITS} px={PADDING_UNITS} pb={PADDING_UNITS}>
+          <RunRecord pipelineRunId={pipelineRunProp.id} />
+        </Spacing>
+      )}
     </PipelineDetailPage>
   );
 }

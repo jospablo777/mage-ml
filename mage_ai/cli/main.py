@@ -408,6 +408,122 @@ def contract_check(
         raise typer.Exit(code=1)
 
 
+def _run_records_setup(project_path: str, pipeline_uuid: str):
+    from mage_ai.settings.repo import set_repo_path
+
+    set_repo_path(project_path)
+    sys.path.append(os.path.dirname(project_path))
+
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.orchestration.db import db_connection
+
+    db_connection.start_session()
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path, check_if_exists=True)
+    if pipeline is None:
+        print(f'[red]Pipeline {pipeline_uuid} does not exist in {project_path}.[/red]')
+        raise typer.Exit(code=2)
+    return pipeline
+
+
+def _pipeline_run(pipeline, run_id: int):
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+    run = PipelineRun.get(run_id)
+    if run is None or run.pipeline_uuid != pipeline.uuid:
+        print(f'[red]Pipeline run {run_id} of {pipeline.uuid} does not exist.[/red]')
+        raise typer.Exit(code=2)
+    return run
+
+
+@app.command('run-diff')
+def run_diff(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    first_run_id: int = typer.Argument(..., help='id of the earlier pipeline run.'),
+    second_run_id: int = typer.Argument(..., help='id of the later pipeline run.'),
+    as_json: bool = typer.Option(False, '--json', help='print the comparison as JSON.'),
+):
+    """
+    Compare what two runs of a pipeline ran with: code (with a diff of each changed file),
+    Python, Mage and package versions, variables, and which blocks' outputs differ.
+    """
+    from mage_ai.orchestration import run_records
+
+    project_path = os.path.abspath(project_path)
+    pipeline = _run_records_setup(project_path, pipeline_uuid)
+    runs = [_pipeline_run(pipeline, run_id) for run_id in (first_run_id, second_run_id)]
+    try:
+        comparison = run_records.compare(pipeline, *runs)
+    except run_records.RunRecordError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    if as_json:
+        typer.echo(json.dumps(comparison, indent=2, default=str))
+    else:
+        typer.echo(run_records.format_comparison(comparison))
+
+
+@app.command('reproduce')
+def reproduce(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    run_id: int = typer.Argument(..., help='id of the pipeline run to reproduce.'),
+    yes: bool = typer.Option(False, '--yes', '-y', help='run without asking first.'),
+    report: Union[str, None] = typer.Option(None, help='also write the result as JSON here.'),
+    keep: bool = typer.Option(False, help='keep the restored copy of the project.'),
+):
+    """
+    Run a pipeline run again with the code it ran with (restored from its run record),
+    its variables and its execution date, then compare every block's outputs with the
+    original run's. The pipeline runs in full, so exporters write again.
+    """
+    from mage_ai.orchestration import run_records
+
+    project_path = os.path.abspath(project_path)
+    pipeline = _run_records_setup(project_path, pipeline_uuid)
+    original = _pipeline_run(pipeline, run_id)
+    if not yes and not typer.confirm(
+        f'This runs {pipeline_uuid} again, exporters included. Continue?',
+    ):
+        raise typer.Exit(code=1)
+    try:
+        result = run_records.reproduce(pipeline, original, log=typer.echo, keep=keep)
+    except run_records.RunRecordError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    if report:
+        with open(report, 'w') as file:
+            json.dump(result, file, indent=2, default=str)
+    typer.echo(run_records.format_reproduction(result))
+    if not result['passed']:
+        raise typer.Exit(code=1)
+
+
+@app.command('reproduce-run', hidden=True)
+def reproduce_run(
+    project_path: str = typer.Argument(..., help='path of the restored project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    run_id: int = typer.Argument(..., help='id of the original pipeline run.'),
+    report: str = typer.Option(..., help='where to write the new run id.'),
+):
+    """The second half of `mage reproduce`, run in the restored copy of the project."""
+    from mage_ai.orchestration import run_records
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+
+    project_path = os.path.abspath(project_path)
+    # The restored code, not a project of the same name in the working folder.
+    sys.path.insert(0, os.path.dirname(project_path))
+    try:
+        pipeline = _run_records_setup(project_path, pipeline_uuid)
+        original = PipelineRun.get(run_id)
+        run = run_records.run_reproduction(pipeline, original, log=typer.echo)
+        result = dict(pipeline_run_id=run.id, status=str(run.status))
+    except Exception as error:
+        result = dict(error=f'{type(error).__name__}: {error}')
+    with open(report, 'w') as file:
+        json.dump(result, file)
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the Mage project.'),

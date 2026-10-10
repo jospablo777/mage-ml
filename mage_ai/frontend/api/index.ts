@@ -89,6 +89,7 @@ export const PIPELINE_TRIGGERS: 'pipeline_triggers' = 'pipeline_triggers';
 export const PULL_REQUESTS: 'pull_requests' = 'pull_requests';
 export const PROJECTS: 'projects' = 'projects';
 export const ROLES: 'roles' = 'roles';
+export const RUN_RECORDS: 'run_records' = 'run_records';
 export const SEARCH_RESULTS: 'search_results' = 'search_results';
 export const SECRETS: 'secrets' = 'secrets';
 export const SEEDS: 'seeds' = 'seeds';
@@ -196,6 +197,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PROJECTS],
   [PULL_REQUESTS],
   [ROLES],
+  [RUN_RECORDS],
   [SEARCH_RESULTS],
   [SECRETS],
   [SEEDS],

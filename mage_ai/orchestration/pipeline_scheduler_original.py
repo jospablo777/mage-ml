@@ -206,9 +206,25 @@ class PipelineScheduler:
             started_at=datetime.now(tz=pytz.UTC),
             status=PipelineRun.PipelineRunStatus.RUNNING,
         )
+        self.__record_run()
         if should_schedule:
             self.schedule()
         return True
+
+    def __record_run(self) -> None:
+        """The run's manifest: its code, environment and variables (run_records.py)."""
+        from mage_ai.orchestration import fusion, run_records
+
+        if not run_records.enabled() or fusion.verification_mode(self.pipeline_run):
+            return
+        try:
+            run_records.capture(self.pipeline, self.pipeline_run)
+        except Exception as error:
+            self.logger.warning(
+                f'Recording the run record of pipeline run {self.pipeline_run.id} failed: '
+                f'{error}',
+                **self.build_tags(),
+            )
 
     @safe_db_query
     def stop(self) -> None:

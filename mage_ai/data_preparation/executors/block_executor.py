@@ -754,7 +754,11 @@ class BlockExecutor:
 
                 # This is passed in from the pipeline scheduler
                 if on_complete is not None:
-                    on_complete(self.block_uuid)
+                    recorded = self._output_record()
+                    if recorded:
+                        on_complete(self.block_uuid, metrics=recorded)
+                    else:
+                        on_complete(self.block_uuid)
                 else:
                     # If this block run is the data integration controller,
                     # don’t update the block run status here.
@@ -1231,6 +1235,21 @@ class BlockExecutor:
             )
 
         return result
+
+    def _output_record(self) -> Optional[Dict]:
+        """The digests of the block run's stored outputs, for its run record."""
+        from mage_ai.orchestration import run_records
+
+        if self.execution_partition is None or not run_records.enabled():
+            return None
+        try:
+            digests = run_records.output_digests(
+                self.pipeline, self.block_uuid, self.execution_partition,
+            )
+        except Exception as error:
+            self.logger.warning(f'Recording the output digests failed: {error}')
+            return None
+        return dict(outputs=digests) if digests else None
 
     def _execute_conditional(
         self,
