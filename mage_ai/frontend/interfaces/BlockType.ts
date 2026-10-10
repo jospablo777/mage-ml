@@ -293,6 +293,13 @@ export interface TemplateType {
 }
 
 export interface ConfigurationType extends BaseConfigurationType {
+  // The data contract the block's output must meet (contracts/<name>.yaml).
+  contract?: string | {
+    enforcement?: 'fail' | 'warn' | 'off';
+    name: string;
+    output?: string;
+    version?: string;
+  } | null;
   // False runs the block alone when chains of blocks run together (block fusion).
   fusion?: boolean | null;
   dynamic?:

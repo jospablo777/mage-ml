@@ -478,6 +478,15 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Data contracts.** A YAML file in the project's `contracts` folder declares what a
+  block's output must look like: columns, types, missing values, ranges, allowed values,
+  patterns, unique keys and row counts. Choose it in the block's settings, and every run
+  checks the whole stored output with the block's tests, in a Rust engine (10 million rows
+  in about 0.3 s). A broken contract fails the block (or only warns), so downstream
+  blocks and exporters don't run, and the output lists each broken rule with exact counts,
+  example rows and values. **Draft a contract from the output** in block settings, or
+  `mage contract-draft`, writes one from a stored output; `mage contract-check` checks a
+  stored output in CI. See `docs/guides/blocks/data-contracts.mdx`.
 - **Pipeline environments.** A pipeline can give its Python blocks their own packages:
   name a requirements file in the pipeline's settings (or `environment:` in its
   metadata.yaml) and its data loaders, transformers, data exporters and custom blocks run

@@ -3343,6 +3343,58 @@ class Block(
         self._tests_ran_in_environment = True
         return outputs
 
+    def _check_contract(
+        self,
+        dynamic_block_uuid: Optional[str] = None,
+        execution_partition: Optional[str] = None,
+        from_notebook: bool = False,
+        outputs: Optional[List[Any]] = None,
+    ) -> Optional[str]:
+        """
+        Checks the output against the block's data contract and prints the result; returns
+        the error that fails the block, None when it passes or only warns.
+        """
+        from mage_ai.data_preparation import contracts
+
+        if contracts.binding_of(self) is None:
+            return None
+        try:
+            checked = contracts.check_output(
+                self,
+                execution_partition=execution_partition,
+                dynamic_block_uuid=dynamic_block_uuid,
+                outputs=outputs,
+            )
+        except contracts.ContractError as error:
+            failure = str(error)
+            text = failure
+            checked = None
+        else:
+            if checked is None:
+                return None
+            binding, report = checked
+            text = contracts.summary(binding, report)
+            failure = None
+            if not report.get('passed') and binding.enforcement == 'fail':
+                failure = f'Block {self.uuid} broke contract {binding.name}.'
+
+        warning = checked is not None and not checked[1].get('passed') and failure is None
+        if from_notebook:
+            if failure:
+                print('[__internal_test__]' + json.dumps(dict(
+                    error=text,
+                    message=f'FAIL: data contract (block: {self.uuid})',
+                    stacktrace=[],
+                )))
+            else:
+                print('[__internal_test__]' + json.dumps(dict(
+                    message=('WARNING: ' if warning else '') + text,
+                )))
+        else:
+            print('--------------------------------------------------------------')
+            print(('WARNING: ' if warning else '') + text)
+        return failure
+
     def run_tests(
         self,
         build_block_output_stdout: Callable[..., object] = None,
@@ -3411,6 +3463,13 @@ class Block(
             logger=logger,
             logging_tags=logging_tags,
         ):
+            contract_failure = self._check_contract(
+                dynamic_block_uuid=dynamic_block_uuid,
+                execution_partition=execution_partition,
+                from_notebook=from_notebook,
+                outputs=outputs,
+            )
+
             if test_functions and len(test_functions) >= 0:
                 tests_passed = 0
                 for func in test_functions:
@@ -3461,6 +3520,9 @@ class Block(
 
                 if tests_passed != len(test_functions):
                     raise Exception(f'Failed to pass tests for block {self.uuid}')
+
+            if contract_failure:
+                raise Exception(contract_failure)
 
             handle_run_tests(
                 self,

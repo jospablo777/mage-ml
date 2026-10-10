@@ -325,6 +325,89 @@ def create_spark_cluster(
     create_cluster(project_path)
 
 
+def _contract_block(project_path: str, pipeline_uuid: str, block_uuid: str):
+    from mage_ai.settings.repo import set_repo_path
+
+    set_repo_path(project_path)
+    sys.path.append(os.path.dirname(project_path))
+
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path, check_if_exists=True)
+    block = pipeline.get_block(block_uuid) if pipeline else None
+    if block is None:
+        print(f'[red]Block {block_uuid} does not exist in pipeline {pipeline_uuid}.[/red]')
+        raise typer.Exit(code=2)
+    return block
+
+
+@app.command('contract-draft')
+def contract_draft(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    block_uuid: str = typer.Argument(..., help='uuid of the block whose output to describe.'),
+    name: Union[str, None] = typer.Option(None, help='contract name; the block uuid by default.'),
+    write: bool = typer.Option(False, help='save it as contracts/<name>.yaml.'),
+    force: bool = typer.Option(False, help='replace an existing contract file.'),
+):
+    """
+    Draft a data contract from a block's stored output (run the block first): its
+    columns, types and which columns have no missing values. Add ranges, allowed values
+    and unique keys, then set the contract in the block's settings.
+    """
+    from mage_ai.data_preparation import contracts
+
+    project_path = os.path.abspath(project_path)
+    block = _contract_block(project_path, pipeline_uuid, block_uuid)
+    name = name or block.uuid.replace('/', '_')
+    try:
+        document = contracts.draft(block, name)
+    except contracts.ContractError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    if write:
+        path = contracts.contracts_dir(project_path) / f'{name}.yaml'
+        if path.exists() and not force:
+            print(f'[red]{path} exists; pass --force to replace it.[/red]')
+            raise typer.Exit(code=2)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(document)
+        typer.echo(f'Wrote {path}')
+    else:
+        typer.echo(document, nl=False)
+
+
+@app.command('contract-check')
+def contract_check(
+    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    block_uuid: str = typer.Argument(..., help='uuid of the block with a contract.'),
+    partition: Union[str, None] = typer.Option(
+        None, help="a pipeline run's execution partition; the notebook output by default.",
+    ),
+):
+    """
+    Check a block's stored output against its data contract. Exits with 1 when the
+    output breaks it, 2 when the check cannot run.
+    """
+    from mage_ai.data_preparation import contracts
+
+    project_path = os.path.abspath(project_path)
+    block = _contract_block(project_path, pipeline_uuid, block_uuid)
+    try:
+        checked = contracts.check_output(block, execution_partition=partition)
+    except contracts.ContractError as error:
+        print(f'[red]{error}[/red]')
+        raise typer.Exit(code=2)
+    if checked is None:
+        typer.echo(f'Block {block_uuid} has no contract, or its enforcement is off.')
+        return
+    binding, report = checked
+    typer.echo(contracts.summary(binding, report))
+    if not report['passed']:
+        raise typer.Exit(code=1)
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the Mage project.'),

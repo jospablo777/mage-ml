@@ -2,6 +2,7 @@
 //! Mage. The engine has no Mage dependency; the Python service resolves and authorizes
 //! sources and hands this crate a local file path.
 
+pub mod contract;
 pub mod engine;
 pub mod error;
 pub mod format;

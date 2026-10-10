@@ -1,0 +1,140 @@
+---
+title: "Data contracts"
+sidebarTitle: "Data contracts"
+icon: "file-contract"
+description: "Check every row of a block's output against declared rules, and stop the pipeline when the data breaks them."
+---
+
+## Overview
+
+A data contract declares what a block's output must look like: which columns it has, their
+types, which can be missing, value ranges, allowed values, patterns, unique keys and row
+counts. Mage checks the whole output against the contract every time the block runs with
+its tests. If the output breaks the contract, the block fails like a failing test, and
+downstream blocks (exporters included) don't run.
+
+Contracts are YAML files in the project, so they are versioned with the code and reviewed
+in pull requests.
+
+## Write a contract
+
+Create a file in the project's `contracts` folder, named after the contract:
+
+```yaml
+# contracts/customer_scores.yaml
+version: 1.2.0
+owner: ml-engineering
+description: Churn score per customer, between 0 and 1.
+columns:
+  customer_id: {type: integer, nullable: false}
+  score: {type: float, nullable: false, min: 0, max: 1}
+  segment: {type: string, values: [new, active, churned]}
+  email: {type: string, pattern: '[^@]+@[^@]+', max_length: 254}
+  signed_up: {type: date, min: '2015-01-01'}
+  referrer: {type: string, required: false}
+unique: [customer_id]
+min_rows: 1
+```
+
+To start from an existing output, run the block, open its **Block settings** and click
+**Draft a contract from the output**. The draft goes to `contracts/<block uuid>.yaml` with
+every column's type, and `nullable: false` on columns without missing values. You can also
+use the CLI:
+
+```bash
+mage contract-draft <project path> <pipeline uuid> <block uuid> --name customer_scores --write
+```
+
+### Column rules
+
+| Rule | Meaning |
+| --- | --- |
+| `type` | `integer`, `float`, `number` (integer, float or decimal), `decimal`, `string`, `boolean`, `date`, `datetime`, `time`, `duration`, `list`, `struct` or `any` |
+| `required` | The column must exist. `true` by default. |
+| `nullable` | The column may have missing values. `true` by default. NaN counts as missing. |
+| `min`, `max` | Inclusive bounds. Use numbers for numeric columns and dates as text for date and datetime columns. |
+| `values` | The only values allowed: strings, numbers or booleans. |
+| `min_length`, `max_length` | Length of string values, in characters. |
+| `pattern` | A regular expression that each value must match in full. |
+| `unique` | No two rows have the same value. |
+
+`score: float` is short for `score: {type: float}`. Missing values pass every rule except
+`nullable`.
+
+### Contract rules
+
+| Rule | Meaning |
+| --- | --- |
+| `unique` | Columns whose values together identify a row, such as `[customer_id, day]`. No two rows may share them. |
+| `extra_columns` | `allow` (the default) or `forbid`. With `forbid`, columns that aren't in the contract break it. |
+| `min_rows`, `max_rows` | Bounds on the number of rows. |
+| `version`, `owner`, `description` | For people reading the contract. A block can require a version (see below). |
+
+## Use a contract in a block
+
+In the block's **Block settings**, choose the contract under **Data contract** and what a
+violation does, then save:
+
+- **Fail the block** (the default): the block run fails and downstream blocks don't run.
+- **Warn and continue**: the result shows in the output and logs, and the pipeline goes on.
+- **Do not check**: the contract is kept but not checked.
+
+The setting is saved in the pipeline's `metadata.yaml`:
+
+```yaml
+configuration:
+  contract: customer_scores
+  # or, with every option:
+  contract:
+    name: customer_scores
+    enforcement: warn     # fail, warn or off
+    output: output_0      # which output of the block
+    version: '1'          # the contract version the block was written for
+```
+
+With `version: '1'`, the block fails with a message as soon as the contract moves to version
+2.0.0. Bump the major version when a change can break the blocks that read the data, and
+update each block's setting after you check it.
+
+Contracts apply to pandas and Polars DataFrame outputs of data loaders, transformers, data
+exporters and custom blocks, in Python, R, SQL and Rust.
+
+## What you see
+
+In the notebook, the result shows with the block's test results:
+
+```text
+Contract customer_scores 1.2.0 on output_0: 2 rules broken (48,210 rows checked).
+- score has values above the max 1 (3 of 48210 rows); values: 1.4, 2.0, 7.5; rows: 18, 902, 30117
+- customer_id has values repeated (2 of 48210 rows); values: 1093; rows: 4410, 4411
+```
+
+The counts cover every row. The examples list the first rows (positions from 0) and a few
+distinct values. Open the output in ColumnAtlas to look at those rows.
+
+Triggered runs print the same lines in the block run's logs. Each check's report is also
+saved as JSON with the pipeline's variables (`.contract_reports/`). The block settings
+show the last notebook check.
+
+To check a stored output from the command line, such as in CI:
+
+```bash
+mage contract-check <project path> <pipeline uuid> <block uuid> [--partition <execution partition>]
+```
+
+It exits with 1 when the output breaks the contract, and 2 when the check can't run.
+
+## When the check runs
+
+- With the block's tests: in the notebook when you run the block with its tests, and in
+  every triggered run, backfill, retry and block fusion stage.
+- After the output is stored, on the stored file. That's exactly what downstream blocks
+  will read.
+- A Rust engine (the one ColumnAtlas uses) reads the whole output in one pass, plus one
+  more read for each broken rule to find its examples. On an M-series laptop it checks 10
+  million rows with a unique key, a regular expression and two ranges in about 0.3 seconds.
+  `MAGE_CONTRACT_EXAMPLES` (default 10) sets how many rows and values each violation lists.
+
+A missing contract file, an unknown rule (such as `nulable`) or a rule that doesn't fit the
+column (`min` on a string column) fails the block with a message that names it, even with
+**Warn and continue**.

@@ -22,6 +22,7 @@ polars = { version = "=0.55.2", default-features = false, features = [
   "dtype-duration", "dtype-time", "dtype-decimal", "dtype-categorical", "dtype-struct",
   "dtype-array", "dtype-extension", "temporal", "timezones", "fmt", "approx_unique", "propagate_nans",
   "row_hash", "semi_anti_join", "streaming", "performant", "is_between", "dtype-u128",
+  "is_unique", "concat_str", "regex",
 ] }
 pyo3 = { version = "0.29", optional = true }
 serde = { version = "1", features = ["derive"] }

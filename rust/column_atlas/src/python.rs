@@ -74,9 +74,45 @@ impl NativeTable {
     }
 }
 
+/// Checks a Parquet file against a contract (JSON); returns the report as JSON. The counts
+/// cover every row; `examples` caps the rows and values listed per violation.
+#[pyfunction]
+#[pyo3(signature = (path, contract, examples = 10))]
+fn validate_contract(
+    py: Python<'_>,
+    path: String,
+    contract: String,
+    examples: usize,
+) -> PyResult<String> {
+    let report = py
+        .detach(|| crate::contract::validate(&path, &contract, examples))
+        .map_err(to_python)?;
+    json(&report)
+}
+
+/// Raises ValueError with the reason when a contract (JSON) is not valid.
+#[pyfunction]
+fn check_contract(contract: String) -> PyResult<()> {
+    crate::contract::Contract::parse(&contract)
+        .map(|_| ())
+        .map_err(to_python)
+}
+
+/// A contract draft (JSON) with the columns, types and nullability of a Parquet file.
+#[pyfunction]
+fn infer_contract(py: Python<'_>, path: String, name: String) -> PyResult<String> {
+    let draft = py
+        .detach(|| crate::contract::infer(&path, &name))
+        .map_err(to_python)?;
+    json(&draft)
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeTable>()?;
+    module.add_function(wrap_pyfunction!(validate_contract, module)?)?;
+    module.add_function(wrap_pyfunction!(infer_contract, module)?)?;
+    module.add_function(wrap_pyfunction!(check_contract, module)?)?;
     module.add("MAX_ROWS", crate::engine::MAX_ROWS)?;
     module.add("MAX_COLUMNS", crate::engine::MAX_COLUMNS)?;
     module.add("MAX_SUMMARY_COLUMNS", crate::engine::MAX_SUMMARY_COLUMNS)?;

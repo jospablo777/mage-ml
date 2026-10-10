@@ -12,6 +12,7 @@ import BlockType, {
 import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import Circle from '@oracle/elements/Circle';
+import DataContract from './DataContract';
 import Flex from '@oracle/components/Flex';
 import FlexContainer, { JUSTIFY_SPACE_BETWEEN_PROPS } from '@oracle/components/FlexContainer';
 import GlobalDataProductType, {
@@ -75,6 +76,7 @@ const SHARED_EMPHASIZED_TEXT_PROPS = {
 const BLOCK_COLOR_HEX_CODE_MAPPING = getBlockColorHexCodeMapping();
 
 const RESERVED_BLOCK_CONFIG_KEYS = [
+  'contract',
   'data_integration',
   'disable_output_preview',
   'dynamic',
@@ -831,6 +833,29 @@ function BlockSettings({
               The block timeout will only be applied when the block is run through a trigger. If a
               block times out, the block run will be set to a failed state.
             </Text>
+          </Spacing>
+        )}
+
+        {[
+          BlockTypeEnum.CUSTOM,
+          BlockTypeEnum.DATA_EXPORTER,
+          BlockTypeEnum.DATA_LOADER,
+          BlockTypeEnum.TRANSFORMER,
+        ].includes(blockType) && pipeline?.type !== PipelineTypeEnum.INTEGRATION && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <DataContract
+              blockUUID={blockUUID}
+              fetchFileTree={fetchFileTree}
+              onChange={contract => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  contract,
+                },
+              }))}
+              pipelineUUID={pipelineUUID}
+              value={blockAttributes?.configuration?.contract}
+            />
           </Spacing>
         )}
 

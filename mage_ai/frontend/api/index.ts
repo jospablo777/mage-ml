@@ -57,6 +57,7 @@ export const FEATURES: 'features' = 'features';
 export const FEATURE_SETS: 'feature_sets' = 'feature_sets';
 export const FEATURE_SET_VERSIONS: 'feature_set_versions' = 'feature_set_versions';
 export const FILES: 'files' = 'files';
+export const DATA_CONTRACTS: 'data_contracts' = 'data_contracts';
 export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verifications';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
@@ -156,6 +157,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [EXTENSION_OPTIONS],
   [FEATURE_SETS],
   [FILES],
+  [DATA_CONTRACTS],
   [FUSION_VERIFICATIONS],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
