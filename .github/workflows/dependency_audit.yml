@@ -86,4 +86,5 @@ jobs:
         working-directory: mage_ai/frontend
         run: |
           yarn install --frozen-lockfile --ignore-scripts --non-interactive
-          yarn audit
+          set +o pipefail
+          yarn audit --json | python3 ../../scripts/yarn_audit.py

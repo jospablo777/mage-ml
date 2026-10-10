@@ -14,8 +14,8 @@ dependencies = [
   "jupyter",
   "importlib-metadata",
   "requests>=2.33.0",
-  "urllib3>=2.7,<3",
-  "tornado>=6.5.7",
+  "urllib3>=2.8,<3",
+  "tornado>=6.5.9",
   "jupyter-server>=2.20.0",
 ]
 
