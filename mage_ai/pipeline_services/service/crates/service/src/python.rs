@@ -266,7 +266,9 @@ impl PythonPool {
             result = limited => result,
             _ = cancel.cancelled() => Err(WorkerError::Cancelled),
         };
-        *worker.log_target.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        // The target stays the block's until the worker's next block: stdout and stderr are
+        // other pipes than the reply, so a block's last lines can arrive after its reply.
+        // A worker runs one block at a time, so they are still that block's.
 
         match result {
             Ok(reply) if reply.get("id").and_then(Value::as_str) == Some(id.as_str()) => {

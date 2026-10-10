@@ -95,7 +95,8 @@ docker run --rm --env-file .env sales-service run sales_pipeline --var day=2026-
 ```
 
 The exit code is 0 when every block completes and 1 otherwise, and the run prints a table
-of its blocks with their durations and errors.
+of its blocks with their durations and errors on stdout, or the run as JSON with `--json`;
+the logs go to stderr, so the output can be piped.
 
 ## 3. Call it
 

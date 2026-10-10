@@ -652,6 +652,8 @@ fn parse_variables(pairs: &[String]) -> Result<Map<String, Value>, String> {
 }
 
 async fn run_once(common: Common, args: RunArgs) -> Result<ExitCode, String> {
+    // The run's summary, or its JSON, is alone on stdout; logs go to stderr.
+    log::to_stderr();
     let variables = parse_variables(&args.variables)?;
     let service = start_service(&common, false, 0).await?;
     if service.manifest.pipeline(&args.pipeline).is_none() {

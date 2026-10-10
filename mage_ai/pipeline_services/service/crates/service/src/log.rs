@@ -1,7 +1,7 @@
 //! Logs: the service's own events and every line blocks print.
 //!
-//! Each line goes to stdout, where `docker logs` and log collectors read it, as text or as
-//! JSON (`MAGE_SERVICE_LOG_FORMAT=json`), and a run's lines also go to its log file, which
+//! Each line goes to stdout (stderr for `mage-service run`), where `docker logs` and log
+//! collectors read it, as text or as JSON (`MAGE_SERVICE_LOG_FORMAT=json`), and a run's lines also go to its log file, which
 //! `GET /v1/runs/{id}/logs` returns. Nothing is shortened or dropped.
 
 use std::fs::{File, OpenOptions};
@@ -34,6 +34,13 @@ pub fn redact(text: &str) -> String {
     }
 }
 static STDOUT: Mutex<()> = Mutex::new(());
+static TO_STDERR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sends log lines to stderr: `mage-service run` prints its summary, or its JSON, alone on
+/// stdout.
+pub fn to_stderr() {
+    TO_STDERR.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 pub fn init(format: Format) {
     let _ = FORMAT.set(format);
@@ -64,8 +71,11 @@ fn emit(level: &str, run: Option<&str>, block: Option<&str>, stream: Option<&str
         }
     };
     let _guard = STDOUT.lock().unwrap_or_else(|p| p.into_inner());
-    let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{line}");
+    if TO_STDERR.load(std::sync::atomic::Ordering::Relaxed) {
+        let _ = writeln!(std::io::stderr().lock(), "{line}");
+    } else {
+        let _ = writeln!(std::io::stdout().lock(), "{line}");
+    }
 }
 
 pub fn info(message: &str) {
