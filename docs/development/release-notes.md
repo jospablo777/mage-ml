@@ -507,6 +507,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Faster Rust pipelines.** A cached Rust block's process starts in about 10 ms: Mage
+  no longer hashes the SDK before every block, no longer makes macOS check each binary
+  again, and adding a block no longer rebuilds the others. Every job process imports
+  3.5 s less (dbt, scikit-learn and others load where used). The 5-block benchmark chain
+  runs block by block in about 11 s instead of 20 s. `MAGE_RUST_TIMINGS=1` also prints
+  the phases inside a block. See `docs/development/rust-pipeline-optimization.md`.
 - **Rust blocks read and write PostgreSQL.** `mage::postgres` streams binary `COPY` both
   ways with typed columns, keeps `numeric` values exact, handles nested arrays, and
   connects with the block's io_config profile. TLS modes are libpq's (`prefer` by
