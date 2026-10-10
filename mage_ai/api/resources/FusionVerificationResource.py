@@ -11,7 +11,11 @@ from typing import Dict, List, Optional
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
-from mage_ai.shared.processes import HAS_PROCESS_GROUPS, stop_process_group, supervised_command
+from mage_ai.shared.processes import (
+    HAS_PROCESS_GROUPS,
+    stop_process_group,
+    supervised_command,
+)
 
 
 @dataclass

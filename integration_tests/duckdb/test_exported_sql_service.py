@@ -5,9 +5,9 @@ run by Mage leaves, column by column.
 """
 import duckdb
 
+from integration_tests.duckdb.test_pipelines import duckdb_database  # noqa: F401
 from integration_tests.exported_services import differences, run_exported
 from integration_tests.mage_runner import run_pipeline
-from integration_tests.duckdb.test_pipelines import duckdb_database  # noqa: F401
 
 KEEP = {'src', 'expected'}
 

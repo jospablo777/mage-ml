@@ -19,7 +19,11 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from mage_ai.orchestration import fusion
-from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun, PipelineSchedule
+from mage_ai.orchestration.db.models.schedules import (
+    BlockRun,
+    PipelineRun,
+    PipelineSchedule,
+)
 
 TRIGGER_NAMES = {
     fusion.BLOCK_FUSION_OFF: 'Verify fusion: block by block',

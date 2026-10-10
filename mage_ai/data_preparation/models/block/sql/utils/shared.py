@@ -33,7 +33,6 @@ from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.hash import merge_dict
 
 
-
 def build_variable_pattern(variable_name: str):
     return r'{}[ ]*{}[ ]*{}'.format(r'\{\{', variable_name, r'\}\}')
 
@@ -478,5 +477,3 @@ def create_upstream_block_tables(
                 kwargs['allow_reserved_words'] = True
 
             loader.export(df, **kwargs)
-
-
