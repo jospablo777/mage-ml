@@ -10,6 +10,7 @@ class RunRecordPresenter(BasePresenter):
         'comparison',
         'comparison_error',
         'environment',
+        'experiments',
         'git',
         'id',
         'outputs',

@@ -478,6 +478,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **MLflow runs linked to Mage runs.** MLflow runs that a block starts during a pipeline
+  run are tagged with the project, pipeline, pipeline run, block, block run and code
+  digest (`mage.*` tags), and the block run records them: experiment, status, latest
+  metrics and registered model versions. The run page lists them with a link to MLflow,
+  and comparing two runs shows which metrics changed. Blocks use MLflow as before;
+  `MAGE_TRACK_EXPERIMENTS=0` turns it off. See `docs/guides/pipelines/experiments.mdx`.
 - **Faster pandas outputs.** pandas block outputs whose columns are numbers, booleans,
   strings, timestamps, dates or decimals are written by the Polars Parquet writer, which
   encodes columns in parallel: a 2-million-row output writes in 0.03 s instead of 0.16 s,

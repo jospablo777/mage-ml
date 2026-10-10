@@ -632,6 +632,7 @@
               "guides/pipelines/importing-pipelines",
               "guides/pipelines/pipeline-environments",
               "guides/pipelines/run-records",
+              "guides/pipelines/experiments",
               "guides/community-examples"
             ]
           },

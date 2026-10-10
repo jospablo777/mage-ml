@@ -459,7 +459,13 @@ def compare(pipeline, first_run, second_run, diff_limit: int = 20) -> Dict[str, 
             result = 'same'
         else:
             result = 'differs'
-        outputs.append(dict(block_uuid=uuid, result=result, statuses=statuses))
+        entry = dict(block_uuid=uuid, result=result, statuses=statuses)
+        tracked = [((b.metrics or {}).get('mlflow') if b else None) for b in pair]
+        if any(tracked):
+            from mage_ai.orchestration.experiments import metric_changes
+
+            entry['metrics'] = metric_changes(*tracked)
+        outputs.append(entry)
 
     return dict(
         runs=[first_run.id, second_run.id],
@@ -507,6 +513,8 @@ def format_comparison(comparison: Dict[str, Any]) -> str:
     )
     for output in comparison['outputs']:
         lines.append(f'- Output of {output["block_uuid"]}: {output["result"]}')
+        for metric, (before, after) in (output.get('metrics') or {}).items():
+            lines.append(f'  - MLflow metric {metric}: {before} -> {after}')
     for diff in code.get('diffs', {}).values():
         lines.append('')
         lines.append(diff.rstrip())

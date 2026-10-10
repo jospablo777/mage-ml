@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import traceback
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional, Union
@@ -670,7 +671,9 @@ class BlockExecutor:
                             # it left the block run and the pipeline run running.
                             raise RuntimeError(f'{type(err).__name__}: {err}') from err
 
-                    result = __execute_with_retry()
+                    self._tracked_block_run_id = block_run_id
+                    with self._tracking(block_run_id, pipeline_run):
+                        result = __execute_with_retry()
                 except Exception as error:
                     self.logger.exception(
                         f'Failed to execute block {self.block.uuid}',
@@ -1236,20 +1239,51 @@ class BlockExecutor:
 
         return result
 
-    def _output_record(self) -> Optional[Dict]:
-        """The digests of the block run's stored outputs, for its run record."""
-        from mage_ai.orchestration import run_records
+    def _tracking(self, block_run_id: Optional[int], pipeline_run):
+        """Tags the MLflow runs the block starts with this Mage run (experiments.py)."""
+        from contextlib import nullcontext
 
-        if self.execution_partition is None or not run_records.enabled():
-            return None
-        try:
-            digests = run_records.output_digests(
-                self.pipeline, self.block_uuid, self.execution_partition,
-            )
-        except Exception as error:
-            self.logger.warning(f'Recording the output digests failed: {error}')
-            return None
-        return dict(outputs=digests) if digests else None
+        from mage_ai.orchestration import experiments
+
+        if not experiments.enabled():
+            return nullcontext()
+        record = ((getattr(pipeline_run, 'metrics', None) or {}).get('run_record') or {})
+        return experiments.block_context(dict(
+            project=os.path.basename(os.path.realpath(self.pipeline.repo_path)),
+            pipeline_uuid=self.pipeline.uuid,
+            pipeline_run_id=getattr(pipeline_run, 'id', None),
+            block_uuid=self.block_uuid,
+            block_run_id=block_run_id,
+            execution_partition=self.execution_partition,
+            code_digest=record.get('code'),
+        ))
+
+    def _output_record(self) -> Optional[Dict]:
+        """
+        The digests of the block run's stored outputs, for its run record, and the MLflow
+        runs it started.
+        """
+        from mage_ai.orchestration import experiments, run_records
+
+        recorded = {}
+        if self.execution_partition is not None and run_records.enabled():
+            try:
+                digests = run_records.output_digests(
+                    self.pipeline, self.block_uuid, self.execution_partition,
+                )
+                if digests:
+                    recorded['outputs'] = digests
+            except Exception as error:
+                self.logger.warning(f'Recording the output digests failed: {error}')
+        block_run_id = getattr(self, '_tracked_block_run_id', None)
+        if block_run_id is not None and experiments.enabled():
+            try:
+                runs = experiments.runs_of_block_run(block_run_id)
+                if runs:
+                    recorded['mlflow'] = runs
+            except Exception as error:
+                self.logger.warning(f'Looking up the MLflow runs of the block failed: {error}')
+        return recorded or None
 
     def _execute_conditional(
         self,

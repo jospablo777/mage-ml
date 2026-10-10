@@ -1,0 +1,73 @@
+---
+title: "Experiments with MLflow"
+sidebarTitle: "Experiments"
+icon: "flask"
+description: "MLflow runs that your blocks start are linked to the Mage runs that started them."
+---
+
+## Overview
+
+Use MLflow in your blocks as you normally would. Mage links each MLflow run to the
+pipeline run and block run that created it:
+
+- Every MLflow run a block starts during a pipeline run gets tags that name the Mage run.
+- The block run records its MLflow runs: experiment, name, status, latest metrics, number
+  of parameters, and the model versions registered from each.
+- The pipeline run's page lists them with a link to MLflow, and comparing two runs shows
+  which metrics changed.
+
+No configuration is needed beyond MLflow's own, such as `MLFLOW_TRACKING_URI`.
+
+## Example
+
+```python
+import mlflow
+from sklearn.linear_model import LogisticRegression
+
+
+@transformer
+def train(frame, *args, **kwargs):
+    mlflow.set_experiment('churn')
+    with mlflow.start_run(run_name='train'):
+        model = LogisticRegression(C=kwargs.get('c', 1.0)).fit(frame[['x']], frame['y'])
+        mlflow.log_param('c', kwargs.get('c', 1.0))
+        mlflow.log_metric('accuracy', model.score(frame[['x']], frame['y']))
+        mlflow.sklearn.log_model(model, name='model', registered_model_name='churn_model')
+    return frame
+```
+
+## Tags on MLflow runs
+
+| Tag | Value |
+| --- | --- |
+| `mage.project` | The project's folder name |
+| `mage.pipeline_uuid` | The pipeline |
+| `mage.pipeline_run_id` | The pipeline run |
+| `mage.block_uuid` | The block |
+| `mage.block_run_id` | The block run |
+| `mage.execution_partition` | Where the run's outputs are stored |
+| `mage.code_digest` | The code digest of the run's [run record](/guides/pipelines/run-records) |
+
+In MLflow you can search for them, such as
+`tags."mage.pipeline_uuid" = 'train_churn'`. With `mage.code_digest` you can find every
+model trained from the same code.
+
+## On the run page
+
+Open a pipeline run. Under **Run record**, **MLflow runs of** each block lists its runs
+with status, metrics and registered model versions, and **open in MLflow** links to the
+run when the tracking server is an HTTP URL. **Compare with run id** adds, for each block,
+the metrics whose values changed between the two runs. `mage run-diff` prints them too.
+
+## Details
+
+- Mage finds the runs by their `mage.block_run_id` tag when the block run completes. It
+  only looks when the block imported MLflow, so other blocks make no tracking-server
+  calls. A tracking server that can't be reached logs a warning and doesn't fail the
+  block.
+- Runs started outside a pipeline run, such as in the notebook or in a script, get no
+  Mage tags.
+- A password in the tracking URI isn't recorded.
+- Blocks of a pipeline with its own [environment](/guides/pipelines/pipeline-environments)
+  run in another process. Their MLflow runs aren't tagged or recorded yet.
+- Set `MAGE_TRACK_EXPERIMENTS=0` to turn this off.

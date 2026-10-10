@@ -29,7 +29,11 @@ type ComparisonType = {
     removed: string[];
     runtime: { [key: string]: [string, string] };
   };
-  outputs: { block_uuid: string; result: string }[];
+  outputs: {
+    block_uuid: string;
+    metrics?: { [metric: string]: [number, number] };
+    result: string;
+  }[];
   runs: [number, number];
   same_code: boolean;
   same_environment: boolean;
@@ -48,6 +52,17 @@ type ReproductionType = {
   status: 'error' | 'failed' | 'passed' | 'running' | 'stopped';
 };
 
+type MlflowRunType = {
+  experiment_id: string;
+  metrics?: { [name: string]: number };
+  model_versions?: { name: string; version: string }[];
+  params?: number;
+  run_id: string;
+  run_name?: string;
+  status?: string;
+  url?: string;
+};
+
 type RunRecordType = {
   captured_at?: string;
   captures?: number;
@@ -55,6 +70,9 @@ type RunRecordType = {
   code_changed_between_starts?: boolean;
   comparison?: ComparisonType;
   comparison_error?: string;
+  experiments?: {
+    [blockUUID: string]: { runs: MlflowRunType[]; tracking_uri?: string };
+  };
   environment?: {
     mage?: string;
     packages?: number;
@@ -132,7 +150,7 @@ function Comparison({ comparison }: { comparison: ComparisonType }) {
       <Row label="Variables">
         {changedVariables.length ? `changed: ${changedVariables.join(', ')}` : 'the same'}
       </Row>
-      {outputs.map(({ block_uuid: blockUUID, result }) => (
+      {outputs.map(({ block_uuid: blockUUID, metrics, result }) => (
         <Row key={blockUUID} label={`Output of ${blockUUID}`}>
           <Text
             danger={result === 'differs'}
@@ -143,6 +161,11 @@ function Comparison({ comparison }: { comparison: ComparisonType }) {
           >
             {result}
           </Text>
+          {Object.entries(metrics || {}).map(([metric, [before, after]]) => (
+            <Text key={metric} monospace small>
+              {metric}: {String(before ?? 'none')} → {String(after ?? 'none')}
+            </Text>
+          ))}
         </Row>
       ))}
       {Object.entries(code.diffs || {}).map(([path, diff]) => (
@@ -228,6 +251,30 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
           <Row label="Variables">
             {record.variables?.length ? record.variables.join(', ') : 'none'}
           </Row>
+          {Object.entries(record.experiments || {}).map(([blockUUID, tracked]) => (
+            <Spacing key={blockUUID} mt={1}>
+              <Text muted small>MLflow runs of {blockUUID}</Text>
+              {tracked.runs.map(run => (
+                <Row key={run.run_id} label={run.run_name || run.run_id.slice(0, 8)}>
+                  {run.status?.toLowerCase()}
+                  {Object.entries(run.metrics || {}).slice(0, 12)
+                    .map(([name, value]) => `, ${name} ${value}`).join('')}
+                  {run.model_versions?.length
+                    ? `, registered ${run.model_versions
+                      .map(({ name, version }) => `${name} v${version}`).join(', ')}`
+                    : ''}
+                  {run.url && (
+                    <>
+                      {' '}
+                      <a href={run.url} rel="noopener noreferrer" target="_blank">
+                        open in MLflow
+                      </a>
+                    </>
+                  )}
+                </Row>
+              ))}
+            </Spacing>
+          ))}
           {record.code_changed_between_starts && (
             <Text small warning>
               The run was started again with other code; the record shows the latest start.

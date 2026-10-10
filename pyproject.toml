@@ -83,6 +83,10 @@ Repository = "https://github.com/jospablo777/mage-ml"
 [project.scripts]
 mage = "mage_ai.cli.main:app"
 
+# Tags MLflow runs that blocks start with the Mage run (mage_ai/orchestration/experiments.py).
+[project.entry-points."mlflow.run_context_provider"]
+mage = "mage_ai.orchestration.mlflow_context:MlflowRunContext"
+
 [project.optional-dependencies]
 ai = [
   "astor>=0.8.1",
