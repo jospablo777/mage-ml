@@ -40,6 +40,8 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rayon = "1"
+# HTTP for API loaders and exporters; rustls, no system OpenSSL.
+ureq = { version = "3", features = ["json"] }
 
 # Fast rebuilds with optimized code: a block recompiles in about a second once the
 # dependencies are built.

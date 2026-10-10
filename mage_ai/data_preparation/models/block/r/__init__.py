@@ -20,7 +20,9 @@ from mage_ai.data_preparation.models.block.r import exchange, runtime
 from mage_ai.data_preparation.models.constants import BlockType
 
 RUNNER = Path(__file__).parent / 'runner.R'
-BLOCK_TYPES = (BlockType.DATA_LOADER, BlockType.TRANSFORMER, BlockType.DATA_EXPORTER)
+BLOCK_TYPES = (
+    BlockType.DATA_LOADER, BlockType.TRANSFORMER, BlockType.DATA_EXPORTER, BlockType.CUSTOM,
+)
 
 
 class RBlockError(Exception):

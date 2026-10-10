@@ -1,7 +1,8 @@
 function_names <- c(
   data_loader = "load_data",
   transformer = "transform",
-  data_exporter = "export_data"
+  data_exporter = "export_data",
+  custom = "custom"
 )
 
 #' Stop when packages are missing

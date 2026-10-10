@@ -378,6 +378,10 @@ class RigTest(TestCase):
         self.rscript(self.bin / 'Rscript', '4.6.1')
         self.rig_version('4.6.1')
         self.executable(self.bin / 'rv', 'exit 0')
+        # On Debian and Ubuntu the setup also checks the build libraries with dpkg.
+        self.executable(self.bin / 'dpkg-query', '\n'.join(
+            f"echo '{p} installed'" for p in runtime.LINUX_BUILD_LIBRARIES
+        ))
 
         steps = runtime.setup_steps('4.6')
 
@@ -425,7 +429,14 @@ class RigTest(TestCase):
         ])
 
     def test_setup_has_no_library_step_without_dpkg(self):
-        with patch.object(runtime.sys, 'platform', 'linux'):
+        which = shutil.which
+
+        def without_dpkg(name, *args, **kwargs):
+            # Debian and Ubuntu have dpkg-query in /usr/bin; Fedora and macOS do not.
+            return None if name == 'dpkg-query' else which(name, *args, **kwargs)
+
+        with patch.object(runtime.sys, 'platform', 'linux'), \
+                patch.object(runtime.shutil, 'which', side_effect=without_dpkg):
             names = [step['name'] for step in runtime.setup_steps('4.6')]
 
         self.assertFalse(any('libraries' in name for name in names))

@@ -341,3 +341,23 @@ def test_empty_globals_are_a_named_list():
     result = execute_r_code(BlockType.DATA_LOADER, code).outputs[0]
 
     assert result == {'is_list': True, 'n': 0}
+
+
+def test_custom_blocks():
+    """R custom blocks take any inputs and return any value, as Python's do."""
+    from mage_ai.data_preparation.models.constants import BlockType
+    from mage_ai.data_preparation.templates.template import fetch_template_source
+
+    code = fetch_template_source(BlockType.CUSTOM, {}, language='r')
+    assert '#* @custom' in code
+    run = execute_r_code(
+        BlockType.CUSTOM, code, input_vars=[pd.DataFrame({'x': [1, 2]}), {'a': 1}],
+    )
+    assert run.outputs[0]['inputs'] == 2
+
+    run = execute_r_code(
+        BlockType.CUSTOM,
+        '#* @custom\nsummary <- function(df_1, ...) {\n  data.frame(rows = nrow(df_1))\n}\n',
+        input_vars=[pd.DataFrame({'x': [1, 2, 3]})],
+    )
+    assert run.outputs[0]['rows'].tolist() == [3]

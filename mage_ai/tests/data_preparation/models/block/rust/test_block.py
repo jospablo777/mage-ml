@@ -95,7 +95,8 @@ class RustBlockTest(DBTestCase):
             'transformers': BlockType.TRANSFORMER,
         }
         paths = sorted(glob.glob(os.path.join(TEMPLATES, '*', 'rust', '*')))
-        self.assertGreaterEqual(len(paths), 9)
+        self.assertGreaterEqual(len(paths), 13)
+        url = self.serve_records(frame)
         for path in paths:
             folder = path.split(os.sep)[-3]
             name = os.path.basename(path)
@@ -116,9 +117,45 @@ class RustBlockTest(DBTestCase):
                     variables=dict(
                         output_path=os.path.join(self.rust_repo, 'exported.parquet'),
                         path=data_file,
+                        url=url,
+                        batch_size=3,
                     ),
                 )
                 self.assertTrue(all(test['passed'] for test in run.tests), run.tests)
+        # The API exporter sent every row, in batches of 3.
+        self.assertEqual([len(batch) for batch in self.received], [3, 1])
+
+    def serve_records(self, frame) -> str:
+        """An HTTP API on localhost: GET returns the frame's rows, POST records them."""
+        import http.server
+        import json as json_module
+        import threading
+
+        rows = frame.to_dicts()
+        received = self.received = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json_module.dumps({'data': rows}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                length = int(self.headers['Content-Length'])
+                received.append(json_module.loads(self.rfile.read(length)))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return f'http://127.0.0.1:{server.server_address[1]}/records'
 
     def test_a_transformer_reads_tables_and_variables_and_runs_its_tests(self):
         orders = pd.DataFrame({'id': [1, 2, 3], 'amount': [10.0, -2.0, 7.5]})

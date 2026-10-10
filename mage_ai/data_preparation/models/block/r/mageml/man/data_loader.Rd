@@ -4,6 +4,7 @@
 \alias{data_loader}
 \alias{transformer}
 \alias{data_exporter}
+\alias{custom}
 \title{Register the function of a block}
 \usage{
 data_loader(f)
@@ -11,6 +12,8 @@ data_loader(f)
 transformer(f)
 
 data_exporter(f)
+
+custom(f)
 }
 \arguments{
 \item{f}{The block's function.}

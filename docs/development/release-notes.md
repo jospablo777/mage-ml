@@ -484,6 +484,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
   `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
+- **R custom blocks and more R and Rust templates.** R blocks can be custom blocks
+  (`#* @custom`, `custom()` or a function named `custom`), with a template, and the custom
+  block menu offers R and Rust. New Rust templates: an API loader and exporter (JSON over
+  HTTP, in batches), a Parquet or CSV file exporter, and model features per entity (lags,
+  changes, running means, z-scores, ranks). New Rust projects get `ureq` for HTTP.
 - **Pipeline services: `mage export service PROJECT PIPELINE...`** turns pipelines into a
   Docker image that runs them without Mage: an HTTP API to start runs (with
   `?wait=SECONDS` to get the outcome in the same call), schedules, a SQLite run history,

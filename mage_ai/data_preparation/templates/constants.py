@@ -713,6 +713,7 @@ def _r_template(block_type, name, file_name, description, groups=None):
         BlockType.DATA_LOADER: 'data_loaders',
         BlockType.DATA_EXPORTER: 'data_exporters',
         BlockType.TRANSFORMER: 'transformers',
+        BlockType.CUSTOM: 'custom',
     }[block_type]
     return dict(
         block_type=block_type,
@@ -823,6 +824,22 @@ RUST_TEMPLATES = [
     _rust_template(
         BlockType.DATA_LOADER, 'Local file', 'file.rs',
         'Read a CSV or Parquet file lazily with Polars.', [GROUP_FILES],
+    ),
+    _rust_template(
+        BlockType.DATA_LOADER, 'API', 'api.rs',
+        'Load JSON records from an HTTP API into a table.',
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'Local file', 'file.rs',
+        'Write a Parquet (zstd) or CSV file.', [GROUP_FILES],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'API', 'api.rs',
+        'Send rows to an HTTP API as JSON, in batches.',
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Model features', 'features.rs',
+        'Lags, changes, running means, z-scores and ranks per entity, in time order.',
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Aggregate', 'aggregate.rs',

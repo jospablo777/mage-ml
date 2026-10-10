@@ -228,6 +228,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "block_rust_engagement_score_7f710446"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "block_rust_sessions_6fb9117c"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "boxcar"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

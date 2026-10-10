@@ -3,8 +3,8 @@
 #' R has no decorators. Like plumber, Mage reads comments that start with
 #' `#*` above a function, the counterparts of Mage's Python decorators:
 #'
-#' * `#* @data_loader`, `#* @transformer` or `#* @data_exporter` marks the
-#'   block's function. A block has one, of its own type.
+#' * `#* @data_loader`, `#* @transformer`, `#* @data_exporter` or `#* @custom`
+#'   marks the block's function. A block has one, of its own type.
 #' * `#* @test` marks a test of the block's output. Mage calls it with the
 #'   output, or with no arguments when it takes none; it fails when it raises
 #'   an error. It is reported with the function's name.
@@ -34,7 +34,9 @@
 #' }
 NULL
 
-annotation_tags <- c("data_loader", "transformer", "data_exporter", "test")
+annotation_tags <- c(
+  "data_loader", "transformer", "data_exporter", "custom", "test"
+)
 
 #' Read the annotations above each of a block's expressions
 #'
@@ -60,7 +62,7 @@ read_annotations <- function(expressions, lines) {
           sprintf(
             paste0(
               "block.R line %d has the unknown annotation @%s. Mage reads ",
-              "@data_loader, @transformer, @data_exporter and @test."
+              "@data_loader, @transformer, @data_exporter, @custom and @test."
             ),
             line,
             unknown[[1]]

@@ -9,8 +9,8 @@ R has no decorators. Like plumber, Mage reads comments that start with
 }
 \details{
 \itemize{
-\item \verb{#* @data_loader}, \verb{#* @transformer} or \verb{#* @data_exporter} marks the
-block's function. A block has one, of its own type.
+\item \verb{#* @data_loader}, \verb{#* @transformer}, \verb{#* @data_exporter} or \verb{#* @custom}
+marks the block's function. A block has one, of its own type.
 \item \verb{#* @test} marks a test of the block's output. Mage calls it with the
 output, or with no arguments when it takes none; it fails when it raises
 an error. It is reported with the function's name.

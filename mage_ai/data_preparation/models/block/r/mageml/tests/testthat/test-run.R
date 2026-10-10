@@ -152,3 +152,29 @@ test_that("missing packages are named with the rv command that adds them", {
     )
   )
 })
+
+test_that("custom blocks run by annotation, registration or name", {
+  annotated <- local_job(
+    c(
+      "#* @custom",
+      "summarise_inputs <- function(df_1, ...) {",
+      "  list(rows = nrow(df_1))",
+      "}"
+    ),
+    block_type = "custom",
+    inputs = list(data.frame(x = 1:4))
+  )
+  expect_true(run_block(annotated, quit_on_error = FALSE))
+  expect_equal(read_output(annotated)$value$rows, 4)
+
+  registered <- local_job(
+    "custom(function(...) data.frame(id = 1:2))",
+    block_type = "custom"
+  )
+  expect_true(run_block(registered, quit_on_error = FALSE))
+  expect_equal(read_output(registered)$value$id$as_vector(), 1:2)
+
+  named <- local_job("custom <- function(...) 'done'", block_type = "custom")
+  expect_true(run_block(named, quit_on_error = FALSE))
+  expect_equal(read_output(named)$value, "done")
+})

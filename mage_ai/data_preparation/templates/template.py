@@ -332,6 +332,8 @@ def __fetch_custom_templates(
 ) -> str:
     if language == BlockLanguage.RUST:
         template_path = 'custom/rust/default.rs'
+    elif language == BlockLanguage.R:
+        template_path = 'custom/r/default.r'
     elif language != BlockLanguage.PYTHON:
         return ''
     else:
