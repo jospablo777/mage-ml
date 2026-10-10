@@ -13,6 +13,7 @@ import simplejson
 from mage_ai.data_preparation.storage.base_storage import (
     BaseStorage,
     read_pandas_parquet,
+    write_pandas_parquet,
 )
 from mage_ai.settings.server import DEBUG_FILE_IO
 from mage_ai.shared.environments import is_debug
@@ -168,7 +169,7 @@ class LocalStorage(BaseStorage):
 
     def write_parquet(self, df: pd.DataFrame, file_path: str) -> None:
         with self.writing(file_path) as temporary:
-            df.to_parquet(temporary)
+            write_pandas_parquet(df, temporary)
 
     def write_polars_dataframe(self, df: pl.DataFrame, file_path: str) -> None:
         with self.writing(file_path) as temporary:

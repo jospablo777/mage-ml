@@ -8,6 +8,7 @@ import polars as pl
 from pandas.testing import assert_frame_equal
 
 from mage_ai.data_preparation.models.variable import Variable
+from mage_ai.data_preparation.storage import local_storage
 from mage_ai.data_preparation.storage.local_storage import LocalStorage
 from mage_ai.data_preparation.variable_manager import VariableManager
 from mage_ai.tests.base_test import DBTestCase
@@ -210,7 +211,7 @@ class VariableAtomicWriteTest(DBTestCase):
                 file.write(b'PAR1 partial')
             raise OSError('killed')
 
-        with patch.object(pd.DataFrame, 'to_parquet', write_part_and_fail):
+        with patch.object(local_storage, 'write_pandas_parquet', write_part_and_fail):
             with self.assertRaises(OSError):
                 storage.write_parquet(pd.DataFrame({'a': [2]}), path)
 

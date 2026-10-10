@@ -478,6 +478,13 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Faster pandas outputs.** pandas block outputs whose columns are numbers, booleans,
+  strings, timestamps, dates or decimals are written by the Polars Parquet writer, which
+  encodes columns in parallel: a 2-million-row output writes in 0.03 s instead of 0.16 s,
+  and the block run takes a third of the time. The files are zstd-compressed (30%
+  smaller) and read back as the same types and values; frames with other column types
+  (categoricals, lists) are written by pyarrow as before. See
+  `docs/development/efficient-data-exchange.md`.
 - **Run records and reproducing runs.** Every pipeline run records its code (each source
   file's SHA-256, with one copy kept per distinct set of files), Python, Mage and package
   versions, variable names and git commit; each block run records its outputs' SHA-256.

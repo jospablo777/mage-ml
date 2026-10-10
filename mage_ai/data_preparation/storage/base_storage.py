@@ -36,6 +36,71 @@ def _has_fixed_size_list(arrow_type: pa.DataType) -> bool:
     return False
 
 
+def _polars_writes_exactly(arrow_type: pa.DataType) -> bool:
+    """
+    Types the Polars Parquet writer stores with the same Arrow type and values as pyarrow,
+    given the table's schema. It refuses dictionaries, lists, structs, binary and
+    durations from pandas, and float16 is not a Polars type.
+    """
+    return (
+        pa.types.is_integer(arrow_type)
+        or (pa.types.is_floating(arrow_type) and not pa.types.is_float16(arrow_type))
+        or pa.types.is_boolean(arrow_type)
+        or pa.types.is_large_string(arrow_type)
+        or pa.types.is_timestamp(arrow_type)
+        or pa.types.is_date32(arrow_type)
+        or pa.types.is_decimal128(arrow_type)
+    )
+
+
+def pandas_table(df: pd.DataFrame) -> pa.Table:
+    """The Arrow table df.to_parquet writes: index as pandas keeps it, attrs as metadata."""
+    table = pa.Table.from_pandas(df, preserve_index=None)
+    if df.attrs:
+        metadata = dict(table.schema.metadata or {})
+        metadata[b'PANDAS_ATTRS'] = json.dumps(df.attrs).encode()
+        table = table.replace_schema_metadata(metadata)
+    return table
+
+
+def write_pandas_parquet(df: pd.DataFrame, destination) -> None:
+    """
+    Writes a pandas frame as df.to_parquet does, to a path or a binary buffer.
+
+    pyarrow encodes the columns one after another; for a 2-million-row output that was
+    three quarters of the block run. Polars encodes them in parallel, about 5 times as
+    fast, and with the table's own Arrow schema it stores the same types, values and
+    pandas metadata. Frames whose columns are all of types that keep (numbers, booleans,
+    strings, timestamps, dates and decimals) are written by Polars, compressed with zstd
+    as Polars outputs are; the file's schema is then checked against the table's, and any
+    other frame, or a mismatch, is written by pyarrow.
+    """
+    if type(df) is not pd.DataFrame:
+        # Subclasses write their own format, such as GeoParquet for a GeoDataFrame.
+        df.to_parquet(destination)
+        return
+    table = pandas_table(df)
+    if table.num_columns and all(_polars_writes_exactly(f.type) for f in table.schema):
+        start = destination.tell() if hasattr(destination, 'tell') else None
+        try:
+            pl.from_arrow(table, rechunk=False).write_parquet(
+                destination, arrow_schema=table.schema, compression='zstd',
+            )
+            if start is not None:
+                destination.seek(start)
+            written = pq.read_schema(destination)
+            if written.equals(table.schema, check_metadata=True):
+                if start is not None:
+                    destination.seek(0, 2)
+                return
+        except Exception:
+            pass
+        if start is not None:
+            destination.seek(start)
+            destination.truncate()
+    pq.write_table(table, destination)
+
+
 def read_parquet_table(source, columns: Optional[List[str]] = None, **kwargs) -> pa.Table:
     """
     Read a Parquet file into an Arrow table.

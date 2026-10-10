@@ -11,6 +11,7 @@ import simplejson
 from mage_ai.data_preparation.storage.base_storage import (
     BaseStorage,
     read_pandas_parquet,
+    write_pandas_parquet,
 )
 from mage_ai.services.aws.s3 import s3
 from mage_ai.shared.constants import S3_PREFIX
@@ -122,7 +123,7 @@ class S3Storage(BaseStorage):
 
     def write_parquet(self, df: pd.DataFrame, file_path: str) -> None:
         buffer = io.BytesIO()
-        df.to_parquet(buffer)
+        write_pandas_parquet(df, buffer)
         buffer.seek(0)
         self.client.upload_object(s3_url_path(file_path), buffer)
 

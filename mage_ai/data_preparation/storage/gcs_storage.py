@@ -12,6 +12,7 @@ from google.cloud import storage
 from mage_ai.data_preparation.storage.base_storage import (
     BaseStorage,
     read_pandas_parquet,
+    write_pandas_parquet,
 )
 from mage_ai.shared.constants import GCS_PREFIX
 from mage_ai.shared.parsers import encode_complex
@@ -149,7 +150,7 @@ class GCSStorage(BaseStorage):
 
     def write_parquet(self, df: pd.DataFrame, file_path: str) -> None:
         buffer = io.BytesIO()
-        df.to_parquet(buffer)
+        write_pandas_parquet(df, buffer)
         buffer.seek(0)
         blob = self.bucket.blob(gcs_url_path(file_path))
         blob.upload_from_string(buffer.getvalue())
