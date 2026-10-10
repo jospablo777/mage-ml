@@ -62,5 +62,6 @@ So the implementation adds attempts to block runs instead of a new queue.
    released after it (60 s expiry for a holder that died), but it is not renewed, so a
    tick longer than a minute allows a second replica in; without `REDIS_URL` replicas
    share no job ownership at all.
-4. **Integration pipelines and Kubernetes.** Stream jobs and Kubernetes block runs write
+4. **Integration pipelines and Kubernetes.** Stream jobs (whose running jobs the scheduler
+   now finds, after a job id mismatch) and Kubernetes block runs write
    status on other paths that are not fenced yet.

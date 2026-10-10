@@ -59,7 +59,9 @@ class JobManager:
         logger=None,
         logging_tags: Dict = None,
     ) -> bool:
-        job_id = self.__job_id(JobType.PIPELINE_RUN, f'{pipeline_run_id}_{stream}')
+        # The id the scheduler enqueues a stream with; it looked for a pipeline run job
+        # instead, so it never found a running stream.
+        job_id = self.__job_id(JobType.INTEGRATION_STREAM, f'{pipeline_run_id}_{stream}')
         return self.queue.has_job(
             job_id,
             logger=logger,
