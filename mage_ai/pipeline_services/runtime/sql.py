@@ -1,10 +1,12 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
-(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL branch):
+(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL and DuckDB
+branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
-2. {{ df_N }} becomes that table's "database".schema.table.
+2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL, the table
+   alone on MySQL and DuckDB.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -23,10 +25,29 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 QUERY_ROW_LIMIT = 10_000_000
-SUPPORTED_PROVIDERS = ('postgres',)
-# Profile settings that make two SQL blocks use the same PostgreSQL database.
-POSTGRES_PROFILE_KEYS = ('POSTGRES_DBNAME', 'POSTGRES_HOST', 'POSTGRES_PORT')
 CONFIG_KEY_UPSTREAM = 'upstream_block_configuration'
+# Per database, what Mage's branch for it does differently:
+# - profile_keys: the io_config.yaml settings that make two SQL blocks use the same database;
+# - no_schema: upstream tables are named without a schema;
+# - full_names: {{ df_N }} becomes "database".schema.table instead of the table alone.
+PROVIDERS = {
+    'postgres': dict(
+        profile_keys=('POSTGRES_DBNAME', 'POSTGRES_HOST', 'POSTGRES_PORT'),
+        no_schema=False,
+        full_names=True,
+    ),
+    'mysql': dict(
+        profile_keys=('MYSQL_DATABASE', 'MYSQL_HOST', 'MYSQL_PORT'),
+        no_schema=True,
+        full_names=False,
+    ),
+    'duckdb': dict(
+        profile_keys=('DUCKDB_DATABASE', 'DUCKDB_SCHEMA'),
+        no_schema=True,
+        full_names=False,
+    ),
+}
+SUPPORTED_PROVIDERS = tuple(PROVIDERS)
 
 _statements = None
 
@@ -99,7 +120,9 @@ def render_strict(text: Optional[str], variables: Dict) -> Optional[str]:
     )
 
 
-def table_name_parts(configuration: Dict, upstream: Dict) -> Tuple[Any, Any, Any]:
+def table_name_parts(
+    configuration: Dict, upstream: Dict, no_schema: bool = False,
+) -> Tuple[Any, Any, Any]:
     """(database, schema, table) of an upstream block's table, as Mage's table_name_parts."""
     database = schema = table = None
     full = ((configuration.get(CONFIG_KEY_UPSTREAM) or {}).get(upstream['uuid']) or {}).get(
@@ -109,10 +132,13 @@ def table_name_parts(configuration: Dict, upstream: Dict) -> Tuple[Any, Any, Any
     if len(parts) == 3:
         database, schema, table = parts
     elif len(parts) == 2:
-        schema, table = parts
+        if no_schema:
+            database, table = parts
+        else:
+            schema, table = parts
     elif len(parts) == 1:
         table = parts[0]
-    if not schema:
+    if not schema and not no_schema:
         upstream_configuration = upstream.get('configuration') or {}
         if (
             upstream_configuration
@@ -127,7 +153,9 @@ def table_name_parts(configuration: Dict, upstream: Dict) -> Tuple[Any, Any, Any
     return database, schema, table
 
 
-def should_upload(configuration: Dict, upstream: Dict, io_config: str) -> bool:
+def should_upload(
+    configuration: Dict, upstream: Dict, io_config: str, profile_keys: Tuple[str, ...],
+) -> bool:
     """Whether an upstream output has to be written to a table first."""
     from mage_ai.io.config import ConfigFileLoader
 
@@ -148,7 +176,7 @@ def should_upload(configuration: Dict, upstream: Dict, io_config: str) -> bool:
     same_database = all(
         block_loader.config.get(k) and upstream_loader.config.get(k)
         and block_loader.config.get(k) == upstream_loader.config.get(k)
-        for k in POSTGRES_PROFILE_KEYS
+        for k in profile_keys
     )
     return not same_provider or not same_database
 
@@ -165,23 +193,28 @@ def _no_data(value: Any) -> bool:
 
 def upload_upstream_tables(
     loader, configuration: Dict, upstreams: List[Dict], inputs: List, query: str, io_config: str,
+    provider: Dict,
 ) -> None:
-    default_schema = loader.default_schema()
+    import inspect
+
+    default_schema = None if provider['no_schema'] else loader.default_schema()
     for index, upstream in enumerate(upstreams):
         if query and not re.findall(variable_pattern(index + 1), query):
             continue
-        if not should_upload(configuration, upstream, io_config):
+        if not should_upload(configuration, upstream, io_config, provider['profile_keys']):
             continue
         value = inputs[index] if index < len(inputs) else None
         if _no_data(value):
             print(f"\n\nNo data in upstream block {upstream['uuid']}.")
             continue
-        _, schema, table = table_name_parts(configuration, upstream)
-        schema = schema or default_schema
+        _, schema, table = table_name_parts(
+            configuration, upstream, no_schema=provider['no_schema'],
+        )
+        if not schema and not provider['no_schema']:
+            schema = default_schema
         full_name = '.'.join(p for p in (schema, table) if p)
         print(f"\n\nExporting data from upstream block {upstream['uuid']} to {full_name}.")
-        loader.export(
-            value,
+        options = dict(
             table_name=table,
             schema_name=schema,
             cascade_on_drop=False,
@@ -189,11 +222,15 @@ def upload_upstream_tables(
             if_exists='replace',
             index=False,
             verbose=False,
-            allow_reserved_words=True,
         )
+        if 'allow_reserved_words' in inspect.signature(loader.export).parameters:
+            options['allow_reserved_words'] = True
+        loader.export(value, **options)
 
 
-def interpolate_input(loader, configuration: Dict, upstreams: List[Dict], query: str) -> str:
+def interpolate_input(
+    loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
+) -> str:
     """{{ df_N }} becomes the upstream table's name, as Mage's interpolate_input."""
     helpers = statements()
     for index, upstream in enumerate(upstreams):
@@ -215,15 +252,18 @@ def interpolate_input(loader, configuration: Dict, upstreams: List[Dict], query:
                 f'({provider}). Please disable using raw SQL and try again.'
             )
         database, schema, table = table_name_parts(configuration, upstream)
-        config_to_use = config if same_providers else configuration
-        database = database or config_to_use.get('data_provider_database')
-        schema = schema or config_to_use.get('data_provider_schema')
-        if not database:
-            database = f'"{loader.default_database()}"'
-        if not schema:
-            schema = loader.default_schema()
         table = table or upstream['table_name']
-        replace_with = '.'.join(p for p in (database, schema, table) if p)
+        if full_names:
+            config_to_use = config if same_providers else configuration
+            database = database or config_to_use.get('data_provider_database')
+            schema = schema or config_to_use.get('data_provider_schema')
+            if not database:
+                database = f'"{loader.default_database()}"'
+            if not schema:
+                schema = loader.default_schema()
+            replace_with = '.'.join(p for p in (database, schema, table) if p)
+        else:
+            replace_with = table
 
         content = upstream.get('content') or ''
         if (
@@ -285,20 +325,33 @@ def execute_raw_sql(loader, query: str, configuration: Dict) -> List:
     return [] if last is None else [last]
 
 
+def _loader(provider: str, config_loader):
+    if provider == 'postgres':
+        from mage_ai.io.postgres import Postgres
+
+        return Postgres.with_config(config_loader)
+    if provider == 'mysql':
+        from mage_ai.io.mysql import MySQL
+
+        return MySQL.with_config(config_loader)
+    from mage_ai.io.duckdb import DuckDB
+
+    return DuckDB.with_config(config_loader)
+
+
 def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
     """The block's outputs, as a SQL block in a Mage pipeline run returns them."""
     from mage_ai.io.config import ConfigFileLoader
-    from mage_ai.io.postgres import Postgres
-    from mage_ai.io.postgres_types import with_float_numbers
 
     configuration = block.get('configuration') or {}
     details = block.get('sql') or {}
-    provider = configuration.get('data_provider')
-    if provider not in SUPPORTED_PROVIDERS:
+    name = configuration.get('data_provider')
+    if name not in PROVIDERS:
         raise SqlBlockError(
-            f'SQL blocks on {provider} are not supported by pipeline services yet; '
-            'PostgreSQL is.'
+            f'SQL blocks on {name} are not supported by pipeline services yet; '
+            f'{", ".join(SUPPORTED_PROVIDERS)} are.'
         )
+    provider = PROVIDERS[name]
     with open(block['file'], encoding='utf-8') as file:
         query = file.read()
 
@@ -314,24 +367,53 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
     limit = min(
         int(configuration.get('limit_in_pipeline_run') or QUERY_ROW_LIMIT), QUERY_ROW_LIMIT,
     )
+    options = dict(
+        drop_table_on_replace=True,
+        if_exists=configuration.get('export_write_policy', 'append'),
+        index=False,
+        verbose=block.get('type') == 'data_exporter',
+    )
 
-    with Postgres.with_config(config_loader) as loader:
-        upload_upstream_tables(loader, configuration, upstreams, inputs, query, io_config)
-        query = interpolate_input(loader, configuration, upstreams, query)
-        query = render(query, variables)
+    loader = _loader(name, config_loader)
+    if name == 'duckdb':
+        # Mage's DuckDB branch uses the loader without a with block, and the schema
+        # falls back to the profile's before the upstream tables are written.
         schema = schema or loader.default_schema()
-        if configuration.get('use_raw_sql'):
-            return execute_raw_sql(loader, query, configuration)
-        loader.export(
-            None,
-            schema,
-            table,
-            query_string=query,
-            drop_table_on_replace=True,
-            if_exists=configuration.get('export_write_policy', 'append'),
-            index=False,
-            verbose=block.get('type') == 'data_exporter',
-        )
-        return [with_float_numbers(loader.load(
-            f'SELECT * FROM {schema}.{table}', limit=limit, verbose=False, exact_types=True,
-        ))]
+        return _run_on(loader, name, provider, configuration, upstreams, inputs, query,
+                       io_config, variables, schema, table, limit, options)
+    with loader:
+        if name == 'postgres':
+            upload_upstream_tables(
+                loader, configuration, upstreams, inputs, query, io_config, provider,
+            )
+            query = interpolate_input(loader, configuration, upstreams, query)
+            query = render(query, variables)
+            schema = schema or loader.default_schema()
+            if configuration.get('use_raw_sql'):
+                return execute_raw_sql(loader, query, configuration)
+            loader.export(None, schema, table, query_string=query, **options)
+            from mage_ai.io.postgres_types import with_float_numbers
+
+            return [with_float_numbers(loader.load(
+                f'SELECT * FROM {schema}.{table}', limit=limit, verbose=False,
+                exact_types=True,
+            ))]
+        return _run_on(loader, name, provider, configuration, upstreams, inputs, query,
+                       io_config, variables, schema, table, limit, options)
+
+
+def _run_on(loader, name, provider, configuration, upstreams, inputs, query, io_config,
+            variables, schema, table, limit, options) -> List:
+    """MySQL and DuckDB: upstream tables and {{ df_N }} without a schema."""
+    upload_upstream_tables(loader, configuration, upstreams, inputs, query, io_config, provider)
+    query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
+    query = render(query, variables)
+    if configuration.get('use_raw_sql'):
+        return execute_raw_sql(loader, query, configuration)
+    if name == 'mysql':
+        loader.export(None, None, table, query_string=query, **options)
+        return [loader.load(
+            f'SELECT * FROM {table}', limit=limit, verbose=False, nullable_integers=True,
+        )]
+    loader.export(None, schema, table_name=table, query_string=query, **options)
+    return [loader.load(f'SELECT * FROM {schema}.{table}', verbose=False, nullable_integers=True)]

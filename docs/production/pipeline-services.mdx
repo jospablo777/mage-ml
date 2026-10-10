@@ -59,7 +59,7 @@ Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
   as on amd64; on arm64 some build from source, which makes the first build slow. An
   image with R blocks is based on Debian trixie and is larger.
 
-- **SQL** blocks on PostgreSQL run as in a Mage pipeline run: upstream outputs that the
+- **SQL** blocks on PostgreSQL, MySQL and DuckDB run as in a Mage pipeline run: upstream outputs that the
   query reads as `{{ df_1 }}` are written to tables first (the table of an upstream SQL
   block on the same database is used directly), the query is rendered with the run's
   variables, `variables()`, `env_var()` and `mage_secret_var()`, and the result is created
@@ -69,8 +69,8 @@ Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
 
 Blocks the service cannot run stop the export with the block named and the reason, so
 nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, SQL blocks
-on databases other than PostgreSQL and SQL blocks that use `block_output()` are not
-supported yet. Chart and markdown blocks are notebook only and are left out.
+on other databases (BigQuery, Snowflake, ClickHouse, Trino, Redshift, SQL Server) and SQL
+blocks that use `block_output()` are not supported yet. Chart and markdown blocks are notebook only and are left out.
 
 ## 2. Build and run
 

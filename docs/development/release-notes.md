@@ -13,6 +13,10 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Block outputs
 
+- **Set, frozenset and tuple columns keep their type.** A pandas output with such a
+  column came back with numpy arrays in it; the values are now stored as tagged JSON and
+  read back as sets, frozensets and tuples. The MySQL exporter writes sets as sorted JSON
+  arrays, as it writes lists.
 - **A missing upstream output raises.** When an upstream block's output file or
   directory is missing, the next block fails with `Failed to read ...`. It used to
   receive `{}` and run on it. Pipelines that relied on running after a deleted or
@@ -466,7 +470,7 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 - **Pipeline services run R and SQL blocks.** `mage export service` exports R blocks with
   the project's rv environment (the image installs R 4.6 and the packages rv.lock pins)
-  and PostgreSQL SQL blocks, which run as in a Mage pipeline run. Rust blocks are
+  and SQL blocks on PostgreSQL, MySQL and DuckDB, which run as in a Mage pipeline run. Rust blocks are
   compiled into the image, and secrets can come from AWS Secrets Manager and Parameter
   Store. See `docs/production/pipeline-services.mdx`.
 - **Light theme.** Settings > Preferences > Light theme, or Light theme in the user menu,

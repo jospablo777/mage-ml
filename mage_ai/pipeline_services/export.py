@@ -188,7 +188,7 @@ def capture(
     return capture_
 
 
-SQL_PROVIDERS = ('postgres',)
+SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb')
 
 
 def _sql_unsupported(block) -> Optional[str]:
@@ -197,7 +197,7 @@ def _sql_unsupported(block) -> Optional[str]:
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
-            'PostgreSQL.'
+            'PostgreSQL, MySQL and DuckDB.'
         )
     if not configuration.get('data_provider_profile'):
         return 'a SQL block without a data provider profile (io_config.yaml).'
@@ -673,10 +673,19 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
     if any(b['language'] == 'sql' for p in capture_.manifest['pipelines'] for b in p['blocks']):
         # What the SQL runner imports to render queries and use PostgreSQL.
         candidates += [
-            'jinja2', 'inflection', 'psycopg2', 'mage_ai.io.config', 'mage_ai.io.postgres',
-            'mage_ai.io.postgres_types', 'mage_ai.data_preparation.shared.utils',
-            'mage_ai.data_preparation.templates.utils',
+            'jinja2', 'inflection', 'mage_ai.io.config',
+            'mage_ai.data_preparation.shared.utils', 'mage_ai.data_preparation.templates.utils',
         ]
+        providers = {
+            (b.get('configuration') or {}).get('data_provider')
+            for p in capture_.manifest['pipelines'] for b in p['blocks'] if b['language'] == 'sql'
+        }
+        if 'postgres' in providers:
+            candidates += ['psycopg2', 'mage_ai.io.postgres', 'mage_ai.io.postgres_types']
+        if 'mysql' in providers:
+            candidates += ['mysql.connector', 'mage_ai.io.mysql']
+        if 'duckdb' in providers:
+            candidates += ['duckdb', 'mage_ai.io.duckdb']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [
