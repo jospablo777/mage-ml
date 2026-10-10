@@ -140,6 +140,13 @@ def pipeline_environment(pipeline) -> Optional[Environment]:
                 f'does not exist in {pipeline.dir_path}.'
             )
         requirements = path.read_text().splitlines()
+    python = str(config.get('python') or f'{sys.version_info.major}.{sys.version_info.minor}')
+    return environment_for(requirements, python)
+
+
+def environment_for(requirements: List[str], python: Optional[str] = None) -> Environment:
+    """An environment with these requirements, the exchange packages at Mage's versions."""
+    python = python or f'{sys.version_info.major}.{sys.version_info.minor}'
     lines = []
     for line in requirements:
         line = str(line).split('#', 1)[0].strip()
@@ -154,7 +161,6 @@ def pipeline_environment(pipeline) -> Optional[Environment]:
             pins.append(f'{package}=={importlib.metadata.version(package)}')
         except importlib.metadata.PackageNotFoundError:
             continue
-    python = str(config.get('python') or f'{sys.version_info.major}.{sys.version_info.minor}')
     return Environment(python=python, requirements=tuple(lines), pins=tuple(pins))
 
 

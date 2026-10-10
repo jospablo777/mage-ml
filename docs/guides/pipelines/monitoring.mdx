@@ -89,6 +89,52 @@ Classification metrics are `accuracy`, `precision`, `recall`, `f1`, `roc_auc` an
 errors. Rows without a label or a prediction are left out. The metrics come from
 scikit-learn, over every labeled row of the output.
 
+### Evidently and NannyML
+
+A monitor can also run [Evidently](https://github.com/evidentlyai/evidently) and
+[NannyML](https://github.com/NannyML/nannyml) on the run's output and the baseline run's
+output. Their failed tests become checks of the monitor, and their HTML reports open from
+the pipeline run's page.
+
+```yaml
+evidently:
+  presets: [DataDriftPreset, DataSummaryPreset]   # also ClassificationPreset, RegressionPreset
+  drift_share: 0.5          # DataDriftPreset fails past this share of drifted columns
+  columns: [score, segment]
+  # For ClassificationPreset or RegressionPreset:
+  target: label
+  prediction: prediction
+  score: probability
+  task: classification       # or regression
+  severity: warn            # what a failed Evidently test counts as (default warn)
+nannyml:
+  problem_type: classification_binary   # classification_multiclass or regression
+  timestamp: event_time
+  chunk_size: 1000          # or chunk_number: 10
+  y_pred: prediction
+  y_pred_proba: probability
+  y_true: label             # the baseline needs labels; the current run doesn't
+  metrics: [roc_auc, f1]
+  features: [score, tenure, segment]
+  severity: fail            # what a NannyML alert counts as (default fail)
+```
+
+- **Evidently** runs its presets with their tests. Its default tests are bands around
+  the baseline in both directions, so a better accuracy fails them too. That's why
+  their failures count as warnings unless you set `severity: fail`.
+- **NannyML** estimates the model's performance on the current run without labels:
+  CBPE for classification, and DLE for regression, which needs `features`. With
+  `features`, it also runs univariate drift for each feature, and multivariate drift
+  (PCA reconstruction error) when there are two or more. A chunk outside the thresholds
+  NannyML derives from the baseline is an alert.
+- They run in a Python environment that Mage builds for them with uv, so their packages
+  never enter Mage's environment. The default versions are `evidently==0.7.23` and
+  `nannyml==0.13.1`, tested with this release. Set your own with
+  `environment: {requirements: [...]}`. The first run builds the environment; later runs
+  reuse it.
+- An engine that fails (a column it needs is missing, for example) records `hold` with
+  its error. It doesn't fail the monitor.
+
 ## Results
 
 Each check gives one result:

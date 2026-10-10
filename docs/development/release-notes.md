@@ -515,7 +515,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   failed monitor sends the pipeline's notifications or fails the block run. Monitors
   also check model performance when the output holds labels (accuracy, F1, ROC AUC,
   RMSE and others, against bounds and the baseline), offer the population stability
-  index, per-column thresholds, rolling baselines and notifications on change only. See
+  index, per-column thresholds, rolling baselines and notifications on change only.
+  Evidently and NannyML can run as engines of a monitor (presets with their tests;
+  label-free performance estimation and multivariate drift), in an environment Mage
+  builds for them, with their HTML reports on the run page. See
   `docs/guides/pipelines/monitoring.mdx`.
 - **Resources and shared limits.** A block can declare the memory, CPUs, GPUs and shared
   limits it needs (block settings > Resources), and the project declares what exists

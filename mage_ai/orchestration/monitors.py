@@ -45,8 +45,15 @@ _NAME = re.compile(r'^[A-Za-z0-9][\w.\-]{0,127}$')
 _KEYS = {
     'pipeline', 'block', 'output', 'baseline', 'columns', 'drift', 'missing', 'rows',
     'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top', 'rolling',
-    'performance',
+    'performance', 'evidently', 'nannyml', 'environment',
 }
+# The engines' versions tested with this fork (pandas 3, NumPy 2, Python 3.12).
+ENGINE_REQUIREMENTS = {'evidently': 'evidently==0.7.23', 'nannyml': 'nannyml==0.13.1'}
+# What an engine's failed test counts as: Evidently's default tests are bands around the
+# baseline in both directions, so a better accuracy fails them too.
+ENGINE_SEVERITY = {'evidently': 'warn', 'nannyml': 'fail'}
+ENGINE_TIMEOUT_SECONDS = int(os.getenv('MAGE_MONITOR_ENGINE_TIMEOUT_SECONDS') or 1800)
+ENGINE_WORKER = os.path.join(os.path.dirname(__file__), 'monitor_engines.py')
 DRIFT_METHODS = {
     # Jensen-Shannon divergence, natural log: 0 to ln 2.
     'js': dict(warn=0.1, fail=0.2),
@@ -89,6 +96,10 @@ class Monitor:
     # The baseline is the sum of this many earlier runs (previous baseline only).
     rolling: int = 1
     performance: Dict[str, Any] = field(default_factory=dict)
+    evidently: Dict[str, Any] = field(default_factory=dict)
+    nannyml: Dict[str, Any] = field(default_factory=dict)
+    # The requirements the engines run with; ENGINE_REQUIREMENTS by default.
+    environment: Dict[str, Any] = field(default_factory=dict)
 
 
 def parse_duration(value: Any, what: str) -> float:
@@ -180,6 +191,25 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
     if isinstance(rolling, bool) or not isinstance(rolling, int) or rolling < 1:
         raise MonitorError(f'The rolling of monitor {name} is a number of runs, 1 or more.')
     performance = _performance_settings(document.get('performance'), name)
+    engines = {}
+    for engine in ('evidently', 'nannyml'):
+        settings = document.get(engine)
+        if settings in (None, False):
+            engines[engine] = {}
+            continue
+        if settings is True:
+            settings = {}
+        if not isinstance(settings, dict):
+            raise MonitorError(f'The {engine} settings of monitor {name} must be a mapping.')
+        severity = settings.get('severity', ENGINE_SEVERITY[engine])
+        if severity not in ('warn', 'fail'):
+            raise MonitorError(f'The {engine} severity of monitor {name} is warn or fail.')
+        engines[engine] = dict(settings, severity=severity)
+    environment = document.get('environment') or {}
+    if not isinstance(environment, dict) or set(environment) - {'requirements', 'python'}:
+        raise MonitorError(
+            f'The environment of monitor {name} takes requirements and python.'
+        )
     return Monitor(
         name=name,
         pipeline=str(document['pipeline']),
@@ -199,6 +229,9 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         column_rules=column_rules,
         rolling=rolling,
         performance=performance,
+        evidently=engines['evidently'],
+        nannyml=engines['nannyml'],
+        environment=environment,
     )
 
 
@@ -598,7 +631,8 @@ def _merged(records: List[Dict]) -> Dict:
         }
     return dict(newest, profile=profile,
                 pipeline_run_id=newest['pipeline_run_id'],
-                baseline_runs=[r['pipeline_run_id'] for r in records])
+                baseline_runs=[r['pipeline_run_id'] for r in records],
+                baseline_records=[dict(partition=r.get('partition')) for r in records])
 
 
 def _baseline(pipeline, monitor: Monitor, run_id: int) -> Optional[Dict]:
@@ -641,6 +675,77 @@ def _output_file(pipeline, block_uuid: str, output: str, partition: Optional[str
     return path, variable
 
 
+def run_engines(
+    pipeline, monitor: Monitor, block_uuid: str, current_path: str, baseline: Optional[Dict],
+    output_dir: str,
+) -> Dict:
+    """
+    Evidently and NannyML on the current output and the baseline runs' outputs, in an
+    environment uv builds for them (data_preparation/environments.py), so their packages
+    never enter Mage's. Returns each engine's checks, reports and error.
+    """
+    import subprocess
+
+    from mage_ai.data_preparation import environments
+
+    engines = {k: v for k, v in (('evidently', monitor.evidently),
+                                 ('nannyml', monitor.nannyml)) if v}
+    if not engines:
+        return {}
+    baseline_paths = []
+    for record in (baseline or {}).get('baseline_records') or ([baseline] if baseline else []):
+        path, _ = _output_file(
+            pipeline, block_uuid, monitor.output, record.get('partition'),
+        )
+        if path:
+            baseline_paths.append(path)
+    if not baseline_paths:
+        return {name: dict(checks=[dict(
+            check=name, column=None, value=None, result='hold',
+            detail='no stored baseline output to compare with',
+        )], reports=[]) for name in engines}
+
+    requirements = monitor.environment.get('requirements') or [
+        ENGINE_REQUIREMENTS[name] for name in engines
+    ]
+    if isinstance(requirements, str):
+        requirements = [requirements]
+    environment = environments.environment_for(requirements, monitor.environment.get('python'))
+    python = environments.ensure(environment)
+    os.makedirs(output_dir, exist_ok=True)
+    request_path = os.path.join(output_dir, 'request.json')
+    with open(request_path, 'w', encoding='utf-8') as file:
+        json.dump(dict(
+            current=[current_path], baseline=baseline_paths, output_dir=output_dir,
+            **{name: {k: v for k, v in settings.items() if k != 'severity'}
+               for name, settings in engines.items()},
+        ), file)
+    # -I: the script's folder (mage_ai/orchestration, with a queue package) stays off
+    # the import path, so the standard library's queue is found.
+    completed = subprocess.run(
+        [str(python), '-I', ENGINE_WORKER, request_path],
+        capture_output=True, text=True, timeout=ENGINE_TIMEOUT_SECONDS,
+        env={k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'VIRTUAL_ENV')},
+    )
+    result_path = os.path.join(output_dir, 'result.json')
+    if not os.path.exists(result_path):
+        message = (completed.stderr or completed.stdout or '').strip()[-2000:]
+        raise MonitorError(f'Monitor {monitor.name}: the engines stopped: {message}')
+    with open(result_path, encoding='utf-8') as file:
+        result = json.load(file)
+    for name, outcome in result.items():
+        severity = engines[name]['severity']
+        for check in outcome.get('checks') or []:
+            if check['result'] == 'fail':
+                check['result'] = severity
+        if outcome.get('error'):
+            outcome['checks'] = [dict(
+                check=name, column=None, value=None, result='hold',
+                detail=f'{name} failed: {outcome["error"]}',
+            )]
+    return result
+
+
 def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) -> List[Dict]:
     """Runs the monitors that watch this block; returns their records."""
     import tempfile
@@ -676,9 +781,16 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
                 raise MonitorError(f'Monitor {monitor.name}: {error}')
             if monitor.performance:
                 profile['performance'] = performance(monitor.performance, path)
+            engines = run_engines(
+                pipeline, monitor, block_uuid, path, baseline,
+                os.path.join(_records_dir(pipeline, monitor), str(pipeline_run.id)),
+            ) if (monitor.evidently or monitor.nannyml) else {}
         result = compare(
             monitor, profile, (baseline or {}).get('profile'), pipeline_run.execution_date,
         )
+        for outcome in engines.values():
+            result['checks'].extend(outcome.get('checks') or [])
+        result['result'] = _worst([c['result'] for c in result['checks']])
         previous = saved(pipeline, monitor)
         earlier = [r for r in previous if r['pipeline_run_id'] < pipeline_run.id]
         turned = result['result'] == 'fail' and (
@@ -690,6 +802,9 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
             block_run_id=block_run_id,
             baseline_run_id=(baseline or {}).get('pipeline_run_id'),
             baseline_runs=(baseline or {}).get('baseline_runs'),
+            partition=pipeline_run.execution_partition,
+            engines={name: dict(reports=o.get('reports') or [], error=o.get('error'))
+                     for name, o in engines.items()},
             should_notify=result['result'] == 'fail' and (
                 monitor.notify is True or (monitor.notify == 'on_change' and turned)
             ),

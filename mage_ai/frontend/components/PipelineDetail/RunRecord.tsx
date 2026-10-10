@@ -101,8 +101,10 @@ type RunRecordType = {
         detail: string;
         result: string;
       }[];
+      engines?: { [engine: string]: { error?: string; reports?: string[] } };
       error?: string;
       monitor: string;
+      pipeline_run_id?: number;
       result: string;
     }[];
   };
@@ -401,6 +403,25 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
                     : 'no baseline yet'})
                 </Text>
                 {monitor.error && <Text danger small>{monitor.error}</Text>}
+                {Object.values(monitor.engines || {}).flatMap(engine => engine.reports || [])
+                  .map(report => (
+                    <Spacing key={report} mr={1}>
+                      <Button
+                        compact
+                        onClick={() => api.monitor_reports.detailAsync(monitor.monitor, {
+                          pipeline_run_id: monitor.pipeline_run_id || pipelineRunId,
+                          report,
+                        }).then(({ monitor_report: opened }) => {
+                          const url = URL.createObjectURL(
+                            new Blob([opened?.html || ''], { type: 'text/html' }),
+                          );
+                          window.open(url, '_blank', 'noopener');
+                        })}
+                      >
+                        Open {report.replace(/\.html$/, '').replace(/_/g, ' ')}
+                      </Button>
+                    </Spacing>
+                  ))}
                 {monitor.checks.filter(check => check.result !== 'pass').map(check => (
                   <Row
                     key={`${check.check}-${check.column || ''}`}

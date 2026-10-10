@@ -39,6 +39,18 @@ ledger with cooldowns. Measured against Mage:
 - **Failure.** A monitor that can't run (a missing column, an output that isn't a
   DataFrame) records `error` and logs a warning; it doesn't fail the block.
 
+## Evidently and NannyML
+
+Both resolve and run with this fork's pins (pandas 3.0.6, NumPy 2.5, pyarrow 25, Python
+3.12), checked in a scratch environment: Evidently 0.7.23 presets with tests, NannyML
+0.13.1 CBPE, univariate and data reconstruction drift. They are heavy (Plotly, many
+pinned packages), so they never enter Mage's environment: `monitor_engines.py` is a
+standalone script run with `python -I` by an environment `environments.environment_for`
+builds. `-I` matters: run from `mage_ai/orchestration`, the script's folder would put
+Mage's `queue` package in front of the standard library's. Results come back as checks,
+with a severity per engine, and HTML reports listed in the run's record. The
+`monitor_reports` API serves only reports a record lists.
+
 ## Remaining gaps
 
 1. **No streaming or event windows**, as above.
