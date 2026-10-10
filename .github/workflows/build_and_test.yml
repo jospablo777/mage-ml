@@ -258,6 +258,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust/column_atlas -> target
+      # The Rust block tests compile Polars into Mage's shared target directory; keep the
+      # compiled dependencies between runs (not the incremental data or block binaries).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/mage/rust/target/release/deps
+            ~/.cache/mage/rust/target/release/build
+            ~/.cache/mage/rust/target/release/.fingerprint
+          key: rust-blocks-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'mage_ai/data_preparation/models/block/rust/workspace.py') }}
+          restore-keys: rust-blocks-${{ env.RUST_VERSION }}-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
@@ -286,6 +296,8 @@ jobs:
           python3 -m pytest mage_ai/tests mage_integrations/mage_integrations/tests vendor/singer-python/tests --junitxml=unit-results.xml
         env:
           OPENAI_API_KEY: abcdefg
+          # Smaller cached target directory; CI builds each block once.
+          CARGO_INCREMENTAL: "0"
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py unit-results.xml
