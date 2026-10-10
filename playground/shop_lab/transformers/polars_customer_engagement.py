@@ -17,12 +17,13 @@ def customer_engagement(sessions: pl.DataFrame, *args, **kwargs) -> pl.DataFrame
             pl.col('events').sum().alias('events'),
             pl.col('purchases').sum().alias('purchases'),
             pl.col('started_at').max().alias('last_seen_at'),
-            pl.col('device').mode().first().alias('main_device'),
+            pl.col('device').mode().sort().first().alias('main_device'),
             pl.col('length').mean().alias('mean_session_length'),
         )
         .with_columns(
             (pl.col('purchases') / pl.col('sessions')).round(3).alias('conversion_rate'),
         )
+        .sort('customer_id')
     )
 
 

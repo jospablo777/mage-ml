@@ -9,6 +9,7 @@ import {
 import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import FlexContainer from '@oracle/components/FlexContainer';
+import FusionVerification from './FusionVerification';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
@@ -251,6 +252,12 @@ function PipelineSettings({
                       No chains in the saved pipeline: each block runs alone.
                     </Text>
                   )}
+                </Spacing>
+              )}
+
+              {pipeline?.uuid && (
+                <Spacing mt={2}>
+                  <FusionVerification pipelineUUID={pipeline.uuid} />
                 </Spacing>
               )}
             </>

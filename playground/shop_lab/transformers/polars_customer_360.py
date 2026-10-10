@@ -19,5 +19,5 @@ def customer_360(customers: pl.DataFrame, engagement: pl.DataFrame, *args, **kwa
             .cast(pl.Categorical)
             .alias('profile'),
         )
-        .sort('lifetime_value', descending=True)
+        .sort(['lifetime_value', 'customer_id'], descending=[True, False])
     )

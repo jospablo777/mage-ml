@@ -142,6 +142,10 @@ class VerifyFusionTest(DBTestCase):
         self.assertEqual(
             set(verification.statuses.values()), {PipelineRun.PipelineRunStatus.FAILED.value},
         )
+        failed = next(b for b in verification.blocks if b.block_uuid.endswith('_fail'))
+        # The block's error, from both runs, so the report says why without the logs.
+        self.assertIn('block by block:', failed.detail)
+        self.assertIn('fused:', failed.detail)
 
     def test_runs_left_by_a_stopped_verification_are_cancelled(self):
         pipeline = self.chain(('load', 'data_loader', LOAD))
@@ -245,6 +249,17 @@ class CompareValuesTest(TestCase):
         pandas_frame = frame.to_pandas()
         changed = pandas_frame.assign(id=[1, 2, 4])
         self.assertDiffers(pandas_frame, changed, 'id: 1 rows differ; row 2 is 3')
+
+    def test_the_same_rows_in_another_order_are_explained(self):
+        frame = pl.DataFrame({'session': [1, 2, 3], 'device': ['web', None, 'ios']})
+        result, detail = fusion_verify.compare_values(frame, frame.reverse())
+        self.assertEqual(result, 'differs')
+        self.assertIn('same rows in another order', detail)
+        pandas_frame = frame.to_pandas()
+        result, detail = fusion_verify.compare_values(pandas_frame, pandas_frame.iloc[::-1])
+        self.assertIn('same rows in another order', detail)
+        changed = frame.with_columns(pl.Series('device', ['web', 'android', 'ios']))
+        self.assertNotIn("another order", fusion_verify.compare_values(frame, changed)[1])
 
     def test_values_without_equality_are_not_compared(self):
         class Model:

@@ -328,6 +328,37 @@ def _differing_rows(mask, left_values, right_values, what: str) -> Tuple[str, st
     )
 
 
+ORDER_HINT = (
+    'The same rows in another order: the block\'s output order is not deterministic, so it '
+    'depends on how its input is chunked. Sort the output on a unique key, as after a '
+    'group_by, to make it deterministic.'
+)
+
+
+def _same_rows_in_another_order(expected, actual) -> bool:
+    """Whether two tables of the same shape hold the same rows in a different order."""
+    import pandas as pd
+    import polars as pl
+
+    try:
+        if isinstance(expected, pl.DataFrame):
+            columns = expected.columns
+            return expected.sort(columns, nulls_last=True).equals(
+                actual.sort(columns, nulls_last=True), null_equal=True,
+            )
+        if isinstance(expected, pd.DataFrame):
+            columns = list(expected.columns)
+
+            def ordered(frame):
+                return frame.sort_values(columns, kind='stable').reset_index(drop=True)
+
+            in_order = expected.reset_index(drop=True).equals(actual.reset_index(drop=True))
+            return not in_order and ordered(expected).equals(ordered(actual))
+    except Exception:
+        return False
+    return False
+
+
 def _compare_pandas(expected, actual) -> Tuple[str, str]:
     import numpy as np
     import pandas as pd
@@ -349,6 +380,8 @@ def _compare_pandas(expected, actual) -> Tuple[str, str]:
     if dtypes:
         return 'differs', '\n'.join(dtypes)
     if not expected.index.equals(actual.index) or expected.index.dtype != actual.index.dtype:
+        if _same_rows_in_another_order(expected, actual):
+            return 'differs', ORDER_HINT
         return 'differs', 'The index differs.'
     results = []
     for position, column in enumerate(expected.columns):
@@ -373,6 +406,8 @@ def _compare_pandas(expected, actual) -> Tuple[str, str]:
             pass
         results.append(('differs', f'{column}: the values differ'))
     result = _combine(results)
+    if result[0] == 'differs' and _same_rows_in_another_order(expected, actual):
+        return 'differs', ORDER_HINT
     if result[0] == 'same':
         try:
             pd.testing.assert_frame_equal(expected, actual, check_exact=True)
@@ -414,7 +449,10 @@ def _compare_polars(expected, actual) -> Tuple[str, str]:
             results.append(_differing_rows(mask, left.to_list(), right.to_list(), column))
         except Exception:
             results.append(('differs', f'{column}: the values differ'))
-    return _combine(results)
+    result = _combine(results)
+    if result[0] == 'differs' and _same_rows_in_another_order(expected, actual):
+        return 'differs', ORDER_HINT
+    return result
 
 
 def compare_values(expected: Any, actual: Any) -> Tuple[str, str]:
@@ -558,23 +596,34 @@ def compare_runs(pipeline, unfused: PipelineRun, fused: PipelineRun) -> List[Blo
         uuid: index for index, stage in enumerate(_chains(fusion.fusion_plan(pipeline)), start=1)
         for uuid in stage
     }
-    statuses = [
-        {b.block_uuid: b.status for b in run.block_runs} for run in (unfused, fused)
-    ]
+    block_runs = [{b.block_uuid: b for b in run.block_runs} for run in (unfused, fused)]
+    statuses = [{uuid: b.status for uuid, b in runs.items()} for runs in block_runs]
+
+    def errors(uuid: str) -> str:
+        texts = []
+        for label, runs in zip(('block by block', 'fused'), block_runs):
+            error = ((getattr(runs.get(uuid), 'metrics', None) or {}).get('error') or {})
+            text = error.get('message') or error.get('error')
+            if text and text != 'None':
+                texts.append(f'{label}: {_first_lines(text, 6)}')
+        return '\n'.join(texts)
+
     results = []
     for block in _ordered_blocks(pipeline):
         uuid = block.uuid
         stage = stage_of.get(uuid)
         before, after = statuses[0].get(uuid), statuses[1].get(uuid)
         if before != after:
+            detail = f'Block run {before} block by block, {after} fused.'
             results.append(BlockResult(
-                uuid, 'differs', f'Block run {before} block by block, {after} fused.', stage,
+                uuid, 'differs', '\n'.join(filter(None, [detail, errors(uuid)])), stage,
             ))
             continue
         if before != BlockRun.BlockRunStatus.COMPLETED:
+            detail = f'Block run {before} in both runs.'
             results.append(BlockResult(
                 uuid, 'failed' if before == BlockRun.BlockRunStatus.FAILED else 'not compared',
-                f'Block run {before} in both runs.', stage,
+                '\n'.join(filter(None, [detail, errors(uuid)])), stage,
             ))
             continue
         try:
