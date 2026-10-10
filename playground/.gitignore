@@ -1,0 +1,8 @@
+# Written by Mage while it runs.
+shop_lab/.file_versions/
+shop_lab/.logs/
+shop_lab/.variables/
+shop_lab/.preferences.yaml
+shop_lab/.mage_temp_profiles
+shop_lab/mage-ai.db
+shop_lab/**/__pycache__/

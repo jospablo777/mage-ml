@@ -1,0 +1,23 @@
+[project]
+name = "mage-playground"
+# The packages of the playground's R blocks, installed into the playground image.
+r_version = "4.6"
+
+repositories = [
+    {alias = "PPM", url = "https://packagemanager.posit.co/cran/latest"},
+    {alias = "CRAN", url = "https://cloud.r-project.org/"},
+]
+
+dependencies = [
+    # Every R environment of Mage needs these four.
+    "arrow",
+    "bit64",
+    "jsonlite",
+    "tibble",
+    # The pipelines.
+    "dplyr",
+    "tidyr",
+    "lubridate",
+    "DBI",
+    "RPostgres",
+]

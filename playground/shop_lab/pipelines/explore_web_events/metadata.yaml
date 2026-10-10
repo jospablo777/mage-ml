@@ -1,0 +1,25 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - explore_daily_pivot
+  executor_type: local_python
+  language: python
+  name: explore_load_events
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: explore_load_events
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: explore_daily_pivot
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - explore_load_events
+  uuid: explore_daily_pivot
+description: A million-row output and a wide one, to explore in ColumnAtlas.
+name: explore_web_events
+type: python
+uuid: explore_web_events

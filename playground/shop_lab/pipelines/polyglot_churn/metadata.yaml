@@ -1,0 +1,59 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - r_churn_scores
+  executor_type: local_python
+  language: python
+  name: py_load_customer_activity
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: py_load_customer_activity
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_churn_summary
+  - py_export_churn_scores
+  executor_type: local_python
+  language: r
+  name: r_churn_scores
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - py_load_customer_activity
+  uuid: r_churn_scores
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - py_export_churn_summary
+  executor_type: local_python
+  language: python
+  name: polars_churn_summary
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - r_churn_scores
+  uuid: polars_churn_summary
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: py_export_churn_scores
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - r_churn_scores
+  uuid: py_export_churn_scores
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: py_export_churn_summary
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - polars_churn_summary
+  uuid: py_export_churn_summary
+description: 'Python, R and Polars in one pipeline: pandas loads, R scores with dplyr,
+  Polars summarizes.'
+name: polyglot_churn
+type: python
+uuid: polyglot_churn

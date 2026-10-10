@@ -1,0 +1,71 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_sessions
+  executor_type: local_python
+  language: python
+  name: polars_load_web_events
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: polars_load_web_events
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_customer_engagement
+  executor_type: local_python
+  language: python
+  name: polars_sessions
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - polars_load_web_events
+  uuid: polars_sessions
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_customer_360
+  executor_type: local_python
+  language: python
+  name: polars_customer_engagement
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - polars_sessions
+  uuid: polars_customer_engagement
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_customer_360
+  executor_type: local_python
+  language: python
+  name: polars_load_customers
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: polars_load_customers
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - polars_export_customer_360
+  executor_type: local_python
+  language: python
+  name: polars_customer_360
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - polars_load_customers
+  - polars_customer_engagement
+  uuid: polars_customer_360
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: polars_export_customer_360
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - polars_customer_360
+  uuid: polars_export_customer_360
+description: 'Polars with block fusion: a million web events to sessions, engagement
+  and a customer view.'
+name: polars_customer_360
+type: python
+uuid: polars_customer_360
+block_fusion: chains

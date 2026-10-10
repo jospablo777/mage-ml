@@ -1,0 +1,47 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - geo_nearest_store
+  executor_type: local_python
+  language: python
+  name: geo_load_customers
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: geo_load_customers
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - geo_nearest_store
+  executor_type: local_python
+  language: python
+  name: geo_load_stores
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: geo_load_stores
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - geo_export_coverage
+  executor_type: local_python
+  language: python
+  name: geo_nearest_store
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - geo_load_customers
+  - geo_load_stores
+  uuid: geo_nearest_store
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: geo_export_coverage
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - geo_nearest_store
+  uuid: geo_export_coverage
+description: 'geopandas: the nearest store of each customer in Costa Rica.'
+name: geo_store_coverage
+type: python
+uuid: geo_store_coverage

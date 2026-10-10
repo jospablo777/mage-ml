@@ -1,0 +1,10 @@
+version: 0.1.1
+# The playground database. compose.yaml sets the PG* variables.
+default:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: "{{ env_var('PGDATABASE') }}"
+  POSTGRES_SCHEMA: shop
+  POSTGRES_USER: "{{ env_var('PGUSER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('PGPASSWORD') }}"
+  POSTGRES_HOST: "{{ env_var('PGHOST') }}"
+  POSTGRES_PORT: "{{ env_var('PGPORT') }}"

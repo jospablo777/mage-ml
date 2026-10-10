@@ -1,0 +1,48 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - r_cohort_retention
+  - r_channel_mix
+  executor_type: local_python
+  language: r
+  name: r_load_orders
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: r_load_orders
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - r_export_cohorts
+  executor_type: local_python
+  language: r
+  name: r_cohort_retention
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - r_load_orders
+  uuid: r_cohort_retention
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: r
+  name: r_channel_mix
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - r_load_orders
+  uuid: r_channel_mix
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: r
+  name: r_export_cohorts
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - r_cohort_retention
+  uuid: r_export_cohorts
+description: 'R with dplyr, tidyr, lubridate and tibble: cohort retention and channel
+  mix.'
+name: r_dplyr_cohorts
+type: python
+uuid: r_dplyr_cohorts

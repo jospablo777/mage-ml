@@ -1,0 +1,79 @@
+# Mage built from this repository, a PostgreSQL database with a seeded shop, and a
+# project with pipelines in pandas, Polars, R, Python with R, and geopandas.
+#
+#   make playground     # from the repository root; http://localhost:6789
+#
+# See README.md for the other make targets.
+name: mage-playground
+
+x-database: &database
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGUSER: mage
+  PGPASSWORD: mage
+  PGDATABASE: playground
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mage
+      POSTGRES_PASSWORD: mage
+      POSTGRES_DB: playground
+    ports:
+      - "${PLAYGROUND_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mage -d playground"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Builds the Mage image of this repository and fills the shop schema once.
+  seed:
+    image: mage-ml:local
+    build:
+      context: ..
+      target: production
+    environment:
+      <<: *database
+      SEED_SCALE: "${SEED_SCALE:-1}"
+    volumes:
+      - ./seed:/home/src/seed:ro
+    command: ["python", "/home/src/seed/seed.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  mage:
+    image: mage-playground:local
+    build:
+      context: .
+      additional_contexts:
+        mage-base: "service:seed"
+    environment:
+      <<: *database
+      USER_CODE_PATH: /home/src/shop_lab
+      MAGE_DATA_DIR: /home/src/mage_data
+      DISABLE_USAGE_STATISTICS: "1"
+      DISABLE_AUTO_BROWSER_OPEN: "1"
+    ports:
+      - "${PLAYGROUND_MAGE_PORT:-6789}:6789"
+    volumes:
+      - ./shop_lab:/home/src/shop_lab
+      - mage_data:/home/src/mage_data
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:6789/api/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+volumes:
+  postgres:
+  mage_data:

@@ -465,6 +465,11 @@ Each item says what changed, which pipelines it affects, and what to do.
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
   `docs/design/data-pipeline-management.mdx` and `block-fusion.md`.
+- **Playground** (`make playground`): Mage built from this repository, PostgreSQL 17 with
+  a seeded shop (1.5 million order lines, a million web events, generated with Faker),
+  and pipelines in pandas, Polars with block fusion, R (dplyr, tidyr, lubridate,
+  tibble), Python with R, and geopandas, which export to the same database.
+  `make playground-check` runs them all. See `playground/README.md`.
 - R blocks with the `mageml` R package: annotations for block functions and tests,
   pipeline variables, and `read_sql`, `write_table` and `db_connect` for the databases of
   `io_config.yaml`. `mage r init`, `mage r sync` and `mage r status` manage the R

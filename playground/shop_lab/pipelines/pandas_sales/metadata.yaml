@@ -1,0 +1,59 @@
+blocks:
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pandas_daily_revenue
+  - pandas_category_margin
+  executor_type: local_python
+  language: python
+  name: pandas_load_order_lines
+  status: not_executed
+  type: data_loader
+  upstream_blocks: []
+  uuid: pandas_load_order_lines
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pandas_export_daily_revenue
+  executor_type: local_python
+  language: python
+  name: pandas_daily_revenue
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - pandas_load_order_lines
+  uuid: pandas_daily_revenue
+- all_upstream_blocks_executed: true
+  downstream_blocks:
+  - pandas_export_category_margin
+  executor_type: local_python
+  language: python
+  name: pandas_category_margin
+  status: not_executed
+  type: transformer
+  upstream_blocks:
+  - pandas_load_order_lines
+  uuid: pandas_category_margin
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: pandas_export_daily_revenue
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - pandas_daily_revenue
+  uuid: pandas_export_daily_revenue
+- all_upstream_blocks_executed: true
+  downstream_blocks: []
+  executor_type: local_python
+  language: python
+  name: pandas_export_category_margin
+  status: not_executed
+  type: data_exporter
+  upstream_blocks:
+  - pandas_category_margin
+  uuid: pandas_export_category_margin
+description: 'pandas: order lines to daily revenue and category margin, in two parallel
+  branches.'
+name: pandas_sales
+type: python
+uuid: pandas_sales
