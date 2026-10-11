@@ -9,6 +9,7 @@ from tornado.web import Application
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.server.api.pipeline_documentation import (
     PipelineDocumentationImageHandler,
+    PipelineDocumentationRenderHandler,
 )
 from mage_ai.tests.base_test import DBTestCase
 
@@ -38,10 +39,16 @@ class DocumentationImageTest(AsyncHTTPTestCase, DBTestCase):
         self.addCleanup(middleware.stop)
 
     def get_app(self):
-        return Application([(
-            r'/api/pipeline_documentations/(?P<pipeline_uuid>\w+)/images/(?P<path>.+)',
-            PipelineDocumentationImageHandler,
-        )])
+        return Application([
+            (
+                r'/api/pipeline_documentations/(?P<pipeline_uuid>\w+)/images/(?P<path>.+)',
+                PipelineDocumentationImageHandler,
+            ),
+            (
+                r'/api/pipeline_documentations/(?P<pipeline_uuid>\w+)/rendered',
+                PipelineDocumentationRenderHandler,
+            ),
+        ])
 
     def test_an_image_is_served_with_a_policy_that_blocks_scripts(self):
         response = self.fetch('/api/pipeline_documentations/documented/images/flow.svg')
@@ -50,6 +57,15 @@ class DocumentationImageTest(AsyncHTTPTestCase, DBTestCase):
         self.assertIn('sandbox', response.headers['Content-Security-Policy'])
         self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
         self.assertEqual(response.body, SVG)
+
+    def test_an_uploaded_html_file_is_served_in_a_sandbox(self):
+        from mage_ai.data_preparation.models.pipelines import documentation
+
+        documentation.save(self.pipeline, '<h1>Sales</h1><script>alert(1)</script>', 'html')
+        response = self.fetch('/api/pipeline_documentations/documented/rendered')
+        self.assertEqual(response.code, 200)
+        self.assertIn(b'<h1>Sales</h1>', response.body)
+        self.assertTrue(response.headers['Content-Security-Policy'].startswith('sandbox'))
 
     def test_files_that_are_not_images_are_not_served(self):
         for path in ('metadata.yaml', '..%2F..%2Fmetadata.yaml', 'missing.png'):

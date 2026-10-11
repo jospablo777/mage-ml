@@ -55,9 +55,21 @@ class DocumentationTest(DBTestCase):
         self.assertFalse((folder / 'README.md').exists(), 'one README at a time')
 
         with self.assertRaisesRegex(documentation.DocumentationError, 'format must be'):
-            documentation.save(self.pipeline, 'x', 'html')
+            documentation.save(self.pipeline, 'x', 'pdf')
         with self.assertRaisesRegex(documentation.DocumentationError, 'larger than'):
             documentation.save(self.pipeline, 'x' * (documentation.MAX_SOURCE_BYTES + 1))
+
+    def test_an_uploaded_html_file_is_kept_as_it_is(self):
+        html = '<!doctype html><h1>Sales</h1><img src="data:image/png;base64,AAAA">'
+        doc = documentation.save(self.pipeline, html, 'html')
+        self.assertEqual((doc.format, doc.path, doc.source), ('html', 'README.html', ''))
+        self.assertEqual(documentation.html_document(self.pipeline), html)
+        # Larger than Markdown may be, since such files embed their images.
+        documentation.save(self.pipeline, 'x' * (documentation.MAX_SOURCE_BYTES + 1), 'html')
+        documentation.save(self.pipeline, '# Sales\n', 'markdown')
+        self.assertFalse((Path(self.pipeline.dir_path) / 'README.html').exists())
+        with self.assertRaisesRegex(documentation.DocumentationError, 'no README.html'):
+            documentation.html_document(self.pipeline)
 
     def test_only_images_inside_the_pipeline_folder_are_served(self):
         folder = Path(self.pipeline.dir_path)

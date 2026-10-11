@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
-FILES = {'markdown': 'README.md', 'quarto': 'README.qmd'}
+FILES = {'markdown': 'README.md', 'quarto': 'README.qmd', 'html': 'README.html'}
 IMAGE_TYPES = {
     '.gif': 'image/gif',
     '.jpeg': 'image/jpeg',
@@ -27,6 +27,8 @@ IMAGE_TYPES = {
     '.webp': 'image/webp',
 }
 MAX_SOURCE_BYTES = 1024 * 1024
+# An uploaded HTML file often embeds its images, so it may be larger.
+MAX_HTML_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 QUARTO_TIMEOUT_SECONDS = 120
 
@@ -51,18 +53,25 @@ def _folder(pipeline) -> Path:
     return Path(pipeline.dir_path).resolve()
 
 
+def _limit(fmt: str) -> int:
+    return MAX_HTML_BYTES if fmt == 'html' else MAX_SOURCE_BYTES
+
+
 def read(pipeline) -> Documentation:
-    """The pipeline's documentation; the Markdown file when both exist."""
+    """
+    The pipeline's documentation; the Markdown file when several exist. An HTML file is
+    shown as it is, through html_document, so its source is not returned.
+    """
     for fmt, name in FILES.items():
         path = _folder(pipeline) / name
         if path.is_file():
-            if path.stat().st_size > MAX_SOURCE_BYTES:
+            if path.stat().st_size > _limit(fmt):
                 raise DocumentationError(
-                    f'{name} is larger than {MAX_SOURCE_BYTES // 1024} KB; keep large content '
+                    f'{name} is larger than {_limit(fmt) // 1024} KB; keep large content '
                     'in separate files and link them.',
                 )
-            return Documentation(fmt, path.read_text(encoding='utf-8', errors='replace'),
-                                 name, path.stat().st_mtime)
+            source = '' if fmt == 'html' else path.read_text(encoding='utf-8', errors='replace')
+            return Documentation(fmt, source, name, path.stat().st_mtime)
     return Documentation(None, '', None, None)
 
 
@@ -76,9 +85,9 @@ def save(pipeline, source: str, fmt: str = 'markdown') -> Documentation:
     if fmt not in FILES:
         raise DocumentationError(f'format must be one of {sorted(FILES)}, not {fmt!r}.')
     data = source.encode('utf-8')
-    if len(data) > MAX_SOURCE_BYTES:
+    if len(data) > _limit(fmt):
         raise DocumentationError(
-            f'The documentation is larger than {MAX_SOURCE_BYTES // 1024} KB.',
+            f'The documentation is larger than {_limit(fmt) // 1024} KB.',
         )
     folder = _folder(pipeline)
     target = folder / FILES[fmt]
@@ -189,6 +198,16 @@ def save_image(pipeline, name: str, content: bytes) -> str:
         path = folder / f'{stem}-{number}{suffix}'
     path.write_bytes(content)
     return f'images/{path.name}'
+
+
+def html_document(pipeline) -> str:
+    """The uploaded README.html, which the documentation page shows in a sandbox."""
+    path = _folder(pipeline) / FILES['html']
+    if not path.is_file():
+        raise DocumentationError('The pipeline has no README.html.')
+    if path.stat().st_size > MAX_HTML_BYTES:
+        raise DocumentationError(f'README.html is larger than {MAX_HTML_BYTES // 1048576} MB.')
+    return path.read_text(encoding='utf-8', errors='replace')
 
 
 def quarto_command() -> Optional[str]:

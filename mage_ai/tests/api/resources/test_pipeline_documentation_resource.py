@@ -44,7 +44,7 @@ class PipelineDocumentationResourceTest(AsyncDBTestCase):
         self.assertTrue(detail['has_documentation'])
 
     async def test_an_invalid_save_is_explained(self):
-        response = await self.save(source='# x', format='html')
+        response = await self.save(source='# x', format='pdf')
         self.assertEqual(response['error']['code'], 400)
         self.assertIn('format must be', response['error']['message'])
         response = await self.save(format='markdown')

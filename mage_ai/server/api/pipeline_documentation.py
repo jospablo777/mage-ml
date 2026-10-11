@@ -67,7 +67,10 @@ class PipelineDocumentationRenderHandler(_DocumentationFileHandler):
             pipeline.uuid,
         )
         try:
-            html = documentation.render_quarto(pipeline, cache_dir)
+            if documentation.read(pipeline).format == 'html':
+                html = documentation.html_document(pipeline)
+            else:
+                html = documentation.render_quarto(pipeline, cache_dir)
         except documentation.DocumentationError as error:
             return self._refuse(422, str(error))
         self.set_header('Content-Type', 'text/html; charset=utf-8')
