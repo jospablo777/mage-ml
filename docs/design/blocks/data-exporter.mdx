@@ -9,8 +9,8 @@ description:
   alt="exporter"
   src="https://mage-ai.github.io/assets/blocks/exporter/data-exporter.gif"
 />
-Mage natively supports integration with a variety of data storage systems. However, these integrations often 
-require specific configurations in both the exporter block and the ```io_config.yml``` file to ensure seamless operation. 
+MageML integrates with a variety of data storage systems. These integrations
+require configuration in both the exporter block and the ```io_config.yml``` file. 
 The ```io_config.yml``` file typically includes connection details such as host, port, database name, username, and password. 
 Meanwhile, the exporter block needs to be configured with the appropriate export parameters, such as target table names, 
 schema details, and conflict resolution strategies.
@@ -23,7 +23,7 @@ schema details, and conflict resolution strategies.
     - Most data exporters include a `config_profile` parameter set to `'default'` by default. This parameter can be customized 
     to use different configuration profiles if you have multiple profiles or have renamed them.
 2. **Supported Data Storage Systems**:
-    - Mage supports a wide range of storage systems including PostgreSQL, MySQL, AWS S3, Google Cloud Storage, Azure Blob Storage, and many more.
+    - MageML supports a wide range of storage systems including PostgreSQL, MySQL, AWS S3, Google Cloud Storage, Azure Blob Storage, and many more.
     - Each system may have unique requirements and configurations to ensure compatibility and optimal performance.
 3. **Configuration in `io_config.yml`**:
     - This file serves as the central configuration hub for defining connection parameters.
@@ -38,9 +38,9 @@ schema details, and conflict resolution strategies.
 
 <Accordion title="Data Warehouse">
 
-Configure the `io_config.yml` file to connect your Mage pipeline to a snowflake data warehouse. While optional, 
+Configure the `io_config.yml` file to connect your MageML pipeline to a Snowflake data warehouse. While optional, 
 depending on how your Snowflake DW is configured you may need to enter all information into the .yml file. 
-It’s recommended to store sensitive information as Secrets. See the general [Secrets documentation](https://docs.mage.ai/development/variables/secrets)
+It’s recommended to store sensitive information as Secrets. See the general [Secrets documentation](/development/variables/secrets)
 for more information.
 
 ```YAML
@@ -101,8 +101,8 @@ def export_data_to_snowflake(df: DataFrame, **kwargs) -> None:
 ```
 </Accordion>
 <Accordion title="Data Lake">
-Configure the `io_config.yml` file to connect your Mage pipeline to a Azure Blob Storage. Configure some Secrets and enter them into `io_config.yml` file. 
-If you need more information on entering secrets see this [documentation](https://docs.mage.ai/production/deploying-to-cloud/secrets/Azure).
+Configure the `io_config.yml` file to connect your MageML pipeline to Azure Blob Storage. Configure some Secrets and enter them into `io_config.yml` file. 
+If you need more information on entering secrets see this [documentation](/production/deploying-to-cloud/secrets/Azure).
 
 ```YAML
   AZURE_CLIENT_ID: "{{ env_var('AZURE_CLIENT_ID') }}"
@@ -153,8 +153,8 @@ def export_data_to_azure_blob_storage(df: DataFrame, **kwargs) -> None:
 </Accordion>
 
 <Accordion title="Database">
-Configure the `io_config.yml` file to connect your Mage pipeline to a PostgreSQL database. Configure some Secrets and enter them into `io_config.yml` file. 
-If you need more information on entering secrets see this [documentation](https://docs.mage.ai/production/deploying-to-cloud/secrets/Azure).
+Configure the `io_config.yml` file to connect your MageML pipeline to a PostgreSQL database. Configure some Secrets and enter them into `io_config.yml` file. 
+If you need more information on entering secrets see the [Secrets documentation](/development/variables/secrets).
 
 ```YAML
   POSTGRES_CONNECT_TIMEOUT: 10
@@ -171,8 +171,8 @@ If exporting from Docker to an external machine use the host.docker.internal for
 
 Enter information for the following in the Data Exporter block
 
-1. schema_name - requires developers enter the name of their destination container
-2. table_name - requires developers enter the name of their destination blob path
+1. schema_name - requires developers enter the name of their destination schema
+2. table_name - requires developers enter the name of their destination table
 
 All other information is handled in the `io_config.yml` file.
 
@@ -227,7 +227,7 @@ They contain the necessary configurations within the exporter block itself. Lets
 - `'AWS_S3_ALLOW_UNSAFE_RENAME'`: This option allows unsafe rename operations on S3, which might be necessary for some workflows.
 
 <Note>
-Remember Secrets can be stored in Mage’s internal Secrets Manager, .YAML files, or sync directly with Cloud Secret Managers.
+Remember Secrets can be stored in MageML’s internal Secrets Manager, .YAML files, or sync directly with Cloud Secret Managers.
 </Note>
 
 **Additional Configurations**
@@ -270,5 +270,4 @@ def export_data(df, *args, **kwargs):
 
 </Accordion>
 
-By correctly configuring these components, you can effectively streamline the data loading process into your chosen storage system, 
-whether it be a relational database, a data lake, or a machine learning model repository.
+With these components configured, the exporter writes to your chosen storage system: a relational database, a data lake, or a model repository.

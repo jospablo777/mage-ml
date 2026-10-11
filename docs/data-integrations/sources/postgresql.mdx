@@ -31,19 +31,10 @@ To set up the PostgreSQL source, provide the following connection parameters:
 
 <br/>
 
-## Why Use PostgreSQL as a Source in Mage?
-
-- **Real-time change data capture (CDC)**: Capture and sync only changed rows.
-- **Reliable large-scale data ingestion**: Load millions of rows efficiently.
-- **Flexible schema support**: Work with multiple schemas in your PostgreSQL instance.
-- **Secure and scalable**: Support for SSL connections, logical replication slots, and publication management.
-
-<br/>
-
 ## Change Data Capture (CDC)
 
 
-Mage supports 2 types of change data capture with PostgreSQL:
+MageML supports 2 types of change data capture with PostgreSQL:
 
 1. Batch query
 1. Log replication
@@ -52,23 +43,22 @@ Mage supports 2 types of change data capture with PostgreSQL:
 
 ### Batch query
 
-Mage will query PostgreSQL in batches using `SELECT`, `WHERE`, and `ORDER BY`
+MageML will query PostgreSQL in batches using `SELECT`, `WHERE`, and `ORDER BY`
 statements.
 
 ### Log replication
 
-Mage supports **Change Data Capture (CDC)** for PostgreSQL using **logical replication**, 
-enabling real-time tracking of inserts, updates, and deletes without requiring full table reloads.
-By reading PostgreSQL’s Write-Ahead Logs (WAL), Mage captures changes efficiently and applies them to the 
-destination system — inserting new records, updating existing ones, or deleting as needed — 
-ensuring low-latency, incremental data synchronization.
+MageML supports **Change Data Capture (CDC)** for PostgreSQL using **logical replication**.
+It tracks inserts, updates, and deletes without full table reloads.
+MageML reads PostgreSQL’s Write-Ahead Log (WAL) and applies the changes to the
+destination: it inserts new records, updates existing ones, and marks deleted ones.
 
 #### Setup in PostgreSQL
 
 1. Enable logical replication in Postgres config
     1. Local Postgres
         1. Open the `postgresql.conf` file. Here is an example location on Mac OSX:
-            `/Users/Mage/Library/Application Support/Postgres/var-14/postgresql.conf`.
+            `/Users/<user>/Library/Application Support/Postgres/var-14/postgresql.conf`.
         1. Under the settings section, change the value of `wal_level` to `logical`. The line in your
         `postgresql.conf` file should look like this:
             ```text
@@ -101,7 +91,7 @@ ensuring low-latency, incremental data synchronization.
             ```sql
             ALTER ROLE <username> WITH REPLICATION;
             ```
-        5. Azure also requires that you configure firewall rules to allow your Mage server or IP range to access the PostgreSQL server.
+        5. Azure also requires that you configure firewall rules to allow your MageML server or IP range to access the PostgreSQL server.
         6. For more detailed instructions, see: [Set up logical replication on Azure PostgreSQL](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-logical-replication).
 
 
@@ -123,7 +113,7 @@ ensuring low-latency, incremental data synchronization.
     CREATE PUBLICATION mage_pub FOR ALL TABLES;
     ```
 
-    <sub>`mage_pub` is used in Mage’s [code](https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/sources/postgresql/__init__.py#L126)</sub>
+    <sub>`mage_pub` is the default `publication_name` in MageML’s [code](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/sources/postgresql/__init__.py). Set `publication_name` to use another publication.</sub>
 
 
     or for 1 table:
@@ -157,10 +147,10 @@ ensuring low-latency, incremental data synchronization.
     ```
 <br />
 
-#### Create data integration pipeline in Mage
+#### Create data integration pipeline in MageML
 
 Follow this [guide to create a data integration pipeline](/guides/data-integration-pipeline)
-in Mage.
+in MageML.
 
 However, choose <b>PostgreSQL</b> as the source and choose <b>`LOG_BASED`</b> as the
 replication method.
@@ -228,7 +218,7 @@ to start running your pipeline and begin syncing data.
 
 ## What is PostgreSQL?
 
-[PostgreSQL](https://www.postgresql.org/) is an open-source, enterprise-grade relational database system. Known for its robustness, extensibility, and SQL compliance, PostgreSQL powers thousands of applications worldwide in both small businesses and large enterprises.
+[PostgreSQL](https://www.postgresql.org/) is an open-source relational database system.
 
 Common use cases include:
 

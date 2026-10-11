@@ -50,21 +50,13 @@ If the above data loader has 2 downstream blocks (e.g. 2 blocks that depend on t
 then this dynamic block will create 6 total downstream blocks at runtime
 (3 users multiplied by 2 downstream blocks).
 
-<br />
+<Note>
+Dynamic blocks and their dynamically created blocks are not fused with other blocks in
+production runs: each runs as its own stage. See
+[Block fusion](/design/data-pipeline-management#block-fusion).
+</Note>
 
-<AccordionGroup>
-    <Accordion title="Krichkorn Oparad" icon="block-brick-fire" iconType="duotone" defaultOpen>
-        > This feature saves me when I need to securely transfer multiple media files from one location to another (SCP), especially when the files are spread across different directories and across the network. Typically, one would have to loop through each file, but secure copy (SCP) operations can fail for various reasons, and dealing with exceptions can be error-prone.
-        >
-        > An alternative approach would be to use an API trigger (like the one provided by Mage AI) to receive POST requests for each file that needs to be securely copied. However, this method can be highly resource-intensive, particularly when dealing with thousands of pipeline runs.
-        >
-        > Dynamic block, which allows me to manage source and destination specifications in a DataFrame and then dynamically execute SCP operations without having to handle exceptions manually (thanks to the "retry incomplete block" feature), is a game-changer. Not only does it save me from the hassle of exception handling, but it also keeps computational resources in check by avoiding unnecessary pipeline triggers.
-        >
-        > Thank you for your world-class project. Keep up the excellent work.
-        >
-        > <img src="https://yt3.googleusercontent.com/ytc/AIdro_kcyWKgnvWDUDD6iOcxByIKb4E4zXJGYlT52Mtorrljo98f=s176-c-k-c0x00ffffff-no-rj" />
-    </Accordion>
-</AccordionGroup>
+<br />
 
 ### Data output shape of a dynamic block
 

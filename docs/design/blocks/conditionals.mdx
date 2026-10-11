@@ -4,8 +4,6 @@ sidebarTitle: "Conditional"
 description: "A conditional block is an 'Add-on Block' associated with another block. The condition will be evaluated before the parent block is executed, determining if the parent block gets executed."
 ---
 
-<Note>Requires version `0.8.93` or greater.</Note>
-
 Conditional blocks are part of your pipeline but don't run as individual steps in your pipeline like data loader blocks, transformer blocks, etc.
 However, conditional blocks are associated to other blocks within the pipeline (e.g. data loaders, transformers, data exporters, etc).
 
@@ -19,7 +17,7 @@ Take the following example:
 <img src="https://mage-ai.github.io/assets/blocks/conditionals-example.png" width="85%"/>
 </div>
 
-The `morpheus` block returns a variable— `pill`, which is either red or blue. Both downstream blocks have conditionals associated with them. The `red_pill` block will only execute if `pill` is red, and the `blue_pill` block will only execute if `pill` is blue.
+The `morpheus` block returns a variable, `pill`, which is either red or blue. Both downstream blocks have conditionals associated with them. The `red_pill` block will only execute if `pill` is red, and the `blue_pill` block will only execute if `pill` is blue.
 
 Here's what the conditionals look like for each:
 
@@ -32,7 +30,7 @@ Because `pill=red`, the `red_pill` block will execute, and the `blue_pill` block
 
 ## Add conditionals to your pipeline
 
-Conditional blocks are "add-on blocks" in Mage— that means they're added through the side panel on the right in the pipeline editor.
+Conditional blocks are "add-on blocks" in MageML: that means they're added through the side panel on the right in the pipeline editor.
 
 <div align="center">
 <img src="https://mage-ai.github.io/assets/blocks/add-conditionals.gif" width="85%"/>
@@ -44,9 +42,9 @@ To add a condition to your block:
 2. Click the button <b>Conditionals</b>.
 3. Click the button <b>+ Conditional block</b>.
 4. In the conditional block's code, add a function that returns a boolean value. Be sure it's decorated with `@condition`.
-5. Select the magnifiying class icon at the bottom of the block to associate your conditional with a block.
+5. Select the magnifying glass icon at the bottom of the block to associate your conditional with a block.
 
-Looking for a video walkthrough? Check out our [tips and tricks](/guides/tips-and-tricks) page!
+For a video walkthrough, see [tips and tricks](/guides/tips-and-tricks).
 
 ### Positional arguments
 

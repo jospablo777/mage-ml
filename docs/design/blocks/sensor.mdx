@@ -57,9 +57,12 @@ then the sensor will check the status of the pipeline for that many hours in pas
 The default value is 24 hours.
 
 Sensors can also have upstream block dependencies. The output of the upstream blocks will be passed
-into the sensor in the `args` parameter like in other Mage block types.
+into the sensor in the `args` parameter like in other block types.
 
 Currently, the sensor makes a check every 60 seconds.
+
+In production runs, a sensor always runs as its own stage: it is not fused with other blocks.
+See [Block fusion](/design/data-pipeline-management#block-fusion).
 
 ## Templates
 
@@ -70,6 +73,7 @@ When adding a sensor block, here are the available templates to choose from:
 1. PostgreSQL
 1. Amazon Redshift
 1. Amazon S3
+1. Google Cloud Storage
 1. Snowflake
 
 Below are the code examples in those templates.
@@ -211,6 +215,31 @@ def check_condition(*args, **kwargs) -> bool:
     config_file_loader = ConfigFileLoader(config_path, config_profile)
     return S3.with_config(config_file_loader).exists(
         bucket_name, s3_path
+    )
+```
+
+### Google Cloud Storage
+
+Check if a file or folder exists in a Google Cloud Storage bucket.
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.google_cloud_storage import GoogleCloudStorage
+from os import path
+
+
+@sensor
+def check_condition(*args, **kwargs) -> bool:
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    bucket_name = 'your_bucket_name'
+    object_key = 'your_object_key'
+
+    return GoogleCloudStorage.with_config(ConfigFileLoader(config_path, config_profile)).exists(
+        bucket_name,
+        object_key,
     )
 ```
 

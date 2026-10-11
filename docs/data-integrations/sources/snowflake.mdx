@@ -25,8 +25,8 @@ Connect to your Snowflake data warehouse and extract data by providing the follo
 | Key                 | Description                                                                                | Sample Value               |
 | ------------------- | ------------------------------------------------------------------------------------------ | --------------------------- |
 | `password`           | Password for the database user.                                                           | `abc123...`                  |
-| `private_key_file`   | Path to the Snowflake private key file (supported in version >= 0.9.76).                   | `/path/to/snowflake_key`     |
-| `private_key_file_pwd`| Passphrase for the private key file (supported in version >= 0.9.76).                     | `abc123...`                  |
+| `private_key_file`   | Path to the Snowflake private key file.                                                    | `/path/to/snowflake_key`     |
+| `private_key_file_pwd`| Passphrase for the private key file.                                                      | `abc123...`                  |
 | `role`               | Role of the user to access the database.                                                  | `ROLE`                       |
 
 > For setting up key-pair authentication, follow [this guide](https://docs.snowflake.com/en/user-guide/key-pair-auth).
@@ -43,16 +43,6 @@ Connect to your Snowflake data warehouse and extract data by providing the follo
 
 ## What is Snowflake?
 
-[Snowflake](https://www.snowflake.com/) is a leading cloud-based data warehouse platform that provides fast, scalable, and flexible data storage and analytics. It separates compute and storage for cost efficiency and performance, supporting structured and semi-structured data with SQL-based querying.
-
-<br/>
-
-## Why Integrate Snowflake with Mage?
-
-- **Seamless ETL pipelines**: Automate extraction of large datasets from Snowflake into your data lakes or warehouses.
-- **Scalable performance**: Handle millions of rows with ease using high-speed, cloud-native architecture.
-- **Flexible authentication**: Use either password-based or secure key-pair authentication.
-- **Cost-effective**: Optimize compute and storage separately for your data workflows.
-- **Enterprise-ready security**: Built-in role-based access control and encryption.
+[Snowflake](https://www.snowflake.com/) is a cloud data warehouse. It separates compute and storage and supports structured and semi-structured data with SQL.
 
 <br/>

@@ -19,8 +19,8 @@ To connect to the Postmark API and extract email event data, provide the followi
 
 ## What is Postmark?
 
-[Postmark](https://postmarkapp.com/) is a reliable transactional email service for sending and tracking important application-generated emails, such as password resets, receipts, welcome emails, and more.  
-Integrating Postmark with Mage allows you to automate the extraction of email delivery events, bounce information, and open/click tracking into your data warehouse for advanced analytics.
+[Postmark](https://postmarkapp.com/) is a transactional email service for application emails such as password resets and receipts.
+This source extracts message, open, and outbound statistics data.
 
 <br/>
 
@@ -34,26 +34,16 @@ For more information, see Postmark's [API token documentation](https://postmarka
 
 <br/>
 
-## Why Integrate Postmark with Mage?
-
-- **Automated email tracking**: Extract delivery, open, click, and bounce events.
-- **Centralized analytics**: Consolidate Postmark email data with other sources in your data warehouse.
-- **Improve deliverability**: Analyze bounce reasons and optimize your sending practices.
-- **Real-time monitoring**: Stay updated on the performance of transactional emails.
-- **Scalable architecture**: Sync millions of email events without manual intervention.
-
-<br/>
-
 ## Supported Streams from Postmark
 
-When integrated with Mage, the following Postmark data streams are available:
+The following Postmark streams are available:
 
-- **messages_opens** — Track when recipients open your emails.
-- **messages_outbound** — Retrieve details of outbound messages sent via Postmark.
-- **stats_outbound_bounces** — Statistics on email bounces (hard, soft bounces).
-- **stats_outbound_clients** — Email client analytics (e.g., Gmail, Outlook, Apple Mail).
-- **stats_outbound_overview** — High-level summary of outbound email performance.
-- **stats_outbound_platform** — Platform analytics showing devices used by recipients.
+- **messages_opens**: Track when recipients open your emails.
+- **messages_outbound**: Retrieve details of outbound messages sent via Postmark.
+- **stats_outbound_bounces**: Statistics on email bounces (hard, soft bounces).
+- **stats_outbound_clients**: Email client analytics (e.g., Gmail, Outlook, Apple Mail).
+- **stats_outbound_overview**: High-level summary of outbound email performance.
+- **stats_outbound_platform**: Platform analytics showing devices used by recipients.
 
 
 <br/>

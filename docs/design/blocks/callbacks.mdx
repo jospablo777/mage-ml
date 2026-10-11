@@ -4,8 +4,6 @@ sidebarTitle: "Callback"
 description: "A callback block is associated to another block. When the parent block succeeds or fails, the callback block functions are executed."
 ---
 
-<Note>Requires version `0.8.61` or greater.</Note>
-
 <Frame>
   <img alt="Callbacks" src="https://i.imgflip.com/3s2icl.jpg" />
 </Frame>
@@ -71,6 +69,8 @@ It fails due to some error. The callback block will run and execute the function
     parent block successfully completes.
 1. Use `@callback('failure')` to decorate a function that should only run when the
     parent block fails.
+1. Use `@callback('cancelled')` to decorate a function that should only run when the
+    parent block is cancelled.
 
 ### Supported callbacks
 
@@ -93,7 +93,6 @@ def only_run_this_function_on_failure(parent_block_data, **kwargs):
 ```
 
 #### `cancelled`
-<Note>Available in versions `>= 0.9.77`.</Note>
 Execute callback function when block is cancelled (manually or by system interruption).
 
 ```python
@@ -102,38 +101,9 @@ def only_run_this_function_on_cancelled(parent_block_data, **kwargs):
     pass
 ```
 
-### Advanced parameters
-
-import { ProButton } from '/snippets/pro/button.mdx';
-import { ProOnly } from '/snippets/pro/only.mdx';
-
-<ProOnly source="callback" />
-
-In **Mage Pro**, you can pass additional parameters to the `@callback` decorator.
-
-#### `fetch_inputs`
-
-By default, Mage will fetch upstream inputs before executing a callback.
-If your callback doesn’t need input data (e.g. sending alerts, posting logs), you can **disable input fetching** to improve performance.
-
-```python
-@callback('failure', fetch_inputs=False)
-def alert_me_without_inputs(*args, **kwargs):
-    # Runs faster since upstream block inputs are not fetched
-    send_alert("Parent block failed!")
-```
-
-- **`fetch_inputs=True`** (default) → Fetch parent block inputs before executing callback
-- **`fetch_inputs=False`** → Skip fetching inputs, speeding up execution
-
-
 ### Positional arguments
 
 The 1st positional argument is the data output of the callback block’s parent block.
-
-<Note>
-    Positional arguments are only supported in Mage versions `>= 0.8.81`.
-</Note>
 
 ### Keyword arguments
 
@@ -150,11 +120,9 @@ Here are the keyword arguments that are  available in each callback function:
 | `hr` | Hour string when the parent block started executing. | `'20'` |
 | `pipeline_run` | Python pipeline run object associated to the current run. | `PipelineRun(id=2357, pipeline_uuid=fire_etl, execution_date=2023-04-26 20:28:17.335254+00:00)` |
 | `pipeline_uuid` | UUID of the current pipeline. | `'fire_etl'` |
-| `__input` | For version `>= 0.8.81`. See below for more details. | `{ 'some_block_uuid': {} }` |
+| `__input` | See below for more details. | `{ 'some_block_uuid': {} }` |
 
 #### `__input` keyword argument
-
-<Note>For versions `>= 0.8.81`.</Note>
 
 If your callback function is defined to only accept keyword arguments and no positional arguments,
 you can access the callback block’s parent block’s data output by accessing the key
@@ -188,7 +156,7 @@ data integration pipelines:
 
 ## Legacy
 
-<Note>For versions `< 0.8.61`.</Note>
+<Note>Block-level callbacks from Mage versions before 0.8.61. MageML still runs them.</Note>
 
 ### Adding a callback to your block
 

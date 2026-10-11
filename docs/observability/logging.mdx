@@ -40,8 +40,8 @@ SERVER_LOGGING_TEMPLATE=$'%(asctime)s\t[%(name)25.25s]\t%(levelname)5s: %(messag
     To pass such string you can
     1. Use `export SERVER_LOGGING_TEMPLATE=$'%(asctime)s\t[%(name)25.25s]\t%(levelname)5s: %(message)s'` syntax for local
     python deployment or docker compose with exported env variables
-    2. Use combination of `.env` file and `-e` flag for plain docker deployment
-    `docker run -d --env-file .env -e SERVER_LOGGING_TEMPLATE=$'%(asctime)s\t\t[%(name)25.25s]\t%(levelname)5s: %(message)s' mageai/mageai:latest`
+    2. Use combination of `.env` file and `-e` flag for plain docker deployment (with an image built from the repository, `docker build -t mageml .`)
+    `docker run -d --env-file .env -e SERVER_LOGGING_TEMPLATE=$'%(asctime)s\t\t[%(name)25.25s]\t%(levelname)5s: %(message)s' mageml`
 </Warning>
 
 ### JSON format
@@ -60,8 +60,6 @@ JSON formatted logs will have the following fields:
   "line_number": "..."
 }
 ```
-
-More logging formats/customization to come...
 
 ## Pipelines logging
 By default, logs for each pipeline run will be stored in the
@@ -89,7 +87,7 @@ logging_config:
   retention_period: '15d'
 ```
 
-Then you can run command `mage clean-old-logs [project_path]` to clean up old logs
+Then you can run the command `mage clean-old-logs [project_path]` to clean up old logs.
 
 ### Block logging
 A logger is available in the block's context. You can use it to log messages to the block's log file. The logger is passed into
@@ -148,12 +146,6 @@ logging_config:
     bucket: <bucket name>
     prefix: <prefix path>
 ```
-
-<br />
-
-*More destinations coming...*
-
-<br />
 
 ---
 

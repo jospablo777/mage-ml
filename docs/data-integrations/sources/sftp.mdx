@@ -4,7 +4,7 @@ title: "SFTP"
 
 ## Configuration
 
-Connect securely to an SFTP server and load files into your Mage pipelines by providing the following configuration parameters:
+To load files from an SFTP server into your MageML pipelines, provide the following configuration parameters:
 
 | Key                | Description                                                            | Sample Value             |
 | ------------------ | ---------------------------------------------------------------------- | ------------------------ |
@@ -40,8 +40,6 @@ Define how files are processed and structured into tables:
 | `encoding`                | Character encoding of the file (default: `utf-8`).                                              | `utf-8`                      |
 | `sanitize_header`         | Clean up header names for SQL compatibility (default: `False`).                                 | `True` or `False`            |
 | `skip_rows`               | Number of header or metadata rows to skip at the top of the file (default: `0`).                | `0`                          |
-| `auto_generate_field_names`<br/>*(Pro only)* | Automatically generate column names (`col_0`, `col_1`, etc.) if headers are missing (default: `false`). | `true` or `false`            |
-| `schema_discovery_sample_rows`<br/>*(Pro only)* | Number of rows to sample to infer schema (default: `100`). Not applicable for encrypted files. | `100`                        |
 
 <br/>
 
@@ -57,39 +55,8 @@ If your files are encrypted with GPG, specify the following:
 
 <br/>
 
-## Mage Pro Enhancements 🚀
-
-With **Mage Pro**, the SFTP source is enhanced for improved performance, usability, and scalability.  
-The following features are **available in Mage Pro only**:
-
-- **Auto-Generate Field Names**:  
-  Automatically generate column names (`col_0`, `col_1`, ..., `col_N`) when headers are missing by setting `auto_generate_field_names: true`.
-- **Schema Discovery Sample Rows**:  
-  Speed up schema inference by limiting how many rows are sampled with `schema_discovery_sample_rows`.
-- **Improved Logging**:  
-  Enhanced, structured logging for better traceability and debugging.
-- **TableSpec Schema Support**:  
-  Define detailed table specifications for schema generation and validation.
-- **Selective Column Extraction**:  
-  Write only the selected columns to the schema to reduce size and improve performance.
-- **Better Code Quality and Documentation**:  
-  Cleaner, more robust code and fully updated documentation for enterprise use.
-
-<br/>
-
 ## What is SFTP?
 
-**SFTP (Secure File Transfer Protocol)** is a secure method for transferring files over an encrypted SSH connection.  
-It provides encrypted file access, transfer, and management across a reliable, secure channel.
-
-<br/>
-
-## Why Use SFTP with Mage?
-
-- **Secure and encrypted**: Safely ingest sensitive files over SSH-secured channels.
-- **Seamless ETL workflows**: Automate file ingestion into your data warehouse or lake.
-- **Support for encrypted files**: Easily decrypt GPG-protected files during ingestion.
-- **High performance**: Faster schema discovery, selective column loading, and large file handling.
-- **Enterprise-ready**: Built for scale with advanced logging, security, and performance features.
+**SFTP (SSH File Transfer Protocol)** transfers files over an encrypted SSH connection.
 
 <br/>

@@ -2,7 +2,7 @@
 title: "Create a new destination"
 ---
 
-Here is an example PR for adding a new destination: https://github.com/mage-ai/mage-ai/pull/2277
+Here is an example PR for adding a new destination in upstream Mage: https://github.com/mage-ai/mage-ai/pull/2277
 
 In this guide, we'll build a sample destination called `SampleDest`. When you're building your own destination, you can swap out the `SampleDest` name for the real name of your new destination.
 
@@ -64,7 +64,7 @@ This is where majority of the destination logic will exist.
 
 #### Examples
 
-[`mage_integrations/destinations/amazon_s3/__init__.py`](https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/destinations/amazon_s3/__init__.py)
+[`mage_integrations/destinations/amazon_s3/__init__.py`](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/destinations/amazon_s3/__init__.py)
 
 ### `README.md`
 
@@ -76,10 +76,10 @@ Document how to configure and use your destination in the `README.md` file.
 
 In the `mage_integrations/destinations/sample_dest/__init__.py`,
 create a new class named after your destination and subclass the
-[base destination class](https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/destinations/base.py).
+[base destination class](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/destinations/base.py).
 
 If you're adding a destination for a SQL data warehouse or database, you can subclass the
-[base sql destination class](https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/destinations/sql/base.py)
+[base sql destination class](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/destinations/sql/base.py)
 
 ```python
 from mage_integrations.destinations.base import Destination
@@ -94,7 +94,7 @@ class SampleDest(Destination):
 The base `Destination` class has an instance method called `export_batch_data`. Here is the interface:
 
 ```python
-def export_batch_data(self, record_data: List[Dict], stream: str) -> None:
+def export_batch_data(self, record_data: List[Dict], stream: str, tags: Dict = None) -> None:
     ...
 ```
 
@@ -117,14 +117,16 @@ if __name__ == '__main__':
 
 ## 4. Add your destination to the UI (optional)
 
-Add the new destination to the `DESTINATIONS` list constant in this file: https://github.com/mage-ai/mage-ai/blob/master/mage_ai/data_integrations/destinations/constants.py
+Add the new destination to the `DESTINATIONS` list constant in this file: https://github.com/jospablo777/mage-ml/blob/master/mage_ai/data_integrations/destinations/constants.py
 
 ## 5. Test your destination
 
-Follow this [doc](https://github.com/mage-ai/mage-ai/tree/master/mage_integrations) to test your new destination.
+Follow this [doc](https://github.com/jospablo777/mage-ml/tree/master/mage_integrations) to test your new destination.
 
-To test the destination in the UI, you can install your updated `mage_integrations` module by running the following commands in Mage terminal:
+To test the destination in the UI, run MageML from your checkout. `mage_integrations` is a
+uv workspace member of the repository, so `uv sync` installs your local copy in editable
+mode:
 ```bash
-pip uninstall -y mage_integrations
-pip install "git+https://github.com/your_repo.git@your_branch#egg=mage-integrations&subdirectory=mage_integrations"
+uv sync --locked --no-default-groups --extra postgres
+uv run --no-sync mage start my_project
 ```

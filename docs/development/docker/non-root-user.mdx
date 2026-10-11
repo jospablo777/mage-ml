@@ -2,33 +2,37 @@
 title: "Run docker image as non-root user"
 sidebarTitle: "Run as non-root user"
 icon: "user"
-description: "Run Mage docker image as non-root user to restrict access to the system"
+description: "Run the MageML docker image as a non-root user to restrict access to the system"
 ---
 
-By default, the official Mage docker images in DockerHub are using the root users. For production deployment,
+By default, the MageML image built from the repository's Dockerfile runs as the root user. For production deployment,
 it's recommended to use non-root users in the docker image to restrict access to the system for better security.
-Here is the Dockerfile template that you can use to build your custom docker image that runs Mage as non-root user.
+Here is a Dockerfile template that builds on that image and runs MageML as a non-root user.
 
 ```dockerfile
-ARG VERSION
+# Build the MageML image first, from the repository: docker build -t mageml .
+FROM mageml
 
-FROM mageai/mageai:$VERSION
-
-# Add non-root user for Mage service
+# Add non-root user for the MageML service
 RUN adduser --disabled-password --gecos '' mage && adduser mage mage
 
-# Grant the user permissions to the Mage related directories
-RUN mkdir /home/src/mage_data; chown -R mage /home/src/mage_data
-RUN mkdir /home/src/default_repo; chown -R mage /home/src/default_repo
+# Grant the user permissions to the MageML directories. Rust blocks compile into
+# /opt/mage-rust and fetch crates into /opt/cargo.
+RUN mkdir -p /home/src/mage_data /home/src/default_repo && \
+    chown -R mage /home/src/mage_data /home/src/default_repo /opt/mage-rust /opt/cargo
 
-RUN pip3 install -r path/to/requirements.txt
+# Install extra packages into MageML's environment while still root, pinned to the
+# versions MageML was built with.
+RUN uv pip install --python /opt/mage/bin/python \
+    --constraint "$MAGE_RUNTIME_CONSTRAINTS" -r path/to/requirements.txt
 
-# Set the Mage user
+# Set the MageML user
 USER mage
-
-ENV PYTHONPATH="${PYTHONPATH}:/home/mage/.local/lib/python3.10/site-packages"
 
 WORKDIR /home/src
 
-CMD ["/bin/sh", "-c", "/app/run_app.sh"]
+CMD ["/app/run_app.sh"]
 ```
+
+The non-root user cannot install packages into `/opt/mage` at startup, so install a
+project's `requirements.txt` at build time as above.

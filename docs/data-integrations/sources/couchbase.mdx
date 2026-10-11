@@ -16,16 +16,16 @@ To set up the Couchbase source, provide the following configuration parameters:
 | `username`           | Username to access the database (must have permissions to read from the specified bucket and scope).                       | `username`                                   |
 | `password`           | Password for the user.                                                                                                     | `password`                                   |
 | `bucket`             | Name of the Couchbase bucket containing your data.                                                                         | `my_bucket`                                  |
-| `scope`              | Name of the Couchbase scope. Only collections within this scope will be available in Mage.                                 | `my_scope`                                   |
+| `scope`              | Name of the Couchbase scope. Only collections within this scope will be available in MageML.                                 | `my_scope`                                   |
 | `strategy`           | (Optional) Strategy for schema inference. See below.                                                                       | `infer`                                      |
 
 <br/>
 
 ## Strategy Details
 
-By default, Mage will attempt to infer your data’s schema from a sample of documents.
+By default, MageML will attempt to infer your data’s schema from a sample of documents.
 
-- `strategy: infer` — Mage will try to infer a unified schema from the data. If multiple schemas exist, Mage will pick the one covering the most data points.
-- `strategy: combine` — Mage will combine the data into a single `_document` column as an object.
+- `strategy: infer`: MageML will try to infer a unified schema from the data. If multiple schemas exist, MageML will pick the one covering the most data points.
+- `strategy: combine`: MageML will combine the data into a single `_document` column as an object.
 
 <br/>
