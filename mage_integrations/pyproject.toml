@@ -7,7 +7,7 @@ name = "mage-integrations"
 version = "0.0.0"
 description = "Data source and destination connectors for Mage."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.13"
 dependencies = [
   "attrs>=24.2",
   "azure-storage-blob>=12.31",

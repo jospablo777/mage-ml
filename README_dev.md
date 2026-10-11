@@ -2,7 +2,7 @@
 
 Run these commands from the repository root unless a different directory is specified.
 
-Mage server requires Python `>=3.11,<3.14`, as declared in `pyproject.toml`. The Docker images [use Python 3.12](./Dockerfile).
+MageML requires Python 3.12, as declared in `pyproject.toml`, and the Docker images [use it](./Dockerfile). Support for Python 3.14 is planned.
 
 Python dependencies are managed with [uv](https://docs.astral.sh/uv/). `pyproject.toml` declares them and `uv.lock` pins the resolved versions. Both files are committed.
 

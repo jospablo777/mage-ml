@@ -22,7 +22,7 @@ env:
 
 jobs:
   # The ColumnAtlas extension has one wheel per platform; the stable ABI covers every
-  # Python from 3.11. PyPI accepts Linux wheels with a manylinux tag only, which a plain
+  # Python from 3.12. PyPI accepts Linux wheels with a manylinux tag only, which a plain
   # build does not give.
   native_wheels:
     name: column-atlas-native (${{ matrix.os }} ${{ matrix.target }})

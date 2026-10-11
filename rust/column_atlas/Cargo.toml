@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 python = ["dep:pyo3"]
-extension-module = ["python", "pyo3/extension-module", "pyo3/abi3-py311"]
+extension-module = ["python", "pyo3/extension-module", "pyo3/abi3-py312"]
 
 [dependencies]
 polars = { version = "=0.55.2", default-features = false, features = [

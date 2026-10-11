@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "singer-python"
 version = "5.13.0+mage.1"
 description = "Singer protocol utilities used by Mage connectors."
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
