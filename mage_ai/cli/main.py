@@ -964,7 +964,7 @@ EXPORT_PUSH = typer.Option(
 EXPORT_SERVICE = typer.Option(
     None, '--service', '-s',
     help='a service saved in the project\'s pipeline_services.yaml (the Services page): '
-         'its pipelines, after-run triggers, settings and included files.',
+         'its pipelines, settings and included files.',
 )
 EXPORT_MODELS = typer.Option(
     [], '--model', '-m',
@@ -999,7 +999,6 @@ def export_service(
     """
     from mage_ai.pipeline_services import definitions, export
 
-    after_runs = []
     if service:
         try:
             saved = definitions.load_definition(project_path, service)
@@ -1007,7 +1006,6 @@ def export_service(
             typer.echo(str(error), err=True)
             raise typer.Exit(code=1)
         pipelines = list(dict.fromkeys([*saved['pipelines'], *(pipelines or [])]))
-        after_runs = saved['after_runs']
         name = name or service
         max_runs = max_runs or saved['max_runs']
         include = [*saved['include'], *include]
@@ -1017,7 +1015,7 @@ def export_service(
     try:
         captured = export.capture(
             project_path, pipelines, name=name, max_concurrent_runs=max_runs, models=model,
-            includes=include, after_runs=after_runs,
+            includes=include,
         )
         out_dir = export.write(captured, out, force=force)
     except export.ExportError as error:

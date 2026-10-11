@@ -1,16 +1,12 @@
 """
-Services saved in the project: pipeline_services.yaml lists each service's pipelines, the
-after-run triggers that start one pipeline when a run of another ends, and its settings.
-The app's Services page edits it, and `mage export service <project> --service <name>`
-exports one.
+Services saved in the project: pipeline_services.yaml lists each service's pipelines and
+settings. The app's Services page edits it, and `mage export service <project> --service
+<name>` exports one. Pipelines that start after another's runs do it with their own
+after-run triggers, which MageML and the service both run.
 
     services:
       shop-live:
         pipelines: [live_traffic, live_minute_kpis]
-        after_runs:
-          - run: live_minute_kpis
-            after: live_traffic
-            when: completed      # completed, failed or any
         max_runs: 2              # optional: runs of each pipeline at once
         include: [models/churn.onnx]
 """
@@ -66,29 +62,15 @@ def normalize(name: str, value: Dict) -> Dict:
     if not isinstance(value, dict):
         raise DefinitionError(f'Service {name}: its settings must be a mapping.')
     pipelines = value.get('pipelines') or []
-    after_runs = value.get('after_runs') or []
     include = value.get('include') or []
     max_runs = value.get('max_runs')
     if not isinstance(pipelines, list) or not all(isinstance(p, str) for p in pipelines):
         raise DefinitionError(f'Service {name}: pipelines must be a list of pipeline names.')
-    if not isinstance(after_runs, list) or not all(isinstance(a, dict) for a in after_runs):
-        raise DefinitionError(
-            f'Service {name}: after_runs must be a list of {{run, after, when}} entries.'
-        )
     if not isinstance(include, list) or not all(isinstance(i, str) for i in include):
         raise DefinitionError(f'Service {name}: include must be a list of project paths.')
     if max_runs is not None and (not isinstance(max_runs, int) or max_runs < 1):
         raise DefinitionError(f'Service {name}: max_runs must be a whole number above 0.')
     return dict(
-        after_runs=[
-            dict(
-                after=a.get('after'),
-                run=a.get('run'),
-                when=a.get('when') or 'completed',
-                **({'variables': a['variables']} if a.get('variables') else {}),
-            )
-            for a in after_runs
-        ],
         description=value.get('description') or '',
         include=list(include),
         max_runs=max_runs,
@@ -131,8 +113,6 @@ def _compact(value: Dict) -> Dict:
     out = dict(pipelines=value['pipelines'])
     if value.get('description'):
         out['description'] = value['description']
-    if value.get('after_runs'):
-        out['after_runs'] = value['after_runs']
     if value.get('max_runs'):
         out['max_runs'] = value['max_runs']
     if value.get('include'):

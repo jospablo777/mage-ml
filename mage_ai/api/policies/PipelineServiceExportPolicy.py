@@ -30,7 +30,7 @@ PipelineServiceExportPolicy.allow_read(
 )
 
 PipelineServiceExportPolicy.allow_write(
-    ['after_runs', 'include', 'max_runs', 'name', 'pipeline_uuids', 'preview'],
+    ['include', 'max_runs', 'name', 'pipeline_uuids', 'preview'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

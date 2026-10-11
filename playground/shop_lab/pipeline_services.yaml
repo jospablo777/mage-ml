@@ -8,10 +8,3 @@ services:
     - live_device_revenue
     description: Live shop traffic every minute, then per-minute KPIs and revenue per device
       after each traffic run
-    after_runs:
-    - after: live_traffic
-      run: live_minute_kpis
-      when: completed
-    - after: live_traffic
-      run: live_device_revenue
-      when: completed

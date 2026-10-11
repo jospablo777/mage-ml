@@ -1,0 +1,12 @@
+# After each live_traffic run completes, in the exported playground service
+# (make playground-service). envs keeps the playground's own scheduler, which runs as dev,
+# from running it too.
+triggers:
+- name: after_live_traffic
+  schedule_type: after_run
+  status: active
+  settings:
+    after_pipeline: live_traffic
+    after_status: completed
+  envs:
+  - prod

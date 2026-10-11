@@ -4,7 +4,7 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
 
-FIELDS = ('after_runs', 'description', 'include', 'max_runs', 'pipelines')
+FIELDS = ('description', 'include', 'max_runs', 'pipelines')
 
 
 def _with_export(repo_path: str, name: str, value: Dict, exports_by_name: Dict = None) -> Dict:

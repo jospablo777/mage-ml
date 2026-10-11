@@ -78,12 +78,7 @@ class PipelineServiceExportResource(GenericResource):
         if max_runs is not None and (not isinstance(max_runs, int) or max_runs < 1):
             raise ApiError(dict(code=400, message='Runs at once must be a whole number above 0.'))
 
-        after_runs = payload.get('after_runs') or []
         includes = payload.get('include') or []
-        if not isinstance(after_runs, list) or not all(isinstance(c, dict) for c in after_runs):
-            raise ApiError(dict(
-                code=400, message='after_runs must be a list of {run, after, when}.',
-            ))
         if not isinstance(includes, list) or not all(isinstance(i, str) for i in includes):
             raise ApiError(dict(code=400, message='include must be a list of project paths.'))
 
@@ -92,7 +87,7 @@ class PipelineServiceExportResource(GenericResource):
                 None,
                 lambda: preview_pipelines(
                     repo_path, pipeline_uuids, name=payload.get('name'), max_runs=max_runs,
-                    after_runs=after_runs, includes=includes,
+                    includes=includes,
                 ),
             )
             return cls(result, user, **kwargs)
@@ -100,7 +95,7 @@ class PipelineServiceExportResource(GenericResource):
         try:
             job = start_export(
                 repo_path, pipeline_uuids, name=payload.get('name'), max_runs=max_runs,
-                after_runs=after_runs, includes=includes,
+                includes=includes,
             )
         except ValueError as error:
             raise ApiError(dict(code=400, message=str(error)))

@@ -53,7 +53,6 @@ def start_export(
     pipeline_uuids: List[str],
     name: Optional[str] = None,
     max_runs: Optional[int] = None,
-    after_runs: Optional[List[Dict]] = None,
     includes: Optional[List[str]] = None,
 ) -> Dict:
     """
@@ -88,7 +87,7 @@ def start_export(
         try:
             result = export_pipelines(
                 repo_path, pipeline_uuids, name=service, max_runs=max_runs,
-                after_runs=after_runs, includes=includes,
+                includes=includes,
                 on_stage=lambda stage, progress: update(stage=stage, progress=progress),
             )
             update(progress=1.0, result=result, stage=STAGE_DONE, state='completed')
@@ -121,7 +120,6 @@ def export_pipelines(
     name: Optional[str] = None,
     max_runs: Optional[int] = None,
     on_stage=None,
-    after_runs: Optional[List[Dict]] = None,
     includes: Optional[List[str]] = None,
 ) -> Dict:
     """
@@ -135,7 +133,7 @@ def export_pipelines(
         on_stage(STAGE_READING, 0.05)
     captured = export.capture(
         repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
-        after_runs=after_runs, includes=includes,
+        includes=includes,
     )
     out_dir = export_directory(repo_path, captured.name)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +149,6 @@ def preview_pipelines(
     pipeline_uuids: List[str],
     name: Optional[str] = None,
     max_runs: Optional[int] = None,
-    after_runs: Optional[List[Dict]] = None,
     includes: Optional[List[str]] = None,
 ) -> Dict:
     """
@@ -163,7 +160,7 @@ def preview_pipelines(
     try:
         captured = export.capture(
             repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
-            after_runs=after_runs, includes=includes,
+            includes=includes,
         )
     except export.ExportError as error:
         return dict(name=export._service_name(name, list(pipeline_uuids)),

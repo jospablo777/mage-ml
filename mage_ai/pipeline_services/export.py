@@ -124,13 +124,8 @@ def capture(
     max_concurrent_runs: Optional[int] = None,
     models: Optional[List[str]] = None,
     includes: Optional[List[str]] = None,
-    after_runs: Optional[List[Dict]] = None,
 ) -> Capture:
-    """
-    Reads the pipelines and everything they need; raises ExportError with every problem.
-    after_runs start a pipeline when a run of another ends: {run, after, when} with when
-    completed (the default), failed or any.
-    """
+    """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
 
     project_path = Path(project).resolve()
@@ -166,7 +161,7 @@ def capture(
         if entry:
             pipelines.append(entry)
         environments[uuid] = _pipeline_environment(pipeline, problems)
-    _apply_after_runs(pipelines, after_runs or [], problems)
+    _check_after_runs(pipelines, notes, problems)
     if problems:
         raise ExportError(problems)
     capture_.environment = _shared_environment(environments, problems)
@@ -207,78 +202,37 @@ def capture(
     return capture_
 
 
-AFTER_RUN_ENDINGS = ('completed', 'failed', 'any')
+def _check_after_runs(entries: List[Dict], notes: List[str], problems: List[str]) -> None:
+    """
+    After-run triggers in the service: one that follows a pipeline left out of the service
+    could never start, so it is left out with a note; a loop stops the export.
+    """
+    from mage_ai.orchestration.after_runs import trigger_problems
 
-
-def after_run_problems(pipeline_uuids: List[str], after_runs: List[Dict]) -> List[str]:
-    """What is wrong with a service's after-run triggers: unknown pipelines, endings, loops."""
-    problems = []
-    known = set(pipeline_uuids)
-    edges: Dict[str, List[str]] = {}
-    for start in after_runs:
-        run, after = start.get('run'), start.get('after')
-        when = start.get('when') or 'completed'
-        for role, uuid in (('runs', run), ('follows', after)):
-            if uuid not in known:
-                problems.append(
-                    f'An after-run trigger {role} pipeline {uuid}, which is not in the service; '
-                    'add the pipeline or remove the trigger.'
+    exported = {e['uuid'] for e in entries}
+    pairs = []
+    for entry in entries:
+        kept = []
+        for trigger in entry['triggers']:
+            if trigger['kind'] == 'after_run' and trigger['after_pipeline'] not in exported:
+                notes.append(
+                    f"Pipeline {entry['uuid']}, trigger {trigger['name']}: it follows "
+                    f"{trigger['after_pipeline']}, which is not in the service; left out."
                 )
-        if run == after and run is not None:
-            problems.append(f'Pipeline {run} cannot start itself after its own runs.')
-        if when not in AFTER_RUN_ENDINGS:
-            problems.append(
-                f'The after-run trigger from {after} to {run} starts on {when!r}; use '
-                'completed, failed or any.'
-            )
-        if run in known and after in known and run != after:
-            edges.setdefault(after, []).append(run)
-
-    def loop_from(node, path):
-        if node in path:
-            return path[path.index(node):] + [node]
-        for nxt in edges.get(node, []):
-            found = loop_from(nxt, path + [node])
-            if found:
-                return found
-        return None
-
-    for first in sorted(edges):
-        found = loop_from(first, [])
+                continue
+            kept.append(trigger)
+            if trigger['kind'] == 'after_run' and trigger['active']:
+                pairs.append((entry['uuid'], dict(
+                    after_pipeline=trigger['after_pipeline'],
+                    after_status=trigger['after_status'],
+                )))
+        entry['triggers'] = kept
+    for index, (uuid, settings) in enumerate(pairs):
+        others = pairs[:index] + pairs[index + 1:]
+        found = trigger_problems(uuid, settings, others)
         if found:
-            problems.append(
-                'Pipelines start each other after their runs in a loop: '
-                f'{" -> ".join(found)}. Remove one of these after-run triggers.'
-            )
+            problems.append(f'Pipeline {uuid}: {found[0]}')
             break
-    return problems
-
-
-def _apply_after_runs(entries: List[Dict], after_runs: List[Dict], problems: List[str]) -> None:
-    """Adds each after-run trigger to the pipeline it starts."""
-    found = after_run_problems([e['uuid'] for e in entries], after_runs)
-    if found:
-        problems.extend(found)
-        return
-    by_uuid = {e['uuid']: e for e in entries}
-    for start in after_runs:
-        entry = by_uuid[start['run']]
-        names = {t['name'] for t in entry['triggers']}
-        name = f"after_{start['after']}"
-        while name in names:
-            name += '_'
-        entry['triggers'].append(dict(
-            name=name,
-            kind='after_run',
-            schedule=None,
-            start_time=None,
-            timezone='UTC',
-            active=True,
-            after_pipeline=start['after'],
-            after_status=start.get('when') or 'completed',
-            variables=_json_safe(start.get('variables') or {}),
-            skip_if_previous_running=bool(start.get('skip_if_running')),
-        ))
 
 
 def _pipeline_environment(pipeline, problems: List[str]):
@@ -782,6 +736,21 @@ def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:
     triggers = []
     for trigger_name, trigger in sorted(by_name.items()):
         kind = trigger['schedule_type']
+        if kind == 'after_run':
+            settings = trigger['settings'] or {}
+            triggers.append(dict(
+                name=trigger_name,
+                kind='after_run',
+                schedule=None,
+                start_time=None,
+                timezone='UTC',
+                active=trigger['status'] == 'active',
+                variables=_json_safe(trigger['variables']),
+                skip_if_previous_running=bool(settings.get('skip_if_previous_running')),
+                after_pipeline=settings.get('after_pipeline'),
+                after_status=(settings.get('after_status') or 'completed').lower(),
+            ))
+            continue
         if kind not in ('time', 'api'):
             notes.append(
                 f'Pipeline {pipeline.uuid}, trigger {trigger_name}: {kind} triggers are not '
