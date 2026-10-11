@@ -1,10 +1,10 @@
 ---
 title: Amazon S3
-description: How to configure Amazon S3 as a destination in Mage to write data to your S3 bucket in CSV or Parquet format.
+description: How to configure Amazon S3 as a destination in MageML to write data to your S3 bucket in CSV or Parquet format.
 ---
 
 
-Configure **Amazon S3** as a Mage destination to write data files in CSV or Parquet format directly into your AWS S3 bucket.
+Configure **Amazon S3** as a MageML destination to write data files in CSV or Parquet format directly into your AWS S3 bucket.
 
 ---
 
@@ -47,7 +47,7 @@ Yes. Set the `aws_endpoint` field to your custom endpoint URL (e.g., `https://pl
 
 ### How are files named in S3?
 
-Mage automatically handles file naming using table names and batch metadata. Your `object_key_path` acts as the prefix under which the files are written.
+MageML handles file naming using table names and batch metadata. Your `object_key_path` acts as the prefix under which the files are written.
 
 ### What happens if I don’t set `date_partition_format`?
 
@@ -55,7 +55,7 @@ Files will be written directly into the specified path without date-based folder
 
 ### What if both `role_arn` and access keys are set?
 
-Mage will attempt to assume the IAM role using the provided access key credentials. This is helpful in cross-account setups or for short-lived access via STS.
+MageML attempts to assume the IAM role using the provided access key credentials. This is helpful in cross-account setups or for short-lived access via STS.
 
 ---
 

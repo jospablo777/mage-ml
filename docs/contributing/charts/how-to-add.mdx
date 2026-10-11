@@ -5,15 +5,15 @@ sidebarTitle: "Charts"
 
 ## 1. Add a new chart type
 
-Add a new type in [`mage_ai/data_preparation/models/widget/constants.py`](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/data_preparation/models/widget/constants.py):
+Add a new type in [`mage_ai/data_preparation/models/widget/constants.py`](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/data_preparation/models/widget/constants.py):
 
 ```python
-class ChartType(str, Enum):
+class ChartType(StrEnum):
     # ...
     PIE_CHART = 'pie_chart'
 ```
 
-Add a new type in [`mage_ai/frontend/interfaces/ChartBlockType.ts`](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/frontend/interfaces/ChartBlockType.ts):
+Add a new type in [`mage_ai/frontend/interfaces/ChartBlockType.ts`](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/frontend/interfaces/ChartBlockType.ts):
 
 ```javascript
 export enum ChartTypeEnum {
@@ -44,7 +44,7 @@ export const CONFIGURATIONS_BY_CHART_TYPE = {
 ```
 
 Also, add the new variable name to the following constant in the
-file `mage_ai/frontend/interfaces/ChartBlockType.ts`,:
+file `mage_ai/frontend/interfaces/ChartBlockType.ts`:
 
 ```javascript
 export const VARIABLE_NAMES = [
@@ -67,7 +67,7 @@ VARIABLE_NAMES_BY_CHART_TYPE = {
 ### Add default settings to the configuration
 
 When a user selects a chart type, you can set default values for these options.
-In the file `mage_ai/frontend/interfaces/ChartBlockType.ts`, add the following:
+In the file `mage_ai/frontend/components/ChartBlock/constants.ts`, add the following:
 
 ```javascript
 export const DEFAULT_SETTINGS_BY_CHART_TYPE = {

@@ -1,6 +1,6 @@
 ---
 title: Delta Lake (Azure)
-description: How to configure Delta Lake on Azure as a destination in Mage to write data to a Delta table using ABFS.
+description: How to configure Delta Lake on Azure as a destination in MageML to write data to a Delta table using ABFS.
 ---
 
 ## Configuration Parameters
@@ -19,7 +19,7 @@ To use **Delta Lake on Azure** as a destination, provide the following parameter
 ## Notes
 
 - The table URI must point to a valid **Delta Lake table path** accessible via Azure Data Lake Storage (Gen2) using the **ABFS** protocol.
-- Mage uses the [delta-rs](https://delta-io.github.io/delta-rs/python/usage.html) engine for interacting with Delta Lake.
+- MageML uses the [delta-rs](https://delta-io.github.io/delta-rs/python/usage.html) engine for interacting with Delta Lake.
 - If using `overwrite` mode, ensure downstream systems tolerate table recreation.
 
 ---

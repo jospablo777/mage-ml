@@ -1,11 +1,11 @@
 ---
 title: "Configure Git"
 sidebarTitle: "Configurations"
-description: "This page will walk you through the process of authenticating with SSH or HTTPS and configuring Git for use with Mage Git Sync."
+description: "This page will walk you through the process of authenticating with SSH or HTTPS and configuring Git for use with MageML Git sync."
 icon: "code-pull-request-draft"
 ---
 
-If you're wondering which Git resource to use in Mage, see [this](docs/getting-started/setting-up-git) page for a high-level overview of Git functionality. If you'd like to use Mage's GitHub integration (recommended for GitHub users), there's a different method of configuration. See [this](/production/data-sync/github) page for more information.
+If you're wondering which Git resource to use in MageML, see [this](/development/git/setting-up-git) page for a high-level overview of Git functionality. The [Version control](/guides/data-sync/version-control) app is configured differently: it uses an OAuth app that you register with your Git provider.
 
 If you've decided on a method that uses HTTPS or SSH authentication (Git Sync or Git Integration), this page will walk you through configuring one of those methods.
 
@@ -16,14 +16,10 @@ If you've decided on a method that uses HTTPS or SSH authentication (Git Sync or
 ## Configure Git settings
 
 <Note>
-    In Mage Pro, the Git settings page is the legacy configuration workflow. For current Git configuration and deployments, use the Deploy app at `/apps/deploy`.
+    When you use the Git integration, MageML sets your local repo as a safe directory (i.e. `git config --global --add safe.directory <local repo path>`)
 </Note>
 
-<Note>
-    By using the Git integration through Mage, Mage will automatically set your local repo as a safe directory (i.e. `git config --global --add safe.directory <local repo path>`)
-</Note>
-
-To use the Mage Git integration, you will need to first configure Git settings. The following instructions are tailored to Github, but the Git integration can work with other Git providers as well, such as GitLab, BitBucket, or Azure DevOps:
+To use the MageML Git integration, you will need to first configure Git settings. The following instructions are tailored to Github, but the Git integration can work with other Git providers as well, such as GitLab, BitBucket, or Azure DevOps:
 
 <AccordionGroup>
     <Accordion title="SSH" icon="terminal">
@@ -33,7 +29,7 @@ To use the Mage Git integration, you will need to first configure Git settings. 
 
         The Git integration currently does not support repositories that require an SSH key with a passphrase.
 
-        You can, however, use the Mage terminal and the git CLI to perform your git actions.
+        You can, however, use the MageML terminal and the git CLI to perform your git actions.
         You'll still need to generate your SSH keys as normal. You can start a ssh-agent in the terminal so that
         you don't have to enter your SSH key passphrase every time you perform an action.
 
@@ -44,11 +40,7 @@ To use the Mage Git integration, you will need to first configure Git settings. 
                 Ensure that `.preferences.yaml` is added to your repo's `.gitignore` file so that your Git settings aren't pushed to Github.
             </Step>
             <Step title="Navigate to Git settings">
-                Navigate to the Wizard icon in the top right, then select _Settings_ to open your Mage settings.
-                <Frame>
-                <img src="https://mage-ai.github.io/assets/mage-settings.png"/>
-                </Frame>
-                There should be an option for _Git settings_ on the left side of the settings modal.
+                Click _Settings_ in the left navigation, then select _Git settings_ on the left side of the settings page.
             </Step>
             <Step title="Select SSH as the authentication type.">
                 Change the authentication type to SSH. The interface will change for you to input a remote repo url.
@@ -57,7 +49,7 @@ To use the Mage Git integration, you will need to first configure Git settings. 
                 </Frame>
             </Step>
             <Step title="Set up your SSH key">
-            If you haven't already, configure your SSH key— this will allow your instance to access GitHub. Our [instructions](/development/git/configure#generate-ssh-token#generate-ssh-token) can help if you're unfamiliar with the process.
+            If you haven't already, configure your SSH key. This will allow your instance to access GitHub. Our [instructions](#generate-ssh-token) can help if you're unfamiliar with the process.
             </Step>
             <Step title="Add Git details">
                 - `Remote repo url`: Your Github repository's remote url. Use the SSH link instead of HTTPS link.
@@ -67,13 +59,13 @@ To use the Mage Git integration, you will need to first configure Git settings. 
                 <Snippet file="configure-git-sync.mdx"/>
             </Step>
             <Step title="Fill out the remaining fields.">
-            Filling out these fields will allow Mage to recreate your git and SSH settings if they are deleted (i.e. if your container restarts):
+            Filling out these fields will allow MageML to recreate your git and SSH settings if they are deleted (i.e. if your container restarts):
             <Note>
             If you are using a AWS CodeCommit repository, you will need to set the username to the SSH Key ID of the SSH public key added to your AWS IAM user.
             </Note>
                 - `Username`: Your git username. If you push to your remote repo, this username will show up next to your commits.
                 - `Email`: Your git email. Used for the same purpose as your username.
-                - `SSH public key in base64`, `SSH public key in base64`: Enter your SSH public and private key encoded in base64. You can follow the instructions in the field description if you want to Mage to save your SSH keys.
+                - `SSH public key in base64`, `SSH private key in base64`: Enter your SSH public and private key encoded in base64. You can follow the instructions in the field description if you want MageML to save your SSH keys.
             </Step>
             <Step title="Save your Git settings">
                 Click "Save repository settings" to complete the setup.
@@ -86,18 +78,14 @@ To use the Mage Git integration, you will need to first configure Git settings. 
             Ensure that `.preferences.yaml` is added to your repo's `.gitignore` file so that your Git settings aren't pushed to Github.
             </Step>
             <Step title="Navigate to Git settings">
-                Navigate to the Wizard icon in the top right, then select _Settings_ to open your Mage settings.
-                <Frame>
-                <img src="https://mage-ai.github.io/assets/mage-settings.png"/>
-                </Frame>
-                There should be an option for _Git settings_ on the left side of the settings modal.
+                Click _Settings_ in the left navigation, then select _Git settings_ on the left side of the settings page.
             </Step>
             <Step title="Create a Git access token and save it for later">
                 - [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token)
                 - [GitLab](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html#create-a-personal-access-token)
             </Step>
             <Step title="Add Git details">
-                - `Remote repo url`: Your Github repository's remote url. Use the SSH link instead of HTTPS link.
+                - `Remote repo url`: Your Github repository's remote url. Use the HTTPS link.
                 - `Local directory path`: The directory in your machine that will be synced with the Github repository. If this field is omitted, it will default to the path determined by Python's `os.getcwd()`. You can check what your current working directory is in a Scratchpad block.
             </Step>
             <Step title="[Optional] Enable One-way Git Sync">
@@ -106,7 +94,7 @@ To use the Mage Git integration, you will need to first configure Git settings. 
             <Step title="Fill out the remaining fields.">
                 - `Username`: Your git username. If you push to your remote repo, this username will show up next to your commits.
                 - `Email`: Your git email. Used for the same purpose as your username.
-                - `Access token`: Enter the Git access token that you created in step 4.
+                - `Access token`: Enter the Git access token that you created in the step above.
             </Step>
             <Step title="Save your Git settings">
                 Click "Save repository settings" to complete the setup.
@@ -117,7 +105,7 @@ To use the Mage Git integration, you will need to first configure Git settings. 
 
 ### Generate SSH Token
 
-If you're using a method that requires an SSH token in Mage, this section will walk you through generating one. If you're using a method that requires an HTTPS token, you can skip this section.
+If you're using a method that requires an SSH token in MageML, this section will walk you through generating one. If you're using a method that requires an HTTPS token, you can skip this section.
 
 <AccordionGroup>
     <Accordion title="SSH" icon="terminal">

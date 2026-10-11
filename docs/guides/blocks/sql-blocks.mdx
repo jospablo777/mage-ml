@@ -13,22 +13,19 @@ description: "Execute SQL commands directly in your database, data warehouse, et
 
 ## Credentials
 
-Before starting, you need to add credentials so Mage can execute your SQL
+Before starting, you need to add credentials so MageML can execute your SQL
 commands.
 
 Follow the steps for the database or data warehouse of your choice:
 
 - [BigQuery](/integrations/databases/BigQuery#add-credentials)
 - [ClickHouse](/integrations/databases/ClickHouse#add-credentials)
-- [Databricks](/integrations/databases/Databricks#add-credentials) (Mage Pro only)
 - [Druid](/integrations/databases/Druid#add-credentials)
 - [DuckDB](/integrations/databases/DuckDB#add-credentials)
 - [MySQL](/integrations/databases/MySQL#add-credentials)
-- [Oracle](/design/data-loading#oracledb) (Mage Pro only)
 - [PostgreSQL](/integrations/databases/PostgreSQL#add-credentials)
 - [Redshift](/integrations/databases/Redshift#add-credentials)
 - [Snowflake](/integrations/databases/Snowflake#add-credentials)
-- [SQLite](/integrations/databases/SQLite#add-credentials) (Mage Pro only)
 - [Microsoft SQL Server](/integrations/databases/MicrosoftSQLServer#add-credentials)
 - [Trino](/integrations/databases/trino#add-credentials)
 
@@ -109,7 +106,7 @@ user's search path). Qualify tables with their schema.
 
 #### Dynamic `data_provider_profile`
 
-You can configure the `data_provider_profile` in a SQL block to resolve dynamically at runtime using [Mage variable syntax](/development/variables/referencing-variables).
+You can configure the `data_provider_profile` in a SQL block to resolve dynamically at runtime using [variable syntax](/development/variables/referencing-variables).
 
 This is done by modifying the pipeline’s `metadata.yaml` directly.
 
@@ -145,13 +142,6 @@ When you run a block, it’ll execute your SQL command, then store the results i
 a table created in your database or data warehouse.
 
 ### Using raw SQL
-
-<Warning>
-If you’re using version `0.9.69` or less and interpolating a SQL command from an upstream block that uses raw SQL:
-if the downstream block’s SQL command is referencing the upstream block using a variable such as `{{ df_1 }}` and ends the statement with a semi-colon (`;`), there is an interpolation error.
-To work around the error, remove the semi-colon `;`.
-A fix will be available in `0.9.70`.
-</Warning>
 
 If you toggle this setting, you’re responsible for writing the `CREATE TABLE` command and the
 `INSERT` command.
@@ -306,10 +296,6 @@ a.id = b.user_id LIMIT 1
 ---
 
 ## Variable interpolation
-
-<Note>
-    Available in versions >= `0.9.59`
-</Note>
 
 Interpolate values in the block’s code using data from:
 
@@ -471,17 +457,13 @@ FROM mage.mox
 
 ## Executing pure SQL
 
-<Note>
-    Available in versions >= `0.9.59`
-</Note>
+MageML pre-processes your SQL command before sending it to the final destination.
 
-Mage automatically pre-processes your SQL command before sending it to the final destination.
-
-The pre-process extracts and structures the command so that Mage can build upstream tables and
+The pre-process extracts and structures the command so that MageML can build upstream tables and
 properly display preview data.
 
 However, there are scenarios where the SQL command you write must be executed as is.
-You can disable Mage’s pre-processing by opening a SQL block and checking the box labeled
+You can disable this pre-processing by opening a SQL block and checking the box labeled
 <b>Use raw SQL</b> and <b>Disable query preprocessing</b>.
 
 <Frame>

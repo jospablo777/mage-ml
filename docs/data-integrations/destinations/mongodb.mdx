@@ -1,13 +1,13 @@
 ---
 title: MongoDB
-description: How to configure MongoDB as a destination in Mage to write data to a MongoDB database using a connection string.
+description: How to configure MongoDB as a destination in MageML to write data to a MongoDB database using a connection string.
 ---
 
 ## Overview
 
-Use **MongoDB** as a destination in Mage to export records from your pipelines directly into a MongoDB collection. This is ideal for persisting semi-structured JSON data, powering APIs, or integrating with operational data systems.
+Use **MongoDB** as a destination in MageML to export records from your pipelines directly into a MongoDB collection. This is ideal for persisting semi-structured JSON data, powering APIs, or integrating with operational data systems.
 
-Each record from your pipeline will be inserted as a document in the specified MongoDB collection. If no collection name is provided, Mage will default to using the stream name as the collection name.
+Each record from your pipeline will be inserted as a document in the specified MongoDB collection. If no collection name is provided, MageML uses the stream name as the collection name.
 
 ---
 
@@ -24,8 +24,8 @@ Each record from your pipeline will be inserted as a document in the specified M
 ## Notes
 
 - The `connection_string` should include any authentication, cluster details, or replica set info as needed (e.g., `mongodb+srv://user:pass@cluster0.mongodb.net/`).
-- If `table_name` is not set, Mage automatically uses the name of the stream that produced the data.
-- Mage inserts each record as a single MongoDB document in the target collection.
+- If `table_name` is not set, MageML uses the name of the stream that produced the data.
+- MageML inserts each record as a single MongoDB document in the target collection.
 
 ---
 

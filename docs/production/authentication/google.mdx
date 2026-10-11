@@ -2,19 +2,19 @@
 title: "Sign in with Google"
 sidebarTitle: "Google Sign-In"
 icon: "google"
-description: "Enable signing in with a Google account in Mage."
+description: "Enable signing in with a Google account in MageML."
 ---
 
 ### Pre-requisites
 
-First, you'll need to enable user authentication within Mage. You can find out more about
+User authentication must be on (it is by default). You can find out more about
 this in the [Overview page](/production/authentication/overview).
 
 ### Enable Google sign in
 
 <Note>
 
-Mage will request access for the following scopes:
+MageML requests access for the following scopes:
 
 ```
 https://www.googleapis.com/auth/userinfo.email
@@ -29,7 +29,7 @@ By default, users will not see the "Sign in with Google" option in their sign in
 
 <Step title="Add Oauth application">
 
-You will need to add Mage as an OAuth client in your Google Cloud Platform project.
+Create an OAuth client for MageML in your Google Cloud Platform project.
 For more instructions on how to do this, please see the [Google Cloud Platform documentation](https://developers.google.com/identity/protocols/oauth2/openid-connect#appsetup).
 
 </Step>
@@ -37,13 +37,13 @@ For more instructions on how to do this, please see the [Google Cloud Platform d
 <Step title="Retrieve credentials">
 
 Once you have created the credentials, you will need to get the application's client ID and client secret.
-You will also need to add `http(s)://<your-mage-url>/oauth` as an authorized redirect URI.
+You will also need to add `http(s)://<your-mageml-url>/oauth` as an authorized redirect URI.
 
 </Step>
 
 <Step title="Set environment variables">
 
-Set the following environment variables in your Mage setup.
+Set the following environment variables in your MageML setup.
 
 | Name | Value |
 | --- | --- |
@@ -54,7 +54,7 @@ Set the following environment variables in your Mage setup.
 
 </Steps>
 
-You should now see the "Sign in with Google" button when you start Mage and attempt to sign in.
+You should now see the "Sign in with Google" button when you start MageML and attempt to sign in.
 
 <Frame>
     <img

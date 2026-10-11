@@ -1,6 +1,6 @@
 ---
 title: Kafka
-description: How to configure Apache Kafka as a destination in Mage to publish JSON records to a Kafka topic using optional message keys.
+description: How to configure Apache Kafka as a destination in MageML to publish JSON records to a Kafka topic using optional message keys.
 ---
 
 ![Kafka logo](https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Apache_kafka_wordtype.svg/2560px-Apache_kafka_wordtype.svg.png)
@@ -9,9 +9,9 @@ description: How to configure Apache Kafka as a destination in Mage to publish J
 
 ## Overview
 
-Use **Apache Kafka** as a destination in Mage to stream records from your pipeline into Kafka topics in real time. Each record is serialized as a JSON object and sent to the configured `bootstrap_server`.
+Use **Apache Kafka** as a destination in MageML to stream records from your pipeline into Kafka topics in real time. Each record is serialized as a JSON object and sent to the configured `bootstrap_server`.
 
-If a `Key Property` is defined in the Source Schema, Mage will use the corresponding field value as the Kafka message key—enabling partitioned message routing and supporting downstream systems that rely on message keys.
+If a `Key Property` is defined in the Source Schema, MageML uses the corresponding field value as the Kafka message key. This enables partitioned message routing for downstream systems that rely on message keys.
 
 This is ideal for:
 - Real-time data streaming
@@ -26,7 +26,7 @@ This is ideal for:
 |--------------------|-------------------------------------------------------------------------------------------------------|---------|----------|
 | `bootstrap_server` | Comma-separated list of Kafka brokers with ports (e.g., `kafka:9093`, `broker1:9092,broker2:9092`).   | None    | ✅        |
 | `topic`            | Kafka topic to publish messages to.                                                                  | None    | ✅        |
-| `api_version`      | *(Optional)* Kafka API version to use. If unspecified, Mage will auto-detect the server version.      | None    | ❌        |
+| `api_version`      | *(Optional)* Kafka API version to use. If unspecified, the client detects the server version.        | None    | ❌        |
 
 ---
 

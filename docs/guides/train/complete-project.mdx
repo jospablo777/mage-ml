@@ -12,16 +12,25 @@ by running the following command:
 git clone https://github.com/mage-ai/demo_project.git
 ```
 
-## 2. Start the tool
+The demo project comes from upstream Mage.
+
+## 2. Start MageML
 
 <b>Docker</b>
+
+From the folder that contains `demo_project`, with an image built from the MageML repository's
+Dockerfile (`docker build -t mageml .`):
+
 ```bash
-./scripts/start.sh demo_project
+docker run -it -p 6789:6789 -v $(pwd):/home/src mageml /app/run_app.sh mage start demo_project
 ```
 
-<b>pip</b>
+<b>Source checkout</b>
+
+From your MageML checkout, after `uv sync`, pass the path to the project:
+
 ```bash
-mage start demo_project
+uv run --no-sync mage start /path/to/demo_project
 ```
 
 Open [http://localhost:6789](http://localhost:6789) in your browser.

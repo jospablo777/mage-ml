@@ -15,7 +15,7 @@ description: "Transformer Actions are a library of modular, reusable data transf
 
 ## Tutorial
 
-To introduce how the Transformer Actions library works, we will perform some cleaning actions on the Titanic Survival dataset. Open the Mage app and create a new pipeline. Add a data loader with the following code to load the Titanic Survival dataset:
+To introduce how the Transformer Actions library works, we will perform some cleaning actions on the Titanic Survival dataset. Open MageML and create a new pipeline. Add a data loader with the following code to load the Titanic Survival dataset:
 ```python
 from mage_ai.io.file import FileIO
 from pandas import DataFrame
@@ -234,7 +234,7 @@ payload = build_transformer_action(
     action_type=ActionType.IMPUTE,
     arguments=['age'],
     axis=Axis.COLUMN,
-    options={'strategy': 'constants', 'values': 32},
+    options={'strategy': ImputationStrategy.CONSTANT, 'value': 32},
 )
 ```
 See [Building Transformer Actions](#building-transformer-actions) for detailed information on using `build_transformer_action`.
@@ -490,7 +490,7 @@ Reformats values in column based on requested action. The currently supported re
     | "0.42 €"         | 0.42           |                                                 |
     | "-  3.42032 CAD" | -3.42032       |                                                 |
     | "Rs - 100000.23" | -100000.23     | Negation after symbol is supported              |
-- Convert string to datetime (`reformat = 'date_time_conversion'`): Converts a string value representing a datetime to a `pandas.Timestamp` object if correctly formatted, else converts to `None`.
+- Convert string to datetime (`reformat = 'date_format_conversion'`): Converts a string value representing a datetime to a `pandas.Timestamp` object if correctly formatted, else converts to `None`.
 - Trim whitespace (`reformat = 'trim'`): Removes leading and trailing whitespace from text columns.
 
 **Example**:
@@ -694,7 +694,7 @@ build_transformer_action(
 - **_options:_**
   - `strategy` (required): Specifies strategy to use. See table above or enum `ImputationStrategy`
   - `value` (optional): Value to fill in missing value with. This argument is ignored unless `strategy = 'constant'`, in which case the constant value used to impute is `value`.
-  - `timeseries_cols = []` (optional): Columns which specify the time series in the data frame. This argument is ignored unless `strategy = 'sequential'`, in which case the data frame is sorted along these columns to sequentially impute data in the order of the time series.
+  - `timeseries_index = []` (optional): Columns which specify the time series in the data frame. This argument is ignored unless `strategy = 'sequential'`, in which case the data frame is sorted along these columns to sequentially impute data in the order of the time series.
 
 ### Remove Outliers
 Removes multidimensional outliers in the data frame by analyzing numerical columns. If there are no numerical columns, no check is performed. Null values are ignored when checking for outliers.
@@ -723,12 +723,10 @@ build_transformer_action(
 **Args**
 - **_arguments:_** The set of columns to consider when checking for outliers. Of these columns, only numerical columns will be used to calculate outliers.
 - **_options:_**
-  - `method` (optional): Specifies outlier detection method to use:
+  - `method` (required): Specifies outlier detection method to use:
     - `'itree'`
     - `'lof'`
     - `'auto'`
-
-    Defaults to `'auto'`.
 
 # Row Actions
 
@@ -829,7 +827,7 @@ Clauses can be connected using the `and` and `or` operators and grouped with par
 - If columns contain any other special characters apart from those listed above, the column cannot be filtered. This is a fundamental limitation of pandas, see [here](https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.query.html?highlight=query#pandas.DataFrame.query:~:text=During%20parsing%20a,not%20be%20escaped) for more information.
 
 # Appendix: Column Types
-These are list of column types used in the Mage tool. One of these column types should be specified for every entry in the _options_ argument of a transformer action. The enum source is `mage_ai.data_cleaner.column_types.constants.ColumnType`.
+These are the column types used in MageML. One of these column types should be specified for every entry in the _options_ argument of a transformer action. The enum source is `mage_ai.data_cleaner.column_types.constants.ColumnType`.
 | Type                      | Enum                                   | String Value                | Description                                                                                           |
 | ------------------------- | -------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Category                  | `ColumnType.CATEGORY`                  | "category"                  | Categorical variable that takes one of some finite set of values. This set has at most 255 entries.   |

@@ -5,7 +5,7 @@ description: How to configure and authenticate the Airtable destination for load
 
 ![Airtable Logo](https://1000logos.net/wp-content/uploads/2022/05/Airtable-Logo.png)
 
-Connect Mage to Airtable as a **destination** to load data into your bases. This guide explains how to configure authentication using a Personal Access Token and the required base ID.
+Connect MageML to Airtable as a **destination** to load data into your bases. This guide explains how to configure authentication using a Personal Access Token and the required base ID.
 
 ---
 
@@ -27,7 +27,7 @@ To generate your Airtable Personal Access Token:
 1. Visit the [Airtable Developer Hub](https://airtable.com/developers/web/guides/personal-access-tokens).
 2. Click **Create token**.
 3. Assign the appropriate scopes (listed below).
-4. Save the token securely and include it in your Mage destination configuration.
+4. Save the token securely and include it in your MageML destination configuration.
 
 ---
 
@@ -35,8 +35,8 @@ To generate your Airtable Personal Access Token:
 
 Make sure your token includes the following scopes:
 
-- `schema.bases:write` — Required for schema access
-- `data.records:write` — Required to insert, update, or delete records in Airtable
+- `schema.bases:write`: required for schema access
+- `data.records:write`: required to insert, update, or delete records in Airtable
 
 ---
 
@@ -48,9 +48,9 @@ The `base_id` is a unique identifier for your Airtable base. It typically starts
 
 ### How should I store my Airtable token securely?
 
-Use environment variables or Mage’s secrets manager to store your token. Avoid hardcoding tokens in your configuration files or version control.
+Use environment variables or MageML secrets to store your token. Avoid hardcoding tokens in your configuration files or version control.
 
-### Can Mage write data to multiple Airtable bases?
+### Can MageML write data to multiple Airtable bases?
 
 Yes, but you must configure each destination with its corresponding `base_id` and ensure the access token has permission for each base.
 

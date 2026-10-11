@@ -15,20 +15,6 @@ description: "Authenticate with a Git provider then pull from a remote repositor
 On the homepage in the left side navigation, click the link labeled <b>Version control</b>.
 The URL could look something like this: http://localhost:6789/version-control.
 
-# Mage Pro
-
-Unlock seamless version control and effortless deployments with Mage Pro!
-Check out this [guide](/guides/data-sync/version-control-guide) to experience a more intuitive, user-friendly way to manage and deploy your code.
-
-
-<Frame>
-  <img
-    alt="Mage Pro deployments page"
-    src="https://mage-ai.github.io/assets/pro/features/deployments/deployments-page.png"
-  />
-</Frame>
-
-# Open source
 ## Demo
 
 <video
@@ -49,24 +35,15 @@ The Git directory is the local folder that will be linked to your remote reposit
 
 ### Authentication
 
-You will be able to authenticate with GitHub by default, but if you need to authenticate with
-GitHub Enterprise (GHE) or other providers, you will need to follow the steps below. You can
-authenticate with multiple git providers if you need to. Mage will attempt to use the oauth provider
-based on the URL of the remote.
+MageML has no built-in GitHub OAuth application, and no sign-in goes through Mage's servers.
+To authenticate with GitHub, use a personal access token or an SSH key in the Git settings
+(see [Configure Git](/guides/git/configure)), or register your own OAuth application by following
+the steps in `Authenticate with GitHub or GHE` below. Other providers also need the steps below.
+You can authenticate with multiple git providers. MageML uses the OAuth provider that matches the
+URL of the remote.
 
-<Warning>
-
-Mage authenticates with a default GitHub OAuth application that may not be able to access
-your repository depending on the repository or organization settings. If you encounter issues
-accessing your repository after authenticating with GitHub, you may need to create your own
-OAuth application that has access to the repositories you want to work with. You can follow the
-steps in the `Authenticate with GitHub or GHE` section below to connect Mage with your OAuth
-application.
-
-</Warning>
-
-When creating the OAuth app for GHE, BitBucket, GitLab, you will need to set the authorized
-callback URL to `http(s)://<your-mage-url>/oauth`.
+When creating the OAuth app for GitHub, GHE, BitBucket or GitLab, set the authorized
+callback URL to `http(s)://<your-mageml-url>/oauth`.
 
 <AccordionGroup>
 
@@ -74,10 +51,10 @@ callback URL to `http(s)://<your-mage-url>/oauth`.
 
 <Steps>
 
-<Step title="Register Mage in GitHub">
+<Step title="Register an OAuth app in GitHub">
 
-In order for Mage to authenticate with your GitHub host, you will need to add Mage as an
-authorized oauth application. You can follow the steps [here](https://docs.github.com/en/enterprise-cloud@latest/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+For MageML to authenticate with your GitHub host, register your own OAuth application
+in GitHub. You can follow the steps [here](https://docs.github.com/en/enterprise-cloud@latest/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
 to set it up.
 
 Make sure you copy the client id and client secret after the app is created.
@@ -86,9 +63,9 @@ Make sure you copy the client id and client secret after the app is created.
 
 <Step title="Update environment variables">
 
-You will need to set the following environment variables in your Mage environment:
+You will need to set the following environment variables in your MageML environment:
 
-1. GHE_HOSTNAME: the hostname of your GitHub instance. If you’re using non-enterprise GitHub or GitHub Enterprise Cloud, you should set this to `github.com`
+1. GHE_HOSTNAME: the URL of your GitHub instance. If you’re using github.com or GitHub Enterprise Cloud, set this to `https://github.com`
 2. GHE_CLIENT_ID: the client id you retrieved in the previous step
 3. GHE_CLIENT_SECRET: the client secret you retrieved in the previous step
 
@@ -108,10 +85,9 @@ You should now be able to authenticate with GitHub and follow the rest of the st
 
 <Steps>
 
-<Step title="Add Mage as an OAuth consumer">
+<Step title="Add an OAuth consumer">
 
-In order for Mage to authenticate with your BitBucket, you will need to add Mage as an
-OAuth consumer. You can follow the steps [here](https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/)
+For MageML to authenticate with your BitBucket, add an OAuth consumer for it. You can follow the steps [here](https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/)
 to set it up.
 
 Make sure you copy the key and secret after the consumer is created.
@@ -120,14 +96,14 @@ Make sure you copy the key and secret after the consumer is created.
 
 <Step title="Update environment variables">
 
-You will need to set the following environment variables in your Mage environment:
+You will need to set the following environment variables in your MageML environment:
 
 1. BITBUCKET_OAUTH_KEY: the key you retrieved in the previous step
 2. BITBUCKET_OAUTH_SECRET: the secret you retrieved in the previous step
 
 </Step>
 
-<Step title="Authenticate Mage with Bitbucket">
+<Step title="Authenticate with Bitbucket">
 
 You should now be able to authenticate with Bitbucket and follow the rest of the steps in this document.
 
@@ -141,16 +117,16 @@ You should now be able to authenticate with Bitbucket and follow the rest of the
 
 <Note>
 
-Mage will request `read_user`, `write_repository`, and `api` scopes from GitLab in order
+MageML requests `read_user`, `write_repository`, and `api` scopes from GitLab in order
 to perform the necessary git actions.
 
 </Note>
 
 <Steps>
 
-<Step title="Add Mage Oauth application">
+<Step title="Add an OAuth application">
 
-In order for Mage to authenticate with your GitLab, you will need to add a Mage oauth application.
+For MageML to authenticate with your GitLab, add an OAuth application for it.
 You can follow the steps [here](https://docs.gitlab.com/ee/integration/oauth_provider.html)
 to set it up.
 
@@ -160,7 +136,7 @@ Make sure you copy the Application ID and Secret after the oauth app is created.
 
 <Step title="Update environment variables">
 
-You will need to set the following environment variables in your Mage environment:
+You will need to set the following environment variables in your MageML environment:
 
 1. GITLAB_CLIENT_ID: the application ID you retrieved in the previous step
 2. GITLAB_CLIENT_SECRET: the secret you retrieved in the previous step
@@ -168,7 +144,7 @@ You will need to set the following environment variables in your Mage environmen
 
 </Step>
 
-<Step title="Authenticate Mage with GitLab">
+<Step title="Authenticate with GitLab">
 
 You should now be able to authenticate with GitLab and follow the rest of the steps in this document.
 
@@ -184,7 +160,7 @@ You should now be able to authenticate with GitLab and follow the rest of the st
 
 <Step title="Enable Active Directory integration">
 
-First, you will need to enable the [Active Directory](https://docs.mage.ai/production/authentication/microsoft) integration in order for Mage to authenticate your user.
+First, enable the [Active Directory](/production/authentication/microsoft) integration so MageML can authenticate your user. It needs your own Azure application.
 
 </Step>
 
@@ -193,11 +169,11 @@ First, you will need to enable the [Active Directory](https://docs.mage.ai/produ
 Once the Active Directory integration is enabled, you simply need to add your DevOps organization as an environment variable.
 
 ```bash
-export AZURE_DEVOPS_ORGANIZATION=<organization_name>`
+export AZURE_DEVOPS_ORGANIZATION=<organization_name>
 ```
 </Step>
 
-<Step title="Authenticate Mage with Azure DevOps">
+<Step title="Authenticate with Azure DevOps">
 
 You should now be able to authenticate with Azure DevOps and follow the rest of the steps in this document.
 
@@ -215,7 +191,7 @@ Click the Authenticate button next to your Git Provider to start the authenticat
     <img alt="Authenticate" src="https://mage-ai.github.io/assets/version-control/authentication.png" />
 </Frame>
 
-After authorizing Mage, you’ll be redirected back to the initial page and an access token will
+After authorizing the application, you’ll be redirected back to the initial page and an access token will
 be in the URL as a parameter. This access token is saved in your application’s database;
 it never leaves your application’s database.
 
@@ -224,9 +200,9 @@ it never leaves your application’s database.
 Enter a name for your new remote. For the remote URL, you must use the `https` version of the
 GitHub repository (as opposed to the `SSH` version).
 
-For example, the remote URL for Mage is `https://github.com/mage-ai/mage-ai.git`.
+For example, the remote URL for MageML is `https://github.com/jospablo777/mage-ml.git`.
 
-Note that a remote added via HTTPS/SSH authentication _will not_ work— only a remote in the format above is accepted.
+Note that a remote added via HTTPS/SSH authentication _will not_ work. Only a remote in the format above is accepted.
 
 Once you fill in both input text fields, click the button labeled <b>Create new remote</b>.
 

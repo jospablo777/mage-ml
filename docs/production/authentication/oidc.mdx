@@ -1,12 +1,12 @@
 ---
 title: "Sign in with OIDC"
 sidebarTitle: "OIDC"
-description: "Enable signing in with OIDC in Mage."
+description: "Enable signing in with OIDC in MageML."
 ---
 
 ### Pre-requisites
 
-First, you'll need to enable user authentication within Mage. You can find out more about
+User authentication must be on (it is by default). You can find out more about
 this in the [Overview page](/production/authentication/overview).
 
 ### Enable OIDC sign in
@@ -17,21 +17,21 @@ By default, users will not see the "Sign in with OIDC" option in their sign in p
 
 <Step title="Add Oauth application">
 
-You will need to add Mage as a client for your OIDC provider. The way to do this will
-be different depending on your OIDC provider. The redirect URL should be `https://<your-mage-url>/oauth`.
+Register MageML as a client with your OIDC provider. The way to do this will
+be different depending on your OIDC provider. The redirect URL should be `https://<your-mageml-url>/oauth`.
 
 </Step>
 
 <Step title="Retrieve credentials">
 
-Once you have registered Mage, you will need to retrieve the client ID, client secret,
+Once you have registered MageML, you will need to retrieve the client ID, client secret,
 and the OIDC discovery URL for your provider.
 
 </Step>
 
 <Step title="Set environment variables">
 
-Set the following environment variables in your Mage setup.
+Set the following environment variables in your MageML setup.
 
 | Name | Value |
 | --- | --- |
@@ -43,9 +43,9 @@ Set the following environment variables in your Mage setup.
 
 </Steps>
 
-You should now see a "Sign in with OIDC" button when you start Mage and attempt to sign in.
+You should now see a "Sign in with OIDC" button when you start MageML and attempt to sign in.
 
-Mage will fetch the following OIDC endpoints from the discovery URL:
+MageML fetches the following OIDC endpoints from the discovery URL:
 
 * authorization_endpoint
 * token_endpoint

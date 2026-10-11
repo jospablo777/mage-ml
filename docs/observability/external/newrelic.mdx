@@ -7,7 +7,7 @@ sidebarTitle: "New Relic"
 ## Enable New Relic
 
 You will need to add `ENABLE_NEW_RELIC` environment variable as `true` in order to use
-New Relic in Mage.
+New Relic in MageML.
 
 ## New Relic Configuration File
 
@@ -20,16 +20,16 @@ license_key = INSERT_YOUR_LICENSE_KEY
 app_name = INSERT_YOUR_APP_NAME
 ...
 
-An example `example_newrelic.ini` file is attacehd in Mage repo under folder `integrations/newrelic`.
+An example `example_newrelic.ini` file is in the MageML repository under `integrations/newrelic`.
 
 Add path of your newrelic configuration into environment variable `NEW_RELIC_CONFIG_PATH`.
 
-## Using New Relic in Mage
+## Using New Relic in MageML
 
-Monitoring with New Relic will be enabled the next time you start the Mage server.
+Monitoring with New Relic will be enabled the next time you start the MageML server.
 
 The following logs and errors will be reported to New Relic:
 
 * Trigger runs.
-* Mage scheduler.
+* MageML scheduler.
 * `mage run` CLI command.

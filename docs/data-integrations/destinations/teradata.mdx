@@ -1,13 +1,13 @@
 ---
 title: Teradata
-description: How to configure Teradata as a destination in Mage to write pipeline data to a Teradata database using standard host, port, and user credentials.
+description: How to configure Teradata as a destination in MageML to write pipeline data to a Teradata database using standard host, port, and user credentials.
 ---
 
 ## Overview
 
-Use **Teradata** as a destination in Mage to write structured pipeline data into a Teradata database table. This is ideal for analytics, reporting, or operational workloads in enterprise environments using Teradata’s scalable architecture.
+Use **Teradata** as a destination in MageML to write structured pipeline data into a Teradata database table. This is ideal for analytics, reporting, or operational workloads in enterprise environments using Teradata’s scalable architecture.
 
-Mage connects using direct credentials and supports exporting to tables in any schema the user has access to.
+MageML connects using direct credentials and supports exporting to tables in any schema the user has access to.
 
 ---
 
@@ -27,7 +27,7 @@ Provide the following credentials when configuring Teradata as a **destination**
 
 ## Notes
 
-- Mage will automatically create the target table if it doesn't exist, unless configured otherwise.
+- MageML creates the target table if it doesn't exist.
 - Ensure the user has `CREATE TABLE`, `INSERT`, and `SELECT` privileges in the target schema.
 - Teradata uses ANSI SQL but has some syntax differences (e.g., date handling, identity columns) to be aware of.
 - This integration is well-suited for batch ingestion pipelines and bulk exports into data marts.

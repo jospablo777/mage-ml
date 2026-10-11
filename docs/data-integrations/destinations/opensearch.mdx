@@ -1,13 +1,13 @@
 ---
 title: OpenSearch
-description: How to configure OpenSearch as a destination in Mage to stream pipeline data into OpenSearch indices using JSON records with support for authentication, ECS metadata, and SSL.
+description: How to configure OpenSearch as a destination in MageML to stream pipeline data into OpenSearch indices using JSON records with support for authentication, ECS metadata, and SSL.
 ---
 
 ## Overview
 
-Use **OpenSearch** as a destination in Mage to publish JSON-formatted records into an OpenSearch index. This is ideal for search indexing, log aggregation, and real-time analytics.
+Use **OpenSearch** as a destination in MageML to publish JSON-formatted records into an OpenSearch index. This is ideal for search indexing, log aggregation, and real-time analytics.
 
-By default, Mage uses the pipeline’s `table` name to set the OpenSearch **index name**. You can also define dynamic index patterns using JSONPath expressions.
+By default, MageML uses the pipeline’s `table` name to set the OpenSearch **index name**. You can also define dynamic index patterns using JSONPath expressions.
 
 ---
 
@@ -31,8 +31,8 @@ By default, Mage uses the pipeline’s `table` name to set the OpenSearch **inde
 
 ## Notes
 
-- Mage automatically converts each record into JSON format and indexes it into the specified OpenSearch index.
-- If `index_schema_fields` is configured, Mage will use the JSONPath-extracted values from each record to generate dynamic index names.
+- MageML converts each record into JSON format and indexes it into the specified OpenSearch index.
+- If `index_schema_fields` is configured, MageML uses the JSONPath-extracted values from each record to generate dynamic index names.
 - `metadata_fields` is useful for setting OpenSearch ECS-compatible fields like `_id`, `@timestamp`, etc., from the incoming data stream.
 - Authentication can be configured using **basic auth**, **bearer tokens**, or **API key pairs**.
 - For production use, we recommend enabling `https` and providing a trusted `ssl_ca_file`.

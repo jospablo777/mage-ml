@@ -1,6 +1,6 @@
 ---
 title: Trino
-description: How to configure Trino as a destination in Mage to write pipeline data to Trino-compatible catalogs using supported connectors such as PostgreSQL, Iceberg, Delta Lake, and more.
+description: How to configure Trino as a destination in MageML to write pipeline data to Trino-compatible catalogs using supported connectors such as PostgreSQL, Iceberg, Delta Lake, and more.
 ---
 
 ![Trino logo](https://trino.io/assets/trino-og.png)
@@ -9,7 +9,7 @@ description: How to configure Trino as a destination in Mage to write pipeline d
 
 ## Overview
 
-Use **Trino** as a destination in Mage to write data to a variety of underlying data sources including **PostgreSQL**, **Delta Lake**, **Iceberg**, **S3**, and more—via Trino’s supported catalog and connector system.
+Use **Trino** as a destination in MageML to write data to a variety of underlying data sources including **PostgreSQL**, **Delta Lake**, **Iceberg**, **S3**, and more, through Trino’s catalog and connector system.
 
 Trino enables federated query and write access across databases, data warehouses, and data lakes, all through a unified SQL engine.
 
@@ -40,7 +40,7 @@ You must provide the following parameters when configuring Trino as a destinatio
 
 When using the **Delta Lake connector** with a **Glue metastore**, tables created with the `WITH LOCATION` property will **not delete underlying data** when dropped.
 
-To avoid residual files when Mage creates temp tables, set:
+To avoid residual files when MageML creates temp tables, set:
 
 ```yaml
 ignore_location_for_temp_tables: true

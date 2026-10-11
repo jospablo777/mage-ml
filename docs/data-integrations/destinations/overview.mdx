@@ -6,11 +6,11 @@ description: "A destination is a system where you want the data to be exported. 
 
 ## Singer spec
 
-Mage uses the data engineering community standard for data integrations called the
+MageML uses the data engineering community standard for data integrations called the
 [Singer spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
 
 In addition,
-Mage further standardizes the spec and provides common classes and methods to make implementing them easier and faster.
+MageML further standardizes the spec and provides common classes and methods to make implementing them easier and faster.
 
 ## Folder structure
 
@@ -21,8 +21,8 @@ All destinations should be a subclass of the `Destination` class defined in
 
 ## Configs
 
-* `maximum_batch_size_mb`: Destination processes records the batches. The maximum batch size can be configured.
+* `maximum_batch_size_mb`: The destination processes records in batches. The maximum batch size can be configured.
 
 ## Contribute
 
-Want to learn about contributing a destination? Read on [here](/contributing/data-integrations/add-new-destination)!
+To contribute a destination, see [Add a new destination](/contributing/data-integrations/add-new-destination).

@@ -1,15 +1,13 @@
 ---
 title: "Reuse blocks"
 sidebarTitle: "Reuse blocks"
-description: "Learn how to reuse blocks within pipelines, across pipelines, and across projects in Mage for better code organization and efficiency."
+description: "Reuse blocks within pipelines, across pipelines, and across projects in MageML."
 icon: "share"
 ---
 
-import { ProOnly } from '/snippets/pro/only.mdx';
-
 ## Overview
 
-Mage allows you to reuse blocks across multiple pipelines within the same project, enabling you to build modular, maintainable data pipelines. When you reuse a block, any changes made to that block will automatically apply to all pipelines that use it.
+MageML lets you reuse blocks across multiple pipelines within the same project, enabling you to build modular, maintainable data pipelines. When you reuse a block, any changes made to that block will automatically apply to all pipelines that use it.
 
 ### Benefits of reusing blocks
 
@@ -25,10 +23,9 @@ Mage allows you to reuse blocks across multiple pipelines within the same projec
 |----------|--------|-------------|----------|
 | **Within Pipeline** | [Replicate blocks](#replicate-blocks-within-a-pipeline) | Right-click to duplicate blocks in the same pipeline | Similar data sources, parallel processing, testing variations |
 | **Across Pipelines** | [Drag & drop](#drag-and-drop-from-file-browser) | Drag blocks from file browser to pipeline canvas | Quick reuse of existing blocks |
-| **Across Pipelines** | [Search bar](#use-the-search-block-bar) | Search and add blocks from all projects | Finding specific blocks across projects |
+| **Across Pipelines** | [Search bar](#use-the-search-block-bar) | Search and add existing blocks | Finding specific blocks |
 | **Code Reuse** | [Utility files](#create-utility-files-and-import-in-blocks) | Create shared Python modules and import them | Small functions, data processing utilities |
 | **Code Reuse** | [Block templates](#use-block-templates) | Create reusable templates with placeholders | Common patterns with slight variations |
-| **Across Projects** | [Pro templates](#block-templates-across-projects-mage-pro) | Use Mage Pro's template library | Organization-wide standardization |
 | **Across Projects** | [Export/import](#cross-project-block-sharing) | Export blocks from one project to another | Sharing between different projects |
 
 ## How block sharing works
@@ -79,19 +76,13 @@ This is the most intuitive way to reuse blocks across pipelines:
 - `callbacks`, `conditionals`, `custom`, `data_exporters`, `data_loaders`
 - `dbt`, `dbts`, `markdowns`, `scratchpads`, `sensors`, `transformers`
 
-<Info>
-  **Mage OSS**: Version 0.9.64 or greater is required to add callback and conditional blocks from the file browser.
-  
-  **Mage Pro**: Callback and conditional blocks are supported by default in all versions.
-</Info>
-
 ### Use the search block bar
 
-Search for existing blocks across all your projects:
+Search for existing blocks:
 
 1. **Click in the search bar** at the bottom of the pipeline editor
 2. **Type keywords** to search for existing blocks (e.g., "load titanic")
-3. **Browse the search results** showing blocks from different projects
+3. **Browse the search results**
 4. **Click on a block** from the dropdown to add it to your pipeline
 5. **The block will be added** to your current pipeline
 
@@ -105,9 +96,7 @@ Search for existing blocks across all your projects:
 </Frame>
 
 <Info>
-  **Mage OSS**: The "Add new block v2" feature must be enabled in project settings and is available in standard (batch) pipelines. If recently enabled, Mage must be restarted for blocks to be indexed.
-  
-  **Mage Pro**: This feature is enabled by default and available in all pipeline types.
+  The "Add new block v2" feature must be enabled in project settings and is available in standard (batch) pipelines. If recently enabled, restart MageML so the blocks are indexed.
 </Info>
 
 ### Replicate blocks within a pipeline
@@ -187,45 +176,12 @@ Create reusable block templates for common patterns:
 1. **Navigate to Templates** - Click "Templates" in the left navigation menu
 2. **Create new template** - Click "New block template" button
 3. **Define template properties** - Set template UUID, block type, and language
-4. **Edit template content** - Write the template code with placeholders
-5. **Save template** - Click "Save template" to create the template
+4. **Edit template content** - Write the template code
+5. **Save template** - Click "Create new template"
 
 Learn more about [creating and using user-defined templates](/guides/blocks/user-defined-templates).
 
 ## Reusing blocks across projects
-
-### Block templates across projects (Mage Pro)
-
-<ProOnly source="block-templates" />
-
-<Info>
-  **Mage Pro feature**: Mage Pro supports configuring a central template library that shares templates across projects, allowing you to create and share reusable block templates across multiple projects in your organization.
-</Info>
-
-**Creating block templates:**
-
-1. **Navigate to Templates** - Click "Templates" in the left navigation menu
-2. **Create new template** - Click "New block template" button
-3. **Define template properties** - Set template UUID, block type, and language
-4. **Edit template content** - Write the template code with placeholders
-5. **Save template** - Click "Save template" to create the template
-
-**Using block templates:**
-
-1. **Open pipeline editor** - Navigate to the pipeline where you want to add the block
-2. **Add new block** - Click the "+" button to add a new block
-3. **Browse templates** - Select "Browse templates" from the block creation options
-4. **Choose a source** - Select **Core** for Mage's built-in templates or **Team** for templates created in your workspace
-5. **Select template** - Browse or search the folders, then select a template to preview its code
-6. **Add to workflow** - Click **Add to workflow**. Core templates are added directly; Team templates open the add-block form so you can enter a block name, then click **Save and add**.
-
-The **dbt** folder contains three workflow starters: select a model or snapshot
-from a file, run all models with optional selection or exclusion rules, or
-start with a generic dbt command. Selecting the file-based starter opens the
-file browser so you can choose the model or snapshot to add.
-
-When you add a callback or conditional block from an existing block's add-on panel,
-Mage opens the same template browser scoped to the matching block type.
 
 ### Cross-project block sharing
 
@@ -292,10 +248,8 @@ When you modify a shared block:
 
 ### Deleting shared blocks
 
-When you delete a shared block from the pipeline editor, choose whether to remove only the pipeline reference or remove the block file too:
-
-- **Remove from this pipeline only** - Removes the block from the current pipeline and keeps the shared block file available to other pipelines.
-- **Remove and delete the block file** - Permanently deletes the block file only when the block is not a replica and no other pipeline uses that file. This option is disabled when deleting the file would break another pipeline or replica.
+- **Delete block** in the pipeline editor removes the block from the current pipeline and keeps the block file, so other pipelines that use it are not affected. Scratchpad and markdown block files are deleted when no other pipeline uses them.
+- Deleting the block file from the file browser removes the block from every pipeline that uses it. If the block has downstream blocks, MageML asks for confirmation first and then removes it as a dependency from those blocks.
 
 ### Detaching blocks when needed
 

@@ -1,6 +1,6 @@
 ---
 title: Salesforce
-description: How to configure Salesforce as a destination in Mage to write records using OAuth or username/password authentication with support for insert, update, upsert, and bulk actions.
+description: How to configure Salesforce as a destination in MageML to write records using OAuth or username/password authentication with support for insert, update, upsert, and bulk actions.
 ---
 
 ![Salesforce logo](https://user-images.githubusercontent.com/78053898/198753571-7c033641-75a2-4338-b257-ee37a159915e.png)
@@ -9,7 +9,7 @@ description: How to configure Salesforce as a destination in Mage to write recor
 
 ## Overview
 
-Use **Salesforce** as a destination in Mage to export records into standard or custom Salesforce objects. Mage supports both **OAuth 2.0** and **username/password/token** authentication methods, and enables `insert`, `update`, `upsert`, `delete`, and `hard_delete` actions.
+Use **Salesforce** as a destination in MageML to export records into standard or custom Salesforce objects. MageML supports both **OAuth 2.0** and **username/password/token** authentication methods, and enables `insert`, `update`, `upsert`, `delete`, and `hard_delete` actions.
 
 You can also configure behavior for bulk failures, define external ID fields for upserts, and optionally override the source-to-object mapping using `table_name`.
 
@@ -41,13 +41,13 @@ You can authenticate to Salesforce using either of the following methods:
 
 - Set `client_id`, `client_secret`, and `refresh_token`.
 - Recommended for connected apps and secure access with refreshable tokens.
-- [How to obtain credentials →](https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/sources/salesforce/README.md#how-to-get-your-client_id-client_secret-and-refresh_token)
+- [How to obtain credentials →](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/sources/salesforce/README.md#how-to-get-your-client_id-client_secret-and-refresh_token)
 
 ### Option 2: Username / Password
 
 - Set `username`, `password`, and `security_token`.
 - Recommended for sandbox/testing environments.
-- Ensure that IP restrictions are disabled or add your Mage IP to the trusted IP list.
+- Ensure that IP restrictions are disabled or add the IP of your MageML server to the trusted IP list.
 
 ---
 
