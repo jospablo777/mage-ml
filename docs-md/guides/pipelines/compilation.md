@@ -1,0 +1,77 @@
+# Compile pipelines
+
+*Compilation is a performance optimization: MageML checks your blocks and builds chains of blocks ahead of production runs, so pipelines run faster.*
+
+Compilation is a performance optimization. MageML checks a pipeline's blocks for errors and
+builds them ahead of its production runs (triggers, schedules, backfills and API runs), so
+those runs start without building anything and run faster. Running a block in the editor is
+unchanged.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/diagrams/compiled-chains.dark.svg">
+  <img src="../../../docs/images/diagrams/compiled-chains.light.svg" alt="A pandas block, a compiled chain of three Rust blocks and an R chain, with Arrow conversions between languages" />
+</picture>
+
+## What compiling does
+
+| Blocks | What happens |
+| --- | --- |
+| Python | Each block is checked for syntax errors; a block without its decorated function gets a warning |
+| R | Each block is parsed with R; the project's R environment is checked and prepared |
+| Rust | Consecutive Rust blocks build into one program whose queries Polars plans together; a Rust block that something else needs on its own (it has tests, it is an exporter, it uses another database profile) builds as its own program |
+| SQL | Not compiled: SQL blocks run in the database as they are |
+
+In production runs, blocks of the same language that follow each other run as one chain:
+consecutive Rust blocks as one program, consecutive R blocks in one R session, and Python
+blocks in one process. Each switch between languages ends a chain and converts the data, so
+a pipeline in one language runs fastest. See
+[Pipeline performance](../../production/pipeline-performance.md) for the measurements.
+
+## When it runs
+
+You rarely need to start it:
+
+- **After you save** a block or the pipeline, once saves stop for 3 seconds.
+- **When you turn on a trigger**, so its first scheduled run does not wait for a build.
+- **When the server starts**, for pipelines with an active trigger. Set
+  `MAGE_COMPILE_ON_START=off` to skip it.
+- **When you ask**: **Compile now** in the panel, or **Compile** in a pipeline's right-click
+  menu in the pipelines list.
+
+A compilation for code that has not changed reuses what was built, so it finishes in
+seconds.
+
+## See the result
+
+The button next to the kernel in the editor header shows the state:
+
+| Button | Meaning |
+| --- | --- |
+| **Compile** | Not compiled yet, or the code changed since the last compilation |
+| **Compiling** | A compilation is running; the panel shows its progress |
+| **Compiled** | Compiled, and the code has not changed since |
+| **Compile failed** | A block has an error; the panel shows it with the file and line |
+| **Optimized** | Nothing to compile: the pipeline has no Python, R or Rust blocks |
+
+Click it to open the panel. It lists each step with its result (passed, built, up to date or
+failed) and time, when the pipeline last compiled and whether the code changed since, and
+the pipeline's languages in order, such as `Python → Rust ×2 → R ×2`, with a hint when a
+single-language pipeline would run faster.
+
+The pipelines list has a **Compiled** column with the same state and a compile button on
+each row.
+
+## When it fails
+
+Fix the error the panel shows and save; the pipeline compiles again on its own. A failed
+compilation does not stop a production run from starting: Rust blocks build when they first
+run instead, and the run reports any error in the block's log.
+
+## From the API
+
+```text
+POST /api/pipeline_compilations   {"pipeline_compilation": {"pipeline_uuid": "sales"}}
+GET  /api/pipeline_compilations/sales
+```
+
+The POST starts a compilation; the GET returns its progress and result.

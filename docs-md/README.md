@@ -282,6 +282,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
     - [Kafka streaming pipeline](guides/streaming/tutorials/streaming-pipeline.md)
     - [Local stream to dbt transform](guides/streaming/tutorials/magic-devcontainer.md)
     - [RabbitMQ streaming pipeline](guides/streaming/tutorials/streaming-pipeline-rabbitmq.md)
+- [Compile pipelines](guides/pipelines/compilation.md)
 - [Importing pipelines](guides/pipelines/importing-pipelines.md)
 - [Pipeline environments](guides/pipelines/pipeline-environments.md)
 - [Run records and reproducing runs](guides/pipelines/run-records.md)

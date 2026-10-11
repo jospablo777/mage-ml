@@ -450,6 +450,7 @@
                   }
                 ]
               },
+              "guides/pipelines/compilation",
               "guides/pipelines/importing-pipelines",
               "guides/pipelines/pipeline-environments",
               "guides/pipelines/run-records",
