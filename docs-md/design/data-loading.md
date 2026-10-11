@@ -806,7 +806,9 @@ Initializes the OracleDB data loading client.
     -   `verbose (bool)`: Enables verbose output printing. Defaults to `True`.
     -   `**kwargs`: Additional settings for creating psycopg2 connection
 
-To switch OracleDB mode to `thick`, it is required to use the customized oracle Dockerfile in `integrations/oracle/Dockerfile`.
+Thick mode needs Oracle Instant Client. Build the MageML image with it from
+`integrations/oracle/Dockerfile`, which starts from your MageML image (`docker build -t mageml .`,
+then `docker build -t mageml-oracle integrations/oracle`).
 
 <h3> Factory Methods </h3>
 

@@ -18,11 +18,6 @@ description:
   PySpark in the Python environment that runs your blocks.
 </Warning>
 
-<Note>
-  The Dockerfile templates in the repository's `integrations/spark` and `integrations/hadoop`
-  folders start from the upstream `mageai/mageai` image, so they build upstream Mage with
-  Spark, not MageML.
-</Note>
 
 ## Kubernetes
 
@@ -46,8 +41,8 @@ echo "Visit http://127.0.0.1:80 to use your application"
 Find the Spark Master URL at the top of the web page.
 
 ### 2. Build a Docker image with Spark environment
-* Download the [Dockerfile template](https://github.com/jospablo777/mage-ml/blob/master/integrations/spark/Dockerfile) with a Spark environment.
-* Change the current directory to the directory that contains the `Dockerfile`. Build the docker image with the command `docker build -t mage_spark .`
+* From the repository root, build the `spark` target of the Dockerfile:
+  `docker build --target spark -t mage_spark .`
 
 ### 3. Run MageML in a Kubernetes cluster with the `SPARK_MASTER_HOST` environment variable
 * Use the docker image built from step 2 as the container image in your Kubernetes yaml file.
@@ -107,8 +102,8 @@ In other blocks, you can access the Spark session from the `kwargs` via `kwargs[
 ## Standalone Spark cluster
 
 ### 1. Build a Docker image with Spark environment
-* Download the [Dockerfile template](https://github.com/jospablo777/mage-ml/blob/master/integrations/spark/Dockerfile) with a Spark environment.
-* Change the current directory to the directory that contains the `Dockerfile`. Build the docker image with the command `docker build -t mage_spark .`
+* From the repository root, build the `spark` target of the Dockerfile:
+  `docker build --target spark -t mage_spark .`
 
 ### 2. Start MageML with `SPARK_MASTER_HOST` environment variable
 Type this command in your terminal to start MageML using Docker
@@ -144,8 +139,8 @@ In other blocks, you can access the Spark session from the `kwargs` via `kwargs[
 ## Custom Spark Session at the Project Level
 
 ### 1. Build a Docker image with Spark environment
-* Download the [Dockerfile template](https://github.com/jospablo777/mage-ml/blob/master/integrations/spark/Dockerfile) with a Spark environment.
-* Build the docker image with the command `docker build -t mage_spark .`
+* From the repository root, build the `spark` target of the Dockerfile:
+  `docker build --target spark -t mage_spark .`
 
 ### 2. Start MageML using Docker with the following command in your terminal
 
@@ -208,8 +203,8 @@ print(spark.sql('select 1'))
 It is also possible to use different Spark Sessions in different pipelines under the same project.
 
 ### 1. Build a Docker image with Spark environment
-* Download the [Dockerfile template](https://github.com/jospablo777/mage-ml/blob/master/integrations/spark/Dockerfile) with a Spark environment.
-* Build the docker image with the command `docker build -t mage_spark .`
+* From the repository root, build the `spark` target of the Dockerfile:
+  `docker build --target spark -t mage_spark .`
 
 ### 2. Start MageML using Docker with the following command in your terminal
 
@@ -288,21 +283,22 @@ It is also possible to create a custom Spark session using Python code. Here are
 
 ## Hadoop and Yarn cluster for Spark
 
-### 1. Build a Docker image with a Hadoop Yarn environment
-* Download the [Dockerfile template](https://github.com/jospablo777/mage-ml/blob/master/integrations/hadoop/Dockerfile) with a Hadoop environment.
-* Build the docker image with the command `docker build -t mage_hadoop .`
+### 1. Start MageML with your cluster's configuration
 
-
-### 2. Start MageML with the following command in your terminal using Docker
+From the repository root, build the `spark` target, then start it with the directory that
+holds the cluster's `core-site.xml` and `yarn-site.xml`:
 
 ```bash
-docker run -it --name mage_hadoop -p 6789:6789 -v $(pwd):/home/src mage_hadoop \
-  /app/run_app_with_hadoop.sh mage start demo_project
+docker build --target spark -t mage_spark .
+docker run -it -p 6789:6789 -v $(pwd):/home/src \
+  -v /path/to/hadoop/conf:/etc/hadoop/conf:ro \
+  -e HADOOP_CONF_DIR=/etc/hadoop/conf -e YARN_CONF_DIR=/etc/hadoop/conf \
+  mage_spark mage start demo_project
 ```
-Notes
-* `demo_project` is the name of your project, you can change it to anything you want
 
-### 3. Run PySpark code using Hadoop Yarn
+`demo_project` is the name of your project.
+
+### 2. Run PySpark code using Hadoop Yarn
 
 * Change the `metadata.yaml` file in the main pipeline folder to include the following Spark settings:
 ```yaml
