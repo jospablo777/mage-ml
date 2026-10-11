@@ -92,15 +92,15 @@ playground-reseed:
 
 # Exports live_traffic, live_minute_kpis and live_device_revenue as one service, then
 # builds and starts it: it writes to the analytics schema every minute.
-LIVE_PIPELINES := live_traffic live_minute_kpis live_device_revenue
+# shop-live is saved in playground/shop_lab/pipeline_services.yaml (the Services page).
 playground-service:
 	mkdir -p playground/service
 	$(PLAYGROUND) run --rm --no-deps -v "$(CURDIR)/playground/service:/home/src/service" mage \
-		mage export service /home/src/shop_lab $(LIVE_PIPELINES) --name shop-live \
+		mage export service /home/src/shop_lab --service shop-live \
 		--out /home/src/service --force
 	BUILDX_BUILDER=$(PLAYGROUND_BUILDER) $(PLAYGROUND) --profile service build live-service
 	$(PLAYGROUND) --profile service up -d live-service
-	@echo "The service runs its pipelines every minute; make playground-console shows them."
+	@echo "live_traffic runs every minute and starts the other two; make playground-console shows them."
 
 # The service's terminal dashboard.
 playground-console:

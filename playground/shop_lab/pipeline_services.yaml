@@ -1,0 +1,17 @@
+# Services exported from this project, edited by the Services page in MageML.
+# Export one with: mage export service <project> --service <name> --out <folder>
+services:
+  shop-live:
+    pipelines:
+    - live_traffic
+    - live_minute_kpis
+    - live_device_revenue
+    description: Live shop traffic every minute, then per-minute KPIs and revenue per device
+      after each traffic run
+    after_runs:
+    - after: live_traffic
+      run: live_minute_kpis
+      when: completed
+    - after: live_traffic
+      run: live_device_revenue
+      when: completed

@@ -78,8 +78,8 @@ The values are random but the same on every seed.
 | `rust_session_scores` | Rust blocks: sessions from a million events with Polars expressions, then a per-row engagement score on every core with Rayon; block tests in Rust |
 | `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, computes exact decimal margins per day and category and customer value tiers in two parallel branches, writes both back with binary COPY |
 | `live_traffic` | New web events every minute, more or fewer as the hour goes on, appended to `analytics.live_events`; keeps six hours |
-| `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis` |
-| `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended each minute to `analytics.live_device_revenue` |
+| `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis`; starts after each `live_traffic` run |
+| `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended to `analytics.live_device_revenue` after each `live_traffic` run |
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one
 by one. Exported tables are in `analytics`:
@@ -110,13 +110,15 @@ the exported tables with their row counts.
   match PostgreSQL's own sums to the cent.
 - **Types**: decimals, zoned timestamps, nullable integers, uuid, jsonb, text[] and NaN
   are all in the data; check them in the outputs and in the exported tables.
-- **A live service**: `make playground-service` exports `live_traffic`, `live_minute_kpis`
-  and `live_device_revenue` as one service and starts it next to the playground. Each runs
-  every minute and writes to the `analytics` schema, so the tables grow and the dashboard
-  moves. `make playground-console` opens the service's terminal dashboard (`q` quits), and
-  its HTTP API is at http://localhost:8081 with the token `playground`. Their triggers
-  carry `envs: [prod]`, so MageML's own scheduler, which runs as dev, leaves them to the
-  service. `make playground-service-stop` stops it.
+- **A live service**: `make playground-service` exports the service `shop-live`, saved in
+  `pipeline_services.yaml` (open **Services** in the left menu to see it and its checks), and
+  starts it next to the playground. `live_traffic` runs every minute, and each of its runs
+  starts `live_minute_kpis` and `live_device_revenue` (after-run triggers), so the
+  `analytics` tables grow and the dashboard moves. `make playground-console` opens the
+  service's terminal dashboard (`q` quits), and its HTTP API is at http://localhost:8081
+  with the token `playground`. The minute trigger carries `envs: [prod]`, so MageML's own
+  scheduler, which runs as dev, leaves it to the service. `make playground-service-stop`
+  stops it.
 - **Pipeline services**: export a pipeline as a Docker service that runs without MageML,
   and run it once against the playground database. From the repository root:
 

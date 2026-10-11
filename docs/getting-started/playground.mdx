@@ -57,8 +57,8 @@ On the first start the database is seeded with about 3 million rows, in about a 
 | `rust_session_scores` | Rust blocks: sessions from a million events with Polars, a per-row score on every core with Rayon, tests in Rust |
 | `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, exact decimal margins, writes back with binary COPY |
 | `live_traffic` | New web events every minute, more or fewer as the hour goes on, appended to `analytics.live_events`; keeps six hours |
-| `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis` |
-| `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended each minute to `analytics.live_device_revenue` |
+| `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis`; starts after each `live_traffic` run |
+| `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended to `analytics.live_device_revenue` after each `live_traffic` run |
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one by
 one.
@@ -77,11 +77,13 @@ one.
   of a block builds it, later runs of unchanged code start at once.
 - **Documentation.** Open **Documentation** in a pipeline's navigation and write its README,
   or upload an HTML report. See [Pipeline documentation](/guides/pipelines/documentation).
-- **A live service.** `make playground-service` exports `live_traffic`,
-  `live_minute_kpis` and `live_device_revenue` as one service and starts it. Each runs
-  every minute and writes to the `analytics` schema; `make playground-console` opens its
-  dashboard, where the runs and throughput move. Its API is at http://localhost:8081 with
-  the token `playground`. See [Service console](/production/service-console).
+- **A live service.** `make playground-service` exports the service `shop-live`, saved in
+  `pipeline_services.yaml` (see it under **Services** in the left menu), and starts it.
+  `live_traffic` runs every minute and each run starts `live_minute_kpis` and
+  `live_device_revenue`; all three write to the `analytics` schema. `make
+  playground-console` opens its dashboard, where the runs and throughput move. Its API is
+  at http://localhost:8081 with the token `playground`. See
+  [Service console](/production/service-console).
 - **Pipeline services.** Export a pipeline and run it without MageML against the playground
   database:
 
