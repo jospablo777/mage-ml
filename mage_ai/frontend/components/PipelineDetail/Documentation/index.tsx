@@ -20,7 +20,7 @@ import { useError } from '@context/Error';
 
 export type PipelineDocumentationType = {
   exists: boolean;
-  format?: 'markdown' | 'quarto';
+  format?: 'markdown' | 'quarto' | 'html';
   path?: string;
   pipeline_uuid: string;
   quarto_available: boolean;
@@ -30,6 +30,7 @@ export type PipelineDocumentationType = {
 };
 
 const FORMAT_LABELS = {
+  html: 'HTML',
   markdown: 'Markdown',
   quarto: 'Quarto',
 };
@@ -113,8 +114,10 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
   }, [unsaved]);
 
   const startEditing = useCallback((startFormat?: 'markdown' | 'quarto') => {
-    setDraft(doc?.exists ? doc.source : doc?.template || '');
-    setFormat(startFormat || doc?.format || 'markdown');
+    // An uploaded HTML file is not edited here: writing starts from the template.
+    const html = doc?.format === 'html';
+    setDraft(doc?.exists && !html ? doc.source : doc?.template || '');
+    setFormat(startFormat || (doc?.format === 'quarto' ? 'quarto' : 'markdown'));
     setEditing(true);
   }, [doc]);
 
@@ -159,6 +162,31 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
     };
     reader.readAsDataURL(file);
   }, [uploadImage]);
+
+  // An HTML file of your own, such as a report exported from Quarto, Jupyter or R
+  // Markdown, is saved as README.html and shown as it is, without running its scripts.
+  const htmlInput = useRef<HTMLInputElement>(null);
+  const uploadHtml = useCallback((file: File) => {
+    file.text().then((source) => {
+      // @ts-ignore
+      save({ pipeline_documentation: { format: 'html', source } });
+    });
+  }, [save]);
+  const htmlPicker = (
+    <input
+      accept=".html,.htm"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) {
+          uploadHtml(file);
+        }
+        event.target.value = '';
+      }}
+      ref={htmlInput}
+      style={{ display: 'none' }}
+      type="file"
+    />
+  );
 
   const saveDraft = useCallback((source?: string) => {
     // @ts-ignore
@@ -324,13 +352,24 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
                 </Text>
               </Spacing>
             </ChoiceStyle>
+            <Spacing ml={2} />
+            <ChoiceStyle onClick={() => htmlInput.current?.click()} type="button">
+              <Text bold>Upload an HTML file</Text>
+              <Spacing mt={1}>
+                <Text muted small>
+                  A report you made elsewhere, such as an export from Quarto, Jupyter or R
+                  Markdown. Shown as it is; its scripts do not run, so embed its images.
+                </Text>
+              </Spacing>
+            </ChoiceStyle>
+            {htmlPicker}
           </FlexContainer>
         </Spacing>
       </Spacing>
     );
   }
 
-  const showQuarto = doc.format === 'quarto' && doc.quarto_available;
+  const showQuarto = (doc.format === 'quarto' && doc.quarto_available) || doc.format === 'html';
 
   return (
     <Spacing p={3}>
@@ -345,9 +384,19 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
               : ''}
           </Text>
         </FlexContainer>
-        <Button onClick={() => startEditing()} primary>
-          Edit
-        </Button>
+        <FlexContainer alignItems="center">
+          {htmlPicker}
+          <Button loading={isSaving} onClick={() => htmlInput.current?.click()}>
+            {doc.format === 'html' ? 'Replace HTML' : 'Upload HTML'}
+          </Button>
+          <Spacing ml={1} />
+          <Button
+            onClick={() => startEditing(doc.format === 'html' ? 'markdown' : undefined)}
+            primary
+          >
+            {doc.format === 'html' ? 'Write in Markdown' : 'Edit'}
+          </Button>
+        </FlexContainer>
       </FlexContainer>
 
       {doc.format === 'quarto' && !doc.quarto_available && (
@@ -367,7 +416,9 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
                 <FlexContainer alignItems="center">
                   <Spinner small />
                   <Spacing ml={1} />
-                  <Text muted small>Rendering with Quarto</Text>
+                  <Text muted small>
+                    {doc.format === 'html' ? 'Loading' : 'Rendering with Quarto'}
+                  </Text>
                 </FlexContainer>
               </Spacing>
             )}

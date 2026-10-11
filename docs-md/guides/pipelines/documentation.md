@@ -20,14 +20,21 @@ Git and travels with it.
 
 ## Write it
 
-A pipeline without documentation offers two formats:
+A pipeline without documentation offers three choices:
 
 | Format | File | Best for |
 | --- | --- | --- |
 | Markdown (recommended) | `README.md` | Text, tables, links, code and images, previewed as you type |
 | Quarto | `README.qmd` | Reports that use Quarto features such as cross-references and callouts |
+| Your own HTML file | `README.html` | A report made elsewhere, such as an export from Quarto, Jupyter or R Markdown |
 
-Both start from a template with sections for the purpose, inputs, outputs, schedule,
+**Upload an HTML file** (or **Upload HTML** on a documented pipeline) saves the file you
+choose, up to 20 MB, and shows it as it is. Its scripts do not run, so use a
+self-contained export with its images embedded, such as `quarto render --embed-resources`,
+`jupyter nbconvert --to html --embed-images` or R Markdown's `self_contained: true`.
+**Write in Markdown** replaces it with a Markdown document.
+
+Markdown and Quarto start from a template with sections for the purpose, inputs, outputs, schedule,
 owners and operations, and list the pipeline's data loaders and exporters.
 
 **Edit** opens the source beside a live preview. **Save** (or Cmd+S / Ctrl+S) writes the
