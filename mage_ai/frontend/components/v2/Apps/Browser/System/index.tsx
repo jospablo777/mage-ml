@@ -147,7 +147,7 @@ function SystemBrowser({ app, operations }: AppLoaderProps, ref: React.Ref<HTMLD
                       { divider: true },
                       {
                         uuid: 'Projects',
-                        items: [{ uuid: 'New Mage project' }, { uuid: 'New dbt project' }],
+                        items: [{ uuid: 'New Mage project', label: () => 'New MageML project' }, { uuid: 'New dbt project' }],
                       },
                     ]);
                   }}

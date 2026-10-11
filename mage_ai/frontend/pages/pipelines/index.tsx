@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MutateFunction, useMutation } from 'react-query';
 import { useRouter } from 'next/router';
 
-import AIControlPanel from '@components/AI/ControlPanel';
 import BrowseTemplates from '@components/CustomTemplates/BrowseTemplates';
 import Button from '@oracle/elements/Button';
 import ButtonTabs from '@oracle/components/Tabs/ButtonTabs';
@@ -27,9 +26,8 @@ import PipelineType, {
   PIPELINE_TYPE_INVALID,
   PIPELINE_TYPE_LABEL_MAPPING,
 } from '@interfaces/PipelineType';
-import Preferences from '@components/settings/workspace/Preferences';
 import PrivateRoute from '@components/shared/PrivateRoute';
-import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
+import { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
@@ -48,6 +46,7 @@ import {
   Check,
   Circle,
   Clone,
+  DocumentIcon,
   File,
   Open,
   Pause,
@@ -103,7 +102,6 @@ import { range, sortByKey } from '@utils/array';
 import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils';
 import { useModal } from '@context/Modal';
 import { initiateDownload } from '@utils/downloads';
-import Setup from '@components/AI/Setup';
 
 const TAB_RECENT = {
   Icon: Schedule,
@@ -141,7 +139,6 @@ function PipelineListPage() {
   const timeout = useRef(null);
 
   const {
-    fetchProjects,
     project,
   } = useProject();
 
@@ -643,84 +640,16 @@ function PipelineListPage() {
     uuid: 'browse_templates',
   });
 
-  const [showConfigureProjectModal, hideConfigureProjectModal] = useModal(({
-    cancelButtonText,
-    header,
-    onCancel,
-    onSaveSuccess,
-  }: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => (
-    <ErrorProvider>
-      <Preferences
-        cancelButtonText={cancelButtonText}
-        contained
-        header={<Setup />}
-        onCancel={() => {
-          onCancel?.();
-          hideConfigureProjectModal();
-        }}
-        onSaveSuccess={(project: ProjectType) => {
-          fetchProjects();
-          hideConfigureProjectModal();
-          onSaveSuccess?.(project);
-        }}
-      />
-    </ErrorProvider>
-  ), {
-  }, [
-    fetchProjects,
-  ], {
-    background: true,
-    uuid: 'configure_project',
-  });
-
-  const [showAIModal, hideAIModal] = useModal(() => (
-    <ErrorProvider>
-      <AIControlPanel
-        createPipeline={createPipeline}
-        isLoading={isLoadingCreate}
-        onClose={hideAIModal}
-      />
-    </ErrorProvider>
-  ), {
-  }, [
-    createPipeline,
-    isLoadingCreate,
-  ], {
-    background: true,
-    disableClickOutside: true,
-    disableCloseButton: true,
-    uuid: 'AI_modal',
-  });
-
   const newPipelineButtonMenuItems = useMemo(() => getNewPipelineButtonMenuItems(
     createPipeline,
     {
-      showAIModal: () => {
-        if (!project?.openai_api_key) {
-          showConfigureProjectModal({
-            onSaveSuccess: () => {
-              showAIModal();
-            },
-          });
-        } else {
-          showAIModal();
-        }
-      },
       showBrowseTemplates,
       showCreatePipelineModal,
       showImportPipelineModal,
     },
   ), [
     createPipeline,
-    project,
-    showAIModal,
     showBrowseTemplates,
-    showConfigureProjectModal,
     showCreatePipelineModal,
     showImportPipelineModal,
   ]);
@@ -1204,6 +1133,7 @@ function PipelineListPage() {
           blocks,
           created_at: createdAt,
           description,
+          has_documentation: hasDocumentation,
           last_compiled: lastCompiled,
           schedules,
           tags,
@@ -1340,6 +1270,21 @@ function PipelineListPage() {
             flex={1} justifyContent="flex-end"
             key={`chevron_icon_${idx}`}
           >
+            <Button
+              {...sharedOpenButtonProps}
+              onClick={(e) => {
+                pauseEvent(e);
+                router.push('/pipelines/[pipeline]/docs', `/pipelines/${uuid}/docs`);
+              }}
+              title={hasDocumentation ? 'Documentation' : 'Add documentation'}
+            >
+              <DocumentIcon
+                default={!hasDocumentation}
+                muted={!hasDocumentation}
+                size={2 * UNIT}
+              />
+            </Button>
+            <Spacing mr={1} />
             <Button
               {...sharedOpenButtonProps}
               onClick={() => {

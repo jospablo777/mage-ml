@@ -143,6 +143,8 @@ export default interface PipelineType {
   keep_block_outputs?: boolean;
   // When the pipeline last compiled; null when it has no Python, R or Rust blocks.
   last_compiled?: LastCompiledType;
+  // A README.md or README.qmd in the pipeline folder.
+  has_documentation?: boolean;
   conditionals?: BlockType[];
   created_at?: string;
   data_integration?: {

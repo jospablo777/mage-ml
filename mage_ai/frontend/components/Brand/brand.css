@@ -1,0 +1,173 @@
+.mageml-brand {
+  --mageml-brand-accent: #e88b61;
+  --mageml-brand-text: #f5f5f7;
+  --mageml-brand-mark-start: #7d55ec;
+  --mageml-brand-mark-end: #2ab2fe;
+  --mageml-brand-gap: 9px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  max-width: 100%;
+  color: var(--mageml-brand-text);
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.mageml-brand[data-brand-theme='light'] {
+  --mageml-brand-accent: #a34820;
+  --mageml-brand-text: #1c1d22;
+  --mageml-brand-mark-start: #6b3fce;
+  --mageml-brand-mark-end: #0869b4;
+}
+
+@media (prefers-color-scheme: light) {
+  .mageml-brand[data-brand-theme='auto'] {
+    --mageml-brand-accent: #a34820;
+    --mageml-brand-text: #1c1d22;
+    --mageml-brand-mark-start: #6b3fce;
+    --mageml-brand-mark-end: #0869b4;
+  }
+}
+
+[data-theme='dark'] .mageml-brand[data-brand-theme='auto'] {
+  --mageml-brand-accent: #e88b61;
+  --mageml-brand-text: #f5f5f7;
+  --mageml-brand-mark-start: #7d55ec;
+  --mageml-brand-mark-end: #2ab2fe;
+}
+
+[data-theme='light'] .mageml-brand[data-brand-theme='auto'] {
+  --mageml-brand-accent: #a34820;
+  --mageml-brand-text: #1c1d22;
+  --mageml-brand-mark-start: #6b3fce;
+  --mageml-brand-mark-end: #0869b4;
+}
+
+.mageml-brand__visual {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mageml-brand-gap);
+  white-space: nowrap;
+}
+
+.mageml-brand__mark {
+  display: block;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 22.4px;
+}
+
+.mageml-brand__name {
+  letter-spacing: -0.035em;
+}
+
+.mageml-brand__suffix {
+  color: var(--mageml-brand-accent);
+}
+
+.mageml-brand__start {
+  stop-color: var(--mageml-brand-mark-start);
+}
+
+.mageml-brand__end {
+  stop-color: var(--mageml-brand-mark-end);
+}
+
+.mageml-brand--small {
+  --mageml-brand-gap: 7px;
+  font-size: 19px;
+}
+
+.mageml-brand--small .mageml-brand__mark {
+  width: 26px;
+  height: 18.2px;
+}
+
+.mageml-brand--large {
+  --mageml-brand-gap: 13px;
+  font-size: 36px;
+}
+
+.mageml-brand--large .mageml-brand__mark {
+  width: 48px;
+  height: 33.6px;
+}
+
+.mageml-brand--compact {
+  --mageml-brand-gap: 3px;
+}
+
+.mageml-brand__initials {
+  font-size: 0.55em;
+  letter-spacing: -0.06em;
+}
+
+.mageml-brand--compact.mageml-brand--small {
+  width: 44px;
+}
+
+.mageml-brand--compact.mageml-brand--small .mageml-brand__mark {
+  width: 24px;
+  height: 16.8px;
+}
+
+.mageml-brand--mark {
+  width: 32px;
+  height: 22.4px;
+}
+
+.mageml-brand--mark.mageml-brand--small {
+  width: 26px;
+  height: 18.2px;
+}
+
+.mageml-brand--mark.mageml-brand--large {
+  width: 48px;
+  height: 33.6px;
+}
+
+.mageml-brand--mark .mageml-brand__visual,
+.mageml-brand--mark .mageml-brand__mark {
+  width: 100%;
+  height: 100%;
+}
+
+.mageml-brand--monochrome {
+  --mageml-brand-accent: currentColor !important;
+  --mageml-brand-mark-start: currentColor !important;
+  --mageml-brand-mark-end: currentColor !important;
+  color: inherit;
+}
+
+a.mageml-brand {
+  min-height: 24px;
+  min-width: 24px;
+  border-radius: 4px;
+  touch-action: manipulation;
+}
+
+a.mageml-brand:hover {
+  text-decoration: none;
+}
+
+a.mageml-brand:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+@media (forced-colors: active) {
+  .mageml-brand[data-brand-theme] {
+    --mageml-brand-accent: currentColor !important;
+    --mageml-brand-mark-start: currentColor !important;
+    --mageml-brand-mark-end: currentColor !important;
+    color: CanvasText !important;
+  }
+
+  a.mageml-brand[data-brand-theme] {
+    color: LinkText !important;
+  }
+}

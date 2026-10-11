@@ -3,8 +3,6 @@ import { useRouter } from 'next/router';
 
 import AuthToken from '@api/utils/AuthToken';
 import api from '@api';
-import { isDemo } from '@utils/environment';
-import { logUserOS } from '@utils/gtag';
 
 const PATHS_TO_IGNORE_AUTH_CHECK = [
   '/sign-in',
@@ -18,12 +16,6 @@ const Home = () => {
 
   const { data: data } = api.statuses.list();
   const dataStatus = useMemo(() => data?.statuses?.[0], [data]);
-
-  useEffect(() => {
-    if (isDemo()) {
-      logUserOS();
-    }
-  }, []);
 
   useEffect(() => {
     if (PATHS_TO_IGNORE_AUTH_CHECK.includes(basePath)) {

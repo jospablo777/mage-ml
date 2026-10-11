@@ -1,7 +1,5 @@
-import * as gtag from '@utils/gtag';
 import { BlockLanguageEnum, BlockTypeEnum } from '@interfaces/BlockType';
 import { ScreenSizeEnum, screenSizeName } from '@styles/theme';
-import { isDemo } from '@utils/environment';
 
 export const EVENT_ACTION_TYPE_CLICK = 'click';
 export const EVENT_ACTION_TYPE_IMPRESSION = 'impression';
@@ -119,12 +117,10 @@ export function getDefaultEventParameters(
   return defaultEventParameters;
 }
 
+// MageML sends no analytics; callers keep their events for a project-owned sink.
 export function logEventCustom(
   eventName: string,
   eventParameters: EventParametersType = {},
 ) {
-  // This method currently only logs Google Analytics events in the Mage demo app.
-  if (isDemo()) {
-    gtag.logGAEvent(eventName, eventParameters);
-  }
+  return { eventName, eventParameters };
 }

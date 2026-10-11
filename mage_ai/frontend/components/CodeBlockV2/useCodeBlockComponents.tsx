@@ -43,7 +43,6 @@ export default function useCodeBlockComponents({
     setErrors,
     setSelected,
     setTextareaFocused,
-    showConfigureProjectModal,
     sideBySideEnabled,
     status,
     textareaFocused,
@@ -70,7 +69,6 @@ export default function useCodeBlockComponents({
   const {
     featureEnabled,
     featureUUIDs,
-    project,
   } = useProject();
 
   const enabled = useMemo(() =>
@@ -126,13 +124,11 @@ export default function useCodeBlockComponents({
           onMountCallback={onMountCallback}
           pipeline={pipeline}
           placeholder={placeholder}
-          project={project}
           runBlockAndTrack={runBlockAndTrack}
           selected={selected}
           setSelected={setSelected}
           setTextareaFocused={setTextareaFocused}
           sideMenuVisible={sideMenuVisible}
-          showConfigureProjectModal={showConfigureProjectModal}
           textareaFocused={textareaFocused}
           theme={theme}
           updatePipeline={updatePipeline}
@@ -155,13 +151,11 @@ export default function useCodeBlockComponents({
     onMountCallback,
     pipeline,
     placeholder,
-    project,
     runBlockAndTrack,
     selected,
     setSelected,
     setTextareaFocused,
     sideMenuVisible,
-    showConfigureProjectModal,
     textareaFocused,
     theme,
     updatePipeline,

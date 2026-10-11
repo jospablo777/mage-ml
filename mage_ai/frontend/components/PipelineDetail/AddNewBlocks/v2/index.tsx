@@ -10,7 +10,6 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import KeyboardTextGroup from '@oracle/elements/KeyboardTextGroup';
 import Link from '@oracle/elements/Link';
 import Panel from '@oracle/components/Panel';
-import ProjectType from '@interfaces/ProjectType';
 import SearchResultType, { SearchResultTypeEnum } from '@interfaces/SearchResultType';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
@@ -20,8 +19,6 @@ import {
   ABBREV_BLOCK_LANGUAGE_MAPPING,
 } from '@interfaces/BlockType';
 import {
-  AISparkle,
-  AlertTriangle,
   BlockCubePolygon,
   File as FileIcon,
   TemplateShapes,
@@ -42,29 +39,17 @@ import {
   KEY_SYMBOL_META,
   KEY_CODE_ESCAPE,
 } from '@utils/hooks/keyboardShortcuts/constants';
-import { LOCAL_STORAGE_KEY_SETUP_AI_LATER } from '@storage/constants';
 import { UNITS_BETWEEN_SECTIONS, UNIT } from '@oracle/styles/units/spacing';
-import { get, set } from '@storage/localStorage';
 import { getColorsForBlockType } from '@components/CodeBlock/index.style';
 import { onSuccess } from '@api/utils/response';
 import { pauseEvent } from '@utils/events';
 import { useError } from '@context/Error';
 import { useKeyboardContext } from '@context/Keyboard';
-import Setup from '@components/AI/Setup';
-
-// WORKING ON storing a user clicking setup later on the project modal
 
 type AddNewBlocksV2Props = {
   focused?: boolean;
-  project?: ProjectType;
   searchTextInputRef?: any;
   setFocused?: (focused: boolean) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
 } & ButtonItemsProps;
 
 function AddNewBlocksV2({
@@ -75,12 +60,10 @@ function AddNewBlocksV2({
   focused: focusedProp,
   itemsDBT,
   pipelineType,
-  project,
   searchTextInputRef,
   setAddNewBlockMenuOpenIdx,
   setFocused: setFocusedProp,
   showBrowseTemplates,
-  showConfigureProjectModal,
   showGlobalDataProducts,
 }: AddNewBlocksV2Props) {
   const timeoutRef = useRef(null);
@@ -99,21 +82,6 @@ function AddNewBlocksV2({
   const [focusedState, setFocusedState] = useState<boolean>(false);
   const [inputValue, setInputValue] = useState<string>(null);
   const [searchResult, setSearchResult] = useState<SearchResultType>(null);
-  const [setupAILater, setSetupAILaterState] = useState<boolean>(null);
-  const setSetupAILater = useCallback((val: boolean) => {
-    setSetupAILaterState(val);
-    set(LOCAL_STORAGE_KEY_SETUP_AI_LATER, val);
-  }, []);
-
-  useEffect(() => {
-    if (setupAILater === null) {
-      const val = get(LOCAL_STORAGE_KEY_SETUP_AI_LATER, false);
-      setSetupAILater(val);
-    }
-  }, [
-    setSetupAILater,
-    setupAILater,
-  ]);
 
   const focused = useMemo(() => {
     if (typeof focusedProp !== 'undefined') {
@@ -213,36 +181,14 @@ function AddNewBlocksV2({
   const autocompleteItems = useMemo(() => {
     const q = searchResult?.uuid;
 
-    const arr = results?.map((blockActionObject: BlockActionObjectType) => ({
+    return results?.map((blockActionObject: BlockActionObjectType) => ({
       itemObject: blockActionObject,
       searchQueries: [q],
       value: blockActionObject?.uuid,
     }));
-
-    if (q) {
-      const generateBlock = {
-        itemObject: {
-          description: q,
-          object_type: ObjectType.GENERATE_BLOCK,
-          title: 'Generate block using AI (beta)',
-        },
-        searchQueries: [q],
-        value: 'generate_block',
-      };
-      if (setupAILater) {
-        // @ts-ignore
-        arr.push(generateBlock);
-      } else {
-        // @ts-ignore
-        arr.unshift(generateBlock);
-      }
-    }
-
-    return arr;
   }, [
     results,
     searchResult,
-    setupAILater,
   ]);
 
   const focusArea = useMemo(() => (
@@ -254,8 +200,6 @@ function AddNewBlocksV2({
     compact,
     refTextInput,
   ]);
-
-  const hasOpenAIAPIKey = useMemo(() => !!project?.openai_api_key, [project]);
 
   return (
     <ClickOutside
@@ -348,20 +292,11 @@ function AddNewBlocksV2({
                           default?: boolean;
                           fill?: string;
                           size: number;
-                          warning?: boolean;
                         } = {
                           fill: getColorsForBlockType(blockType).accent,
                           size: ICON_SIZE,
                         };
-                        let Icon = BLOCK_TYPE_ICON_MAPPING[blockType];
-
-                        const isGenerateBlock = ObjectType.GENERATE_BLOCK === objectType;
-                        if (isGenerateBlock) {
-                          Icon = AISparkle;
-                          iconProps.default = false;
-                          iconProps.fill = null;
-                          iconProps.warning = true;
-                        }
+                        const Icon = BLOCK_TYPE_ICON_MAPPING[blockType];
 
                         const displayText =
                           `${title}${description ? ': ' + description : ''}`.slice(0, 80);
@@ -390,7 +325,7 @@ function AddNewBlocksV2({
                             <Spacing mr={1} />
 
                             <Text monospace muted uppercase>
-                              {isGenerateBlock ? 'AI' : ABBREV_BLOCK_LANGUAGE_MAPPING[language]}
+                              {ABBREV_BLOCK_LANGUAGE_MAPPING[language]}
                             </Text>
 
                             <Spacing mr={1} />
@@ -406,13 +341,6 @@ function AddNewBlocksV2({
                             {ObjectType.MAGE_TEMPLATE === objectType && (
                               <BlockCubePolygon muted size={ICON_SIZE} />
                             )}
-
-                            {isGenerateBlock && hasOpenAIAPIKey && (
-                              <AISparkle muted size={ICON_SIZE} />
-                            )}
-                            {isGenerateBlock && !hasOpenAIAPIKey && (
-                              <AlertTriangle muted size={ICON_SIZE} />
-                            )}
                           </RowStyle>
                         );
                       },
@@ -421,35 +349,12 @@ function AddNewBlocksV2({
                   onSelectItem={({
                     itemObject: blockActionObject,
                   }: ItemType) => {
-                    const {
-                      object_type: objectType,
-                    } = blockActionObject;
-
-                    if (ObjectType.GENERATE_BLOCK === objectType && !hasOpenAIAPIKey) {
-                      showConfigureProjectModal?.({
-                        cancelButtonText: 'Set this up later',
-                        header: <Setup />,
-                        onCancel: () => {
-                          setSetupAILater(true);
-                        },
-                        onSaveSuccess: (project: ProjectType) => {
-                          if (project?.openai_api_key) {
-                            addNewBlock({
-                              block_action_object: blockActionObject,
-                            });
-                            setInputValue(null);
-                            setSearchResult(null);
-                          }
-                        },
-                      });
-                    } else {
-                      addNewBlock({
-                        block_action_object: blockActionObject,
-                        require_unique_name: false,
-                      });
-                      setInputValue(null);
-                      setSearchResult(null);
-                    }
+                    addNewBlock({
+                      block_action_object: blockActionObject,
+                      require_unique_name: false,
+                    });
+                    setInputValue(null);
+                    setSearchResult(null);
                   }}
                   uuid={componentUUID}
                 />

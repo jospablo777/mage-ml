@@ -248,7 +248,7 @@ function SyncData() {
                       small
                     >
                       cat ~/.ssh/id_ed25519.pub | base64 | tr -d \\n && echo
-                    </Link> in terminal to get base64 encoded public key and paste the result here. The key will be stored as a Mage secret. You will see the secret below if you have already added it.
+                    </Link> in terminal to get base64 encoded public key and paste the result here. The key will be stored as a MageML secret. You will see the secret below if you have already added it.
                   </Text>
                 </Spacing>
               );
@@ -270,7 +270,7 @@ function SyncData() {
                       small
                     >
                       cat ~/.ssh/id_ed25519 | base64 | tr -d \\n && echo
-                    </Link> instead. The key will be stored as a Mage secret. You will see the secret below if you have already added it.
+                    </Link> instead. The key will be stored as a MageML secret. You will see the secret below if you have already added it.
                   </Text>
                 </Spacing>
               );
@@ -478,7 +478,7 @@ function SyncData() {
       </Spacing>
       <Spacing mt={UNITS_BETWEEN_ITEMS_IN_SECTIONS}>
         <Text>
-          These fields are required to help Mage configure your Git settings. These settings
+          These fields are required to help MageML configure your Git settings. These settings
           will be specific to your user.
         </Text>
       </Spacing>
@@ -638,7 +638,7 @@ function SyncData() {
               </Text>
               <Spacing mt={2} />
               <Text>
-                Reset will tell Mage to try to clone your repository from remote. This will
+                Reset will ask MageML to clone your repository from remote. This will
                 also <Text bold danger inline>overwrite</Text> all your local changes and 
                 reset any settings you may have configured for your local Git repo. This may be
                 helpful if you are having issues syncing your repository.

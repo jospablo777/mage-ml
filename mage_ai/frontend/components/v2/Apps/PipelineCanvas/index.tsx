@@ -798,7 +798,7 @@ const PipelineBuilder: React.FC<PipelineBuilderProps> = ({
       { divider: true },
       {
         uuid: 'Projects',
-        items: [{ uuid: 'New Mage project' }, { uuid: 'New dbt project' }],
+        items: [{ uuid: 'New Mage project', label: () => 'New MageML project' }, { uuid: 'New dbt project' }],
       },
     ];
 

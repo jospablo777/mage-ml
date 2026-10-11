@@ -13,7 +13,7 @@ import Flex from '@oracle/components/Flex';
 import FlexContainer from '@oracle/components/FlexContainer';
 import FlyoutMenu, { FlyoutMenuItemType } from '@oracle/components/FlyoutMenu';
 import GitActions from '@components/VersionControl/GitActions';
-import GradientLogoIcon from '@oracle/icons/GradientLogo';
+import MageMLBrand from '@components/Brand/MageMLBrand';
 import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButton';
 import LaunchKeyboardShortcutText from '@components/CommandCenter/LaunchKeyboardShortcutText';
 import Loading, { LoadingStyleEnum } from '@oracle/components/Loading';
@@ -70,6 +70,11 @@ export type HeaderProps = {
   project?: ProjectType;
   version?: string;
 };
+
+// MageML is released on GitHub; the header's version links to its releases.
+const MAGEML_RELEASES_URL = 'https://github.com/jospablo777/mage-ml/releases';
+// The Mage release MageML is based on (mage_ai/server/constants.py).
+const UPSTREAM_MAGE_VERSION = '0.9.79';
 
 function Header({
   breadcrumbs: breadcrumbsProp,
@@ -264,7 +269,7 @@ function Header({
 
   const logoLink = useMemo(() => {
     let logoHeight = LOGO_HEIGHT;
-    let logoEl = <GradientLogoIcon height={LOGO_HEIGHT} />;
+    let logoEl = <MageMLBrand decorative size="small" theme="auto" />;
 
     if (design?.components?.header?.media) {
       const media = design?.components?.header?.media;
@@ -289,10 +294,10 @@ function Header({
         passHref
       >
         <Link
+          aria-label={design?.components?.header?.media ? 'Workspace home' : 'MageML home'}
           block
           height={logoHeight}
           noHoverUnderline
-          noOutline
         >
           {logoEl}
         </Link>
@@ -479,7 +484,7 @@ function Header({
                 borderLess
                 compact
                 linkProps={{
-                  href: 'https://docs.mage.ai/about/releases',
+                  href: `${MAGEML_RELEASES_URL}/tag/v${latestVersion}`,
                 }}
                 noHoverUnderline
                 pill
@@ -494,14 +499,15 @@ function Header({
             {version && typeof (version) !== 'undefined' && (
               <Spacing px={1}>
                 <Link
-                  href="https://www.mage.ai/changelog"
+                  href={MAGEML_RELEASES_URL}
                   monospace
                   noWrapping
                   openNewWindow
                   sameColorAsText
                   small
+                  title={`MageML ${version}, based on Mage ${UPSTREAM_MAGE_VERSION}`}
                 >
-                  {`v${version}`}
+                  {`MageML ${version}`}
                 </Link>
               </Spacing>
             )}

@@ -17,7 +17,6 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import FlyoutMenu from '@oracle/components/FlyoutMenu';
 import FlyoutMenuWrapper from '@oracle/components/FlyoutMenu/FlyoutMenuWrapper';
 import KeyboardTextGroup from '@oracle/elements/KeyboardTextGroup';
-import LLMType, { LLMUseCaseEnum } from '@interfaces/LLMType';
 import Link from '@oracle/elements/Link';
 import Panel from '@oracle/components/Panel';
 import PipelineType from '@interfaces/PipelineType';
@@ -31,7 +30,6 @@ import dark from '@oracle/styles/themes/dark';
 import { AddonBlockTypeEnum } from '@interfaces/AddonBlockOptionType';
 import { ExecutionStateEnum } from '@interfaces/KernelOutputType';
 import {
-  AISparkle,
   Charts,
   Check,
   Close,
@@ -55,8 +53,6 @@ import { getColorsForBlockType } from '../index.style';
 import { isMac } from '@utils/os';
 import { indexBy } from '@utils/array';
 import { onSuccess } from '@api/utils/response';
-import { useError } from '@context/Error';
-import Setup from '@components/AI/Setup';
 
 export type CommandButtonsSharedProps = {
   addWidget?: (widget: BlockType, opts?: {
@@ -71,7 +67,6 @@ export type CommandButtonsSharedProps = {
 type CommandButtonsProps = {
   addNewBlock: (block: BlockType) => Promise<any>;
   block: BlockType;
-  blockContent?: string;
   fetchFileTree?: () => void;
   fetchPipeline: () => void;
   hideExtraButtons?: boolean;
@@ -98,23 +93,15 @@ type CommandButtonsProps = {
     block?: BlockType;
     pipeline?: PipelineType;
   }) => Promise<any>;
-  setBlockContent?: (content: string) => void;
   setIsEditingBlock?: (isEditingBlock: any) => void;
   setOutputCollapsed: (outputCollapsed: boolean) => void;
   setErrors: (errors: ErrorsType) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
 } & CommandButtonsSharedProps;
 
 function CommandButtons({
   addNewBlock,
   addWidget,
   block,
-  blockContent,
   blocks,
   deleteBlock,
   executionState,
@@ -127,17 +114,11 @@ function CommandButtons({
   pipeline,
   project,
   runBlock,
-  setBlockContent,
   setIsEditingBlock,
   savePipelineContent,
   setErrors,
   setOutputCollapsed,
-  showConfigureProjectModal,
 }: CommandButtonsProps) {
-  const [showError] = useError(null, {}, [], {
-    uuid: `CommandButtons/${block?.uuid}`,
-  });
-
   const {
     all_upstream_blocks_executed: upstreamBlocksExecuted = true,
     color: blockColor,
@@ -150,7 +131,6 @@ function CommandButtons({
   const refConvertBlock = useRef(null);
   const refExecuteActions = useRef(null);
   const refMoreActions = useRef(null);
-  const refAIActions = useRef(null);
 
   const pipelineType = pipeline?.type;
 
@@ -158,7 +138,6 @@ function CommandButtons({
   const [showConvertMenu, setShowConvertMenu] = useState<boolean>(false);
   const [showExecuteActions, setShowExecuteActions] = useState<boolean>(false);
   const [showMoreActions, setShowMoreActions] = useState<boolean>(false);
-  const [showAIActions, setShowAIActions] = useState<boolean>(false);
 
   const themeContext = useContext(ThemeContext);
   const isInProgress = ExecutionStateEnum.IDLE !== executionState;
@@ -195,7 +174,7 @@ function CommandButtons({
   const isDBT = useMemo(() => BlockTypeEnum.DBT === block?.type, [block]);
   const isMarkdown = useMemo(() => BlockTypeEnum.MARKDOWN === block?.type, [block]);
 
-  const [updatePipeline, { isLoading: isLoadingUpdatePipeline }] = useMutation(
+  const [updatePipeline] = useMutation(
     api.pipelines.useUpdate(pipeline?.uuid),
     {
       onSuccess: (response: any) => onSuccess(
@@ -211,119 +190,6 @@ function CommandButtons({
       ),
     },
   );
-
-  const [createLLM, { isLoading: isLoadingCreateLLM }] = useMutation(
-    api.llms.useCreate(),
-    {
-      onSuccess: (response: any) => onSuccess(
-        response, {
-        callback: ({
-          llm,
-        }) => {
-          if (llm?.response && setBlockContent) {
-            setBlockContent?.(llm?.response);
-          }
-        },
-        onErrorCallback: (response, errors) => showError({
-          errors,
-          response,
-        }),
-      },
-      ),
-    },
-  );
-
-  const itemsAIActions = useMemo(() => {
-    const shouldShowModal = !project?.openai_api_key;
-    const showModal = (llm: LLMType) => {
-      showConfigureProjectModal?.({
-        header: <Setup />,
-        onSaveSuccess: (project: ProjectType) => {
-          if (project?.openai_api_key) {
-            // @ts-ignore
-            updatePipeline({
-              pipeline: {
-                llm,
-              },
-            });
-          }
-        },
-      });
-    };
-
-    const llm: LLMType = {
-      request: {
-        block_uuid: block?.uuid,
-        pipeline_uuid: pipeline?.uuid,
-      },
-    };
-
-    return [
-      {
-        label: () => 'Document block (beta)',
-        onClick: () => {
-          llm.use_case = LLMUseCaseEnum.GENERATE_DOC_FOR_BLOCK;
-
-          if (shouldShowModal) {
-            showModal(llm);
-          } else {
-            // @ts-ignore
-            updatePipeline({
-              pipeline: {
-                llm,
-              },
-            });
-          }
-        },
-        uuid: 'Document block',
-      },
-      {
-        label: () => 'Document pipeline and all blocks (beta)',
-        onClick: () => {
-          llm.use_case = LLMUseCaseEnum.GENERATE_DOC_FOR_PIPELINE;
-
-          if (shouldShowModal) {
-            showModal(llm);
-          } else {
-            // @ts-ignore
-            updatePipeline({
-              pipeline: {
-                llm,
-              },
-            });
-          }
-        },
-        uuid: 'Document pipeline and all blocks',
-      },
-      {
-        label: () => 'Add comments in code (beta)',
-        onClick: () => {
-          if (shouldShowModal) {
-            showModal(llm);
-          } else {
-            // @ts-ignore
-            createLLM({
-              llm: {
-                request: {
-                  block_code: blockContent,
-                },
-                use_case: LLMUseCaseEnum.GENERATE_COMMENT_FOR_CODE,
-              },
-            });
-          }
-        },
-        uuid: 'Add comments in code',
-      },
-    ];
-  }, [
-    block,
-    blockContent,
-    createLLM,
-    pipeline,
-    project,
-    showConfigureProjectModal,
-    updatePipeline,
-  ]);
 
   return (
     <FlexContainer
@@ -588,57 +454,6 @@ function CommandButtons({
             </Button>
           </Tooltip>
         </Spacing>
-      )}
-
-      {!hideExtraButtons && BlockTypeEnum.GLOBAL_DATA_PRODUCT !== block?.type && (
-        <div ref={refAIActions}>
-          <Spacing ml={PADDING_UNITS}>
-            {isLoadingUpdatePipeline && (
-              <Spinner inverted small />
-            )}
-
-            {!isLoadingUpdatePipeline && (
-              <Tooltip
-                appearBefore
-                default
-                label={(
-                  <Text>
-                    AI actions
-                  </Text>
-                )}
-                size={DEFAULT_ICON_SIZE}
-                widthFitContent
-              >
-                <Button
-                  noBackground
-                  noBorder
-                  noPadding
-                  onClick={() => setShowAIActions(currState => !currState)}
-                >
-                  <AISparkle default size={DEFAULT_ICON_SIZE} />
-                </Button>
-              </Tooltip>
-            )}
-          </Spacing>
-        </div>
-      )}
-
-      {!hideExtraButtons && (
-        <ClickOutside
-          disableEscape
-          onClickOutside={() => setShowAIActions(false)}
-          open={showAIActions}
-        >
-          <FlyoutMenu
-            items={itemsAIActions}
-            onClickCallback={() => setShowAIActions(false)}
-            open={showAIActions}
-            parentRef={refAIActions}
-            rightOffset={UNIT * 4.75}
-            topOffset={UNIT * 2}
-            uuid="FileHeaderMenu/AI_actions"
-          />
-        </ClickOutside>
       )}
 
       {!hideExtraButtons && (

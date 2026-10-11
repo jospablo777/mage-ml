@@ -1,4 +1,5 @@
 import NextHead from 'next/head';
+import { PRODUCT_NAME, buildBrandMetadata } from '@components/Brand/brand';
 import { useRouter } from 'next/router';
 
 type HeadProps = {
@@ -7,12 +8,14 @@ type HeadProps = {
   title?: string;
 };
 
-const Head = ({ children, defaultTitle = 'Mage', title }: HeadProps) => {
+const Head = ({ children, defaultTitle = PRODUCT_NAME, title }: HeadProps) => {
   const router = useRouter();
+  const metadata = buildBrandMetadata({ assetBase: router?.basePath || '' });
 
   return (
     <NextHead>
-      <link href={`${router?.basePath}/favicon.ico`} rel="icon" />
+      <link href={metadata.fallbackIcon.href} key="mageml-favicon-fallback" rel="icon" sizes="any" />
+      <link href={metadata.icon.href} key="mageml-favicon" rel="icon" type="image/svg+xml" />
 
       <title>{title ? `${title} | ${defaultTitle}` : defaultTitle}</title>
 

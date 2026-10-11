@@ -65,12 +65,6 @@ type AddNewBlocksProps = {
     blockType?: BlockTypeEnum;
     language?: BlockLanguageEnum;
   }) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
   showGlobalDataProducts?: (opts?: {
     addNewBlock?: (block: BlockRequestPayloadType) => Promise<any>;
   }) => void;
@@ -108,7 +102,6 @@ function AddNewBlocks({
   setFocusedAddNewBlockSearch,
   showBlockBrowserModal,
   showBrowseTemplates,
-  showConfigureProjectModal,
   showGlobalDataProducts,
 }: AddNewBlocksProps) {
   const {
@@ -378,12 +371,10 @@ function AddNewBlocks({
         focused={focusedAddNewBlockSearch}
         itemsDBT={itemsDBT}
         pipelineType={pipelineType}
-        project={project}
         searchTextInputRef={searchTextInputRef}
         setAddNewBlockMenuOpenIdx={setAddNewBlockMenuOpenIdx}
         setFocused={setFocusedAddNewBlockSearch}
         showBrowseTemplates={showBrowseTemplates}
-        showConfigureProjectModal={showConfigureProjectModal}
         showGlobalDataProducts={showGlobalDataProducts}
       />
     );

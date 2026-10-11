@@ -303,7 +303,7 @@ function PipelineSettings({
               <Text muted small>
                 The Python data loaders, transformers, data exporters and custom blocks run
                 in a virtual environment with the packages this file lists, instead of
-                Mage&apos;s. The path is relative to the pipeline&apos;s folder. uv builds the
+                MageML&apos;s. The path is relative to the pipeline&apos;s folder. uv builds the
                 environment on the first run that needs it, and later runs reuse it.
               </Text>
               {Array.isArray(pipelineAttributes?.environment?.requirements) && (

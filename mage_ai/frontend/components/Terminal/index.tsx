@@ -348,7 +348,7 @@ function Terminal({
           } else if (onlyKeysPresent([KEY_CODE_META, KEY_CODE_V], keyMapping)
             || onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_V], keyMapping)) {
             if (typeof navigator?.clipboard === 'undefined') {
-              alert('Clipboard pasting is not allowed in insecure contexts. If your Mage '
+              alert('Clipboard pasting is not allowed in insecure contexts. If your MageML '
                 + 'deployment is not secure but you still want to use clipboard paste, you '
                 + 'can override this setting (which should only be done temporarily) '
                 + 'on Chrome browsers by going to '

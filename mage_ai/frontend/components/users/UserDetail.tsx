@@ -581,7 +581,7 @@ function UserDetail({
                 })}
                 paddingHorizontal={0}
                 paddingVertical={0}
-                placeholder="e.g. Mage Supreme"
+                placeholder="e.g. Analytics team"
                 value={objectAttributes?.username || ''}
               />
             </Flex>
@@ -725,7 +725,7 @@ function UserDetail({
                   })}
                   paddingHorizontal={0}
                   paddingVertical={0}
-                  placeholder="e.g. mage@power.com"
+                  placeholder="e.g. engineer@example.org"
                   type="email"
                   value={objectAttributes?.email || ''}
                 />

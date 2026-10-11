@@ -41,7 +41,7 @@ import KernelOutputType, { ExecutionStateEnum } from '@interfaces/KernelOutputTy
 import Link from '@oracle/elements/Link';
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import PipelineVariableType from '@interfaces/PipelineVariableType';
-import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
+import { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
@@ -190,12 +190,6 @@ type PipelineDetailProps = {
     blockType?: BlockTypeEnum;
     language?: BlockLanguageEnum;
   }) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
   showGlobalDataProducts?: (opts?: {
     addNewBlock?: (block: BlockRequestPayloadType) => Promise<any>;
   }) => void;
@@ -264,7 +258,6 @@ function PipelineDetail({
   setSideBySideEnabled,
   showBrowseTemplates,
   showBlockBrowserModal,
-  showConfigureProjectModal,
   showDataIntegrationModal,
   showGlobalDataProducts,
   showUpdateBlockModal,
@@ -887,7 +880,6 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
             setFocusedAddNewBlockSearch={setFocusedAddNewBlockSearch}
             showBlockBrowserModal={showBlockBrowserModal}
             showBrowseTemplates={showBrowseTemplates}
-            showConfigureProjectModal={showConfigureProjectModal}
             showGlobalDataProducts={showGlobalDataProducts}
           />
 
@@ -928,7 +920,6 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
       setFocusedAddNewBlockSearch,
       showBlockBrowserModal,
       showBrowseTemplates,
-      showConfigureProjectModal,
       showGlobalDataProducts,
       useV2AddNewBlock,
     ],
@@ -1136,7 +1127,6 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
           setTextareaFocused={setTextareaFocused}
           showBlockBrowserModal={showBlockBrowserModal}
           showBrowseTemplates={showBrowseTemplates}
-          showConfigureProjectModal={showConfigureProjectModal}
           showDataIntegrationModal={showDataIntegrationModal}
           showGlobalDataProducts={showGlobalDataProducts}
           showUpdateBlockModal={showUpdateBlockModal}
@@ -1225,7 +1215,6 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
     setSideBySideEnabled,
     showBlockBrowserModal,
     showBrowseTemplates,
-    showConfigureProjectModal,
     showDataIntegrationModal,
     showGlobalDataProducts,
     showUpdateBlockModal,

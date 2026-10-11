@@ -151,11 +151,11 @@ function ResourceManagement({
                       <Spacing mt={1}>
                         <Text warning>
                           Without all the fields in this section present and valid,
-                          Mage won’t automatically create the SSH tunnel.
+                          MageML does not automatically create the SSH tunnel.
 
                           <br />
 
-                          You must manually create the SSH tunnel in order for Mage to retrieve
+                          You must manually create the SSH tunnel for MageML to retrieve
                           and display the Spark jobs, statuses, metrics, and system information.
                         </Text>
                       </Spacing>
@@ -169,7 +169,7 @@ function ResourceManagement({
 
                       <br />
 
-                      Mage can automatically create the SSH tunnel for you
+                      MageML can automatically create the SSH tunnel for you
                       if every field in this section is present and valid.
                     </Text>
                   </Spacing>

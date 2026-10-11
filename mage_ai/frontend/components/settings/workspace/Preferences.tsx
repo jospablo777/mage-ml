@@ -4,9 +4,7 @@ import { useMutation } from 'react-query';
 import Button from '@oracle/elements/Button';
 import Divider from '@oracle/elements/Divider';
 import Flex from '@oracle/components/Flex';
-import FlexContainer, {
-  JUSTIFY_SPACE_BETWEEN_PROPS,
-} from '@oracle/components/FlexContainer';
+import FlexContainer from '@oracle/components/FlexContainer';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import Panel from '@oracle/components/Panel';
@@ -14,14 +12,11 @@ import ProjectType, { FeatureUUIDEnum, ProjectRequestPayloadType } from '@interf
 import SetupSection, { SetupSectionRow } from '@components/shared/SetupSection';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
-import TextInput from '@oracle/elements/Inputs/TextInput';
 import ToggleSwitch from '@oracle/elements/Inputs/ToggleSwitch';
 import Tooltip from '@oracle/components/Tooltip';
 import api from '@api';
 import useProject from '@utils/models/project/useProject';
 import { ContainerStyle } from './index.style';
-import { Edit } from '@oracle/icons';
-import { ICON_SIZE_SMALL } from '@oracle/styles/units/icons';
 import { LOCAL_TIMEZONE_TOOLTIP_PROPS, storeLocalTimezoneSetting } from './utils';
 import { PADDING_UNITS, UNITS_BETWEEN_SECTIONS } from '@oracle/styles/units/spacing';
 import { ThemeModeEnum } from '@oracle/styles/themes/mode';
@@ -52,7 +47,6 @@ function Preferences({
     uuid: 'settings/workspace/preferences',
   });
   const [projectAttributes, setProjectAttributes] = useState<ProjectType>(null);
-  const [editingOpenAIKey, setEditingOpenAIKey] = useState<boolean>(false);
 
   const {
     fetchProjects,
@@ -69,14 +63,8 @@ function Preferences({
 
   const {
     name: projectName,
-    openai_api_key: openaiApiKey,
     project_uuid: projectUUID,
   } = project || {};
-
-  const isDemoApp = useMemo(() =>
-    typeof window !== 'undefined' && window.location.hostname === 'demo.mage.ai',
-    [],
-  );
 
   useEffect(() => {
     if (!projectAttributes) {
@@ -92,7 +80,6 @@ function Preferences({
           callback: ({ project: p }) => {
             fetchProjects();
             setProjectAttributes(p);
-            setEditingOpenAIKey(false);
             storeLocalTimezoneSetting(p?.features?.[FeatureUUIDEnum.LOCAL_TIMEZONE]);
 
             if (onSaveSuccess) {
@@ -178,45 +165,6 @@ function Preferences({
               onCheck={() => setThemeMode(
                 getThemeMode() === ThemeModeEnum.LIGHT ? ThemeModeEnum.DARK : ThemeModeEnum.LIGHT,
               )}
-            />
-          </FlexContainer>
-        </Spacing>
-
-        <Divider light />
-
-        <Spacing p={PADDING_UNITS}>
-          <FlexContainer
-            alignItems="center"
-            justifyContent="space-between"
-          >
-            <Flex flexDirection="column">
-              <Spacing mb={1}>
-                <Headline level={5}>
-                  Help improve Mage
-                </Headline>
-              </Spacing>
-
-              <Text default>
-                Please contribute usage statistics to help improve the developer experience
-                for you and everyone in the community. Learn more <Link
-                  href="https://docs.mage.ai/contributing/statistics/overview"
-                  openNewWindow
-                >
-                  here
-                </Link>.
-              </Text>
-            </Flex>
-
-            <Spacing mr={PADDING_UNITS} />
-
-            <ToggleSwitch
-              checked={projectAttributes?.help_improve_mage}
-              compact
-              id="help_improve_mage_toggle"
-              onCheck={() => setProjectAttributes(prev => ({
-                ...prev,
-                help_improve_mage: !projectAttributes?.help_improve_mage,
-              }))}
             />
           </FlexContainer>
         </Spacing>
@@ -358,48 +306,6 @@ function Preferences({
 
       <Spacing mt={UNITS_BETWEEN_SECTIONS} />
 
-      <Panel noPadding>
-        <Spacing p={PADDING_UNITS}>
-          <Spacing mb={1}>
-            <Headline level={5}>
-              OpenAI
-            </Headline>
-          </Spacing>
-
-          {(openaiApiKey && !editingOpenAIKey)
-            ?
-              <FlexContainer {...JUSTIFY_SPACE_BETWEEN_PROPS} >
-                <Text default monospace>
-                  API key: ********
-                </Text>
-                <Button
-                  iconOnly
-                  onClick={() => setEditingOpenAIKey(true)}
-                  secondary
-                  title="Edit"
-                >
-                  <Edit size={ICON_SIZE_SMALL} />
-                </Button>
-              </FlexContainer>
-            :
-              <TextInput
-                disabled={isDemoApp}
-                label={isDemoApp ? 'Entering API key is disabled on demo' : 'API key'}
-                monospace
-                onChange={e => setProjectAttributes(prev => ({
-                  ...prev,
-                  openai_api_key: e.target.value,
-                }))}
-                primary
-                setContentOnMount
-                value={projectAttributes?.openai_api_key || ''}
-              />
-          }
-        </Spacing>
-      </Panel>
-
-      <Spacing mt={UNITS_BETWEEN_SECTIONS} />
-
       <FlexContainer alignItems="center">
         <Button
           id="save-project-settings"
@@ -407,15 +313,8 @@ function Preferences({
           onClick={() => {
             const updateProjectPayload: ProjectRequestPayloadType = {
               features: projectAttributes?.features,
-              help_improve_mage: projectAttributes?.help_improve_mage,
-              openai_api_key: projectAttributes?.openai_api_key,
               pipelines: projectAttributes?.pipelines,
             };
-            if (project?.help_improve_mage === true
-              && projectAttributes?.help_improve_mage === false
-            ) {
-              updateProjectPayload.deny_improve_mage = true;
-            }
             updateProject(updateProjectPayload);
           }}
           primary

@@ -291,12 +291,6 @@ type CodeBlockProps = {
     blockType?: BlockTypeEnum;
     language?: BlockLanguageEnum;
   }) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
   showGlobalDataProducts?: (opts?: {
     addNewBlock?: (block: BlockRequestPayloadType) => Promise<any>;
   }) => void;
@@ -390,7 +384,6 @@ function CodeBlock(
     setSideBySideEnabled,
     showBlockBrowserModal,
     showBrowseTemplates,
-    showConfigureProjectModal,
     showDataIntegrationModal,
     showGlobalDataProducts,
     showUpdateBlockModal,
@@ -1362,7 +1355,6 @@ function CodeBlock(
     setSelected,
     setSideBySideEnabled,
     setTextareaFocused,
-    showConfigureProjectModal,
     sideBySideEnabled,
     status,
     textareaFocused,
@@ -2312,7 +2304,6 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
         setCreatingNewDBTModel={setCreatingNewDBTModel}
         showBlockBrowserModal={showBlockBrowserModal}
         showBrowseTemplates={showBrowseTemplates}
-        showConfigureProjectModal={showConfigureProjectModal}
         showGlobalDataProducts={showGlobalDataProducts}
       />
     ),
@@ -2333,7 +2324,6 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
       showBlockBrowserModal,
       setCreatingNewDBTModel,
       showBrowseTemplates,
-      showConfigureProjectModal,
       showGlobalDataProducts,
     ],
   );
@@ -2564,7 +2554,6 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                         addNewBlock={addNewBlock}
                         addWidget={addWidget}
                         block={block}
-                        blockContent={content}
                         blocks={blocks}
                         deleteBlock={deleteBlock}
                         executionState={executionState}
@@ -2578,14 +2567,9 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                         project={project}
                         runBlock={hideRunButton ? null : runBlockAndTrack}
                         savePipelineContent={savePipelineContent}
-                        setBlockContent={(val: string) => {
-                          setContent(val);
-                          onChange?.(val);
-                        }}
                         setErrors={setErrors}
                         setIsEditingBlock={setIsEditingBlock}
                         setOutputCollapsed={setOutputCollapsed}
-                        showConfigureProjectModal={showConfigureProjectModal}
                       />
                     </>
                   )}
@@ -3007,7 +2991,7 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                                 block
                                 description={
                                   <Text default inline>
-                                    By default, Mage will preprocess your query
+                                    By default, MageML will preprocess your query
                                     <br />
                                     commands. Toggle this feature to disable
                                     <br />

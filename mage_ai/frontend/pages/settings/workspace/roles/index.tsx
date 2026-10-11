@@ -118,7 +118,7 @@ function RolesListPage() {
                   <Text default>
                     This will create 6 roles and 100s of permissions
                     <br />
-                    that Mage normally uses when user defined
+                    that MageML normally uses when user defined
                     <br />
                     permissions isn’t turned on.
                   </Text>

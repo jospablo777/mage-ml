@@ -1,5 +1,4 @@
 import {
-  AISparkle,
   BatchPipeline,
   IntegrationPipeline,
   StreamingPipeline,
@@ -17,7 +16,6 @@ export const getNewPipelineButtonMenuItems = (
     reqBody: { pipeline: { name: string, type?: PipelineTypeEnum } },
   ) => void,
   opts?: {
-    showAIModal?: () => void;
     showBrowseTemplates?: () => void;
     showCreatePipelineModal?: (opts: { pipelineType: PipelineTypeEnum }) => void;
     showImportPipelineModal?: () => void;
@@ -91,15 +89,6 @@ export const getNewPipelineButtonMenuItems = (
       label: () => 'Import pipeline zip',
       onClick: () => opts?.showImportPipelineModal?.(),
       uuid: 'Pipelines/NewPipelineMenu/upload',
-    });
-  }
-
-  if (opts?.showAIModal) {
-    arr.push({
-      beforeIcon: <AISparkle />,
-      label: () => 'Using AI (beta)',
-      onClick: () => opts?.showAIModal?.(),
-      uuid: 'Pipelines/NewPipelineMenu/AI_modal',
     });
   }
 

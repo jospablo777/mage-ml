@@ -3,7 +3,7 @@ import { redirectToUrl } from '@utils/url';
 import Headline from '@oracle/elements/Headline';
 import Text from '@oracle/elements/Text';
 import Spacing from '@oracle/elements/Spacing';
-import GradientLogoIcon from '@oracle/icons/GradientLogo';
+import MageMLBrand from '@components/Brand/MageMLBrand';
 
 function NotFoundPage() {
   const [secondsToRedirect, setSecondsToRedirect] = useState(5);
@@ -29,7 +29,7 @@ function NotFoundPage() {
         marginTop: '16rem',
       }}
     >
-      <GradientLogoIcon height={64} />
+      <MageMLBrand size="large" theme="auto" />
       <Spacing my={2}>
         <Headline level={1}>404 - Page Not Found</Headline>
       </Spacing>

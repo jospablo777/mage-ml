@@ -65,9 +65,8 @@ import PipelineType, {
   PipelineTypeEnum,
 } from '@interfaces/PipelineType';
 import PopupMenu from '@oracle/components/PopupMenu';
-import Preferences from '@components/settings/workspace/Preferences';
 import PrivateRoute from '@components/shared/PrivateRoute';
-import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
+import { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Sidekick from '@components/Sidekick';
 import SidekickHeader from '@components/Sidekick/Header';
 import Spacing from '@oracle/elements/Spacing';
@@ -183,7 +182,6 @@ function PipelineDetailPage({
   const {
     featureEnabled,
     featureUUIDs,
-    fetchProjects,
     project,
     sparkEnabled,
   } = useProject();
@@ -2175,41 +2173,6 @@ function PipelineDetailPage({
     uuid: 'configure_block_name_and_create',
   });
 
-  const [showConfigureProjectModal, hideConfigureProjectModal] = useModal(({
-    cancelButtonText,
-    header,
-    onCancel,
-    onSaveSuccess,
-  }: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => (
-    <ErrorProvider>
-      <Preferences
-        cancelButtonText={cancelButtonText}
-        contained
-        header={header}
-        onCancel={() => {
-          onCancel?.();
-          hideConfigureProjectModal();
-        }}
-        onSaveSuccess={(project: ProjectType) => {
-          fetchProjects();
-          hideConfigureProjectModal();
-          onSaveSuccess?.(project);
-        }}
-      />
-    </ErrorProvider>
-  ), {
-  }, [
-    fetchProjects,
-  ], {
-    background: true,
-    uuid: 'configure_project',
-  });
-
   // Widgets
   const [createWidget] = useMutation(api.widgets.pipelines.useCreate(pipelineUUID));
   const addWidgetAtIndex = useCallback((
@@ -3175,7 +3138,6 @@ function PipelineDetailPage({
       setTextareaFocused={setTextareaFocused}
       showBlockBrowserModal={showBlockBrowserModal}
       showBrowseTemplates={showBrowseTemplates}
-      showConfigureProjectModal={showConfigureProjectModal}
       showDataIntegrationModal={showDataIntegrationModal}
       showGlobalDataProducts={showGlobalDataProducts}
       showUpdateBlockModal={showUpdateBlockModalCallbackMemo}
@@ -3235,7 +3197,6 @@ function PipelineDetailPage({
     setScrollTogether,
     showBlockBrowserModal,
     showBrowseTemplates,
-    showConfigureProjectModal,
     showDataIntegrationModal,
     showGlobalDataProducts,
     showUpdateBlockModalCallbackMemo,

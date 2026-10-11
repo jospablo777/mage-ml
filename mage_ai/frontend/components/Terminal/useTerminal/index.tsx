@@ -458,7 +458,7 @@ export default function useTerminal({
       />
     ),
     renderTabTitle: (uuid: string) => {
-      return uuid?.replace('_', ' ');
+      return uuid === UUID_MAIN ? 'Main MageML' : uuid?.replace('_', ' ');
     },
     selectedFilePath: selectedItem?.uuid,
     shouldDisableClose: (uuid: string) => uuid === UUID_MAIN,

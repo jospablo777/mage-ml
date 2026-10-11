@@ -11,9 +11,11 @@ import { MarkdownContainer } from './index.style';
 
 type MarkdownProps = {
   children: string;
+  // Rewrites an image's src, such as a path relative to a pipeline's folder.
+  imageSource?: (src: string) => string;
 };
 
-function Markdown({ children }: MarkdownProps) {
+function Markdown({ children, imageSource }: MarkdownProps) {
   return (
     <MarkdownContainer>
       <ReactMarkdown
@@ -45,6 +47,16 @@ function Markdown({ children }: MarkdownProps) {
           h3: ({ children }) => <Headline level={3}>{children}</Headline>,
           h4: ({ children }) => <Headline level={4}>{children}</Headline>,
           h5: ({ children }) => <Headline level={5}>{children}</Headline>,
+          img: ({ alt, src, title }) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt={alt || ''}
+              loading="lazy"
+              src={imageSource && typeof src === 'string' ? imageSource(src) : src as string}
+              style={{ borderRadius: 4, maxWidth: '100%' }}
+              title={title}
+            />
+          ),
           p: ({ children }) => <Text>{children}</Text>,
           strong: ({ children }) => (
             <Text bold inline>

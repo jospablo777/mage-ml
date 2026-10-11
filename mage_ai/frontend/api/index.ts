@@ -60,6 +60,7 @@ export const FILES: 'files' = 'files';
 export const DATA_CONTRACTS: 'data_contracts' = 'data_contracts';
 export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verifications';
 export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilations';
+export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_documentations';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
 export const FOLDERS: 'folders' = 'folders';
@@ -75,7 +76,6 @@ export const INTEGRATION_SOURCES = 'integration_sources';
 export const INTEGRATION_SOURCE_STREAMS = 'integration_source_streams';
 export const INTERACTIONS: 'interactions' = 'interactions';
 export const KERNELS: 'kernels' = 'kernels';
-export const LLMS = 'llms';
 export const LOGS = 'logs';
 export const MODEL_RELEASES: 'model_releases' = 'model_releases';
 export const MONITORS: 'monitors' = 'monitors';
@@ -165,6 +165,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [DATA_CONTRACTS],
   [FUSION_VERIFICATIONS],
   [PIPELINE_COMPILATIONS],
+  [PIPELINE_DOCUMENTATIONS],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
   [FILE_VERSIONS, FILES],
@@ -183,7 +184,6 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [INTERACTIONS, PIPELINE_INTERACTIONS],
   [INTERACTIONS],
   [KERNELS],
-  [LLMS],
   [LOGS, PIPELINES],
   [MODEL_RELEASES],
   [MONITORS],

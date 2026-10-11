@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import moment from 'moment';
 
-import AIControlPanel from '@components/AI/ControlPanel';
 import AddButton from '@components/shared/AddButton';
 import BarStackChart from '@components/charts/BarStack';
 import BlockLayout from '@components/BlockLayout';
@@ -19,7 +18,6 @@ import MetricsSummary from '@components/PipelineRun/MetricsSummary';
 import PageSectionHeader from '@components/shared/Sticky/PageSectionHeader';
 import Panel from '@oracle/components/Panel';
 import PipelineRunType from '@interfaces/PipelineRunType';
-import Preferences from '@components/settings/workspace/Preferences';
 import PrivateRoute from '@components/shared/PrivateRoute';
 import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Spacing from '@oracle/elements/Spacing';
@@ -84,7 +82,6 @@ import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils'
 import { useModal } from '@context/Modal';
 import UploadPipeline from '@components/PipelineDetail/UploadPipeline';
 import { LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, set, get } from '@storage/localStorage';
-import Setup from '@components/AI/Setup';
 
 const SHARED_WIDGET_SPACING_PROPS = {
   mt: 2,
@@ -251,7 +248,7 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
     router.push('/pipelines/[pipeline]/edit', `/pipelines/${pipelineUUID}/edit`),
   );
 
-  const { data: dataProjects, mutate: fetchProjects } = api.projects.list();
+  const { data: dataProjects } = api.projects.list();
   const project: ProjectType = useMemo(() => dataProjects?.projects?.[0], [dataProjects]);
   const displayLocalTimezone = useMemo(
     () => storeLocalTimezoneSetting(project?.features?.[FeatureUUIDEnum.LOCAL_TIMEZONE]),
@@ -322,87 +319,16 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
     },
   );
 
-  const [showConfigureProjectModal, hideConfigureProjectModal] = useModal(
-    ({
-      cancelButtonText,
-      header,
-      onCancel,
-      onSaveSuccess,
-    }: {
-      cancelButtonText?: string;
-      header?: any;
-      onCancel?: () => void;
-      onSaveSuccess?: (project: ProjectType) => void;
-    }) => (
-      <ErrorProvider>
-        <Preferences
-          cancelButtonText={cancelButtonText}
-          contained
-          header={<Setup />}
-          onCancel={() => {
-            onCancel?.();
-            hideConfigureProjectModal();
-          }}
-          onSaveSuccess={(project: ProjectType) => {
-            fetchProjects();
-            hideConfigureProjectModal();
-            onSaveSuccess?.(project);
-          }}
-        />
-      </ErrorProvider>
-    ),
-    {},
-    [fetchProjects],
-    {
-      background: true,
-      uuid: 'configure_project',
-    },
-  );
-
-  const [showAIModal, hideAIModal] = useModal(
-    () => (
-      <ErrorProvider>
-        <AIControlPanel
-          createPipeline={createPipeline}
-          isLoading={isLoadingCreatePipeline}
-          onClose={hideAIModal}
-        />
-      </ErrorProvider>
-    ),
-    {},
-    [createPipeline, isLoadingCreatePipeline],
-    {
-      background: true,
-      disableClickOutside: true,
-      disableCloseButton: true,
-      uuid: 'AI_modal',
-    },
-  );
-
   const newPipelineButtonMenuItems = useMemo(
     () =>
       getNewPipelineButtonMenuItems(createPipeline, {
-        showAIModal: () => {
-          if (!project?.openai_api_key) {
-            showConfigureProjectModal({
-              onSaveSuccess: () => {
-                showAIModal();
-              },
-            });
-          } else {
-            showAIModal();
-          }
-        },
         showBrowseTemplates,
         showCreatePipelineModal,
         showImportPipelineModal,
       }),
     [
       createPipeline,
-      project,
-      showAIModal,
       showBrowseTemplates,
-      showConfigureProjectModal,
       showCreatePipelineModal,
       showImportPipelineModal,
     ],

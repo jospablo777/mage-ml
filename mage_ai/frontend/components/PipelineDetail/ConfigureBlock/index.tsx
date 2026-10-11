@@ -1,7 +1,4 @@
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation } from 'react-query';
 
 import BlockCubeGradient from '@oracle/icons/custom/BlockCubeGradient';
 import BlockType, {
@@ -13,20 +10,15 @@ import BlockType, {
   LANGUAGE_DISPLAY_MAPPING,
 } from '@interfaces/BlockType';
 import Button from '@oracle/elements/Button';
-import CodeBlock from '@components/CodeBlock';
 import Flex from '@oracle/components/Flex';
 import FlexContainer, { JUSTIFY_SPACE_BETWEEN_PROPS } from '@oracle/components/FlexContainer';
 import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButton';
-import LLMType, { LLMUseCaseEnum } from '@interfaces/LLMType';
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
-import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
-import api from '@api';
 import {
-  AISparkle,
   AlertTriangle,
   Locked,
 } from '@oracle/icons';
@@ -45,8 +37,6 @@ import {
   UNIT,
 } from '@oracle/styles/units/spacing';
 import { capitalize, startsWithNumber } from '@utils/string';
-import { onSuccess } from '@api/utils/response';
-import { useError } from '@context/Error';
 
 type ConfigureBlockProps = {
   block: BlockType | BlockRequestPayloadType;
@@ -71,17 +61,12 @@ function ConfigureBlock({
   onSave,
   pipeline,
 }: ConfigureBlockProps) {
-  const [showError] = useError(null, {}, [], {
-    uuid: 'ConfigureBlock',
-  });
-
   // @ts-ignore
   const sharedPipelinesCount = (block?.pipelines || [])?.length;
 
   const refTextInput = useRef(null);
   const [blockAttributes, setBlockAttributes] = useState<{
     color?: BlockColorEnum;
-    content?: string;
     language?: BlockLanguageEnum;
     name?: string;
     type?: BlockTypeEnum;
@@ -141,12 +126,6 @@ function ConfigureBlock({
 
   // @ts-ignore
   const blockActionObject = useMemo(() => block?.block_action_object, [block]);
-  const isGenerateBlock =
-    useMemo(() => ObjectType.GENERATE_BLOCK === blockActionObject?.object_type, [blockActionObject]);
-  const generateBlockCommand = useMemo(() => isGenerateBlock && blockActionObject?.description, [
-    blockActionObject,
-    isGenerateBlock,
-  ]);
 
   const isDataIntegration: boolean = useMemo(() => {
     // @ts-ignore
@@ -168,70 +147,6 @@ function ConfigureBlock({
       block,
       blockActionObject,
     ]);
-
-  const [llm, setLLM] = useState<LLMType>(null);
-  const [createLLM, { isLoading: isLoadingCreateLLM }] = useMutation(
-    api.llms.useCreate(),
-    {
-      onSuccess: (response: any) => onSuccess(
-        response, {
-          callback: ({
-            llm,
-          }) => {
-            const {
-              block_type: blockType,
-              code, // Raw code without block template
-              configuration,
-              content,
-              language,
-            } = llm?.response || {};
-
-            setBlockAttributes(prev => ({
-              ...prev,
-              block_action_object: null,
-              configuration: configuration,
-              content: content,
-              language,
-              type: blockType,
-            }));
-
-            setLLM(llm);
-          },
-          onErrorCallback: (response, errors) => showError({
-            errors,
-            response,
-          }),
-        },
-      ),
-    },
-  );
-
-  useEffect(() => {
-    if (isGenerateBlock && generateBlockCommand && !llm) {
-      // @ts-ignore
-      createLLM({
-        // llm: {
-        //   request: {
-        //     block_description: generateBlockCommand,
-        //   },
-        //   use_case: LLMUseCaseEnum.GENERATE_CODE,
-        // },
-        llm: {
-          request: {
-            block_description: generateBlockCommand,
-            block_type: BlockTypeEnum.TRANSFORMER,
-            code_language: BlockLanguageEnum.PYTHON,
-          },
-          use_case: LLMUseCaseEnum.GENERATE_CODE,
-        },
-      });
-    }
-  }, [
-    createLLM,
-    generateBlockCommand,
-    isGenerateBlock,
-    llm,
-  ]);
 
   const customTemplate = useMemo(() => {
     if (block?.config?.custom_template) {
@@ -275,52 +190,15 @@ function ConfigureBlock({
   ]);
 
   return (
-    <ContainerStyle width={isGenerateBlock && blockAttributes?.content && (80 * UNIT)}>
+    <ContainerStyle>
       <HeaderStyle>
-        {isGenerateBlock && isLoadingCreateLLM && (
-          <FlexContainer alignItems="center" justifyContent="space-between">
-            <Text>
-              Generating block using AI...
-            </Text>
-
-            <Spinner inverted />
-          </FlexContainer>
-        )}
-
-        {isGenerateBlock && !isLoadingCreateLLM && (
-          <FlexContainer
-            alignItems="center"
-            justifyContent="center"
-          >
-            <AISparkle size={5 * UNIT} warning />
-          </FlexContainer>
-        )}
-
-        {!isGenerateBlock && (
-          <FlexContainer
-            alignItems="center"
-            justifyContent="center"
-          >
-            <BlockCubeGradient size={15 * UNIT} />
-          </FlexContainer>
-        )}
+        <FlexContainer
+          alignItems="center"
+          justifyContent="center"
+        >
+          <BlockCubeGradient size={15 * UNIT} />
+        </FlexContainer>
       </HeaderStyle>
-
-      {isGenerateBlock && !isLoadingCreateLLM && (
-        <RowStyle>
-          <Spacing py={1}>
-            <Spacing mb={1}>
-              <Text default>
-                Block generated using AI
-              </Text>
-            </Spacing>
-
-            <Text textOverflow>
-              {generateBlockCommand}
-            </Text>
-          </Spacing>
-        </RowStyle>
-      )}
 
       {customTemplate && (
         <RowStyle>
@@ -524,35 +402,6 @@ function ConfigureBlock({
         </RowStyle>
       )}
 
-      {isGenerateBlock && blockAttributes?.content && (
-        <RowStyle display="block">
-          <Spacing pr={PADDING_UNITS} py={1}>
-            <DndProvider backend={HTML5Backend}>
-              {/* @ts-ignore */}
-              <CodeBlock
-                block={{
-                  ...blockAttributes,
-                  uuid: generateBlockCommand,
-                }}
-                defaultValue={blockAttributes?.content}
-                disableDrag
-                hideExtraCommandButtons
-                hideExtraConfiguration
-                hideHeaderInteractiveInformation
-                key={generateBlockCommand}
-                noDivider
-                onChange={val => setBlockAttributes(prev => ({
-                  ...prev,
-                  content: val,
-                }))}
-                selected
-                textareaFocused
-              />
-            </DndProvider>
-          </Spacing>
-        </RowStyle>
-      )}
-
       {/*<Spacing mt={PADDING_UNITS}>
         <FlexContainer alignItems="center">
           <Checkbox
@@ -577,7 +426,7 @@ function ConfigureBlock({
           <KeyboardShortcutButton
             bold
             centerText
-            disabled={isLoadingCreateLLM || blockNameStartsWithNumber}
+            disabled={blockNameStartsWithNumber}
             onClick={handleOnSave}
             primary
             tabIndex={0}

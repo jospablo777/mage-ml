@@ -2,10 +2,10 @@ import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import {
   BackfillV2,
   Code,
+  DocumentIcon,
   Lightning,
   Logs,
   Monitor,
-  NavDashboard,
   PipeIcon,
   Schedule,
   SettingsWithKnobs,
@@ -100,6 +100,18 @@ export function buildNavigationItems(
     linkProps: {
       as: `/pipelines/${pipelineUUID}/edit`,
       href: '/pipelines/[pipeline]/edit',
+    },
+  });
+
+  // @ts-ignore
+  navigationItems.push({
+    Icon: DocumentIcon,
+    id: PageNameEnum.DOCUMENTATION,
+    isSelected: () => PageNameEnum.DOCUMENTATION === pageName,
+    label: () => 'Documentation',
+    linkProps: {
+      as: `/pipelines/${pipelineUUID}/docs`,
+      href: '/pipelines/[pipeline]/docs',
     },
   });
 

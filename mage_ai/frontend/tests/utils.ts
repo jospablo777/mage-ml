@@ -46,13 +46,6 @@ export async function enableSettings(
   await page.waitForLoadState();
   await expect(page.getByText('Add new block v2')).toBeVisible();
 
-  const helpImproveMageToggle = page.locator('#help_improve_mage_toggle');
-  const helpImproveMageToggleInput = page.locator('#help_improve_mage_toggle_input');
-  if (await helpImproveMageToggleInput.isChecked()) {
-    await helpImproveMageToggle.click();
-  }
-  await expect(helpImproveMageToggleInput).not.toBeChecked();
-
 
   const features = getSettingsToEnable(settingFeaturesToDisable);
 

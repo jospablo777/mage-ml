@@ -3,9 +3,7 @@ import ConfigurationOptionType from '@interfaces/ConfigurationOptionType';
 import ErrorsType from '@interfaces/ErrorsType';
 import KernelOutputType, { ExecutionStateEnum } from '@interfaces/KernelOutputType';
 import KeyboardShortcutType from '@interfaces/KeyboardShortcutType';
-import LLMType from '@interfaces/LLMType';
 import PipelineType from '@interfaces/PipelineType';
-import ProjectType from '@interfaces/ProjectType';
 import StatusType from '@interfaces/StatusType';
 import { AddonBlockTypeEnum } from '@interfaces/AddonBlockOptionType';
 import { FlyoutMenuItemType } from '@oracle/components/FlyoutMenu';
@@ -114,12 +112,6 @@ export type UseCodeBlockComponentProps = {
   setScrollTogether?: (prev: any) => void;
   setSelected?: (value: boolean) => void;
   setSideBySideEnabled?: (prev: any) => void;
-  showConfigureProjectModal?: (opts: {
-    cancelButtonText?: string;
-    header?: any;
-    onCancel?: () => void;
-    onSaveSuccess?: (project: ProjectType) => void;
-  }) => void;
   setTextareaFocused?: (value: boolean) => void;
   sideBySideEnabled?: boolean;
   status?: StatusType;
@@ -128,7 +120,6 @@ export type UseCodeBlockComponentProps = {
   updatePipeline?: (payload: {
     pipeline: {
       add_upstream_for_block_uuid?: string;
-      llm?: LLMType;
     };
   }) => Promise<any>;
 };

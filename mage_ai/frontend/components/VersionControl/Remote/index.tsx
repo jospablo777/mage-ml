@@ -401,7 +401,7 @@ function Remote({
                 to initialize git.
                 <br />
                 If git hasn’t been initialized in the directory below,
-                Mage will automatically run git init for you.
+                MageML will automatically run git init for you.
               </Text>
             )}
           </Spacing>

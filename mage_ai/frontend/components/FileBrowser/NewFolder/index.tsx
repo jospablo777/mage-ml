@@ -218,7 +218,7 @@ function NewFolder({
           : 'Rename folder'
         : projectType
           ? (ProjectTypeEnum.STANDALONE === projectType
-            ? 'New Mage project'
+            ? 'New MageML project'
             : ProjectTypeEnum.DBT === projectType
               ? 'New dbt project'
               : 'New project'

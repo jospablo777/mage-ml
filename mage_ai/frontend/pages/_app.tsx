@@ -3,13 +3,13 @@ import App, { AppProps } from 'next/app';
 import Cookies from 'js-cookie';
 import LoadingBar from 'react-top-loading-bar';
 import dynamic from 'next/dynamic';
-import { GoogleAnalytics } from '@next/third-parties/google';
 import { GridThemeProvider } from 'styled-bootstrap-grid';
 import { ThemeProvider } from 'styled-components';
 import { createRoot } from 'react-dom/client';
 
 import 'react-toastify/dist/ReactToastify.min.css';
 import '@styles/globals.css';
+import '@components/Brand/brand.css';
 import '@styles/scss/main.scss';
 import '@styles/scss/themes/dark.scss';
 import '@styles/scss/themes/light.scss';
@@ -23,7 +23,6 @@ import useGlobalKeyboardShortcuts from '@utils/hooks/keyboardShortcuts/useGlobal
 import useProject from '@utils/models/project/useProject';
 import useStatus from '@utils/models/status/useStatus';
 import { CustomEventUUID } from '@utils/events/constants';
-import { DEMO_GA_MEASUREMENT_ID } from '@utils/gtag';
 import { ErrorProvider } from '@context/Error';
 import { LOCAL_STORAGE_KEY_HIDE_PUBLIC_DEMO_WARNING } from '@storage/constants';
 import { ModalProvider } from '@context/Modal';
@@ -330,8 +329,8 @@ function MyApp(props: MyAppProps & AppProps) {
                   {isDemoApp && (
                     <Banner
                       linkProps={{
-                        href: 'https://github.com/mage-ai/mage-ai',
-                        label: 'GET MAGE',
+                        href: 'https://github.com/jospablo777/mage-ml',
+                        label: 'Get MageML',
                       }}
                       localStorageHideKey={LOCAL_STORAGE_KEY_HIDE_PUBLIC_DEMO_WARNING}
                       textProps={{
@@ -350,7 +349,6 @@ function MyApp(props: MyAppProps & AppProps) {
         </ThemeProvider>
       </KeyboardContext.Provider>
 
-      {isDemoApp && <GoogleAnalytics gaId={DEMO_GA_MEASUREMENT_ID} />}
     </>
   );
 }

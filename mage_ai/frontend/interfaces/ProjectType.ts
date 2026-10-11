@@ -89,12 +89,9 @@ export interface ProjectPipelinesType {
 }
 
 export type ProjectRequestPayloadType = {
-  deny_improve_mage?: boolean;
   features?: {
     [key: string]: boolean;
   };
-  help_improve_mage?: boolean;
-  openai_api_key?: string;
   pipelines?: ProjectPipelinesType;
 };
 
@@ -109,10 +106,8 @@ export default interface ProjectType {
   features_override?: {
     [key: string]: boolean;
   };
-  help_improve_mage?: boolean;
   latest_version?: string;
   name?: string;
-  openai_api_key?: string;
   pipelines?: ProjectPipelinesType;
   platform_settings?: PlatformType;
   project_uuid?: string;

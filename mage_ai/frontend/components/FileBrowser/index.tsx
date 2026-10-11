@@ -22,7 +22,7 @@ import FileHeaderMenu from './FileHeaderMenu';
 import FileType from '@interfaces/FileType';
 import FlyoutMenu from '@oracle/components/FlyoutMenu';
 import Folder, { FolderSharedProps } from './Folder';
-import GradientLogoIcon from '@oracle/icons/GradientLogo';
+import MageMLBrand from '@components/Brand/MageMLBrand';
 import NewFile from './NewFile';
 import NewFolder from './NewFolder';
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
@@ -619,11 +619,12 @@ function FileBrowser({
       ]);
 
       items.push({
-        beforeIcon: <GradientLogoIcon width={UNIT * 1.5} />,
+        beforeIcon: <MageMLBrand decorative variant="mark" style={{ height: UNIT * 1.5, width: UNIT * 1.5 }} />,
         onClick: () => {
           showModalNewFolder({ projectType: ProjectTypeEnum.STANDALONE });
         },
         uuid: 'New Mage project',
+        label: () => 'New MageML project',
       });
     } else if (selectedFile) {
       if (selectedFile?.path) {

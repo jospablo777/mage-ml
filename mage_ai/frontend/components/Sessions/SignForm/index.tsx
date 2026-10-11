@@ -220,7 +220,7 @@ function SignForm({
                     uuid="SignForm/action"
                     wind
                   >
-                    Sign into Mage
+                    Sign in to MageML
                   </KeyboardShortcutButton>
                 </Spacing>
 
