@@ -226,10 +226,13 @@ class EnvironmentTest(ExportTestCase):
         self.add('load', 'data_loader', '''
             import os
 
+            from mage_ai.io.config import ConfigFileLoader
+
             @data_loader
             def load(*args, **kwargs):
                 region = os.getenv('AWS_REGION', 'us-east-1')
                 bucket = os.environ['BUCKET']
+                ConfigFileLoader('io_config.yaml', 'default')
                 return {'region': region, 'bucket': bucket, 'debug': os.environ.get('DEBUG')}
         ''')
 
@@ -254,6 +257,22 @@ class EnvironmentTest(ExportTestCase):
         self.assertIn('BUCKET=\n', example)
         self.assertIn('# required', example)
         self.assertIn('`PGPASSWORD` | no | yes', (out / 'README.md').read_text())
+
+    def test_io_config_variables_are_left_out_when_no_block_reads_a_profile(self):
+        (self.project / 'io_config.yaml').write_text(
+            "default:\n  AWS_ACCESS_KEY_ID: \"{{ env_var('AWS_ACCESS_KEY_ID') }}\"\n"
+        )
+        self.add('load', 'data_loader', '''
+            import os
+
+            @data_loader
+            def load(*args, **kwargs):
+                return {'bucket': os.getenv('BUCKET')}
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        self.assertEqual([v['name'] for v in captured.manifest['environment']], ['BUCKET'])
 
     def test_mage_secrets_come_from_the_environment_in_a_service(self):
         from unittest.mock import patch

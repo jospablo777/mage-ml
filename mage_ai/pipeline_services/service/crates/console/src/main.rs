@@ -134,7 +134,7 @@ fn parse_options(
 ) -> Result<Option<Options>, Box<dyn Error>> {
     let mut options = Options {
         mode: Mode::Live,
-        endpoint: "http://127.0.0.1:8090".into(),
+        endpoint: "http://127.0.0.1:8080".into(),
         snapshot: None,
         allow_control: false,
         render_once: false,

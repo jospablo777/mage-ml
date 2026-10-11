@@ -641,9 +641,16 @@ def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:
         from mage_ai.orchestration.db.models.schedules import PipelineSchedule
 
         db_connection.start_session()
-        for schedule in PipelineSchedule.query.filter(
+        # A project whose server never started has a database without tables: no triggers.
+        from sqlalchemy import inspect as sqlalchemy_inspect
+
+        has_table = sqlalchemy_inspect(db_connection.session.get_bind()).has_table(
+            PipelineSchedule.__tablename__,
+        )
+        schedules = PipelineSchedule.query.filter(
             PipelineSchedule.pipeline_uuid == pipeline.uuid,
-        ).all():
+        ).all() if has_table else []
+        for schedule in schedules:
             stored = dict(
                 origin='database',
                 schedule_type=str(getattr(schedule.schedule_type, 'value', schedule.schedule_type)),
@@ -665,8 +672,8 @@ def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:
             by_name[schedule.name] = stored
     except Exception as error:
         notes.append(
-            f'Pipeline {pipeline.uuid}: the trigger database could not be read ({error}); '
-            'only triggers.yaml is exported.'
+            f'Pipeline {pipeline.uuid}: the trigger database could not be read '
+            f'({str(error).splitlines()[0][:300]}); only triggers.yaml is exported.'
         )
 
     triggers = []
@@ -746,10 +753,33 @@ def _environment_reads(path: Path, project: Path) -> List[Tuple[str, bool, bool,
     return [(n, r, s, label) for n, r, s in reads]
 
 
+# Code that reads io_config.yaml: Python loaders, SQL blocks, R's database and S3 helpers
+# and Rust's io_config profiles.
+READS_IO_CONFIG_FILE = re.compile(
+    r'io_config|ConfigFileLoader|\b(db_connect|read_sql|write_table|read_s3|write_s3|'
+    r's3_filesystem)\(|mage::postgres|Postgres::connect'
+)
+
+
+def _uses_io_config(capture_: Capture) -> bool:
+    for path in capture_.files:
+        if path.suffix == '.sql':
+            return True
+        if path.suffix in ('.py', '.r', '.R', '.rs') and READS_IO_CONFIG_FILE.search(
+            path.read_text(errors='replace'),
+        ):
+            return True
+    return False
+
+
 def _environment(capture_: Capture) -> List[Dict]:
     variables: Dict[str, Dict] = {}
+    io_config_used = _uses_io_config(capture_)
     for path in sorted(capture_.files):
         if path.suffix not in ('.py', '.yaml', '.yml'):
+            continue
+        if path.name == 'io_config.yaml' and not io_config_used:
+            # Only the profiles' variables matter, and no exported code reads a profile.
             continue
         for name, required, secret, label in _environment_reads(path, capture_.project):
             if name.startswith('MAGE_SERVICE_'):
@@ -1398,15 +1428,17 @@ WORKDIR /build
 COPY build/mage_service ./mage_service
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     --mount=type=cache,target=/build/mage_service/target \\
-    cargo build --release --locked --manifest-path mage_service/Cargo.toml -p mage-service && \\
-    mkdir -p /out && cp mage_service/target/release/mage-service /out/mage-service
+    cargo build --release --locked --manifest-path mage_service/Cargo.toml \\
+      -p mage-service -p mage-console && \\
+    mkdir -p /out && \\
+    cp mage_service/target/release/mage-service mage_service/target/release/mage-console /out/
 {rust_blocks}
 {runtime}RUN groupadd --system --gid 10001 mage && \\
     useradd --system --uid 10001 --gid mage --home-dir /srv/mage-service --no-create-home mage && \\
     mkdir -p /srv/mage-service /var/lib/mage-service && \\
     chown mage:mage /var/lib/mage-service
 WORKDIR /srv/mage-service
-COPY --from=build /out/mage-service /usr/local/bin/mage-service
+COPY --from=build /out/mage-service /out/mage-console /usr/local/bin/
 {copy_python}{copy_blocks}{copy_models}COPY --chown=mage:mage {project} ./{project}
 COPY --chown=mage:mage service.json ./service.json
 {r_prepare}
