@@ -120,6 +120,12 @@ function BarStackChart({
     range: colors,
   });
 
+  // Before its container is measured the chart has no room: drawing it then gives
+  // bars a negative height.
+  if (xMax <= 0 || yMax <= 0) {
+    return null;
+  }
+
   return (
     <div style={{ position: 'relative', zIndex: 2 }}>
       <svg height={height} width={width}>
