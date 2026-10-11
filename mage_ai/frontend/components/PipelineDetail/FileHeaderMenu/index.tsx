@@ -6,6 +6,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import FileHeaderMenuItem, { blankIcon } from './FileHeaderMenuItem';
 import FlyoutMenu from '@oracle/components/FlyoutMenu';
 import KernelOutputType from '@interfaces/KernelOutputType';
+import PipelineServiceExport from '@components/PipelineServiceExport';
 import PipelineType, {
   KERNEL_NAME_TO_PIPELINE_TYPE,
   PipelineTypeEnum,
@@ -35,6 +36,7 @@ import { SHARED_FILE_HEADER_BUTTON_PROPS } from './constants';
 import { isMac } from '@utils/os';
 import { randomNameGenerator } from '@utils/string';
 import { useKeyboardContext } from '@context/Keyboard';
+import { useModal } from '@context/Modal';
 
 const NUMBER_OF_TOP_MENU_ITEMS: number = 3;
 const INDEX_COMPUTE = 4;
@@ -99,6 +101,17 @@ function FileHeaderMenu({
     featureUUIDs,
   } = useProject();
 
+  const [showServiceExport, hideServiceExport] = useModal(() => (
+    <PipelineServiceExport
+      onClose={hideServiceExport}
+      pipelineUUIDs={pipeline?.uuid ? [pipeline.uuid] : []}
+    />
+  ), {
+  }, [pipeline?.uuid], {
+    background: true,
+    uuid: 'pipeline_service_export',
+  });
+
   const fileItems = [
     {
       beforeIcon: blankIcon,
@@ -138,6 +151,12 @@ function FileHeaderMenu({
       label: () => 'Disable autosave',
       onClick: toggleDisableAutosave,
       uuid: 'Disable_autosave',
+    },
+    {
+      beforeIcon: blankIcon,
+      label: () => 'Export as service',
+      onClick: () => showServiceExport(),
+      uuid: 'export_as_service',
     },
   ];
   const runItems = useMemo(() => {

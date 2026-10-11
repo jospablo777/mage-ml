@@ -61,6 +61,9 @@ export const DATA_CONTRACTS: 'data_contracts' = 'data_contracts';
 export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verifications';
 export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilations';
 export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_documentations';
+export const PIPELINE_SERVICE_EXPORTS: 'pipeline_service_exports' = 'pipeline_service_exports';
+export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
+export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_service_builds';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
 export const FOLDERS: 'folders' = 'folders';
@@ -166,6 +169,9 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [FUSION_VERIFICATIONS],
   [PIPELINE_COMPILATIONS],
   [PIPELINE_DOCUMENTATIONS],
+  [PIPELINE_SERVICE_EXPORTS],
+  [PIPELINE_SERVICES],
+  [PIPELINE_SERVICE_BUILDS],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
   [FILE_VERSIONS, FILES],

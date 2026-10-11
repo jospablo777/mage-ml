@@ -8,6 +8,7 @@ import Button from '@oracle/elements/Button';
 import ButtonTabs from '@oracle/components/Tabs/ButtonTabs';
 import Chip from '@oracle/components/Chip';
 import CompiledCell from '@components/PipelineDetail/CompileStatus/CompiledCell';
+import PipelineServiceExport from '@components/PipelineServiceExport';
 import ConfigurePipeline from '@components/PipelineDetail/ConfigurePipeline';
 import Dashboard from '@components/Dashboard';
 import ErrorsType from '@interfaces/ErrorsType';
@@ -601,6 +602,21 @@ function PipelineListPage() {
     uuid: 'rename_pipeline_and_save',
   });
 
+  const [showServiceExport, hideServiceExport] = useModal(({
+    pipelineUUIDs,
+  }: {
+    pipelineUUIDs: string[];
+  }) => (
+    <PipelineServiceExport
+      onClose={hideServiceExport}
+      pipelineUUIDs={pipelineUUIDs}
+    />
+  ), {
+  }, [], {
+    background: true,
+    uuid: 'pipeline_service_export',
+  });
+
   const [showImportPipelineModal, hideImportPipelineModal] = useModal(() => (
     <UploadPipeline
       fetchPipelines={fetchPipelines}
@@ -808,6 +824,13 @@ function PipelineListPage() {
             pipelineDescription: selectedPipeline?.description,
           }),
           uuid: 'Pipelines/MoreActionsMenu/EditDescription',
+        },
+        {
+          label: () => 'Export as service',
+          onClick: () => showServiceExport({
+            pipelineUUIDs: selectedPipeline ? [selectedPipeline.uuid] : [],
+          }),
+          uuid: 'Pipelines/MoreActionsMenu/ExportAsService',
         },
       ]}
       onClickFilterDefaults={() => {
@@ -1112,6 +1135,11 @@ function PipelineListPage() {
             uuid: 'compile',
           },
           {
+            label: () => 'Export as service',
+            onClick: () => showServiceExport({ pipelineUUIDs: [selectedPipeline?.uuid] }),
+            uuid: 'export_as_service',
+          },
+          {
             label: () => 'Delete',
             onClick: () => {
               if (typeof window !== 'undefined'
@@ -1126,7 +1154,7 @@ function PipelineListPage() {
           },
         ];
       }}
-      rightClickMenuHeight={36 * 10}
+      rightClickMenuHeight={36 * 11}
       rightClickMenuWidth={UNIT * 30}
       rowGroupHeaders={rowGroupHeadersInner}
       rows={pipelinesInner?.map((pipeline, idx) => {

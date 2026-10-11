@@ -16,6 +16,7 @@ import api from '@api'
 import useProject from '@utils/models/project/useProject';
 import {
   BranchAlt,
+  CubeWithArrowDown,
   Insights,
   DocumentIcon,
   Lightning,
@@ -125,6 +126,14 @@ const DEFAULT_NAV_ITEMS = ({
           label: () => 'Pipeline runs',
           linkProps: {
             href: '/pipeline-runs',
+          },
+        },
+        {
+          Icon: CubeWithArrowDown,
+          id: 'services',
+          label: () => 'Services',
+          linkProps: {
+            href: '/services',
           },
         },
         {
