@@ -19,6 +19,14 @@ pipeline's variables are in \code{global_vars} and \code{\link[=variable]{variab
 \code{\link[=read_sql]{read_sql()}}, \code{\link[=write_table]{write_table()}} and \code{\link[=db_connect]{db_connect()}} use the databases of the
 project's \code{io_config.yaml}.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/jospablo777/mage-ml}
+  \item Report bugs at \url{https://github.com/jospablo777/mage-ml/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: jospablo777 \email{jospablo777@gmail.com}
 

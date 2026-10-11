@@ -1,14 +1,16 @@
 Package: mageml
-Title: Run R Blocks in Mage ML Pipelines
+Title: Run R Blocks in MageML Pipelines
 Version: 0.1.0
 Authors@R:
     person("jospablo777", email = "jospablo777@gmail.com", role = c("aut", "cre"))
-Description: The runtime of R blocks in Mage ML pipelines. It exchanges data
+Description: The runtime of R blocks in MageML pipelines. It exchanges data
     frames with Python blocks through Arrow IPC files, keeping 64-bit
     integers, lists, dates and time zones, connects to the databases of a
-    Mage project's io_config.yaml through DBI, and reads and writes data
+    MageML project's io_config.yaml through DBI, and reads and writes data
     files locally and on S3.
 License: Apache License (== 2.0)
+URL: https://github.com/jospablo777/mage-ml
+BugReports: https://github.com/jospablo777/mage-ml/issues
 Encoding: UTF-8
 Depends:
     R (>= 4.3)

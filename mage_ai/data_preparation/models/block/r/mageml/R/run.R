@@ -126,7 +126,8 @@ execute_block <- function(job_dir) {
   evaluate_block(expressions, readLines(path, encoding = "UTF-8"), env)
   f <- block_function(env, block_type)
   value <- do.call(f, unname(inputs), envir = env)
-  if (identical(block_type, "conditional") && !(isTRUE(value) || isFALSE(value))) {
+  decided <- isTRUE(value) || isFALSE(value)
+  if (identical(block_type, "conditional") && !decided) {
     stop(
       "A conditional block returns TRUE or FALSE, not ",
       paste(class(value), collapse = "/"),

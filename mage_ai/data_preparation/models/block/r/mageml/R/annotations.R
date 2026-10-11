@@ -149,7 +149,8 @@ evaluate_block <- function(expressions, lines, env) {
         register_test(f, name)
       } else {
         # A condition is the function of a conditional block.
-        register_block_function(f, if (tag == "condition") "conditional" else tag)
+        type <- if (tag == "condition") "conditional" else tag
+        register_block_function(f, type)
       }
     }
   }

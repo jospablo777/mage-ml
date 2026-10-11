@@ -178,3 +178,35 @@ test_that("custom blocks run by annotation, registration or name", {
   expect_true(run_block(named, quit_on_error = FALSE))
   expect_equal(read_output(named)$value, "done")
 })
+
+test_that("a conditional block writes its decision", {
+  job_dir <- local_job(
+    c(
+      "#* @condition",
+      "enough_rows <- function(df_1, ...) {",
+      "  nrow(df_1) >= variable(\"minimum\", 1)",
+      "}"
+    ),
+    block_type = "conditional",
+    inputs = list(data.frame(x = 1:3)),
+    globals = list(minimum = 3)
+  )
+
+  expect_true(run_block(job_dir, quit_on_error = FALSE))
+
+  expect_true(read_output(job_dir)$value)
+})
+
+test_that("a conditional block must return TRUE or FALSE", {
+  job_dir <- local_job(
+    c("#* @condition", "decide <- function(...) NA"),
+    block_type = "conditional"
+  )
+
+  expect_false(run_block(job_dir, quit_on_error = FALSE))
+
+  expect_match(
+    paste(readLines(file.path(job_dir, "error.txt")), collapse = "\n"),
+    "returns TRUE or FALSE"
+  )
+})
