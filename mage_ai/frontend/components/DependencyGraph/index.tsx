@@ -2165,6 +2165,10 @@ function DependencyGraph({
             );
           }}
           nodes={nodes}
+          // Blocks load in steps, and reaflow fits only its first layout: a graph whose
+          // blocks arrived after it stayed at 100%, wider than its panel. Each new layout
+          // fits again, once reaflow has committed it.
+          onLayoutChange={() => setTimeout(() => recenterCanvas(canvasRef), 0)}
           onNodeLinkCheck={(event, from, to) => !edges.some(e => e.from === from.id && e.to === to.id)}
           onZoomChange={z => {
             const zFinal = Math.max(z, 0.05);

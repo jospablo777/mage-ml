@@ -57,13 +57,13 @@ test('an error with markup in it is shown as text', async ({ page }) => {
   await expect(page.locator('img[src="x"]')).toHaveCount(0);
 });
 
-test('the dependency graph is centered in the editor panel', async ({ page }) => {
+test('the dependency graph fits and is centered in the editor panel', async ({ page }) => {
   await page.goto(`/pipelines/${pipelineUUID}/edit`);
   await page.locator('foreignObject').first().waitFor();
-  // The graph fits once after the layout; give it the time it takes.
+  // The graph fits after each layout; give the last one time to land.
   await page.waitForTimeout(2500);
 
-  const { container, graph } = await page.evaluate(() => {
+  const { container, graph, left, right } = await page.evaluate(() => {
     const svg = document.querySelector('foreignObject').closest('svg');
     const box = svg.parentElement.getBoundingClientRect();
     const group = svg.querySelector(':scope > g').getBoundingClientRect();
@@ -71,9 +71,13 @@ test('the dependency graph is centered in the editor panel', async ({ page }) =>
     return {
       container: box.x + box.width / 2,
       graph: group.x + group.width / 2,
+      left: group.left - box.left,
+      right: box.right - group.right,
     };
   });
   expect(Math.abs(container - graph)).toBeLessThan(4);
+  expect(left).toBeGreaterThanOrEqual(-2);
+  expect(right).toBeGreaterThanOrEqual(-2);
 });
 
 test('pages fit a 1024 px wide screen', async ({ page }) => {
