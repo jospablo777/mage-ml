@@ -1,3 +1,7 @@
+import shutil
+import tempfile
+import time
+from pathlib import Path
 from unittest.mock import patch
 
 from mage_ai.orchestration.queue.config import QueueConfig
@@ -7,6 +11,26 @@ from mage_ai.tests.base_test import TestCase
 
 def run_block():
     print('test run block')
+
+
+def use_polars(path):
+    import polars as pl
+
+    frame = pl.DataFrame({'k': [i % 7 for i in range(200_000)], 'v': range(200_000)})
+    Path(path).write_text(str(frame.group_by('k').agg(pl.col('v').sum()).height))
+
+
+def warm_polars():
+    """Runs Polars' thread pool here, as a server that showed a Polars block's output."""
+    import polars as pl
+
+    pl.DataFrame({'k': [1, 2] * 100_000, 'v': range(200_000)}).group_by('k').sum()
+
+
+def wait_for(path: Path, seconds: float) -> None:
+    deadline = time.monotonic() + seconds
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
 
 
 class ProcessQueueTests(TestCase):
@@ -141,8 +165,10 @@ class ProcessQueueRaceTests(TestCase):
         """
         import pickle
 
+        from mage_ai.orchestration.queue import process_queue
+
         self.queue.redis_url = 'redis://localhost:6379/0'
-        with patch('mage_ai.orchestration.queue.process_queue.mp.Process') as process:
+        with patch.object(process_queue.PROCESS_CONTEXT, 'Process') as process:
             self.queue.start_worker_pool()
 
         args = process.call_args.kwargs['args']
@@ -362,3 +388,26 @@ class JobAliasTests(TestCase):
         from mage_ai.orchestration.queue import process_queue
 
         process_queue.register_job_alias('block_run_9')
+
+
+class PolarsAfterForkTests(TestCase):
+    def test_a_worker_runs_polars_after_its_scheduler_used_polars(self):
+        """
+        Linux forked the worker pool and its workers. A process forked after its parent ran
+        Polars' thread pool has the pool's state without its threads, and its first Polars
+        call waited forever: the Polars blocks of scheduled runs hung until their timeout.
+        """
+        warm_polars()
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        result = Path(directory, 'result')
+        queue = ProcessQueue(queue_config=QueueConfig.load(config=dict(concurrency=2)))
+        queue.start()
+        self.addCleanup(queue.mp_manager.shutdown)
+        self.addCleanup(queue.stop)
+
+        queue.enqueue('polars_job', use_polars, str(result))
+        wait_for(result, 120)
+
+        self.assertTrue(result.exists(), 'The worker did not finish its Polars job.')
+        self.assertEqual(result.read_text(), '7')

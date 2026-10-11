@@ -64,6 +64,7 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.constants import ENV_DEV
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.processes import PROCESS_CONTEXT
 from mage_ai.shared.security import filter_out_env_var_values
 from mage_ai.utils.code import reload_all_repo_modules
 
@@ -615,8 +616,8 @@ db_connection.start_session()
             else:
                 config_copy_path = None
 
-            queue = multiprocessing.Queue()
-            proc = multiprocessing.Process(
+            queue = PROCESS_CONTEXT.Queue()
+            proc = PROCESS_CONTEXT.Process(
                 target=run_pipeline, args=(pipeline, config_copy_path, global_vars, queue)
             )
             proc.start()
