@@ -292,6 +292,31 @@ impl Ledger {
         Ok(())
     }
 
+    /// A completed block of a chain, with its own span inside the chain's time.
+    pub fn finish_chained_block(
+        &self,
+        run_id: &str,
+        block: &str,
+        started_at: DateTime<Utc>,
+        finished_at: DateTime<Utc>,
+        outputs: &[Value],
+    ) -> Result<()> {
+        let outputs =
+            serde_json::to_string(outputs).map_err(|e| LedgerError::Data(e.to_string()))?;
+        self.lock().execute(
+            "UPDATE block_runs SET status = 'completed', started_at = ?3, finished_at = ?4, \
+             error = NULL, outputs = ?5 WHERE run_id = ?1 AND block = ?2",
+            params![
+                run_id,
+                block,
+                timestamp(started_at),
+                timestamp(finished_at),
+                outputs
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Runs a killed process left running or queued block runs behind; marks them failed.
     pub fn recover_interrupted(&self) -> Result<Vec<String>> {
         let mut connection = self.lock();

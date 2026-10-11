@@ -230,6 +230,11 @@ class ExportedRunTest(ExportTestCase):
         run = json.loads(result.stdout[result.stdout.index('{'):])
         self.assertEqual(run['status'], 'completed')
         self.assertEqual([b['status'] for b in run['blocks']], ['completed'] * 3)
+        # Each chained block has its own span; the spans follow one another.
+        spans = [(b['started_at'], b['finished_at']) for b in run['blocks']]
+        for (_, finished), (started, _) in zip(spans, spans[1:]):
+            self.assertEqual(finished, started)
+        self.assertLessEqual(spans[0][1], spans[-1][1])
 
         summary_output = next(b for b in run['blocks'] if b['block'] == summary.uuid)
         actual = pl.read_ipc(summary_output['outputs'][0]['path'])
