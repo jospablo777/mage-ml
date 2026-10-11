@@ -83,11 +83,11 @@ notification_config:
       details: ...
 ```
 You can customize the message template for `success`, `failure`, `passed_sla` scenarios. For each message template,
-you can specify `title` and `details`.
+you can specify `title`, `summary` and `details`.
 * `title` is used as the email subject.
 * `details` is used as the email body.
-* Without `details`, the body is the default message followed by the URL of the pipeline run page.
-  `summary` is not used for email.
+* Without `details`, the body is `summary` followed by the URL of the pipeline run page,
+  or the default message when neither is set.
 
 To interpolate variables in the message template, you can use `{variable_name}` syntax.
 Here are the supported variables:

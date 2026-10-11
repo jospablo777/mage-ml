@@ -229,6 +229,10 @@ class NotificationSender:
             if details is None and message_template.details is not None:
                 details = message_template.details
 
+        if details is None and summary is not None:
+            # Slack and email send the details: a template's summary must reach them too.
+            details = self.__with_pipeline_run_url(summary, pipeline, pipeline_run)
+
         self.send(
             title=self.__interpolate_vars(
                 title or default_title,

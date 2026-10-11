@@ -94,6 +94,19 @@ class NotificationSenderTests(DBTestCase):
             title
         )
 
+    @patch('mage_ai.orchestration.notification.sender.send_slack_message')
+    def test_a_template_summary_reaches_slack(self, mock_send_slack):
+        notification_config = NotificationConfig.load(config=dict(
+            alert_on=['trigger_failure'],
+            slack_config=dict(webhook_url='test_webhook_url'),
+            message_templates=dict(failure=dict(summary='{pipeline_uuid} failed.')),
+        ))
+        sender = NotificationSender(config=notification_config)
+        pipeline_run = self.__class__.pipeline_run
+        sender.send_pipeline_run_failure_message(self.__class__.pipeline, pipeline_run)
+        message = mock_send_slack.call_args[0][1]
+        self.assertTrue(message.startswith('test_pipeline failed.'), message)
+
     @patch('mage_ai.orchestration.notification.sender.send_teams_message')
     @patch('mage_ai.orchestration.notification.sender.send_email')
     def test_send_pipeline_run_failure_message_using_teams(
