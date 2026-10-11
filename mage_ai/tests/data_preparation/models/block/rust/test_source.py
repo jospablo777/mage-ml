@@ -110,6 +110,42 @@ class WorkspaceTest(TestCase):
             (sdk / 'src' / 'lib.rs').write_text('pub fn b() {}\n')
             self.assertNotEqual(ws.sdk_digest(), first)
 
+    def test_the_sdk_digest_sees_a_rewrite_with_the_same_size_and_time(self):
+        """
+        ext4 records modification times at the kernel tick, so a file written twice within
+        a few milliseconds keeps its size and time; the digest of the first content stayed.
+        """
+        from unittest import mock
+
+        sdk = Path(tempfile.mkdtemp())
+        (sdk / 'src').mkdir()
+        lib = sdk / 'src' / 'lib.rs'
+        lib.write_text('pub fn a() {}\n')
+        with mock.patch.object(ws, 'SDK_SOURCE', sdk), mock.patch.object(
+            ws, '_sdk_digest_cache', None,
+        ):
+            first = ws.sdk_digest()
+            modified = lib.stat().st_mtime_ns
+            lib.write_text('pub fn b() {}\n')
+            os.utime(lib, ns=(modified, modified))
+            self.assertNotEqual(ws.sdk_digest(), first)
+
+    def test_the_digest_of_sdk_files_older_than_the_settle_time_is_cached(self):
+        from unittest import mock
+
+        sdk = Path(tempfile.mkdtemp())
+        (sdk / 'src').mkdir()
+        lib = sdk / 'src' / 'lib.rs'
+        lib.write_text('pub fn a() {}\n')
+        old = lib.stat().st_mtime_ns - 60_000_000_000
+        os.utime(lib, ns=(old, old))
+        with mock.patch.object(ws, 'SDK_SOURCE', sdk), mock.patch.object(
+            ws, '_sdk_digest_cache', None,
+        ):
+            first = ws.sdk_digest()
+            with mock.patch.object(Path, 'read_bytes', side_effect=AssertionError('read')):
+                self.assertEqual(ws.sdk_digest(), first)
+
     def test_a_workspace_without_the_sdk_dependency_is_explained(self):
         workspace = ws.init(tempfile.mkdtemp())
         workspace.cargo_toml.write_text('[workspace]\nmembers = []\n')
