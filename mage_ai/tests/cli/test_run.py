@@ -82,3 +82,19 @@ class RunTests(TestCase):
         assert '[north, south, east, west]' in result.output
         assert 'Traceback' not in result.output
         assert 'Pipeline run completed.' not in result.output
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_a_failed_block_prints_a_plain_traceback_with_its_notes(
+        self, mock_executor_factory, mock_pipeline,
+    ):
+        error = ModuleNotFoundError("No module named 'sklearn'", name='sklearn')
+        error.add_note('Block train (transformers/train.py) failed.')
+        mock_executor_factory.get_pipeline_executor.return_value.execute.side_effect = error
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic'])
+        assert result.exit_code == 1
+        assert 'Traceback (most recent call last)' in result.output
+        assert "ModuleNotFoundError: No module named 'sklearn'" in result.output
+        assert 'Block train (transformers/train.py) failed.' in result.output
+        assert 'Pipeline run failed.' in result.output
+        assert '╭' not in result.output

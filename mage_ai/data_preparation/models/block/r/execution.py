@@ -139,7 +139,7 @@ def execute_r_chain(
             block = _read_text(os.path.join(job_dir, 'error_block.txt')) or None
             calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
             text = (f'R block {block or steps[0]["block_uuid"]} failed: '
-                    f'{message or f"Rscript exited with {exit_code}"}')
+                    f'{message or describe_exit(exit_code, "Rscript")}')
             if calls:
                 text += f'\n\nR calls:\n{calls}'
             raise RChainError(text, block)
@@ -222,7 +222,7 @@ def execute_r_code(
         if exit_code != 0:
             message = _read_text(os.path.join(job_dir, 'error.txt'))
             calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
-            text = f'R block {block_uuid} failed: {message or f"Rscript exited with {exit_code}"}'
+            text = f'R block {block_uuid} failed: {message or describe_exit(exit_code, "Rscript")}'
             if calls:
                 text += f'\n\nR calls:\n{calls}'
             raise RBlockError(text)

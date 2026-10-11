@@ -289,6 +289,14 @@ def run(
             # broken rules are printed above it), not a failure of the block's code.
             print(f'[red]{_e(error)}[/red]')
             raise typer.Exit(code=1)
+        except Exception as error:
+            # The whole traceback, in plain text: the block's file and line are in it, and
+            # the notes at its end name the block and what to do.
+            import traceback
+
+            traceback.print_exception(error, file=sys.stderr)
+            print('[red]Pipeline run failed.[/red]')
+            raise typer.Exit(code=1)
         print('Pipeline run completed.')
 
 

@@ -25,6 +25,7 @@ from mage_ai.data_preparation.models.block.rust import exchange
 from mage_ai.data_preparation.models.block.rust import inputs as rust_inputs
 from mage_ai.data_preparation.models.block.rust.source import RustSourceError
 from mage_ai.data_preparation.models.constants import BlockType
+from mage_ai.shared.error_hints import describe_exit
 from mage_ai.shared.processes import HAS_PROCESS_GROUPS, stop_process_group
 
 BLOCK_TYPES = (
@@ -205,7 +206,7 @@ def execute_rust_code(
                 raise RustBlockError(f'Rust block {block_uuid} panicked{where}: {message}')
             raise RustBlockError(
                 f'Rust block {block_uuid} failed: '
-                + (message or f'the process exited with {exit_code}'),
+                + (message or describe_exit(exit_code)),
             )
         result = _read_json(os.path.join(job_dir, 'result.json'))
         if result is None:
@@ -317,7 +318,7 @@ def execute_rust_chain(
                 raise RustChainError(f'Rust block {block} panicked{where}: {message}', block)
             raise RustChainError(
                 f'Rust block {block} failed: '
-                + (message or f'the process exited with {exit_code}'),
+                + (message or describe_exit(exit_code)),
                 block,
             )
         result = _read_json(os.path.join(job_dir, 'result.json'))

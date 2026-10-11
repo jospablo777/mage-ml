@@ -372,10 +372,13 @@ pub fn kill_group(pid: u32) {
     }
 }
 
-fn describe_exit(status: std::process::ExitStatus) -> String {
+/// How a child process ended, as a suffix for "the block exited": signals name their usual
+/// cause.
+pub(crate) fn describe_exit(status: std::process::ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
     match (status.code(), status.signal()) {
         (_, Some(libc::SIGKILL)) => " (killed, often by running out of memory)".into(),
+        (_, Some(libc::SIGSEGV)) => " (crashed in native code: segmentation fault)".into(),
         (_, Some(signal)) => format!(" (signal {signal})"),
         (Some(code), _) => format!(" (exit code {code})"),
         _ => String::new(),
@@ -416,4 +419,32 @@ fn forward(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe_exit;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    #[test]
+    fn exits_name_their_usual_cause() {
+        // A raw wait status: the low 7 bits hold the signal, the next byte the exit code.
+        assert_eq!(
+            describe_exit(ExitStatus::from_raw(libc::SIGKILL)),
+            " (killed, often by running out of memory)"
+        );
+        assert_eq!(
+            describe_exit(ExitStatus::from_raw(libc::SIGSEGV)),
+            " (crashed in native code: segmentation fault)"
+        );
+        assert_eq!(
+            describe_exit(ExitStatus::from_raw(libc::SIGABRT)),
+            " (signal 6)"
+        );
+        assert_eq!(
+            describe_exit(ExitStatus::from_raw(2 << 8)),
+            " (exit code 2)"
+        );
+    }
 }

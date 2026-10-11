@@ -1674,7 +1674,9 @@ class Block(
             except Exception as err:
                 if update_status:
                     self.status = BlockStatus.FAILED
-                raise err
+                from mage_ai.shared.error_hints import annotate_block_error
+
+                raise annotate_block_error(err, self)
             finally:
                 if update_status:
                     self.__update_pipeline_block(widget=BlockType.CHART == self.type)
@@ -1972,6 +1974,12 @@ class Block(
         with redirect_stdout(stdout) as out, redirect_stderr(stdout) as err:
             yield (out, err)
 
+    def _compiled(self, code: str):
+        """The block's code compiled under its file name, so tracebacks show its lines."""
+        from mage_ai.shared.error_hints import compile_source
+
+        return compile_source(code, self.file_path or f'<block {self.uuid}>')
+
     def _execute_block(
         self,
         outputs_from_input_vars,
@@ -2061,12 +2069,12 @@ class Block(
 
         if custom_code is not None and custom_code.strip():
             if BlockType.CHART != self.type:
-                exec(custom_code, results)
+                exec(self._compiled(custom_code), results)
         elif self.content is not None:
-            exec(self.content, results)
+            exec(self._compiled(self.content), results)
         elif os.path.exists(self.file_path):
             with open(self.file_path) as file:
-                exec(file.read(), results)
+                exec(self._compiled(file.read()), results)
 
         outputs = None
 
@@ -3444,10 +3452,10 @@ class Block(
                 'test': self._block_decorator(test_functions),
             }
             if custom_code is not None:
-                exec(custom_code, results)
+                exec(self._compiled(custom_code), results)
             elif os.path.exists(self.file_path):
                 with open(self.file_path) as file:
-                    exec(file.read(), results)
+                    exec(self._compiled(file.read()), results)
         elif not contracts_only:
             test_functions = self.test_functions
 
@@ -4532,7 +4540,7 @@ class ConditionalBlock(AddonBlock):
             results = dict(
                 condition=self._block_decorator(condition_functions),
             )
-            exec(self.content, results)
+            exec(self._compiled(self.content), results)
 
             global_vars_copy = global_vars.copy()
             input_vars = []
@@ -4605,7 +4613,7 @@ class CallbackBlock(AddonBlock):
                 on_failure=super()._block_decorator(failure_functions),
                 on_success=super()._block_decorator(success_functions),
             )
-            exec(self.content, results)
+            exec(self._compiled(self.content), results)
 
             callback_functions_legacy = []
             callback_status = None

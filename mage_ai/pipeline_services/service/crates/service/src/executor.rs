@@ -832,7 +832,7 @@ fn rust_failure(
                 None => message,
             }
         })
-        .unwrap_or_else(|| format!("the block exited with {status}"));
+        .unwrap_or_else(|| format!("the block exited{}", crate::python::describe_exit(status)));
     (BlockFailure::retryable(message), block)
 }
 
