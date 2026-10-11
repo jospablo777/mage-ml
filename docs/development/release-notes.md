@@ -365,6 +365,18 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The MongoDB destination works again** and upserts on every key property; records
   whose `_id` is not an ObjectId are kept.
 
+#### Production runs
+
+- **Production runs fuse chains of blocks by default.** Triggers, schedules, backfills, the
+  API and `mage run` run each chain of blocks in one process; block by block is for the
+  editor. Turn it off per pipeline with `block_fusion: 'off'` ("Run chains of blocks
+  together" in the settings), or for the server with `MAGE_BLOCK_FUSION_DEFAULT=off`.
+- **Consecutive Rust blocks compile into one program, and consecutive R blocks share one
+  R session.** The blocks before the one whose output is needed store a plan instead of
+  their output; reading it runs the chain. Pipelines that read an intermediate block's
+  output from storage, outside Mage, should set `keep_block_outputs: true` ("Keep every
+  block's output"). `MAGE_COMPILED_CHAINS=off` turns compiled chains off.
+
 #### Runtime
 
 - **Stopping the server stops the scheduler and every block run process.** SIGTERM, or
@@ -611,8 +623,8 @@ Each item says what changed, which pipelines it affects, and what to do.
   a histogram bar its range, row count and share; a category its name, count and share;
   the completeness bar and missing marks their counts. All are computed over the whole
   output.
-- **Block fusion** (`block_fusion: chains`, or "Run chains of blocks together" in the
-  pipeline settings): blocks that form a chain run as one stage, in one process, and each
+- **Block fusion** (on by default; "Run chains of blocks together" in the pipeline
+  settings): blocks that form a chain run as one stage, in one process, and each
   block receives the previous block's output from memory. Every block keeps its block run,
   status, logs, retries, timeout and stored output; branches still run in parallel. A
   5-block chain on 3 million rows ran in 12 to 17 seconds instead of 29. See
@@ -643,6 +655,14 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **Faster block imports**: `mage_ai.io.postgres` no longer imports SciPy, paramiko and
   sshtunnel unless an SSH tunnel or a sparse matrix is used (1.1 s to 0.7 s), and
   `io_config.yaml` loads secrets support only when it reads a secret.
+- **Pipeline compilation**: MageML checks Python and R blocks, prepares the R environment
+  and builds the Rust chains and blocks ahead of a pipeline's runs: after a save, when a
+  trigger is turned on, at server start for pipelines with active triggers, and from the
+  **Compile** button in the editor and the pipelines list, with progress, each step's error
+  and when the pipeline last compiled. The panel shows where a pipeline switches language,
+  since single-language pipelines run faster. API: `/api/pipeline_compilations`.
+- **The Mage Pro promotion is removed**: Live help and Try Pro in the header, Deploy (Pro)
+  in the side navigation, AI Code (Pro) in the add-block menu and the live chat links.
 - **`mage verify-fusion`** runs a pipeline block by block and fused, compares every
   block's stored outputs and names the first block whose output differs. Floats that differ
   only by rounding are reported as close. See "Verify fusion before turning it on" in

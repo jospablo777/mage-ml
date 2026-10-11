@@ -1,6 +1,6 @@
 # Rust pipeline optimization
 
-Status: done for this round (2026-10-10). Measured on macOS, Apple M-series, 14 cores,
+Status: done for this round (2026-10-10; compiled chains added 2026-10-11). Measured on macOS, Apple M-series, 14 cores,
 Python 3.12, with the 5-block chain of `integration_tests/benchmark` (load, clean, enrich,
 aggregate, export on 1,000,000 rows) and the playground's `rust_postgres_margins`
 (1.2 million order lines from PostgreSQL, two branches, two exports).
@@ -66,11 +66,10 @@ Mage's own runs keep a binary per block: a block edited in the editor rebuilds a
 
 ## What was evaluated and not done
 
-- **One binary for a chain of Rust blocks**, passing frames and lazy plans in memory.
-  It would save the 20 to 30 ms of Arrow IPC per block measured above, and would let
-  Polars optimize across blocks. Mage still stores every block's output, which
-  materializes each frame anyway, and the blocks would lose their own process, build
-  cache entry and error isolation. Not worth it at these numbers.
+- **One binary for a chain of Rust blocks** was first set aside: Mage stored every
+  block's output, which materialized each frame anyway. It is done now (dc7aac511 for
+  services, e8214ebd4 for Mage runs), together with storing a plan instead of the output
+  of a block nothing reads: see "Compiled chains" below.
 - **The Rust process writing the stored Parquet output itself.** Polars writes it in
   Rust on either side; the saving is one IPC read, about 10 ms per million rows.
 - **Starting job processes from a forkserver** that preloads Mage. A forked job started
@@ -79,6 +78,22 @@ Mage's own runs keep a binary per block: a block edited in the editor rebuilds a
   crashed (SIGSEGV) on macOS. Mage's own modules import pandas, so preloading less does
   not help. What came out of it: forked processes no longer share their parent's
   database connections (aaa00a8c4), which also protects the Linux workers that fork.
+
+## Compiled chains
+
+A chain of Rust blocks now runs as one program (`mage::run_chain`): each block's function
+receives the previous block's `LazyFrame`, and Polars optimizes the chain's queries as one
+plan and collects once, with the streaming engine. On the benchmark chain at 3 million
+rows, the Rust work took 0.029 s as one plan against 0.316 s block by block. In Mage
+runs, the blocks before the one whose output is needed store a plan (block/plans.py), so
+the frames between them are never written; a block with tests, a contract or monitors, an
+exporter, or `keep_block_outputs: true` computes its own output. Services run the chain
+from the bundle binary (`MAGE_CHAIN=1`). R chains run in one R session the same way
+(`mageml::run_chain`), and Python and SQL chains in one worker request.
+
+MageML compiles these chains ahead of the runs (orchestration/compilation.py): after a
+save, when a trigger is turned on, at server start and from the Compile button, so the
+first scheduled run after an edit does not pay the 3 to 10 s build.
 
 ## Where the time goes now
 
@@ -97,4 +112,5 @@ Mage's own runs keep a binary per block: a block edited in the editor rebuilds a
    services' Python workers do), recycled after N jobs, removes the per-job process
    cost where jobs cannot fork. It has to purge the project's modules between jobs so
    edited code is picked up; design it with the item 27 benchmark numbers.
-2. Benchmark R, Python and Rust pipelines with repetitions and medians (item 27).
+2. Benchmark R, Python and Rust pipelines with repetitions and medians: done, see
+   `docs/production/pipeline-performance.mdx` and `integration_tests/benchmark/pipelines`.

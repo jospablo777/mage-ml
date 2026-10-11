@@ -303,6 +303,14 @@ block.R#6: stop("expected 5 rows, got ", nrow(df))
 `MAGE_R_TIMEOUT` stops a block that runs longer, with the processes it started. Stopping a
 run, in the notebook or by cancelling a pipeline run, also stops its R process.
 
+In production runs, consecutive R blocks run in one R session: packages load once and data
+frames pass in memory. A block with tests, an exporter, or the last block of the chain
+computes its own output; the blocks before it store a plan that runs the chain when read.
+See [compiled chains](/design/data-pipeline-management#compiled-chains-of-rust-and-r-blocks).
+Integer columns stored as 64-bit integers reach the next block as R integers when they fit,
+as they would from storage. MageML checks R blocks for parse errors and prepares their
+environment ahead of the run (the **Compile** button in the editor).
+
 Each run starts a new `Rscript` process; nothing is kept between runs except stored
 outputs. `mage export service` exports R blocks with the project's rv environment: the
 [pipeline service](/production/pipeline-services) image installs R and the packages

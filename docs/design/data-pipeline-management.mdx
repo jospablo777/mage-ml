@@ -318,18 +318,21 @@ mage clean-cached-variables [project_path]
 
 ## Block fusion
 
-Blocks that form a chain can run as one stage: one process, with each block receiving the
-previous block's output from memory. Each block keeps its block run, status, logs, retries,
+Production runs (triggers, schedules, backfills, the API and `mage run`) run each chain of
+blocks as one stage: one process, with each block receiving the previous block's output
+from memory. This is on by default. Each block keeps its block run, status, logs, retries,
 timeout and stored output, so the run page, retries and every reader of stored outputs work
 as before. Branches still run in parallel, each as its own stage. Running a block in the
-notebook is unchanged.
+editor is unchanged: block by block is for developing and editing a pipeline.
 
-Turn it on in the pipeline settings ("Run chains of blocks together"), or in the
-pipeline's metadata.yaml:
+To run a pipeline block by block, for example to debug it, turn off "Run chains of blocks
+together" in its settings, or set it in the pipeline's metadata.yaml:
 
 ```yaml
-block_fusion: chains
+block_fusion: 'off'
 ```
+
+`MAGE_BLOCK_FUSION_DEFAULT=off` changes the default for every pipeline of the server.
 
 A chain is a path where each block has one downstream block and that block has one upstream
 block. The settings show the stages of the saved pipeline. These blocks always run alone:
@@ -350,7 +353,67 @@ block alone" in its settings, or set `fusion: false` in its configuration.
   half of the machine's memory (`MAGE_STAGE_MAX_MEMORY_SHARE`) or a block leaves a thread
   running.
 
-### Verify fusion before turning it on
+### Compiled chains of Rust and R blocks
+
+Inside a stage, consecutive Rust blocks compile into one program, and Polars optimizes
+their lazy queries as one plan: a filter in the third block can run while the first block
+reads the file. Consecutive R blocks run in one R session, with their packages loaded once.
+A block whose next block is of the same language returns a plan instead of computing its
+output, and the first block that needs its output runs the whole chain.
+
+A block computes its own output, and so ends a chain, when:
+
+- it is the last block of the chain, an exporter or a conditional;
+- it has tests, a data contract or monitors;
+- the pipeline keeps every block's output (below).
+
+A planned block keeps its block run, logs and status. Its stored output is the plan, which
+a retry, a later stage or the editor runs when it reads it. When a block of a compiled
+chain fails, its own block run is marked failed with the error, and the block that ran the
+chain names it.
+
+To store every block's own output, for example to inspect intermediate results, turn on
+"Keep every block's output" in the pipeline settings, or in metadata.yaml:
+
+```yaml
+keep_block_outputs: true
+```
+
+Runs are slower with it on: every block computes and writes its output.
+`MAGE_COMPILED_CHAINS=off` turns compiled chains off for the server.
+
+### Pipeline compilation
+
+MageML compiles a pipeline ahead of its runs, so a scheduled run starts without building
+anything:
+
+- **Python blocks**: a syntax check, with the block and line of each error, and a warning
+  for a block without its decorated function (`@transformer` and the like).
+- **R blocks**: a parse check, with the line and column of each error, and the R
+  environment and packages the blocks run with.
+- **Rust blocks**: the binaries of the chains and blocks a run would build.
+- **SQL blocks** are not compiled: the database checks their queries when they run.
+
+Compiling starts on its own a few seconds after you save a pipeline or a block, when you
+turn on a trigger, and when the server starts, for pipelines with an active trigger whose
+last compilation is missing or out of date (`MAGE_COMPILE_ON_START=off` turns this off).
+Builds are cached, so compiling an unchanged pipeline takes a moment. A run never waits
+for a compilation: it builds whatever is missing.
+
+In the editor, the button next to the kernel shows the state: **Compile**, **Compiling
+2/4** with a progress bar, **Compiled** or **Compile failed**. Click it to see each step with
+its result and error, when the pipeline last compiled and whether its code changed since,
+and to compile now. When the pipeline switches language, the panel shows where: each switch
+converts the data, so single-language pipelines run faster (see
+[Pipeline performance](/production/pipeline-performance)). The pipelines list has a
+**Compiled** column with the same status and a compile button, and **Compile** in each
+row's right-click menu.
+
+From the API, `POST /api/pipeline_compilations` with `{"pipeline_compilation":
+{"pipeline_uuid": "..."}}` starts a compilation, and `GET
+/api/pipeline_compilations/<pipeline uuid>` returns its progress and result.
+
+### Verify fusion
 
 In the pipeline's **Settings**, under block fusion, **Verify fusion** runs the check and
 shows each block's result and the full log as it runs; **Stop** ends it. From a terminal:

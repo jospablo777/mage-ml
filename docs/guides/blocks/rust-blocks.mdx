@@ -276,6 +276,17 @@ Rust blocks run in pipeline runs, triggers and backfills like other blocks, and 
 with Python, R and SQL blocks. The playground's `rust_session_scores` pipeline is a working
 example.
 
+In production runs, consecutive Rust blocks compile into one program, and Polars optimizes
+their lazy queries as one plan. Return a `LazyFrame` from a transformer and take
+`LazyFrame` inputs to get the most from it: the chain collects once, in the block whose
+output is needed. A block with tests, an exporter, or the last block of the chain computes
+its own output. See [compiled chains](/design/data-pipeline-management#compiled-chains-of-rust-and-r-blocks).
+
+MageML builds a pipeline's chains and blocks ahead of its runs, a few seconds after you
+save and when you turn on a trigger, so a scheduled run does not wait for a build. The
+**Compile** button in the editor shows the progress and any compile error, with its file
+and line. See [pipeline compilation](/design/data-pipeline-management#pipeline-compilation).
+
 `mage export service` compiles a pipeline's Rust blocks into one binary in the service
 image, which runs them without Mage or a Rust installation. A block's io_config profile goes with it, with
 `env_var()` and `mage_secret_var()` kept as references that the service fills in from its
