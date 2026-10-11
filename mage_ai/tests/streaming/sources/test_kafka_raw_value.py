@@ -28,12 +28,12 @@ class KafkaRawValueTests(TestCase):
                 'serialization_method': SerializationMethod.RAW_VALUE
             }
         }
-        
+
         source = KafkaSource(config)
-        
+
         # Test message conversion
         result = source._convert_message(mock_message)
-        
+
         self.assertIsInstance(result, dict)
         self.assertIn('metadata', result)
         self.assertIn('key', result['metadata'])
@@ -59,12 +59,12 @@ class KafkaRawValueTests(TestCase):
             'topic': 'test_topic',
             'include_metadata': True
         }
-        
+
         source = KafkaSource(config)
-        
+
         # Test message conversion
         result = source._convert_message(mock_message)
-        
+
         self.assertIsInstance(result, dict)
         self.assertIn('metadata', result)
         self.assertIn('key', result['metadata'])
@@ -91,12 +91,12 @@ class KafkaRawValueTests(TestCase):
             'topic': 'test_topic',
             'include_metadata': True
         }
-        
+
         source = KafkaSource(config)
-        
+
         # Test message conversion - should fallback to raw bytes
         result = source._convert_message(mock_message)
-        
+
         self.assertIsInstance(result, dict)
         self.assertIn('metadata', result)
         self.assertIn('key', result['metadata'])

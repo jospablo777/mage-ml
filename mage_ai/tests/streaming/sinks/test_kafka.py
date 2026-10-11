@@ -63,7 +63,7 @@ class KafkaSinkTests(TestCase):
                 }
                 mock_response.raise_for_status = Mock()
                 mock_post.return_value = mock_response
-                
+
                 KafkaSink(kafka_config)
 
         # Verify KafkaProducer was called with correct parameters
