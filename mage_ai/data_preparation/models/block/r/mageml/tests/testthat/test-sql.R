@@ -29,6 +29,8 @@ test_that("date-times keep every microsecond", {
 })
 
 test_that("values are prepared with the column types that read them", {
+  # R blocks run with TZ=UTC; a naive time is written as its UTC wall time.
+  withr::local_timezone("UTC")
   df <- data.frame(id = 1:2)
   df$day <- as.Date(c("0001-01-01", NA))
   df$naive <- as.POSIXct(c("2024-01-01 12:00:00", NA), tz = "")
