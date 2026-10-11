@@ -1,0 +1,207 @@
+---
+title: "Export pipelines as a service"
+sidebarTitle: "Export a service"
+icon: "box-archive"
+description: "Step by step: export one pipeline or a group of pipelines as a Docker service, run it, call its API and watch it from the terminal."
+---
+
+This guide takes two pipelines from a MageML project and turns them into one Docker service
+that runs without MageML. It uses a small project, `shop`, with two pipelines:
+
+- `load_orders`: generates orders and drops the ones with no amount;
+- `daily_summary`: sums the orders by region, every hour (a time trigger).
+
+Every command and output below comes from a real run. For every option, see the
+[pipeline services reference](/production/pipeline-services).
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/pipeline-service.light.svg" alt="Pipelines built in MageML are exported to a build context, built into a Docker image and run by the service" />
+  <img className="hidden dark:block" src="/images/diagrams/pipeline-service.dark.svg" alt="Pipelines built in MageML are exported to a build context, built into a Docker image and run by the service" />
+</Frame>
+
+## Before you start
+
+- The pipelines run in MageML: `mage run shop load_orders` completes.
+- Docker is installed. The machine that builds the image needs nothing else: Rust, R and
+  Python packages are installed inside the image.
+
+## 1. Export
+
+One pipeline:
+
+```bash
+mage export service shop load_orders --out ./orders-service
+```
+
+A group of pipelines in one service: list them and give the service a name.
+
+```bash
+mage export service shop load_orders daily_summary --out ./shop-service --name shop
+```
+
+The export prints what it found:
+
+```text
+Service shop, from project shop
+
+load_orders: 2 blocks, at most 1 run(s) at once
+  python data_loader   generate_orders
+  python transformer   clean_orders
+
+daily_summary: 2 blocks, at most 1 run(s) at once
+  python data_loader   generate_orders
+  python transformer   summarize_by_region
+  trigger every_hour: time @hourly
+
+Project files (6):
+  __init__.py
+  data_loaders/generate_orders.py
+  io_config.yaml
+  requirements.txt
+  transformers/clean_orders.py
+  transformers/summarize_by_region.py
+
+Python packages (7):
+  cloudpickle==3.1.2
+  numpy==2.5.3
+  pandas==3.0.6
+  ...
+```
+
+Read it before you build:
+
+- **Blocks:** every block of every pipeline, with its language. A block the service cannot
+  run (a sensor, a dynamic block) stops the export and names the reason.
+- **Project files:** only the files the blocks need, found by following their imports.
+  `generate_orders` is shared by both pipelines and copied once.
+- **Environment variables:** the ones the code reads, marked secret when they look like
+  one. This project reads none; when it does, they are listed here and in `.env.example`.
+- **Python packages:** only those the blocks import, pinned to the versions of your MageML
+  environment.
+
+The folder is a Docker build context:
+
+| File | |
+| --- | --- |
+| `Dockerfile`, `compose.yaml` | Build and run the image |
+| `service.json` | The pipelines, blocks, triggers, retries and timeouts |
+| `shop/` | The project files the blocks need |
+| `requirements.txt` | The pinned Python packages |
+| `.env.example` | The variables the code reads, without values |
+| `deploy/`, `.tekton/` | Kubernetes, IBM Cloud Code Engine and Tekton files |
+| `report.txt`, `README.md` | The report above and how to run this service |
+
+## 2. Build the image
+
+```bash
+docker build -t shop ./shop-service
+```
+
+The first build compiles the service (Rust) and installs the Python packages, which takes a
+few minutes; later builds reuse Docker's cache. This image is 460 MB. The build ends with
+`mage-service validate`, which checks the exported files, so a broken export fails here and
+not in production.
+
+## 3. Run a pipeline once
+
+For a cron job, a Kubernetes Job or a CI step, run one pipeline and exit:
+
+```bash
+docker run --rm shop run load_orders --var rows=500
+```
+
+```text
+COMPLETED load_orders  run 01a12931-8cbc-7410-a6af-09ecd7956689  870 ms
+  ok    generate_orders     869 ms
+  ok    clean_orders        869 ms
+```
+
+The exit code is 0 when every block completes and 1 otherwise. `--var` sets the run's
+variables, as runtime variables do in MageML (`kwargs['rows']` in the block).
+
+## 4. Serve it
+
+```bash
+docker run -d --name shop -p 127.0.0.1:8080:8080 \
+  -e MAGE_SERVICE_TOKEN=change-me \
+  -v shop-data:/var/lib/mage-service \
+  shop
+```
+
+Or `docker compose up --build` in the folder, which does the same with `compose.yaml`.
+
+- `MAGE_SERVICE_TOKEN` protects the API. Set your own; without it the service makes one
+  and prints it in its log.
+- The volume keeps the run history and logs across restarts.
+- Time triggers do not run until you add `-e MAGE_SERVICE_SCHEDULES=on`, so a service built
+  next to a running MageML does not run the same schedule twice.
+
+## 5. Start runs through the API
+
+```bash
+curl -X POST -H "Authorization: Bearer change-me" -H 'Content-Type: application/json' \
+  "http://localhost:8080/v1/pipelines/load_orders/runs?wait=60" \
+  -d '{"variables": {"rows": 50000}}'
+```
+
+With `?wait=60` the call returns when the run ends (or after 60 seconds) with the status of
+the run and of each block. A failing run says which block failed and why:
+
+```json
+{
+  "status": "failed",
+  "blocks": [
+    {"block": "generate_orders", "status": "failed", "error": "1 of 1 tests failed: test_output"},
+    {"block": "clean_orders", "status": "upstream_failed", "error": "Upstream block generate_orders failed."}
+  ]
+}
+```
+
+Other calls: `GET /v1/runs` lists runs, `GET /v1/runs/{id}/logs` returns everything the
+blocks printed, `POST /v1/runs/{id}/cancel` cancels. See the
+[API reference](/production/pipeline-services#3-call-it).
+
+## 6. Watch it from the terminal
+
+The image includes `mage-console`, a terminal dashboard. Open it inside the container:
+
+```bash
+docker exec -it shop mage-console
+```
+
+<Frame>
+  <img className="block dark:hidden" src="/images/services/console.light.svg" alt="mage-console showing the shop service: two pipelines, run counters, run duration and throughput charts, recent runs and the last failure" />
+  <img className="hidden dark:block" src="/images/services/console.dark.svg" alt="mage-console showing the shop service: two pipelines, run counters, run duration and throughput charts, recent runs and the last failure" />
+</Frame>
+
+It is read-only unless you start it with `--allow-control`, which lets you pause a pipeline
+or change how many of its runs go at once. See [Service console](/production/service-console).
+
+## One service or several
+
+A group of pipelines in one service shares one image, one API, one run history and one
+limit on runs at once (`MAGE_SERVICE_MAX_RUNS`, 8 by default); each pipeline keeps its own
+concurrency setting from MageML. Put pipelines together when they share code, data and
+release schedule. Export them as separate services when they need to scale apart, read
+different secrets, or ship at different times.
+
+## Update the service
+
+After you change the pipelines in MageML, export again over the same folder and rebuild:
+
+```bash
+mage export service shop load_orders daily_summary --out ./shop-service --name shop
+docker build -t shop ./shop-service
+```
+
+The new export replaces the exported files and keeps yours: `.env` and other `.env.*`
+files (except `.env.example`, which is regenerated) and a `data/` folder. `--force` is
+needed only to export into a folder that holds something other than an earlier export.
+
+## Next steps
+
+- [Deploy](/production/pipeline-services#deploy) to Kubernetes, IBM Cloud Code Engine or
+  any container platform with the files in `deploy/`.
+- [Secrets](/production/pipeline-services#configuration-and-secrets) from files, IBM Cloud
+  Secrets Manager or AWS.
+- [Models](/production/pipeline-services#models) from MLflow, embedded in the image.

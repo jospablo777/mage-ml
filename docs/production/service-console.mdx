@@ -1,0 +1,125 @@
+---
+title: "Service console"
+sidebarTitle: "Service console"
+icon: "terminal"
+description: "Watch an exported pipeline service from the terminal with mage-console, and pause pipelines or change their concurrency from its control panel."
+---
+
+`mage-console` is a terminal dashboard for a running [pipeline service](/production/pipeline-services).
+It shows each pipeline's runs, durations, throughput and last failure, refreshes every
+second, and can pause a pipeline or change how many of its runs go at once.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/services/console.light.svg" alt="mage-console: the pipeline list, run counters, run duration and throughput charts, recent runs and the last failure" />
+  <img className="hidden dark:block" src="/images/services/console.dark.svg" alt="mage-console: the pipeline list, run counters, run duration and throughput charts, recent runs and the last failure" />
+</Frame>
+
+## Open it
+
+Every service image includes the console. Run it inside the container:
+
+```bash
+docker exec -it shop mage-console
+```
+
+It reads the service at `http://127.0.0.1:8080` with the container's `MAGE_SERVICE_TOKEN`.
+If the service made its own token at start (it prints it in its log), pass it:
+`docker exec -it -e MAGE_SERVICE_TOKEN=<token> shop mage-console`.
+
+To run it on your machine instead, build it from the export folder (needs Rust, see
+[Rust setup](/guides/blocks/rust-setup)):
+
+```bash
+cargo build --release --manifest-path shop-service/build/mage_service/Cargo.toml -p mage-console
+MAGE_SERVICE_READ_TOKEN=... shop-service/build/mage_service/target/release/mage-console \
+  --endpoint http://localhost:8080
+```
+
+| Option | |
+| --- | --- |
+| `--endpoint URL` | The service; default `http://127.0.0.1:8080`. Plain HTTP only on localhost; remote services need HTTPS or a tunnel such as `ssh -L 8080:localhost:8080 host` |
+| `--allow-control` | Enables the control panel (below); needs `MAGE_SERVICE_TOKEN` |
+| `--light` | Colors for terminals with a light background; or `MAGE_CONSOLE_THEME=light` |
+| `--reduce-motion` | No activity animation; `m` toggles it |
+
+The console reads with `MAGE_SERVICE_READ_TOKEN` when it is set, so a monitoring screen
+never holds the full token, and falls back to `MAGE_SERVICE_TOKEN`.
+
+## What it shows
+
+| Panel | |
+| --- | --- |
+| Header | The service name and id, how many pipelines, the connection state and the age of the data |
+| Pipelines | Each pipeline with its state (idle, running, paused) and its active and queued runs; `↑` `↓` select one |
+| Counters | For the selected pipeline: runs succeeded and failed since the service started, in flight and queued |
+| Run duration | The durations of the latest completed runs, with their 95th percentile |
+| Throughput | Finished runs per minute over the last hour |
+| Recent runs | Status, what started each run (`api`, `schedule:<trigger>`), start time, duration and error |
+| Failure detail | The last failure's time and error, in full |
+| Service totals | Active and queued runs, paused pipelines and failures across all pipelines, and the embedded models |
+| Session | Read only or controls enabled |
+
+When the data is more than 5 seconds old, or the connection drops, the header says so and
+the controls turn off until fresh data arrives.
+
+## Keys
+
+| Key | |
+| --- | --- |
+| `↑` `↓` or `j` `k` | Select a pipeline |
+| `p` | Review pausing or resuming the selected pipeline |
+| `+` `-` | Review raising or lowering its runs at once (1 to 16) |
+| `Enter` | Submit the reviewed request |
+| `Esc` | Dismiss it without submitting |
+| `r` | Review retrying a request whose delivery is unknown |
+| `m` | Toggle the activity animation |
+| `?` | Keyboard reference and metric definitions |
+| `q` or `Ctrl-C` | Quit |
+
+## The control panel
+
+Start the console with `--allow-control` to change a pipeline while the service runs:
+
+```bash
+docker exec -it shop mage-console --allow-control
+```
+
+Every change takes two steps: a key shows what will happen, and `Enter` sends it.
+
+1. Select the pipeline with `↑` `↓`.
+2. Press `p` to pause it, or `+` / `-` to change how many runs go at once.
+3. Read the confirmation, such as "Pause new admission; active runs continue", and press
+   `Enter`, or `Esc` to cancel.
+
+What the changes do:
+
+- **Pause** stops new runs from starting: scheduled and API runs wait in the queue. Runs
+  already going continue. `p` again resumes.
+- **Runs at once** sets the pipeline's limit from 1 to 16; the service's total limit
+  (`MAGE_SERVICE_MAX_RUNS`) still applies. Active runs continue.
+- Each request carries the settings revision the console showed. If someone changed the
+  pipeline in the meantime, from another console or the API, the service refuses the
+  request instead of overwriting the newer setting.
+- If the connection drops while a request is sent, the console cannot know whether it
+  arrived; `r` shows it again. If the first one arrived, the retry is refused because the
+  revision moved on, so a setting never changes twice.
+
+Changes are stored with the run history, so they survive a restart. The same controls
+are available through `POST /v1/control`.
+
+## Without a running service
+
+| Command | |
+| --- | --- |
+| `mage-console --demo` | A demo with sample data, to try the keys |
+| `mage-console --snapshot FILE` | A saved snapshot, read only |
+| `mage-console --snapshot FILE --render-svg > console.svg` | A picture of the dashboard for a report; `--render-once` prints text |
+
+Save a snapshot from a service with:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/snapshot > snapshot.json
+```
+
+The pictures on this page were made that way, from the service in
+[Export pipelines as a service](/production/export-a-service).
