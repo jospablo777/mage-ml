@@ -48,7 +48,11 @@ def parse_output_message(message: dict) -> dict:
         text_stdout = content.get('text')
         data_content = text_stdout.split('\n')
         data_type = DataType.TEXT_PLAIN
-        if content.get('name') == 'stdout' and len(data_content) > MAX_PRINT_OUTPUT_LINES:
+        if (
+            MAX_PRINT_OUTPUT_LINES
+            and content.get('name') == 'stdout'
+            and len(data_content) > MAX_PRINT_OUTPUT_LINES
+        ):
             data_content_truncated = data_content[:MAX_PRINT_OUTPUT_LINES]
             data_content = data_content_truncated + ['... (output truncated)']
     elif image:

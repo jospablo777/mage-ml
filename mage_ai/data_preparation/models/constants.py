@@ -19,7 +19,8 @@ DATAFRAME_SAMPLE_COUNT_PREVIEW = int(os.getenv('DATAFRAME_SAMPLE_COUNT_PREVIEW',
 DATAFRAME_SAMPLE_MAX_COLUMNS = 1000
 DYNAMIC_CHILD_BLOCK_SAMPLE_COUNT_PREVIEW = 10
 LOGS_SUBDIR = '.logs'
-MAX_PRINT_OUTPUT_LINES = int(os.getenv('MAX_PRINT_OUTPUT_LINES', 1000) or 1000)
+# No cap by default: a block's printed output stays whole. Set it to cap each print.
+MAX_PRINT_OUTPUT_LINES = int(os.getenv('MAX_PRINT_OUTPUT_LINES') or 0) or None
 MAX_RESULTS_FOR_BLOCK_OUTPUTS_PREVIEW = 10
 PIPELINE_CONFIG_FILE = 'metadata.yaml'
 PIPELINE_MAX_FILE_SIZE = 500000  # maximum size of a pipeline import zip in kb (500Mb)
