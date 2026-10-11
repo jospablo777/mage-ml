@@ -15,7 +15,7 @@ def export_data_to_mssql(df: DataFrame, **kwargs) -> None:
     Specify your configuration settings in 'io_config.yaml'.
     Set the following in your io_config:
 
-    Docs: https://docs.mage.ai/integrations/databases/MicrosoftSQLServer
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/integrations/databases/MicrosoftSQLServer.md
     """
     schema_name = 'dbo'  # Specify the name of the schema to export data to
     table_name = 'your_table_name'  # Specify the name of the table to export data to

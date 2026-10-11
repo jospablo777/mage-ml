@@ -3,7 +3,7 @@
     """
     Execute Transformer Action: ActionType.REMOVE
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#remove-columns
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#remove-columns
     """
     action = build_transformer_action(
         df,

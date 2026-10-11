@@ -230,7 +230,7 @@ function Preferences({
               Features&nbsp;
               <Link
                 bold
-                href="https://docs.mage.ai/development/project/features"
+                href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/development/project/metadata.md"
                 largeSm
                 openNewWindow
               >

@@ -6,7 +6,7 @@
     This marks any improperly formatted values in each column specified
     as invalid.
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#fix-syntax-errors
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#fix-syntax-errors
     """
     action = build_transformer_action(
         df,

@@ -88,7 +88,7 @@ function Extensions({
             <Text default>
               Power up your pipeline with extensions.
               Learn more about <Link
-                href="https://docs.mage.ai/design/blocks/extension"
+                href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/observability/testing/data-validation.md"
                 openNewWindow
               >
                 extension blocks

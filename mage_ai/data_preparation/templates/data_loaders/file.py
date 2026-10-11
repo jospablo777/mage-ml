@@ -15,7 +15,7 @@ def load_data_from_file(*args, **kwargs):
     For multiple directories, use the following:
         FileIO().load(file_directories=['dir_1', 'dir_2'])
 
-    Docs: https://docs.mage.ai/design/data-loading#fileio
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/data-loading.md#fileio
     """
     filepath = 'path/to/your/file.csv'
 

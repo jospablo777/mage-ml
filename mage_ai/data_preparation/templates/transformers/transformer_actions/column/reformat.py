@@ -3,7 +3,7 @@
     """
     Execute Transformer Action: ActionType.REFORMAT
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#reformat-values
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#reformat-values
     """
     action = build_transformer_action(
         df,

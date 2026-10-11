@@ -343,7 +343,7 @@ ${BUILD_CODE_SNIPPET_PREVIEW(pipelineUUID, selectedBlock?.uuid, uuid)}`;
         <Text bold large>
           For Python (
           <Link
-            href="https://docs.mage.ai/production/configuring-production-settings/runtime-variable"
+            href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/getting-started/runtime-variable.md"
             large
             openNewWindow
             primary
@@ -362,7 +362,7 @@ ${BUILD_CODE_SNIPPET_PREVIEW(pipelineUUID, selectedBlock?.uuid, uuid)}`;
         <Text bold large>
           For SQL (
           <Link
-            href="https://docs.mage.ai/guides/sql-blocks#variables"
+            href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/sql-blocks.md#variables"
             large
             openNewWindow
             primary
@@ -381,7 +381,7 @@ ${BUILD_CODE_SNIPPET_PREVIEW(pipelineUUID, selectedBlock?.uuid, uuid)}`;
         <Text bold large>
           For R (
           <Link
-            href="https://docs.mage.ai/guides/r-blocks#runtime-variables"
+            href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/r-blocks.md#variables-and-context"
             large
             openNewWindow
             primary

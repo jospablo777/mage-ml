@@ -14,7 +14,7 @@ def export_data_to_snowflake(df: DataFrame, **kwargs) -> None:
     Template for exporting data to a Snowflake warehouse.
     Specify your configuration settings in 'io_config.yaml'.
 
-    Docs: https://docs.mage.ai/design/data-loading#snowflake
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/data-loading.md#snowflake
     """
     table_name = 'your_table_name'
     database = 'your_database_name'

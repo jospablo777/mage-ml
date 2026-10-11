@@ -366,7 +366,7 @@ function AddonBlock({
         <Spacing mt={1}>
           <Text default>
             Learn more about <Link
-              href={`https://docs.mage.ai/development/blocks/${lowercase(pluralize(displayBlockName, null))}/overview`}
+              href={`https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/blocks/${lowercase(pluralize(displayBlockName, null))}.md`}
               openNewWindow
             >
               {lowercase(pluralize(displayBlockName, null))}

@@ -1657,7 +1657,7 @@ function DataIntegrationModal({
 
           <FlexContainer alignItems="center">
             <Link
-              href="https://docs.mage.ai"
+              href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/README.md"
               inline
               noOutline
               openNewWindow

@@ -3,7 +3,7 @@
     """
     Execute Transformer Action: ActionType.COUNT
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#aggregation-actions
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#aggregation-actions
     """
     action = build_transformer_action(
         df,

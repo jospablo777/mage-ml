@@ -3,7 +3,7 @@
     """
     Execute Transformer Action: ActionType.SORT
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#sort
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#sort
     """
     action = build_transformer_action(
         df,

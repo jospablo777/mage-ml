@@ -512,7 +512,7 @@ export const createColorMenuItems = (
   }));
 
 export const addSqlBlockNote = (content: string) => (
-  `-- Docs: https://docs.mage.ai/guides/sql-blocks
+  `-- Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/sql-blocks.md
 ` + (content || '')
 );
 

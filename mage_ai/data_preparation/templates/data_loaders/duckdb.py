@@ -15,7 +15,7 @@ def load_data_from_duckdb(*args, **kwargs):
     Template for loading data from DuckDB database.
     Specify your configuration settings in 'io_config.yaml'.
 
-    Docs: https://docs.mage.ai/design/data-loading#duckdb
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/data-loading.md#duckdb
     """
     query = 'Your SQL query'  # Specify your SQL query here
     config_path = path.join(get_repo_path(), 'io_config.yaml')

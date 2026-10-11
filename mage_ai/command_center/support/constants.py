@@ -14,7 +14,7 @@ ITEMS = [
         actions=[
             dict(
                 page=dict(
-                    path='https://docs.mage.ai',
+                    path='https://github.com/jospablo777/mage-ml/blob/master/docs-md/README.md',
                     external=True,
                     open_new_window=True,
                 ),

@@ -290,7 +290,7 @@ function GreatExpectations({
             When a block in your pipeline runs, it’ll run any tests you define in its code.
             All associated extension blocks will also run during that phase.
             Learn more about the <Link
-              href="https://docs.mage.ai/development/testing/great-expectations"
+              href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/observability/testing/data-validation.md"
               openNewWindow
             >
               Great Expectation power up

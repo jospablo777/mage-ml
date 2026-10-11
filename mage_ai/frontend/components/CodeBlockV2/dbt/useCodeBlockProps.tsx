@@ -561,7 +561,7 @@ export default function useCodeBlockProps({
           beforeIcon: <DocumentIcon {...MENU_ICON_PROPS} />,
           uuid: 'Developer documentation',
           linkProps: {
-            href: 'https://docs.mage.ai',
+            href: 'https://github.com/jospablo777/mage-ml/blob/master/docs-md/README.md',
             openNewWindow: true,
           },
         },

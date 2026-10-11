@@ -29,6 +29,6 @@ You must enter the following credentials when configuring this source:
 
 ## Change Data Capture (CDC) with PostgreSQL
 
-Please read this [document](https://docs.mage.ai/data-integrations/sources/postgresql).
+Please read this [document](https://github.com/jospablo777/mage-ml/blob/master/docs-md/data-integrations/sources/postgresql.md).
 
 <br />

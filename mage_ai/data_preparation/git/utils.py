@@ -326,7 +326,7 @@ def execute_on_remote_branch(func: Callable, branch) -> None:
                             """
 Connecting to remote timed out, make sure your SSH key is set up properly
 and your repository host is added as a known host. More information
-here: https://docs.mage.ai/developing-in-the-cloud/setting-up-git#5-add-github-com-to-known-hosts
+here: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/git/configure.md
 """
                         )
             return await func(*args, **kwargs)

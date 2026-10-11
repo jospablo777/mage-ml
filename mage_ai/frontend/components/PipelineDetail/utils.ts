@@ -353,7 +353,7 @@ export function buildBlockFromFilePath({
   };
 
   if (isNewBlock) {
-    newBlock.content = `--Docs: https://docs.mage.ai/dbt/sources
+    newBlock.content = `--Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/dbt/sources.md
 `;
   }
 

@@ -14,7 +14,7 @@ def load_data_from_pinot(*args, **kwargs):
     """
     Template for loading data from a Pinot warehouse.
     Specify your configuration settings in 'io_config.yaml'.
-    Docs: https://docs.mage.ai/design/data-loading#pinot
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/development/io_config.md
     """
     query = 'your Pinot query'  # Specify your SQL query here
     config_path = path.join(get_repo_path(), 'io_config.yaml')

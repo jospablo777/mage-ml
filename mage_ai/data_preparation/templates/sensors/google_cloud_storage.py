@@ -13,7 +13,7 @@ def check_condition(*args, **kwargs) -> bool:
     Template code for checking if a file or folder exists in a Google Cloud Storage bucket.
     Specify your configuration settings in 'io_config.yaml'.
 
-    Docs: https://docs.mage.ai/design/data-loading#googlecloudstorage
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/data-loading.md#googlecloudstorage
     """
 
     config_path = path.join(get_repo_path(), 'io_config.yaml')

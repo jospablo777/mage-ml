@@ -357,7 +357,7 @@ function SyncData() {
         </Text>
         <Link
           bold
-          href="https://docs.mage.ai/production/data-sync/git-sync"
+          href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/data-sync/git-sync.md"
           openNewWindow>
           here
         </Link>
@@ -528,7 +528,7 @@ function SyncData() {
         <Spacing mt={UNITS_BETWEEN_ITEMS_IN_SECTIONS}>
           {authType === AuthType.SSH && (
             <Text bold>
-              You will need to <Link href="https://docs.mage.ai/development/git/configure#generate-ssh-token" openNewWindow>
+              You will need to <Link href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/git/configure.md#generate-ssh-token" openNewWindow>
                 set up your SSH key
               </Link> if you have not done so already.
             </Text>

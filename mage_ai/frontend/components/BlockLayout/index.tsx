@@ -1055,7 +1055,7 @@ function BlockLayout({ leftOffset, pageBlockLayoutTemplate, topOffset, uuid }: B
               Write code for custom data sources, parsing, etc. For more information on what is
               possible, please check out the{' '}
               <Link
-                href="https://docs.mage.ai/visualizations/dashboards#custom-code-for-chart"
+                href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/observability/visualizations/dashboards.md#custom-code-for-chart"
                 openNewWindow
               >
                 chart documentation

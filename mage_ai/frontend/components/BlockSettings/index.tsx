@@ -599,7 +599,7 @@ function BlockSettings({
           <Text muted>
             For more information on this setting, please read the{' '}
             <Link
-              href="https://docs.mage.ai/production/configuring-production-settings/compute-resource#2-set-executor-type-and-customize-the-compute-resource-of-the-mage-executor"
+              href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/production/configuring-production-settings/compute-resource.md#block-executor"
               openNewWindow
             >
               documentation
@@ -687,7 +687,7 @@ function BlockSettings({
             )}
             For more information on this setting, please read the{' '}
             <Link
-              href="https://docs.mage.ai/orchestration/pipeline-runs/retrying-block-runs"
+              href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/orchestration/pipeline-runs/retrying-block-runs.md"
               openNewWindow
             >
               documentation
@@ -935,7 +935,7 @@ function BlockSettings({
                     {' '}
                     Refer to the
                     <Link
-                      href="https://docs.mage.ai/development/variables/block-variables"
+                      href="https://github.com/jospablo777/mage-ml/blob/master/docs-md/development/variables/block-variables.md"
                       openNewWindow
                     >
                       {' '}

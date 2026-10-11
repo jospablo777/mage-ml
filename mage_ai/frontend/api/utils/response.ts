@@ -157,7 +157,7 @@ export function displayErrorFromReadResponse(
   if (data?.error?.exception?.includes('Too many open files')) {
     const tooManyOpenFilesErrLink = [
       {
-        href: 'https://docs.mage.ai/production/configuring-production-settings/overview#ulimit',
+        href: 'https://github.com/jospablo777/mage-ml/blob/master/docs-md/production/configuring-production-settings/overview.md#ulimit',
         label: 'Refer to the docs for troubleshooting this error.',
       },
     ];

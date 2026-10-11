@@ -1,7 +1,7 @@
 ## Set up
 
 1. Pull the `mage-ai` repository and `cd` into it.
-2. Run Mage in a development Docker container using `./scripts/dev.sh [PROJECT NAME]`. This starts Mage and allows us to make changes in realtime. See [this page](https://docs.mage.ai/community/contributing) for more details.
+2. Run Mage in a development Docker container using `./scripts/dev.sh [PROJECT NAME]`. This starts Mage and allows us to make changes in realtime. See [this page](https://github.com/jospablo777/mage-ml/blob/master/docs-md/contributing/overview.md) for more details.
 3. Open another terminal and run:
     ```bash
     docker exec -it mage-ai-server-1 bash

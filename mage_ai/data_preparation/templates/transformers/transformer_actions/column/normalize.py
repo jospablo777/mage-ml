@@ -6,7 +6,7 @@
     """
     Execute Transformer Action: ActionType.NORMALIZE
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#normalize-data
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#normalize-data
     """
     action = build_transformer_action(
         df,

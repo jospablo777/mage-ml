@@ -14,7 +14,7 @@ def export_data_to_mysql(df: DataFrame, **kwargs) -> None:
     Template for exporting data to a MySQL database.
     Specify your configuration settings in 'io_config.yaml'.
 
-    Docs: https://docs.mage.ai/design/data-loading#mysql
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/design/data-loading.md#mysql
     """
     table_name = 'your_table_name'  # Specify the name of the table to export data to
     config_path = path.join(get_repo_path(), 'io_config.yaml')

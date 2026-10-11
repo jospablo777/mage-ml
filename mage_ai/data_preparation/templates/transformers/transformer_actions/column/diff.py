@@ -5,7 +5,7 @@
 
     Calculates difference from previous row along column.
 
-    Docs: https://docs.mage.ai/guides/transformer-blocks#difference
+    Docs: https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/blocks/transformer-blocks.md#difference
     """
     action = build_transformer_action(
         df,

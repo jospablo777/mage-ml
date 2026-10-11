@@ -757,7 +757,7 @@ function IntegrationPipeline({
                         </AccordionPanel>
                       </Accordion>
 
-                      {buildVariablesTable('https://docs.mage.ai/guides/data-integration-pipeline#configure-source')}
+                      {buildVariablesTable('https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/data-integration-pipeline.md#configure-source')}
                     </Spacing>
                   )}
 
@@ -1073,7 +1073,7 @@ function IntegrationPipeline({
                       </Text> in a previous section.
                     </Text>
 
-                    {buildVariablesTable('https://docs.mage.ai/guides/data-integration-pipeline#configure-destination')}
+                    {buildVariablesTable('https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/data-integration-pipeline.md#configure-destination')}
                   </Spacing>
                 </>
               )}
