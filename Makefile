@@ -45,7 +45,7 @@ playground-build:
 
 playground-up:
 	$(PLAYGROUND) up -d
-	@echo "Waiting for Mage (the first start seeds the database, a minute or two)..."
+	@echo "Waiting for MageML (the first start seeds the database, a minute or two)..."
 	@for i in $$(seq 1 300); do \
 		if curl -fs -o /dev/null $(PLAYGROUND_URL)/api/status; then \
 			echo "MageML is running at $(PLAYGROUND_URL)"; exit 0; fi; \
@@ -53,7 +53,7 @@ playground-up:
 			echo "Seeding failed:"; $(PLAYGROUND) logs --tail 30 seed; exit 1; fi; \
 		sleep 2; \
 	done; \
-	echo "Mage did not answer in 10 minutes; see make playground-logs"; exit 1
+	echo "MageML did not answer in 10 minutes; see make playground-logs"; exit 1
 
 playground-logs:
 	$(PLAYGROUND) logs -f seed mage
