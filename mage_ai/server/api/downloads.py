@@ -84,6 +84,9 @@ class ApiResourceDownloadHandler(BaseHandler):
             )
 
             file_name = decoded_payload['file_name']
+            if decoded_payload.get('service_export'):
+                self.write_service_export(decoded_payload['service_export'], file_name)
+                return
             file_list = decoded_payload['file_list']
             self.ignore_folder_structure = decoded_payload['ignore_folder_structure']
 
@@ -114,6 +117,26 @@ class ApiResourceDownloadHandler(BaseHandler):
         except ValueError as e:
             self.set_status(400)
             self.write(f'Attempt at fetching file outside of project folder: {e}')
+
+    def write_service_export(self, name, file_name):
+        """The zip of a service exported from the app (pipeline_services/exports.py)."""
+        from mage_ai.pipeline_services.exports import zip_export
+
+        try:
+            archive = zip_export(get_repo_path(), name)
+        except (FileNotFoundError, ValueError) as error:
+            self.set_status(404)
+            self.write(str(error))
+            return
+        with archive:
+            self.set_header('Content-Type', 'application/zip')
+            self.set_header('Content-Disposition', f'attachment; filename={file_name}')
+            while True:
+                chunk = archive.read(65536)
+                if not chunk:
+                    break
+                self.write(chunk)
+        self.flush()
 
     # file pointer points to either a singular file or a temporary zip
     def get_file_pointer(self, file_list, relative_file_list):

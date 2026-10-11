@@ -942,7 +942,30 @@ app.add_typer(export_app, name='export')
 
 
 EXPORT_PROJECT_PATH = typer.Argument(..., help='path of the MageML project.')
-EXPORT_PIPELINES = typer.Argument(..., help='uuids of the pipelines to export.')
+EXPORT_PIPELINES = typer.Argument(
+    None, help='uuids of the pipelines to export; optional with --service.',
+)
+EXPORT_INCLUDES = typer.Option(
+    [], '--include', '-i',
+    help='a project file or folder to put in the image, such as a model the blocks load '
+         'by a computed path; repeat for more. Paths named in the blocks are found '
+         'without it.',
+)
+EXPORT_PLATFORM = typer.Option(
+    None, '--platform',
+    help='platforms to build for with --build, such as linux/amd64,linux/arm64; uses docker '
+         'buildx. Several platforms need --push.',
+)
+EXPORT_PUSH = typer.Option(
+    False, '--push',
+    help='with --build, push the image to the registry its --tag names, such as '
+         'icr.io/team/scoring:1.0 or docker.io/team/scoring:1.0; log in first.',
+)
+EXPORT_SERVICE = typer.Option(
+    None, '--service', '-s',
+    help='a service saved in the project\'s pipeline_services.yaml (the Services page): '
+         'its pipelines, after-run triggers, settings and included files.',
+)
 EXPORT_MODELS = typer.Option(
     [], '--model', '-m',
     help='an MLflow model to embed, NAME=URI (models:/name/3, models:/name@alias, '
@@ -964,24 +987,37 @@ def export_service(
     tag: Union[str, None] = typer.Option(None, help='image tag for --build; defaults to the name.'),
     force: bool = typer.Option(False, help='replace a non-empty output directory.'),
     model: List[str] = EXPORT_MODELS,
-    include: List[str] = typer.Option(
-        [], '--include', '-i',
-        help='a project file or folder to put in the image, such as a model the blocks load '
-             'by a computed path; repeat for more. Paths named in the blocks are found '
-             'without it.',
-    ),
+    include: List[str] = EXPORT_INCLUDES,
+    service: Union[str, None] = EXPORT_SERVICE,
+    platform: Union[str, None] = EXPORT_PLATFORM,
+    push: bool = EXPORT_PUSH,
 ):
     """
     Export pipelines as a standalone Docker service: an HTTP API, schedules, run history
     and logs, without MageML. Writes a build context with a Dockerfile, compose.yaml and a
     README that shows how to run and call it.
     """
-    from mage_ai.pipeline_services import export
+    from mage_ai.pipeline_services import definitions, export
 
+    after_runs = []
+    if service:
+        try:
+            saved = definitions.load_definition(project_path, service)
+        except definitions.DefinitionError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1)
+        pipelines = list(dict.fromkeys([*saved['pipelines'], *(pipelines or [])]))
+        after_runs = saved['after_runs']
+        name = name or service
+        max_runs = max_runs or saved['max_runs']
+        include = [*saved['include'], *include]
+    if not pipelines:
+        typer.echo('Name the pipelines to export, or a saved service with --service.', err=True)
+        raise typer.Exit(code=1)
     try:
         captured = export.capture(
             project_path, pipelines, name=name, max_concurrent_runs=max_runs, models=model,
-            includes=include,
+            includes=include, after_runs=after_runs,
         )
         out_dir = export.write(captured, out, force=force)
     except export.ExportError as error:
@@ -991,18 +1027,24 @@ def export_service(
         raise typer.Exit(code=1)
     typer.echo(export.report(captured))
     typer.echo(f'Build context: {out_dir}')
+    if push and not build:
+        typer.echo('--push needs --build.', err=True)
+        raise typer.Exit(code=1)
     if build:
         image = tag or captured.name
+        platforms = (platform or '').split(',') if platform else None
         try:
-            export.build_image(out_dir, image)
+            export.build_image(out_dir, image, platforms=platforms, push=push)
         except export.ExportError as error:
             typer.echo(error.problems[0], err=True)
             raise typer.Exit(code=1)
-        typer.echo(f'Image {image} is built. Run it with:')
+        if push:
+            typer.echo(f'Image {image} is pushed. Run it with:')
+        else:
+            typer.echo(f'Image {image} is built. Run it with:')
         typer.echo(f'  docker run --rm -p 8080:8080 -e MAGE_SERVICE_TOKEN=change-me {image}')
     else:
         typer.echo(f'Build the image with: docker build -t {captured.name} {out_dir}')
-
 
 if __name__ == '__main__':
     app()

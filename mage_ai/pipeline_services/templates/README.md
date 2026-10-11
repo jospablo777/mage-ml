@@ -24,6 +24,30 @@ Run a pipeline once and exit, for a cron job or a Kubernetes Job:
 docker run --rm $name run $first --var key=value
 ```
 
+## Build for other platforms and push to a registry
+
+The folder holds everything the image needs, so it builds on any machine with Docker and
+in any CI. For other chips, or to push to a registry, use `docker buildx` (log in first):
+
+```bash
+# Docker Hub
+docker login -u team
+docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/team/$name:1.0 --push .
+
+# IBM Cloud Container Registry (ibmcloud cr login, or an API key)
+echo "$$IBM_CLOUD_API_KEY" | docker login -u iamapikey --password-stdin icr.io
+docker buildx build --platform linux/amd64,linux/arm64 -t icr.io/team/$name:1.0 --push .
+```
+
+GitHub Container Registry (`ghcr.io`), Amazon ECR, Google Artifact Registry and Azure
+Container Registry work the same way with their own login. Several platforms need
+`--push`: Docker keeps one platform of an image locally.
+
+Kept as its own repository, the folder builds itself: `.github/workflows/build-image.yml`
+builds amd64 and arm64 images on every push to `main` and pushes them when the repository
+sets `REGISTRY_IMAGE`; `.tekton/` does the same on IBM Cloud Continuous Delivery. Export
+again into the same folder and commit the diff: the export keeps `.git`, `.env` and `data/`.
+
 ## Call it
 
 ```bash

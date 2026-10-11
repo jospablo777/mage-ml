@@ -124,8 +124,13 @@ def capture(
     max_concurrent_runs: Optional[int] = None,
     models: Optional[List[str]] = None,
     includes: Optional[List[str]] = None,
+    after_runs: Optional[List[Dict]] = None,
 ) -> Capture:
-    """Reads the pipelines and everything they need; raises ExportError with every problem."""
+    """
+    Reads the pipelines and everything they need; raises ExportError with every problem.
+    after_runs start a pipeline when a run of another ends: {run, after, when} with when
+    completed (the default), failed or any.
+    """
     from mage_ai.settings.repo import set_repo_path
 
     project_path = Path(project).resolve()
@@ -161,6 +166,7 @@ def capture(
         if entry:
             pipelines.append(entry)
         environments[uuid] = _pipeline_environment(pipeline, problems)
+    _apply_after_runs(pipelines, after_runs or [], problems)
     if problems:
         raise ExportError(problems)
     capture_.environment = _shared_environment(environments, problems)
@@ -199,6 +205,80 @@ def capture(
         if capture_.environment is not None:
             _apply_environment(capture_)
     return capture_
+
+
+AFTER_RUN_ENDINGS = ('completed', 'failed', 'any')
+
+
+def after_run_problems(pipeline_uuids: List[str], after_runs: List[Dict]) -> List[str]:
+    """What is wrong with a service's after-run triggers: unknown pipelines, endings, loops."""
+    problems = []
+    known = set(pipeline_uuids)
+    edges: Dict[str, List[str]] = {}
+    for start in after_runs:
+        run, after = start.get('run'), start.get('after')
+        when = start.get('when') or 'completed'
+        for role, uuid in (('runs', run), ('follows', after)):
+            if uuid not in known:
+                problems.append(
+                    f'An after-run trigger {role} pipeline {uuid}, which is not in the service; '
+                    'add the pipeline or remove the trigger.'
+                )
+        if run == after and run is not None:
+            problems.append(f'Pipeline {run} cannot start itself after its own runs.')
+        if when not in AFTER_RUN_ENDINGS:
+            problems.append(
+                f'The after-run trigger from {after} to {run} starts on {when!r}; use '
+                'completed, failed or any.'
+            )
+        if run in known and after in known and run != after:
+            edges.setdefault(after, []).append(run)
+
+    def loop_from(node, path):
+        if node in path:
+            return path[path.index(node):] + [node]
+        for nxt in edges.get(node, []):
+            found = loop_from(nxt, path + [node])
+            if found:
+                return found
+        return None
+
+    for first in sorted(edges):
+        found = loop_from(first, [])
+        if found:
+            problems.append(
+                'Pipelines start each other after their runs in a loop: '
+                f'{" -> ".join(found)}. Remove one of these after-run triggers.'
+            )
+            break
+    return problems
+
+
+def _apply_after_runs(entries: List[Dict], after_runs: List[Dict], problems: List[str]) -> None:
+    """Adds each after-run trigger to the pipeline it starts."""
+    found = after_run_problems([e['uuid'] for e in entries], after_runs)
+    if found:
+        problems.extend(found)
+        return
+    by_uuid = {e['uuid']: e for e in entries}
+    for start in after_runs:
+        entry = by_uuid[start['run']]
+        names = {t['name'] for t in entry['triggers']}
+        name = f"after_{start['after']}"
+        while name in names:
+            name += '_'
+        entry['triggers'].append(dict(
+            name=name,
+            kind='after_run',
+            schedule=None,
+            start_time=None,
+            timezone='UTC',
+            active=True,
+            after_pipeline=start['after'],
+            after_status=start.get('when') or 'completed',
+            variables=_json_safe(start.get('variables') or {}),
+            skip_if_previous_running=bool(start.get('skip_if_running')),
+        ))
 
 
 def _pipeline_environment(pipeline, problems: List[str]):
@@ -955,7 +1035,37 @@ def _local_install(dist) -> bool:
     return 'dir_info' in direct
 
 
+# The map of installed files to their distributions, with the state of sys.path it was read
+# from. Reading it takes seconds; the app previews an export each time a pipeline is chosen.
+_owners_cache: Dict[str, Any] = {}
+
+
+def _environment_fingerprint() -> Tuple:
+    """
+    The package folders on sys.path with their modification times. Installing, upgrading or
+    removing a package adds or removes a .dist-info folder, which changes its folder's time.
+    Other entries are left out: an export adds the project's folder to sys.path.
+    """
+    entries = []
+    for entry in sorted(set(sys.path)):
+        if not entry.rstrip(os.sep).endswith(('site-packages', 'dist-packages')):
+            continue
+        try:
+            entries.append((entry, os.stat(entry).st_mtime_ns))
+        except OSError:
+            entries.append((entry, None))
+    return tuple(entries)
+
+
 def _file_owners() -> Dict[str, Tuple[str, str]]:
+    fingerprint = _environment_fingerprint()
+    if _owners_cache.get('fingerprint') != fingerprint:
+        _owners_cache['owners'] = _read_file_owners()
+        _owners_cache['fingerprint'] = fingerprint
+    return _owners_cache['owners']
+
+
+def _read_file_owners() -> Dict[str, Tuple[str, str]]:
     owners: Dict[str, Tuple[str, str]] = {}
     seen: Set[str] = set()
     for dist in importlib.metadata.distributions():
@@ -1101,8 +1211,11 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
 
 
 def _kept_on_export(name: str) -> bool:
-    """Files of the user in an export folder: the filled-in environment and local data."""
-    return name == 'data' or (
+    """
+    Files of the user in an export folder: the filled-in environment, local data, and the
+    git repository when the folder is kept as one, so exporting again shows as a diff.
+    """
+    return name in ('data', '.git') or (
         (name == '.env' or name.startswith('.env.')) and name != '.env.example'
     )
 
@@ -1153,7 +1266,11 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
-        '**/__pycache__\n**/target\ndata/\n.tekton/\ndeploy/\n.env\n.env.*\n'
+        '**/__pycache__\n**/target\ndata/\n.tekton/\n.github/\n.git/\ndeploy/\n.env\n.env.*\n'
+    )
+    (out_dir / '.gitignore').write_text(
+        '# The folder can be its own repository: export again into it and commit the diff.\n'
+        '.env\n.env.*\n!.env.example\ndata/\n**/__pycache__/\n**/target/\n'
     )
     (out_dir / 'compose.yaml').write_text(_compose(capture_))
     (out_dir / 'README.md').write_text(_readme(capture_))
@@ -1227,6 +1344,7 @@ DEPLOY_FILES = (
     ('deploy/ibm/code-engine.sh', 'deploy/ibm/code-engine.sh'),
     ('deploy/ibm/README.md', 'deploy/ibm/README.md'),
     ('deploy/kubernetes.yaml', 'deploy/kubernetes.yaml'),
+    ('ci/github-build-image.yml', '.github/workflows/build-image.yml'),
 )
 
 
@@ -1629,13 +1747,24 @@ volumes:
 '''
 
 
+AFTER_RUN_WORDS = {'completed': 'completes', 'failed': 'fails', 'any': 'ends'}
+
+
+def describe_trigger(trigger: Dict) -> str:
+    """How a trigger starts runs, for people: its schedule, the run it follows, or the API."""
+    if trigger['kind'] == 'after_run':
+        ending = AFTER_RUN_WORDS.get(trigger.get('after_status') or 'completed', 'completes')
+        return f"after {trigger['after_pipeline']} {ending}"
+    return trigger.get('schedule') or 'api'
+
+
 def _readme(capture_: Capture) -> str:
     pipelines = capture_.manifest['pipelines']
     first = pipelines[0]['uuid']
     rows = '\n'.join(
         f"| `{p['uuid']}` | {len(p['blocks'])} | "
         + (', '.join(
-            f"{t['name']} ({t['schedule'] or 'api'}{'' if t['active'] else ', inactive'})"
+            f"{t['name']} ({describe_trigger(t)}{'' if t['active'] else ', inactive'})"
             for t in p['triggers']
         ) or 'API only')
         + ' |'
@@ -1701,8 +1830,11 @@ def report(capture_: Capture) -> str:
             extra = f", {retry} retries" if retry else ''
             lines.append(f"  {block['language']:<6} {block['type']:<13} {block['uuid']}{extra}")
         for trigger in pipeline['triggers']:
+            how = describe_trigger(trigger) if trigger['kind'] == 'after_run' else (
+                trigger.get('schedule') or ''
+            )
             lines.append(f"  trigger {trigger['name']}: {trigger['kind']} "
-                         f"{trigger['schedule'] or ''}{'' if trigger['active'] else ' (inactive)'}")
+                         f"{how}{'' if trigger['active'] else ' (inactive)'}")
         lines.append('')
     files = sorted(str(p.relative_to(capture_.project)) for p in capture_.files)
     lines.append(f'Project files ({len(files)}):')
@@ -1727,10 +1859,57 @@ def report(capture_: Capture) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def build_image(out_dir: Path, tag: str) -> None:
+def build_command(
+    out_dir: Path,
+    tag: str,
+    platforms: Optional[List[str]] = None,
+    push: bool = False,
+) -> List[str]:
+    """
+    The docker command that builds the image: docker build for this machine's platform, or
+    docker buildx for other platforms and for pushing to a registry. Several platforms need
+    push, since Docker keeps one platform of an image locally.
+    """
     docker = shutil.which('docker')
     if not docker:
         raise ExportError(['docker is not installed; build the image with the Dockerfile.'])
-    result = subprocess.run([docker, 'build', '-t', tag, str(out_dir)])
-    if result.returncode != 0:
-        raise ExportError([f'docker build failed with exit code {result.returncode}.'])
+    platforms = [p.strip() for p in (platforms or []) if p and p.strip()]
+    if not platforms and not push:
+        return [docker, 'build', '-t', tag, str(out_dir)]
+    if len(platforms) > 1 and not push:
+        raise ExportError([
+            'Several platforms need --push: Docker keeps one platform of an image locally. '
+            'Push to a registry, or build one platform.'
+        ])
+    command = [docker, 'buildx', 'build', '--tag', tag]
+    if platforms:
+        command += ['--platform', ','.join(platforms)]
+    command += ['--push' if push else '--load', str(out_dir)]
+    return command
+
+
+def build_image(
+    out_dir: Path,
+    tag: str,
+    platforms: Optional[List[str]] = None,
+    push: bool = False,
+    on_line=None,
+) -> None:
+    """Builds, and pushes when asked, printing docker's output or passing each line on."""
+    command = build_command(out_dir, tag, platforms=platforms, push=push)
+    if on_line is None:
+        result = subprocess.run(command)
+        code = result.returncode
+    else:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        for line in process.stdout:
+            on_line(line.rstrip('\n'))
+        code = process.wait()
+    if code != 0:
+        what = 'docker buildx build' if command[1] == 'buildx' else 'docker build'
+        raise ExportError([
+            f'{what} failed with exit code {code}. '
+            + ('Check that you are logged in to the registry (docker login).' if push else '')
+        ])

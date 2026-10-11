@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import polars as pl
+import yaml
 
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -250,7 +251,7 @@ class CaptureTest(ExportTestCase):
         self.assertIn('--include ../x: the path is outside the project.', problems)
         self.assertIn('--include nope.bin: there is no such file or folder', problems)
 
-    def test_exporting_again_keeps_the_env_file_and_local_data(self):
+    def test_exporting_again_keeps_the_env_file_local_data_and_the_git_repository(self):
         self.chain()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
         out = Path(tempfile.mkdtemp())
@@ -262,6 +263,8 @@ class CaptureTest(ExportTestCase):
         (out / 'data' / 'sample.csv').write_text('a\n1\n')
         (out / 'stale.txt').write_text('from an older export')
         (out / '.env.example').write_text('OLD=\n')
+        (out / '.git').mkdir()
+        (out / '.git' / 'HEAD').write_text('ref: refs/heads/main\n')
 
         export.write(captured, str(out))
 
@@ -271,6 +274,42 @@ class CaptureTest(ExportTestCase):
         self.assertFalse((out / 'stale.txt').exists())
         self.assertNotIn('OLD=', (out / '.env.example').read_text())
         self.assertTrue((out / 'service.json').is_file())
+        self.assertTrue((out / '.git' / 'HEAD').is_file())
+        ignored = (out / '.gitignore').read_text().splitlines()
+        self.assertIn('.env', ignored)
+        self.assertIn('!.env.example', ignored)
+
+    def test_the_folder_builds_for_other_platforms_and_in_ci(self):
+        from unittest.mock import patch
+
+        self.chain()
+        captured = export.capture(self.repo_path, [self.pipeline.uuid], name='shop')
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(captured, str(out))
+
+        workflow = yaml.safe_load((out / '.github' / 'workflows' / 'build-image.yml').read_text())
+        build = workflow['jobs']['image']['steps'][-1]['with']
+        self.assertEqual(build['platforms'], 'linux/amd64,linux/arm64')
+        self.assertIn("'shop'", build['tags'])
+        self.assertIn('.github/', (out / '.dockerignore').read_text())
+        self.assertIn('docker buildx build --platform', (out / 'README.md').read_text())
+
+        with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'):
+            self.assertEqual(export.build_command(out, 'shop')[1:3], ['build', '-t'])
+            pushed = export.build_command(
+                out, 'icr.io/team/shop:1', platforms=['linux/amd64', 'linux/arm64'], push=True,
+            )
+            self.assertEqual(pushed[1:], [
+                'buildx', 'build', '--tag', 'icr.io/team/shop:1',
+                '--platform', 'linux/amd64,linux/arm64', '--push', str(out),
+            ])
+            self.assertIn('--load', export.build_command(out, 'shop', platforms=['linux/arm64']))
+            with self.assertRaisesRegex(export.ExportError, 'Several platforms need --push'):
+                export.build_command(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
+        with patch.object(export.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(export.ExportError, 'docker is not installed'):
+                export.build_command(out, 'shop')
 
     def test_the_build_context_holds_everything_the_image_needs(self):
         self.chain()
@@ -291,8 +330,9 @@ class CaptureTest(ExportTestCase):
         dockerfile = (out / 'Dockerfile').read_text()
         self.assertIn('USER mage', dockerfile)
         self.assertIn('RUN mage-service validate', dockerfile)
+        # Placeholders are all filled; the shell variables stay.
         self.assertNotIn('$', (out / 'README.md').read_text().split('## Call it')[0]
-                         .replace('$TOKEN', ''))
+                         .replace('$TOKEN', '').replace('$IBM_CLOUD_API_KEY', ''))
         manifest = json.loads((out / 'service.json').read_text())
         self.assertEqual(manifest['schema_version'], 1)
 
@@ -658,7 +698,7 @@ class FileOwnersTest(unittest.TestCase):
         with patch.object(
             export.importlib.metadata, 'distributions', return_value=[first, shadowed, other],
         ):
-            owners = export._file_owners()
+            owners = export._read_file_owners()
 
         self.assertEqual(first.parses, 1)
         self.assertLessEqual(shadowed.parses, 1)
