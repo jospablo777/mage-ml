@@ -86,3 +86,146 @@ def load_model(name: str, uri: Optional[str] = None):
     with _lock:
         _loaded[key] = model
     return model
+
+
+# Model files by suffix: the loader that reads them and the module it imports. A suffix
+# several frameworks use (.json, .txt, .pt) needs loader=.
+ARTIFACT_LOADERS = {
+    '.onnx': ('onnx', 'onnxruntime'),
+    '.cbm': ('catboost', 'catboost'),
+    '.ubj': ('xgboost', 'xgboost'),
+    '.skops': ('skops', 'skops'),
+    '.safetensors': ('safetensors', 'safetensors'),
+    '.pt2': ('torch_export', 'torch'),
+    '.keras': ('keras', 'keras'),
+    '.joblib': ('joblib', 'joblib'),
+    '.pkl': ('pickle', None),
+    '.pickle': ('pickle', None),
+}
+LOADER_MODULES = {
+    'onnx': 'onnxruntime', 'catboost': 'catboost', 'xgboost': 'xgboost',
+    'lightgbm': 'lightgbm', 'skops': 'skops', 'safetensors': 'safetensors',
+    'torch_export': 'torch', 'torchscript': 'torch', 'keras': 'keras', 'joblib': 'joblib', 'mlflow': 'mlflow',
+}
+_artifacts: Dict[Any, Any] = {}
+
+
+def _read(loader: str, path: str, options: Dict) -> Any:
+    if loader == 'onnx':
+        import onnxruntime
+
+        return onnxruntime.InferenceSession(
+            path, providers=options.get('providers') or ['CPUExecutionProvider'],
+        )
+    if loader == 'catboost':
+        import catboost
+
+        return catboost.CatBoost().load_model(path)
+    if loader == 'xgboost':
+        import xgboost
+
+        booster = xgboost.Booster()
+        booster.load_model(path)
+        return booster
+    if loader == 'lightgbm':
+        import lightgbm
+
+        return lightgbm.Booster(model_file=path)
+    if loader == 'skops':
+        import skops.io
+
+        trusted = options.get('trusted')
+        try:
+            return skops.io.load(path, trusted=trusted)
+        except Exception as error:
+            if 'untrusted' not in str(error).lower():
+                raise
+            types = skops.io.get_untrusted_types(file=path)
+            raise ValueError(
+                f'{path} holds types skops does not trust by default: {", ".join(types)}. '
+                'Check them, then pass them: load_artifact(path, trusted=[...]).'
+            ) from error
+    if loader == 'safetensors':
+        from safetensors.torch import load_file
+
+        return load_file(path)
+    if loader == 'torch_export':
+        import torch
+
+        # A program saved with torch.export.save; .module() is the callable model.
+        return torch.export.load(path).module()
+    if loader == 'torchscript':
+        import torch
+
+        return torch.jit.load(path, map_location=options.get('map_location', 'cpu'))
+    if loader == 'keras':
+        import keras
+
+        return keras.models.load_model(path)
+    if loader == 'mlflow':
+        import mlflow.pyfunc
+
+        return mlflow.pyfunc.load_model(path)
+    if loader == 'joblib':
+        import joblib
+
+        return joblib.load(path)
+    if loader == 'pickle':
+        import pickle
+
+        with open(path, 'rb') as file:
+            return pickle.load(file)
+    raise ValueError(f'Unknown loader {loader!r}; use one of {", ".join(sorted(LOADER_MODULES))}, '
+                     'pickle, or a function that takes the path.')
+
+
+def artifact_path(path: str) -> str:
+    """A model file's absolute path: relative paths start at the project, here and in a service."""
+    if os.path.isabs(path):
+        return path
+    from mage_ai.settings.repo import get_repo_path
+
+    return os.path.join(get_repo_path(), path)
+
+
+def load_artifact(path: str, loader: Any = None, **options):
+    """
+    A model saved in its framework's own format, loaded once per process and reused: an
+    exported service loads it on the first request, not on every one. A changed file is
+    loaded again.
+
+        model = load_artifact('models/churn.cbm')                 # CatBoost
+        model = load_artifact('models/churn.onnx')                # an ONNX Runtime session
+        model = load_artifact('models/booster.txt', loader='lightgbm')
+        model = load_artifact('models/forecaster.pt', loader=NBEATSModel.load)  # Darts
+
+    loader picks the format when the suffix does not (a name in LOADER_MODULES, 'pickle',
+    or a function that takes the path). Pickle and joblib run code from the file when they
+    load it: use them only for files you made.
+    """
+    absolute = artifact_path(path)
+    if not os.path.exists(absolute):
+        raise ModelNotFound(
+            f'No model file at {absolute}. Paths are relative to the project; an exported '
+            'service includes the files its blocks name.'
+        )
+    if loader is None:
+        suffix = Path(absolute).suffix.lower()
+        if os.path.isdir(absolute) and os.path.exists(os.path.join(absolute, 'MLmodel')):
+            loader = 'mlflow'
+        elif suffix in ARTIFACT_LOADERS:
+            loader = ARTIFACT_LOADERS[suffix][0]
+        else:
+            raise ValueError(
+                f'{path}: the suffix does not say which framework reads it; pass loader=, '
+                f'one of {", ".join(sorted(LOADER_MODULES))}, or a function that takes the path.'
+            )
+    key = (absolute, os.path.getmtime(absolute), loader if isinstance(loader, str) else id(loader),
+           tuple(sorted((k, repr(v)) for k, v in options.items())))
+    with _lock:
+        if key in _artifacts:
+            return _artifacts[key]
+    model = loader(absolute) if callable(loader) else _read(loader, absolute, options)
+    with _lock:
+        _artifacts[key] = model
+    return model
