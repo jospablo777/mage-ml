@@ -47,11 +47,6 @@ case $key in
     shift # past argument
     shift # past value
     ;;
-    --otel_exporter_otlp_http_endpoint)
-    OTEL_EXPORTER_OTLP_HTTP_ENDPOINT="$3"
-    shift # past argument
-    shift # past value
-    ;;
     --otel_python_tornado_excluded_urls)
     OTEL_PYTHON_TORNADO_EXCLUDED_URLS="$3"
     shift # past argument
@@ -155,7 +150,6 @@ export ECS_CONTAINER_NAME=$ECS_CONTAINER_NAME
 export ENABLE_NEW_RELIC=$ENABLE_NEW_RELIC
 export ENABLE_PROMETHEUS=$ENABLE_PROMETHEUS
 export OTEL_EXPORTER_OTLP_ENDPOINT=$OTEL_EXPORTER_OTLP_ENDPOINT
-export OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=$OTEL_EXPORTER_OTLP_HTTP_ENDPOINT
 export OTEL_PYTHON_TORNADO_EXCLUDED_URLS=$OTEL_PYTHON_TORNADO_EXCLUDED_URLS
 
 export GCP_PROJECT_ID=$GCP_PROJECT_ID
