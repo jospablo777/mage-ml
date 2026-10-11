@@ -4,6 +4,11 @@ Behaviors of Feast 0.66 found by `integration_tests/feast/`, with PostgreSQL as 
 offline store and online store, Feast running as a service and Mage calling it over HTTP.
 Feast requires pandas below 3, so it cannot run inside Mage's environment.
 
+Blocks use `mage_ai.feature_stores.feast.FeastClient`, which applies these findings on
+MageML's side, so it works with a stock Feast server: guide in
+`docs/guides/blocks/feast-features.mdx`, tests in `mage_ai/tests/feature_stores` and
+`integration_tests/feast/test_client.py`.
+
 Each entry gives the effect, the test that pins it and what to do. The test service in
 `integration_tests/services/feast/` applies every recommendation; its `typed_push.py` is
 a route a Feast deployment can add next to Feast's own `/push`.

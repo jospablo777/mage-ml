@@ -661,6 +661,12 @@ Each item says what changed, which pipelines it affects, and what to do.
   **Compile** button in the editor and the pipelines list, with progress, each step's error
   and when the pipeline last compiled. The panel shows where a pipeline switches language,
   since single-language pipelines run faster. API: `/api/pipeline_compilations`.
+- **Feast client for blocks** (`mage_ai.feature_stores.feast.FeastClient`): reads online
+  features into pandas, Polars or Arrow with integers exact, and pushes, writes and
+  materializes through a stock Feast feature server's REST API. It sends large integers
+  next to NULLs so Feast keeps them exact, writes rows in event-time order so the latest
+  event wins, refuses timestamps Feast would misread, and retries only transient failures.
+  Guide: `docs/guides/blocks/feast-features.mdx`.
 - **The Mage Pro promotion is removed**: Live help and Try Pro in the header, Deploy (Pro)
   in the side navigation, AI Code (Pro) in the add-block menu and the live chat links.
 - **`mage verify-fusion`** runs a pipeline block by block and fused, compares every
