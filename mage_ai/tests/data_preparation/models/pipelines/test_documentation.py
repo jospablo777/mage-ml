@@ -1,0 +1,129 @@
+"""
+A pipeline's README: read and saved beside the pipeline's code, images served only from
+the pipeline folder, Quarto rendered without running code.
+"""
+import os
+import shutil
+import stat
+import textwrap
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.pipeline import Pipeline
+from mage_ai.data_preparation.models.pipelines import documentation
+from mage_ai.tests.base_test import DBTestCase
+
+PNG = bytes.fromhex(
+    '89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+    '1f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4a60000000049454e44ae426082'
+)
+
+
+class DocumentationTest(DBTestCase):
+    def setUp(self):
+        super().setUp()
+        self.pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
+        self.addCleanup(self.pipeline.delete)
+
+    def test_a_pipeline_without_documentation_gets_a_template_of_its_blocks(self):
+        loader = Block.create(f'{self._testMethodName}_orders', 'data_loader', self.repo_path)
+        exporter = Block.create(f'{self._testMethodName}_save', 'data_exporter', self.repo_path)
+        self.pipeline.add_block(loader)
+        self.pipeline.add_block(exporter, upstream_block_uuids=[loader.uuid])
+        pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
+
+        doc = documentation.read(pipeline)
+        self.assertEqual((doc.format, doc.source, doc.path), (None, '', None))
+        self.assertFalse(documentation.exists(pipeline))
+        template = documentation.template(pipeline)
+        self.assertIn(f'# {self._testMethodName}', template)
+        self.assertIn(f'- `{loader.uuid}`: ', template.split('## Outputs')[0])
+        self.assertIn(f'- `{exporter.uuid}`: ', template.split('## Outputs')[1])
+
+    def test_documentation_is_saved_beside_the_pipeline_and_switches_format(self):
+        doc = documentation.save(self.pipeline, '# Sales\n\nDaily sales.', 'markdown')
+        folder = Path(self.pipeline.dir_path)
+        self.assertEqual((doc.format, doc.path), ('markdown', 'README.md'))
+        self.assertEqual((folder / 'README.md').read_text(), '# Sales\n\nDaily sales.')
+        self.assertTrue(documentation.exists(self.pipeline))
+
+        doc = documentation.save(self.pipeline, '---\ntitle: Sales\n---\n', 'quarto')
+        self.assertEqual(doc.format, 'quarto')
+        self.assertTrue((folder / 'README.qmd').is_file())
+        self.assertFalse((folder / 'README.md').exists(), 'one README at a time')
+
+        with self.assertRaisesRegex(documentation.DocumentationError, 'format must be'):
+            documentation.save(self.pipeline, 'x', 'html')
+        with self.assertRaisesRegex(documentation.DocumentationError, 'larger than'):
+            documentation.save(self.pipeline, 'x' * (documentation.MAX_SOURCE_BYTES + 1))
+
+    def test_only_images_inside_the_pipeline_folder_are_served(self):
+        folder = Path(self.pipeline.dir_path)
+        (folder / 'images').mkdir()
+        (folder / 'images' / 'flow.png').write_bytes(PNG)
+        self.assertEqual(documentation.image(self.pipeline, 'images/flow.png'),
+                         (folder / 'images' / 'flow.png').resolve())
+
+        outside = Path(self.repo_path) / 'secret.png'
+        outside.write_bytes(PNG)
+        self.addCleanup(outside.unlink)
+        for path in ('../../secret.png', '/etc/passwd', 'metadata.yaml', 'missing.png', ''):
+            with self.subTest(path=path):
+                with self.assertRaises(documentation.DocumentationError):
+                    documentation.image(self.pipeline, path)
+        # A link inside the folder that points outside it is outside it.
+        os.symlink(outside, folder / 'linked.png')
+        with self.assertRaisesRegex(documentation.DocumentationError, 'inside the pipeline'):
+            documentation.image(self.pipeline, 'linked.png')
+
+    def test_quarto_renders_without_running_code_and_is_cached(self):
+        documentation.save(self.pipeline, '---\ntitle: Sales\n---\n\n![Flow](flow.png)\n', 'quarto')
+        (Path(self.pipeline.dir_path) / 'flow.png').write_bytes(PNG)
+        fake = Path(self.repo_path) / 'fake-quarto'
+        log = Path(self.repo_path) / 'quarto-calls.txt'
+        fake.write_text(textwrap.dedent(f'''\
+            #!/bin/sh
+            echo "$@" >> "{log}"
+            test -f flow.png || exit 3
+            echo "<html><body><h1>Sales</h1></body></html>" > index.html
+        '''))
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        cache = Path(self.repo_path) / 'doc-cache'
+        with patch.dict(os.environ, {'MAGE_QUARTO': str(fake)}):
+            html = documentation.render_quarto(self.pipeline, str(cache))
+            again = documentation.render_quarto(self.pipeline, str(cache))
+        self.assertIn('<h1>Sales</h1>', html)
+        self.assertEqual(html, again)
+        calls = log.read_text().splitlines()
+        self.assertEqual(len(calls), 1, 'the second render comes from the cache')
+        self.assertIn('--no-execute', calls[0])
+        self.assertIn('embed-resources:true', calls[0])
+
+    def test_without_quarto_the_error_says_how_to_get_it(self):
+        documentation.save(self.pipeline, '# Sales', 'quarto')
+        with patch.object(documentation, 'quarto_command', return_value=None):
+            with self.assertRaisesRegex(documentation.DocumentationError, 'not installed'):
+                documentation.render_quarto(self.pipeline, self.repo_path)
+
+    @unittest.skipUnless(shutil.which('quarto'), 'needs Quarto')
+    def test_a_real_quarto_document_renders_with_its_image_embedded_and_code_shown(self):
+        documentation.save(self.pipeline, textwrap.dedent('''\
+            ---
+            title: Sales
+            ---
+
+            ## Flow
+
+            ![Flow](flow.png)
+
+            ```{python}
+            raise SystemExit("this cell must not run")
+            ```
+        '''), 'quarto')
+        (Path(self.pipeline.dir_path) / 'flow.png').write_bytes(PNG)
+        html = documentation.render_quarto(self.pipeline, str(Path(self.repo_path) / 'cache'))
+        self.assertIn('Sales', html)
+        self.assertIn('data:image/png;base64', html, 'the image is embedded')
+        self.assertIn('this cell must not run', html, 'the code is shown')

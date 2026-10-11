@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" role="img" aria-label="Pipeline documentation" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6E7681"/></marker></defs>
+<rect x="24" y="30" width="330" height="190" rx="12" fill="#0D1117" stroke="#30363D" stroke-width="1.5" stroke-dasharray="5 4"/><text x="38" y="52" font-size="12.5" font-weight="600" fill="#9198A1">pipelines/sales/</text>
+<rect x="44" y="66" width="290" height="50" rx="9" fill="#161B22" stroke="#6E7681" stroke-width="1.6"/>
+<text x="58" y="91.0" font-size="14" font-weight="600" fill="#E6EDF3">README.md or README.qmd</text>
+<text x="58" y="108.0" font-size="11.5" fill="#9198A1">versions with the pipeline</text>
+<rect x="44" y="134" width="290" height="50" rx="9" fill="#161B22" stroke="#6E7681" stroke-width="1.6"/>
+<text x="58" y="159.0" font-size="14" font-weight="600" fill="#E6EDF3">images/flow.png</text>
+<text x="58" y="176.0" font-size="11.5" fill="#9198A1">shown with ![...](images/flow.png)</text>
+<rect x="430" y="66" width="230" height="50" rx="9" fill="#161B22" stroke="#6E7681" stroke-width="1.6"/>
+<g transform="translate(442.0 80.0) scale(0.9167)"><path d="M22.27 19.385H1.73A1.73 1.73 0 010 17.655V6.345a1.73 1.73 0 011.73-1.73h20.54A1.73 1.73 0 0124 6.345v11.308a1.73 1.73 0 01-1.73 1.731zM5.769 15.923v-4.5l2.308 2.885 2.307-2.885v4.5h2.308V8.078h-2.308l-2.307 2.885-2.308-2.885H3.46v7.847zM21.232 12h-2.309V8.077h-2.307V12h-2.308l3.461 4.039z" fill="#6E7681"/></g>
+<text x="474" y="91.0" font-size="14" font-weight="600" fill="#E6EDF3">Markdown</text>
+<text x="474" y="108.0" font-size="11.5" fill="#9198A1">rendered in the browser</text>
+<rect x="430" y="134" width="230" height="50" rx="9" fill="#161B22" stroke="#39729E" stroke-width="1.6"/>
+<g transform="translate(442.0 148.0) scale(0.9167)"><path d="M12.65 12.854V24c6.042-.325 10.923-5.105 11.33-11.125H12.65Zm-1.504 0H.02c.427 5.94 5.166 10.699 11.105 11.105V12.854Zm1.505-1.505H24C23.675 5.247 18.753.325 12.65 0Zm-1.505 0V0C5.106.427.326 5.308 0 11.35Z" fill="#39729E"/></g>
+<text x="474" y="159.0" font-size="14" font-weight="600" fill="#E6EDF3">Quarto</text>
+<text x="474" y="176.0" font-size="11.5" fill="#9198A1">quarto render, no code run</text>
+<rect x="740" y="96" width="236" height="58" rx="9" fill="#161B22" stroke="#6E7681" stroke-width="1.6"/>
+<text x="754" y="125.0" font-size="14" font-weight="600" fill="#E6EDF3">Documentation page</text>
+<text x="754" y="142.0" font-size="11.5" fill="#9198A1">pipeline row button and nav</text>
+<path d="M354,125 L430,91" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M354,125 L430,159" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M660,91 L740,118" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M660,159 L740,134" fill="none" stroke="#6E7681" stroke-width="1.6" marker-end="url(#arrow)"/>
+</svg>

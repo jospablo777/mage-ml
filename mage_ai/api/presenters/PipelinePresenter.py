@@ -120,8 +120,19 @@ class PipelinePresenter(BasePresenter):
         data['updated_at'] = self.model.updated_at
         if display_format in (constants.DETAIL, constants.LIST):
             data['last_compiled'] = _last_compiled(self.model)
+            data['has_documentation'] = _has_documentation(self.model)
 
         return data
+
+
+def _has_documentation(pipeline) -> bool:
+    """Whether the pipeline has a README.md or README.qmd."""
+    from mage_ai.data_preparation.models.pipelines import documentation
+
+    try:
+        return documentation.exists(pipeline)
+    except Exception:
+        return False
 
 
 def _last_compiled(pipeline):
@@ -141,6 +152,7 @@ PipelinePresenter.register_format(
     constants.LIST,
     PipelinePresenter.default_attributes
     + [
+        'has_documentation',
         'last_compiled',
         'schedules',
     ],
