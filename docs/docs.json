@@ -379,6 +379,7 @@
               "guides/blocks/r-setup",
               "guides/blocks/r-blocks",
               "guides/blocks/r-packages",
+              "guides/blocks/rust-setup",
               "guides/blocks/rust-blocks",
               "guides/blocks/feast-features"
             ]
