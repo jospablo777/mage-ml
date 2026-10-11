@@ -49,7 +49,7 @@ class DorisDestinationTests(unittest.TestCase, SQLDestinationMixin):
             "port": 9030,
             "table": "",
             "username": "",
-            "use_lowercase": True,
+            "lower_case": True,
         },
     }
 
