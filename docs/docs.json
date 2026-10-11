@@ -376,6 +376,7 @@
               "guides/blocks/custom-blocks",
               "guides/blocks/markdown-blocks",
               "guides/blocks/sql-blocks",
+              "guides/blocks/r-setup",
               "guides/blocks/r-blocks",
               "guides/blocks/r-packages",
               "guides/blocks/rust-blocks",
