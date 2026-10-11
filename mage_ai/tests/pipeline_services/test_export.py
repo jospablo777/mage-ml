@@ -522,6 +522,62 @@ class RExportTest(ExportTestCase):
         self.assertIn('rv.lock', str(caught.exception))
 
 @unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
+class FakeDistribution:
+    """A distribution that counts how often its metadata is parsed."""
+
+    def __init__(self, root: Path, name: str, version: str, files: int):
+        self.root = root
+        self.name = name
+        self._version = version
+        self.files = [Path(name, f'module_{i}.py') for i in range(files)]
+        self.parses = 0
+
+    @property
+    def metadata(self):
+        self.parses += 1
+        return {'Name': self.name, 'Version': self._version}
+
+    @property
+    def version(self):
+        return self.metadata['Version']
+
+    def read_text(self, filename):
+        return None
+
+    def locate_file(self, file):
+        return self.root / file
+
+
+class FileOwnersTest(unittest.TestCase):
+    def test_each_distribution_is_read_once_and_the_first_of_a_name_owns_its_files(self):
+        """
+        The owner of every file read the distribution's version, which parses its METADATA:
+        37,000 parses, 13 seconds per export, and 10 to 24 minutes per export test in a full
+        test run, where the importlib_metadata backport lists every distribution twice.
+        """
+        from unittest.mock import patch
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        first = FakeDistribution(root / 'a', 'Pandas', '3.0.6', files=50)
+        shadowed = FakeDistribution(root / 'b', 'pandas', '2.3.0', files=50)
+        other = FakeDistribution(root / 'a', 'polars', '2.0.1', files=10)
+
+        with patch.object(
+            export.importlib.metadata, 'distributions', return_value=[first, shadowed, other],
+        ):
+            owners = export._file_owners()
+
+        self.assertEqual(first.parses, 1)
+        self.assertLessEqual(shadowed.parses, 1)
+        self.assertEqual(other.parses, 1)
+        self.assertEqual(
+            owners[os.path.realpath(root / 'a' / 'Pandas' / 'module_0.py')], ('pandas', '3.0.6'),
+        )
+        self.assertNotIn(os.path.realpath(root / 'b' / 'pandas' / 'module_0.py'), owners)
+        self.assertEqual(len(owners), 60)
+
+
 class CargoLockTest(unittest.TestCase):
     def setUp(self):
         self.workspace = Path(tempfile.mkdtemp())
