@@ -28,6 +28,29 @@ class HintTest(TestCase):
             sys.executable = executable
         self.assertIn("--python '/opt/My Env/bin/python' polars-ds", hint)
 
+    def test_a_project_named_like_another_module_is_explained(self):
+        """
+        A project folder named test, json or email: `from test.utils import x` found
+        Python's module of that name, and the hint said to install a package named test.
+        """
+        import json
+
+        error = ModuleNotFoundError("No module named 'json.utils'", name='json.utils')
+        hint = error_hints.hint_for(error, repo_path='/srv/projects/json')
+        self.assertNotIn('uv pip install', hint)
+        self.assertIn('The project folder json has the name of', hint)
+        self.assertIn(os.path.dirname(json.__file__), hint)
+        self.assertIn('Rename the project folder', hint)
+
+    def test_a_missing_submodule_of_an_installed_package_is_not_an_install(self):
+        hint = error_hints.hint_for(
+            ModuleNotFoundError("No module named 'pandas.nope'", name='pandas.nope'),
+            repo_path='/srv/projects/shop',
+        )
+        self.assertNotIn('uv pip install', hint)
+        self.assertIn('pandas is installed but has no module pandas.nope', hint)
+        self.assertIn('uv pip show pandas', hint)
+
     def test_mageml_modules_get_no_install_hint(self):
         self.assertIsNone(error_hints.hint_for(ModuleNotFoundError('x', name='mage_ai.nope')))
 
