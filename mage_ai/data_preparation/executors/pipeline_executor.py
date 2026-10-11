@@ -69,7 +69,17 @@ class PipelineExecutor:
         **kwargs,
     ) -> None:
         try:
-            if pipeline_run_id is None:
+            from mage_ai.orchestration import fusion
+
+            if pipeline_run_id is None and fusion.stages_apply_to_cli(self.pipeline):
+                # Runs outside the editor fuse chains of blocks by default, as triggers do.
+                await fusion.execute_in_stages(
+                    self.pipeline,
+                    global_vars=global_vars,
+                    run_tests=run_tests,
+                    update_status=update_status,
+                )
+            elif pipeline_run_id is None:
                 await self.pipeline.execute(
                     analyze_outputs=analyze_outputs,
                     global_vars=global_vars,

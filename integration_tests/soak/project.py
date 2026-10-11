@@ -243,9 +243,9 @@ def write_project(root: Path, chains: int, start_time: str) -> Dict[str, List[Di
         metadata = dict(blocks=blocks, name=uuid, type='python', uuid=uuid)
         if uuid == 'soak_fanout':
             metadata['concurrency_config'] = dict(block_run_limit=FANOUT_BLOCK_RUN_LIMIT)
-        if os.getenv('MAGE_TEST_SOAK_FUSION'):
-            # Every pipeline runs its chains as stages; the fan-out has none.
-            metadata['block_fusion'] = 'chains'
+        # Every pipeline runs its chains as stages (the fan-out has none) in the fusion
+        # pass, and block by block in the other: fusion is on by default.
+        metadata['block_fusion'] = 'chains' if os.getenv('MAGE_TEST_SOAK_FUSION') else 'off'
         (folder / 'metadata.yaml').write_text(yaml.safe_dump(metadata))
         (folder / '__init__.py').touch()
         triggers[uuid] = [

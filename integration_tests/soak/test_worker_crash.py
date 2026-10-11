@@ -61,8 +61,7 @@ def write_project(root, fused: bool) -> None:
         blocks=project.chain('crash_load'), name='crash_chain', type='python',
         uuid='crash_chain',
     )
-    if fused:
-        metadata['block_fusion'] = 'chains'
+    metadata['block_fusion'] = 'chains' if fused else 'off'
     folder = root / 'pipelines' / 'crash_chain'
     (folder / 'metadata.yaml').write_text(yaml.safe_dump(metadata))
     (folder / '__init__.py').touch()

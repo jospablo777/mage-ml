@@ -152,13 +152,23 @@ class FusionFlowTest(DBTestCase):
         for block in blocks[:3]:
             pd.testing.assert_frame_equal(self.stored(block, fused), self.stored(block, unfused))
 
-    def test_without_the_setting_each_block_runs_alone(self):
+    def test_with_fusion_off_each_block_runs_alone(self):
         self.chain()
+        self.pipeline.block_fusion = 'off'
+        self.pipeline.save()
 
         run = self.run_pipeline()
 
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
         self.assertEqual([name for name, _ in self.jobs], ['run_block'] * 4)
+
+    def test_production_runs_fuse_chains_by_default(self):
+        self.chain()
+
+        run = self.run_pipeline()
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertEqual([name for name, _ in self.jobs], ['run_stage'])
 
     def test_branches_are_separate_jobs(self):
         load = self.block('load', 'data_loader', LOAD)

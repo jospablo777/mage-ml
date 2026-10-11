@@ -596,15 +596,23 @@ def _ordered_blocks(pipeline) -> List:
 
 
 def _outputs(pipeline, block_uuid: str, run: PipelineRun) -> Dict[str, Any]:
+    from mage_ai.data_preparation.models.block import plans
+
     manager = pipeline.variable_manager
     names = manager.get_variables_by_block(
         pipeline.uuid, block_uuid, partition=run.execution_partition,
         output_variable_only=True,
     )
+    block = pipeline.get_block(block_uuid)
+    # A block planned in a compiled chain stores its plan; compare what it computes.
     return {
-        name: manager.get_variable(
-            pipeline.uuid, block_uuid, name, partition=run.execution_partition,
-            raise_exception=True,
+        name: plans.resolve(
+            manager.get_variable(
+                pipeline.uuid, block_uuid, name, partition=run.execution_partition,
+                raise_exception=True,
+            ),
+            block,
+            run.execution_partition,
         )
         for name in names
     }

@@ -48,6 +48,29 @@ class RBlock(Block):
         if code is None and os.path.exists(self.file_path):
             with open(self.file_path, encoding='utf-8') as file:
                 code = file.read()
+        from mage_ai.data_preparation.models.block import plans
+
+        step = dict(block_uuid=self.uuid, block_type=str(self.type), code=code or '',
+                    tests=['test'] if '@test' in (code or '') else [])
+        upstream = plans.upstream_plan(input_vars, 'r')
+        if upstream is not None:
+            plan = upstream.extend(step)
+        else:
+            plan = plans.Plan('r', [step], [plans.resolve(v, self, execution_partition)
+                                            for v in (input_vars or [])],
+                              list(self.upstream_block_uuids or []), global_vars)
+        if plans.may_plan(self, step):
+            self.test_functions = []
+            return [plan]
+        if len(plan.steps) > 1:
+            run = plans.run(plan, self, execution_partition)
+            prefix = f'{self.uuid}: '
+            self.test_functions = [
+                _replayed_test(dict(r, name=str(r.get('name', '')).removeprefix(prefix)))
+                for r in run.tests if str(r.get('name', '')).startswith(prefix)
+            ]
+            return run.outputs
+        input_vars = plan.inputs
         run = execute_r_code(
             self.type,
             code or '',

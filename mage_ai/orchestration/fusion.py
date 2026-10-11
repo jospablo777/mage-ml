@@ -72,12 +72,24 @@ def verification_mode(pipeline_run) -> Optional[str]:
     return (pipeline_run.metrics or {}).get(VERIFY_FUSION_METRIC)
 
 
+# Production runs (triggers, schedules, backfills, the API) fuse chains of blocks unless a
+# pipeline says block_fusion: off. Running blocks one by one is for developing them in the
+# editor, which is unchanged. MAGE_BLOCK_FUSION_DEFAULT=off changes the default.
+DEFAULT_BLOCK_FUSION = os.getenv('MAGE_BLOCK_FUSION_DEFAULT') or BLOCK_FUSION_CHAINS
+
+
+def block_fusion_mode(pipeline) -> str:
+    """The pipeline's block fusion: its own setting, or the default."""
+    return (getattr(pipeline, 'block_fusion', None) or DEFAULT_BLOCK_FUSION) \
+        if pipeline is not None else BLOCK_FUSION_OFF
+
+
 def fusion_enabled(pipeline, pipeline_run=None) -> bool:
     from mage_ai.settings.server import MEMORY_MANAGER_V2
 
     mode = verification_mode(pipeline_run)
     if mode is None and pipeline is not None:
-        mode = pipeline.block_fusion
+        mode = block_fusion_mode(pipeline)
     return (
         pipeline is not None
         and mode == BLOCK_FUSION_CHAINS
@@ -204,6 +216,11 @@ def passes_in_memory(output: Any) -> bool:
     if not isinstance(output, list) or len(output) != 1:
         return False
     value = output[0]
+    from mage_ai.data_preparation.models.block.plans import Plan
+
+    if isinstance(value, Plan):
+        # A planned block: the next block of its language extends the plan (plans.py).
+        return True
     import numpy as np
     import pandas as pd
     import polars as pl
@@ -430,3 +447,80 @@ def member_variables(variables: Optional[Dict]) -> Dict:
         return copy.deepcopy(variables or {})
     except Exception:
         return dict(variables or {})
+
+
+# ---- stages in one process, for mage run -------------------------------------------------
+
+
+def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tests: bool,
+                          update_status: bool) -> None:
+    """Runs a stage's blocks in order, each taking the previous block's output in memory;
+    a Rust or R block followed by one of its language may plan (block/plans.py)."""
+    from mage_ai.data_preparation.models.block import plans
+
+    previous = None
+    for index, uuid in enumerate(stage):
+        block = pipeline.get_block(uuid)
+        following = pipeline.get_block(stage[index + 1]) if index + 1 < len(stage) else None
+        next_block = None
+        if following is not None and block.language in (BlockLanguage.RUST, BlockLanguage.R) \
+                and following.language == block.language:
+            next_block = following.uuid
+        with plans.stage_context(next_block, None):
+            result = block.execute_sync(
+                block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
+                global_vars=global_vars,
+                run_all_blocks=True,
+                update_status=update_status,
+            )
+        if run_tests:
+            block.run_tests(global_vars=global_vars, update_tests=False)
+        output = result.get('output') if isinstance(result, dict) else None
+        previous = (uuid, output) if passes_in_memory(output) else None
+        release_block(block)
+
+
+def stages_apply_to_cli(pipeline) -> bool:
+    """Whether `mage run` runs the pipeline in stages: fusion on, and only blocks a stage
+    can hold (no dynamic, integration or replicated blocks, conditionals or callbacks)."""
+    if not fusion_enabled(pipeline):
+        return False
+    if getattr(pipeline, 'conditionals', None) or getattr(pipeline, 'callbacks', None):
+        return False
+    return all(block_can_fuse(pipeline, block) for block in pipeline.blocks_by_uuid.values())
+
+
+async def execute_in_stages(
+    pipeline,
+    global_vars: Optional[Dict] = None,
+    run_tests: bool = True,
+    update_status: bool = False,
+) -> None:
+    """
+    `mage run` with block fusion: the pipeline's stages in this process, as a fused run
+    runs them, stages whose upstream blocks are done at the same time.
+    """
+    import asyncio
+
+    global_vars = global_vars or {}
+    pending = [list(stage) for stage in fusion_plan(pipeline)]
+    done: set = set()
+    while pending:
+        ready = [
+            stage for stage in pending
+            if all(u.uuid in done for u in (pipeline.get_block(stage[0]).upstream_blocks or []))
+        ]
+        if not ready:
+            raise RuntimeError(
+                'The pipeline has blocks whose upstream blocks never run: '
+                + ', '.join(s[0] for s in pending),
+            )
+        await asyncio.gather(*[
+            asyncio.to_thread(
+                _run_stage_in_process, pipeline, stage, global_vars, run_tests, update_status,
+            )
+            for stage in ready
+        ])
+        for stage in ready:
+            done.update(stage)
+            pending.remove(stage)

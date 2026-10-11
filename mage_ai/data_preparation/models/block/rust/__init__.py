@@ -232,6 +232,105 @@ def execute_rust_code(
         shutil.rmtree(job_dir, ignore_errors=True)
 
 
+class RustChainError(RustBlockError):
+    """A block of a Rust chain failed; block_uuid names it."""
+
+    def __init__(self, message: str, block_uuid: Optional[str]):
+        super().__init__(message)
+        self.block_uuid = block_uuid
+
+
+@dataclass
+class RustChainRun:
+    """The last block's outputs, every block's tests (named `block: test`) and times."""
+    outputs: List[Any]
+    tests: List[Dict]
+    blocks: List[Dict]
+
+
+BLOCK_MARKER = '\x1emage-block '
+
+
+def execute_rust_chain(
+    members: List['rust_build.ChainMember'],
+    input_vars: List = None,
+    global_vars: Dict = None,
+    repo_path: str = None,
+    pipeline_uuid: str = None,
+    execution_partition: str = None,
+    io_config: Optional[Dict] = None,
+) -> RustChainRun:
+    """
+    Runs consecutive Rust blocks in one process (mage::run_chain): each block's lazy
+    query extends the previous block's, and Polars optimizes the chain as one. Only the
+    last block's output is computed and returned.
+    """
+    try:
+        prepared = rust_build.prepare_chain(members, repo_path)
+        built = rust_build.build_chain(prepared)
+    except (RustSourceError, rust_build.RustBuildError) as error:
+        raise RustBlockError(str(error)) from error
+    names = ', '.join(m.block_uuid for m in members)
+    if not built.cached:
+        print(f'Compiled the chain {names} in {built.seconds:.1f} s.', flush=True)
+
+    def relabel(line: str) -> str:
+        if line.startswith(BLOCK_MARKER):
+            return f'----- block {line[len(BLOCK_MARKER):].strip()} -----\n'
+        return rust_build.chain_failure_text(line, prepared)
+
+    job_dir = tempfile.mkdtemp(prefix='mage_rust_chain_')
+    try:
+        entries = exchange.write_inputs(input_vars or [], job_dir)
+        variables, _ = exchange.variables_for_rust(global_vars)
+        crates = dict((m.block_uuid, crate) for m, crate in prepared.members)
+        with open(os.path.join(job_dir, 'job.json'), 'w', encoding='utf-8') as file:
+            json.dump(dict(
+                api_version=JOB_API_VERSION,
+                block_type=str(members[0].block_type),
+                block_uuid=members[0].block_uuid,
+                execution_partition=execution_partition,
+                inputs=entries,
+                output_dir='out',
+                pipeline_uuid=pipeline_uuid,
+                variables=variables,
+                chain=[
+                    dict(block_uuid=m.block_uuid, block_type=str(m.block_type),
+                         entry=crates[m.block_uuid])
+                    for m in members
+                ],
+            ), file)
+        cwd = repo_path if repo_path and os.path.isdir(repo_path) else job_dir
+        exit_code = _run_binary(
+            str(built.binary), job_dir, cwd, _settings_int('MAGE_RUST_TIMEOUT_SECONDS'),
+            relabel=relabel,
+            extra_env=dict(MAGE_IO_CONFIG=json.dumps(io_config, default=str))
+            if io_config else None,
+        )
+        if exit_code != 0:
+            error = _read_json(os.path.join(job_dir, 'error.json')) or {}
+            block = error.get('block_uuid') or members[-1].block_uuid
+            message = rust_build.chain_failure_text(error.get('message') or '', prepared)
+            if error.get('kind') == 'panic':
+                location = rust_build.chain_failure_text(error.get('location') or '', prepared)
+                where = f' at {location}' if location else ''
+                raise RustChainError(f'Rust block {block} panicked{where}: {message}', block)
+            raise RustChainError(
+                f'Rust block {block} failed: '
+                + (message or f'the process exited with {exit_code}'),
+                block,
+            )
+        result = _read_json(os.path.join(job_dir, 'result.json'))
+        if result is None:
+            raise RustChainError(f'The Rust chain {names} exited without a result.', None)
+        outputs, tests = exchange.read_outputs(result, job_dir)
+        if members[-1].block_type == BlockType.DATA_EXPORTER:
+            outputs = []
+        return RustChainRun(outputs=outputs, tests=tests, blocks=result.get('blocks') or [])
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+
 def block_io_config(block) -> Optional[Dict]:
     """
     The block's io_config profile (data_provider_profile, or default), rendered with its
@@ -265,6 +364,13 @@ def _replayed_test(result: Dict) -> Callable:
     return test
 
 
+def _run_plan(plan, block, execution_partition) -> Any:
+    from mage_ai.data_preparation.models.block import plans
+
+    outputs = plans.run(plan, block, execution_partition).outputs
+    return outputs[0] if outputs else None
+
+
 class RustBlock(Block):
     def _execute_block(
         self,
@@ -281,6 +387,40 @@ class RustBlock(Block):
         if code is None and os.path.exists(self.file_path):
             with open(self.file_path, encoding='utf-8') as file:
                 code = file.read()
+        from mage_ai.data_preparation.models.block import plans
+        from mage_ai.data_preparation.models.block.rust import source as block_source
+
+        try:
+            tests = block_source.analyze(code or '', self.type).tests
+        except RustSourceError:
+            tests = []
+        # The profile's name, never its settings: a plan is stored as JSON.
+        profile = (self.configuration or {}).get('data_provider_profile') or 'default'
+        step = dict(block_uuid=self.uuid, block_type=str(self.type), code=code or '',
+                    io_profile=profile, tests=tests)
+        upstream = plans.upstream_plan(input_vars, 'rust')
+        if upstream is not None and upstream.steps[-1].get('io_profile') != profile:
+            # One process has one connection profile: run the plan so far on its own.
+            input_vars = [_run_plan(upstream, self, execution_partition)]
+            upstream = None
+        if upstream is not None:
+            plan = upstream.extend(step)
+        else:
+            plan = plans.Plan('rust', [step], [plans.resolve(v, self, execution_partition)
+                                               for v in (input_vars or [])],
+                              list(self.upstream_block_uuids or []), global_vars)
+        if plans.may_plan(self, step):
+            self.test_functions = []
+            return [plan]
+        if len(plan.steps) > 1:
+            run = plans.run(plan, self, execution_partition)
+            prefix = f'{self.uuid}: '
+            self.test_functions = [
+                _replayed_test(dict(r, name=str(r.get('name', '')).removeprefix(prefix)))
+                for r in run.tests if str(r.get('name', '')).startswith(prefix)
+            ]
+            return run.outputs
+        input_vars = plan.inputs
         label = None
         if self.file_path and self.repo_path:
             label = os.path.relpath(self.file_path, self.repo_path)

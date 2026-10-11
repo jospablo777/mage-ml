@@ -56,6 +56,7 @@ import { capitalize } from '@utils/string';
 import { getBlockColorHexCodeMapping } from '@components/CodeBlock/utils';
 import { getSelectedStreams } from '@utils/models/block';
 import { ignoreKeys, isEmptyObject } from '@utils/hash';
+import { blockFusionOn } from '@utils/models/fusion';
 import { isDataIntegrationBlock } from '@utils/models/block';
 import { onSuccess } from '@api/utils/response';
 import { useError } from '@context/Error';
@@ -509,7 +510,7 @@ function BlockSettings({
             />
           </Spacing>
 
-          {pipeline?.block_fusion === 'chains' && (
+          {blockFusionOn(pipeline) && (
             <Spacing mt={PADDING_UNITS}>
               <Checkbox
                 checked={blockAttributes?.configuration?.fusion === false}

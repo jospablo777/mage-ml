@@ -1598,6 +1598,8 @@ def run_stage(
     thread running. The block runs after that stay INITIAL, and the scheduler handles
     them as any other block runs.
     """
+    from mage_ai.data_preparation.models.block import plans
+    from mage_ai.data_preparation.models.constants import BlockLanguage
     from mage_ai.orchestration import fusion
     from mage_ai.orchestration.queue.process_queue import register_job_alias
 
@@ -1702,23 +1704,33 @@ def run_stage(
             **member_tags,
         )
         result = None
+        # A Rust or R block followed in the stage by a block of its language may return a
+        # plan, which that block extends: the chain runs once, compiled (plans.py).
+        next_block = None
+        if next_id is not None and block is not None and block.language in (
+            BlockLanguage.RUST, BlockLanguage.R,
+        ):
+            following = pipeline.get_block(BlockRun.get_by_id(next_id).block_uuid)
+            if following is not None and following.language == block.language:
+                next_block = following.uuid
         try:
-            result = ExecutorFactory.get_block_executor(
-                pipeline,
-                block_uuid,
-                block_run_id=block_run_id,
-                execution_partition=pipeline_run.execution_partition,
-            ).execute(
-                block_run_id=block_run_id,
-                block_run_outputs_cache=outputs_cache,
-                fused=True,
-                global_vars=fusion.member_variables(variables),
-                on_complete=on_complete,
-                on_failure=pipeline_scheduler.on_block_failure,
-                pipeline_run_id=pipeline_run_id,
-                retry_config=retry_config,
-                tags=member_tags,
-            )
+            with plans.stage_context(next_block, pipeline_run_id):
+                result = ExecutorFactory.get_block_executor(
+                    pipeline,
+                    block_uuid,
+                    block_run_id=block_run_id,
+                    execution_partition=pipeline_run.execution_partition,
+                ).execute(
+                    block_run_id=block_run_id,
+                    block_run_outputs_cache=outputs_cache,
+                    fused=True,
+                    global_vars=fusion.member_variables(variables),
+                    on_complete=on_complete,
+                    on_failure=pipeline_scheduler.on_block_failure,
+                    pipeline_run_id=pipeline_run_id,
+                    retry_config=retry_config,
+                    tags=member_tags,
+                )
         except Exception:
             # The block run is FAILED and its error stored; the block runs after it
             # stay INITIAL for the scheduler.

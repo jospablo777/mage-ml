@@ -119,8 +119,12 @@ class Pipeline:
     ):
         self.block_configs = []
         self.blocks_by_uuid = {}
-        # 'chains' runs each chain of blocks as one stage; see block-fusion.md.
+        # 'chains' runs each chain of blocks as one stage, 'off' runs blocks one by one;
+        # unset means the default, chains (orchestration/fusion.py, block-fusion.md).
         self.block_fusion = None
+        # Store every block's output in production runs, for debugging: compiled chains of
+        # Rust and R blocks then compute each block's output (block/plans.py).
+        self.keep_block_outputs = False
         # Its own Python packages for the Python blocks; see data_preparation/environments.py.
         self.environment = None
         # Can only be set True when run_pipeline_in_one_process is True
@@ -896,6 +900,7 @@ class Pipeline:
 
         self.block_configs = config.get('blocks') or []
         self.block_fusion = config.get('block_fusion')
+        self.keep_block_outputs = bool(config.get('keep_block_outputs', False))
         self.environment = config.get('environment')
         self.cache_block_output_in_memory = config.get('cache_block_output_in_memory', False)
         self.callback_configs = config.get('callbacks') or []
@@ -1084,6 +1089,8 @@ class Pipeline:
         # Saved only when set, so pipelines without it keep their metadata.yaml as is.
         if self.block_fusion:
             base['block_fusion'] = self.block_fusion
+        if self.keep_block_outputs:
+            base['keep_block_outputs'] = True
         if self.environment:
             base['environment'] = self.environment
 
@@ -1355,6 +1362,7 @@ class Pipeline:
             'block_fusion',
             'cache_block_output_in_memory',
             'environment',
+            'keep_block_outputs',
             'concurrency_config',
             'data_integration',
             'executor_type',

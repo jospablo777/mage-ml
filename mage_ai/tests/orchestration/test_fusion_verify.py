@@ -179,6 +179,7 @@ class VerifyFusionTest(DBTestCase):
 
     def test_the_run_mode_overrides_the_pipeline_setting(self):
         pipeline = self.chain(('load', 'data_loader', LOAD))
+        pipeline.block_fusion = fusion.BLOCK_FUSION_OFF
         self.assertFalse(fusion.fusion_enabled(pipeline))
         on = fusion_verify._Mode(fusion.BLOCK_FUSION_CHAINS)
         off = fusion_verify._Mode(fusion.BLOCK_FUSION_OFF)

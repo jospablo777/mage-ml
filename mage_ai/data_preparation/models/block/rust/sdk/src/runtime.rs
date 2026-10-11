@@ -603,7 +603,13 @@ fn run_chain_job(entries: &ChainEntries, job_dir: &Path) -> anyhow::Result<()> {
             let block_dir = output_dir.join("chain").join(position.to_string());
             for (index, output) in outputs.into_iter().enumerate() {
                 let item = match output {
-                    Output::Lazy(frame) if !materialize => {
+                    Output::Lazy(mut frame) if !materialize => {
+                        // Resolve the plan's columns and types now, without computing
+                        // it: a query that names a missing column fails at this block,
+                        // not at the block that later computes the chain.
+                        frame.collect_schema().with_context(|| {
+                            format!("Planning the query of block {}", step.block_uuid)
+                        })?;
                         planned = true;
                         Item::Lazy(frame)
                     }

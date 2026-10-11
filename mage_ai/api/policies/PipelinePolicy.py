@@ -52,6 +52,7 @@ PipelinePolicy.allow_read(
     + [
         'callbacks',
         'conditionals',
+        'block_fusion_default',
         'extensions',
         'fusion_plan',
         'schedules',

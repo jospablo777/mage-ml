@@ -36,7 +36,7 @@ import {
 import { get, set } from '@storage/localStorage';
 import { isEqual } from '@utils/hash';
 import { capitalize, isJsonString } from '@utils/string';
-import { BLOCK_FUSION_CHAINS } from '@utils/models/fusion';
+import { BLOCK_FUSION_CHAINS, BLOCK_FUSION_OFF, blockFusionOn } from '@utils/models/fusion';
 import { pushUnique } from '@utils/array';
 
 type PipelineSettingsProps = {
@@ -223,9 +223,14 @@ function PipelineSettings({
           description={(
             <>
               <Text muted small>
-                Blocks that form a chain run in one process and pass their outputs in
-                memory. Each block keeps its run, logs, retries and stored output, and
-                branches still run in parallel. Running a block in the notebook is unchanged.
+                On by default. In runs from triggers, schedules, backfills and the API, blocks
+                that form a chain run in one process and pass their outputs in memory.
+                Consecutive Rust blocks compile into one optimized plan, and consecutive R
+                blocks share one R session. Each block keeps its run, logs and retries, and
+                branches still run in parallel. Running a block in the editor is unchanged.
+              </Text>
+              <Text muted small>
+                Turn it off only to debug a pipeline one block at a time; runs take longer.
               </Text>
 
               {pipelineAttributes?.run_pipeline_in_one_process && (
@@ -234,7 +239,7 @@ function PipelineSettings({
                 </Text>
               )}
 
-              {pipelineAttributes?.block_fusion === BLOCK_FUSION_CHAINS && (
+              {blockFusionOn({ ...pipeline, ...pipelineAttributes }) && (
                 <Spacing mt={1}>
                   {fusionStages?.length ? fusionStages.map((stage, stageIndex) => (
                     <FlexContainer alignItems="center" flexWrap="wrap" key={stage.join('>')}>
@@ -262,14 +267,32 @@ function PipelineSettings({
               )}
             </>
           )}
-          title="Run chains of blocks together (block fusion)"
+          title="Run chains of blocks together (recommended)"
           toggleSwitch={{
-            checked: pipelineAttributes?.block_fusion === BLOCK_FUSION_CHAINS,
+            checked: blockFusionOn({ ...pipeline, ...pipelineAttributes }),
             onCheck: (valFunc: (val: boolean) => boolean) => setPipelineAttributes(prev => ({
               ...prev,
-              block_fusion: valFunc(prev?.block_fusion === BLOCK_FUSION_CHAINS)
+              block_fusion: valFunc(blockFusionOn({ ...pipeline, ...prev }))
                 ? BLOCK_FUSION_CHAINS
-                : null,
+                : BLOCK_FUSION_OFF,
+            })),
+          }}
+        />
+
+        <SetupSectionRow
+          description={(
+            <Text muted small>
+              Stores the output of every block in production runs, so you can open each one
+              after the run. A compiled chain then computes each block&apos;s output instead
+              of only the last one&apos;s, which is slower. Use it to debug.
+            </Text>
+          )}
+          title="Keep every block's output"
+          toggleSwitch={{
+            checked: !!pipelineAttributes?.keep_block_outputs,
+            onCheck: (valFunc: (val: boolean) => boolean) => setPipelineAttributes(prev => ({
+              ...prev,
+              keep_block_outputs: valFunc(!!prev?.keep_block_outputs),
             })),
           }}
         />
@@ -668,6 +691,7 @@ function PipelineSettings({
               name: pipelineAttributes?.name,
               retry_config: pipelineAttributes?.retry_config,
               block_fusion: pipelineAttributes?.block_fusion || null,
+              keep_block_outputs: !!pipelineAttributes?.keep_block_outputs,
               run_pipeline_in_one_process: pipelineAttributes?.run_pipeline_in_one_process,
               settings: pipelineAttributes?.settings,
               tags: pipelineAttributes?.tags,

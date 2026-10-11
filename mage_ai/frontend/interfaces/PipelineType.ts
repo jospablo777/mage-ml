@@ -138,6 +138,8 @@ export default interface PipelineType {
   callbacks?: BlockType[];
   concurrency_config?: ConcurrencyConfigType;
   block_fusion?: string;
+  block_fusion_default?: string;
+  keep_block_outputs?: boolean;
   conditionals?: BlockType[];
   created_at?: string;
   data_integration?: {
