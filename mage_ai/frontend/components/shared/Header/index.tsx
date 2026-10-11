@@ -446,7 +446,9 @@ function Header({
           fullHeight
           justifyContent="space-between"
         >
-          <Flex alignItems="center">
+          {/* Long breadcrumbs (a run's timestamp) clip instead of running under the
+            version, clock and avatar, which keep their size. */}
+          <Flex alignItems="center" flex={1} textOverflow>
             {logoLink}
 
             <Breadcrumbs
@@ -454,7 +456,7 @@ function Header({
             />
           </Flex>
 
-          <Flex alignItems="center">
+          <Flex alignItems="center" flexShrink={0} ml={2}>
             {gitIntegrationEnabled && branch && (
               <Spacing mr={1}>
                 <KeyboardShortcutButton

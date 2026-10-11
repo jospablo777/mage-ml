@@ -1943,6 +1943,8 @@ function DependencyGraph({
           // https://github.com/reaviz/reaflow/blob/master/src/layout/elkLayout.ts
           layoutOptions={{
             'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+            // Room under the graph for the zoom controls, which a fitted graph ran under.
+            'elk.padding': '[top=24,left=24,bottom=160,right=24]',
             // 'elk.nodeLabels.placement': 'INSIDE V_CENTER H_RIGHT',
             // 'elk.algorithm': 'org.eclipse.elk.layered',
             // 'elk.direction': 'DOWN',
