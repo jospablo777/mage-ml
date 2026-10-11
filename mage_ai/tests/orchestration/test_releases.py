@@ -17,6 +17,7 @@ from mage_ai.orchestration.db.models.schedules import BlockRun
 from mage_ai.orchestration.fusion_verify import run_in_process
 from mage_ai.orchestration.triggers.api import trigger_pipeline
 from mage_ai.tests.base_test import DBTestCase, TestCase
+from mage_ai.tests.shared.tracking import use_temporary_mlflow
 
 try:
     import mlflow
@@ -106,12 +107,7 @@ class RuleTest(TestCase):
 class ReleaseFlowTest(DBTestCase):
     def setUp(self):
         super().setUp()
-        self.tracking = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tracking, True)
-        uri = f'sqlite:///{self.tracking}/mlflow.db'
-        os.environ['MLFLOW_TRACKING_URI'] = uri
-        self.addCleanup(os.environ.pop, 'MLFLOW_TRACKING_URI', None)
-        mlflow.set_tracking_uri(uri)
+        use_temporary_mlflow(self, experiments=['churn'])
         self.model = f'model_{self.faker.unique.random_int(1, 10**9)}'
         self.pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
         block = Block.create(

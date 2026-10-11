@@ -19,6 +19,7 @@ from mage_ai.data_preparation.repo_manager import init_project_uuid
 from mage_ai.pipeline_services import export
 from mage_ai.settings.repo import set_repo_path
 from mage_ai.tests.base_test import DBTestCase
+from mage_ai.tests.shared.tracking import use_temporary_mlflow
 
 REPO = Path(__file__).resolve().parents[3]
 SERVICE_BINARY = Path(os.environ.get(
@@ -359,12 +360,7 @@ class ModelTest(ExportTestCase):
         super().setUp()
         import mlflow
 
-        self.tracking = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tracking, True)
-        uri = f'sqlite:///{self.tracking}/mlflow.db'
-        os.environ['MLFLOW_TRACKING_URI'] = uri
-        self.addCleanup(os.environ.pop, 'MLFLOW_TRACKING_URI', None)
-        mlflow.set_tracking_uri(uri)
+        use_temporary_mlflow(self, experiments=['scoring'])
         mlflow.set_experiment('scoring')
 
         class Doubler(mlflow.pyfunc.PythonModel):
