@@ -111,10 +111,13 @@ docker run --rm shop run load_orders --var rows=500
 ```
 
 ```text
-COMPLETED load_orders  run 01a12931-8cbc-7410-a6af-09ecd7956689  870 ms
-  ok    generate_orders     869 ms
-  ok    clean_orders        869 ms
+COMPLETED load_orders  run 01a12938-bd84-7076-8c99-b0a2a292aa72  756 ms
+  ok    generate_orders     751 ms
+  ok    clean_orders          4 ms
 ```
+
+The two blocks ran as one chain in one Python process. The first block's time includes
+starting that process.
 
 The exit code is 0 when every block completes and 1 otherwise. `--var` sets the run's
 variables, as runtime variables do in MageML (`kwargs['rows']` in the block).
