@@ -9,6 +9,11 @@ MageML talks to [Feast](https://feast.dev) through its feature server's REST API
 itself cannot run in MageML's environment (it requires pandas below 3), so Feast runs as
 its own service and blocks call it over HTTP with `FeastClient`.
 
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/feast-flow.light.svg" alt="Pipeline blocks read and push features through the Feast feature server, which uses PostgreSQL online and offline stores" />
+  <img className="hidden dark:block" src="/images/diagrams/feast-flow.dark.svg" alt="Pipeline blocks read and push features through the Feast feature server, which uses PostgreSQL online and offline stores" />
+</Frame>
+
 The client sends what Feast stores exactly. A raw request to Feast's `/push` can change
 values without an error; the client prevents each of these:
 

@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from integration_tests.benchmark.pipelines import logos
+
 MODE_LABELS = {
     'cli': 'mage run',
     'scheduler': 'Scheduler, block by block',
@@ -26,6 +28,8 @@ PIPELINE_LABELS = {
     'rust': 'Rust',
 }
 COLORS = ['#4C6EF5', '#12B886', '#F59F00', '#E8590C', '#AE3EC9', '#1098AD']
+# The logo of each language's pipeline, drawn on its bars and in the legend.
+PIPELINE_LOGOS = {'pandas': 'pandas', 'polars': 'polars', 'r': 'r', 'rust': 'rust'}
 
 
 def pipeline_label(name: str) -> str:
@@ -109,11 +113,19 @@ def _log_ticks(low: float, high: float) -> List[float]:
 
 
 def bar_chart(title: str, groups: List[str], series: List[Tuple[str, List[Optional[float]],
-              List[Optional[Tuple[float, float]]]]], unit: str, log: bool = False) -> str:
+              List[Optional[Tuple[float, float]]]]], unit: str, log: bool = False,
+              series_logos: Optional[List[Optional[str]]] = None) -> str:
     """
     Grouped bars (median) with whiskers (min to max); text uses currentColor. A log axis
-    shows values that differ by orders of magnitude side by side.
+    shows values that differ by orders of magnitude side by side. With series_logos, each
+    series takes its logo's color, and the logo marks its bars and its legend entry.
     """
+    series_logos = series_logos or [None] * len(series)
+
+    def color(s):
+        slug = series_logos[s] if s < len(series_logos) else None
+        return logos.COLORS[slug] if slug else COLORS[s % len(COLORS)]
+
     width, height = 900, 380
     left, right, top, bottom = 64, 16, 40, 92
     plot_w, plot_h = width - left - right, height - top - bottom
@@ -161,7 +173,7 @@ def bar_chart(title: str, groups: List[str], series: List[Tuple[str, List[Option
             x = x0 + s * bar_w
             h = scale(value)
             parts.append(f'<rect x="{x:.1f}" y="{top + plot_h - h:.1f}" width="{bar_w * 0.9:.1f}" '
-                         f'height="{h:.1f}" fill="{COLORS[s % len(COLORS)]}" rx="2">'
+                         f'height="{h:.1f}" fill="{color(s)}" rx="2">'
                          f'<title>{html.escape(series[s][0])}, {html.escape(group)}: '
                          f'{value:.3g} {html.escape(unit)}</title></rect>')
             spread = spreads[g]
@@ -171,6 +183,11 @@ def bar_chart(title: str, groups: List[str], series: List[Tuple[str, List[Option
                 y_hi = top + plot_h - scale(spread[1])
                 parts.append(f'<line x1="{cx:.1f}" x2="{cx:.1f}" y1="{y_lo:.1f}" '
                              f'y2="{y_hi:.1f}" stroke="currentColor" stroke-opacity="0.6"/>')
+            if series_logos[s]:
+                size = min(bar_w * 0.85, 18)
+                peak_y = top + plot_h - max(h, scale(spread[1]) if spread else h)
+                parts.append(logos.logo(series_logos[s], x + bar_w * 0.45 - size / 2,
+                                        peak_y - size - 3, size, title=series[s][0]))
         label_x = left + g * group_w + group_w / 2
         if len(groups) <= 5:
             parts.append(f'<text x="{label_x:.1f}" y="{top + plot_h + 20}" '
@@ -181,16 +198,19 @@ def bar_chart(title: str, groups: List[str], series: List[Tuple[str, List[Option
                          f'{html.escape(group)}</text>')
     legend_x = left
     for s, (name, _, _) in enumerate(series):
-        parts.append(f'<rect x="{legend_x}" y="{height - 18}" width="12" height="12" '
-                     f'fill="{COLORS[s % len(COLORS)]}" rx="2"/>')
-        parts.append(f'<text x="{legend_x + 18}" y="{height - 8}">{html.escape(name)}</text>')
-        legend_x += 30 + 7.2 * len(name)
+        if series_logos[s]:
+            parts.append(logos.logo(series_logos[s], legend_x - 1, height - 21, 16))
+        else:
+            parts.append(f'<rect x="{legend_x}" y="{height - 18}" width="12" height="12" '
+                         f'fill="{color(s)}" rx="2"/>')
+        parts.append(f'<text x="{legend_x + 20}" y="{height - 8}">{html.escape(name)}</text>')
+        legend_x += 36 + 6.6 * len(name)
     parts.append('</svg>')
     return '\n'.join(parts)
 
 
 def line_chart(title: str, xs: List[int], series: List[Tuple[str, List[Optional[float]]]],
-               unit: str, x_label: str) -> str:
+               unit: str, x_label: str, end_logos: Optional[Tuple[str, str]] = None) -> str:
     width, height = 900, 340
     left, right, top, bottom = 64, 16, 40, 72
     plot_w, plot_h = width - left - right, height - top - bottom
@@ -217,6 +237,10 @@ def line_chart(title: str, xs: List[int], series: List[Tuple[str, List[Optional[
         parts.append(f'<text x="{px:.1f}" y="{top + plot_h + 18}" text-anchor="middle">{x}</text>')
     parts.append(f'<text x="{left + plot_w / 2}" y="{top + plot_h + 38}" text-anchor="middle">'
                  f'{html.escape(x_label)}</text>')
+    if end_logos:
+        # The two ends of the axis: all blocks in the first tool, all in the second.
+        parts.append(logos.logo(end_logos[0], left - 9, top + plot_h + 24, 18))
+        parts.append(logos.logo(end_logos[1], left + plot_w - 9, top + plot_h + 24, 18))
     parts.append(f'<text x="14" y="{top + plot_h / 2}" transform="rotate(-90 14 '
                  f'{top + plot_h / 2})" text-anchor="middle">{html.escape(unit)}</text>')
     for s, (name, values) in enumerate(series):
@@ -235,7 +259,7 @@ def line_chart(title: str, xs: List[int], series: List[Tuple[str, List[Optional[
         parts.append(f'<rect x="{legend_x}" y="{height - 18}" width="12" height="12" '
                      f'fill="{COLORS[s % len(COLORS)]}" rx="2"/>')
         parts.append(f'<text x="{legend_x + 18}" y="{height - 8}">{html.escape(name)}</text>')
-        legend_x += 30 + 7.2 * len(name)
+        legend_x += 32 + 6.6 * len(name)
     parts.append('</svg>')
     return '\n'.join(parts)
 
@@ -273,6 +297,7 @@ def charts(results: Dict, summary: Dict) -> Dict[str, str]:
                 f'{label}, {rows:,} rows (median; lines: min to max)',
                 [MODE_LABELS[m] for m in modes], series, unit,
                 log=metric != 'peak_rss_bytes',
+                series_logos=[PIPELINE_LOGOS.get(p) for p in language_pipelines],
             )
         if len(staggered) > 2 and 'pandas' in staggered:
             series = []
@@ -287,7 +312,7 @@ def charts(results: Dict, summary: Dict) -> Dict[str, str]:
                 f'Replacing pandas blocks with Rust, {rows:,} rows '
                 f'(median run time; 1 = the pandas pipeline)',
                 [rust_blocks(p) for p in staggered], series, 'relative to pandas',
-                'Rust blocks out of 5',
+                'Rust blocks out of 5', end_logos=('pandas', 'rust'),
             )
     return out
 
@@ -436,6 +461,11 @@ def html_report(results: Dict, summary: Dict, svgs: Dict[str, str], notes: str =
     return PAGE.format(body='\n'.join(body))
 
 
+def themed(svg: str, color: str) -> str:
+    """The chart with its text and lines in color instead of currentColor."""
+    return svg.replace('currentColor', color)
+
+
 def write(results: Dict, out: Path, notes: str = '') -> Path:
     summary = summarize(results)
     svgs = charts(results, summary)
@@ -443,6 +473,10 @@ def write(results: Dict, out: Path, notes: str = '') -> Path:
     chart_dir.mkdir(exist_ok=True)
     for name, svg in svgs.items():
         (chart_dir / f'{name}.svg').write_text(svg)
+        # For pages that show a chart as an image, where currentColor is black: one file
+        # per theme, the text and lines in a color legible on its background.
+        (chart_dir / f'{name}.light.svg').write_text(themed(svg, '#1F2328'))
+        (chart_dir / f'{name}.dark.svg').write_text(themed(svg, '#E6EDF3'))
     (out / 'summary.json').write_text(json.dumps(
         [dict(rows=k[0], mode=k[1], pipeline=k[2], **v) for k, v in sorted(summary.items())],
         indent=2,

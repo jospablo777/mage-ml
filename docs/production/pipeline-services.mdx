@@ -20,6 +20,11 @@ web server, no scheduler, no metadata database. It starts in under a second and 
 You build pipelines in Mage as always, then ship them where they need to run: next to an
 application, in a Kubernetes cluster, on IBM Cloud Code Engine or AWS ECS.
 
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/pipeline-service.light.svg" alt="Pipelines built in MageML are exported to a build context, built into a Docker image and run by the service" />
+  <img className="hidden dark:block" src="/images/diagrams/pipeline-service.dark.svg" alt="Pipelines built in MageML are exported to a build context, built into a Docker image and run by the service" />
+</Frame>
+
 ## 1. Export
 
 ```bash
@@ -294,14 +299,40 @@ run history, a volume at `/var/lib/mage-service`.
 | `MAGE_SERVICE_SECRETS` | none | Secrets to fetch at start |
 | `MAGE_SERVICE_SECRETS_DIR` | none | Directory of secret files |
 | `MAGE_SERVICE_STRICT_ENV` | `off` | Refuse to start without required variables |
+| `MAGE_SERVICE_CHAINS` | `on` | `off` runs every block on its own |
+| `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
+| `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 
 ## How it runs your blocks
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant S as Service (Rust)
+  participant W as Python worker
+  participant R as Rust blocks binary
+  C->>S: start a run
+  S->>W: chain of Python, R and SQL blocks (one request)
+  W-->>S: outputs as Arrow IPC
+  S->>R: chain of Rust blocks (MAGE_CHAIN=1)
+  R-->>S: last block's output
+  S-->>C: run status, block by block
+```
 
 The service is written in Rust. Python blocks run in long-lived Python worker processes, so
 a block pays no interpreter or import start-up; each block runs in a fresh namespace with
 Mage's decorators, gets its upstream outputs in argument order and the run's variables as
 `kwargs`, and its `@test` functions run on its outputs. Tables pass between blocks as Arrow
 IPC files and keep their types and index. Independent branches run at the same time.
+
+Consecutive blocks of one language run as one chain, as in Mage's production runs. A chain
+of Rust blocks runs in one process of the image's Rust binary, and Polars optimizes the
+blocks' lazy queries as one plan. A chain of Python, R or SQL blocks runs in one worker
+request, with the outputs between them in memory. Each block keeps its own entry in the run,
+its log lines and its retry settings. Only the outputs that later blocks or the API read are
+written; `MAGE_SERVICE_KEEP_OUTPUTS=on` writes every block's output, and
+`MAGE_SERVICE_CHAINS=off` runs every block on its own (`MAGE_SERVICE_RUST_CHAINS=off` for
+Rust blocks only).
 
 A block that fails is retried as configured; when it still fails, no new block starts, the
 blocks after it are marked `upstream_failed`, and the run fails with the block's error. A

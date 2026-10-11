@@ -334,6 +334,27 @@ block_fusion: 'off'
 
 `MAGE_BLOCK_FUSION_DEFAULT=off` changes the default for every pipeline of the server.
 
+```mermaid
+flowchart LR
+  subgraph S1["Stage 1: one process"]
+    direction LR
+    L[load_orders] --> C[clean] --> E[enrich]
+  end
+  subgraph S2["Stage 2"]
+    direction LR
+    A[aggregate] --> X[export]
+  end
+  subgraph S3["Stage 3"]
+    direction LR
+    F[features] --> M[score_model]
+  end
+  E --> A
+  E --> F
+```
+
+Above, `enrich` has two downstream blocks, so the chain ends there and each branch runs
+as its own stage, in parallel. Inside a stage, outputs pass in memory.
+
 A chain is a path where each block has one downstream block and that block has one upstream
 block. The settings show the stages of the saved pipeline. These blocks always run alone:
 dynamic blocks and their children, replicated blocks, data integration blocks, sensors,
@@ -360,6 +381,15 @@ their lazy queries as one plan: a filter in the third block can run while the fi
 reads the file. Consecutive R blocks run in one R session, with their packages loaded once.
 A block whose next block is of the same language returns a plan instead of computing its
 output, and the first block that needs its output runs the whole chain.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/compiled-chains.light.svg" alt="A pandas block, a compiled chain of three Rust blocks and an R chain, with Arrow conversions between languages" />
+  <img className="hidden dark:block" src="/images/diagrams/compiled-chains.dark.svg" alt="A pandas block, a compiled chain of three Rust blocks and an R chain, with Arrow conversions between languages" />
+</Frame>
+
+`clean` and `enrich` store their plans; `aggregate` runs the three Rust blocks as one
+optimized query, so the frames between them are never built. Each block still has its own block run,
+log and status.
 
 A block computes its own output, and so ends a chain, when:
 
@@ -393,6 +423,19 @@ anything:
   environment and packages the blocks run with.
 - **Rust blocks**: the binaries of the chains and blocks a run would build.
 - **SQL blocks** are not compiled: the database checks their queries when they run.
+
+```mermaid
+flowchart LR
+  Save[Save a pipeline or block] --> W{{"wait 3 s<br/>for more saves"}}
+  Trigger[Turn on a trigger] --> W
+  Start[Server start:<br/>active pipelines] --> C
+  Button[Compile now] --> C
+  W --> C[Compile]
+  C --> Py[Check Python blocks]
+  C --> Rk[Check R blocks<br/>and prepare R]
+  C --> Rs[Build Rust<br/>chains and blocks]
+  Py & Rk & Rs --> Rec[(Record: when,<br/>result, code fingerprint)]
+```
 
 Compiling starts on its own a few seconds after you save a pipeline or a block, when you
 turn on a trigger, and when the server starts, for pipelines with an active trigger whose
