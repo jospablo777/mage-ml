@@ -1,0 +1,94 @@
+# Playground: try MageML with sample data
+
+*Start MageML with a seeded shop database and eight pipelines in pandas, Polars, R, Rust and geopandas, and explore every feature in a few minutes.*
+
+The playground starts MageML built from the repository, a PostgreSQL database seeded with a
+shop (customers, products, orders, order lines and web events) and a project, `shop_lab`,
+with pipelines in pandas, Polars, R, Rust, geopandas and mixes of them. Exporters write to
+the same database, in the `analytics` schema. It needs Docker.
+
+## Start it
+
+From the repository root:
+
+```bash
+make playground
+```
+
+It builds the images, starts everything and waits until MageML answers at
+http://localhost:6789. Sign in with `admin@admin.com` and `admin`.
+
+The first build takes a while: it compiles MageML's Rust extension and installs the R
+packages (on Apple silicon some compile from source). Later builds reuse a build cache.
+On the first start the database is seeded with about 3 million rows, in about a minute.
+
+| Command | |
+| --- | --- |
+| `make playground` | Build, start and wait for MageML |
+| `make playground-check` | Run every pipeline once and list the exported tables |
+| `make playground-logs` | Follow the logs |
+| `make playground-psql` | psql on the playground database |
+| `make playground-stop`, `make playground-start` | Stop and start again, keeping everything |
+| `make playground-down` | Remove the containers; the database and MageML's data stay |
+| `make playground-reset` | Delete the database and MageML's data (asks first) |
+| `make playground-reseed` | Fill the shop schema again |
+
+| Setting | Default | |
+| --- | --- | --- |
+| `PLAYGROUND_MAGE_PORT` | `6789` | MageML's port |
+| `PLAYGROUND_POSTGRES_PORT` | `55432` | PostgreSQL on the host (user `mage`, password `mage`, database `playground`) |
+| `SEED_SCALE` | `1` | Multiplies the row counts; `0.1` for a quick start |
+
+## The pipelines
+
+| Pipeline | Shows |
+| --- | --- |
+| `pandas_sales` | pandas with exact PostgreSQL types; two branches that run in parallel; block tests |
+| `polars_customer_360` | Polars on a million events; blocks that run as one compiled chain |
+| `r_dplyr_cohorts` | R blocks: `read_sql`, dplyr, lubridate, tidyr, tibble, `write_table` and `#* @test` |
+| `polyglot_churn` | pandas loads, R scores customers with dplyr, Polars summarizes, Python exports |
+| `geo_store_coverage` | geopandas: GeoDataFrames with their CRS; the nearest store with `sjoin_nearest` |
+| `explore_web_events` | A million-row output and a wide one (about 60 columns) to explore |
+| `rust_session_scores` | Rust blocks: sessions from a million events with Polars, a per-row score on every core with Rayon, tests in Rust |
+| `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, exact decimal margins, writes back with binary COPY |
+
+Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one by
+one.
+
+## What to try
+
+- **ColumnAtlas.** Run a block in the editor and explore its output: column profiles, sort,
+  filters and per-column summaries over the whole table. `explore_web_events` has a million
+  rows. See [ColumnAtlas](../guides/blocks/column-atlas.md).
+- **Compilation.** Open any pipeline: the button next to the kernel shows whether it is
+  compiled and opens the panel with each step. See
+  [Compile pipelines](../guides/pipelines/compilation.md).
+- **R and polyglot pipelines.** In `polyglot_churn`, the R block receives the pandas frame
+  as a tibble, and its factor reaches Polars as a category.
+- **Rust.** In `rust_session_scores`, compile errors are marked as you type; the first run
+  of a block builds it, later runs of unchanged code start at once.
+- **Documentation.** Open **Documentation** in a pipeline's navigation and write its README,
+  or upload an HTML report. See [Pipeline documentation](../guides/pipelines/documentation.md).
+- **Pipeline services.** Export a pipeline and run it without MageML against the playground
+  database:
+
+```bash
+  mage export service playground/shop_lab rust_session_scores --out /tmp/rust-scores
+  docker build -t rust-scores /tmp/rust-scores
+  docker run --rm --network mage-playground_default \
+    -e PGHOST=postgres -e PGPORT=5432 -e PGUSER=mage -e PGPASSWORD=mage \
+    -e PGDATABASE=playground rust-scores run rust_session_scores
+  ```
+
+  See [Export pipelines as a service](../production/export-a-service.md).
+
+The project files are in `playground/shop_lab/` on the host; blocks you edit in MageML are
+saved there.
+
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| The build runs out of disk space | The image needs about 15 GB of build space; free Docker's build cache with `docker builder prune` |
+| A port is in use | `make playground PLAYGROUND_MAGE_PORT=6800`, or `PLAYGROUND_POSTGRES_PORT` |
+| MageML does not answer after a restart | `make playground-logs` shows why; `make playground-restart` restarts MageML only |

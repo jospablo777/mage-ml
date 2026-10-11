@@ -19,6 +19,7 @@
               "introduction/overview",
               "getting-started/setup",
               "getting-started/polyglot-pipeline",
+              "getting-started/playground",
               "guides/train/train-model",
               "design/core-design-principles",
               {
@@ -35,7 +36,7 @@
             "group": "Concepts",
             "pages": [
               "design/data-pipeline-management",
-              "design/column-atlas",
+              "guides/blocks/column-atlas",
               {
                 "group": "Blocks",
                 "icon": "block-brick",
@@ -1185,6 +1186,10 @@
     {
       "source": "/ai/ml/train-model",
       "destination": "/guides/train/train-model"
+    },
+    {
+      "source": "/design/column-atlas",
+      "destination": "/guides/blocks/column-atlas"
     }
   ]
 }

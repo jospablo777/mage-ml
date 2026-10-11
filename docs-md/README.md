@@ -9,6 +9,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [MageML](introduction/overview.md)
 - [Quickstart](getting-started/setup.md)
 - [Tutorial: a pipeline in Python, Rust and R](getting-started/polyglot-pipeline.md)
+- [Playground: try MageML with sample data](getting-started/playground.md)
 - [Machine learning pipeline tutorial](guides/train/train-model.md)
 - [Core Design Principles](design/core-design-principles.md)
 - **Abstractions**
@@ -18,7 +19,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 ### Concepts
 
 - [Pipeline Management](design/data-pipeline-management.md)
-- [ColumnAtlas: explore block outputs](design/column-atlas.md)
+- [ColumnAtlas: explore block outputs](guides/blocks/column-atlas.md)
 - **Blocks**
   - [Overview](design/blocks.md)
   - **Types**

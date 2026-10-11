@@ -1,6 +1,6 @@
-# Mage playground
+# MageML playground
 
-Mage built from this repository, a PostgreSQL database with a seeded shop, and a project
+MageML built from this repository, a PostgreSQL database with a seeded shop, and a project
 (`shop_lab`) with pipelines that use pandas, Polars, R (dplyr, tidyr, lubridate, tibble),
 Python and R together, and geopandas. Exporters write to the same database, in the
 `analytics` schema.
@@ -13,11 +13,11 @@ From the repository root:
 make playground
 ```
 
-It builds the images, starts everything and waits until Mage answers at
-<http://localhost:6789>. The first build compiles Mage's Rust extension and installs the
+It builds the images, starts everything and waits until MageML answers at
+<http://localhost:6789>. The first build compiles MageML's Rust extension and installs the
 R packages; on arm64 (Apple silicon) R packages without a binary compile from source,
 Arrow's C++ library among them, which takes a while once. The compiled packages stay in
-a build cache, so later builds, also after changes to Mage, reuse them.
+a build cache, so later builds, also after changes to MageML, reuse them.
 
 `seed` fills the database on the first start (about 1.5 million rows, a minute or two)
 and does nothing on later starts.
@@ -27,15 +27,15 @@ deployment.
 
 | Command | |
 | --- | --- |
-| `make playground` | Build, start and wait for Mage |
+| `make playground` | Build, start and wait for MageML |
 | `make playground-check` | Run every pipeline once and list the exported tables |
-| `make playground-logs` | Follow the logs of the seed and Mage |
+| `make playground-logs` | Follow the logs of the seed and MageML |
 | `make playground-ps` | State of each service |
 | `make playground-psql` | psql on the playground database |
 | `make playground-stop`, `make playground-start` | Stop and start again, keeping everything |
-| `make playground-restart` | Restart Mage only |
-| `make playground-down` | Remove the containers; the database and Mage's data stay |
-| `make playground-reset` | Delete the database and Mage's data (asks first) |
+| `make playground-restart` | Restart MageML only |
+| `make playground-down` | Remove the containers; the database and MageML's data stay |
+| `make playground-reset` | Delete the database and MageML's data (asks first) |
 | `make playground-reseed` | Fill the shop schema again |
 
 The targets wrap `docker compose -f playground/compose.yaml`; use it directly for
@@ -43,7 +43,7 @@ anything else.
 
 | Setting | Default | |
 | --- | --- | --- |
-| `PLAYGROUND_MAGE_PORT` | `6789` | Mage |
+| `PLAYGROUND_MAGE_PORT` | `6789` | MageML |
 | `PLAYGROUND_POSTGRES_PORT` | `55432` | PostgreSQL on the host (user `mage`, password `mage`, database `playground`) |
 | `SEED_SCALE` | `1` | Multiplies the row counts; `0.1` for a quick start |
 
@@ -67,7 +67,7 @@ The values are random but the same on every seed.
 | Pipeline | Shows |
 | --- | --- |
 | `pandas_sales` | pandas with exact PostgreSQL types; two branches that run in parallel; block tests |
-| `polars_customer_360` | Polars on a million events; block fusion (`block_fusion: chains`): the loader, sessions and engagement blocks run as one stage |
+| `polars_customer_360` | Polars on a million events; the loader, sessions and engagement blocks run as one compiled chain |
 | `r_dplyr_cohorts` | R blocks: `read_sql`, dplyr, lubridate, tidyr `pivot_wider`, tibble, `write_table`, `#* @test` |
 | `polyglot_churn` | pandas loads, R scores customers with dplyr, Polars summarizes, Python exports the R output |
 | `geo_store_coverage` | geopandas: GeoDataFrames pass between blocks with their CRS; nearest store with `sjoin_nearest` |
@@ -104,7 +104,7 @@ the exported tables with their row counts.
   match PostgreSQL's own sums to the cent.
 - **Types**: decimals, zoned timestamps, nullable integers, uuid, jsonb, text[] and NaN
   are all in the data; check them in the outputs and in the exported tables.
-- **Pipeline services**: export a pipeline as a Docker service that runs without Mage,
+- **Pipeline services**: export a pipeline as a Docker service that runs without MageML,
   and run it once against the playground database. From the repository root:
 
   ```bash
@@ -115,17 +115,17 @@ the exported tables with their row counts.
     -e PGDATABASE=playground rust-scores run rust_session_scores
   ```
 
-  It writes `analytics.rust_session_scores`, the same rows as the pipeline run in Mage.
+  It writes `analytics.rust_session_scores`, the same rows as the pipeline run in MageML.
   Without `run`, the service starts its HTTP API; see
-  [Pipeline services](../docs/production/pipeline-services.mdx).
+  [Pipeline services](../docs-md/production/pipeline-services.md).
 
 ## Reset
 
-`make playground-reset` deletes the database and Mage's data; the next
+`make playground-reset` deletes the database and MageML's data; the next
 `make playground` seeds again. `make playground-reseed` refills only the shop schema.
 `SEED_SCALE` applies when the database is seeded: `make playground-reseed SEED_SCALE=0.1`.
 
-The project files are in `shop_lab/` on the host: blocks you edit in Mage are saved
+The project files are in `shop_lab/` on the host: blocks you edit in MageML are saved
 there.
 
 ## Troubleshooting

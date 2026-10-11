@@ -1,6 +1,6 @@
 # ColumnAtlas
 
-The block output explorer. User guide: `docs/design/column-atlas.mdx`.
+The block output explorer. User guide: `docs/guides/blocks/column-atlas.mdx`.
 
 ## Layout
 

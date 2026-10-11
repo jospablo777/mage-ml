@@ -33,6 +33,9 @@ http://localhost:3333.
 | [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv or Docker and create a project |
 | [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
+| [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eight pipelines |
+| [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |
+| [Compile pipelines](docs-md/guides/pipelines/compilation.md) | The performance optimization behind production runs |
 | [Rust blocks](docs-md/guides/blocks/rust-blocks.md) and [Rust setup](docs-md/guides/blocks/rust-setup.md) | Blocks in Rust with Polars |
 | [R blocks](docs-md/guides/blocks/r-blocks.md), [R setup](docs-md/guides/blocks/r-setup.md) and [R packages](docs-md/guides/blocks/r-packages.md) | Blocks in R with packages locked by rv |
 | [Export pipelines as a service](docs-md/production/export-a-service.md) and the [service console](docs-md/production/service-console.md) | Run pipelines without MageML |

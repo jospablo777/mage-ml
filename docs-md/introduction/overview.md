@@ -26,7 +26,7 @@ one R session.
 | [Monitoring](../guides/pipelines/monitoring.md) | Drift, missing values, row counts and freshness of block outputs. |
 | [Pipeline environments](../guides/pipelines/pipeline-environments.md) and [resources](../guides/pipelines/resources.md) | Packages per pipeline, and CPU, memory and GPU limits per block. |
 | [Feast features](../guides/blocks/feast-features.md) | Read and write features in a Feast feature server with values kept exact. |
-| [ColumnAtlas](../design/column-atlas.md) | Explore a block's output: profiles and charts over the whole dataset. |
+| [ColumnAtlas](../guides/blocks/column-atlas.md) | Explore a block's output: profiles and charts over the whole dataset. |
 
 The [release notes](https://github.com/jospablo777/mage-ml/blob/master/docs/development/release-notes.md)
 list every change from Mage 0.9.79, including the fixes to values Mage changed or lost

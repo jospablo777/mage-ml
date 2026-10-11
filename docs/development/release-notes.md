@@ -640,7 +640,7 @@ Each item says what changed, which pipelines it affects, and what to do.
   Rust extension on Polars (`rust/column_atlas`), run
   in worker processes with deadlines and memory limits; 128 rows of a 2-million-row
   output arrive in 4 to 20 ms. Other outputs and outputs on S3 or GCS show the plain
-  table. Printed text and errors show in full, as before. `MAGE_COLUMN_ATLAS=0` turns it off. See `docs/design/column-atlas.mdx` and
+  table. Printed text and errors show in full, as before. `MAGE_COLUMN_ATLAS=0` turns it off. See `docs/guides/blocks/column-atlas.mdx` and
   `column-atlas.md`. Building Mage from source now needs Rust (`rustup`); the Docker
   image has it in the build stage only. Hovering a mini chart shows its numbers at once:
   a histogram bar its range, row count and share; a category its name, count and share;
