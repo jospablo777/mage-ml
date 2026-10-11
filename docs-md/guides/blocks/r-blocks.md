@@ -42,6 +42,9 @@ must have the `arrow`, `bit64`, `jsonlite` and `tibble` packages.
 2. Add a data loader, transformer, data exporter or custom block.
 3. Select **R**, then a template.
 
+Sensors, conditionals and callbacks are written in Python; conditionals can also be written
+in [Rust](rust-blocks.md#conditional-block).
+
 | Block type | Templates |
 | --- | --- |
 | Data loader | Generic, local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
