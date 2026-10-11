@@ -317,6 +317,14 @@ def markdown(results: Dict, summary: Dict) -> str:
         + f'. {settings["repeats"]} measured rounds after a warm-up round; '
         f'seed {settings["seed"]}.',
         '',
+    ]
+    if results.get('source_changed_runs'):
+        lines += [
+            f'**Warning: the source changed during the benchmark; '
+            f'{results["source_changed_runs"]} runs measured other code than the first.**',
+            '',
+        ]
+    lines += [
         'Cells are the median, with the interquartile range in parentheses.',
     ]
     for rows in settings['rows']:
@@ -396,6 +404,12 @@ def html_report(results: Dict, summary: Dict, svgs: Dict[str, str], notes: str =
         + (' with local changes' if machine['git_dirty'] else '')
         + f'. {settings["repeats"]} measured rounds after a warm-up.</p>',
     ]
+    if results.get('source_changed_runs'):
+        body.append(
+            f'<p class="warning"><strong>The source changed during the benchmark: '
+            f'{results["source_changed_runs"]} runs measured other code than the first.'
+            '</strong></p>',
+        )
     if notes:
         body.append(notes)
     for rows in settings['rows']:

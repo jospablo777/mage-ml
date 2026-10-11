@@ -383,6 +383,27 @@ def machine() -> Dict:
     )
 
 
+def source_digest() -> str:
+    """
+    The state of the code a run executes: path, size and modification time of MageML's
+    Python, Rust and R sources. A run measured after this changes measured other code, as
+    when the working tree is edited during the benchmark; run from a pinned git worktree to
+    keep working while it runs.
+    """
+    import hashlib
+
+    skipped = {'__pycache__', 'frontend', 'frontend_dist', 'frontend_dist_base_path_template',
+               'node_modules', 'target', '.next'}
+    digest = hashlib.sha256()
+    for root, dirs, files in os.walk(REPO / 'mage_ai'):
+        dirs[:] = sorted(d for d in dirs if d not in skipped)
+        for name in sorted(files):
+            if name.endswith(('.py', '.rs', '.R', '.toml')):
+                stat = os.stat(os.path.join(root, name))
+                digest.update(f'{root}/{name}:{stat.st_size}:{stat.st_mtime_ns}\n'.encode())
+    return digest.hexdigest()
+
+
 def main(argv: Optional[List[str]] = None) -> Path:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--rows', type=int, nargs='+', default=[100_000, 1_000_000])
@@ -410,10 +431,16 @@ def main(argv: Optional[List[str]] = None) -> Path:
         machine=machine(),
         pipelines={name: workload.pipelines()[name] for name in args.pipelines},
         runs=[],
+        source_digest=source_digest(),
     )
 
     def record(result, round_number):
         result['round'] = round_number
+        if source_digest() != results['source_digest']:
+            result['source_changed'] = True
+            results['source_changed_runs'] = results.get('source_changed_runs', 0) + 1
+            print('  WARNING: the source changed since the benchmark started; this run '
+                  'measured other code.', flush=True)
         results['runs'].append(result)
         results_path.write_text(json.dumps(results, indent=2))
         status = result.get('check') if result['returncode'] == 0 else 'FAILED'
