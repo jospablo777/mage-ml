@@ -2,33 +2,53 @@
 title: "API overview"
 icon: "webhook"
 sidebarTitle: "Overview"
-description: "Our API powers everything in the app— our UI makes calls to the backend, which operates the app. You can learn more about how these work and make your own calls in this section."
+description: "The UI calls the same API you can call. This section shows how to authenticate, make calls, and add endpoints."
 ---
 
-Want to jump-in and interact with Mage via API? Follow the [quickstart](#quickstart) below to get going! Otherwise, head to the [components](#components) section to learn about how our API is structured— this will be helpful if you're interested in adding new API endpoints or developing Mage.
+To call the API, follow the [quickstart](#quickstart) below. To add or change endpoints,
+read the [components](#components) section.
 
-You can read more about the components in the _Design_ section on the sidebar to the left— it contains pages for [Resources](api-reference/resources), [Policies](api-reference/policies), and [Presenters](api-reference/presenters), which are the three components that make up an API endpoint.
+An API endpoint is made of three components, each with its own page:
+[Resources](/extensibility/api-reference/resources),
+[Policies](/extensibility/api-reference/policies) and
+[Presenters](/extensibility/api-reference/presenters).
 
 ## Quickstart
 
 <AccordionGroup>
-    <Accordion title="Obtain API Key" icon="key">
+    <Accordion title="Obtain API key" icon="key">
 
-    You'll need your API key to authenticate calls. You can find your API key quickly by navigating to the GUI and checking the network request log from the container.
-
-    You can read more about how to do this on Chromium based browsers [here](https://developers.google.com/web/tools/chrome-devtools/network/reference#headers).
-
-    Once you have your API key, we recommend storing it as a secret and using a solution like [dotenv](https://pypi.org/project/python-dotenv/) to load it into your environment. This will prevent you from exposing it as plain text.
-
-    </Accordion>
-    <Accordion title="Initialize Session" icon="car">
-
-        <Snippet file="initialize-session.mdx"/>
+    The API key is the client ID of MageML's built-in OAuth application:
+    `zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2` (`OAUTH2_APPLICATION_CLIENT_ID` in
+    `mage_ai/settings/server.py`). It is the same for every MageML server, so it is not a
+    secret; the OAuth token identifies the user.
 
     </Accordion>
-    <Accordion title="Authenticate Session" icon="lock">
+    <Accordion title="Initialize session" icon="car">
 
-    To authenticate your session, we recommend using the `oauth_token` cookie. This can be done simply in Python requests with the following, where `token` is the value of the `token` key in the response payload:
+    Sign in with a user's email (or username) and password. The server creates a default
+    owner, `admin@admin.com` with password `admin`, unless `DEFAULT_OWNER_EMAIL`,
+    `DEFAULT_OWNER_USERNAME` and `DEFAULT_OWNER_PASSWORD` set others.
+
+    ```python
+    import requests
+
+    base_url = 'http://localhost:6789'
+
+    s = requests.Session()
+    s.headers['X-API-KEY'] = 'zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2'
+
+    r = s.post(
+        base_url + '/api/sessions',
+        json={'session': {'email': 'admin@admin.com', 'password': 'admin'}},
+    )
+    mage_session = r.json()['session']
+    ```
+
+    </Accordion>
+    <Accordion title="Authenticate session" icon="lock">
+
+    Send the session's `token` in the `oauth_token` cookie:
 
     ```python
     token = mage_session.get('token')
@@ -37,7 +57,7 @@ You can read more about the components in the _Design_ section on the sidebar to
     </Accordion>
     <Accordion title="Make API calls" icon="phone">
 
-    With your API session configured, you can now make API calls! Here's an example of how to list all pipelines:
+    List all pipelines:
 
     ```python
     pipelines_url = base_url + '/api/pipelines'
@@ -51,31 +71,40 @@ You can read more about the components in the _Design_ section on the sidebar to
 
 ## Authentication
 
-Most API endpoints require authentication. The API request must include the following:
+User authentication is on by default (`REQUIRE_USER_AUTHENTICATION` defaults to `true`).
+While it is on, a request must include:
 
-1. API key
-1. OAuth token
+1. The API key
+1. An OAuth token
+
+With `REQUIRE_USER_AUTHENTICATION=false`, the API accepts requests without either.
 
 ### API key
 
-The API request must include the API key in the query parameter as `api_key` or in the request payload body as `api_key`. You can find your API key quickly by navigating to the GUI and checking the request log from the container or going to the "Network" tab in your browser's developer tools.
+Send the API key in the `X-API-KEY` header, as the `api_key` query parameter, or as
+`api_key` in the JSON body of a `POST` request.
 
 ### OAuth token
 
-The OAuth token is generated by creating a new [session](/extensibility/api-reference/sessions/overview). Sessions are only required when `REQUIRE_USER_AUTHENTICATION` is enabled for your project— that is, when users must login to access Mage.
+Create a [session](/extensibility/api-reference/sessions/overview) to get a token. The
+`token` in the session payload is **encoded**. There are three ways to send it:
 
-The token provided in the session payload is the **raw** value. There are two ways to authenticate with this token:
-
-1. Supply the raw token in the header as:
+1. The encoded token in the cookie header:
 
 ```json
-{"Cookie": "oauth_token=[RAW-TOKEN-FROM-RESPONSE]"}
+{"Cookie": "oauth_token=[TOKEN-FROM-RESPONSE]"}
 ```
 
-2. Supply the decoded token in the header as:
+2. The decoded token in the `OAUTH-TOKEN` header:
 
 ```json
 {"OAUTH-TOKEN": "[DECODED-TOKEN-FROM-RESPONSE]"}
+```
+
+3. The decoded token as a bearer token:
+
+```json
+{"Authorization": "Bearer [DECODED-TOKEN-FROM-RESPONSE]"}
 ```
 
 To decode a token:
@@ -83,20 +112,20 @@ To decode a token:
     ```python Python
     from mage_ai.authentication.oauth2 import decode_token
 
-    decoded_token = decode_token(token_from_session_response) ['token']
+    decoded_token = decode_token(token_from_session_response)['token']
     ```
 </CodeGroup>
 
 ### Examples
 
-Decoded token, API key in in URL:
+Decoded token, API key in the URL:
 
 ```curl
 curl -X GET "localhost:6789/api/pipelines?api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2" \
     -H "OAUTH-TOKEN: [DECODED-TOKEN-FROM-RESPONSE]"
 ```
 
-Decoded token, API key in body:
+Decoded token, API key in the body:
 
 ```curl
 curl -X POST "localhost:6789/api/pipelines" \
@@ -107,20 +136,23 @@ curl -X POST "localhost:6789/api/pipelines" \
     }'
 ```
 
-Raw token, API key in body:
+Encoded token, API key in the header:
 
 ```curl
 curl -X POST "localhost:6789/api/pipelines" \
-    -H "Cookie: oauth_token=[RAW-TOKEN-FROM-RESPONSE]" \
+    -H "X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2" \
+    -H "Cookie: oauth_token=[TOKEN-FROM-RESPONSE]" \
     -d '{
-        "api_key": "zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2",
         "pipeline": {}
     }'
 ```
 
 ### Responses
 
-_All_ our responses return a `200` status in the main payload. The any error code will be stored in the `error` key. For example, the following is a response from a failed session auth:
+Errors are returned in the `error` key of the payload. The payload's `status` is `200`
+and so is the HTTP status, except for an invalid API key or OAuth token, which return
+HTTP `401`. Add `_http_error_codes=true` to the query to get the error's code as the HTTP
+status and the payload's `status`. The following is a response from a failed sign-in:
 
 ```json
 {
@@ -133,16 +165,16 @@ _All_ our responses return a `200` status in the main payload. The any error cod
 }
 ```
 
-To check for an error, one might try a solution like the following:
+To check for an error:
 <CodeGroup>
     ```python Python
-    err_code = r.json().get('error').get('code'):
+    err_code = (r.json().get('error') or {}).get('code')
     ```
 </CodeGroup>
 
 ## Components
 
-If you're not developing our API, you can jump right in and start querying endpoints using the [quickstart](#quickstart) above. Otherwise, our API is based on three components:
+To call the API, use the [quickstart](#quickstart) above. An endpoint is built from three components:
 
 1. [Resources](/extensibility/api-reference/resources)
 2. [Policies](/extensibility/api-reference/policies)
@@ -156,7 +188,7 @@ If you'd like to contribute a new endpoint, you'll need to create one of each. T
 
 **Presenters** determine what attributes of the resource are returned to the client in the response. You can have different sets of attributes be included in the response based on the action (e.g. create, detail, delete, list, update) or a custom format.
 
-To see examples of each, take a look at the `mage-ai/mage_ai/api` directory [here](https://github.com/mage-ai/mage-ai/tree/master/mage_ai/api).
+For examples of each, see the [`mage_ai/api`](https://github.com/jospablo777/mage-ml/tree/master/mage_ai/api) directory.
 
 ## Testing
 
@@ -167,7 +199,7 @@ Paste in the following sample code into your file:
 
 ```python
 from mage_ai.orchestration.db.models.oauth import User
-from mage_ai.tests.api.operations.base import BaseApiTestCase
+from mage_ai.tests.api.operations.test_base import BaseApiTestCase
 from mage_ai.tests.factory import create_user
 
 

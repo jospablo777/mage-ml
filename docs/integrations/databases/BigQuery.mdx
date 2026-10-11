@@ -10,7 +10,36 @@ title: "BigQuery"
 
 ## Add credentials
 
-<Snippet file="google-auth.mdx"/>
+1. Create a service account in your GCP project and download its JSON key.
+2. Open `io_config.yaml` at the root of your project and enter one of these under the
+   `default` key (or another profile):
+
+```yaml
+version: 0.1.1
+default:
+  # Option 1: path to the service account key file
+  GOOGLE_SERVICE_ACC_KEY_FILEPATH: "/path/to/your/service/account/key.json"
+
+  # Option 2: the contents of the key
+  # GOOGLE_SERVICE_ACC_KEY:
+  #   type: service_account
+  #   project_id: project-id
+  #   private_key_id: key-id
+  #   private_key: "-----BEGIN PRIVATE KEY-----\nyour_private_key\n-----END PRIVATE KEY-----"
+  #   client_email: your_service_account_email
+  #   auth_uri: "https://accounts.google.com/o/oauth2/auth"
+  #   token_uri: "https://accounts.google.com/o/oauth2/token"
+  #   auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+  #   client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/your_service_account_email"
+
+  GOOGLE_LOCATION: US  # Optional, BigQuery only
+```
+
+If both are set, `GOOGLE_SERVICE_ACC_KEY` is used. The `io_config.yaml` that
+`mage init` creates has a placeholder `GOOGLE_SERVICE_ACC_KEY`; delete it when you use the
+file path. When the server runs in the container
+image, put the key file inside the project folder (such as
+`/home/src/default_repo/key.json`) so the path is valid in the container.
 
 ## Required permissions
 
@@ -31,12 +60,12 @@ role for the BigQuery dataset.
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `BigQuery`.
+4. Under the `Connection` dropdown, select `BigQuery`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
-6. Next to the `Database` label, enter the database name you want this block to
+6. In the `Database` field, enter the database name you want this block to
    save data to.
-7. Next to the `Save to schema` label, enter the schema name you want this block
+7. In the `Schema` field, enter the schema name you want this block
    to save data to.
 8. Under the `Write policy` dropdown, select `Replace` or `Append` (please see
    [SQL blocks guide](/guides/blocks/sql-blocks)
@@ -96,8 +125,6 @@ def export_data_to_big_query(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a BigQuery warehouse.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#bigquery
     """
     table_id = 'your-project.your_dataset.your_table_name'
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -149,8 +176,6 @@ def export_data_to_big_query(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to BigQuery with UPSERT support.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#bigquery
     """
     table_id = 'your-project.your_dataset.your_table_name'
     config_path = path.join(get_repo_path(), 'io_config.yaml')

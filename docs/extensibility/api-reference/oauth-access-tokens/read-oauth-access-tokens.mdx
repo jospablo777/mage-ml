@@ -3,16 +3,16 @@ title: "Read OAuth tokens"
 sidebarTitle: "Read OAuth tokens"
 api: "GET /api/oauth_access_tokens"
 ---
-```GET /api/oauth_access_tokens```
+`GET /api/oauth_access_tokens`
 
 <ParamField query="_limit" type="integer">
-  Maximum number of logs to be returned in the API response.
+  Maximum number of tokens to be returned in the API response.
 
   Example: `20`
 </ParamField>
 
 <ParamField query="_offset" type="integer">
-  Read logs after N number of logs, where N equals `_offset`.
+  Skip the first N tokens, where N equals `_offset`.
 
   Example: `10`
 </ParamField>
@@ -28,8 +28,8 @@ api: "GET /api/oauth_access_tokens"
 <RequestExample>
 ```bash Request
 curl --request GET \
-  --url 'http://localhost:6789/api/pipelines/oauth_access_tokens/logs?_limit=20&_offset=0&show_all=1&api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
-  --header 'OAUTH-TOKEN=some_really_long_string' \
+  --url 'http://localhost:6789/api/oauth_access_tokens?_limit=20&_offset=0&show_all=1&api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
+  --header 'OAUTH-TOKEN: some_really_long_string'
 ```
 </RequestExample>
 <ResponseExample>

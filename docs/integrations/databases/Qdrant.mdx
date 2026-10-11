@@ -5,23 +5,25 @@ sidebarTitle: "Qdrant"
 
 ## Credentials
 
-Open the file named `io_config.yaml` at the root of your Mage project and enter qdrant required fields:
+Open the file named `io_config.yaml` at the root of your MageML project and enter the Qdrant fields:
 
 ```yaml
 version: 0.1.1
 default:
   QDRANT_COLLECTION: collection_name
-  QDRANT_PATH: path of the qdrant persisitant storage
+  QDRANT_PATH: path of the Qdrant persistent storage
 ```
 
 ## Dependencies
 
-The dependency libraries are not installed in the docker image by default. You'll need to add the libraries to
-project `requirements.txt` file manually and install them.
+The Qdrant client and sentence-transformers are not installed in the image built from the
+repository's Dockerfile. Add them to the project's `requirements.txt` and install them
+(see [Install dependencies](/getting-started/install-dependencies)), or, in a source
+checkout, add `--extra qdrant` to the `uv sync` command you installed with.
 
 ```
-qdrant-client==1.6.9
-sentence-transformers==2.2.2
+qdrant-client>=1.9,<2
+sentence-transformers>=5.0,<6
 ```
 
 ## Using Python block
@@ -36,7 +38,7 @@ Both the data loader and exporter use SentenceTransformer 'all-MiniLM-L6-v2' as 
 
 - Qdrant data loader arguments:
   - limit_results (int): Number of results to return.
-  - query_vector (List): vector lit used for query.
+  - query_vector (List): vector list used for the query.
   - collection_name (str): name of the collection. Default to use the name defined in io_config.yaml.
 
 - Qdrant data exporter arguments:

@@ -89,11 +89,10 @@ block dependencies."
     Pipeline UUID the trigger belongs to.
   </ResponseField>
   <ResponseField name="schedule_interval" type="string">
-    `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`
+    `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`, `@always_on`, or a cron expression
   </ResponseField>
   <ResponseField name="schedule_type" type="string" required>
-    Trigger type. Supported new trigger creation uses `api` or `time`; `event` may appear for
-    deprecated legacy event triggers.
+    Trigger type: `api`, `event` or `time`.
   </ResponseField>
   <ResponseField name="start_time" type="datetime">
     Date and time when the trigger should start running.

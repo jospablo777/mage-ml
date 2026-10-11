@@ -15,8 +15,7 @@ api: "POST /api/pipelines"
 </ResponseField>
 
 <ParamField query="tags" type="array of strings">
-  Non-empty tag names to associate with the pipeline. Tag names are trimmed and duplicate names are
-  ignored before persistence. Each tag name cannot exceed 70 characters.
+  Tag names to associate with the pipeline.
 </ParamField>
 
 <ParamField query="clone_pipeline_uuid" type="string">
@@ -38,11 +37,11 @@ api: "POST /api/pipelines"
 <RequestExample>
 
 ```bash Request
-  curl --request POST 
-  -H 'Content-Type: application/json' 
-  -H 'Cookie: oauth_token=some_really_long_string'
-  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2'
-  -d '{"pipeline": {"name": "arwen-starlight", "type": "python"}}' 
+  curl --request POST \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: oauth_token=some_really_long_string' \
+  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
+  -d '{"pipeline": {"name": "arwen-starlight", "type": "python"}}' \
   --url http://localhost:6789/api/pipelines
 ```
 

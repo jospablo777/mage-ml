@@ -2,8 +2,6 @@
 title: "MySQL"
 ---
 
-import { ProOnly } from '/snippets/pro/only.mdx';
-
 ![](https://user-images.githubusercontent.com/78053898/198753513-4a149790-853a-4dcd-8c93-388f84ef6aeb.png)
 
 ## Add credentials
@@ -14,8 +12,6 @@ import { ProOnly } from '/snippets/pro/only.mdx';
 4. Enter the following keys and values under the key named `default` (you can
    have multiple profiles, add it under whichever is relevant to you)
 
-### Standard connection
-
 ```yaml
 version: 0.1.1
 default:
@@ -26,37 +22,9 @@ default:
   MYSQL_USER: root
 ```
 
-### SSH tunnel connection
-
-<ProOnly source="mysql" />
-
-If your MySQL database is in a private network and you need to connect via an SSH bastion host, Mage Pro supports configuring an SSH tunnel directly in io_config.yaml:
-
-```yaml
-version: 0.1.1
-default:
-  MYSQL_DATABASE: ...
-  MYSQL_HOST: ...
-  MYSQL_PASSWORD: ...
-  MYSQL_PORT: 3306
-  MYSQL_USER: root
-
-  # Pro only: SSH tunnel settings
-  MYSQL_SSH_HOST: bastion.example.com
-  MYSQL_SSH_PORT: 22
-  MYSQL_SSH_USERNAME: ec2-user
-  # Use one of the following for authentication:
-  MYSQL_SSH_PKEY: /path/to/private/key.pem   # path to SSH private key
-  MYSQL_SSH_PASSWORD: your_ssh_password      # only if using password auth
-```
-
-* `MYSQL_SSH_HOST`: Hostname or IP of the SSH bastion.
-* `MYSQL_SSH_PORT`: SSH port (default 22).
-* `MYSQL_SSH_USERNAME`: SSH user to log in as.
-* `MYSQL_SSH_PKEY`: Path to private key file (preferred).
-* `MYSQL_SSH_PASSWORD`: Password for SSH user (alternative to key).
-
-⚠️ You only need either `MYSQL_SSH_PKEY` or `MYSQL_SSH_PASSWORD`, not both.
+<Note>
+MageML's MySQL client has no SSH tunnel option.
+</Note>
 
 ---
 
@@ -65,7 +33,7 @@ default:
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider`/`Connection` dropdown, select `Mysql`.
+4. Under the `Connection` dropdown, select `MySQL`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
 6. Enter the optional table name of the table to write to.
@@ -111,7 +79,7 @@ df.to_csv('default_repo/users.csv', index=False)
 
 ---
 
-### Using Mage's MySQL python blocks
+### Using MageML's MySQL Python blocks
 
 1. Create a Data Loader block from the MySQL Template
 
@@ -123,13 +91,15 @@ from mage_ai.io.config import ConfigFileLoader
 from mage_ai.io.mysql import MySQL
 from os import path
 
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+
 @data_loader
 def load_data_from_mysql(*args, **kwargs):
     """
     Template for loading data from a MySQL database.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#mysql
     """
     query = 'Your MySQL query'  # Specify your SQL query here
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -160,8 +130,6 @@ def export_data_to_mysql(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a MySQL database.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#mysql
     """
     table_name = 'your_table_name'  # Specify the name of the table to export data to
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -200,8 +168,6 @@ def export_data_to_mysql(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a MySQL database.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#mysql
     """
     table_name = 'your_table_name'  # Specify the name of the table to export data to
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -251,8 +217,6 @@ def export_data_to_mysql(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a MySQL database with UPSERT support.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#mysql
     """
     table_name = 'your_table_name'
     config_path = path.join(get_repo_path(), 'io_config.yaml')

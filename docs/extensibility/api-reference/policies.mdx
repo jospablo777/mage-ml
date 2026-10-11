@@ -5,10 +5,10 @@ description: "Policies for resources determine what actions can be taken on the 
 be read, and which attributes can be written."
 ---
 
-Define your policy by creating a file `api/policies/SwordPolicy`:
+Define your policy by creating a file `mage_ai/api/policies/SwordPolicy.py`:
 
 ```python
-from .BasePolicy import BasePolicy
+from mage_ai.api.policies.BasePolicy import BasePolicy
 
 class SwordPolicy(BasePolicy):
     pass
@@ -36,8 +36,8 @@ There are 2 scopes you can permit:
 Define which actions a user can perform:
 
 ```python
-from api import operations
-from api.oauth_scope import OauthScope
+from mage_ai.api.oauth_scope import OauthScope
+from mage_ai.api.operations import constants as operations
 
 class SwordPolicy(BasePolicy):
     pass
@@ -59,7 +59,7 @@ SwordPolicy.allow_actions([
     operations.UPDATE,
 ], scopes=[
     OauthScope.CLIENT_PRIVATE,
-], condition=lambda policy: policy.current_user.is_staff)
+], condition=lambda policy: policy.has_at_least_editor_role())
 ```
 
 ## Permit query parameters
@@ -94,7 +94,7 @@ SwordPolicy.allow_query([
     OauthScope.CLIENT_PRIVATE,
 ], on_action=[
     operations.LIST,
-], condition=lambda policy: policy.current_user.is_staff)
+], condition=lambda policy: policy.has_at_least_editor_role())
 ```
 
 ## Permit read attributes

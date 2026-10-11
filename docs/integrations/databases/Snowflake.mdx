@@ -34,7 +34,7 @@ default:
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `Snowflake`.
+4. Under the `Connection` dropdown, select `Snowflake`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
 6. In the `Database` input in the block header, enter the database name you want this block to
@@ -114,8 +114,6 @@ def export_data_to_snowflake(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a Snowflake warehouse.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#snowflake
     """
     table_name = 'your_table_name'
     database = 'your_database'
@@ -153,8 +151,6 @@ def export_data_to_snowflake(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a Snowflake warehouse.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#snowflake
     """
     table_name = 'your_table_name'
     database = 'your_database'
@@ -201,8 +197,6 @@ def export_data_to_snowflake(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to Snowflake with UPSERT support.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#snowflake
     """
     table_name = 'your_table_name'
     database = 'your_database'

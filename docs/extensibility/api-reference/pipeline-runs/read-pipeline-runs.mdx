@@ -9,13 +9,13 @@ api: "GET /api/pipeline_schedules/:pipeline_schedule_id/pipeline_runs"
 </ParamField>
 
 <ParamField query="_limit" type="integer">
-  Maximum number of logs to be returned in the API response.
+  Maximum number of pipeline runs to be returned in the API response.
 
   Example: `20`
 </ParamField>
 
 <ParamField query="_offset" type="integer">
-  Read logs after N number of logs, where N equals `_offset`.
+  Skip the first N pipeline runs, where N equals `_offset`.
 
   Example: `10`
 </ParamField>
@@ -24,7 +24,7 @@ api: "GET /api/pipeline_schedules/:pipeline_schedule_id/pipeline_runs"
 ```curl cURL
 curl --request GET \
   --url 'http://localhost:6789/api/pipeline_schedules/1/pipeline_runs?api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
-  --header 'OAUTH-TOKEN=some_really_long_string' \
+  --header 'OAUTH-TOKEN: some_really_long_string'
 ```
 </RequestExample>
 <ResponseExample>

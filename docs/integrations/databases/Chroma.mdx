@@ -5,19 +5,21 @@ sidebarTitle: "Chroma"
 
 ## Credentials
 
-Open the file named `io_config.yaml` at the root of your Mage project and enter chroma required fields:
+Open the file named `io_config.yaml` at the root of your MageML project and enter the Chroma fields:
 
 ```yaml
 version: 0.1.1
 default:
   CHROMA_COLLECTION: collection_name
-  CHROMA_PATH: path of the chroma persisitant storage
+  CHROMA_PATH: path of the Chroma persistent storage
 ```
 
 ## Dependencies
 
-The dependency libraries are not installed in the docker image by default. You'll need to add the libraries to
-project `requirements.txt` file manually and install them.
+The Chroma client is not installed in the image built from the repository's Dockerfile.
+Add it to the project's `requirements.txt` and install it (see
+[Install dependencies](/getting-started/install-dependencies)), or, in a source checkout,
+add `--extra chroma` to the `uv sync` command you installed with.
 
 ```
 chromadb>=0.4.17

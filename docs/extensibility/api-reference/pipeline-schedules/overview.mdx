@@ -42,8 +42,7 @@ description: "Triggers for a pipeline."
 </ResponseField>
 
 <ResponseField name="event_matchers" type="array of objects">
-  Deprecated. Legacy event matching logic returned for existing event triggers. New trigger
-  creation supports `api` and `time` schedule types.
+  Event matchers of an event trigger (`schedule_type` `event`).
 
   <Expandable title="properties">
     <ResponseField name="event_type" type="string" required>
@@ -70,8 +69,7 @@ description: "Triggers for a pipeline."
 </ResponseField>
 
 <ResponseField name="name" type="string" required>
-  Name of trigger. Names are trimmed before validation, must include at least one letter or
-  number, cannot exceed 255 characters, and must be unique within the pipeline.
+  Name of trigger. It cannot be empty.
 </ResponseField>
 
 <ResponseField name="next_pipeline_run_date" type="datetime">
@@ -86,12 +84,11 @@ description: "Triggers for a pipeline."
 </ResponseField>
 
 <ResponseField name="schedule_interval" type="string">
-  `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`
+  `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`, `@always_on`, or a cron expression
 </ResponseField>
 
 <ResponseField name="schedule_type" type="string" required>
-  Trigger type. Supported new trigger creation uses `api` or `time`; `event` may appear for
-  deprecated legacy event triggers.
+  Trigger type: `api`, `event` or `time`.
 </ResponseField>
 
 <ResponseField name="settings" type="object">
@@ -120,16 +117,14 @@ description: "Triggers for a pipeline."
     </ResponseField>
 
     <ResponseField name="timeout" type="integer">
-      Optional run timeout in seconds. When provided, the value is a positive integer. A `null`
-      or omitted value means no timeout.
+      Optional run timeout in seconds. A `null` or omitted value means no timeout.
     </ResponseField>
   </Expandable>
 </ResponseField>
 
 <ResponseField name="sla" type="integer">
   Optional SLA threshold in seconds. If the pipeline run has been running for more than the SLA
-  value, then the pipeline will fail. A positive integer enables SLA enforcement; `0` clears the
-  SLA on update.
+  value, then the pipeline will fail.
 </ResponseField>
 
 <ResponseField name="start_time" type="datetime">
@@ -141,7 +136,7 @@ description: "Triggers for a pipeline."
 </ResponseField>
 
 <ResponseField name="tags" type="array">
-  An array of tag names. Each tag name can contain up to 70 characters.
+  An array of tag names.
 </ResponseField>
 
 <ResponseField name="token" type="string">

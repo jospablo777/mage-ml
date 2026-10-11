@@ -6,10 +6,10 @@ You can have different sets of attributes be included in the response based on t
 action (e.g. create, detail, delete, list, update) or a custom format."
 ---
 
-Define your presenter by creating a file `api/presenters/SwordPresenter`:
+Define your presenter by creating a file `mage_ai/api/presenters/SwordPresenter.py`:
 
 ```python
-from .BasePresenter import BasePresenter
+from mage_ai.api.presenters.BasePresenter import BasePresenter
 
 class SwordPresenter(BasePresenter):
     default_attributes = [
@@ -27,8 +27,8 @@ If you want the resource to return different data, you can register unique forma
 attributes that format should return:
 
 ```python
-from .BasePresenter import BasePresenter
-from api import operations
+from mage_ai.api.presenters.BasePresenter import BasePresenter
+from mage_ai.api.operations import constants as operations
 
 class SwordPresenter(BasePresenter):
     default_attributes = [
@@ -53,8 +53,8 @@ call by including the `_format` URL parameter. For example, you can present spec
 calling the `GET /swords?_format=all_attributes` endpoint.
 
 ```python
-from .BasePresenter import BasePresenter
-from api import operations
+from mage_ai.api.presenters.BasePresenter import BasePresenter
+from mage_ai.api.operations import constants as operations
 
 class SwordPresenter(BasePresenter):
     default_attributes = [

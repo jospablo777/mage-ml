@@ -12,8 +12,7 @@ api: "POST /api/pipelines/:pipeline_uuid/pipeline_schedules"
 <ParamField body="pipeline_schedule" type="object" required>
   <Expandable title="payload" defaultOpen="true">
     <ParamField body="name" type="string" required>
-      Trigger names are trimmed before validation. The name must include at least one letter or
-      number, cannot exceed 255 characters, and must be unique within the pipeline.
+      Name of the trigger. It cannot be empty.
     </ParamField>
     <ParamField body="description" type="string">
     </ParamField>
@@ -21,21 +20,19 @@ api: "POST /api/pipelines/:pipeline_uuid/pipeline_schedules"
       Required when `schedule_type` is `time`.
     </ParamField>
     <ParamField body="schedule_type" type="string">
-      Trigger type: `api` or `time`.
+      Trigger type: `api`, `event` or `time`.
     </ParamField>
     <ParamField body="settings" type="object">
       Additional settings for the trigger.
 
       <Expandable title="properties">
         <ParamField body="timeout" type="integer">
-          Optional run timeout in seconds. When provided, the value must be a positive integer.
-          Use `null` or omit this field for no timeout.
+          Optional run timeout in seconds. Use `null` or omit this field for no timeout.
         </ParamField>
       </Expandable>
     </ParamField>
     <ParamField body="sla" type="integer">
-      Optional SLA threshold in seconds. When provided, the value must be a positive integer.
-      Use `0`, `null`, or omit this field for no SLA.
+      Optional SLA threshold in seconds. Use `null` or omit this field for no SLA.
     </ParamField>
     <ParamField body="start_time" type="datetime">
       Persisted schedule start timestamp. For `@once`, this value determines the single run time;
@@ -44,8 +41,7 @@ api: "POST /api/pipelines/:pipeline_uuid/pipeline_schedules"
     <ParamField body="status" type="string">
     </ParamField>
     <ParamField body="tags" type="array of strings">
-      Non-empty tag names to associate with the trigger. Tag names are trimmed and duplicate names
-      are ignored before persistence. Each tag name cannot exceed 70 characters.
+      Tag names to associate with the trigger.
     </ParamField>
     <ParamField body="variables" type="object">
     </ParamField>
@@ -53,19 +49,16 @@ api: "POST /api/pipelines/:pipeline_uuid/pipeline_schedules"
 </ParamField>
 
 <Info>
-  This endpoint creates supported Schedule and API triggers. Use `time` for Schedule triggers and
-  `api` for API triggers. Event trigger creation is deprecated. Creating a trigger accepts the same
-  configuration payload used by the trigger creation UI, including tags, settings, runtime
-  variables, SLA, and status.
+  Use `time` for Schedule triggers, `api` for API triggers and `event` for event triggers.
 </Info>
 
 <RequestExample>
 
 ```bash Request
-  curl --request POST
-  -H 'Content-Type: application/json'
-  -H 'Cookie: oauth_token=some_really_long_string'
-  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2'
+  curl --request POST \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: oauth_token=some_really_long_string' \
+  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
   -d '{
     "pipeline_schedule": {
       "name": "Example Pipeline Schedule Name",
@@ -85,7 +78,7 @@ api: "POST /api/pipelines/:pipeline_uuid/pipeline_schedules"
       },
       "tags": ["core data"]
     }
-  }'
+  }' \
   --url http://localhost:6789/api/pipelines/example_pipeline/pipeline_schedules
 ```
 

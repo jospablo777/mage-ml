@@ -4,12 +4,13 @@ title: "Backblaze B2"
 
 ## Prerequisites
 
-Backblaze B2 uses Mage's S3-compatible client, which depends on `boto3`. Docker
-and full dev installs already include it. If you installed Mage with a plain
-`pip install mage-ai`, install the `s3` extra so the dependency is present:
+Backblaze B2 uses MageML's S3-compatible client, which depends on `boto3`. The
+image built from the repository's Dockerfile already includes it. In a source
+checkout, add the `s3` extra to the `uv sync` command you installed with
+(`uv sync` removes extras you leave out):
 
 ```bash
-pip install "mage-ai[s3]"
+uv sync --locked --no-default-groups --extra postgres --extra s3
 ```
 
 ## Add credentials
@@ -110,7 +111,7 @@ These permissions are required to:
 <Note>
   Two common Backblaze B2 gotchas:
   - The **master application key** is not S3-compatible. Create a standard
-    (non-master) application key for use with Mage.
+    (non-master) application key for use with MageML.
   - App keys restricted to a single bucket may also need the
     `listAllBucketNames` capability for S3 SDK/integration compatibility.
 </Note>

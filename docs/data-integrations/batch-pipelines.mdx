@@ -14,12 +14,6 @@ description: "Load data from data integration sources and export to data integra
     </p>
 </Frame>
 
-<br />
-
-<Warning>
-  Available in version <b>`0.9.35`</b> and greater.
-</Warning>
-
 ## Overview
 
 You can use a [data integration source](/data-integrations/sources/overview) (e.g. Stripe)
@@ -66,10 +60,7 @@ dynamic capabilities of a batch pipeline.
 - Dynamically build the source and destination catalog schema at runtime.
 - Source blocks can output its fetched data to any downstream block.
 - Any block can output its data to a destination block and have it exported to that destination.
-- Support incremental sync
-- `[Coming soon]` *Support log based sync*.
-- `[Coming soon]` *Replicate source and destination blocks*.
-- `[Coming soon]` *Support source and destination blocks as dynamic blocks*.
+- Support incremental sync.
 
 ---
 
@@ -114,7 +105,7 @@ dynamic capabilities of a batch pipeline.
     1. <b>Templates</b> →
     1. <b>Data exporter</b> →
     1. <b>Destinations</b> →
-    1. Select the source to add to the pipeline.
+    1. Select the destination to add to the pipeline.
 
     <Frame>
         <p align="center">
@@ -126,7 +117,7 @@ dynamic capabilities of a batch pipeline.
     </Frame>
 1. Configure the destination:
     1. Add credentials.
-    1. Select 1 or more stre.ams to export.
+    1. Select 1 or more streams to export.
     1. Setup stream settings.
     1. Select 1 or more columns to include in the destination table when exporting stream.
 
@@ -340,7 +331,7 @@ for sources.
 | --- | --- |
 | Argument | `discover_streams` |
 | Argument values | `False`, `True` |
-| Description | If `True`, there will be a list of stream names available in the function’s body via the keyword argument `selected_streams`; e.g. `kwargs['selected_streams']`. This list of stream names are retrieved by the source’s underlying code in the [Mage Integrations library](https://github.com/mage-ai/mage-ai/tree/master/mage_integrations/mage_integrations/sources). |
+| Description | If `True`, there will be a list of stream names available in the function’s body via the keyword argument `selected_streams`; e.g. `kwargs['selected_streams']`. This list of stream names are retrieved by the source’s underlying code in the [Mage Integrations library](https://github.com/jospablo777/mage-ml/tree/master/mage_integrations/mage_integrations/sources). |
 | Available in | Sources only |
 
 #### Keyword arguments inside the decorated function
@@ -389,7 +380,7 @@ The following keyword arguments are only available in the decorated function’s
 | Sample code | `kwargs['discover_streams_func']` |
 | Return value type | `Callable` |
 | Sample return value | If function is invoked, the return value is the same as `selected_streams` above. |
-| Description | A list of stream names are retrieved by the source’s underlying code in the [Mage Integrations library](https://github.com/mage-ai/mage-ai/tree/master/mage_integrations/mage_integrations/sources). |
+| Description | A list of stream names are retrieved by the source’s underlying code in the [Mage Integrations library](https://github.com/jospablo777/mage-ml/tree/master/mage_integrations/mage_integrations/sources). |
 | Available in | Sources only |
 
 ### `@data_integration_catalog`
@@ -627,15 +618,15 @@ And its output data has the following Pandas data types:
 | PassengerId | `int64` | 2 |
 | Survived | `int64` | 1 |
 | Pclass | `int64` | 1 |
-| Name | `object` | Mrs. John Bradley (Florence Briggs Thayer) |
-| Sex | `object` | female |
+| Name | `str` | Mrs. John Bradley (Florence Briggs Thayer) |
+| Sex | `str` | female |
 | Age | `float64` | 38 |
 | SibSp | `int64` | 1 |
 | Parch | `int64` | 0 |
-| Ticket | `object` | PC 17599 |
+| Ticket | `str` | PC 17599 |
 | Fare | `float64` | 71.2833 |
-| Cabin | `object` | C85 |
-| Embarked | `object` | C |
+| Cabin | `str` | C85 |
+| Embarked | `str` | C |
 
 Here are examples on how to use the upstream block’s catalog as an input to the data integration’s
 decorated functions:
@@ -983,7 +974,7 @@ streams at once in the <b>Overview</b> section:
 
 ## Incremental sync
 
-Synchronize your data incrementally after the 1st sync. 
+Synchronize your data incrementally after the 1st sync.
 
 When you choose 1 or more bookmark values in a stream, the value from that property will be
 saved after each successful sync. The next sync will use that value to compare to the next

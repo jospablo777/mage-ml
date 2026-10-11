@@ -19,7 +19,7 @@ To fetch a single pipeline:
 ```bash Request
 curl --request GET \
   --url 'http://localhost:6789/api/pipelines/arwen_starlight?api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
-  --header 'OAUTH-TOKEN=some_really_long_string'
+  --header 'OAUTH-TOKEN: some_really_long_string'
 ```
 
 </RequestExample>
@@ -45,6 +45,7 @@ curl --request GET \
     "widgets": [],
     "extensions": {}
   }
+}
 ```
 
 </ResponseExample>

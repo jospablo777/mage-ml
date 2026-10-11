@@ -14,32 +14,28 @@ api: "PUT /api/pipeline_schedules/:id"
 <ParamField body="pipeline_schedule" type="object" required>
   <Expandable title="payload" defaultOpen="true">
     <ParamField body="event_matchers" type="array of objects">
-      Deprecated. Used only for maintaining existing legacy event triggers.
+      Event matchers of an event trigger. The list replaces the trigger's current matchers.
     </ParamField>
     <ParamField body="name" type="string">
-      Trigger names are trimmed before validation. The name must include at least one letter or
-      number, cannot exceed 255 characters, and must be unique within the pipeline.
+      Name of the trigger. It cannot be empty.
     </ParamField>
     <ParamField body="schedule_interval" type="string">
       Required when `schedule_type` is `time`.
     </ParamField>
     <ParamField body="schedule_type" type="string">
-      Trigger type. Use `api` or `time` for supported non-legacy triggers. `event` is deprecated
-      and only used for existing legacy event triggers.
+      Trigger type: `api`, `event` or `time`.
     </ParamField>
     <ParamField body="settings" type="object">
       Additional settings for the trigger.
 
       <Expandable title="properties">
         <ParamField body="timeout" type="integer">
-          Optional run timeout in seconds. When provided, the value must be a positive integer.
-          Use `null` or omit this field for no timeout.
+          Optional run timeout in seconds. Use `null` or omit this field for no timeout.
         </ParamField>
       </Expandable>
     </ParamField>
     <ParamField body="sla" type="integer">
-      Optional SLA threshold in seconds. When provided, the value must be a positive integer.
-      Use `0` or `null` to clear an existing SLA, or omit this field for no SLA change.
+      Optional SLA threshold in seconds. Omit this field to keep the current SLA.
     </ParamField>
     <ParamField body="start_time" type="datetime">
       Persisted schedule start timestamp. For `@once`, this value determines the single run time;
@@ -48,8 +44,7 @@ api: "PUT /api/pipeline_schedules/:id"
     <ParamField body="status" type="string">
     </ParamField>
     <ParamField body="tags" type="array of strings">
-      Non-empty tag names to associate with the trigger. Tag names are trimmed and duplicate names
-      are ignored before persistence. Each tag name cannot exceed 70 characters.
+      Tag names to associate with the trigger.
     </ParamField>
     <ParamField body="variables" type="object">
     </ParamField>
@@ -60,7 +55,7 @@ api: "PUT /api/pipeline_schedules/:id"
 ```curl cURL
 curl --request PUT \
   --url 'http://localhost:6789/api/pipeline_schedules/55?api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
-  --header 'OAUTH-TOKEN=some_really_long_string' \
+  --header 'OAUTH-TOKEN: some_really_long_string' \
   --data '{
     "pipeline_schedule": {
       "name": "black voice11111",

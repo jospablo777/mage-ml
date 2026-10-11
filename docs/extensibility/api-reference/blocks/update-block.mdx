@@ -48,7 +48,7 @@ api: "PUT /api/pipelines/:pipeline_uuid/blocks/:block_uuid"
     </Expandable>
   </ResponseField>
 <ParamField query="content" type="string">
-  The content of block formatted as a string. Use `/n` for newlines. Omitting will create an empty block.
+  The content of block formatted as a string. Use `\n` for newlines. Omitting will create an empty block.
 </ParamField>
 <ParamField query="destination_table" type="string">
   The destination table for a data integration pipeline.
@@ -57,17 +57,17 @@ api: "PUT /api/pipelines/:pipeline_uuid/blocks/:block_uuid"
   Array of blocks downstream from the created block.
 </ParamField>
 <ParamField query="executor_config" type="object">
-  Used when configuring a Kubernetes executor. See the [Kubernetes config](/production/configuring-production-settings/compute-resource#2-set-executor-type-and-customize-the-compute-resource-of-the-mage-executor) page for more details
+  Used when configuring a Kubernetes executor. See the [Kubernetes config](/production/configuring-production-settings/compute-resource#block-executor) page for more details
 </ParamField>
 <ParamField query="executor_type" type="string">
-  Used when configuring a Kubernetes executor. See the [Kubernetes config](/production/configuring-production-settings/compute-resource#2-set-executor-type-and-customize-the-compute-resource-of-the-mage-executor) page for more details
+  The executor that runs the block: `ecs`, `gcp_cloud_run`, `azure_container_instance`, `k8s`, `local_python`, `local_python_force`, `pyspark`. See the [block executor](/production/configuring-production-settings/compute-resource#block-executor) docs.
 </ParamField>
 <ParamField query="extension_uuid" type="string">
   UUID of extensions, currently Great Expectations is the only extension supported.
 </ParamField>
 <ParamField query="language" type="string">
   The block language:
-  `python`, `sql`, `r`, `yaml`, `markdown`
+  `python`, `sql`, `r`, `rust`, `yaml`, `markdown`
 </ParamField>
 
 <ParamField query="pipelines" type="[string]">

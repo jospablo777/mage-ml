@@ -3,7 +3,7 @@ title: "ClickHouse"
 ---
 
 <img
-  alt="ClickHouse — open source distributed column-oriented DBMS"
+  alt="ClickHouse: open source distributed column-oriented DBMS"
   src="https://clickhouse.com/images/ch_gh_logo_rounded.png"
   height="200"
 />
@@ -35,7 +35,7 @@ default:
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `ClickHouse`.
+4. Under the `Connection` dropdown, select `ClickHouse`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
 6. Enter the optional table name of the table to write to.
@@ -81,15 +81,14 @@ def load_data_from_clickhouse(**kwargs) -> DataFrame:
 
 ## Destination table in Data Exporter
 
-If the destination table does not exist and the `Write policy` is set
-to `Replace`, `data exporter` will automatically create a table in `ClickHouse`
-with `Engine = Memory` and a default schema inferred from the data.
+If the destination table does not exist, the data exporter creates a table in ClickHouse
+with `ENGINE = MergeTree ORDER BY tuple()` and a schema inferred from the data.
 However, this may not be optimal for various use cases. Since [table creation](https://clickhouse.com/docs/en/sql-reference/statements/create/table)
 in `ClickHouse` can involve numerous details, it is strongly advised to
 create the destination table manually before loading data to ensure it
 meets specific requirements.
 
-If generating the destination table via Mage export method, one can overwrite specific column types
+When MageML's export method creates the destination table, you can overwrite specific column types
 by using the `overwrite_types` dict setting.
 
 Example:
@@ -136,5 +135,5 @@ def export_data_to_clickhouse(df: DataFrame, **kwargs) -> None:
 
 | Field name              | Description                                                                                                                                            | Example values              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| if_exists               | Specify resolution policy if table name already exists                                                                                                 | "fail"/"replace"/"append" (default: "replace") |
+| if_exists               | Specify resolution policy if table name already exists                                                                                                 | "fail"/"replace"/"append" (default: "append") |
 | overwrite_types         | Overwrite the column types                                                                                                                             | `{'column1': 'VARCHAR(255)', 'column2': 'INTEGER'}` |

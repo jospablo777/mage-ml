@@ -32,10 +32,10 @@ as the `REDSHIFT_HOST` value.
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `Redshift`.
+4. Under the `Connection` dropdown, select `Redshift`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
-6. Next to the `Save to schema` label, enter the schema name you want this block
+6. In the `Schema` field, enter the schema name you want this block
    to save data to.
 7. Under the `Write policy` dropdown, select `Replace` or `Append` (please see
    [SQL blocks guide](/guides/blocks/sql-blocks)
@@ -101,8 +101,6 @@ def export_data_to_redshift(df: DataFrame, **kwargs) -> None:
     """
     Template for exporting data to a Redshift cluster.
     Specify your configuration settings in 'io_config.yaml'.
-
-    Docs: https://docs.mage.ai/design/data-loading#redshift
     """
     table_name = 'your_table_name'
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -123,9 +121,10 @@ def export_data_to_redshift(df: DataFrame, **kwargs) -> None:
 
 | Field name              | Description                                                                                                                                            | Example values              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
-| allow_reserved_words    | Whether to allow using reserved words as column names.                                                                                                 | True/False (default: False) |
-| auto_clean_name         | Whether to automatically clean the column name (replace the empty space with underscore, avoid using number as the prefix of the column name)          | True/False (default: True)  |
-| case_sensitive          | Whether to support case sensitive columns                                                                                                              | True/False (default: False) |
+| schema_name             | Schema of the table. Without it, a `schema.table` value of `table_name` sets the schema; otherwise `public`.                                           | `'analytics'` (default: None) |
+| if_exists               | Specify resolution policy if table name already exists                                                                                                 | "fail"/"replace"/"append" (default: "append") |
 | drop_table_on_replace   | Whether to drop the table when "if_exists" param is set to "replace".                                                                                  | True/False (default: False) |
-| if_exists               | Specify resolution policy if table name already exists                                                                                                 | "fail"/"replace"/"append" (default: "replace") |
+| cascade_on_drop         | Whether to cascade the table drop.                                                                                                                     | True/False (default: False) |
+| create_schema           | Whether to create the schema if it does not exist.                                                                                                     | True/False (default: False) |
+| index                   | Whether to include the index in the exported table.                                                                                                    | True/False (default: False) |
 | overwrite_types         | Overwrite the column types                                                                                                                             | `{'column1': 'INTEGER', 'column2': 'VARCHAR(255)'}` |

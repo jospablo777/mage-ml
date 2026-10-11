@@ -31,7 +31,7 @@ description: "Sign in and retrieve an OAuth token."
 </ResponseField>
 
 <ResponseField name="user" type="object" required>
-  Object containing variables for the pipeline.
+  The signed-in user.
 
   <Expandable title="properties">
     <ResponseField name="id" type="integer" required>
@@ -52,4 +52,5 @@ description: "Sign in and retrieve an OAuth token."
   </Expandable>
 </ResponseField>
 
-<Snippet file="initialize-session.mdx"/>
+To create a session, see [Create session](/extensibility/api-reference/sessions/create-session).
+To use the token, see [Authentication](/extensibility/api-reference/overview#authentication).

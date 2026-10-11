@@ -22,47 +22,17 @@ default:
   MSSQL_PASSWORD: password
   MSSQL_PORT: 1433
   MSSQL_USER: SA
-
-  # (Optional) SSH tunnel config
-  MSSQL_CONNECTION_METHOD: direct
-  MSSQL_SSH_HOST:
-  MSSQL_SSH_PORT: 22
-  MSSQL_SSH_USERNAME:
-  MSSQL_SSH_PASSWORD:
-  MSSQL_SSH_PKEY:
 ```
 
-### SSH tunneling
-
 <Note>
-SSH tunneling is a Mage Pro only feature.
+MageML's SQL Server client has no SSH tunnel option.
 </Note>
-
-import { ProButton } from '/snippets/pro/button.mdx';
-import { ProOnly } from '/snippets/pro/only.mdx';
-
-<ProOnly source="mssql" />
-
-If you want to connect to SQL Server with SSH tunnel, update the value of `MSSQL_CONNECTION_METHOD` to `ssh_tunnel`, and enter the values for keys with prefix `MSSQL_SSH`.
-
-| Key | Description | Sample value |
-| --- | --- | --- |
-| `MSSQL_SSH_HOST` | The host of the intermediate bastion server. | `123.45.67.89` |
-| `MSSQL_SSH_PORT` | The port of the intermediate bastion server. Default value: 22 | `22` |
-| `MSSQL_SSH_USERNAME` | The username used to connect to the bastion server. | `username` |
-| `MSSQL_SSH_PASSWORD` | (Optional) The password used to connect to the bastion server. It should be set if you authenticate with the bastion server with password. | `password` |
-| `MSSQL_SSH_PKEY` | (Optional) The path to the private key used to connect to the bastion server. It should be set if you authenticate with the bastion server with private key. | `/path/to/private/key` |
-
-<Note>
-When using SSH tunnel, the `fast_execute` option will automatically be disabled to ensure reliable connections through the tunnel.
-</Note>
-
 
 ## Dependencies
 
 To connect to the Microsoft SQL Server, you'll need to make sure the driver is installed.
-By default, ODBC Driver 18 is installed in the docker image.
-If you want to use other ODBC Driver versions, you'll need to build a custom docker image (use Mage image as the base image) and install the drivers.
+The image built from the repository's Dockerfile includes ODBC Driver 18.
+To use another ODBC driver version, build a custom image on top of the MageML image and install the driver.
 Here is the doc for installing ODBC drivers for SQL Server: https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server
 
 ---
@@ -72,7 +42,7 @@ Here is the doc for installing ODBC drivers for SQL Server: https://learn.micros
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider`/`Connection` dropdown, select `Microsoft SQL Server`.
+4. Under the `Connection` dropdown, select `Microsoft SQL Server`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
 6. Enter the schema and optional table name of the table to write to.
@@ -214,8 +184,5 @@ def export_data_to_mssql(df: DataFrame, **kwargs) -> None:
 
 ### `error: ODBC SQL type -155 is not yet supported.`
 
-<Check>
-    *“I changed the datetime with timezone data type to a datetime and it starting working”*
-</Check>
-
-- [Windy Martin](https://mageai.slack.com/archives/C068SHY6YG6/p1705874712639659?thread_ts=1705668895.141169&cid=C068SHY6YG6)
+ODBC type -155 is SQL Server's `datetimeoffset` (datetime with time zone). If a query
+raises this error, change the column to a `datetime` type.

@@ -5,9 +5,16 @@ description: "Development (local) and production (cloud) using GitLab CI/CD."
 icon: "gitlab"
 ---
 
-## Mage project setup
+## MageML project setup
 
-Follow the [Mage project setup instructions](/production/ci-cd/local-cloud/repository-setup).
+Follow the [MageML project setup instructions](/production/ci-cd/local-cloud/repository-setup).
+
+<Note>
+The project's `Dockerfile` starts from the MageML image you built (`FROM mageml:latest`).
+A CI runner cannot see that local image: push it to a registry the runner can pull from
+(such as your ECR, Artifact Registry or Azure Container Registry) and use its full name in
+the `FROM` line.
+</Note>
 
 ---
 
@@ -54,19 +61,19 @@ Follow the [Mage project setup instructions](/production/ci-cd/local-cloud/repos
     ```
 1. When adding a variable, in the field labeled **Key**, enter the value `AWS_ACCESS_KEY_ID`.
 1. When adding a variable, in the field labeled **Value**, enter your AWS Access Key ID.
-1. Check the box labeled **Mask variable**..
+1. Check the box labeled **Mask variable**.
 1. Click the button labeled **Add variable** to save.
 1. Add a 2nd secret by clicking the button labeled **Add variable** in
    the top right corner.
 1. In the field labeled **Key**, enter the value `AWS_SECRET_ACCESS_KEY`.
 1. In the field labeled **Value**, enter your AWS Secret Access Key.
-1. Check the box labeled **Mask variable**..
+1. Check the box labeled **Mask variable**.
 1. Click the button labeled **Add variable** to save.
 1. In the field labeled **Key**, enter the value `AWS_DEFAULT_REGION`.
 1. In the field labeled **Value**, enter your AWS default region.
 1. Click the button labeled **Add variable** to save.
 1. Create a new file in your repository and name it `.gitlab-ci.yml`.
-   If you followed the [Mage project setup instructions](/production/ci-cd/local-cloud/repository-setup),
+   If you followed the [MageML project setup instructions](/production/ci-cd/local-cloud/repository-setup),
    then your current folder structure could look like this:
     ```
     my_team/
@@ -74,7 +81,7 @@ Follow the [Mage project setup instructions](/production/ci-cd/local-cloud/repos
     |   .gitlab-ci.yml
     |   Dockerfile
     ```
-1. Copy the contents of this [GitLab CI/CD template file](https://github.com/mage-ai/mage-ai/blob/master/templates/gitlab_cicd/aws.gitlab-ci.yml)
+1. Copy the contents of this [GitLab CI/CD template file](https://github.com/jospablo777/mage-ml/blob/master/templates/gitlab_cicd/aws.gitlab-ci.yml)
    and paste it into the file named `.gitlab-ci.yml`.
 1. Change the following values in the file named `.gitlab-ci.yml` under the key labeled `variables`:
     ```yaml
@@ -112,14 +119,4 @@ Follow the [Mage project setup instructions](/production/ci-cd/local-cloud/repos
    CI/CD pipeline will run, building a Docker image using your GitLab code, then
    updating AWS ECS to use the new image with the updated code.
 
----
-
-## GCP
-
-_Coming soon..._
-
----
-
-## Azure
-
-_Coming soon..._
+There is no GitLab template for GCP or Azure.

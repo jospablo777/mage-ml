@@ -31,18 +31,17 @@ All default attributes for a pipeline may be updated in addition to the followin
 </ParamField>
 
 <ParamField query="tags" type="array of strings">
-  Non-empty tag names to associate with the pipeline. Tag names are trimmed and duplicate names are
-  ignored before persistence. Each tag name cannot exceed 70 characters.
+  Tag names to associate with the pipeline.
 </ParamField>
 
 <RequestExample>
 
 ```bash Request
-curl --request PUT 
-  --url http://localhost:6789/api/pipelines/arwen_starlight
-  -H 'Content-Type: application/json' 
-  -H 'Cookie: oauth_token=some_really_long_string'
-  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2'
+curl --request PUT \
+  --url http://localhost:6789/api/pipelines/arwen_starlight \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: oauth_token=some_really_long_string' \
+  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
   -d '{"pipeline": {"type": "integration"}}'
 ```
 

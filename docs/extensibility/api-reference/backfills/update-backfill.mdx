@@ -4,12 +4,12 @@ api: "PUT /api/pipelines/:pipeline_uuid/backfills/:backfill_id"
 ---
 `PUT /api/pipelines/:pipeline_uuid/backfills/:backfill_id`
 
-All default attributes for a backfill may be updated in addittion to the following:
+All default attributes for a backfill may be updated in addition to the following:
 
 <ParamField query="start_datetime" type="string">
   A datetime formatted string representing the start time of the backfill, e.g. `"2023-09-05 23:56:05"`.
 </ParamField>
-<ParamField query="end_datetime" type="">
+<ParamField query="end_datetime" type="string">
   A datetime formatted string representing the end time of the backfill, e.g. `"2023-09-05 23:56:05"`.
 </ParamField>
 <ParamField query="interval_type" type="string">
@@ -21,7 +21,7 @@ All default attributes for a backfill may be updated in addittion to the followi
 <ParamField query="name" type="string">
   A new name for the backfill.
 </ParamField>
-<ParamField query="status" type="status">
+<ParamField query="status" type="string">
   The backfill status. One of `initial`, `running`, `completed`, `failed`, `cancelled`.
 </ParamField>
 <ParamField query="variables" type="object">
@@ -32,11 +32,11 @@ All default attributes for a backfill may be updated in addittion to the followi
 
 <RequestExample>
   ```curl cURL
-  curl -X PUT
-  --url http://localhost:6789/api/pipelines/arwen_starlight/backfills/6
-  -H 'Content-Type: application/json'
-  -H 'Cookie: oauth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHBpcmVzIjoxNjkyMzE0ODM3LjE1MTkzOSwidG9rZW4iOiJieHlQajlVcHE5N2phTC1nTGtOQTVnM2draWZwRjJwSEZZZkNzLTJ2NmpnIn0.bWqUP7Xg9PmHBW703AGPOE270Cc73F4kb0IKHLppGbM'
-  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' 
+  curl -X PUT \
+  --url http://localhost:6789/api/pipelines/arwen_starlight/backfills/6 \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: oauth_token=some_really_long_string' \
+  -H 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
   -d '{
     "backfill": {
       "start_datetime": "2023-07-17 23:56:05",
@@ -62,7 +62,7 @@ All default attributes for a backfill may be updated in addittion to the followi
             }
   }
 
-  r = r.put('http://localhost:6789/api/pipelines/arwen_starlight/backfills/6', json=json_data, headers=headers)
+  r = requests.put('http://localhost:6789/api/pipelines/arwen_starlight/backfills/6', json=json_data, headers=headers)
   ```
 </RequestExample>
 <ResponseExample>

@@ -25,17 +25,9 @@ Use `ORACLEDB_MODE: thick` only if you need the Oracle thick mode (e.g. for adva
 
 <br />
 
-## Using SQL block
-
-1. Create a new pipeline or open an existing pipeline.
-2. Add a data loader, transformer, or data exporter block.
-3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `Oracle`.
-5. Under the `Profile` dropdown, select `default` (or the profile you added
-   credentials underneath).
-6. Enter your query (e.g. `SELECT 1 FROM DUAL`) and run the block.
-
-<br />
+<Note>
+Oracle is not a connection for SQL blocks. Use a Python block.
+</Note>
 
 ## Using Python block
 

@@ -4,9 +4,6 @@ title: "PostgreSQL"
 
 ![](https://user-images.githubusercontent.com/78053898/198754399-3b594af0-cf84-41d3-8faf-e1f6e4c5182d.png)
 
-import { ProButton } from '/snippets/pro/button.mdx';
-import { ProOnly } from '/snippets/pro/only.mdx';
-
 ## Add credentials
 
 1. Create a new pipeline or open an existing pipeline.
@@ -32,19 +29,11 @@ default:
 ```
 
 
-### Pro-only fields
-<ProOnly source="postgresql" />
+### SSL
 
-```yaml
-  POSTGRES_SSL_MODE:
-  POSTGRES_SSL_ROOTCERT:
-  POSTGRES_SSL_CERT:
-  POSTGRES_SSL_KEY:
-```
-
-**Notes:**
-- `POSTGRES_SSL_MODE` corresponds to the `sslmode` parameter in psycopg2 (e.g., `require`, `verify-full`).  
-- `POSTGRES_SSL_ROOTCERT`, `POSTGRES_SSL_CERT`, and `POSTGRES_SSL_KEY` should be absolute paths to your SSL files on disk.  
+`io_config.yaml` has no SSL keys for PostgreSQL. psycopg2 uses libpq, which reads
+`PGSSLMODE` (such as `require` or `verify-full`), `PGSSLROOTCERT`, `PGSSLCERT` and
+`PGSSLKEY` from the server's environment.
 
 ### SSH tunneling
 If you want to connect to Postgres cluster with ssh tunnel, update the value of `POSTGRES_CONNECTION_METHOD` to `ssh_tunnel`, and enter the values for keys with prefix `POSTGRES_SSH`.
@@ -64,10 +53,10 @@ If you want to connect to Postgres cluster with ssh tunnel, update the value of 
 1. Create a new pipeline or open an existing pipeline.
 2. Add a data loader, transformer, or data exporter block.
 3. Select `SQL`.
-4. Under the `Data provider` dropdown, select `PostgreSQL`.
+4. Under the `Connection` dropdown, select `PostgreSQL`.
 5. Under the `Profile` dropdown, select `default` (or the profile you added
    credentials underneath).
-6. Next to the `Save to schema` label, enter the schema name you want this block
+6. In the `Schema` field, enter the schema name you want this block
    to save data to.
 7. Under the `Write policy` dropdown, select `Replace` or `Append` (please see
    [SQL blocks guide](/guides/blocks/sql-blocks) for more
@@ -200,14 +189,9 @@ def export_data_to_postgres(df: DataFrame, **kwargs) -> None:
 | drop_table_on_replace   | Whether to drop the table when "if_exists" param is set to "replace".                                                                                  | True/False (default: False) |
 | if_exists               | Specify resolution policy if table name already exists                                                                                                 | "fail"/"replace"/"append" (default: "replace") |
 | overwrite_types         | Overwrite the column types                                                                                                                             | `{'column1': 'INTEGER', 'column2': 'VARCHAR'}` |
-| unique_conflict_method  | How to handle the conflict on unique constraints.                                                                                                      | 'UPDATE' (default: None)         |
+| unique_conflict_method  | How to handle the conflict on unique constraints.                                                                                                      | 'UPDATE' or 'IGNORE' (default: None) |
 | unique_constraints      | The unique constraints of the table.                                                                                                                   | ['col1', 'col2'] (default: None) |
 
 
-#### Pro-only fields
-
-<ProOnly source="postgresql" />
-
-| Field name   | Description                                                                                      | Example values              |
-| ------------ | ------------------------------------------------------------------------------------------------ | --------------------------- |
-| batch_write  | Use `COPY` command to write to PostgreSQL to improve performance.                                | True/False (default: False) |
+Rows are written with `COPY`. When `unique_conflict_method` and `unique_constraints` are
+both set, rows go through `INSERT ... ON CONFLICT` instead.

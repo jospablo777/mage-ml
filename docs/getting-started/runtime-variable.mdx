@@ -13,8 +13,8 @@ Runtime Variables can be accessed via the `**kwargs` parameter in your block
 function.
 
 ```python
+import pandas as pd
 from pandas import DataFrame
-from os import path
 
 if 'data_loader' not in globals():
     from mage_ai.data_preparation.decorators import data_loader
@@ -43,9 +43,9 @@ name, can't start with a number).
 
 ## Creating Runtime Variables
 
-### In Mage editor
+### In the MageML editor
 
-You can create new global variables from the Mage UI through the "Variables" tab
+You can create new global variables in the editor through the "Variables" tab
 in the sidekick. Click the "New" button, and configure your variable's name and
 value, and press Enter to save.
 
@@ -74,9 +74,9 @@ variables:
       var: value3
 ```
 
-This create dictionaries of runtime variables as the blocks are executed. 
+This creates dictionaries of runtime variables as the blocks are executed.
 
-In your execution environment, you may then set variables for each environment `ENV=dev, ENV=staging, ENV=prod` which can be leveraged to indicate the execution environment. 
+In your execution environment, set `ENV=dev`, `ENV=staging` or `ENV=prod` to indicate the execution environment.
 
 A simple python function can then be used to access the variables:
 
@@ -85,13 +85,13 @@ import os
 
 def testfunc(**kwargs):
     env = os.environ.get('ENV')
-    myyvar = kwargs[env][var]
+    myvar = kwargs[env]['var']
 ```
 
-A big thanks to community member [Preston Dotsey](https://mageai.slack.com/team/U061CMVAJH1) for their contribution!
+Thanks to community member Preston Dotsey for this contribution.
 
 ### In Python code
-You can also save the variable in Python code. One example usage is to save checkpoint data. 
+You can also save the variable in Python code. One example usage is to save checkpoint data.
 
 ```python
 from mage_ai.data_preparation.variable_manager import set_global_variable
@@ -100,7 +100,7 @@ set_global_variable(pipeline_uuid, key, value)
 
 ## Default Runtime Variables
 
-Mage provides some default variables to give context on the pipeline execution.
+MageML provides some default variables to give context on the pipeline execution.
 
 - `execution_date`: A datetime object that the pipeline is executed at.
 - `event`: If the pipeline is triggered by event, the `event` variable contains
@@ -110,15 +110,8 @@ Mage provides some default variables to give context on the pipeline execution.
 
 ### Run from command line
 
-You can execute your pipeline with runtime variables from the command line.
-First, make sure you installed the package.
-
-```bash
-pip install mage-ai
-```
-
-Once the package is installed, you can run your pipeline through the command
-line.
+You can execute your pipeline with runtime variables from the command line, in
+the environment where MageML is installed (see the [Quickstart](/getting-started/setup)):
 
 ```bash
 mage run <project_path> <pipeline_uuid> --runtime-vars '{"name": "value"}'...
@@ -154,7 +147,7 @@ our web application produces.
 | 2022-07-27T00:42:37 | ERROR   | react-1   |
 
 Suppose we want to know the distribution of log types at the end of every day.
-Using Mage's runtime variables this is made a very simple task:
+Runtime variables make this a simple task:
 
 1. Create a data loader to load all log files modified on a specific date. We
    will specify the log folder and the date to load logs from using **runtime
