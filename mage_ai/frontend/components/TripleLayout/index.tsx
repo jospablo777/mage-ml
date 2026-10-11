@@ -25,6 +25,7 @@ import {
   DraggableStyle,
   InlineContainerStyle,
   MainContainerHeaderStyle,
+  MAIN_FIT_WIDTH,
   MAIN_MIN_WIDTH,
   MainContentInnerStyle,
   MainContentStyle,
@@ -292,10 +293,25 @@ function TripleLayout({
   ]);
 
   const shouldHideAfterWrapper = hideAfterCompletely && afterHidden !== false;
-  const afterWidthFinal = shouldHideAfterWrapper ? 0 : afterHidden ? UNIT * 4 : afterWidth;
+  let afterWidthFinal = shouldHideAfterWrapper ? 0 : afterHidden ? UNIT * 4 : afterWidth;
 
   const shouldHideBeforeWrapper = hideBeforeCompletely && beforeHidden !== false;
-  const beforeWidthFinal = shouldHideBeforeWrapper ? 0 : beforeHidden ? UNIT * 4 : beforeWidth;
+  let beforeWidthFinal = shouldHideBeforeWrapper ? 0 : beforeHidden ? UNIT * 4 : beforeWidth;
+
+  // The side panels keep their widths only while the main column keeps MAIN_FIT_WIDTH:
+  // on a 820 px screen their default widths left the editor's code 20 px. The after
+  // panel gives width back first, then the before panel, down to their minimums.
+  if (width) {
+    let excess = beforeWidthFinal + afterWidthFinal + leftOffset + MAIN_FIT_WIDTH - width;
+    if (excess > 0 && !afterHidden && afterWidthFinal > AFTER_MIN_WIDTH) {
+      const given = Math.min(excess, afterWidthFinal - AFTER_MIN_WIDTH);
+      afterWidthFinal -= given;
+      excess -= given;
+    }
+    if (excess > 0 && !beforeHidden && beforeWidthFinal > BEFORE_MIN_WIDTH) {
+      beforeWidthFinal -= Math.min(excess, beforeWidthFinal - BEFORE_MIN_WIDTH);
+    }
+  }
   const mainWidth = `calc(100% - ${beforeWidthFinal + afterWidthFinal + leftOffset}px)`;
 
   const hasAfterNavigationItems = useMemo(
