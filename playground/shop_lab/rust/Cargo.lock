@@ -1532,6 +1532,7 @@ name = "mage-block"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "polars",
  "postgres",
  "rustls",
@@ -1539,6 +1540,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio-postgres-rustls",
+ "ureq",
  "webpki-roots",
 ]
 

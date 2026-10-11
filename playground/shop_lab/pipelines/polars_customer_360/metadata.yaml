@@ -1,71 +1,127 @@
+block_fusion: chains
 blocks:
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - polars_sessions
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_load_web_events
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: polars_load_web_events
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - polars_customer_engagement
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_sessions
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - polars_load_web_events
   uuid: polars_sessions
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - polars_customer_360
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_customer_engagement
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - polars_sessions
   uuid: polars_customer_engagement
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - polars_customer_360
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_load_customers
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: polars_load_customers
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - polars_export_customer_360
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_customer_360
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - polars_load_customers
   - polars_customer_engagement
   uuid: polars_customer_360
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks: []
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: polars_export_customer_360
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_exporter
   upstream_blocks:
   - polars_customer_360
   uuid: polars_export_customer_360
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: null
+data_integration: null
 description: 'Polars with block fusion: a million web events to sessions, engagement
   and a customer view.'
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
 name: polars_customer_360
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
 type: python
 uuid: polars_customer_360
-block_fusion: chains
+variables_dir: /home/src/mage_data/shop_lab
+widgets: []

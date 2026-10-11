@@ -1,48 +1,92 @@
 blocks:
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - r_cohort_retention
   - r_channel_mix
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: r
   name: r_load_orders
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: r_load_orders
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - r_export_cohorts
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: r
   name: r_cohort_retention
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - r_load_orders
   uuid: r_cohort_retention
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks: []
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: r
   name: r_channel_mix
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - r_load_orders
   uuid: r_channel_mix
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks: []
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: r
   name: r_export_cohorts
-  status: not_executed
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_exporter
   upstream_blocks:
   - r_cohort_retention
   uuid: r_export_cohorts
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: null
+data_integration: null
 description: 'R with dplyr, tidyr, lubridate and tibble: cohort retention and channel
   mix.'
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
 name: r_dplyr_cohorts
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
 type: python
 uuid: r_dplyr_cohorts
+variables_dir: /home/src/mage_data/shop_lab
+widgets: []

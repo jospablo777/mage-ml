@@ -1,30 +1,92 @@
 blocks:
-- downstream_blocks: [rust_sessions]
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - rust_sessions
+  executor_config: null
+  executor_type: local_python
+  has_callback: null
   language: python
   name: rust_load_web_events
+  retry_config: null
+  status: executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: rust_load_web_events
-- downstream_blocks: [rust_engagement_score]
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - rust_engagement_score
+  executor_config: null
+  executor_type: local_python
+  has_callback: null
   language: rust
   name: rust_sessions
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
-  upstream_blocks: [rust_load_web_events]
+  upstream_blocks:
+  - rust_load_web_events
   uuid: rust_sessions
-- downstream_blocks: [rust_export_session_scores]
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - rust_export_session_scores
+  executor_config: null
+  executor_type: local_python
+  has_callback: null
   language: rust
   name: rust_engagement_score
+  retry_config: null
+  status: executed
+  timeout: null
   type: transformer
-  upstream_blocks: [rust_sessions]
+  upstream_blocks:
+  - rust_sessions
   uuid: rust_engagement_score
-- downstream_blocks: []
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: null
   language: python
   name: rust_export_session_scores
+  retry_config: null
+  status: null
+  timeout: null
   type: data_exporter
-  upstream_blocks: [rust_engagement_score]
+  upstream_blocks:
+  - rust_engagement_score
   uuid: rust_export_session_scores
-description: Web sessions scored by two Rust blocks, Polars expressions then per-row logic
-  on every core, exported to analytics.rust_session_scores.
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: null
+data_integration: null
+description: Web sessions scored by two Rust blocks, Polars expressions then per-row
+  logic on every core, exported to analytics.rust_session_scores.
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
 name: rust_session_scores
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
 type: python
 uuid: rust_session_scores
+variables_dir: /home/src/mage_data/shop_lab
+widgets: []
