@@ -1,0 +1,20 @@
+# Microsoft SQL Server
+
+## Basic config
+
+```yaml
+connector_type: mssql
+profile: default    # profile in the io_config.yaml
+config:
+  table_name: table_name
+```
+
+## Optional fields
+
+These keys go under `config`.
+
+```yaml
+config:
+  table_name: table_name
+  schema_name: schema_name    # Override the schema name. Default schema is "dbo"
+```

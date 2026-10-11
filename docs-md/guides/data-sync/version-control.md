@@ -1,0 +1,264 @@
+# Version control application with Git
+
+*Authenticate with a Git provider then pull from a remote repository, push local changes to a remote repository, and create pull requests for a remote repository.*
+
+<div align="center">
+</div>
+
+<img src="https://wallpapercave.com/dwp2x/wp3082255.jpg" alt="GitHub authentication" width="75%" />
+
+On the homepage in the left side navigation, click the link labeled <b>Version control</b>.
+The URL could look something like this: http://localhost:6789/version-control.
+
+## Demo
+
+[Video](https://github.com/mage-ai/assets/raw/main/version-control/demo.mp4)
+
+## Setup
+
+<img src="https://mage-ai.github.io/assets/version-control/setup.png" alt="Setup" />
+
+### Set Git directory
+
+The Git directory is the local folder that will be linked to your remote repository.
+
+### Authentication
+
+MageML has no built-in GitHub OAuth application, and no sign-in goes through Mage's servers.
+To authenticate with GitHub, use a personal access token or an SSH key in the Git settings
+(see [Configure Git](../git/configure.md)), or register your own OAuth application by following
+the steps in `Authenticate with GitHub or GHE` below. Other providers also need the steps below.
+You can authenticate with multiple git providers. MageML uses the OAuth provider that matches the
+URL of the remote.
+
+When creating the OAuth app for GitHub, GHE, BitBucket or GitLab, set the authorized
+callback URL to `http(s)://<your-mageml-url>/oauth`.
+
+<details><summary>Authenticate with GitHub or GHE</summary>
+
+**1. Register an OAuth app in GitHub**
+
+For MageML to authenticate with your GitHub host, register your own OAuth application
+in GitHub. You can follow the steps [here](https://docs.github.com/en/enterprise-cloud@latest/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+to set it up.
+
+Make sure you copy the client id and client secret after the app is created.
+
+**2. Update environment variables**
+
+You will need to set the following environment variables in your MageML environment:
+
+1. GHE_HOSTNAME: the URL of your GitHub instance. If you’re using github.com or GitHub Enterprise Cloud, set this to `https://github.com`
+2. GHE_CLIENT_ID: the client id you retrieved in the previous step
+3. GHE_CLIENT_SECRET: the client secret you retrieved in the previous step
+
+**3. Authenticate with GitHub**
+
+You should now be able to authenticate with GitHub and follow the rest of the steps in this document.
+
+</details>
+
+<details><summary>Authenticate with BitBucket</summary>
+
+**1. Add an OAuth consumer**
+
+For MageML to authenticate with your BitBucket, add an OAuth consumer for it. You can follow the steps [here](https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/)
+to set it up.
+
+Make sure you copy the key and secret after the consumer is created.
+
+**2. Update environment variables**
+
+You will need to set the following environment variables in your MageML environment:
+
+1. BITBUCKET_OAUTH_KEY: the key you retrieved in the previous step
+2. BITBUCKET_OAUTH_SECRET: the secret you retrieved in the previous step
+
+**3. Authenticate with Bitbucket**
+
+You should now be able to authenticate with Bitbucket and follow the rest of the steps in this document.
+
+</details>
+
+<details><summary>Authenticate with GitLab</summary>
+
+> [!NOTE]
+>
+> MageML requests `read_user`, `write_repository`, and `api` scopes from GitLab in order
+> to perform the necessary git actions.
+>
+
+**1. Add an OAuth application**
+
+For MageML to authenticate with your GitLab, add an OAuth application for it.
+You can follow the steps [here](https://docs.gitlab.com/ee/integration/oauth_provider.html)
+to set it up.
+
+Make sure you copy the Application ID and Secret after the oauth app is created.
+
+**2. Update environment variables**
+
+You will need to set the following environment variables in your MageML environment:
+
+1. GITLAB_CLIENT_ID: the application ID you retrieved in the previous step
+2. GITLAB_CLIENT_SECRET: the secret you retrieved in the previous step
+3. GITLAB_HOST (optional): hostname for your GitLab instance. Defaults to `https://gitlab.com`
+
+**3. Authenticate with GitLab**
+
+You should now be able to authenticate with GitLab and follow the rest of the steps in this document.
+
+</details>
+
+<details><summary>Authenticate with Azure DevOps</summary>
+
+**1. Enable Active Directory integration**
+
+First, enable the [Active Directory](../../production/authentication/microsoft.md) integration so MageML can authenticate your user. It needs your own Azure application.
+
+**2. Update environment variables**
+
+Once the Active Directory integration is enabled, you simply need to add your DevOps organization as an environment variable.
+
+```bash
+export AZURE_DEVOPS_ORGANIZATION=<organization_name>
+```
+
+**3. Authenticate with Azure DevOps**
+
+You should now be able to authenticate with Azure DevOps and follow the rest of the steps in this document.
+
+</details>
+
+Click the Authenticate button next to your Git Provider to start the authentication process.
+
+<img src="https://mage-ai.github.io/assets/version-control/authentication.png" alt="Authenticate" />
+
+After authorizing the application, you’ll be redirected back to the initial page and an access token will
+be in the URL as a parameter. This access token is saved in your application’s database;
+it never leaves your application’s database.
+
+### Add remote
+
+Enter a name for your new remote. For the remote URL, you must use the `https` version of the
+GitHub repository (as opposed to the `SSH` version).
+
+For example, the remote URL for MageML is `https://github.com/jospablo777/mage-ml.git`.
+
+Note that a remote added via HTTPS/SSH authentication _will not_ work. Only a remote in the format above is accepted.
+
+Once you fill in both input text fields, click the button labeled <b>Create new remote</b>.
+
+### Actions
+
+#### Clone remote repository
+
+> [!WARNING]
+>
+> Cloning will copy all the files and folders from the remote repository and put them into the Git directory you specified above.
+>
+> Cloning won’t automatically create a folder that is named after the remote repository.
+>
+> For example, if you have a file named `magic.py` in a remote repository named `project_romeo`
+> then that file will be cloned here `<your git directory>/magic.py`
+> as opposed to `<your git directory>/project_romeo/magic.py`.
+>
+> If you want to clone the content of a remote repository into a folder named after the remote repository, then change the Git init directory above to
+> `<your git directory>/[remote repository name]`
+>
+
+1. Under the Actions dropdown, select the option labeled <b>Clone</b>.
+1. Under the Remote dropdown, select the name of the remote you want to clone from (e.g. origin).
+
+#### Pull remote branch
+
+1. Under the Actions dropdown, select the option labeled <b>Pull</b>.
+1. Under the Remote dropdown, select the name of the remote you want to pull from (e.g. origin).
+1. Under the Branch dropdown, select the name of the branch you want to pull from the remote you chose from the previous step.
+
+---
+
+## Branches
+
+<img src="https://mage-ai.github.io/assets/version-control/branches.png" alt="Branches" />
+
+### Switch branch
+
+1. Under the dropdown labeled <b>Current branch</b>, select the name of the branch you want to change to.
+1. After selecting a branch, the current branch will be updated to what you selected.
+
+### Create branch
+
+1. Type in the name of the new branch in the text input field.
+1. Click the button labeled <b>+ Create new branch</b>.
+
+### Merge branch
+
+1. Under the Base branch dropdown, select the name of the branch you want to merge into your current branch.
+1. Under the Action dropdown, select the option labeled <b>Merge</b>.
+1. Type a commit message for the merge action.
+1. Click the button labeled <b>Merge</b>.
+
+### Rebase branch
+
+1. Under the Base branch dropdown, select the name of the branch you want to rebase into your current branch.
+1. Under the Action dropdown, select the option labeled <b>Rebase</b>.
+1. Type a commit message for the rebase action.
+1. Click the button labeled <b>Rebase</b>.
+
+### Delete branch
+
+1. Under the Base branch dropdown, select the name of the branch you want to delete.
+1. Under the Action dropdown, select the option labeled <b>Delete</b>.
+1. Click the button labeled <b>Delete</b>.
+1. Confirm the popup dialog box.
+
+---
+
+## Files
+
+<img src="https://mage-ai.github.io/assets/version-control/files.png" alt="Files" />
+
+### Add files
+
+1. On the left side under <b>Not staged</b>, check the boxes next to the files you want to add.
+1. Once you’re done selecting the files, click the button labeled <b>Add files</b>.
+1. The selected files will be staged.
+
+### Checkout files
+
+1. On the left side under <b>Not staged</b>, check the boxes next to the files you want to checkout.
+1. Once you’re done selecting the files, click the button labeled <b>Checkout files</b>.
+1. Confirm the popup dialog box.
+1. All changes to the selected files will be undone.
+
+### Reset files
+
+1. On the right side under <b>Staged files</b>, check the boxes next to the files you want to reset.
+1. Once you’re done selecting the files, click the button labeled <b>Reset files</b>.
+1. The selected files will be unstaged.
+
+### Commit
+
+1. Enter a commit message.
+1. Click the button labeled <b>Commit N files with message</b>.
+
+---
+
+## Push
+
+<img src="https://mage-ai.github.io/assets/version-control/push.png" alt="Push" />
+
+### Push local changes
+
+1. Under the Remote dropdown, select the name of the remote you want to push to (e.g. origin).
+1. Under the Branch dropdown, select the name of the branch you want to push.
+1. Click the button labeled <b>Push [remote] [branch]</b>.
+
+### Create pull request
+
+1. Under the Repository dropdown, select the name of the repository you want to create a pull request for.
+1. Under the Base branch dropdown, select the name of the branch you want your pull request to compare against (e.g. main).
+1. Under the Compare branch dropdown, select the name of the branch you want your pull request to be for (e.g. feature branch).
+1. Type the title of the pull request in the text input field labeled <b>Title</b>.
+1. Type the description of the pull request in the text input field labeled <b>Description</b>.

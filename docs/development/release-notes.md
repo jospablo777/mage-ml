@@ -4,7 +4,8 @@
 
 The first release under MageML's own versions, which start at 0.1.0. Earlier builds of this
 fork were versioned after Mage (`0.9.79+ml.1` to `0.9.79+ml.4`); MageML is based on Mage
-0.9.79. Changes since `0.9.79+ml.4`. The fork runs on Python 3.12 with pandas 3.0, Polars 2.0,
+0.9.79. Changes since `0.9.79+ml.4`. MageML runs on Python 3.12 only (3.11 is no longer
+supported; support for 3.14 is planned) with pandas 3.0, Polars 2.0,
 pyarrow 26 and NumPy 2. Most changes fix values that Mage changed or lost without an
 error; the per-service findings are in `docs/development/*-integration.md` and
 `postgres-data-integrity.md`.
@@ -369,10 +370,11 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Privacy
 
-- **Usage statistics are off by default.** New projects set `help_improve_mage: false`, so
-  MageML sends nothing to the upstream Mage project (api.mage.ai) unless you turn it on in
-  Settings > Workspace > Preferences. Turning it off no longer sends a last event recording
-  the choice. Existing projects keep their setting.
+- **Usage statistics are removed.** Mage sent events about projects, pipelines, blocks,
+  runs and errors to the upstream Mage project (api.mage.ai) when `help_improve_mage` was
+  on, the default for new projects. MageML has no such module: the setting, its toggle in
+  Settings and its API field are gone, and a `help_improve_mage` key left in a project's
+  metadata.yaml is ignored. The demo app's Google Analytics is removed too.
 - **The docs no longer send visits to upstream Mage's Google Analytics**, and their
   header and footer link to MageML's repository instead of Mage's chat and social accounts.
 - **No sign-in goes through Mage's servers.** GitHub sign-in in the Git settings and
@@ -682,11 +684,25 @@ Each item says what changed, which pipelines it affects, and what to do.
   **Compile** button in the editor and the pipelines list, with progress, each step's error
   and when the pipeline last compiled. The panel shows where a pipeline switches language,
   since single-language pipelines run faster. API: `/api/pipeline_compilations`.
+- **Diagrams and a tutorial in the docs**: diagrams with the logos of the languages and
+  tools (compiled chains, Rust and R blocks, pipeline services, Feast), drawn by
+  `scripts/docs/diagrams.py` in light and dark, and the tutorial "A pipeline in Python,
+  Rust and R" (`docs/getting-started/polyglot-pipeline.mdx`).
+- **The documentation on GitHub**: `docs-md/` holds every page as Markdown GitHub renders,
+  with images and light and dark diagrams, generated from `docs/` by
+  `scripts/docs/export_markdown.py`; a test fails while the two differ.
+- **Pipeline documentation**: each pipeline can have a README in Markdown (`README.md`)
+  or Quarto (`README.qmd`) in its folder, with images beside it. Open it from the document
+  button on each row of the pipelines list or from **Documentation** in the pipeline's
+  navigation; edit it beside a live preview. Quarto documents render with the quarto
+  command when installed, without running code. Guide:
+  `docs/guides/pipelines/documentation.mdx`.
 - **Feast client for blocks** (`mage_ai.feature_stores.feast.FeastClient`): reads online
   features into pandas, Polars or Arrow with integers exact, and pushes, writes and
   materializes through a stock Feast feature server's REST API. It sends large integers
   next to NULLs so Feast keeps them exact, writes rows in event-time order so the latest
   event wins, refuses timestamps Feast would misread, and retries only transient failures.
+  Rust blocks have the same client in `mage::feast` (the SDK's `feast` feature).
   Guide: `docs/guides/blocks/feast-features.mdx`.
 - **MageML branding**: the header, sign-in, 404 page and browser tab show MageML with
   its mark and favicon, and product copy says MageML. Routes, settings, identifiers and the
@@ -751,6 +767,22 @@ Each item says what changed, which pipelines it affects, and what to do.
   pipelines run from triggers and from the notebook, and R blocks with R 4.6 and rv.
   `make -C integration_tests test-soak` runs the scheduler with many concurrent
   pipelines.
+
+### Removed
+
+- **Python 3.11.** MageML runs on Python 3.12 only; support for 3.14 is planned.
+- **Mage Pro promotion** in the app and the docs, and **74 docs pages** no page linked:
+  Mage Pro, Mage Agent and Pro architecture pages, migrations to Mage Pro, the Pro API and
+  Mage's community pages.
+- **Unused code**: 17 Python modules nothing imported (among them an unused copy of the
+  pipeline scheduler, a websockets package, the Spark SQL block module, a client that
+  synced pipelines to backend.mage.ai) and 103 frontend modules no page reached, about
+  14,600 lines; and legacy files: `example.ipynb`, the GitBook `SUMMARY.md`, the
+  `mage_dev` sample project, the `sample_datasets` module and obsolete scripts.
+- **AI assistant features**: the OpenAI and Hugging Face clients, pipelines and code
+  generated with AI, AI documentation and comments for blocks, the project's OpenAI key
+  and the `ai` extra. MageML has no AI integration; RAG pipelines stay. **Mage Pro docs**: 36 pages
+  about features of Mage Pro.
 
 ### CI
 

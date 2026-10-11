@@ -1,0 +1,139 @@
+# User authentication
+
+*Create users, manage users, and require sign in to authenticate and use MageML.*
+
+![Gandalf](https://media.tenor.com/bIJa2uRURiQAAAAC/lord-of-the-rings-you-shall-not-pass.gif)
+
+---
+
+## Overview
+
+MageML requires user authentication to secure access to the UI and APIs.
+Authentication is required before creating, managing, or running pipelines.
+It is enabled by default.
+
+## Configure user authentication
+
+User authentication is controlled by the following environment variable. It defaults to on;
+set it to `0` only for a local, single-user setup that nobody else can reach.
+
+|   |   |
+|---|---|
+| Name | `REQUIRE_USER_AUTHENTICATION` |
+| Default | `1` |
+
+### Set access token expiration time
+
+You can set the `MAGE_ACCESS_TOKEN_EXPIRY_TIME` environment variable to customize the expiration time
+of a MageML access token. The value should be the length of time in seconds.
+
+Defaults to 2592000 which is 30 days.
+
+|   |   |
+| --- | --- |
+| Name | `MAGE_ACCESS_TOKEN_EXPIRY_TIME` |
+| Value | `2592000` |
+
+### Running MageML in Docker
+
+If you’re running MageML in Docker, set environment variables in the `docker run` command with
+`-e`. See [environment variables](../../development/variables/environment-variables.md). The example
+below uses an image built from the repository's Dockerfile (`docker build -t mageml .`):
+
+```bash
+docker run -it -p 6789:6789 \
+  -v $(pwd):/home/src \
+  -e MAGE_ACCESS_TOKEN_EXPIRY_TIME=86400 \
+  mageml /app/run_app.sh mage start demo_project
+```
+
+### Running MageML without Docker
+
+If you installed MageML from source and run it with `uv run mage start`, set the environment
+variables in your shell before starting the server:
+
+```bash
+export MAGE_ACCESS_TOKEN_EXPIRY_TIME=86400
+```
+
+On Windows, read Microsoft’s [instructions](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1)
+on how to set environment variables.
+
+## Default owner user
+
+When MageML starts, if there is no existing owner user, then a new user will be created with owner
+permissions (e.g. all permissions).
+
+The owner user can create, edit, and delete other users.
+
+Here are the default credentials for the owner user to sign in with:
+
+| Field | Value |
+| --- | --- |
+| Email | `admin@admin.com` |
+| Password | `admin` |
+
+To customize the email, password and username of the default owner user, you can configure these environment variables:
+* `DEFAULT_OWNER_EMAIL`
+* `DEFAULT_OWNER_PASSWORD`
+* `DEFAULT_OWNER_USERNAME`
+
+## Sign in page
+
+Before using MageML, users will have to sign in at `/sign-in`. If you go to a page that requires
+authentication and you’re not signed in, you’ll be redirected to the sign in page.
+
+![Sign in page](https://raw.githubusercontent.com/mage-ai/assets/main/users/sign-in.jpg)
+
+## User management page
+
+If you’re signed in as the owner user, you’ll have access to the user management page at
+`/settings/workspace/users`.
+
+On this page, you can:
+
+1. Add new users
+1. Edit existing users
+1. Reset user passwords
+1. Delete users
+
+![Sign in page](https://raw.githubusercontent.com/mage-ai/assets/main/users/users-list.jpg)
+
+## Roles and permissions
+
+| Role | Permissions |
+| --- | --- |
+| Viewer | Can read. |
+| Editor | Can do everything a viewer can, create, update, and delete. |
+| Admin | Can do everything a viewer can, an editor can, and manage users who are viewers/editors (update usernames, emails, passwords, and make viewers editors or vice versa. |
+| Owner | In addition to what admins can do, add and delete users. Manage all users, including admins/owners. Make other users any role, including admins/owners. |
+
+## Authenticated requests
+
+When user authentication is on (the default), each API request the front-end client makes to the backend server will include an API key
+and an OAuth2 token.
+
+The API key and OAuth2 token is used to authenticate the incoming request. If the requester
+doesn’t have the proper permissions, the backend server will respond with a `4XX` error code.
+
+### API errors
+
+If a page loads and no data is visible, it could either mean there is no data or the user
+doesn’t have the proper permissions.
+
+If there is no visible error message on the page, you can view the browser’s network tab and
+inspect the API request response to view the full error details.
+
+> [!TIP]
+> Learn how to view the network requests in Chrome by following these
+> [instructions](https://developer.chrome.com/docs/devtools/network/).
+
+| Error code | Description |
+| --- | --- |
+| `401` | Expired OAuth token. |
+| `401` | Invalid OAuth token. |
+| `402` | Record is invalid. |
+| `403` | Invalid API key. |
+| `403` | Unauthorized access. |
+| `404` | Record not found. |
+| `500` | API resource error. |

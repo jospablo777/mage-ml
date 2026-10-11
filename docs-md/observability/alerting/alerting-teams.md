@@ -1,0 +1,132 @@
+# Alerting status updates in Teams
+
+*Get status updates in your Teams channel.*
+
+<img src="https://img.icons8.com/color-glass/512/microsoft-teams.png" alt="Teams" width="300" />
+
+## Overview of steps
+
+1. Set up webhooks for Teams
+2. Update the project settings
+
+---
+
+## Set up webhooks for Teams
+
+Follow these
+[instructions on Teams](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)
+to setup incoming webhooks for your workspace.
+
+---
+
+## Update the project settings
+
+Once you’ve set up webhooks for Teams, you should have a webhook URL that Teams
+provides.
+
+Here is an example webhook (yours may vary):
+
+```
+https://teams.webhook.office.com/webhookb2/B04XXXXGY67/IncomingWebhook/1UgUkao8pXXXXPmsuXXXX2lk
+```
+
+Follow these steps to add that webhook URL to your project settings:
+
+1. Open MageML in your browser (e.g. http://localhost:6789/).
+2. Open a pipeline and start editing it (e.g.
+   http://localhost:6789/pipelines/example_pipeline/edit).
+3. In your left sidebar in the file browser, scroll all the way down and click
+   on a file named `metadata.yaml`.
+4. In the `metadata.yaml` file, add a section with the following
+   configuration or update the existing `notification_config` section:
+
+```yaml
+    notification_config:
+      alert_on:
+        - trigger_failure
+        - trigger_passed_sla
+    ```
+
+    If you omit the `alert_on` section it will default to `trigger_failure` and `trigger_passed_sla`.
+
+    Options:
+
+    - `trigger_failure`: alert when a run of a trigger fails
+    - `trigger_success`: alert when a run of a trigger succeeds
+    - `trigger_passed_sla`: alert when a run of a trigger passes sla
+
+5. In the `metadata.yaml` file, add the following values:
+
+```yaml
+    notification_config:
+      alert_on:
+        ...
+      teams_config:
+        webhook_url:
+          - 'https://teams.webhook.office.com/webhookb2/B04XXXXGY67/IncomingWebhook/1UgUkao8pXXXXPmsuXXXX2lk'
+          - 'https://teams.webhook.office.com/webhookb2/B04XXXXGY67/IncomingWebhook/1UgUkao8pXXXXPmsuXXXX2lx'
+    ```
+
+    Change the `webhook_url` values to be the webhook URLs you created from Teams.
+
+    For a single endpoint, `webhook_url` can also be a string:
+
+```yaml
+    teams_config:
+        webhook_url: 'https://teams.webhook.office.com/webhookb2/B04XXXXGY67/IncomingWebhook/1UgUkao8pXXXXPmsuXXXX2lk'
+    ```
+
+## Customize message templates
+You can customize message templates in `notification_config`. Here is an example config:
+```yaml
+notification_config:
+  alert_on:
+    ...
+  teams_config:
+    ...
+  message_templates:
+    failure:
+      title: 'Failed to execute pipeline {pipeline_uuid} at {execution_time}'
+      summary: >
+        Failed to execute pipeline {pipeline_run_url}.
+        Pipeline uuid: {pipeline_uuid}. Trigger name: {pipeline_schedule_name}.
+        Test custom message.
+    success:
+      title: ...
+      summary: ...
+    passed_sla:
+      title: ...
+      summary: ...
+```
+You can customize the message template for `success`, `failure`, `passed_sla` scenarios. For each message template,
+you can specify the `title` and the `summary`. The Teams message shows the `title` and,
+below it, the `summary`. `details` is not used for Teams.
+
+To interpolate variables in the message template, you can use `{variable_name}` syntax.
+Here are the supported variables:
+1. `execution_time`
+1. `pipeline_run_url`
+1. `pipeline_schedule_id`
+1. `pipeline_schedule_name`
+1. `pipeline_schedule_description`
+1. `pipeline_uuid`
+1. `error`
+    * available only for the `failure` message template
+1. `stacktrace`
+    * available only for the `failure` message template
+
+> **Note**: For `pipeline_run_url`, the default host is `http://localhost:6789`. You can specify `MAGE_PUBLIC_HOST` to be
+the host url you want to use in the notification messages.
+
+---
+
+## What next?
+
+Whenever a pipeline run is successfully completed or fails, a Teams message will
+appear in the channel you configured the webhook URL for.
+
+Here is an example of what that message could look like:
+
+|                                                                                                        |
+| ------------------------------------------------------------------------------------------------------ |
+| ![Teams](https://mage-ai.github.io/assets/third-party/teams-message-run-alert.jpg) |

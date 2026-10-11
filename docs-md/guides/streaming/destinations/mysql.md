@@ -1,0 +1,10 @@
+# MySQL
+
+## Basic config
+
+```yaml
+connector_type: mysql
+profile: default    # profile in the io_config.yaml
+config:
+  table_name: table_name
+```

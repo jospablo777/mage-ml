@@ -1,0 +1,28 @@
+# Contributing to the front-end client
+
+*Guides on adding features to the front-end client.*
+
+|                |                     |
+| -------------- | ------------------- |
+| Language       | TypeScript          |
+| Framework      | React, Next.js      |
+| Code directory | `mage_ai/frontend/` |
+
+## Style guide
+
+MageML follows the [Airbnb JavaScript style guide](https://airbnb.io/javascript/react/).
+
+### Linter
+
+To run the linter locally, execute this script:
+
+```bash
+./scripts/test.sh
+```
+
+## Setup
+
+```bash
+yarn global add eslint-config-next
+yarn global add eslint_d
+```

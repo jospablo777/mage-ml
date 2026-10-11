@@ -1,0 +1,108 @@
+# Run a single model
+
+1. Under the data loader block you just added, click the button **`dbt model`**,
+   then click the option `Single model or snapshot (from file)`.
+2. In the file browser that pops up, click the file of the dbt model you want to
+   add to your pipeline.
+3. Next to the **Target** label, choose the dbt connection profile target (e.g.
+   `dev`) that you want to use when running the dbt model. You can also check
+   **Manually enter target** and type it.
+
+![](https://mage-ai.github.io/assets/dbt/add-dbt-model.gif)
+
+---
+
+## Depending on upstream blocks
+
+If your dbt model references other models, those models will also be added to
+the current pipeline as upstream blocks.
+
+Once you’ve added 1 or more dbt models to your pipeline, you can set its
+dependencies on other blocks.
+
+The dbt model won’t run until all upstream blocks have successfully been
+completed.
+
+---
+
+## Preview dbt model results
+
+You can run a dbt model block and see the results of the SQL query.
+
+Under the hood, MageML runs
+[`dbt show`](https://docs.getdbt.com/reference/commands/show) for that single model
+against the data source of your dbt project’s
+[connection profile](https://docs.getdbt.com/docs/get-started/connection-profiles)
+target.
+
+![](https://mage-ai.github.io/assets/dbt/dbt-preview.gif)
+
+---
+
+## Pipeline execution run
+
+When a pipeline is triggered and executes, it runs each dbt model block with
+[`dbt build`](https://docs.getdbt.com/reference/commands/build), which also runs the
+model's tests. When the block's tests are disabled, it uses `dbt run` (`dbt snapshot`
+for a snapshot). dbt blocks always run in their own process, outside
+[block fusion](../../design/data-pipeline-management.md#block-fusion).
+
+---
+
+## Variable interpolation
+
+You can add
+[variables](../../getting-started/runtime-variable.md)
+specific to your pipeline. These variables are accessible in each block of your
+pipeline.
+
+In addition, all the environment variables are accessible within the SQL query
+using the `var` syntax.
+
+| Syntax             | Description                                                      | Example           |
+| ------------------ | ---------------------------------------------------------------- | ----------------- |
+| `{{ var('...') }}` | Get a value from the environment variables or runtime variables. | `{{ var('ds') }}` |
+
+### SQL statement
+
+Within the SQL query in a dbt model block, you can access these variables using
+the `var` syntax. To learn more, read
+[dbt’s documentation](https://docs.getdbt.com/reference/dbt-jinja-functions/var).
+For example:
+
+```SQL
+SELECT *
+FROM users_v1
+WHERE created_at >= '{{ var("ds") }}'
+```
+
+In the above example, the variable named `ds` is defined as part of the runtime
+variables for the pipeline.
+
+---
+
+## Adding variables when running a YAML dbt block
+
+In addition to interpolating variables described above, you can define variables directly
+in the dbt code block if it is a YAML dbt code block (i.e. not a SQL dbt block) by following
+these steps:
+
+1. In the Pipeline Editor, add a dbt model by selecting the `All models (w/ optional exclusion)`
+option from the dropdown when clicking on the `dbt model` button for adding a block.
+2. For the newly added code block, you should see that is `YAML` type indicated in the top left
+corner of the block.
+3. On the same line as your `--select` or `--exclude` syntax, add the `--vars` syntax with the
+variables you want to include. Note: Putting the `--vars` syntax on a separate line may cause
+issues.
+4. Format the variables like a JSON object, so there should be double quotes around the keys and
+string values. Single quotes surrounding the variables object are optional.
+5. You can interpolate global or environment variables using double brackets around the
+variable name. See below for examples.
+
+Examples of YAML dbt code block content (note the syntax for the variables object):
+```
+--select demo/models --vars '{"demo_key": "demo_value", "date": 20230101}'
+--select demo/models --vars {"demo_key":"demo_value","date":20230101}
+--select demo/models --vars '{"global_var": {{ test_global_var }}, "env_var": {{ test_env_var }}}'
+--select demo/models --vars {"refresh":{{page_refresh}},"env_var":{{env}}}
+```

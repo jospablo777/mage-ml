@@ -1,0 +1,34 @@
+# Tableau
+
+![Tableau](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSWG60Loiu8KeR9TgUNjopJ59A9R0-pp0fJCitooXRz4tsn-5erVYtB-CjilCrRAZSkUn4&usqp=CAU)
+
+<br/>
+
+## Configuration
+
+Connect to your Tableau Cloud environment and extract data using the following configuration parameters:
+
+| Key             | Description                                                                        | Sample Value                                  |
+| --------------- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| `access_token`  | (REQUIRED) Access token used to authenticate with Tableau API.                     | `abcdefg123456`                              |
+| `base_url`      | (REQUIRED) Base API URL including your `<servername>` and `<siteid>`.               | `https://<servername>/api/3.20/sites/<siteid>` |
+| `request_timeout` | (OPTIONAL) Timeout for API requests (default: 300 seconds).                        | `300`                                        |
+| `user_agent`    | (OPTIONAL) Custom User-Agent string for API requests.                               | `my-app-v1.0`                                |
+| `start_date`    | (OPTIONAL) Fetch records updated after this date for incremental sync.              | `2023-01-01`                                 |
+
+> **Note**:
+> This connector has been tested with **Tableau Cloud**. It may not work with Tableau Server deployments.
+
+<br/>
+
+### How to get your `access_token`
+
+Follow Tableau’s [official documentation](https://help.tableau.com/current/api/rest_api/en-us/REST/rest_api_concepts_auth.htm) to generate an API `access_token` for authentication.
+
+<br/>
+
+## What is Tableau?
+
+[Tableau](https://www.tableau.com/) is a business intelligence and data visualization platform.
+
+<br/>

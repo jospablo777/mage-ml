@@ -1,0 +1,218 @@
+# API overview
+
+*The UI calls the same API you can call. This section shows how to authenticate, make calls, and add endpoints.*
+
+To call the API, follow the [quickstart](#quickstart) below. To add or change endpoints,
+read the [components](#components) section.
+
+An API endpoint is made of three components, each with its own page:
+[Resources](resources.md),
+[Policies](policies.md) and
+[Presenters](presenters.md).
+
+## Quickstart
+
+<details><summary>Obtain API key</summary>
+
+The API key is the client ID of MageML's built-in OAuth application:
+`zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2` (`OAUTH2_APPLICATION_CLIENT_ID` in
+`mage_ai/settings/server.py`). It is the same for every MageML server, so it is not a
+secret; the OAuth token identifies the user.
+
+</details>
+
+<details><summary>Initialize session</summary>
+
+Sign in with a user's email (or username) and password. The server creates a default
+owner, `admin@admin.com` with password `admin`, unless `DEFAULT_OWNER_EMAIL`,
+`DEFAULT_OWNER_USERNAME` and `DEFAULT_OWNER_PASSWORD` set others.
+
+```python
+import requests
+
+base_url = 'http://localhost:6789'
+
+s = requests.Session()
+s.headers['X-API-KEY'] = 'zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2'
+
+r = s.post(
+    base_url + '/api/sessions',
+    json={'session': {'email': 'admin@admin.com', 'password': 'admin'}},
+)
+mage_session = r.json()['session']
+```
+
+</details>
+
+<details><summary>Authenticate session</summary>
+
+Send the session's `token` in the `oauth_token` cookie:
+
+```python
+token = mage_session.get('token')
+s.headers['Cookie'] = f'oauth_token={token}'
+```
+
+</details>
+
+<details><summary>Make API calls</summary>
+
+List all pipelines:
+
+```python
+pipelines_url = base_url + '/api/pipelines'
+r = s.get(pipelines_url)
+list_pipelines = r.json()
+
+print(list_pipelines)
+```
+
+</details>
+
+## Authentication
+
+User authentication is on by default (`REQUIRE_USER_AUTHENTICATION` defaults to `true`).
+While it is on, a request must include:
+
+1. The API key
+1. An OAuth token
+
+With `REQUIRE_USER_AUTHENTICATION=false`, the API accepts requests without either.
+
+### API key
+
+Send the API key in the `X-API-KEY` header, as the `api_key` query parameter, or as
+`api_key` in the JSON body of a `POST` request.
+
+### OAuth token
+
+Create a [session](sessions/overview.md) to get a token. The
+`token` in the session payload is **encoded**. There are three ways to send it:
+
+1. The encoded token in the cookie header:
+
+```json
+{"Cookie": "oauth_token=[TOKEN-FROM-RESPONSE]"}
+```
+
+2. The decoded token in the `OAUTH-TOKEN` header:
+
+```json
+{"OAUTH-TOKEN": "[DECODED-TOKEN-FROM-RESPONSE]"}
+```
+
+3. The decoded token as a bearer token:
+
+```json
+{"Authorization": "Bearer [DECODED-TOKEN-FROM-RESPONSE]"}
+```
+
+To decode a token:
+```python
+from mage_ai.authentication.oauth2 import decode_token
+
+decoded_token = decode_token(token_from_session_response)['token']
+```
+
+### Examples
+
+Decoded token, API key in the URL:
+
+```curl
+curl -X GET "localhost:6789/api/pipelines?api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2" \
+    -H "OAUTH-TOKEN: [DECODED-TOKEN-FROM-RESPONSE]"
+```
+
+Decoded token, API key in the body:
+
+```curl
+curl -X POST "localhost:6789/api/pipelines" \
+    -H "OAUTH-TOKEN: [DECODED-TOKEN-FROM-RESPONSE]" \
+    -d '{
+        "api_key": "zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2",
+        "pipeline": {}
+    }'
+```
+
+Encoded token, API key in the header:
+
+```curl
+curl -X POST "localhost:6789/api/pipelines" \
+    -H "X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2" \
+    -H "Cookie: oauth_token=[TOKEN-FROM-RESPONSE]" \
+    -d '{
+        "pipeline": {}
+    }'
+```
+
+### Responses
+
+Errors are returned in the `error` key of the payload. The payload's `status` is `200`
+and so is the HTTP status, except for an invalid API key or OAuth token, which return
+HTTP `401`. Add `_http_error_codes=true` to the query to get the error's code as the HTTP
+status and the payload's `status`. The following is a response from a failed sign-in:
+
+```json
+{
+    "error": {
+        "code": 404,
+        "message": "Email/username and/or password invalid.",
+        "type": "record_not_found"
+    },
+    "status": 200
+}
+```
+
+To check for an error:
+```python
+err_code = (r.json().get('error') or {}).get('code')
+```
+
+## Components
+
+To call the API, use the [quickstart](#quickstart) above. An endpoint is built from three components:
+
+1. [Resources](resources.md)
+2. [Policies](policies.md)
+3. [Presenters](presenters.md)
+
+If you'd like to contribute a new endpoint, you'll need to create one of each. To update an endpoint, it's important to understand how they work together.
+
+**Resources** are the core of the API. They define the endpoints and the logic behind them. They are the only component that is required to create a new endpoint. They are also the only component that is required to update an existing endpoint.
+
+**Policies** determine what actions can be taken on a resource: what attributes can be read, and which attributes can be written.
+
+**Presenters** determine what attributes of the resource are returned to the client in the response. You can have different sets of attributes be included in the response based on the action (e.g. create, detail, delete, list, update) or a custom format.
+
+For examples of each, see the [`mage_ai/api`](https://github.com/jospablo777/mage-ml/tree/master/mage_ai/api) directory.
+
+## Testing
+
+Create a test file in `mage_ai/tests/api/operations/test_[resource_name].py`;
+replace `resource_name` with the name of your resource.
+
+Paste in the following sample code into your file:
+
+```python
+from mage_ai.orchestration.db.models.oauth import User
+from mage_ai.tests.api.operations.test_base import BaseApiTestCase
+from mage_ai.tests.factory import create_user
+
+class SomeResourceOperationTests(BaseApiTestCase):
+    model_class = User
+
+    async def test_execute_delete(self):
+        user = create_user(email=self.faker.email())
+
+        await self.base_test_execute_delete(user.id)
+
+    async def test_execute_detail(self):
+        user = create_user()
+        await self.base_test_execute_detail(user.id, dict(
+            email=user.email,
+            username=user.username,
+        ))
+```
+
+This is only a sample test file. It’s running tests on the `UserResource`.
+You’ll need to update the test logic to unit test your custom API endpoint.

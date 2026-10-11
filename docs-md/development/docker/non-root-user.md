@@ -1,0 +1,35 @@
+# Run docker image as non-root user
+
+*Run the MageML docker image as a non-root user to restrict access to the system*
+
+By default, the MageML image built from the repository's Dockerfile runs as the root user. For production deployment,
+it's recommended to use non-root users in the docker image to restrict access to the system for better security.
+Here is a Dockerfile template that builds on that image and runs MageML as a non-root user.
+
+```dockerfile
+# Build the MageML image first, from the repository: docker build -t mageml .
+FROM mageml
+
+# Add non-root user for the MageML service
+RUN adduser --disabled-password --gecos '' mage && adduser mage mage
+
+# Grant the user permissions to the MageML directories. Rust blocks compile into
+# /opt/mage-rust and fetch crates into /opt/cargo.
+RUN mkdir -p /home/src/mage_data /home/src/default_repo && \
+    chown -R mage /home/src/mage_data /home/src/default_repo /opt/mage-rust /opt/cargo
+
+# Install extra packages into MageML's environment while still root, pinned to the
+# versions MageML was built with.
+RUN uv pip install --python /opt/mage/bin/python \
+    --constraint "$MAGE_RUNTIME_CONSTRAINTS" -r path/to/requirements.txt
+
+# Set the MageML user
+USER mage
+
+WORKDIR /home/src
+
+CMD ["/app/run_app.sh"]
+```
+
+The non-root user cannot install packages into `/opt/mage` at startup, so install a
+project's `requirements.txt` at build time as above.

@@ -1,0 +1,55 @@
+# Architecture
+
+<img src="https://mage-ai.github.io/assets/mage-architecture.png" alt="MageML architecture" />
+
+*MageML architecture diagram*
+
+## Server
+
+The MageML server runs in an instance or container. It is responsible for the following:
+- Handle all the API requests.
+- Interact with the storage to read and write data.
+- Run the websocket server to handle websocket requests.
+- Execute the pipeline code in the kernel.
+- Handle user authentication.
+
+The MageML server creates the scheduler process once the server starts. The scheduler process is responsible for
+scheduling pipeline runs for active pipeline triggers.
+
+## Storage
+
+In the storage layer, MageML stores the following data:
+- **Code files**: MageML stores code files on the local disk. You can use [git](../../guides/data-sync/git-integration.md) to sync the code between your local disk and the remote Git repository. If you deploy MageML in containers, you can mount a Network File System share in your container to persist the code and data on your disk.
+- **Data and log files**: By default, MageML stores data and log files on the local disk. You can also configure it to store [logs](../../observability/logging.md#logging-to-external-destination) in an external storage.
+- **Pipeline Trigger, Pipeline Run, User data, etc**.: Orchestration related objects and authentication related objects are stored in a database. By default, MageML uses a local SQLite database. In a production environment, you can configure MageML to use a [Postgres database](../configuring-production-settings/overview.md#databases).
+- **Secrets**: MageML supports storing [secrets](../../development/variables/secrets.md) in the database. It's also recommended to use an external [Secret Manager](secrets/AWS.md) to store secrets.
+
+## Executors
+
+MageML supports different types of executors to execute jobs:
+* Local process executor
+* ECS executor (AWS)
+* GCP Cloud Run executor
+* Azure Container Instance executor
+* Kubernetes executor
+
+Check out this [doc](../configuring-production-settings/compute-resource.md#block-executor) to learn about how to configure these executors.
+
+## Scale web server and schedulers
+
+By default, MageML runs the web server and scheduler in the same container. MageML supports horizontal scaling by separating the web server and scheduler,
+and running multiple replicas of each.
+
+To separate the web server and scheduler, you can override the container command with the commands below:
+* Run scheduler only (The scheduler doesn't need dedicated IP and port)
+```bash
+    /app/run_app.sh mage start project_name --instance-type scheduler
+    ```
+* Run web server only
+```bash
+    /app/run_app.sh mage start project_name --instance-type web_server
+    ```
+
+To run multiple schedulers simultaneously, you will need to specify the `REDIS_URL` environment variable in your container. The Redis storage is used to coordinate the job scheduling between multiple containers to resolve race conditions. Here is an example Redis URL format: `redis://redis:6379/0`
+
+While `REDIS_URL` is set and Redis does not respond, schedulers stop creating runs. They retry the connection every 10 seconds, which `REDIS_LOCK_RECONNECT_INTERVAL` overrides. Without `REDIS_URL` there is no coordination, so run a single scheduler.

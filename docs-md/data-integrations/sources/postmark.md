@@ -1,0 +1,46 @@
+# Postmark
+
+![Postmark](https://assets.getshieldsecurity.com/onedollarplugin.com/uploads/2020/12/postmarkapp-logo-1024x576.jpg)
+
+<br/>
+
+## Configuration
+
+To connect to the Postmark API and extract email event data, provide the following configuration parameters:
+
+| Key                    | Description                                                      | Sample Value | Required |
+| ---------------------- | ----------------------------------------------------------------- | ------------ | -------- |
+| `postmark_server_token` | Your Postmark server's API token used to authenticate requests.   | `abc123...`  | ✅        |
+| `start_date`            | Cutoff date to start syncing historical data (format: `YYYY-MM-DD`). | `2023-01-01` | ✅        |
+
+<br/>
+
+## What is Postmark?
+
+[Postmark](https://postmarkapp.com/) is a transactional email service for application emails such as password resets and receipts.
+This source extracts message, open, and outbound statistics data.
+
+<br/>
+
+## How to Get Your `postmark_server_token`
+
+1. Log in to your [Postmark account](https://postmarkapp.com/).
+2. Navigate to **Servers** → **API Tokens**.
+3. Copy the **Server API Token** you want to use.
+
+For more information, see Postmark's [API token documentation](https://postmarkapp.com/support/article/1008-what-are-the-account-and-server-api-tokens).
+
+<br/>
+
+## Supported Streams from Postmark
+
+The following Postmark streams are available:
+
+- **messages_opens**: Track when recipients open your emails.
+- **messages_outbound**: Retrieve details of outbound messages sent via Postmark.
+- **stats_outbound_bounces**: Statistics on email bounces (hard, soft bounces).
+- **stats_outbound_clients**: Email client analytics (e.g., Gmail, Outlook, Apple Mail).
+- **stats_outbound_overview**: High-level summary of outbound email performance.
+- **stats_outbound_platform**: Platform analytics showing devices used by recipients.
+
+<br/>

@@ -1,0 +1,335 @@
+# IO Config Setup
+
+*Learn how to set up and configure the io_config file for your MageML project*
+
+# IO Config Setup Guide
+
+The `io_config` file is the configuration file in MageML that stores credentials and connection information for accessing various data sources. This guide will help you understand where to store it and how to create it from scratch.
+
+## File Location
+
+The `io_config` file should be stored in your MageML project's root directory. The default path is:
+
+```
+your_mage_project/
+└── io_config.yaml
+```
+
+For detailed information about project structure and file organization, see the [Project Structure documentation](../design/abstractions/project-structure.md#project-structure).
+
+## Creating a New io_config File
+
+### 1. Basic Structure
+
+Create a new file named `io_config.yaml` in your project's root directory (e.g. `/home/src/your_mage_project`) with the following basic structure:
+
+```yaml
+version: 0.1.1  # Optional but recommended
+default:
+  # Your default profile configuration here
+```
+
+### 2. Configuration Formats
+
+MageML supports two formats for the `io_config` file:
+
+#### Standard Format (Recommended)
+
+```yaml
+version: 0.1.1
+default:
+  # PostgreSQL configuration
+  POSTGRES_DBNAME: your_database
+  POSTGRES_USER: your_username
+  POSTGRES_PASSWORD: "{{ env_var('POSTGRES_PASSWORD') }}"
+  POSTGRES_HOST: your_host
+  POSTGRES_PORT: 5432
+
+  # Snowflake configuration
+  SNOWFLAKE_USER: your_username
+  SNOWFLAKE_PASSWORD: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+  SNOWFLAKE_ACCOUNT: your_account
+  SNOWFLAKE_DEFAULT_WH: your_warehouse
+  SNOWFLAKE_DEFAULT_DB: your_database
+  SNOWFLAKE_DEFAULT_SCHEMA: your_schema
+
+  # AWS configuration
+  AWS_ACCESS_KEY_ID: "{{ env_var('AWS_ACCESS_KEY_ID') }}"
+  AWS_SECRET_ACCESS_KEY: "{{ env_var('AWS_SECRET_ACCESS_KEY') }}"
+  AWS_REGION: your_region
+```
+
+#### Legacy Format (Verbose)
+
+```yaml
+default:
+  PostgreSQL:
+    database: your_database
+    user: your_username
+    password: your_password
+    host: your_host
+    port: 5432
+  AWS:
+    region: your_region
+    Redshift:
+      database: your_redshift_database
+      port: 5439
+```
+
+### 3. Using Variables and Secrets
+
+For security, it's recommended to use environment variables and other secret management systems for sensitive information. MageML provides several variable syntax options:
+
+#### Variable Syntax
+
+| Syntax | Description |
+|--------|-------------|
+| `{{ env_var('secret') }}` | Get secret from environment variables |
+| `{{ mage_secret_var('secret') }}` | Get secret from MageML secrets |
+| `{{ aws_secret_var('secret') }}` | Get secret from AWS Secrets Manager |
+| `{{ azure_secret_var('secret') }}` | Get secret from Azure Key Vault |
+| `{{ json_value(json_obj, 'key') }}` | Extract value from a JSON string |
+
+#### Example Configurations
+
+**Environment Variables:**
+```yaml
+version: 0.1.1
+default:
+  POSTGRES_PASSWORD: "{{ env_var('POSTGRES_PASSWORD') }}"
+  SNOWFLAKE_PASSWORD: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+```
+
+**MageML Secrets:**
+```yaml
+version: 0.1.1
+default:
+  POSTGRES_PASSWORD: "{{ mage_secret_var('postgres_password') }}"
+  SNOWFLAKE_PASSWORD: "{{ mage_secret_var('snowflake_password') }}"
+```
+
+**AWS Secrets Manager:**
+```yaml
+version: 0.1.1
+default:
+  POSTGRES_PASSWORD: "{{ aws_secret_var('prod/postgres/password') }}"
+  SNOWFLAKE_PASSWORD: "{{ aws_secret_var('prod/snowflake/password') }}"
+```
+
+**Azure Key Vault:**
+```yaml
+version: 0.1.1
+default:
+  POSTGRES_PASSWORD: "{{ azure_secret_var('postgres-password') }}"
+  SNOWFLAKE_PASSWORD: "{{ azure_secret_var('snowflake-password') }}"
+```
+
+**JSON Value Extraction:**
+```yaml
+version: 0.1.1
+default:
+  # Extract specific field from JSON stored in environment variable
+  POSTGRES_PASSWORD: "{{ json_value(env_var('DB_CONFIG_JSON'), 'postgres_password') }}"
+  # Extract from JSON stored in a MageML secret
+  SNOWFLAKE_PASSWORD: "{{ json_value(mage_secret_var('database_config'), 'snowflake_password') }}"
+```
+
+### 4. Multiple Profiles
+
+You can create multiple profiles for different environments or use cases:
+
+```yaml
+version: 0.1.1
+default:
+  # Default profile configuration
+  POSTGRES_DBNAME: production_db
+
+development:
+  # Development environment configuration
+  POSTGRES_DBNAME: development_db
+
+staging:
+  # Staging environment configuration
+  POSTGRES_DBNAME: staging_db
+```
+
+## Using io_config in Your Code
+
+### SQL Block Example
+
+In SQL blocks, you can select the desired IO Config profile from the UI using the "Profile" dropdown menu. For detailed information about configuring SQL blocks, see the [SQL Blocks documentation](../guides/blocks/sql-blocks.md#configure-sql-block).
+
+### Python Block Examples
+
+You can use `io_config` in your Python code with different profile selection strategies:
+
+**Basic Profile Usage:**
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from os import path
+
+@data_loader
+def load_data_from_postgres(**kwargs):
+    query = 'SELECT * FROM your_table'
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'  # or any other profile name
+
+    with Postgres.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        return loader.load(query)
+```
+
+**Dynamic Profile Selection:**
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from os import path
+
+@data_loader
+def load_data_from_postgres(**kwargs):
+    query = 'SELECT * FROM your_table'
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+
+    # Get profile from pipeline variables or use default
+    config_profile = kwargs.get('profile', 'default')
+
+    with Postgres.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        return loader.load(query)
+```
+
+**Environment-based Profile Selection:**
+```python
+import os
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.postgres import Postgres
+from os import path
+
+@data_loader
+def load_data(**kwargs):
+    query = 'SELECT * FROM your_table'
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+
+    # Automatically select profile based on environment
+    environment = os.getenv('ENV', 'development')
+    config_profile = environment  # 'development', 'staging', 'production'
+
+    with Postgres.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        return loader.load(query)
+```
+
+## Databases using io_config.yaml
+
+The following database and storage integrations use `io_config.yaml` for credentials and connection settings. See each doc for the exact keys and examples:
+
+**Relational & SQL databases**
+
+- [PostgreSQL](../integrations/databases/PostgreSQL.md)
+- [MySQL](../integrations/databases/MySQL.md)
+- [Microsoft SQL Server](../integrations/databases/MicrosoftSQLServer.md)
+- [Redshift](../integrations/databases/Redshift.md)
+- [Trino](../integrations/databases/trino.md)
+- [OracleDB](../integrations/databases/OracleDB.md)
+- [ClickHouse](../integrations/databases/ClickHouse.md)
+- [DuckDB](../integrations/databases/DuckDB.md)
+- [MotherDuck](../integrations/databases/MotherDuck.md)
+
+**Cloud data warehouses & analytics**
+
+- [BigQuery](../integrations/databases/BigQuery.md)
+- [Snowflake](../integrations/databases/Snowflake.md)
+- [Athena](../integrations/databases/Athena.md)
+
+**Storage & data lakes**
+
+- [S3](../integrations/databases/S3.md)
+- [Google Cloud Storage](../integrations/databases/GoogleCloudStorage.md)
+- [Azure Blob Storage](../integrations/databases/AzureBlobStorage.md)
+
+**Other databases & services**
+
+- [MongoDB](../integrations/databases/MongoDB.md)
+- [Druid](../integrations/databases/Druid.md)
+- [Pinot](../integrations/databases/Pinot.md)
+- [Google Sheets](../integrations/databases/GoogleSheets.md)
+- [Spark](../integrations/databases/Spark.md)
+
+**Vector stores & search**
+
+- [Chroma](../integrations/databases/Chroma.md)
+- [Qdrant](../integrations/databases/Qdrant.md)
+- [Weaviate](../integrations/databases/Weaviate.md)
+- [Algolia](../integrations/databases/Algolia.md)
+
+## Best Practices
+
+1. **Security**:
+   - Never commit sensitive credentials directly in the `io_config` file
+   - Use environment variables or secret variables for sensitive information
+   - Consider using a secrets management service for production environments
+
+2. **Organization**:
+   - Use meaningful profile names
+   - Group related configurations together
+   - Document any non-standard configurations
+   - Use the standard format for new configurations
+
+3. **Version Control**:
+   - Add `io_config.yaml` to your `.gitignore` file
+   - Provide a template file (`io_config.yaml.template`) with dummy values
+   - Document the required environment variables
+
+## Troubleshooting
+
+### Common Issues & Solutions
+
+**1. "FileNotFoundError" or "No such file or directory"**
+
+- Make sure your `io_config.yaml` file exists in your project root (e.g., `/home/src/your_project/io_config.yaml`).
+- If running in a different environment (e.g., Docker), confirm the file is mounted and accessible.
+
+**2. "KeyError" or "Missing profile"**
+
+- Double-check that the profile name you are referencing in your code (e.g., `'default'`, `'staging'`) exists in your `io_config.yaml`.
+- Profile names are case-sensitive.
+
+**3. "Missing required field" or "NoneType" errors**
+
+- Ensure all required fields for your data source/destination are present in the selected profile.
+
+**4. "Environment variable not set"**
+
+- If you use `{{ env_var('VAR_NAME') }}` in your config, make sure the environment variable is set in deployment environment.
+- You can check this by running `echo $VAR_NAME` in the MageML terminal.
+
+**5. YAML syntax errors**
+
+- Use a YAML linter or validator to check for indentation or formatting issues.
+- Strings containing special characters (like `:` or `{}`) should be quoted.
+
+**6. "Invalid credentials" or authentication failures**
+
+- Double-check your credentials and permissions.
+- For cloud services, ensure your service account or IAM user has the necessary roles.
+
+**7. "Cannot import ConfigFileLoader" or similar import errors**
+
+- Make sure you are importing from `mage_ai.io.config` (not `mage_ai.io.io_config`).
+- Example:
+```python
+  from mage_ai.io.config import ConfigFileLoader
+  ```
+
+**8. "Profile not selected" in SQL blocks**
+
+- In the MageML UI, select the correct profile from the "Profile" dropdown before running your SQL block.
+
+If you continue to have issues, ask in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
+
+## Additional Resources
+
+- [Variables Overview](variables/overview.md)
+- [Data Integration Guide](../data-integrations/overview.md)
+- [Pipeline Configuration](../design/data-pipeline-management.md)

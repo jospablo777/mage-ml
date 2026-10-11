@@ -1,0 +1,55 @@
+# Backfilling pipelines
+
+*Run a pipeline multiple times.*
+
+A backfill creates 1 or more pipeline runs for a pipeline, one for each datetime in a date and
+time window.
+
+## Date and time window
+
+Create 1 or more pipeline runs between 2 datetime values, both included.
+
+The datetime of each instance is used as the `execution_date` for the pipeline run.
+
+For example, if the backfill has the following attributes:
+
+| Attribute | Value|
+| --- | --- |
+| Start datetime | `2023-01-01T03:00:00` |
+| End datetime | `2023-01-05T03:00:00` |
+| Interval type | `day` |
+| Interval units | `2` |
+
+Then the following pipeline runs will be created:
+
+| `id` | `execution_date` | `ds` | `hr` |
+| --- | --- | --- | --- |
+| 1 | `2023-01-01T03:00:00` | `2023-01-01` | `03` |
+| 2 | `2023-01-03T03:00:00` | `2023-01-03` | `03` |
+| 3 | `2023-01-05T03:00:00` | `2023-01-05` | `03` |
+
+---
+
+## Extra runtime variables from pipeline run
+
+Each pipeline run of a backfill, like a run of a scheduled trigger, has the following extra
+variables in your Python block’s keyword arguments (e.g. `kwargs`).
+
+| Key | Description | Example |
+| --- | --- | --- |
+| `interval_start_datetime` | The `datetime` when the pipeline run is scheduled for. | `datetime.datetime(2023, 7, 23, 7, 0, 0, 0)` |
+| `interval_end_datetime` | The `datetime` when the next pipeline run is scheduled for. | `datetime.datetime(2023, 7, 24, 7, 0, 0, 0)` |
+| `interval_seconds` | The number of seconds between the current pipeline run and the next pipeline run. | `86400` |
+| `interval_start_datetime_previous` | The `datetime` when the previous pipeline run was scheduled for. | `datetime.datetime(2023, 7, 22, 7, 0, 0, 0)` |
+
+### SQL block
+
+If you’re using a SQL block, here is an example of how you can access these variables:
+
+```sql
+SELECT
+    '{{ interval_start_datetime }}' AS interval_start_datetime
+    , '{{ interval_end_datetime }}' AS interval_end_datetime
+    , '{{ interval_seconds }}' AS interval_seconds
+    , '{{ interval_start_datetime_previous }}' AS interval_start_datetime_previous
+```

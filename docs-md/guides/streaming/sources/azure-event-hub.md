@@ -1,0 +1,63 @@
+# Azure Event Hub
+
+*Set up a streaming pipeline in MageML that reads from Azure Event Hub.*
+
+**Start MageML**
+
+1. Open MageML in your browser and then navigate to the pipelines page.
+2. Create a new pipeline by clicking the “+ New” button and then select “Streaming.”
+3. Enter a name for the pipeline and click “Create.”
+
+**Authentication**
+
+The source authenticates with the Event Hub connection string (`connection_str`).
+
+1. Keep the connection string out of the block: store it in an environment variable or a
+[secret](../../../development/variables/secrets.md) and reference it with `{{ env_var('...') }}`.
+2. Add a data loader block to your pipeline and then select "Azure Event Hub" as the source.
+3. Complete the data loader block with the information below.
+
+```YAML
+connector_type: azure_event_hub
+connection_str: 'Endpoint=sb://[namespace].servicebus.windows.net/;...'
+eventhub_name: event_hub_name
+consumer_group: '$Default'
+```
+
+> [!NOTE]
+> Connection string: Use the `connection_str` parameter in the config as shown above. You can obtain this from your Azure portal.
+
+4. Add the template transformer block or create a custom block to transform data from Azure Event Hub
+    - The template will populate with the code below. Make adjustments to your specific requirements.
+
+```Python
+from typing import Dict, List
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+@transformer
+def transform(messages: List[Dict], *args, **kwargs):
+    """
+    Template code for a transformer block.
+
+    Args:
+        messages: List of messages from the Event Hub.
+
+    Returns:
+        Transformed messages
+    """
+# Specify your transformation logic here
+    print(f'Transformed messages: {messages}')
+    return messages
+```
+5. Add a data exporter block and select “Dummy”
+6. Use the default setting as seen below.
+
+```YAML
+connector_type: dummy
+print_msg: true
+```
+
+The source reads every partition from the beginning (`starting_position='-1'`) and hands
+each batch of events to the transformer as a list of `{'data': <event body as text>}`.

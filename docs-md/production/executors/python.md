@@ -1,0 +1,11 @@
+# Local python executor
+
+*Local python executors are ran within the same container as the scheduler service.*
+
+You can customize the compute resource in the way described in
+[Compute resource](../configuring-production-settings/compute-resource.md).
+
+### Force local Python executor
+
+If you want to use `local_python` executor when `DEFAULT_EXECUTOR_TYPE` is set to another executor type,
+you can set the `executor_type` to `local_python_force`.

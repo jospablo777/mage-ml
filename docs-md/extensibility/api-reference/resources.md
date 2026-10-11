@@ -1,0 +1,333 @@
+# API resources
+
+*This file handles the CRUD operations.*
+
+When you create a new API called `Swords`, the resource
+name is `Sword` and the file name is `SwordResource`. The endpoints for CRUD operations are:
+
+| Action | HTTP method | Endpoint |
+| --- | --- | --- |
+| Create | `POST` | `/api/swords` |
+| List | `GET` | `/api/swords` |
+| Detail | `GET` | `/api/swords/:id` |
+| Update | `PUT` | `/api/swords/:id` |
+| Delete | `DELETE` | `/api/swords/:id` |
+
+If your resource belongs to a parent model, for example a sword belongs to a team, then your
+endpoints will be the following (note that swords for the create and list endpoints are nested
+under the `teams` resource):
+
+| Action | HTTP method | Endpoint |
+| --- | --- | --- |
+| Create | `POST` | `/api/teams/:id/swords` |
+| List | `GET` | `/api/teams/:id/swords` |
+| Detail | `GET` | `/api/swords/:id` |
+| Update | `PUT` | `/api/swords/:id` |
+| Delete | `DELETE` | `/api/swords/:id` |
+
+## Collection
+
+This method is executed when you make a request for a list of a specific resource.
+
+Example: `GET /swords`.
+
+Create a file called `SwordResource` that is a subclass of 1 of the following:
+
+1. `GenericResource`: subclass this class if you want to execute arbitrary code
+1. `DatabaseResource`: subclass this class only if your resource is directly associated to a
+database model. This subclass has many methods defined by default that handles CRUD operations
+automatically.
+
+### Creating a subclass of `GenericResource`
+
+Create a file called `mage_ai/api/resources/SwordResource.py`:
+
+```python
+import requests
+
+from mage_ai.api.resources.GenericResource import GenericResource
+
+class SwordResource(GenericResource):
+    @classmethod
+    def collection(self, query, meta, user, **kwargs):
+        """
+        query:
+            a dictionary of URL query parameters
+
+        meta:
+            a dictionary of meta parameters from the URL; such as _limit and _format
+
+        user:
+            a user object that represents the current user who is making the API call
+
+        kwargs:
+            a dictionary of other values that are passed down through the API request lifecycle; such
+            as parent_model, etc.
+        """
+
+        # Fetch a list of Swords from the internet
+        response = requests.get('https://example.com/swords.json')
+
+        return self.build_result_set(response.json()['swords'], user, **kwargs)
+```
+
+### Creating a subclass of `DatabaseResource`
+
+```python
+from mage_ai.api.resources.DatabaseResource import DatabaseResource
+from mage_ai.orchestration.db.models.swords import Sword  # your SQLAlchemy model
+
+class SwordResource(DatabaseResource):
+    # Set this class variable to the model that the resource is associated with
+    model_class = Sword
+
+    """
+    Optionally override collection because the DatabaseResource will handle limits
+    and pagination automatically. If you don’t override the collection method, DatabaseResource
+    will automatically fetch a list of models from the database for you.
+    """
+    @classmethod
+    def collection(self, query, meta, user, **kwargs):
+        """
+        Use collection to handle pre-filtering of the results from the database.
+        """
+
+        # Filter swords that are not weak and belong to the current team
+        team = kwargs['parent_model']
+        return Sword.query.filter(Sword.team_id == team.id, Sword.weak.is_(False))
+```
+
+Here is how we would get a list of swords that are not weak and belong to team ID 1:
+
+```python
+user = User.query.filter(User.id == 3).first()
+team = Team.query.filter(Team.id == 1).first()
+
+# You typically don’t have to call this function by itself.
+# This function is called by making a request to /teams/1/swords.
+swords = SwordResource.collection({}, {}, user, parent_model=team)
+```
+
+## Create
+
+This method is executed when you make a request to create a new instance of a resource.
+
+Example: `POST /swords`.
+
+### `GenericResource`
+
+```python
+from services.datadog import increment
+
+class SwordResource(GenericResource):
+    # code from before
+
+    @classmethod
+    def create(self, payload, user, **kwargs):
+        """
+        payload:
+            a dictionary of the request body
+
+            For example, if your request body is { "sword" : { "weak": false } },
+            then your payload will be the following dictionary: { 'weak': False }.
+
+            NOTE:
+            Payloads must be nested inside a key named after the singular form of the resource name.
+
+        user:
+            a user object that represents the current user who is making the API call
+
+        kwargs:
+            a dictionary of other values that are passed down through the API request lifecycle;
+            such as parent_model, etc.
+        """
+
+        # Increment a create metric in DataDog
+        increment('swords.create')
+
+        if payload.get('weak'):
+            name = 'Weak sword'
+        else:
+            name = 'Strong sword'
+
+        # Always return a new instance of the resource
+        return self({ 'name': name }, user, **kwargs)
+```
+
+### `DatabaseResource`
+
+You typically never have to override the `create` class method. The instances where it is overridden
+include a scenario when you want to execute a callback function only if the resource was
+successfully created.
+
+The `DatabaseResource` `create` method will take the keys and values in the payload argument, assign
+those values to a newly instantiated `Sword` object, and then save the model to the database.
+
+```python
+class SwordResource(DatabaseResource):
+    # code from before
+
+    @classmethod
+    def create(self, payload, user, **kwargs):
+        def _upload(resource):
+            # upload something only if the resource was successfully created
+            pass
+
+        self.on_create_callback = _upload
+
+        return super().create(payload, user, **kwargs)
+```
+
+## Member
+
+This method is executed when you fetch a single resource using its ID.
+Example: `GET /swords/:id`.
+
+### `GenericResource`
+
+```python
+class SwordResource(GenericResource):
+    # code from before
+
+    @classmethod
+    def member(self, pk, user, **kwargs):
+        """
+        pk:
+            a string or integer from the URL parameter :id
+
+        user:
+            a user object that represents the current user who is making the API call
+
+        kwargs:
+            a dictionary of other values that are passed down through the API request lifecycle; such
+            as parent_model, etc.
+        """
+
+        # Fetch 1 Sword from the internet
+        array = requests.get('https://example.com/swords.json').json()['swords']
+        sword = next(x for x in array if x['id'] == pk)
+
+        return self({ 'name': sword['name'], 'weak': False }, user, **kwargs)
+```
+
+### `DatabaseResource`
+
+You almost never have to override the `member` method.
+If you do, see `SecretResource` for an example.
+
+## Update
+
+This method is executed when you want to update a single resource using its ID.
+Example: `PUT /swords/:id`.
+
+This is almost the same as the `create` method except it’s an instance method and the ID of the
+resource you want to update must be included in the URL.
+
+```python
+class SwordResource(GenericResource):
+    # code from before
+
+    def update(self, payload, **kwargs):
+        """
+        payload:
+            a dictionary of the request body
+
+            For example, if your request body is { "sword" : { "weak": false } },
+            then your payload will be the following dictionary: { 'weak': False }.
+
+            NOTE:
+            Payloads must be nested inside a key named after the singular form of the resource name.
+
+        kwargs:
+            a dictionary of other values that are passed down through the API request lifecycle; such
+            as parent_model, etc.
+        """
+
+        print('Awesome update!')
+
+        # Always return self
+        return self
+```
+
+### `DatabaseResource`
+
+You almost never have to override the `update` method.
+If you do, see `PipelineScheduleResource` for an example.
+
+## Delete
+This method is executed when you want to delete a single resource using its ID.
+Example: `DELETE /swords/:id`.
+
+```python
+class SwordResource(GenericResource):
+    # code from before
+
+    def delete(self, **kwargs):
+        """
+        kwargs:
+            a dictionary of other values that are passed down through the API request lifecycle; such
+            as parent_model, etc.
+        """
+
+        print('Deleted!')
+```
+
+### `DatabaseResource`
+
+You almost never have to override the `delete` method.
+
+## Registering parent models
+
+If your resource belongs to a parent model, for example a sword belongs to a team, you must do
+the following in order for these endpoints to work properly:
+
+1. Create: `POST /teams/:id/swords`
+1. List: `GET /teams/:id/swords`
+
+```python
+import importlib
+
+class SwordResource(DatabaseResource):
+    # code from before
+
+SwordResource.register_parent_resource(
+    getattr(importlib.import_module('mage_ai.api.resources.TeamResource'), 'TeamResource'),
+)
+```
+
+## Pre-load single associated object
+
+The sword model belongs to a user via the `sword.user_id` column. If you are fetching a list of 100
+swords and in your code you are accessing the methods of the `user` object via `sword.user`
+(e.g. `sword.user.name`), you will inadvertently make 100 extra API calls to the `users`
+database table. Do the following to prevent this:
+
+```python
+import importlib
+
+class SwordResource(DatabaseResource):
+    # code from before
+
+SwordResource.register_collective_loader_find(
+    getattr(importlib.import_module('mage_ai.api.resources.UserResource'), 'UserResource'),
+)
+```
+
+## Pre-load multiple associated objects
+
+The sword has many opponents that were defeated by it. You can query all the opponents via the
+`sword.opponents` relationship. This will fetch all opponents from the database where
+`opponent.sword_id` equals `sword.id`. If you are accessing the opponents of each sword when
+fetching a list of 100 swords, you will be making 100 extra API calls to the `opponents` database.
+Do the following to prevent this:
+
+```python
+import importlib
+
+class SwordResource(DatabaseResource):
+    # code from before
+
+SwordResource.register_collective_loader_select(
+    getattr(importlib.import_module('mage_ai.api.resources.OpponentResource'), 'OpponentResource'),
+)
+```

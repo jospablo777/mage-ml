@@ -1,0 +1,55 @@
+# PostgreSQL
+
+*How to configure PostgreSQL as a destination in MageML to write pipeline data into a PostgreSQL table using direct database credentials and optional schema/table controls.*
+
+![PostgreSQL logo](https://user-images.githubusercontent.com/78053898/198754309-2ef713a7-62c8-4ea8-9ebb-8c24ed038cb3.png)
+
+---
+
+## Overview
+
+Use **PostgreSQL** as a destination in MageML to export structured data from your pipelines directly into a PostgreSQL table. MageML supports both self-hosted and cloud-hosted PostgreSQL instances such as **Supabase**, **Render**, and **AWS RDS**.
+
+MageML creates the target table and insert pipeline output rows into it, with support for schema selection, lowercase column naming, and reserved keyword handling.
+
+---
+
+## Configuration Parameters
+
+Provide the following credentials when setting up PostgreSQL as a destination:
+
+| Key         | Description                                                                                             | Example Value                     | Required |
+|--------------|---------------------------------------------------------------------------------------------------------|-----------------------------------|----------|
+| `database`   | Name of the PostgreSQL database where data will be written.                                             | `demo`                            | ✅        |
+| `host`       | Hostname or IP address of the PostgreSQL server.                                                       | `db.example.com`                  | ✅        |
+| `port`       | Port used by the PostgreSQL service. Default is `5432`.                                                 | `5432`                            | ✅        |
+| `username`   | Username with access to the target database and schema.                                                 | `guest`                           | ✅        |
+| `password`   | Password for the PostgreSQL user.                                                                       | `abc123...`                       | ✅        |
+| `schema`     | Name of the schema where the table will be created.                                                     | `public`                          | ✅        |
+| `table`      | Name of the table MageML writes records into.                                                           | `dim_users_v1`                    | ✅        |
+
+---
+
+## Optional Parameters
+
+| Key                    | Description                                                                                                                         | Example Value      |
+|-------------------------|-------------------------------------------------------------------------------------------------------------------------------------|---------------------|
+| `skip_schema_creation` | If `true`, MageML skips running `CREATE SCHEMA`. Use this if the schema already exists. [See issue](https://github.com/mage-ai/mage-ai/issues/3416) | `true`              |
+| `lower_case`           | If `true`, MageML converts all column names to lowercase. Default is `true`.                                                     | `true`              |
+| `allow_reserved_words` | If `true`, MageML allows column names that are PostgreSQL reserved words. Default is `false`.                                    | `true` or `false`   |
+
+---
+
+## Notes
+
+- Ensure the user has `CREATE TABLE`, `INSERT`, and optionally `CREATE SCHEMA` privileges.
+- MageML supports exporting data to **existing tables** or **creating new tables** based on the pipeline output schema.
+- If your database is hosted on platforms like Heroku or AWS RDS, make sure the network settings allow inbound connections from MageML.
+
+---
+
+## Related Resources
+
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
+- [PostgreSQL Reserved Keywords](https://www.postgresql.org/docs/current/sql-keywords-appendix.html)
+- [SQLAlchemy PostgreSQL Dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html)

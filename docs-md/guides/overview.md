@@ -1,0 +1,13 @@
+# MageML Guides
+
+*MageML guides for getting started, building pipelines, and more.*
+
+<p align='center'>
+<img src="https://github.com/mage-ai/mage-ai/assets/59450879/7ef1cc84-0b15-4e6c-aa5c-74fdba7c2d5f" />
+</p>
+
+This section contains guides and tutorials for getting started with MageML.
+
+Contributions are welcome. The pages are Markdown (MDX) files in the
+[`docs/` folder](https://github.com/jospablo777/mage-ml/tree/master/docs) of the repository.
+Edit a file on GitHub and open a pull request.

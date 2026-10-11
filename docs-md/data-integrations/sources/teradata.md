@@ -1,0 +1,31 @@
+# Teradata
+
+<br/>
+
+## Configuration
+
+Connect to your Teradata database and extract data by providing the following configuration parameters:
+
+| Key          | Description                                                              | Sample Value                   |
+| ------------ | ------------------------------------------------------------------------ | ------------------------------- |
+| `database`   | The name of the database you want to read data from.                     | `demo`                          |
+| `host`       | Hostname or IP address of your Teradata database.                        | `test.clearscape.teradata.com`   |
+| `port`       | Port number for the database connection (default is 1025 for Teradata).  | `1025`                           |
+| `username`   | Username with permissions to access the database and schema.             | `demo_user`                      |
+| `password`   | Password for the user to authenticate.                                   | `abc123...`                      |
+
+<br/>
+
+### Optional Configs
+
+| Key                 | Description                                                                                  | Sample Value |
+| ------------------- | -------------------------------------------------------------------------------------------- | ------------ |
+| `batch_fetch_limit`  | Number of rows to fetch per batch (default: 50,000). Adjust based on available memory.       | `50000`      |
+
+<br/>
+
+## What is Teradata?
+
+[Teradata](https://www.teradata.com/) is a relational database management system (RDBMS) for data warehousing and analytics.
+
+<br/>

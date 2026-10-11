@@ -1,0 +1,80 @@
+# Google Cloud PubSub
+
+## Basic config
+
+```yaml
+connector_type: google_cloud_pubsub
+project_id: test-project-id
+topic_id: test-topic-id
+pubsub_emulator_host: null  # "host.docker.internal:8085"
+path_to_credentials_json_file: "./google_credentials.json"
+```
+
+The `pubsub_emulator_host` parameter is optional, which could be used when you need to test
+the Google Cloud PubSub service locally through an emulator (see more details at the bottom).
+
+## Data format
+
+The Google Cloud PubSub data exporter accepts scalar values
+
+```
+message = <Any>
+```
+
+or dictionaries with a specific format as messages:
+
+```
+message = {
+    'data': <Any>,
+    'metadata': <Optional[Dict]>
+}
+```
+
+A scalar value is published as it is. A dictionary is published as JSON: its `data` field
+when it has one, otherwise the whole dictionary. The following message is valid:
+
+```python
+message = {'data': {'bees': 23, 'ants': 30}}
+```
+
+- The `project_id` and `topic_id` have to be configured in the yaml file.
+
+```yaml
+connector_type: google_cloud_pubsub
+project_id: test-project-id
+topic_id: test-topic-id
+```
+
+## Set up Google Cloud Pubsub emulator
+
+To test out Google Cloud PubSub source locally, follow the instructions in
+[Testing apps locally with the emulator](https://cloud.google.com/pubsub/docs/emulator)
+to set up the local Google Cloud PubSub emulator.
+
+## Create a `project_id` for testing
+
+Use the command listed under the `Starting the emulator` section to create a `project_id`, e.g.,
+
+```
+gcloud beta emulators pubsub start --project=test-project-id
+
+$(gcloud beta emulators pubsub env-init)
+```
+
+## Create a topic and a subscription
+
+Use the `gcloud pubsub topics create` command to create a topic:
+
+```
+gcloud pubsub topics create test-topic-id
+```
+
+After you create a topic, you can subscribe or publish to it. Use the
+`gcloud pubsub subscriptions create` command to create a subscription.
+
+```
+gcloud pubsub subscriptions create test-subscription-id-0 --topic test-topic-id
+```
+
+Only messages published to the topic after the subscription is created
+are available to subscriber applications.

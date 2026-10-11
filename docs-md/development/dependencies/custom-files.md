@@ -1,0 +1,34 @@
+# Import your own Python code
+
+*You can import any Python code from any file that is in your project directory.*
+
+<p align='center'>
+<img src="https://mage-ai.github.io/assets/development/python-2.png" alt="Python mecha" width="250" />
+</p>
+
+## Importing custom Python code
+
+When you’re writing Python blocks in MageML, you can import any other Python files using this format:
+
+```python
+from [project_name].foo import bar
+```
+
+For example, if your project name is `demo_project` and you have the following folder structure:
+
+```
+demo_project/
+|   pipelines/
+|   utils/
+|   |   helpers/
+|   |   |   shared.py
+|   |   |   __init__.py
+|   |   __init__.py
+```
+
+You can write the following import statement to use functions in the
+`demo_project/utils/helpers/shared.py` file:
+
+```python
+from demo_project.utils.helpers import shared
+```

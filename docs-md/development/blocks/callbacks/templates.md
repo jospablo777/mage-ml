@@ -1,0 +1,16 @@
+# Callback templates
+
+## Base
+
+```python
+if 'callback' not in globals():
+    from mage_ai.data_preparation.decorators import callback
+
+@callback('success')
+def success_callback(**kwargs):
+    pass
+
+@callback('failure')
+def failure_callback(**kwargs):
+    pass
+```

@@ -1,0 +1,401 @@
+# Pipeline Run
+
+*Monitor, manage, and troubleshoot pipeline runs.*
+
+## Overview
+
+Pipeline runs represent **individual executions of your data pipelines** in MageML. Each time a pipeline is triggered (manually or automatically), a pipeline run record is created that tracks the entire execution process, including all block runs, status updates, timing information, and any errors that occur.
+
+### Key Benefits of Pipeline Run Management:
+- **Execution tracking** - Monitor the status and progress of every pipeline execution
+- **Performance insights** - Analyze execution times and bottlenecks
+- **Error debugging** - Detailed logs and error information for troubleshooting
+- **Historical analysis** - Review past executions to identify patterns and issues
+- **Retry capabilities** - Restart failed or incomplete pipeline runs
+- **Audit trail** - Complete record of when and how pipelines were executed, including the code, environment and outputs of each run (see [Run records](../../guides/pipelines/run-records.md))
+
+> [!NOTE]
+> **Pipeline Run** and **Pipeline Execution** are the same thing in MageML. You may see either term used throughout the product.
+
+## Pipeline Run Lifecycle
+
+### Run Statuses
+
+Pipeline runs progress through several statuses during their lifecycle:
+
+- **`initial`** - Pipeline run has been created but not yet started
+- **`running`** - Pipeline is currently executing
+- **`completed`** - Pipeline finished successfully
+- **`failed`** - Pipeline encountered an error and stopped
+- **`cancelled`** - Pipeline run was manually cancelled or timed out
+
+### Block Run Statuses
+
+Within each pipeline run, individual blocks have their own statuses:
+
+- **`initial`** - Block run created but not started
+- **`queued`** - Block run is in the queue and waiting to be executed
+- **`running`** - Block run is currently executing
+- **`completed`** - Block run finished successfully
+- **`failed`** - Block run encountered an error
+- **`cancelled`** - Block run was cancelled
+- **`upstream_failed`** - Block cannot run because upstream blocks failed
+- **`condition_failed`** - The block was skipped because its own or an upstream block's condition was not satisfied.
+
+## Viewing Pipeline Runs
+
+### Project-Wide Pipeline Runs Dashboard
+
+View all pipeline runs across your entire project:
+
+1. **Navigate to the homepage** and click **"Pipeline runs"** in the left navigation
+2. **Or go directly to** `/pipeline-runs` URL
+3. **Filter** by pipeline, status, or pipeline tag
+
+The page lists completed, failed, cancelled, and currently running pipeline runs.
+
+#### Pipeline Run List Filters
+
+The pipeline run list page provides comprehensive filtering options:
+
+**Available Filters:**
+- **Pipeline UUID** - Filter by specific pipeline identifiers
+- **Status** - Filter by run status (Cancelled, Done, Failed, Ready, Running)
+- **Pipeline Tag** - Filter by pipeline tags
+
+**Filter Actions:**
+- **Apply filters** - Apply selected filter criteria
+- **Reset filters** - Clear all filters and return to defaults
+
+> [!NOTE]
+> The project-wide page shows runs from all pipelines.
+
+### Pipeline-Specific Run History
+
+View runs for a specific pipeline:
+
+1. **Click on a pipeline** from the main Pipelines Dashboard
+2. **Navigate to the "Runs" section** or click on a trigger from the "Triggers" section
+3. **View detailed run information** including block runs, logs, and metrics
+4. **Access individual run details** by clicking on specific runs
+
+**Direct URL**: `/pipelines/[pipeline_uuid]/runs`
+
+#### Batch Operations
+
+The pipeline-specific run page supports batch operations for managing multiple runs:
+
+**Available Batch Actions:**
+- **Retry selected** - Retry specific selected pipeline runs
+- **Retry all incomplete block runs** - Retry all incomplete block runs across the pipeline
+- **Cancel selected running** - Cancel specific selected running pipeline runs
+- **Cancel all running** - Cancel all currently running pipeline runs
+
+**How to Use Batch Operations:**
+1. **Select pipeline runs** by checking the boxes next to the runs you want to manage
+2. **Click the "Actions" dropdown** to access batch operation options
+3. **Choose your desired action** from the dropdown menu
+4. **Confirm the operation** when prompted
+
+> [!NOTE]
+> Batch operations are particularly useful for managing multiple failed runs or stopping multiple running pipelines at once, improving operational efficiency.
+
+### Individual Pipeline Run Details
+
+For detailed analysis of a specific run:
+
+1. **Click on a pipeline run** from the runs list
+2. **View the individual run page** at `/pipelines/[pipeline_uuid]/runs/[pipeline_run_id]`
+3. **Examine block run details** including execution order, timing, and status
+4. **Access logs and error information** for each block
+5. **Review runtime variables** and configuration used
+6. **Review the run record**: the code, environment, git commit and outputs the run used
+   (see [Run records](../../guides/pipelines/run-records.md))
+
+## Pipeline Run Retry
+
+### Retrying Failed Runs
+
+When a pipeline run fails, you can retry it in several ways:
+
+> [!NOTE]
+> For detailed information about retry configuration and management, see [Retrying block runs from a pipeline run](retrying-block-runs.md).
+
+#### Retry Incomplete Blocks
+Retry from the failed block instead of restarting the entire pipeline. For detailed instructions, see [Retrying block runs from a pipeline run](retrying-block-runs.md).
+
+#### Retry from Selected Block
+Retry starting from any selected block regardless of its current status. For detailed instructions, see [Retrying block runs from a pipeline run](retrying-block-runs.md).
+
+### Automatic Retry Configuration
+
+Configure automatic retries to handle transient failures. For detailed retry configuration examples and advanced settings, see [Retrying block runs from a pipeline run](retrying-block-runs.md).
+
+## Pipeline Run Data and Monitoring
+
+### Key Metrics and Information
+
+Each pipeline run contains valuable information:
+
+- **Execution timing** - Start time, completion time, and duration
+- **Status tracking** - Current status and any status changes
+- **Block run details** - Individual block execution information
+- **Runtime variables** - Variables used during execution
+- **Error information** - Detailed error messages and stack traces
+- **SLA compliance** - Whether the run met configured SLAs
+
+### Database Storage
+
+Pipeline run data is stored in database tables:
+
+- **`pipeline_run`** - Main pipeline run records
+- **`block_run`** - Individual block run records within each pipeline run
+
+> [!NOTE]
+> You can query pipeline run data directly from the database or use the Python models to access run information programmatically. For detailed database querying examples, see [Query pipeline run metadata from database](database-query.md). For API reference documentation, see [Pipeline runs API reference](../../extensibility/api-reference/pipeline-runs/overview.md).
+
+### Querying Pipeline Run Data
+
+Query pipeline run data directly from the database or use the Python models. For comprehensive database querying examples and Python API usage, see [Query pipeline run metadata from database](database-query.md).
+
+## Advanced Pipeline Run Features
+
+### Runtime Variables
+
+Override pipeline variables for specific runs:
+
+- **Trigger-level variables** - Set variables when creating or editing triggers (see [Pipeline Trigger Overview](../triggers/triggering-pipelines.md))
+- **API-triggered variables** - Pass variables via API requests (see [Trigger pipeline via API](../triggers/trigger-pipeline-api.md))
+- **Manual run variables** - Override variables when manually triggering runs
+
+> [!NOTE]
+> Runtime variables allow you to customize pipeline behavior for different environments, data sources, or processing requirements without modifying the pipeline code. Learn more about [using runtime variables](../../getting-started/runtime-variable.md).
+
+### SLA Monitoring
+
+Configure and monitor Service Level Agreements. For detailed SLA configuration, see [Pipeline Trigger Overview](../triggers/triggering-pipelines.md#sla-configuration).
+
+- **Expected completion time** - Set target completion times for pipeline runs
+- **Time units** - Configure in minutes, hours, or days
+- **SLA tracking** - Monitor whether runs meet their SLA targets
+- **Alerting** - Get notified when SLAs are missed
+
+### Timeout Configuration
+
+Control pipeline run execution time. For detailed timeout configuration, see [Pipeline Trigger Overview](../triggers/triggering-pipelines.md#timeout-configuration).
+
+- **Timeout duration** - Set maximum execution time in seconds
+- **Timeout status** - Choose how to handle runs that exceed timeout (failed, cancelled, warning)
+- **Resource protection** - Prevent runaway pipelines from consuming excessive resources
+
+## Debugging Pipeline Run Failures
+
+When pipeline runs fail, use these debugging techniques to identify and resolve issues:
+
+### Accessing Run Information
+
+**Individual Run Details:**
+1. **Navigate to the failed run** in the pipeline runs list
+2. **Click on the run** to view detailed information
+3. **Examine the execution timeline** to see where the failure occurred
+4. **Review block run statuses** to identify which blocks failed
+
+**Block-Level Debugging:**
+1. **Click on individual block runs** to see detailed information
+2. **Access block logs** for error messages and stack traces
+3. **Open the log source** from the selected error log's source-location link, or click the block name in the Block column, to open the failing block in the pipeline editor. When line metadata is available, the editor focuses that line.
+4. **Review block output** to understand data state at failure
+5. **Check upstream dependencies** to ensure data flow is correct
+
+### Common Failure Patterns
+
+**Upstream Block Failures:**
+- **Issue**: Downstream blocks show `upstream_failed` status
+- **Solution**: Fix the upstream block that failed first, then retry
+
+**Data Validation Errors:**
+- **Issue**: Blocks fail due to unexpected data format or missing columns
+- **Solution**: Add data validation and error handling in your blocks
+
+**Resource Exhaustion:**
+- **Issue**: Pipeline runs timeout or consume excessive resources
+- **Solution**: Optimize block code, increase timeout settings, or break into smaller pipelines
+
+**External Dependency Failures:**
+- **Issue**: API calls, database connections, or file access failures
+- **Solution**: Implement retry logic and proper error handling
+
+**Pipeline Runs Stuck in Initial/Queued Status:**
+- **Issue**: Pipeline runs remain in `initial` or `queued` status with no visible errors in logs
+- **Solution**: Follow these troubleshooting steps:
+  1. **Check concurrency limits** - Verify that block run concurrency or pipeline run concurrency limit is not set to 0
+  2. **Check resource usage** - Monitor CPU and RAM usage to ensure sufficient resources are allocated
+  3. **Check server error logs** - Review server-side logs for underlying issues
+  4. **Restart the server** - Try restarting the server to clear any stuck processes
+  5. **Report it** - If the issue persists, open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) with the run logs
+
+### Debugging Tools
+
+- **Detailed logs** - Access comprehensive execution logs for each block
+- **Error tracking** - View error messages, stack traces, and debugging information
+- **Execution timeline** - See the order and timing of block executions
+- **Variable inspection** - Review runtime variables and their values
+- **Block output export** - Save block output as CSV for analysis (see [Saving block output as CSV](saving-block-output-as-csv.md))
+
+## Best Practices for Pipeline Run Management
+
+### Monitoring and Alerting
+- **Set up monitoring** for key pipeline runs and their success rates
+- **Configure alerts** for failed runs, SLA violations, and performance issues
+- **Regular review** of run history to identify patterns and improvements
+
+### Error Handling
+- **Implement retry logic** for transient failures
+- **Use proper error handling** in your block code
+- **Validate data** at each step to catch issues early
+- **Test thoroughly** before deploying to production
+
+### Performance Optimization
+- **Monitor execution times** and optimize slow blocks
+- **Use appropriate resources** for your workload
+- **Implement caching** where appropriate
+- **Consider parallel processing** for independent operations
+- **Configure concurrency limits** to control resource usage (see [Concurrency](../../design/data-pipeline-management.md#concurrency))
+
+### Documentation and Maintenance
+- **Document pipeline purposes** and expected behavior
+- **Maintain run history** for audit and compliance purposes
+- **Regular cleanup** of old run data to manage storage
+- **Version control** your pipeline code and configurations
+
+## Frequently Asked Questions
+
+<details><summary>How can I retrieve the output of a block after triggering a pipeline via API?</summary>
+
+You can retrieve the output of a block run by calling the block run output API. For example:
+
+```
+{MAGE_HOST}/api/block_runs/<block_run_id>/outputs?sample_count=100
+```
+
+**Steps to get block run ID:**
+1. Trigger your pipeline via API or UI
+2. Navigate to the pipeline run details page
+3. Find the specific block run ID from the block runs list
+4. Use the API endpoint above with the block run ID
+
+You can find the relevant API calls in your browser console when using the UI. More details are available in the [API reference guide](../../extensibility/api-reference/pipeline-runs/overview.md).
+
+</details>
+
+<details><summary>Can I monitor the status of a pipeline run programmatically?</summary>
+
+Yes, you can monitor pipeline run status programmatically using multiple methods:
+
+**API Methods:**
+- Use the API to query pipeline run status and outputs
+- Access individual pipeline run details via `/api/pipeline_runs/<pipeline_run_id>`
+- Monitor block run statuses within a pipeline run
+
+**Database Query Methods:**
+- Query the `pipeline_run` and `block_run` tables directly
+- Use Python scripts to filter by status, execution date, or pipeline UUID
+- Batch update pipeline run statuses programmatically
+
+See [Query pipeline run metadata from database](database-query.md) for detailed examples and [API reference guide](../../extensibility/api-reference/pipeline-runs/overview.md) for API documentation.
+
+</details>
+
+<details><summary>How do I cancel all pipelines that are in Ready/Running status?</summary>
+
+You can cancel all running pipeline runs using either method:
+
+**UI Method:**
+- Navigate to `/pipelines/[pipeline_uuid]/runs` and click **"Cancel all running"** button
+- This cancels all running pipeline runs for a specific pipeline
+
+**Programmatic Method:**
+- Write a Python script to cancel all ready or running pipeline runs
+- Example code and guidance are available in the [database query documentation](database-query.md)
+
+</details>
+
+<details><summary>How are runtime variables managed in pipeline runs?</summary>
+
+Runtime variables are managed at multiple levels in pipeline runs:
+
+**Variable Storage:**
+- Run records store information about runtime variables used during execution
+- Variables are typically specified at the time of pipeline trigger
+- Variables can be overridden at the trigger level for different environments
+
+**Variable Sources:**
+- **Trigger-level variables** - Set when creating or editing triggers
+- **API-triggered variables** - Passed via API requests in the payload
+- **Manual run variables** - Overridden when manually triggering runs
+
+**Variable Usage:**
+- Access variables in blocks using `kwargs.get("variable_name", "default_value")`
+- Variables allow customization for different environments without code changes
+- Runtime variables are stored in the `variables` field of pipeline run records
+
+Learn more about [using runtime variables](../../getting-started/runtime-variable.md) and [trigger configuration](../triggers/triggering-pipelines.md).
+
+</details>
+
+<details><summary>Why do some pipeline runs get stuck or blocks remain in the initial status?</summary>
+
+Pipeline runs can get stuck in `initial` or `queued` status due to several common issues:
+
+**Common Causes:**
+- **Concurrency limits** - Block run concurrency or pipeline run concurrency limit set to 0
+- **Resource constraints** - Insufficient CPU or RAM allocation
+- **Executor issues** - Problems with k8s_executor, volume mounting, or resource constraints
+- **Server issues** - The server has problems or stuck processes
+
+**Troubleshooting Steps:**
+1. **Check concurrency limits** - Verify concurrency settings are not set to 0
+2. **Monitor resource usage** - Ensure sufficient CPU and RAM are allocated
+3. **Check server error logs** - Review server-side logs for underlying issues
+4. **Restart the server** - Try restarting MageML to clear stuck processes
+5. **Switch executors** - Try local_python executor for testing to isolate issues
+
+**Additional Debugging:**
+- If logs are not visible in the UI, check log files directly in the log path
+- Use the debugging tools available in the pipeline run details page
+- Open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) for persistent issues
+
+</details>
+
+<details><summary>How do I set up automated or scheduled pipeline runs?</summary>
+
+You can set up automated pipeline runs using scheduled triggers:
+
+**Creating Scheduled Triggers:**
+1. **Navigate to pipeline** - Go to your pipeline's trigger page
+2. **Create new trigger** - Click "New trigger" and select "Schedule"
+3. **Configure frequency** - Choose from hourly, daily, weekly, monthly, or custom cron expressions
+4. **Set additional options** - Configure SLA, timeout, runtime variables, and other settings
+5. **Save trigger** - Enable the trigger to start automated runs
+
+**Available Frequencies:**
+- **Run exactly once** - Execute once and disable
+- **Hourly/Daily/Weekly/Monthly** - Standard recurring schedules
+- **Always on** - Immediately create new runs when previous completes
+- **Custom cron** - Advanced scheduling with cron expressions
+
+**Requirements:**
+- **Running scheduler** - The server (or its scheduler instance) must keep running for scheduled triggers to work
+
+**Advanced Configuration:**
+- Set runtime variables for different environments
+- Configure SLA monitoring and timeout settings
+- Override global variables at trigger level
+- Use "Run once" button for testing triggers
+
+See [Pipeline Trigger Overview](../triggers/triggering-pipelines.md) for detailed configuration and [Trigger pipeline via API](../triggers/trigger-pipeline-api.md) for API-based triggering.
+
+</details>
+
+> [!NOTE]
+> **Need more help?** If your question isn't answered here, ask in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).

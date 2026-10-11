@@ -1,0 +1,31 @@
+# Google Cloud Storage
+
+## Basic config
+
+```yaml
+connector_type: google_cloud_storage
+bucket: bucket
+prefix: prefix
+file_type: parquet
+buffer_size_mb: 5
+buffer_timeout_seconds: 300
+path_to_credentials_json_file: /path/to/your/service/account/key.json
+```
+
+* `bucket`: The Google Cloud Storage bucket you want to use to store the data.
+* `prefix`: The Google Cloud Storage path prefix. The whole GCS path will be `gs://{bucket}/{prefix}`.
+* `file_type`: `parquet` or `csv`
+* `buffer_size_mb` and `buffer_timeout_seconds`: MageML puts messages in a buffer before uploading to Google Cloud Storage.
+  You can configure the size and timeout of the buffer to control the file size and the delay.
+* `path_to_credentials_json_file`: Google service account credential json file. If MageML is running on GCP, you can leave this value null and MageML will use the instance service account to authenticate. See [Referencing Variables](../../../development/variables/referencing-variables.md) for configuring credentials via environment variables or secret variables.
+
+## Configure time-based partition
+
+```yaml
+date_partition_format: "%Y%m%dT%H"
+```
+
+To store the Google Cloud Storage data in time-based partition folders, add `date_partition_format`
+to the config. Example values: `%Y%m%d`, `%Y%m%dT%H`.
+
+**Security Note:** Storing credentials in configuration files can be insecure. Prefer using environment variables (e.g., `GOOGLE_APPLICATION_CREDENTIALS`) or secret variables when possible, especially for production deployments.

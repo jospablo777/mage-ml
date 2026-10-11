@@ -1,0 +1,56 @@
+# ActiveMQ
+
+*This guide will walk you through the process of setting up and using ActiveMQ with MageML for streaming data pipelines.*
+
+### Step 1: Create a new streaming pipeline
+
+1. Open MageML in your browser.
+2. Click on "+ New Pipeline" and select "Streaming".
+3. Give your pipeline a name and click "Create".
+
+### Step 2: Add an ActiveMQ data loader
+
+1. In your new pipeline, click "+ Add Block" and select "Data loader".
+2. Choose "ActiveMQ" as the data source.
+
+### Step 3: Configure your ActiveMQ connection
+
+In the data loader block, use the following YAML configuration as a template:
+
+```yaml
+connector_type: 'activemq'
+connection_host: 'localhost'
+connection_port: 61613
+queue_name: 'default'
+username: 'admin'
+password: 'admin'
+```
+Adjust these values according to your ActiveMQ setup:
+
+- `connection_host`: Your ActiveMQ broker's hostname or IP address.
+- `connection_port`: The port your ActiveMQ broker is listening on (default STOMP port is 61613).
+- `queue_name`: The name of the queue you want to consume messages from.
+- `username` and `password`: Your ActiveMQ authentication credentials.
+
+> [!NOTE]
+> Ensure that the stomp port on ActiveMQ is open, which is 61613 by default.
+
+### Step 4: Batches (optional)
+
+The transformer gets a list of message bodies, as text. By default each list holds one
+message. To process messages in batches:
+
+```yaml
+batch_size: 100
+# Seconds to wait for a batch to fill before handing over what arrived.
+batch_timeout: 1.0
+```
+
+Messages are acked after the transformer returns. When the transformer raises, the
+pipeline stops and the messages go back to the queue once the connection closes. When
+the connection to the broker drops, the pipeline stops with an error.
+
+### Step 5: Check your connection
+
+Click the run button of the data loader block, "Check connection". The block connects
+with its config and closes the connection; it reads no message.

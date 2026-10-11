@@ -1,0 +1,64 @@
+# Doris
+
+*How to configure Doris as a destination in MageML to write data to a Doris database table, including SSH tunnel and optional connection settings.*
+
+## Configuration Parameters
+
+To use **Doris** as a destination in MageML, provide the following parameters:
+
+| Key               | Description                                                                                                                                         | Example Value                                | Required |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|----------|
+| `database`         | Name of the Doris database to export data to.                                                                                                       | `demo`                                       | ✅        |
+| `host`             | Hostname or IP address of your Doris database server.                                                                                               | `mage.abc.us-west-2.rds.amazonaws.com`       | ✅        |
+| `port`             | Port number on which Doris is listening. The default is usually `9030`.                                                                             | `9030`                                       | ✅        |
+| `username`         | Username used to connect to the Doris database. Must have permission to read and write data.                                                        | `root`                                       | ✅        |
+| `password`         | Password for the above user.                                                                                                                         | `abc123...`                                  | ✅        |
+| `table`            | Name of the destination table in Doris that MageML creates or writes to.                                                                             | `dim_users_v1`                               | ✅        |
+| `connection_method`| Method used to connect to Doris. Choose between `direct` or `ssh_tunnel`.                                                                           | `direct` or `ssh_tunnel`                     | ✅        |
+| `ssh_host`         | *(Optional)* Bastion host IP or DNS if using SSH tunnel.                                                                                            | `123.45.67.89`                               | ❌        |
+| `ssh_port`         | *(Optional)* Port of the bastion host. Defaults to `22`.                                                                                            | `22`                                         | ❌        |
+| `ssh_username`     | *(Optional)* Username to authenticate with the bastion server.                                                                                      | `bastion_user`                               | ❌        |
+| `ssh_password`     | *(Optional)* Password for SSH authentication. Required if not using a private key.                                                                  | `password`                                   | ❌        |
+| `ssh_pkey`         | *(Optional)* Path to or contents of private key file used for SSH authentication.                                                                   | `/path/to/private/key.pem`                   | ❌        |
+| `conn_kwargs`      | *(Optional)* Additional [MySQL connection options](https://dev.mysql.com/doc/connector-python/en/connector-python-connectargs.html) as a dictionary. | `{"ssl_ca": "CARoot.pem"}`                   | ❌        |
+
+---
+
+## Optional Settings
+
+| Key                  | Description                                                                                                                                                     | Example Value | Required |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|----------|
+| `skip_schema_creation`| If `true`, MageML does not run the `CREATE SCHEMA` command. Useful if the schema already exists. [Related issue](https://github.com/mage-ai/mage-ai/issues/3416) | `true`        | ❌        |
+| `lower_case`          | If `true`, MageML converts column names to lowercase. Default is `true`.                                                                                        | `true`        | ❌        |
+
+---
+
+## Notes
+
+- **SSH tunneling** is useful for secure access to Doris behind firewalls or private networks.
+- `conn_kwargs` is especially helpful if you need to enable SSL or set advanced connection options.
+- Doris uses a MySQL-compatible protocol, so many standard MySQL configurations also apply.
+
+---
+
+## Frequently Asked Questions
+
+### Can I connect to Doris using an SSH tunnel?
+Yes. Set `connection_method` to `ssh_tunnel` and provide the appropriate `ssh_host`, `ssh_username`, and either `ssh_password` or `ssh_pkey` depending on your authentication method.
+
+### Can I use a private key for SSH authentication?
+Yes. Use the `ssh_pkey` parameter to provide the file path or content of the SSH private key. This is recommended over using `ssh_password`.
+
+### Does Doris support SSL connections?
+Yes. Use the `conn_kwargs` parameter to pass MySQL-compatible SSL options like `ssl_ca`, `ssl_cert`, and `ssl_key`.
+
+### Which setting controls lowercase column names?
+`lower_case`. The `use_lowercase` key in the generated config template is not read by the destination.
+
+---
+
+## Related Resources
+
+- [Doris Official Documentation](https://doris.apache.org/)
+- [MySQL Connector Python Docs](https://dev.mysql.com/doc/connector-python/en/)
+- [How to Configure SSH Tunnel Connections](https://www.ssh.com/academy/ssh/tunneling)

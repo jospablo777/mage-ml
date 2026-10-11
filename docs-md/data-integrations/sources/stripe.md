@@ -1,0 +1,50 @@
+# Stripe
+
+![Stripe](https://user-images.githubusercontent.com/78053898/198754241-6581cb14-eddc-425b-b90f-e2a11ef22782.png)
+
+<br/>
+
+## Configuration
+
+To set up the Stripe source, provide the following configuration parameters:
+
+| Key            | Description                                   | Sample Value |
+| -------------- | --------------------------------------------- | ------------ |
+| `account_id`   | Your Stripe account’s unique identifier.      | `73bb...`    |
+| `client_secret`| Secret key used to authenticate API requests. | `ABC1...`    |
+| `start_date`   | Date to start syncing data from (`YYYY-MM-DD`).| `2022-01-01` |
+
+> **Find your API keys**:
+> Refer to Stripe’s [official documentation](https://stripe.com/docs/keys) to locate your account’s API keys.
+
+<br/>
+
+## What is Stripe?
+
+[Stripe](https://stripe.com/) is a payment processing platform for online payments, subscriptions, and invoices.
+
+<br/>
+
+## Supported Schemas
+
+The following Stripe data objects are extracted and loaded:
+
+- Balance transactions
+- Charges
+- Coupons
+- Customers
+- Disputes
+- Events
+- Invoice items
+- Invoice line_items
+- Invoices
+- Payment intents
+- Payout transactions
+- Payouts
+- Plans
+- Products
+- Subscription items
+- Subscriptions
+- Transfers
+
+<br/>

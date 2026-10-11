@@ -1,0 +1,53 @@
+# BigQuery
+
+*Stream data to Google BigQuery with the BigQuery IO class.*
+
+The BigQuery streaming destination uses the **Generic IO** sink. Each batch of messages becomes
+a DataFrame that the [BigQuery IO class](../../../development/io_config_setup.md) exports with a load job.
+
+---
+
+## Basic config
+
+```yaml
+connector_type: bigquery
+profile: default    # profile in io_config.yaml
+config:
+  table_id: project_id.dataset_id.table_id   # or dataset_id.table_id (uses profile project)
+  if_exists: "append"
+```
+
+- **`profile`** selects which credentials and connection settings to use. It is the name of a **profile** (section) in your project's `io_config.yaml`. Use the `default` profile unless you have multiple BigQuery connections (e.g. dev vs prod); then define separate profiles (e.g. `default`, `prod`) in `io_config.yaml` and set `profile: prod` in the sink.
+- **`config`** is a key-value map passed to the BigQuery `export` call. It controls *where* and *how* data is written (e.g. `table_id`, `if_exists`, `database`, `overwrite_types`). It is merged with the default `if_exists: append`. Credentials come from the profile, not from `config`.
+
+## How it works
+
+- **Messages**: A message with the format `{"data": {...}, "metadata": {...}}` writes its data, with the metadata in a `metadata` column.
+- **Dataset and table**: The sink creates the dataset if it does not exist. The load job appends to the table, or creates it when it is missing.
+- **Schema**: Column types are cast to match an existing table. Use `overwrite_types` to set types explicitly.
+
+## Optional config
+
+```yaml
+config:
+  table_id: project_id.dataset_id.table_id
+  if_exists: "append"
+  database: project_id   # override project when table_id is dataset.table
+
+  # Override column types
+  overwrite_types:
+    created_at: TIMESTAMP
+    my_column: STRING
+```
+
+## Config parameters
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `table_id` | string | BigQuery table identifier. Use `project_id.dataset_id.table_id` or `dataset_id.table_id` (project from profile or `database`). | *(required)* |
+| `database` | string | Default project when `table_id` is two-part (`dataset_id.table_id`). Overrides the profile project if set. | profile project |
+| `if_exists` | string | Behavior when the table already exists: `append` (add rows), `replace` (truncate existing rows), or `fail` (throw an error). | `append` |
+| `overwrite_types` | object | Map of column name to BigQuery type (e.g. `STRING`, `INT64`, `TIMESTAMP`, `RECORD`). Used as the load job schema. | None |
+| `unique_constraints` | list | Column names for upsert. When set with `unique_conflict_method` and `if_exists: append`, the batch is written with `MERGE` instead of an append. | None |
+| `unique_conflict_method` | string | `UPDATE` updates rows that match `unique_constraints`. `IGNORE` leaves them unchanged and inserts only new rows. Required for the `MERGE`. | None |
+| `create_dataset` | boolean | Create the dataset if it does not exist. | `true` |

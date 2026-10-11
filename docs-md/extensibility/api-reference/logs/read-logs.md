@@ -1,0 +1,72 @@
+# Read logs
+
+`GET /api/pipelines/:pipeline_uuid/logs`
+
+**`pipeline_uuid`** (string, required)
+
+Pipeline UUID of the logs.
+
+Example: `example_pipeline`
+
+**`_limit`** (integer)
+
+Maximum number of logs to be returned in the API response.
+
+Example: `20`
+
+**`_offset`** (integer)
+
+Skip the first N logs, where N equals `_offset`.
+
+Example: `10`
+
+**`start_timestamp`** (integer)
+
+Read logs on or after a specified timestamp.
+
+Example: `1677648116`
+
+**Request**
+
+```curl
+curl --request GET \
+  --url 'http://localhost:6789/api/pipelines/example_pipeline/logs?_limit=20&_offset=0&start_timestamp=1677648116&api_key=zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
+  --header 'OAUTH-TOKEN: some_really_long_string'
+```
+
+**Response**
+
+```json
+{
+  "logs": [
+    {
+      "block_run_logs": [
+        {
+          "name": "solitary_brook.log",
+          "path": "/home/src/mage_data/default_repo/pipelines/example_pipeline/.logs/54/20230308T045259/solitary_brook.log",
+          "content": "very_long_content"
+        },
+        {
+          "name": "load_titanic.log",
+          "path": "/home/src/mage_data/default_repo/pipelines/example_pipeline/.logs/54/20230308T045259/load_titanic.log",
+          "content": "very_long_content"
+        }
+      ],
+      "pipeline_run_logs": [
+        {
+          "name": "pipeline.log",
+          "path": "/home/src/mage_data/default_repo/pipelines/example_pipeline/.logs/55/20230308T045408/pipeline.log",
+          "content": "very_long_content \"timestamp\": 1678251278.430712, \"uuid\": \"3de507ebca894100b20ae4a1645724d7\"}\n"
+        },
+        {
+          "name": "pipeline.log",
+          "path": "very_long_content"
+        }
+      ],
+      "total_block_run_log_count": 2,
+      "total_pipeline_run_log_count": 2
+    }
+  ],
+  "metadata": {}
+}
+```

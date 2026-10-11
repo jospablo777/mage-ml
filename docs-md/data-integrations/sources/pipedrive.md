@@ -1,0 +1,50 @@
+# Pipedrive
+
+## Configuration
+
+To connect to the Pipedrive CRM API and set up the Pipedrive source in MageML, provide the following configuration parameters:
+
+| Key          | Description                                                                                                 | Sample Value           |
+| ------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `start_date` | The start date in ISO format (`YYYY-MM-DDTHH:MM:SSZ`) to begin syncing data from Pipedrive (for supported resources). | `2010-01-01T00:00:00Z`  |
+| `api_key`    | API key used to authenticate your Pipedrive account and access CRM data.                                      | `fake_api_key...`       |
+
+<br/>
+
+## What is Pipedrive?
+
+[Pipedrive](https://www.pipedrive.com/) is a customer relationship management (CRM) platform for sales teams. This source extracts CRM data such as deals, contacts, and activities.
+
+<br/>
+
+## How to Get Your `api_key`
+
+1. Log in to your [Pipedrive account](https://app.pipedrive.com/).
+2. Click on your profile picture (top right) → **Company Settings** → **Personal Preferences** → **API**.
+3. Copy your personal API token.
+
+For more information, refer to [Pipedrive's API documentation](https://pipedrive.readme.io/docs/core-api-concepts-authentication).
+
+<br/>
+
+## Supported Streams in Pipedrive
+
+The Pipedrive source extracts data from the following objects (streams):
+
+- Activities
+- Activity Types
+- Currency
+- Deal Products
+- Deals
+- Dealflow
+- Filters
+- Files
+- Notes
+- Organizations
+- Persons
+- Pipelines
+- Products
+- Stages
+- Users
+
+<br/>

@@ -1,0 +1,224 @@
+# PostgreSQL
+
+![PostgreSQL](https://user-images.githubusercontent.com/78053898/198754309-2ef713a7-62c8-4ea8-9ebb-8c24ed038cb3.png)
+
+<br/>
+
+## Configuration
+
+To set up the PostgreSQL source, provide the following connection parameters:
+
+| Key                 | Description                                                                                      | Sample Value               |
+| ------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
+| `database`          | Name of the database you want to extract data from.                                               | `demo`                       |
+| `host`              | Hostname of your PostgreSQL database.                                                             | `db.bit.io`                  |
+| `password`          | Password for the PostgreSQL user.                                                                 | `abc123...`                  |
+| `port`              | Port number where the database is accessible (typically `5432`).                                  | `5432`                       |
+| `schema`            | Schema containing the tables you want to extract.                                                 | `public`                     |
+| `username`          | Username with permissions to read and write from the specified schema.                            | `guest`                      |
+| `replication_slot`  | Logical replication slot name for Change Data Capture (CDC).                                       | `mage_slot`                  |
+| `publication_name`  | Logical replication publication name for CDC.                                                     | `mage_pub`                   |
+
+<br/>
+
+### Optional Configuration
+
+| Key                 | Description                                                                                      | Sample Value |
+| ------------------- | ------------------------------------------------------------------------------------------------ | ------------ |
+| `batch_fetch_limit` | Number of rows to fetch per batch (default is 50,000). Adjust if your instance has sufficient memory. | `50000`      |
+
+<br/>
+
+## Change Data Capture (CDC)
+
+MageML supports 2 types of change data capture with PostgreSQL:
+
+1. Batch query
+1. Log replication
+
+![](https://user-images.githubusercontent.com/78053898/198754309-2ef713a7-62c8-4ea8-9ebb-8c24ed038cb3.png)
+
+### Batch query
+
+MageML will query PostgreSQL in batches using `SELECT`, `WHERE`, and `ORDER BY`
+statements.
+
+### Log replication
+
+MageML supports **Change Data Capture (CDC)** for PostgreSQL using **logical replication**.
+It tracks inserts, updates, and deletes without full table reloads.
+MageML reads PostgreSQL’s Write-Ahead Log (WAL) and applies the changes to the
+destination: it inserts new records, updates existing ones, and marks deleted ones.
+
+#### Setup in PostgreSQL
+
+1. Enable logical replication in Postgres config
+    1. Local Postgres
+        1. Open the `postgresql.conf` file. Here is an example location on Mac OSX:
+            `/Users/<user>/Library/Application Support/Postgres/var-14/postgresql.conf`.
+        1. Under the settings section, change the value of `wal_level` to `logical`. The line in your
+        `postgresql.conf` file should look like this:
+```text
+            wal_level = logical
+            ```
+        1. Restart the PostgreSQL service or database. You can do this via the PostgreSQL app or if you’re
+        on Linux, run the following commands:
+```bash
+            sudo service postgresql stop
+            sudo service postgresql start
+            ```
+        1. Run the following query in your PostgreSQL database: `SHOW wal_level`. The result should be:
+
+            | `wal_level` |
+            | --- |
+            | `logical` |
+    1. AWS RDS/Aurora
+        1. Follow this [doc](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraPostgreSQL.Replication.Logical.html#AuroraPostgreSQL.Replication.Logical.Configure)
+            to set up PostgreSQL logical replication for an Aurora PostgreSQL DB cluster
+        1. Logical replication for AWS RDS (PostgreSQL) can be set up in a similar way with the Aurora cluster.
+    2. Azure Database for PostgreSQL
+        1. Azure Database for PostgreSQL supports logical replication for **Flexible Server** and **Single Server** deployments.
+        2. Follow this [Azure guide](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-logical-replication) to enable logical replication on Azure PostgreSQL Flexible Server.
+        3. Make sure the following parameters are set in the Azure portal:
+            - `wal_level` = `logical`
+            - `max_replication_slots` ≥ 1
+            - `max_wal_senders` ≥ 1
+        4. Grant replication privileges to your user:
+
+```sql
+            ALTER ROLE <username> WITH REPLICATION;
+            ```
+        5. Azure also requires that you configure firewall rules to allow your MageML server or IP range to access the PostgreSQL server.
+        6. For more detailed instructions, see: [Set up logical replication on Azure PostgreSQL](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/concepts-logical-replication).
+
+1. Run the following command in PostgreSQL to create a replication slot:
+```sql
+    SELECT pg_create_logical_replication_slot('mage_slot', 'pgoutput');
+    ```
+
+    <sub>The replication slot name `mage_slot` quoted is used as an example in the guide. The actual replication slot name should be unique for each pipeline source. </sub>
+
+    The result should looking something like this:
+
+    | `pg_create_logical_replication_slot` |
+    | --- |
+    | `(mage_slot,0/51A80778)` |
+
+1. Create a publication for all tables or for 1 specific table using the following commands:
+```sql
+    CREATE PUBLICATION mage_pub FOR ALL TABLES;
+    ```
+
+    <sub>`mage_pub` is the default `publication_name` in MageML’s [code](https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/sources/postgresql/__init__.py). Set `publication_name` to use another publication.</sub>
+
+    or for 1 table:
+
+```sql
+    CREATE PUBLICATION mage_pub FOR TABLE some_schema.some_table_name;
+    ```
+
+    <sub>Replace `some_schema` with the schema of the table and `some_table_name` with the name
+    of the table you want to replicate.</sub>
+
+    Run the following command to add or remove a table from publication.
+```sql
+    ALTER PUBLICATION mage_pub ADD/DROP TABLE table_name;
+    ```
+
+1. Verify that the publication was created successfully by running the following command in PostgreSQL:
+```sql
+    SELECT * FROM pg_publication_tables;
+    ```
+
+    The result should looking something like this:
+
+    | `pubname` | `schemaname` | `tablename` |
+    | --- | --- | --- |
+    | `mage_pub` | `public` | `users` |
+
+1. Grant the database user permission to read the replication slot:
+```sql
+    ALTER ROLE <username> WITH REPLICATION;
+    ```
+<br />
+
+#### Create data integration pipeline in MageML
+
+Follow this [guide to create a data integration pipeline](../../guides/data-integration-pipeline.md)
+in MageML.
+
+However, choose <b>PostgreSQL</b> as the source and choose <b>`LOG_BASED`</b> as the
+replication method.
+
+#### How log-based replication works
+
+- The first sync reads the whole table and bookmarks the slot's confirmed position. Each
+  later sync reads the changes after the bookmark: inserts and updates, and deletes,
+  which have `_mage_deleted_at` set. Records have the types of the columns.
+- A sync confirms to PostgreSQL only the bookmark it starts from, which the previous sync
+  completed. If a destination fails, the next sync reads the same changes again.
+- From PostgreSQL 14, a sync stops as soon as it has read the changes committed before it
+  started. Older versions stop after `logical_poll_total_seconds` (default 60) without a
+  change.
+- With unique constraints and the `UPDATE` conflict method, the destination keeps the
+  last change of each key in a batch. A delete marks the row as deleted and keeps its
+  values. When an update changes the primary key, the row of the old key is marked as
+  deleted.
+- Values an update leaves unchanged and PostgreSQL stores out of line (TOAST), such as
+  long text, are not in the log; the source reads them from the table by primary key.
+  For tables without a primary key, run `ALTER TABLE ... REPLICA IDENTITY FULL`.
+- `TRUNCATE` is not replicated.
+
+<br />
+
+#### Testing pipeline end-to-end
+
+Once you’ve created the pipeline, add a few rows into your PostgreSQL table that you just
+created a logical replication for.
+
+You can use the `INSERT` command to add rows. For example:
+
+```sql
+INSERT INTO some_schema.some_table_name
+VALUES (1, 2, 3)
+```
+
+<sub>
+  Replace `some_schema` with the schema of the table and `some_table_name` with the name
+  of the table you want to replicate.
+</sub>
+
+<sub>
+  Change the `VALUES` to match the columns in your table.
+</sub>
+
+##### Verify replication logs being created
+
+Run the following commands in PostgreSQL to check for new logs:
+
+```sql
+SELECT
+  *
+FROM pg_logical_slot_peek_binary_changes('mage_slot', null, null, 'proto_version', '1', 'publication_names', 'mage_pub');
+```
+
+##### Run sync
+
+After you added a few new rows, [create a trigger](../../orchestration/triggers/triggering-pipelines.md#trigger)
+to start running your pipeline and begin syncing data.
+
+<br />
+
+## What is PostgreSQL?
+
+[PostgreSQL](https://www.postgresql.org/) is an open-source relational database system.
+
+Common use cases include:
+
+- Transactional applications
+- Analytical workloads
+- Hybrid OLTP + OLAP systems
+- Data warehousing
+- Business intelligence (BI) and reporting pipelines
+
+<br/>

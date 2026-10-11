@@ -1,0 +1,13 @@
+# Monitoring with Prometheus
+
+## Enable Prometheus
+
+You will need to add `ENABLE_PROMETHEUS` environment variable as `true` in order to
+enable Prometheus style metrics on the \<BASE_PATH\>/metrics route.
+The OpenTelemetry and Prometheus packages it uses are part of the `all` extra, which the image
+built from the repository's Dockerfile includes.
+
+## Prometheus metrics
+
+When enabled, MageML publishes metrics for the HTTP server (Tornado) as well as for
+the Python runtime. The /metrics route will be updated on-demand to respond to scrape requests.

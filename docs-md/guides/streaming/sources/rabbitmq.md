@@ -1,0 +1,42 @@
+# RabbitMQ
+
+## Basic config
+
+```yaml
+
+connector_type: 'rabbitmq'
+connection_host: 'localhost'
+connection_port: 5672
+queue_name: 'default'
+username: 'guest'
+password: 'guest'
+amqp_url_virtual_host: '%2f'
+url_protocol: 'amqp'
+# How many messages the broker sends before they are acked (default 100).
+prefetch_count: 100
+```
+
+The transformer gets one message at a time, as `Payload(method, properties, body)`, with
+the channel in `kwargs['channel']`. The message is acked when the transformer returns,
+unless the transformer acked, nacked or rejected it with the channel. When the
+transformer raises, the message is not acked and RabbitMQ delivers it again.
+
+To process messages in batches, set `batch_size`. The transformer then gets a list of up
+to `batch_size` messages, or of those that arrived within `batch_timeout` seconds, and
+sinks write each batch at once:
+
+```yaml
+batch_size: 100
+batch_timeout: 1.0
+```
+
+You can also control some of the RabbitMQ consumer settings with the following fields.
+
+```yaml
+configure_consume: True
+
+consume_config:
+  auto_ack: False
+  exclusive: False
+  inactivity_timeout: 10.0
+```

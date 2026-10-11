@@ -1,0 +1,153 @@
+# Browse all files
+
+*Add, edit, move, and delete files or folders in your project.*
+
+## How to show the file browser
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/overview.gif" alt="File browser" />
+
+<br />
+
+1. When editing a pipeline, expand the left side panel to show the file browser.
+2. Go to the Files page [http://localhost:6789/files](http://localhost:6789/files).
+3. Launch the Text Editor application.
+
+---
+
+## Right click menu
+
+### File
+
+- Rename file
+- Move file
+- Download file
+- Delete file
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/right-click--file.png" alt="Right clicking a file" />
+
+### Folder
+
+- Open all files in the immediate directory
+- New folder
+- Rename folder
+- Move folder
+- Delete folder
+- Upload files
+- Expand all subfolders
+- Collapse all subfolders
+- New MageML project
+- New dbt project
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/right-click-folder.png" alt="Right clicking a folder" />
+
+---
+
+## File versions
+
+When you save a file after making a change, a new file version is created and stored locally.
+
+You can undo any change to a file by reverting to a previous version (this is different than git).
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/file-versions.gif" alt="File versions" />
+
+---
+
+## Hidden files
+
+The file browser will hide hidden folders and files by default. You can show them by toggling
+the option <b>Show hidden files</b> under the <b>View</b> menu dropdown options.
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/hidden-files.gif" alt="Hidden files" />
+
+---
+
+## Current blocks tab
+
+When editing a pipeline, the left side panel has two tabs: <b>All files</b> (the file browser)
+and <b>Current blocks</b>. The <b>Current blocks</b> tab lists the blocks in the pipeline. Click a
+block there to hide it in the notebook, and click it again to show it. This can help optimize
+vertical screen space while writing code.
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/blocks-in-pipeline.gif" alt="Hide and show blocks in the current pipeline" />
+
+---
+
+## Block files used/unused by pipelines
+
+You can tell if a block is being used by a pipeline (or not used by any pipelines)
+by looking at the related block file's icon in the file browser. This is a quick way
+for users to see which block files are currently being used by *any* pipeline; the specific
+pipeline using a block file is not indicated in the file browser.
+
+You need to be viewing the file browser in the Files (`/files`) and Pipeline Editor
+(`/pipelines/[pipeline_uuid]/edit`) pages specifically. Other pages, modals, or
+components that have a file browser may not have this feature.
+
+**Applicable block directories:** `callbacks`, `conditionals`, `custom`, `data_exporters`,
+`data_loaders`, `dbt`, `extensions`, `markdowns`, `scratchpads`, `sensors`, and `transformers`
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/all-block-files.png" alt="Block files with shared pipeline icons" />
+
+### Block file states
+
+There are three different states for a block file in the file browser that can affect the
+icon in front of the block filename and the filename font color. Note that the square icons
+can be different colors depending on which block directory it is.
+1. **Used by exactly one pipeline**: Filled square icon. For example in the screenshot
+above, `aged_sea.py` and `api_load_data.py` are used by a single pipeline.
+2. **Used by more than one pipeline**: Unfilled cyan diamond icon and filename with cyan
+font color. In the screenshot above, `amazon_s3.yaml` and `ancient_pine.yaml` are used by
+multiple pipelines.
+3. **Not used by any pipeline**: Unfilled square icon. For example in the screenshot above,
+`bigquery_loader.py` is not used by any pipeline.
+
+### Unused block files
+
+If you specifically want to view the block files that are not being used by any pipeline,
+you can apply the "Unused block files" filter found in the file search input at the top of
+the file browser. Non-block files may still be visible when this filter is applied.
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/unused-block-files.png" alt="Unused block files" />
+
+---
+
+## Display files by type
+
+> [!NOTE]
+> The feature is currently only available in the <b>Text Editor</b> application
+
+Instead of viewing all files grouped by its parent directory,
+you can toggle a different view that shows these files flattened and then grouped
+by its file extension type.
+
+This can help browse relevant files faster since you don’t have to dig into each folder
+to find the file you’re looking for.
+
+<p align="center">
+</p>
+
+<img src="https://mage-ai.github.io/assets/dev-ux/file-browser/files-flat.gif" alt="Display files by type" />

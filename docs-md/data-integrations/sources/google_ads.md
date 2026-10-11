@@ -1,0 +1,97 @@
+# Google Ads
+
+*Sync campaign, ad group, keyword, and performance report data from the Google Ads API using OAuth 2.0.*
+
+![Google Ads](https://hellomidia.com.br/wp-content/uploads/2018/06/google-ads.png)
+
+<br/>
+
+## Overview
+
+This source syncs campaign, ad group, ad, keyword, and performance report data from the [Google Ads API](https://developers.google.com/google-ads/api/docs/start). It calls API version **v15**.
+
+> [!WARNING]
+> Google has sunset Google Ads API v15. Requests from this source may be rejected until the connector moves to a supported API version.
+
+Authentication uses user OAuth (not service accounts): the connector requires a `refresh_token` alongside a `developer_token`. Service accounts and Application Default Credentials are **not** supported.
+
+<br/>
+
+## INCREMENTAL Sync
+
+This source handles state internally, meaning **INCREMENTAL sync selection is not supported** in the UI. Bookmarks still resume progress across syncs.
+
+<br/>
+
+## Authentication
+
+This connector uses **two kinds** of credentials:
+
+- **Application credential** (`developer_token`): identifies your app to the Google Ads API. Issued per manager account via [API Center](https://ads.google.com/aw/apicenter). This is not an OAuth token.
+- **User OAuth** (`refresh_token`, `oauth_client_id`, `oauth_client_secret`): proves the user has consented to read their Ads data. The required OAuth scope is `https://www.googleapis.com/auth/adwords`.
+
+Create an OAuth 2.0 client in Google Cloud (Web or Desktop app type), obtain a `refresh_token` for the Ads scope (for example with the [Google OAuth Playground](https://developers.google.com/oauthplayground)), and fill in all three OAuth fields.
+
+<br/>
+
+## Configuration
+
+| Key                   | Required | Default | Description |
+| --------------------- | -------- | ------- | ----------- |
+| `developer_token`     | ✅ | | Google Ads API application token from [API Center](https://ads.google.com/aw/apicenter). Not a user OAuth token. |
+| `oauth_client_id`     | ✅ | | Google Cloud OAuth client ID. |
+| `oauth_client_secret` | ✅ | | Google Cloud OAuth client secret. |
+| `refresh_token`       | ✅ | | Long-lived user refresh token for the `https://www.googleapis.com/auth/adwords` scope. |
+| `login_customer_ids`  | ✅ | | List of `{ customerId, loginCustomerId }` pairs. `customerId` is the account to read; `loginCustomerId` is the manager (MCC) account used to access it, or `null` for direct access. |
+| `start_date`          | ✅ | | Fetch data newer than this date. Format: ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`). |
+| `end_date`            | | now | Upper bound for report syncs. |
+| `request_timeout`     | | `900` | HTTP timeout in seconds for API calls. |
+| `conversion_window`   | | `30` | Conversion attribution window in days. Allowed: `1` to `30`, `60`, `90`. |
+| `query_limit`         | | `1000000` | Max rows per query for core streams. |
+
+<br/>
+
+## Sample config
+
+```yaml
+developer_token: YOUR_DEVELOPER_TOKEN
+oauth_client_id: YOUR_CLIENT_ID.apps.googleusercontent.com
+oauth_client_secret: YOUR_CLIENT_SECRET
+refresh_token: YOUR_REFRESH_TOKEN
+start_date: '2023-01-01T00:00:00Z'
+login_customer_ids:
+  - customerId: '1234567890'
+    loginCustomerId: '0987654321'
+```
+
+<br/>
+
+## How to get `login_customer_ids`
+
+`customerId` is the account whose data you want to sync. `loginCustomerId` is the manager (MCC) account you use to access it. Leave it `null` when there is no manager hop.
+
+1. Sign in to [Google Ads](https://ads.google.com/).
+2. Open the account switcher in the top bar.
+3. Copy the numeric ID for each account (strip dashes: `123-456-7890` → `'1234567890'`).
+
+<br/>
+
+## How to get a `developer_token`
+
+A developer token belongs to a [manager (MCC) account](https://support.google.com/google-ads/answer/6139186). Client-only accounts cannot open API Center.
+
+1. Sign in to a manager account.
+2. Open [API Center](https://ads.google.com/aw/apicenter) (**Tools & Settings → Setup → API Center**).
+3. Complete the API sign-up. Your token may start as **Test** tier; request **Basic** or **Standard** access when you are ready for production volume.
+4. Set the token as `developer_token` in your config.
+
+<br/>
+
+## Related links
+
+- [Google Ads API: Get Started](https://developers.google.com/google-ads/api/docs/start)
+- [OAuth with Google Ads API](https://developers.google.com/google-ads/api/docs/oauth/overview)
+- [Developer token access levels](https://developers.google.com/google-ads/api/docs/access-levels)
+- [Manager accounts overview](https://support.google.com/google-ads/answer/6139186)
+
+<br/>

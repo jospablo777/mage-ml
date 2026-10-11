@@ -1,0 +1,114 @@
+# Retrying block runs from a pipeline run
+
+## Automatic retry
+MageML supports configuring automatic retry for block runs in the following ways.
+Automatic retry applies to standard block runs and data integration pipeline stream block runs.
+When multiple retry configs are present, MageML merges them in this order:
+project `metadata.yaml` `retry_config`, pipeline `metadata.yaml` `retry_config`, then block `retry_config`.
+Later configs override earlier values for matching keys only when the later value is not blank or `null`.
+
+> [!NOTE]
+> A resolved retry config retries only when `retries` is greater than `0`. If `retries` is blank,
+> `null`, or not set at the pipeline or block level, MageML inherits the lower-precedence value. To turn
+> off inherited retries, set `retries: 0` on the pipeline or block. If `delay` or `max_delay` is blank
+> or `null`, MageML also inherits the lower-precedence value; if the resolved config still does not set
+> them, MageML uses `5` and `60` seconds.
+
+### 1. Global retry config
+The global `retry_config` is saved in the project's `metadata.yaml` and applies
+to all block runs by default. Pipeline-level and block-level retry settings can
+override the global values.
+
+When retry settings are configured at multiple levels, MageML merges them from
+least specific to most specific: global project defaults, then pipeline-level
+settings, then block-level settings. For the same retry field, the most specific
+configured value wins. Blank or `null` retry fields are ignored during this
+merge, so a blank pipeline or block field inherits the next available value from
+the less-specific config instead of clearing it.
+
+Set it in the project's `metadata.yaml`. If `exponential_backoff` is omitted, it
+defaults to `true`.
+
+```yaml
+retry_config:
+  # Number of retry times
+  retries: 3
+  # Initial delay (in seconds) before retry. If exponential_backoff is true,
+  # the delay time is multiplied by 2 for the next retry
+  delay: 5
+  # Maximum accumulated retry delay before scheduling the next attempt
+  max_delay: 60
+  # Whether to use exponential backoff retry
+  exponential_backoff: true
+```
+
+### 2. Block level retry config
+Add `retry_config` to the block config in pipeline's `metadata.yaml`. The block level `retry_config` will
+override the global and pipeline-level `retry_config` for fields that have
+configured values. Leave a block retry field blank or set it to `null` to inherit
+that field from the pipeline or global config. Here is an example
+```yaml
+blocks:
+- uuid: example_data_loader
+  type: data_loader
+  upstream_blocks: []
+  downstream_blocks: []
+  retry_config:
+    retries: 2
+    delay: 5
+    max_delay: 10
+    exponential_backoff: false
+  ...
+```
+
+### 3. Pipeline level `retry_config`
+Add `retry_config` to the pipeline config in pipeline's `metadata.yaml`. The pipeline level `retry_config` will
+override the global `retry_config` for fields that have configured values unless
+a block sets its own retry value. Leave a pipeline retry field blank or set it to
+`null` to inherit that field from the global config. Here is an example
+```yaml
+blocks:
+- ...
+- ...
+- ...
+retry_config:
+  retries: 2
+  delay: 5
+  max_delay: 10
+  exponential_backoff: false
+  ...
+```
+The retry logs show in the same block run log page.
+
+## Retry incomplete blocks
+
+- Supported pipeline types: Standard and Integration pipelines
+- If a pipeline run fails, you can retry from the failed block
+run instead of restarting the entire pipeline run, from the individual pipeline run page
+(`/pipelines/[pipeline_uuid]/runs/[pipeline_run_id]`). The **Retry run** button in the
+pipeline's **Runs** table restarts the entire pipeline run.
+- At the top of the individual pipeline runs page, there should be a red
+`Retry incomplete blocks` button. Click on it, and the block runs should
+retry from the failed block.
+- For Integration pipelines, this broad retry keeps the existing behavior and
+retries every incomplete stream in the run.
+
+## Retry from selected block
+
+- Supported pipeline types: Standard and Integration pipelines
+- If you want to retry block runs for a pipeline run starting from a specific
+block (regardless of the block run's status), go to the same page for the individual
+pipeline run.
+- Select a block run row, and a blue `Retry from selected block` button should appear.
+- Note that the `Retry from selected block` button will only appear if the pipeline
+run is not currently running.
+- If there is a failed block run and you try to retry from a selected block that is
+downstream from that failed block, you may get `upstream_failed` block run errors.
+
+### Accessing the individual pipeline runs page
+
+1. Click on a pipeline from the main Pipelines Dashboard.
+2. Click on the `Runs` section or on an individual trigger from the `Triggers` section.
+3. Underneath the `Block runs` column of the pipeline runs table, there is a link that
+shows the completed and total block runs (e.g. `3 / 4`). Click on that link to open the
+individual pipeline runs page, which lists the block runs specific to a pipeline run.

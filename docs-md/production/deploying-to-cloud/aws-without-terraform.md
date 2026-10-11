@@ -1,0 +1,299 @@
+# MageML and Native Cloud Environments
+
+- [Amazon EC2](#amazon-ec2)
+- [Amazon ECS](#amazon-ecs). For Amazon ECS, we recommend using Terraform. Here
+  is the [guide](using-terraform.md).
+
+---
+
+# Amazon EC2
+
+MageML can be run in an Amazon EC2 instance, either by
+
+- using SSH to port forward localhost requests to your EC2 instance
+- opening port 6789 on your EC2 instance for access
+
+---
+
+## Prerequisites
+
+MageML runs on Python 3.12. uv installs it on the instance if it is missing, so the
+instance only needs `git` and `curl`.
+
+When launching an EC2 instance, use a current Ubuntu LTS AMI.
+
+---
+
+## Install MageML
+
+Once the EC2 instance is in a running state, SSH into the instance. You can SSH
+using the UI in AWS or you can SSH from your terminal using a command like the
+following:
+
+```bash
+ssh -i [path_to_key_pair] [ec2_username]@[ec2_public_dns_name]
+```
+
+Note: the `ec2_username` is typically `ubuntu` on an Ubuntu AMI.
+
+An example SSH command could look like this:
+
+```bash
+ssh -i ~/.ssh/aws-ec2.pem ubuntu@ec2-55-186-46-136.us-west-2.compute.amazonaws.com
+```
+
+Once you SSH into the instance, install uv and MageML from source:
+
+```bash
+sudo apt update && sudo apt install -y git curl
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+git clone https://github.com/jospablo777/mage-ml.git && cd mage-ml
+uv sync --locked --no-default-groups --extra postgres
+```
+
+> [!NOTE]
+> `pip install mage-ai` and the repository's `scripts/run_ec2.sh` script install upstream
+> Mage from PyPI, not MageML.
+
+---
+
+## Manual connection via Open Port
+
+You can also connect to the MageML app running on your EC2 instance by editing
+your security group to expose the port that MageML runs on.
+
+1. When creating your EC2 instance, edit your security group rules to allow a
+   Custom TCP connection to port 6789 (the port that MageML runs on).
+2. Connect to your EC2 instance via SSH and [install MageML](#install-mageml) if you
+   haven't already.
+3. Start MageML on your EC2 instance from the `mage-ml` folder:
+
+```bash
+   uv run --no-sync mage init <your_repo_name>
+   uv run --no-sync mage start <your_repo_name>
+   ```
+
+4. Then from your browser, access `<ec2-instance-public-ip>:6789` to access the
+   MageML app, where `ec2-instance-public-ip` is the Public IPv4 address of your
+   EC2 instance.
+
+   ***
+
+## Manual connection via SSH
+
+You can also start a connection to MageML running on an EC2
+instance over SSH. This process involves opening two separate SSH connections:
+
+1. Connect to the EC2 instance to run MageML. First, open an SSH
+   connection with your EC2 Key Pair and your EC2 login information to connect
+   the EC2 instance.
+
+```bash
+   ssh -i path/to/key/pair.pem ec2_username@ec2_public_dns_name
+   ```
+
+   If MageML is not installed, [install it](#install-mageml). uv creates a
+   virtual environment in the `mage-ml` folder, so the instance's system Python is
+   left alone.
+
+   Next, from the `mage-ml` folder, initialize your MageML project using `mage init`.
+   You can change the project name as you prefer.
+
+```bash
+   uv run --no-sync mage init default_repo
+   ```
+
+   Then start the MageML app. This will start the app at
+   [localhost:6789](http://localhost:6789), but you can't directly access it yet
+   as it runs on the EC2 instance.
+
+```bash
+   uv run --no-sync mage start default_repo
+   ```
+
+2. Forward all requests sent to [localhost:6789](http://localhost:6789) on
+   _your_ computer back to the EC2 instance. This means that as you interact the
+   user interface on your computer, the data will be forwarded to the EC2
+   instance for execution. Open another terminal window and run
+```bash
+   ssh -i path/to/key/pair.pem -N -L 6789:localhost:6789 ec2_username@ec2_public_dns_name
+   ```
+   which opens up a SSH connection to your EC2 instance which forwards requests
+   to your localhost.
+   - The `-N` option tells your SSH client to not send user commands to the EC2
+     server through this connection since this connection is only for port
+     forwarding
+
+Now you can access MageML at [localhost:6789](http://localhost:6789) on
+your computer, and all executions will be processed on your EC2 instance.
+
+---
+
+# Amazon ECS
+
+You can launch MageML in an Amazon Elastic Container Service (ECS) cluster,
+allowing you to perform tasks like:
+
+- [Using the MageML code editor in the ECS cluster](#running-the-mageml-app-in-ecs)
+- [Running a MageML pipeline in production](#running-a-mageml-pipeline-in-ecs)
+
+## Running the MageML App in ECS
+
+Follow the steps below to launch the MageML app on your ECS cluster:
+
+1. Build a Docker image for the MageML app from the [MageML repository's Dockerfile](https://github.com/jospablo777/mage-ml/blob/master/Dockerfile) (`docker build --platform linux/amd64 -t mageml .`). Upload this Docker image to a repository like Amazon ECR so ECS tasks can pull and create Docker containers using this image.
+
+2. Create a new ECS cluster. Both Fargate and EC2 based clusters work for this
+   task.
+3. Create a new task definition based off the template below. This task, when
+   run:
+
+   1. Creates a new MageML project named "default_repo".
+   2. Starts the MageML app, serving requests sent to "localhost:6789"
+
+```json
+   {
+     "containerDefinitions": [
+       {
+         "name": "mage-data-prep-start",
+         "image": "[aws-account-id].dkr.ecr.[region].amazonaws.com/[your-image-repo-name]:[tag]",
+         "portMappings": [
+           {
+             "containerPort": 6789,
+             "hostPort": 6789,
+             "protocol": "tcp"
+           }
+         ],
+         "essential": true,
+         "entryPoint": ["sh", "-c"],
+         "command": ["mage init default_repo && mage start default_repo"],
+         "interactive": true,
+         "pseudoTerminal": true
+       }
+     ],
+     "family": "mage-data-prep",
+     "networkMode": "awsvpc",
+     "requiresCompatibilities": ["FARGATE", "EC2"],
+     "cpu": "256",
+     "memory": "512",
+     "executionRoleArn": "arn:aws:iam::[aws-account-id]:role/[ecs-task-execution-role-name]"
+   }
+   ```
+
+   You must specify:
+
+   - `"image"` - Docker image URI. If using ECR, you can use the template above
+     and fill in the following information:
+      | Parameter              | Description                              |
+      | ---------------------- | ---------------------------------------- |
+      | `aws-account-id`       | AWS Account ID                           |
+      | `region`               | Region in which ECR is being used        |
+      | `your-image-repo-name` | Name of the repository holding your repo |
+      | `tag`                  | tag for the version of the image to use  |
+   - `"executionRoleArn"` - Name of the
+     [ECS Task Execution Role](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_execution_IAM_role.html).
+     Assigning this role enables this task to make AWS API calls. This is needed
+     to pull the Docker image from an ECR repository. Fill in the following
+     information:
+      | Parameter                      | Description                     |
+      | ------------------------------ | ------------------------------- |
+      | `aws-account-id`               | AWS Account ID                  |
+      | `ecs-task-execution-role-name` | Name of task execution IAM role |
+
+     This parameter can be ignored if you are not using Amazon ECR
+
+   In addition, you may want to edit the allocated CPU and Memory resources
+   based on the type of data you plan to handle and intensity of the
+   computations performed.
+
+4. Launch the task in your new cluster. Make sure the following conditions are
+   met:
+   - Task is launched in a VPC with a public subnet and has a Public IP
+     assigned. Allows you to connect to the ECS task and use the code editor.
+   - Task security group allows an inbound TCP connection to port 6789 from your
+     IP (or the IP with which the app will be accessed). Enables you to connect
+     to port 6789 where the MageML app is running.
+   - The task has network routes to any service that you plan to connect to,
+     such as data warehouses or Amazon ECR. Simplest way to add these network
+     routes are to add outbound connection rules to the security group.
+5. Find the public IP of your task. Then to access the MageML app, go to
+   `your-public-ip:6789`. If you followed the previous steps correctly, you
+   should be able to access the MageML app running in your cluster.
+
+## Running a MageML Pipeline in ECS
+
+If you already have a MageML pipeline developed, you can deploy the pipeline as an
+ECS task that periodically executes.
+
+Follow the steps below to set up running a MageML pipeline in ECS.
+
+**Prerequisite:** You must have already created a MageML project containing the
+pipeline you wish to deploy to ECS. Make sure this repository includes any data
+files and configuration setting files needed for the pipeline to run.
+
+1. Create a new Docker image for running your pipeline: start `FROM` a MageML image built from the [MageML repository's Dockerfile](https://github.com/jospablo777/mage-ml/blob/master/Dockerfile) and copy your project into it. Make sure to add any other environment variables defined locally to the image to be able to access those secrets in the cluster. Upload this Docker image to a repository like Amazon ECR so ECS tasks can pull and deploy containers using the image.
+2. If not already created, create a new ECS cluster. This task can be run on both Fargate and EC2 based instances
+3. Create a new task definition based off the template below. This task calls `mage run` on your pipeline when started.
+
+```json
+   {
+     "containerDefinitions": [
+       {
+         "name": "mage-data-prep-deploy",
+         "image": "[aws-account-id].dkr.ecr.[region].amazonaws.com/[your-image-repo-name]:[tag]",
+         "essential": true,
+         "entryPoint": ["sh", "-c"],
+         "command": ["mage run default_repo [your-pipeline-name]"],
+         "interactive": true,
+         "pseudoTerminal": true
+       }
+     ],
+     "family": "mage-data-prep",
+     "networkMode": "awsvpc",
+     "requiresCompatibilities": ["FARGATE"],
+     "cpu": "1024",
+     "memory": "2048",
+     "executionRoleArn": "arn:aws:iam::[aws-account-id]:role/[ecs-task-execution-role-name]"
+   }
+   ```
+
+   You must specify:
+
+   - `"image"` - Docker image URI. If using ECR, you can use the template above
+     and fill in the following information:
+      | Parameter              | Description                              |
+      | ---------------------- | ---------------------------------------- |
+      | `aws-account-id`       | AWS Account ID                           |
+      | `region`               | Region in which ECR is being used        |
+      | `your-image-repo-name` | Name of the repository holding your repo |
+      | `tag`                  | tag for the version of the image to use  |
+   - `"executionRoleArn"` - Name of the
+     [ECS Task Execution Role](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_execution_IAM_role.html).
+     Assigning this role enables this task to make AWS API calls. This is needed
+     to pull the Docker image from an ECR repository. Fill in the following
+     information:
+      | Parameter                      | Description                     |
+      | ------------------------------ | ------------------------------- |
+      | `aws-account-id`               | AWS Account ID                  |
+      | `ecs-task-execution-role-name` | Name of task execution IAM role |
+
+     This parameter can be ignored if you are not using Amazon ECR
+
+   - `your-pipeline-name` - name of the pipeline to run. This pipeline must be
+     stored in the repository you added to your Docker image.
+
+   In addition, you may want to edit the allocated CPU and Memory resources
+   based on the type of data you plan to handle and intensity of the
+   computations performed.
+
+4. Launch the task in your new cluster. Make sure your task has network routes
+   to any service that you plan to connect to, such as data warehouses or Amazon
+   ECR. Simplest way to add these network routes are to add outbound connection
+   rules to the security group.
+
+5. Your pipeline is now running in the ECS task.
+
+To run a pipeline without the MageML server or its database, you can also export it as a
+standalone Docker service with `mage export service`. See
+[Pipeline services](../pipeline-services.md).

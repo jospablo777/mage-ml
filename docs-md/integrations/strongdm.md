@@ -1,0 +1,54 @@
+# StrongDM
+
+![StrongDM](https://www.strongdm.com/docs/images/logos/strongdm.svg)
+
+## Setup Docker environment
+
+To connect to a StrongDM Resource from inside the MageML container, you may need to add:
+<br/>
+    If using docker run command:
+    <br/>
+```--add-host=host.docker.internal:host-gateway
+        <br/>
+    If using docker-compose setup:
+    <br/>
+        ```yaml
+        services:
+            server:
+                .....
+                extra_hosts:
+                    - "host.docker.internal:host-gateway"
+```
+
+## Install StrongDM CLI tool
+
+To install the StrongDM CLI tool, open a shell in the MageML container and run the installation script from the repository (in `/home/src` in the image):
+```bash
+./scripts/strongdm/install.sh
+```
+(In case you receive a "Permission denied" error, executing ```
+chmod u+x scripts/strongdm/install.sh ``` should fix this issue)
+
+Now, login in your StrongDM account using:
+```bash
+sdm login
+```
+
+And connect to the desired Resources using:
+```bash
+sdm connect RESOURCE-NAME
+```
+
+## Accessing StrongDM Resources
+
+Now, to connect to a Resource, simply add the required host parameter as "localhost" and the respective port number
+
+MongoDB Source example:
+
+```yaml
+database: admin
+host: localhost
+password: example
+port: 10006 # Specified in StrongDM Resource Generation
+user: root
+```

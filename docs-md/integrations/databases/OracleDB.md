@@ -1,0 +1,85 @@
+# OracleDB
+
+## Add credentials
+
+1. Create a new pipeline or open an existing pipeline.
+2. Expand the left side of your screen to view the file browser.
+3. Scroll down and click on a file named `io_config.yaml`.
+4. Enter the following keys and values under the key named `default` (you can
+   have multiple profiles, add it under whichever is relevant to you)
+
+```yaml
+version: 0.1.1
+default:
+  ORACLEDB_USER: ...
+  ORACLEDB_PASSWORD: ...
+  ORACLEDB_HOST: ...
+  ORACLEDB_PORT: 1521
+  ORACLEDB_SERVICE: ...   # Service name (e.g. ORCL, XEPDB1)
+  ORACLEDB_MODE: thin      # Optional: 'thin' (default) or 'thick'
+```
+
+Use `ORACLEDB_MODE: thick` only if you need the Oracle thick mode (e.g. for advanced features); otherwise `thin` is recommended.
+
+<br />
+
+> [!NOTE]
+> Oracle is not a connection for SQL blocks. Use a Python block.
+
+## Using Python block
+
+1. Create a new pipeline or open an existing pipeline.
+2. Add a data loader, transformer, or data exporter block (the code snippet
+   below is for a data loader).
+3. Select `Generic (no template)`.
+4. Enter this code snippet (note: change the `config_profile` from `default` if
+   you have a different profile):
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.oracledb import OracleDB
+from os import path
+from pandas import DataFrame
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+@data_loader
+def load_data_from_oracledb(**kwargs) -> DataFrame:
+    query = 'SELECT 1 FROM DUAL'
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+
+    with OracleDB.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        return loader.load(query)
+```
+
+5. Run the block.
+
+### Export a dataframe to OracleDB
+
+```python
+from mage_ai.settings.repo import get_repo_path
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.oracledb import OracleDB
+from os import path
+from pandas import DataFrame
+
+if 'data_exporter' not in globals():
+    from mage_ai.data_preparation.decorators import data_exporter
+
+@data_exporter
+def export_data_to_oracledb(df: DataFrame, **kwargs) -> None:
+    config_path = path.join(get_repo_path(), 'io_config.yaml')
+    config_profile = 'default'
+    table_name = 'your_table_name'
+
+    with OracleDB.with_config(ConfigFileLoader(config_path, config_profile)) as loader:
+        loader.export(df, table_name=table_name, if_exists='replace')
+```
+
+## Connection modes
+
+- **thin** (default): Pure Python driver; no Oracle Client installation required.
+- **thick**: Uses Oracle Client libraries; required for some advanced scenarios. Ensure Oracle Instant Client or full client is installed and configured when using `ORACLEDB_MODE: thick`.

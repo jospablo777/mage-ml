@@ -1,0 +1,132 @@
+# Alerting status updates in Telegram
+
+*Get status updates in your Telegram Group.*
+
+<img src="https://cdn0.iconfinder.com/data/icons/social-media-2092/100/social-56-512.png" alt="Telegram" width="300" />
+
+## Overview of steps
+
+1. Set Bot with **BotFather** for Telegram
+2. Get the chat_id of your Telegram Group
+3. Update the project settings
+
+---
+
+## Set Bot with BotFather for Telegram
+
+Follow these
+[Tutorial](https://www.directual.com/lesson-library/how-to-create-a-telegram-bot)
+to setup Bot with BotFather and **Don't Forget to add your Bot to the Group**.
+
+---
+
+## Get the chat_id of your Telegram Group
+
+1. Open https://web.telegram.org/ and Follow the instructions
+2. Click your Telegram Group and your Group chat_id is on your url like `https://web.telegram.org/a/#-7222xxxxxx`
+
+## Update the project settings
+
+Once you’ve set up the **Bot** and get the `chat_id` of your group, you need to set the webhook like example below:
+
+Here is an example webhook (yours may vary):
+
+```
+https://api.telegram.org/bot{your_token:from_botfather}/sendMessage?chat_id=-7222xxxxxx
+```
+
+Follow these steps to add that webhook URL to your project settings:
+
+1. Open MageML in your browser (e.g. http://localhost:6789/).
+2. Open a pipeline and start editing it (e.g.
+   http://localhost:6789/pipelines/example_pipeline/edit).
+3. In your left sidebar in the file browser, scroll all the way down and click
+   on a file named `metadata.yaml`.
+4. In the `metadata.yaml` file, add a section with the following
+   configuration or update the existing `notification_config` section:
+
+```yaml
+    notification_config:
+      alert_on:
+        - trigger_failure
+        - trigger_passed_sla
+    ```
+
+    If you omit the `alert_on` section it will default to `trigger_failure` and `trigger_passed_sla`.
+
+    Options:
+
+    - `trigger_failure`: alert when a run of a trigger fails
+    - `trigger_success`: alert when a run of a trigger succeeds
+    - `trigger_passed_sla`: alert when a SLA is missed.
+      - In this context, SLA (Service Level Agreement) is an expected amount of time for the pipeline to complete.
+      - If the pipeline runs _longer_ than the SLA, an alert will be sent.
+
+5. In the `metadata.yaml` file, add the following values:
+
+```yaml
+    notification_config:
+      alert_on:
+        ...
+      telegram_config:
+        webhook_url: ...
+    ```
+
+    Change the `webhook_url` value to be the webhook URL like mentioned above.
+
+    `metadata.yaml` is rendered as a template when the project loads, so you can read the
+    URL from an environment variable: `webhook_url: "{{ env_var('MAGE_TELEGRAM_WEBHOOK_URL') }}"`.
+
+## Customize message templates
+You can customize message templates in `notification_config`. Here is an example config:
+```yaml
+notification_config:
+  alert_on:
+    ...
+  telegram_config:
+    ...
+  message_templates:
+    failure:
+      title: 'Failed to execute pipeline {pipeline_uuid} at {execution_time}'
+      summary: >
+        Failed to execute pipeline {pipeline_run_url}.
+        Pipeline uuid: {pipeline_uuid}. Trigger name: {pipeline_schedule_name}.
+        Test custom message.
+    success:
+      title: ...
+      summary: ...
+    passed_sla:
+      title: ...
+      summary: ...
+```
+You can customize the message template for `success`, `failure`, `passed_sla` scenarios. For each message template,
+you can specify the sentence on `summary` and the `title`.
+
+To interpolate variables in the message template, you can use `{variable_name}` syntax.
+Here are the supported variables:
+1. `execution_time`
+1. `pipeline_run_url`
+1. `pipeline_schedule_id`
+1. `pipeline_schedule_name`
+1. `pipeline_schedule_description`
+1. `pipeline_uuid`
+1. `error`
+    * available only for the `failure` message template
+1. `stacktrace`
+    * available only for the `failure` message template
+
+> **Note**: For `pipeline_run_url`, the default host is `http://localhost:6789`. You can specify `MAGE_PUBLIC_HOST` to be
+the host url you want to use in the notification messages.
+
+---
+
+## What next?
+
+Whenever a pipeline run is successfully completed or fails, a Telegram Group message will
+appear in the group you configured the webhook URL for.
+
+Here is an example of what that message could look like:
+
+|                                                                                                        |
+| ------------------------------------------------------------------------------------------------------ |
+| ![Telegram](https://mage-ai.github.io/assets/third-party/telegram-message-run-alert.jpg) |

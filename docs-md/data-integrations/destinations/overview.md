@@ -1,0 +1,26 @@
+# Destinations technical documentation
+
+*A destination is a system where you want the data to be exported. A destination can be a 3rd party API, SaaS, database, data warehouse, or a data lake.*
+
+## Singer spec
+
+MageML uses the data engineering community standard for data integrations called the
+[Singer spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
+
+In addition,
+MageML further standardizes the spec and provides common classes and methods to make implementing them easier and faster.
+
+## Folder structure
+
+Destinations are defined in the `mage_integrations/destinations/` directory.
+
+All destinations should be a subclass of the `Destination` class defined in
+`mage_integrations/destinations/base.py`.
+
+## Configs
+
+* `maximum_batch_size_mb`: The destination processes records in batches. The maximum batch size can be configured.
+
+## Contribute
+
+To contribute a destination, see [Add a new destination](../../contributing/data-integrations/add-new-destination.md).

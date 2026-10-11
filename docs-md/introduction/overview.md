@@ -1,0 +1,68 @@
+# MageML
+
+*Data and ML pipelines in Python, R, Rust and SQL, built for ML engineers.*
+
+MageML is a platform for building, running and shipping data and machine learning
+pipelines. It is based on [Mage](https://github.com/mage-ai/mage-ai) 0.9.79 and runs on
+Python 3.12 with pandas 3, Polars 2 and pyarrow 26.
+
+Each step of a pipeline is a block: a file of Python, SQL, R or Rust that you run and
+inspect in the editor, then schedule. In production, chains of blocks run together and
+compile: consecutive Rust blocks become one optimized program and consecutive R blocks share
+one R session.
+
+## What MageML adds
+
+| | |
+| --- | --- |
+| [Rust blocks](../guides/blocks/rust-blocks.md) | Loaders, transformers and exporters in Rust with Polars, compiled per chain. |
+| [R blocks](../guides/blocks/r-blocks.md) | dplyr and tidyverse blocks with a pinned environment (rv). |
+| [Compiled pipelines](../design/data-pipeline-management.md#pipeline-compilation) | Production runs fuse and compile chains of blocks; MageML checks and builds them ahead of the run. |
+| [Pipeline services](../production/pipeline-services.md) | Export pipelines as a container that runs them without Mage, with an HTTP API and schedules. |
+| [Pipeline performance](../production/pipeline-performance.md) | Benchmarks of pandas, Polars, R and Rust pipelines, and how to make yours fast. |
+| [Data contracts](../guides/blocks/data-contracts.md) | Schema and value rules a block's output must meet. |
+| [Run records](../guides/pipelines/run-records.md) | What each run used, compared and reproduced. |
+| [Experiments](../guides/pipelines/experiments.md) and [model releases](../guides/pipelines/model-releases.md) | MLflow runs linked to pipeline runs, and checks before a model version is promoted. |
+| [Monitoring](../guides/pipelines/monitoring.md) | Drift, missing values, row counts and freshness of block outputs. |
+| [Pipeline environments](../guides/pipelines/pipeline-environments.md) and [resources](../guides/pipelines/resources.md) | Packages per pipeline, and CPU, memory and GPU limits per block. |
+| [Feast features](../guides/blocks/feast-features.md) | Read and write features in a Feast feature server with values kept exact. |
+| [ColumnAtlas](../design/column-atlas.md) | Explore a block's output: profiles and charts over the whole dataset. |
+
+The [release notes](https://github.com/jospablo777/mage-ml/blob/master/docs/development/release-notes.md)
+list every change from Mage 0.9.79, including the fixes to values Mage changed or lost
+without an error.
+
+## 🏔️ [Core design principles](../design/core-design-principles.md)
+
+Every user experience and technical design decision adheres to these principles.
+
+|     |                                                                                                           |                                                                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 💻 | [Easy developer experience](../design/core-design-principles.md#easy-developer-experience)                     | Open-source engine that comes with a custom notebook UI for building data pipelines.                                         |
+| 🚢 | [Engineering best practices](../design/core-design-principles.md#engineering-best-practices-built-in) | Build and deploy data pipelines using modular code. No more writing throwaway code or trying to turn notebooks into scripts. |
+| 💳 | [Data as a first-class citizen](../design/core-design-principles.md#data-is-a-first-class-citizen)             | Designed from the ground up specifically for running data-intensive workflows.                                               |
+| 🪐 | [Scaling made simple](../design/core-design-principles.md#scaling-is-made-simple)                           | Analyze and process large data quickly for rapid iteration.                                                                  |
+
+## 🛸 [Core abstractions](../design/core-abstractions.md)
+
+These are the fundamental concepts that Mage uses to operate.
+|          |                                                        |                                                                                                                                                             |
+| -------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🏢      | [Project](../design/core-abstractions.md#project)           | Like a repository on GitHub; this is where you write all your code.                                                                                         |
+| 🪈      | [Pipeline](../design/core-abstractions.md#pipeline)         | Contains references to all the blocks of code you want to run, charts for visualizing data, and organizes the dependency between each block of code.        |
+| 🧱      | [Block](../design/core-abstractions.md#block)               | A file with code that can be executed independently or within a pipeline.                                                                                   |
+| 🤓      | [Data product](../design/core-abstractions.md#data-product) | Every block produces data after it's been executed. These are called data products in Mage.                                                                 |
+| ⏰        | [Trigger](../design/core-abstractions.md#trigger)           | A set of instructions that determine when or how a pipeline should run.                                                                                     |
+| 🏃‍♂️ | [Run](../design/core-abstractions.md#run)                   | Stores information about when it was started, its status, when it was completed, any runtime variables used in the execution of the pipeline or block, etc. |
+
+## Credits
+
+MageML builds on the work of Mage's contributors:
+
+<p align="center">
+  <a href="https://github.com/mage-ai/mage-ai/graphs/contributors">
+<img src="https://contrib.rocks/image?repo=mage-ai/mage-ai&columns=10" />
+  </a>
+</p>
+
+Report MageML issues and ideas in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).

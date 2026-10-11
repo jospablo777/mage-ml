@@ -1,0 +1,127 @@
+# Running dbt tests
+
+You can write tests for your dbt models by following
+[dbt’s documentation](https://docs.getdbt.com/docs/build/tests).
+
+When a pipeline runs, each dbt model block runs `dbt build --select <model>`, which
+runs the model and then the tests that reference it.
+
+For example, if you add a dbt block to your pipeline for a dbt model named
+`my_third_dbt_model` and a test file named `test_my_third_dbt_model.sql` with
+the following folder structure:
+
+```
+demo_project/
+|   dbt/
+|   |   demo/
+|   |   |   models/
+|   |   |   |   example/
+|   |   |   |   |   my_third_dbt_model.sql
+|   |   |   tests/
+|   |   |   |   example/
+|   |   |   |   |   test_my_third_dbt_model.sql
+```
+
+Then whenever your pipeline runs, the test in `test_my_third_dbt_model.sql`
+also runs after the model `my_third_dbt_model` is built.
+
+Any errors in the dbt test will also fail the pipeline run. The output of the
+test will be logged and viewable when inspecting the pipeline’s run and logs.
+
+---
+
+## Folder and file naming conventions
+
+dbt selects the tests that reference the model with `ref`, wherever they are in the
+tests folder. Mirroring the path of the model keeps tests easy to find.
+
+For example, if your model is named `my_third_dbt_model` and it's located
+under the folder named `example`, the test file can be located here:
+
+```
+models/example/my_third_dbt_model.sql
+```
+
+```
+tests/example/my_third_dbt_model.sql
+```
+
+Note that the model file and test file have the same name (e.g.
+`my_third_dbt_model.sql`) and are nested under a folder with identical names
+(e.g. `example`).
+
+---
+
+## Example
+
+The content of the dbt model named `my_third_dbt_model` is:
+
+```sql
+SELECT 1 AS n_constant_number
+```
+
+### Failed test
+
+The content of the test for `my_third_dbt_model.sql` that will cause a test
+failure is:
+
+```sql
+SELECT n_constant_number
+FROM {{ ref('my_third_dbt_model') }}
+GROUP BY n_constant_number
+HAVING (n_constant_number = 1)
+```
+
+Here is the sample output of a failed test for the above files:
+
+```
+23:57:21  Running with dbt=1.3.0
+23:57:21  Found 3 models, 4 tests, 0 snapshots, 0 analyses, 289 macros, 0 operations, 0 seed files, 6 sources, 0 exposures, 0 metrics
+23:57:21
+23:57:23  Concurrency: 1 threads (target='dev')
+23:57:23
+23:57:23  1 of 1 START test my_third_dbt_model ........................................... [RUN]
+23:57:23  1 of 1 FAIL 1 my_third_dbt_model ............................................... [FAIL 1 in 0.76s]
+23:57:24
+23:57:24  Finished running 1 test in 0 hours 0 minutes and 3.08 seconds (3.08s).
+23:57:24
+23:57:24  Completed with 1 error and 0 warnings:
+23:57:24
+23:57:24  Failure in test my_third_dbt_model (tests/example/my_third_dbt_model.sql)
+23:57:24    Got 1 result, configured to fail if != 0
+23:57:24
+23:57:24    compiled Code at target/compiled/demo/tests/example/my_third_dbt_model.sql
+23:57:24
+23:57:24  Done. PASS=0 WARN=0 ERROR=1 SKIP=0 TOTAL=1
+
+```
+
+### Successful test
+
+The content of the test for `my_third_dbt_model.sql` that will yield a passing
+test is:
+
+```sql
+SELECT n_constant_number
+FROM {{ ref('my_third_dbt_model') }}
+GROUP BY n_constant_number
+HAVING (n_constant_number = 0)
+```
+
+Here is the sample output of a successful test for the above files:
+
+```
+23:59:56  Running with dbt=1.3.0
+23:59:56  Found 3 models, 4 tests, 0 snapshots, 0 analyses, 289 macros, 0 operations, 0 seed files, 6 sources, 0 exposures, 0 metrics
+23:59:56
+23:59:57  Concurrency: 1 threads (target='dev')
+23:59:57
+23:59:57  1 of 1 START test my_third_dbt_model ........................................... [RUN]
+23:59:58  1 of 1 PASS my_third_dbt_model ................................................. [PASS in 0.72s]
+23:59:59
+23:59:59  Finished running 1 test in 0 hours 0 minutes and 3.00 seconds (3.00s).
+23:59:59
+23:59:59  Completed successfully
+23:59:59
+23:59:59  Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1
+```

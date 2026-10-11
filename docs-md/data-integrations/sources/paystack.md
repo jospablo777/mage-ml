@@ -1,0 +1,19 @@
+# Paystack
+
+## Configuration
+
+To set up the Paystack source, provide the following configuration parameters:
+
+| Key               | Description                                                                                                      | Sample Value          |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `start_date`       | Start date in ISO 8601 format (`YYYY-MM-DDTHH:MM:SSZ`) to begin pulling data. If bookmarks are available, MageML prioritizes the latest bookmark. | `2010-01-01T00:00:00Z` |
+| `secret_key`       | Secret key from your Paystack dashboard used to authenticate API requests.                                       | `fake_api_key...`      |
+| `request_timeout`  | (Optional) Timeout (in seconds) for API requests to Paystack (default: 300 seconds).                             | `300`                  |
+
+<br/>
+
+## What is Paystack?
+
+[Paystack](https://paystack.com/) is a payments platform for businesses in Africa. It accepts payments via credit card, debit card, bank transfers, and mobile money. This source syncs the `transactions` and `customers` streams.
+
+<br/>

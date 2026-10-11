@@ -1,0 +1,63 @@
+# Core Design Principles
+
+<img src="https://user-images.githubusercontent.com/78053898/198752891-1e823231-f5eb-48ea-8a6d-91e60ec368c9.svg" alt="Core design principles" />
+
+## Easy developer experience
+
+Open-source engine that comes with a custom notebook UI for building data
+pipelines.
+
+- MageML comes with a specialized notebook UI for building data pipelines.
+
+- Use Python, SQL, [R](../guides/blocks/r-blocks.md) and [Rust](../guides/blocks/rust-blocks.md)
+  together in the same pipeline.
+
+- Set up locally and get started developing with a single command.
+
+- Deploying to production is fast using native integrations with major cloud
+  providers.
+
+## Engineering best practices built-in
+
+Build and deploy data pipelines using modular code. No more writing throwaway
+code or trying to turn notebooks into scripts.
+
+- Writing reusable code is easy because every block in your data pipeline is a
+  standalone file.
+
+- Data validation is written into each block and tested every time a block is
+  run.
+
+- Operationalizing your data pipelines is easy with built-in observability, data
+  quality monitoring, and lineage.
+
+- Each block of code has a single responsibility: load data from a source,
+  transform data, or export data anywhere.
+
+## Data is a first class citizen
+
+Designed from the ground up specifically for running data-intensive workflows.
+
+- Every block run produces a data product (e.g. dataset, unstructured data,
+  etc.)
+
+- Every data product can be automatically partitioned.
+
+- Each pipeline and data product can be versioned.
+
+- Backfilling data products is a core function and operation.
+
+## Scaling is made simple
+
+Analyze and process large data quickly for rapid iteration.
+
+- Transform very large datasets through a native integration with Spark.
+
+- Run chains of blocks in one process, with outputs passed in memory, and compile
+  consecutive Rust blocks into one program. See
+  [block fusion](data-pipeline-management.md#block-fusion).
+
+- Run thousands of pipelines simultaneously and manage transparently through a
+  collaborative UI.
+
+- Execute SQL queries in your data warehouse to process heavy workloads.

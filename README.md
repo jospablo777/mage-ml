@@ -1,10 +1,72 @@
-# Mage ML
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/mageml-dark.svg">
+    <img alt="MageML" src="docs/logo/mageml-light.svg" height="44">
+  </picture>
+</p>
 
-A fork of [Mage OSS](https://github.com/mage-ai/mage-ai) for building and running data pipelines. This fork updates Python dependencies, uses uv for package management, and maintains the `mage_ai` import namespace and `mage` command.
+<p align="center">
+  Data and ML pipelines in Python, R, Rust and SQL, built for ML engineers.
+</p>
 
-MageML runs on Python 3.12 (support for Python 3.14 is planned) and uses pandas 3, NumPy 2, Polars 2, and SQLAlchemy 2. Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
+MageML is a platform for building, running and shipping data and machine learning
+pipelines. Each step is a block, a file of Python, SQL, R or Rust that you run and inspect
+in the editor, then schedule. It is based on [Mage](https://github.com/mage-ai/mage-ai)
+0.9.79 and builds on the work of the Mage team and its contributors, to whom we are
+grateful. It keeps Mage's `mage_ai` package and `mage` command, and runs on Python 3.12
+with pandas 3, Polars 2, pyarrow 26, NumPy 2 and SQLAlchemy 2. Support for Python 3.14 is
+planned.
 
-## Install from source
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/compiled-chains.dark.svg">
+  <img alt="A pipeline with a pandas block, a compiled chain of Rust blocks and an R chain" src="docs/images/diagrams/compiled-chains.light.svg">
+</picture>
+
+## Documentation
+
+The documentation reads on GitHub in **[docs-md/](docs-md/README.md)**, with every page,
+image and diagram. The same pages run as a site with search: `docs/docs.sh`, then
+http://localhost:3333.
+
+| Start here | |
+| --- | --- |
+| [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv or Docker and create a project |
+| [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
+| [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
+| [Rust blocks](docs-md/guides/blocks/rust-blocks.md) and [Rust setup](docs-md/guides/blocks/rust-setup.md) | Blocks in Rust with Polars |
+| [R blocks](docs-md/guides/blocks/r-blocks.md), [R setup](docs-md/guides/blocks/r-setup.md) and [R packages](docs-md/guides/blocks/r-packages.md) | Blocks in R with packages locked by rv |
+| [Export pipelines as a service](docs-md/production/export-a-service.md) and the [service console](docs-md/production/service-console.md) | Run pipelines without MageML |
+| [Pipeline performance](docs-md/production/pipeline-performance.md) | Measurements and good practices |
+| [Pipeline documentation](docs-md/guides/pipelines/documentation.md) | A README for each pipeline |
+| [All pages](docs-md/README.md) | The full index |
+
+## What MageML adds
+
+- **Rust blocks**: loaders, transformers and exporters in Rust with Polars. Consecutive
+  Rust blocks compile into one program with one optimized query.
+  ([guide](docs-md/guides/blocks/rust-blocks.md))
+- **R blocks** with a locked package environment (rv); consecutive R blocks share one
+  session. ([guide](docs-md/guides/blocks/r-blocks.md))
+- **Compiled production runs**: compilation is a performance optimization. Triggers and
+  schedules fuse chains of blocks and compile them, and MageML checks and builds pipelines
+  ahead of their runs. ([performance](docs-md/production/pipeline-performance.md))
+- **Pipeline services**: export pipelines as a Docker image that runs them without Mage,
+  with an HTTP API, schedules, run history and metrics.
+  ([guide](docs-md/production/export-a-service.md))
+- **ML engineering**: data contracts, run records, MLflow experiments, model release checks,
+  output monitoring, per-pipeline environments, resource limits and a Feast client.
+- **Pipeline documentation**: a README per pipeline in Markdown or Quarto, with images.
+  ([guide](docs-md/guides/pipelines/documentation.md))
+- **ColumnAtlas**: profiles and charts of every block output, over the whole dataset.
+- **Self-contained**: MageML sends no usage statistics, and sign-in uses only the identity
+  providers you configure.
+- **No AI integration**: MageML calls no AI or LLM service; your code and data stay with
+  you.
+
+Every change from Mage 0.9.79 is in the [release notes](docs/development/release-notes.md),
+including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.
+
+## Quick start
 
 ```bash
 git clone https://github.com/jospablo777/mage-ml.git
@@ -14,9 +76,23 @@ uv run --no-sync mage init my_project
 uv run --no-sync mage start my_project
 ```
 
-Select additional integrations with `--extra`, for example `--extra s3` or `--extra dbt`. A subsequent `uv sync` removes extras that are not selected. Use `uv run --no-sync` when running an environment already synchronized with the required extras.
+The install builds a Rust package, so it needs Rust ([rustup](https://rustup.rs)). Open
+http://localhost:6789, sign in with `admin@admin.com` and `admin`, and follow the tutorial
+[a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md). Other
+ways to install, such as into your own environment or with Docker, are in the
+[Quickstart](docs-md/getting-started/setup.md).
 
-The `all` extra selects the container dependency profile. The `integrations` extra supplies connector dependencies; the separate `mage_integrations` package still requires its own installation.
+Select more integrations with `--extra`, for example `--extra s3` or `--extra dbt`. A later
+`uv sync` removes extras that are not selected, so use `uv run --no-sync` in an environment
+already synchronized. The `all` extra selects the container profile; the `integrations`
+extra supplies connector dependencies, and the `mage_integrations` package installs
+separately.
+
+## Editing the documentation
+
+The pages are in [`docs/`](docs/), written for Mintlify. After changing them, run
+`uv run python scripts/docs/export_markdown.py` to update [`docs-md/`](docs-md/README.md);
+a test fails while the two differ.
 
 ## Development
 
@@ -25,12 +101,11 @@ make dev_env
 make test
 ```
 
-See [the development guide](README_dev.md) for extras, frontend development, and dependency changes. See [the fork audit](docs/development/fork-audit.md) for validation results and remaining release blockers.
-
-## Documentation
-
-The [upstream documentation](https://docs.mage.ai) describes pipeline configuration, scheduling, connectors, and the user interface. Upstream installation commands and container images install Mage OSS rather than this fork.
+See [the development guide](README_dev.md) for extras, frontend development and dependency
+changes.
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](LICENSE). MageML is a fork of Mage by Mage Technologies, under the
+same license. Language and tool logos in the diagrams are from
+[Simple Icons](https://simpleicons.org) (CC0) and belong to their owners.

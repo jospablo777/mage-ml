@@ -1,0 +1,164 @@
+# Helm
+
+![](https://avatars.githubusercontent.com/u/15859888?s=200&v=4)
+
+Deploy MageML to a Kubernetes cluster with Helm. Use the chart's `values.yaml` to customize deployment topology, dependencies, and storage.
+
+> [!NOTE]
+> The Helm chart is maintained by upstream Mage and deploys the upstream `mageai/mageai` image by
+> default. MageML has no published image: build one from the repository's Dockerfile, push it to
+> your registry, and set `image.repository` and `image.tag` to it.
+
+---
+
+# Prerequisites
+
+## Install Helm
+
+```bash
+brew install helm
+```
+
+```bash
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+sudo apt-get install apt-transport-https --yes
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update
+sudo apt-get install helm
+```
+
+Full installation guide: https://helm.sh/docs/intro/install/
+
+## Setup a Kubernetes Cluster
+
+### Local
+[Enable Kubernetes](https://docs.docker.com/desktop/kubernetes/#enable-kubernetes) in Docker Desktop to start a Kubernetes cluster locally.
+
+Other options for starting a Kubernetes cluster locally:
+* [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
+* [Minikube](https://minikube.sigs.k8s.io/docs/start/)
+
+### AWS EKS
+Follow the [guide](aws/setup.md#deploy-to-eks-cluster) to set up the EKS cluster.
+
+### Google Kubernetes Engine (GKE)
+Follow the [guide](https://cloud.google.com/kubernetes-engine/docs/deploy-app-cluster#create_cluster) to create a GKE cluster.
+
+---
+
+# Deploy MageML using Helm
+
+Upstream Mage Helm repo: https://mage-ai.github.io/helm-charts/
+
+### Add Helm repository
+
+```bash
+helm repo add mageai https://mage-ai.github.io/helm-charts
+```
+
+### Install with your image
+
+```bash
+helm install my-mageai mageai/mageai \
+  --set image.repository=[your-registry]/mageml --set image.tag=latest
+```
+
+### Get the default values
+
+To customize the deployment, save the chart's default values and edit them:
+
+```bash
+helm show values mageai/mageai > values.yaml
+```
+
+Then install or upgrade using your file:
+
+```bash
+helm install --values values.yaml my-mageai mageai/mageai
+# or
+helm upgrade --install my-mageai mageai/mageai --values values.yaml
+```
+
+---
+
+# Customize deployment
+
+The chart supports many options. Key areas are summarized below; for the full reference, see the [Mage Helm Chart values reference](https://github.com/mage-ai/helm-charts/blob/master/charts/mageai/values.yaml) in the chart repository.
+
+## Deployment topology
+
+- **`replicaCount`**: number of MageML replicas (default: `1`). Increase for high availability or more concurrent requests and pipeline runs. When using multiple replicas, you must enable Redis (see [Dependencies](#dependencies)).
+- **`standaloneScheduler`**: when `true`, splits MageML into separate **web server** and **scheduler** deployments so you can scale and schedule them independently. Use `scheduler.replicaCount` and `webServer.replicaCount` instead of `replicaCount` when enabled.
+
+## Dependencies
+
+- **PostgreSQL** (`postgresql.enabled`): required for production (pipelines, triggers, and metadata). Enable and set `auth.username`, `auth.password`, and `auth.database`, or use an external database and set `MAGE_DATABASE_CONNECTION_URL`.
+- **Redis** (`redis.enabled`): required when `replicaCount` > 1, for distributed locking and caching. You can use an external Redis by setting `customRedisURL` and leaving `redis.enabled: false`.
+
+## Container image
+
+- **`image.repository`**, **`image.tag`**, **`image.pullPolicy`**: control which image is used. The default repository, `mageai/mageai`, is upstream Mage; set it to your MageML image.
+- **`imagePullSecrets`**: use for private registries; the secret must exist in the target namespace.
+
+## Storage and volumes
+
+Project code must be available at `/home/src` inside the container. You can provide it in two ways:
+
+1. **`extraVolumes` / `extraVolumeMounts`** (default): the chart typically mounts a volume named `mage-fs` at `/home/src`. Point it to your project:
+   - **Local / hostPath:** set `extraVolumes` to a `hostPath` with your MageML project path.
+   - **Cloud (EKS, GKE, AKS):** provision a **ReadWriteMany** PersistentVolume (e.g. EFS, Filestore, Azure Files) and a PersistentVolumeClaim, then use that claim in `extraVolumes` / `extraVolumeMounts`.
+
+2. **`persistence.enabled: true`**: use the chart's built-in PersistentVolume. Set `persistence.storageClassName` and `persistence.size` (e.g. `5Gi`). For cloud filesystems (e.g. EFS), you can use `persistence.csi` if supported by the chart.
+
+### Example: PVC for project code (EKS / GKE / Azure)
+
+After creating a ReadWriteMany PVC (e.g. [EKS EFS PVC](https://github.com/mage-ai/mage-ai-terraform-templates/blob/master/aws-eks/kube/efs-pvc.yaml), [GKE Filestore](https://cloud.google.com/kubernetes-engine/docs/concepts/persistent-volumes#dynamic_provisioning), or [AKS storage](https://learn.microsoft.com/en-us/azure/aks/concepts-storage#persistent-volume-claims)):
+
+```yaml
+extraVolumeMounts:
+  - name: mage-fs
+    mountPath: /home/src
+
+extraVolumes:
+  - name: mage-fs
+    persistentVolumeClaim:
+      claimName: your-pvc-name
+```
+
+## Service and ingress
+
+- **`service.type`**: default is `LoadBalancer`; set to `ClusterIP` or `NodePort` if needed. **`service.port`** defaults to `6789`.
+- **`service.annotations`**: use for cloud load balancers (e.g. AWS NLB, GCP).
+- **`ingress`**: set `ingress.enabled: true` and configure `ingress.className`, `ingress.hosts`, and `ingress.tls` for external access. For production, consider the [Mage-Ingress chart](https://github.com/mage-ai/helm-charts/tree/master/charts/ingress).
+
+## Environment and configuration
+
+- **`config`**: key-value environment variables for the MageML container (e.g. `USER_CODE_PATH: /home/src/default_repo`).
+- **`secrets`**: chart-created secrets injected as env vars. Prefer a secret manager (e.g. AWS Secrets Manager, Azure Key Vault) in production.
+- **`existingSecret`**: use an existing Secret for env vars; takes precedence over `secrets` if both are set.
+- **`extraEnvs`**: additional env vars, including `valueFrom` (e.g. downward API for `metadata.namespace`).
+
+## Resources and scheduling
+
+- **`resources`**: set CPU/memory `limits` and `requests` for the MageML container.
+- **`nodeSelector`**, **`tolerations`**, **`affinity`**: control pod placement.
+- **`livenessProbe`** / **`readinessProbe`**: default to `/api/status` on the http port; customize or replace with `customLivenessProbe` / `customReadinessProbe`.
+- **`hpa`**: Horizontal Pod Autoscaler (commented out by default).
+
+## Quick reference: common overrides
+
+| Use case | Key values |
+|----------|------------|
+| Production with database | `postgresql.enabled: true`, `redis.enabled: true` |
+| Multiple replicas | `replicaCount: 2`, `redis.enabled: true` |
+| Private registry | `image.repository`, `imagePullSecrets` |
+| Custom persistent volume| `extraVolumes` / `extraVolumeMounts` with your path or PVC |
+| Persistent storage | `persistence.enabled: true`, `persistence.storageClassName`, `persistence.size` |
+
+---
+
+# Further reading
+
+- [Mage Helm Chart source and values](https://github.com/mage-ai/helm-charts): full values reference in the chart repo
+- [Helm chart releases](https://github.com/mage-ai/helm-charts/releases)
+- [Kubernetes Executor](../executors/k8.md)

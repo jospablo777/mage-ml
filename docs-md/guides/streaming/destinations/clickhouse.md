@@ -1,0 +1,24 @@
+# ClickHouse
+
+## Basic config
+
+```yaml
+connector_type: clickhouse
+profile: default    # profile in the io_config.yaml
+config:
+  table_name: table_name
+```
+Enter the DB connection credentials in [`io_config.yaml`](../../../development/io_config.md) file and specify the profile in the config.
+
+## Optional fields
+
+These keys go under `config`.
+
+```yaml
+config:
+  table_name: table_name
+  database: database                # Override the database
+  create_table_statement: CREATE TABLE ...  # SQL to run when the table does not exist
+```
+
+Without `create_table_statement`, the sink builds the `CREATE TABLE` statement from the data.

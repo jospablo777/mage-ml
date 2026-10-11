@@ -1,0 +1,70 @@
+# Snowflake
+
+*How to configure Snowflake as a destination in MageML to write pipeline data to Snowflake using batch loads, optional key-pair auth, and custom warehouse settings.*
+
+![Snowflake logo](https://user-images.githubusercontent.com/78053898/198754338-a8aeb12e-6e23-45e5-b130-7a1979a2b31d.png)
+
+---
+
+## Overview
+
+Use **Snowflake** as a destination in MageML to load structured data into your cloud data warehouse. MageML supports both **row-by-row insertion** and **batch upload** modes, and integrates with Snowflake using **username/password** or **key-pair authentication**.
+
+This destination is ideal for exporting transformed pipeline data for analytics, BI tools, or data lakehouse modeling.
+
+---
+
+## Required Configuration
+
+Provide the following credentials when configuring Snowflake as a destination:
+
+| Key                   | Description                                                                                                             | Example Value             | Required |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------|----------------------------|----------|
+| `account`              | Your Snowflake [account identifier](https://docs.snowflake.com/en/user-guide/admin-account-identifier.html).           | `abc1234.us-east-1`        | ✅        |
+| `database`            | Name of the Snowflake database to write to.                                                                             | `DEMO_DB`                  | ✅        |
+| `schema`              | Schema within the database where the table will be created.                                                             | `PUBLIC`                   | ✅        |
+| `table`               | Target table that MageML creates or inserts into.                                                                       | `dim_users_v1`             | ✅        |
+| `username`            | Snowflake user with `INSERT` and `CREATE TABLE` permissions.                                                            | `guest`                    | ✅        |
+| `warehouse`           | Virtual warehouse used to execute queries and ingest data.                                                              | `COMPUTE_WH`               | ✅        |
+| `use_batch_load`      | If `true`, enables batch loading instead of row-by-row inserts. Recommended for performance.                            | `true` in the config template; `false` if omitted | ❌        |
+| `disable_double_quotes`| If `true`, column and table names will not be wrapped in double quotes. Disabling may reduce case-sensitivity issues.   | `false` *(default)*        | ✅        |
+
+---
+
+## Optional Connection Parameters
+
+| Key                   | Description                                                                                                 | Example Value                        |
+|------------------------|-------------------------------------------------------------------------------------------------------------|--------------------------------------|
+| `password`             | Password for the Snowflake user.                                                                            | `abc123...`                          |
+| `private_key_file`     | Path to the private key file for key-pair authentication.                                                   | `/path/to/key.p8`                    |
+| `private_key_file_pwd` | Passphrase for the private key file.                                                                        | `abc123...`                          |
+| `role`                 | Snowflake role to use for the session.                                                                      | `ANALYST_ROLE`                       |
+
+[Enable key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth)
+
+---
+
+## Optional Settings
+
+| Key                   | Description                                                                                                                             | Example Value |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|---------------|
+| `skip_schema_creation`| If `true`, MageML skips running the `CREATE SCHEMA` command. Useful if the schema already exists. [See issue](https://github.com/mage-ai/mage-ai/issues/3416) | `true`        |
+| `lower_case`           | If `true`, MageML converts all column names to lowercase. Default is `true`.                                                        | `true`        |
+
+---
+
+## Notes
+
+- Set `use_batch_load: true` for large datasets to improve performance and reduce API calls.
+- When using **key-pair authentication**, ensure the private key is generated and stored securely.
+- If `disable_double_quotes` is `false`, column names will retain their case. Otherwise, names will be treated as case-insensitive.
+- Make sure your user has permission to create tables and write to the specified schema in the selected database and warehouse.
+
+---
+
+## Related Resources
+
+- [Snowflake Account Identifier Format](https://docs.snowflake.com/en/user-guide/admin-account-identifier.html)
+- [Snowflake Key-Pair Authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth)
+- [Snowflake Warehouses Overview](https://docs.snowflake.com/en/user-guide/warehouses.html)
+- [Snowflake SQL Reference](https://docs.snowflake.com/en/sql-reference/)

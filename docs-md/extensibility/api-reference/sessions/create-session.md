@@ -1,0 +1,39 @@
+# Create session
+
+`POST /api/sessions`
+
+**Request**
+
+```curl
+curl --request POST \
+  --url http://localhost:6789/api/sessions \
+  --header 'Content-Type: application/json' \
+  --header 'X-API-KEY: zkWlN0PkIKSN0C11CfUHUj84OT5XOJ6tDZ6bDRO2' \
+  --data '{
+  "session": {
+    "email": "admin@admin.com",
+    "password": "admin"
+  }
+}'
+```
+
+**Response**
+
+```json
+{
+  "session": {
+    "expires": "2023-04-30 03:02:14.781970+00:00",
+    "token": "...",
+    "user": {
+      "avatar": null,
+      "first_name": null,
+      "id": 1,
+      "last_name": null,
+      "owner": true,
+      "roles": null,
+      "roles_display": "Owner",
+      "username": "admin"
+    }
+  }
+}
+```

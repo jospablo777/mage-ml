@@ -1,0 +1,34 @@
+# Native support for Polars
+
+*Serialize and deserialize data using Polars DataFrames.*
+
+MageML supports Polars DataFrames in addition to pandas DataFrames.
+
+```python
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+import polars as pl
+
+@data_loader
+def load_data(*args, **kwargs):
+    df = pl.DataFrame(
+        {
+            'A': [1, 2, 3, 4, 5] * 10,
+            'fruits': ['banana', 'banana', 'apple', 'apple', 'banana'] * 10,
+            'ham': ['a', 'b', 'c', 'd', 'e'] * 10,
+            'dt': ['2023-03-01', '2023-03-02', '2023-03-03', '2023-03-04', '2023-03-05'] * 10,
+            'arr': [[1, 2], [1, 2], [1, 2], [1, 2], [1, 2]] * 10,
+            'obj': [dict(a=[1, 2]), dict(a=[3, 4]), dict(a=[5, 6]), dict(a=[7, 8]), dict(a=[9, 10])] * 10,
+        }
+    )
+    df = df.with_columns(
+        pl.col('dt').str.to_datetime('%Y-%m-%d')
+    )
+    return df
+```
+
+If you return a pandas or Polars DataFrame, it’ll be serialized to disk using PyArrow and stored in Parquet format. When a downstream block loads an upstream block’s output data as an input argument, that data will be deserialized back to the data type before it was serialized.
+
+<img src="https://media.graphassets.com/FBfwDhuzSnyc2O3pLyMS" />
+
+Using Polars and PyArrow here lowers memory usage when serializing data to disk and reading it back. It uses Polars lazy frames, PyArrow partitions, and Parquet features such as reading metadata and schema information without loading the raw data into memory.

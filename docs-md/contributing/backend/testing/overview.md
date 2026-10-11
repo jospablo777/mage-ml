@@ -1,0 +1,32 @@
+# Testing
+
+*Common errors when running the MageML test suite.*
+
+<p align="center">
+</p>
+
+<img src="https://i.pinimg.com/originals/05/70/56/057056dae3c4c8a5c5426f6c458ba001.gif" alt="Testing" />
+
+## Errors
+
+### SQL Alchemy migration error
+
+Delete the `test.db` file located in the directory where you are running the
+`python3 -m pytest ... -x` command.
+
+Example:
+
+```
+sqlite3.OperationalError: index ix_pipeline_run_execution_date already exists
+
+...
+
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) index ix_pipeline_run_execution_date already exists
+[SQL: CREATE INDEX ix_pipeline_run_execution_date ON pipeline_run (execution_date)]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+
+----------------------------------------------------------------------
+Ran 0 tests in 0.038s
+
+FAILED (errors=1)
+```

@@ -1,0 +1,129 @@
+# Project Structure
+
+*How the MageML file directory works and how typical projects are structured.*
+
+## Overview
+
+A MageML project lives inside its own folder, next to the `mage_data` folder where MageML stores the project's data. You can think of a project as an environment: it contains configurations, pipelines, and other project-specific data.
+
+## Project structure
+
+Here is a sample folder structure:
+
+```
+.
+├── mage_data
+└── my-first-project
+    ├── charts
+    ├── custom
+    ├── data_exporters
+    ├── data_loaders
+    ├── dbt
+    ├── extensions
+    ├── interactions
+    ├── pipelines
+    │   └── demo
+    │       ├── __init__.py
+    │       ├── metadata.yaml
+    │       └── README.md
+    ├── scratchpads
+    ├── transformers
+    ├── utils
+    ├── __init__.py
+    ├── io_config.yaml
+    ├── metadata.yaml
+    └── requirements.txt
+```
+
+Let's walk through each folder:
+
+- Each [Block](../core-abstractions.md#block) type has its own directory:
+  - `charts`
+  - [`custom`](../../guides/blocks/custom-blocks.md)
+  - [`data_loaders`](../blocks/data-loader.md)
+  - [`data_exporters`](../blocks/data-exporter.md)
+  - [`extensions`](../../observability/testing/data-validation.md)
+  - [`sensors`](../blocks/sensor.md)
+  - [`scratchpads`](../blocks/scratchpad.md)
+  - [`transformers`](../blocks/transformer.md)
+- Python (`.py`), SQL (`.sql`), [R](../../guides/blocks/r-blocks.md) (`.r`) and
+  [Rust](../../guides/blocks/rust-blocks.md) (`.rs`) blocks of the same type share a directory.
+- dbt assets are stored in the [dbt directory](../../guides/dbt/overview.md).
+- Each [pipeline](../core-abstractions.md#pipeline) is represented by a YAML file in the `pipelines` folder under the project directory: `[project_dir]/pipelines/[pipeline_name]/metadata.yaml`. The pipeline folder can also hold its [documentation](../../guides/pipelines/documentation.md) (`README.md` or `README.qmd`).
+- The `utils` folder is meant to hold custom utilities for your project. For example, [Python scripts](../../development/dependencies/custom-files.md).
+- The `extensions` folder is used for extensions that integrate other data tools, like Great Expectations.
+- Data loader and exporter [configurations](../../development/io_config.md) are stored in the `io_config.yaml` file.
+- The `metadata.yaml` file contains project-level metadata. There's a metadata file in each pipeline as well.
+
+Code can be shared across the entire project.
+
+## Project organization
+
+Blocks can be organized in subdirectories within their respective folders, with no additional configuration. For example, you might have a `data_loaders` folder with subdirectories for `api`, `database`, and `file` data loaders.
+
+You can do the same when creating blocks in the UI: name the block `subfolder_name/block_name` and the subfolder will be automatically created.
+
+This might look like:
+
+```
+.
+└── data_loaders
+    ├── api
+    │   ├── load_bamboo.py
+    │   ├── load_recurly.py
+    │   └── load_stripe.py
+    ├── database
+    |   ├── load_duckdb.py
+    │   └── load_influxdb.py
+    └── file
+        ├── load_avro.py
+        └── load_parquet.py
+```
+
+## Project data
+
+Project-level data is stored in the `mage_data` directory, at the same level as your project folder in the container image (`MAGE_DATA_DIR=/home/src/mage_data`). Outside the image, the default is `~/.mage_data`; set `MAGE_DATA_DIR` to change it.
+
+`mage_data` holds project-level cache data and stores the result of Block runs, which are then returned to the user via the UI. Here are the locations for various components of `mage_data`:
+
+- SQLite DB: `mage_data/[project_folder]/mage-ai.db`
+  - The SQLite DB stores project-level metadata, such as pipeline and block run data. Here's a sample tree tables in the `tables` schema:
+
+```
+    └── tables
+        ├── backfill
+        ├── block_run
+        ├── event_matcher
+        ├── oauth2_access_token
+        ├── oauth2_application
+        ├── permission
+        ├── pipeline_run
+        ├── pipeline_schedule
+        ├── pipeline_schedule_event_matcher_association
+        ├── role
+        ├── secret
+        ├── sqlite_master
+        ├── user
+        └── user_role
+    ```
+
+  - You can connect to the SQLite DB like any other database. The JDBC URL `jdbc:sqlite:PATH`, where PATH is `/home/src/mage_data/[project_folder]/mage-ai.db` in the container image or `~/.mage_data/[project_folder]/mage-ai.db` for a source install.
+- Block output: `mage_data/[project_folder]/pipelines/[pipeline_uuid]/.variables/`
+- Pipeline and block logs: `mage_data/[project_folder]/pipelines/[pipeline_uuid]/.logs/`
+- Cache: `mage_data/[project_folder]/.cache`
+
+To clear project block output, cache data, or log data, consider performing routine operations on this folder. This might be helpful for reducing storage size, optimizing cost, or otherwise maintaining your project.
+
+## Changing the name of your project
+
+### Docker
+
+If you’re running MageML in Docker, change the environment variable `USER_CODE_PATH` to the absolute path where your project lives.
+
+For example, if your original project name was `demo_magic` and the directory is located at `/home/src/demo_magic`,
+then the value of `USER_CODE_PATH` should be: `/home/src/demo_magic`.
+
+### Not using Docker
+
+When you run `mage start [project_name]` on the command line to start MageML,
+the 1st command line argument value is used for your project’s name.

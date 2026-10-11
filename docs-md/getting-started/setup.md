@@ -1,0 +1,215 @@
+# Quickstart
+
+*Install MageML and run your first pipeline.*
+
+## Get MageML
+
+There is no published MageML package or Docker image yet. `pip install mage-ai`,
+`conda install mage-ai` and the `mageai/mageai` image install upstream Mage, not MageML.
+Install MageML from source with [uv](https://docs.astral.sh/uv/), or build the image from
+the repository's Dockerfile.
+
+<details><summary>From source (uv)</summary>
+
+**1. Install the requirements**
+
+Install [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git),
+[uv](https://docs.astral.sh/uv/getting-started/installation/) and Rust with
+[rustup](https://rustup.rs) (see [Rust setup](../guides/blocks/rust-setup.md)). MageML
+runs on Python 3.12; uv installs it if it is missing. Rust builds
+`column-atlas-native`, a package of the repository, and runs Rust blocks.
+
+**2. Install MageML**
+
+```bash
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+uv sync --locked --no-default-groups --extra postgres
+```
+
+**3. Create a project and start the server**
+
+```bash
+uv run --no-sync mage init my_project
+uv run --no-sync mage start my_project
+```
+
+**4. Open MageML**
+
+Open http://localhost:6789 in your browser.
+
+</details>
+
+<details><summary>Into your own environment (uv)</summary>
+
+To add MageML to a Python 3.12 environment you already use:
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
+.venv/bin/mage init my_project
+.venv/bin/mage start my_project
+```
+
+The install compiles the repository's Rust package, so it needs Rust and takes about
+three minutes. Plain `pip install` does not work yet: `column-atlas-native` is not on
+PyPI. Add packages for your blocks to the same environment with
+`uv pip install --python .venv/bin/python <package>`.
+
+</details>
+
+<details><summary>Docker</summary>
+
+### Build the image
+
+Be sure [Docker](https://docs.docker.com/engine/install/) is installed, then build the
+image from the repository:
+
+```bash
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+docker build -t mageml .
+```
+
+### Start a project
+
+Create a folder for your project, change directory into it, and run:
+
+```bash
+docker run -it -p 6789:6789 -v $(pwd):/home/src mageml /app/run_app.sh mage start [project_name]
+```
+```bash
+docker run -it -p 6789:6789 -v "%cd%:/home/src" mageml /app/run_app.sh mage start [project_name]
+```
+
+```bash
+docker run -it -p 6789:6789 -v ${PWD}:/home/src mageml /app/run_app.sh mage start [project_name]
+```
+
+Once the server is running, open `http://localhost:6789` in your browser. On a cloud
+VM, use its external IP address with the port, such as `123.456.78:6789`.
+
+### What's happening?
+
+`docker run` starts a container from the `mageml` image. The `-v` option mounts the
+current folder at `/home/src` in the container, so the project files stay on your
+machine. `/app/run_app.sh` runs the command that follows it.
+
+</details>
+
+<details><summary>Kubernetes</summary>
+
+**1. Start a Kubernetes cluster locally**
+
+[Enable Kubernetes](https://docs.docker.com/desktop/kubernetes/#enable-kubernetes) in Docker Desktop to start a Kubernetes cluster locally. Other options for starting a Kubernetes cluster locally are [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/) and [Minikube](https://minikube.sigs.k8s.io/docs/start/)
+
+**2. Download and update the Kubernetes config file**
+
+Download the Kubernetes config file [here](https://github.com/jospablo777/mage-ml/blob/master/kube/app.yaml).
+Set `image` to an image built from the repository's Dockerfile that your cluster
+can pull, and replace `/path/to/mage_project` with the path where you want to store
+your projects.
+
+**3. Run MageML in the Kubernetes cluster**
+
+Install the command line tool, [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl), if you haven't already.
+Run the command `kubectl create -f kube/app.yaml` to run MageML in a Kubernetes pod. You can check the pod status with command `kubectl get pods -o wide`.
+Set up port forwarding with command `kubectl port-forward mage-server 6789:6789`.
+
+**4. Open MageML**
+
+Open http://localhost:6789 in your browser.
+
+</details>
+
+## Default login credentials
+
+User authentication is on by default. When you first start MageML, the default login
+credentials are:
+
+| Field     | Value        |
+|-----------|--------------|
+| Email  | `admin@admin.com`      |
+| Password  | `admin`      |
+
+The `DEFAULT_OWNER_EMAIL`, `DEFAULT_OWNER_USERNAME` and `DEFAULT_OWNER_PASSWORD`
+environment variables set other credentials for this first user.
+
+> [!WARNING]
+> After logging in for the first time, change the default password or create new user
+> accounts for your team. See [User authentication](../production/authentication/overview.md).
+
+## Run your first pipeline
+
+Open a browser to `http://localhost:6789`. From the pipelines page, select `example_pipeline` and open the notebook view by selecting `Edit pipeline` from the left side nav.
+
+<p align="center">
+<img src="https://mage-ai.github.io/assets/quickstart/open-pipeline.gif" />
+</p>
+
+Select the first block by clicking it and select the "play" icon in the top right to run the block. The block loads data from a dataset.
+
+<details><summary>What's a block?</summary>
+
+A block is a file of code (Python, SQL, R or Rust) that does one step of a pipeline, such
+as loading, transforming or exporting data. A block's output is passed to the blocks that
+depend on it.
+
+</details>
+
+Do the same for the following blocks in the pipeline to transform and export the data.
+
+## Install optional dependencies
+
+MageML's connectors and add-ons are extras in `pyproject.toml`. Select them with `--extra`
+when you install from source:
+
+```bash
+uv sync --locked --no-default-groups --extra postgres --extra s3 --extra dbt
+```
+
+A later `uv sync` removes extras you leave out, so list all the extras you need, or use
+`uv run --no-sync` in an environment already synchronized. For an install into your own
+environment, put the extras in brackets:
+`uv pip install "mage-ml[postgres,s3] @ git+https://github.com/jospablo777/mage-ml"`.
+
+| Extra                  | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `all`                  | the dependency profile of the container image        |
+| `integrations`         | the `mage-integrations` package for data integration pipelines |
+| `airtable`             | Airtable                                             |
+| `azure`                | Azure packages                                       |
+| `bigquery`             | BigQuery                                             |
+| `chroma`               | Chroma                                               |
+| `clickhouse`           | ClickHouse                                           |
+| `dbt`                  | dbt Core and adapters                                |
+| `duckdb`               | DuckDB                                               |
+| `geo`                  | GeoPandas                                            |
+| `google-cloud-storage` | Google Cloud Storage and Google Sheets               |
+| `great-expectations`   | Great Expectations for block tests                   |
+| `hdf5`                 | HDF5 files                                           |
+| `mlflow`               | the MLflow tracking client                           |
+| `mongodb`              | MongoDB                                              |
+| `mysql`                | MySQL                                                |
+| `oracle`               | OracleDB                                             |
+| `pointblank`           | Pointblank data validation                           |
+| `postgres`             | PostgreSQL                                           |
+| `qdrant`               | Qdrant and sentence-transformers                     |
+| `redshift`             | Redshift                                             |
+| `s3`                   | S3                                                   |
+| `snowflake`            | Snowflake                                            |
+| `spark`                | Spark (EMR)                                          |
+| `streaming`            | streaming pipelines                                  |
+| `trino`                | Trino                                                |
+
+The image built from the repository's Dockerfile includes the `all` and `integrations`
+extras. To add other Python packages to a project, see
+[Install dependencies](install-dependencies.md).
+
+## Next steps
+
+Build [a pipeline in Python, Rust and R](polyglot-pipeline.md), or go to the
+[tutorials](../guides/overview.md) to learn how to build your own pipelines.
+
+To connect to a database running in Docker, see this
+[guide](../development/docker/connecting-a-database.md).

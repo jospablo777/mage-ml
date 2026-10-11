@@ -1,0 +1,168 @@
+# Install Python packages using `requirements.txt`
+
+*Add third-party Python packages to your project and pipelines with requirements.txt.*
+
+<p align='center'>
+<img src="https://mage-ai.github.io/assets/development/python-package.png" alt="Python mecha" width="250" />
+</p>
+
+> [!NOTE]
+> For installing packages from the UI and from a source checkout, see [Install dependencies](../../getting-started/install-dependencies.md).
+
+## Add Python packages to `requirements.txt`
+
+### Location
+
+At the root of your project directory, you'll find a file named `requirements.txt`.
+This file is used to specify all the Python packages that your project depends on.
+
+### Path
+
+At the root of your project directory, there is a file named `requirements.txt`. Open this file
+and add the Python package you want installed and available throughout your entire project.
+
+For example, if your project is named `demo_project` then the file will be located at
+`demo_project/requirements.txt`.
+
+### Adding packages
+
+To add a package, open the `requirements.txt` file and list each package on a new line. You can also specify version requirements if needed.
+
+### Example `requirements.txt`:
+
+```
+matplotlib==3.10.0
+tqdm
+```
+In this example the `requirements.txt` file will install:
+
+- matplotlib version 3.10.0
+- tqdm
+
+## Automatic installation
+
+When you run MageML in Docker, from an image built from the repository's Dockerfile, there are two ways to install third-party packages automatically at startup.
+These methods utilize the `USER_CODE_PATH` environment variable, which defines your project path (e.g. `/home/src/project_name`),
+to locate your `requirements.txt` file and install the packages listed there.
+
+<details><summary>Using Command Line Flags</summary>
+
+## Using command line flags
+
+If you run MageML in Docker, the `USER_CODE_PATH` can be set using command line flags. You will need to add these command line flags every time you run a new Docker container.
+
+### Setting `USER_CODE_PATH` in Docker
+
+The `USER_CODE_PATH` environment variable tells MageML where your project code is located within the Docker container. This is essential for features like automatic package installation from `requirements.txt`.
+
+#### Docker run command
+
+To set the `USER_CODE_PATH` when running a MageML container (image built with `docker build -t mageml .`), use the following command structure:
+
+```Shell
+docker run -it -p 6789:6789 -v $(pwd):/home/src \
+  -e USER_CODE_PATH=/home/src/project_name \
+  mageml /app/run_app.sh mage start [project_name]
+```
+Let's break down this command:
+
+- `it`: Runs the container interactively with a pseudo-TTY.
+- `p 6789:6789`: Maps port 6789 from the container to your host machine.
+- `v $(pwd):/home/src`: Mounts your current directory to `/home/src` in the container.
+- `e USER_CODE_PATH=/home/src/project_name`: Sets the `USER_CODE_PATH` environment variable.
+- `mageml`: The image built from the repository's Dockerfile.
+- `/app/run_app.sh mage start [project_name]`: The command to run inside the container.
+
+### Important Notes
+
+1. **Persistence**: The `USER_CODE_PATH` setting is not persistent across new containers. You must include these flags each time you run a new Docker container.
+2. **Project Name**: Replace `[project_name]` with your actual project name in both the `USER_CODE_PATH` and the start command.
+3. **Path Consistency**: Ensure that the path in `USER_CODE_PATH` matches the mount point specified in the `v` flag. In this example, we mount to `/home/src`, so the `USER_CODE_PATH` starts with `/home/src`.
+4. **Working Directory**: The `$(pwd)` in the `v` flag assumes you're running the Docker command from your project's parent directory. Adjust this path if you're running from a different location.
+
+For more information on environment variables, see the [environment variables documentation](../variables/environment-variables.md).
+
+</details>
+
+<details><summary>Using Dockerfile</summary>
+
+## Using Dockerfiles
+
+The `USER_CODE_PATH` tells MageML where your project code is located.
+While this can be done using command-line flags when running Docker containers, it's also possible to set the `USER_CODE_PATH`
+directly in your Dockerfile. This approach can be more convenient for consistent deployments and when building custom images.
+
+```Bash
+FROM mageml
+
+### Set up project-specific arguments
+ARG PROJECT_NAME=[project_name]
+ARG MAGE_CODE_PATH=/home/mage_code
+ENV USER_CODE_PATH=${MAGE_CODE_PATH}/${PROJECT_NAME}
+
+### Set working directory
+WORKDIR ${MAGE_CODE_PATH}
+
+### Copy project files
+COPY ${PROJECT_NAME} ${PROJECT_NAME}
+
+### Set the command to run on container startup
+CMD ["/bin/sh", "-c", "/app/run_app.sh"]
+```
+
+Breakdown of the Dockerfile:
+
+1. `FROM mageml`
+    - Uses the image built from the MageML repository's Dockerfile (`docker build -t mageml .`) as the base image.
+2. Project-specific arguments:
+
+```Bash
+ARG PROJECT_NAME=[project_name]
+ARG MAGE_CODE_PATH=/home/mage_code
+ENV USER_CODE_PATH=${MAGE_CODE_PATH}/${PROJECT_NAME}
+```
+- `PROJECT_NAME`: Should be replaced with your actual project name.
+- `MAGE_CODE_PATH`: Sets the base path for the project code.
+- `USER_CODE_PATH`: Constructs the full path to your project. It is set with `ENV`, not `ARG`, because `run_app.sh` reads it when the container runs and `ARG` values exist only during the build.
+3. `WORKDIR ${MAGE_CODE_PATH}`
+    - Sets the working directory inside the container to the path specified by `MAGE_CODE_PATH`.
+4. `COPY ${PROJECT_NAME} ${PROJECT_NAME}`
+    - Copies your project files from the host machine into the container.
+5. `CMD ["/bin/sh", "-c", "/app/run_app.sh"]`
+    - Specifies the command to run when the container starts, which launches MageML.
+
+To use this Dockerfile:
+
+1. Replace `[project_name]` with your actual project name.
+2. Ensure your project files are in a directory named after your project.
+3. Build the Docker image using this Dockerfile.
+4. Run the container to start MageML.
+
+This Dockerfile sets `USER_CODE_PATH` in the image. By defining it this way, MageML will
+consistently know where to find your project code within the container, without needing to specify it each time you run the container.
+
+Follow the [Repository setup](../../production/ci-cd/local-cloud/repository-setup.md) documentation to deploy this
+Dockerfile to fully automate the installation of third-party Python packages.
+
+</details>
+
+If you run MageML from a source checkout (`uv run mage start`), your shell's environment variables are available to the running server. `run_app.sh` is not used in that case; install packages as described in [Install dependencies](../../getting-started/install-dependencies.md).
+
+### Prerequisites
+
+1. Ensure that the environment variable `USER_CODE_PATH` is set to your project path, using
+the command line flags or the Dockerfile methods.
+
+      Example: `/home/src/project_name`
+
+2. The image starts MageML with a script named `run_app.sh`.
+
+### Installation process
+
+When the container starts:
+
+1. The `run_app.sh` script checks the `USER_CODE_PATH` environment variable.
+2. It locates the `requirements.txt` file within the specified project directory.
+3. All packages listed in `requirements.txt` are installed with `uv pip`, constrained to the versions MageML ships (`MAGE_RUNTIME_CONSTRAINTS`), before the server starts.
+
+This ensures that all required packages are available for your project and pipelines.
