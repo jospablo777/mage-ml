@@ -2,10 +2,8 @@
 title: "Alerting status updates in Slack"
 sidebarTitle: "Slack"
 icon: "slack"
-description: "Get real-time status updates from Mage pipelines directly in your Slack channels."
+description: "Get pipeline status updates in your Slack channels."
 ---
-
-import { ProOnly } from '/snippets/pro/only.mdx';
 
 <img
   alt="Slack"
@@ -16,24 +14,8 @@ import { ProOnly } from '/snippets/pro/only.mdx';
 ## Overview of steps
 
 1. Set up webhooks for Slack
-2. Update Mage project settings
-3. Customize message templates with dynamic variables (Pro only)
-
----
-
-## Configure alerts in the Mage Pro UI
-
-After you create your Slack webhook, you can configure alerts in the Mage Pro UI
-instead of editing `metadata.yaml` directly:
-
-1. For project defaults, go to **Settings > Account > Alerts**.
-2. For one pipeline, open the pipeline and go to **Alerts**. Pipeline-level
-   settings override the project-level alert config for that pipeline.
-3. Choose the alert outcomes, enable Slack, enter the webhook URL, and use
-   **Send test notification** to send a test alert before saving.
-
-You can still reference secrets with values such as
-`{{ env_var('MAGE_SLACK_WEBHOOK_URL') }}`.
+2. Update the project settings
+3. Customize message templates
 
 ---
 
@@ -46,7 +28,7 @@ To send notifications to Slack, you need to configure an incoming webhook:
 
 ---
 
-## Update Mage project settings
+## Update the project settings
 
 Once you’ve set up webhooks for Slack, you should have a webhook URL that Slack
 provides.
@@ -59,7 +41,7 @@ https://hooks.slack.com/services/T01XXXXRKMJ/B04XXXXGY67/1UgUkao8pXXXXPmsuXXXX2l
 
 Follow these steps to add that webhook URL to your project settings:
 
-1. Open the Mage tool in your browser (e.g. http://localhost:6789/).
+1. Open MageML in your browser (e.g. http://localhost:6789/).
 2. Open a pipeline and start editing it (e.g.
    http://localhost:6789/pipelines/example_pipeline/edit).
 3. In your left sidebar in the file browser, scroll all the way down and click
@@ -96,6 +78,9 @@ Follow these steps to add that webhook URL to your project settings:
 
     Change the `webhook_url` value to be the webhook URL you created from Slack.
 
+    `metadata.yaml` is rendered as a template when the project loads, so you can read the
+    URL from an environment variable: `webhook_url: "{{ env_var('MAGE_SLACK_WEBHOOK_URL') }}"`.
+
 ## Customize message templates
 You can customize message templates in `notification_config`. Here is an example config:
 ```yaml
@@ -116,9 +101,10 @@ notification_config:
       details: ...
 ```
 You can customize the message template for `success`, `failure`, `passed_sla` scenarios. For each message template,
-you can specify either `summary` or `details`.
-* If you specify the `summary`, the slack message will be your `summary` + the url of the pipeline run page
-* If you specify the `details`, the `details` will be used as your slack message directly
+you can specify `title` and `details`.
+* `details` is posted as the Slack message.
+* Without `details`, the message is the default message followed by the URL of the pipeline run page.
+  `summary` is not used for Slack.
 
 To interpolate variables in the message template, you can use `{variable_name}` syntax.
 Here are the supported variables:
@@ -135,30 +121,6 @@ Here are the supported variables:
 
 > **Note**: For `pipeline_run_url`, the default host is `http://localhost:6789`. You can specify `MAGE_PUBLIC_HOST` to be
 the host url you want to use in the notification messages.
-
-### 🚀 Pro Only: Interpolate Mage Variables in Message Templates
-
-<ProOnly source="notification" />
-
-If you're using **Mage Pro**, you can interpolate environment variables and other [Mage variables](/development/variables/referencing-variables#accessing-variables-in-mage) directly in your Slack message templates using the familiar Jinja-like syntax:
-
-```yaml
-notification_config:
-  message_templates:
-    failure:
-      details: >
-        Failed at {{ env_var('ENVIRONMENT') }} environment.
-        Pipeline run: {pipeline_run_url}.
-```
-
-In addition to the variables mentioned above (e.g. `execution_time`, `pipeline_uuid`, etc), you can also use the
-following in your message templates in Mage Pro:
-1. `start_time`
-1. `end_time`
-1. `duration` (in seconds)
-1. `env` (this gets the value stored in the `ENV` environment variable)
-
-This makes your Slack notifications more dynamic and context-aware — ideal for multi-environment deployments and advanced workflows.
 
 ---
 

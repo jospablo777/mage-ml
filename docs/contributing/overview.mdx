@@ -2,25 +2,22 @@
 title: "Contributing"
 sidebarTitle: "Overview"
 icon: "handshake-simple"
-description: "We welcome all contributions to Mage; from small UI enhancements to brand new
-cleaning actions. We love seeing community members level up and give people
-power-ups!"
+description: "Contributions to MageML are welcome, from small UI fixes to new features."
 ---
 
 <Frame>
   <img alt="Contributing" src="https://media.giphy.com/media/5cZbRBLhW4tc4/giphy.gif" />
 </Frame>
 
-## 🥾 Choose your adventure
+## Ways to contribute
 
-There _so_ many ways to contribute to Mage! We welcome all contributions, no matter how small.
-
-Start your contribution journey below, whether you're an *apprentice* or a *master of spells*. Once you feel confident in your path, [read on](/contributing/development-environment) to learn how to get started.
+There are many ways to contribute to MageML, and all contributions are welcome. To set up a
+development environment, [read on](/contributing/development-environment).
 
 <AccordionGroup>
-<Accordion title="🧪 Alchemist">
+<Accordion title="Report and fix bugs">
 
-Thanks for leading the charge! The easiest way to contribute is to report bugs or suggest new features.
+The easiest way to contribute is to report bugs or suggest new features.
 
 ### Report bugs
 
@@ -28,71 +25,61 @@ Open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) 
 
 ### Squash bugs
 
-We're always trying to make our project better, but we need your help! Take a look at our [GitHub issues](https://github.com/jospablo777/mage-ml/issues) for small to medium complexity projects and bugs that need fixing.
+Take a look at the [GitHub issues](https://github.com/jospablo777/mage-ml/issues) for small to medium complexity projects and bugs that need fixing.
 
 </Accordion>
-<Accordion title="🤹 Loremaster">
+<Accordion title="Features and docs">
 ### Suggest new features
-We _love_ your suggestions. First take a look at our [roadmap](/about/roadmap) to see if your idea is already planned. You might also consider checking out open issues on [GitHub](https://github.com/jospablo777/mage-ml).
+First take a look at the [roadmap](/about/roadmap) to see if your idea is already planned. You might also consider checking out open issues on [GitHub](https://github.com/jospablo777/mage-ml).
 
 Otherwise, open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) and tell us what you're thinking.
 
 ### Write documentation
-We have _a lot_ of docs. We really hope they're fun to read, but we know they can be improved.
-
-The great news is that they're fun to write, too! The _easiest_ way to contribute is by scrolling to the bottom of the page you'd like to edit (maybe this one) and clicking the "Edit this page" link. You'll be taken to GitHub where you can make your changes and submit a pull request.
+The docs can always be improved. The easiest way to contribute is by scrolling to the bottom of the page you'd like to edit (maybe this one) and clicking the "Edit this page" link. You'll be taken to GitHub where you can make your changes and submit a pull request.
 
 <Frame>
  <img src="/media/edit-docs.png" />
 </Frame>
 
-If you like working in code, that's great too! All of our docs are written in markdown, so you can just pull Mage from [GitHub](https://github.com/jospablo777/mage-ml) and start writing.
+If you like working in code, that's great too! All of our docs are written in markdown, so you can clone the repository from [GitHub](https://github.com/jospablo777/mage-ml) and edit the files in `docs/`.
 
 {/* TODO: add a docs-specific guide */}
 
 </Accordion>
-<Accordion title="🗣️ Bard/Herald">
+<Accordion title="Community support">
 ### Community Support
 
-If you're already an adept Mager, help answer questions in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
+If you know MageML well, help answer questions in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
 
-If you want to take it up a notch, check out our GitHub issues! We have a lot of [open issues](https://github.com/jospablo777/mage-ml/issues) that need your help.
+There are also [open issues](https://github.com/jospablo777/mage-ml/issues) that need help.
 
 </Accordion>
-<Accordion title="🧱 Stonemason">
+<Accordion title="Backend">
 ### Backend development
 
-We're always looking for help with the Mage backend— that might look like refactoring code, adding new features, or fixing bugs.
-
-[Here's](https://github.com/mage-ai/mage-ai/pull/3497) an example of an _amazing_ backend PR that drastically improved dbt functionality in Mage.
-
-Check out our [roadmap](https://airtable.com/shrJctaGt4tvU27uF/tbl5bIlFkk2KhCpL4) for small to large complexity projects that need your help!
+Help with the backend can be refactoring code, adding new features, or fixing bugs. See
+the [roadmap](/about/roadmap) for planned work.
 
 ### Data integration
 
-Mage supports [data integration](/data-integrations/overview) pipelines via the Singer spec. We're always looking for help adding/updating our sources and destinations.
-
-Here's an example of a [great community PR](https://github.com/mage-ai/mage-ai/pull/2277) & here's our [docs on adding a source](/contributing/data-integrations/adapt-existing-source).
+MageML supports [data integration](/data-integrations/overview) pipelines via the Singer spec. Help adding or updating sources and destinations is welcome. See the [docs on adding a source](/contributing/data-integrations/adapt-existing-source).
 
 ### IO operations (SQL block) and templates
 
-Want to help build _awesome_ tools _inside_ the pipeline builder page? Help out with our IO operations by adding new SQL blocks! Here's a PR that implements a [DuckDB IO Class](https://github.com/mage-ai/mage-ai/pull/3463).
+Add IO classes under `mage_ai/io/` for new SQL block sources. For an example, see the upstream PR that added the [DuckDB IO class](https://github.com/mage-ai/mage-ai/pull/3463).
 
-The simplest way you can help is by adding data loader/exporter templates. Here's an example PR that adds a few for [DuckDB](https://github.com/mage-ai/mage-ai/pull/3553).
+The simplest way to help is by adding data loader and exporter templates, as in the upstream PR that added [DuckDB templates](https://github.com/mage-ai/mage-ai/pull/3553).
 
 </Accordion>
 
-<Accordion title="👨‍🎨 Illuminator">
+<Accordion title="Frontend">
 
 ### Frontend development
 
-Want to help build the _future_ of the Mage UI? Help out with our frontend development! We're always looking for help with UI/UX, accessibility, and more. Checkout our [frontend](/contributing/frontend/overview) page for more info.
+Help with UI/UX, accessibility, and more is welcome. See the [frontend](/contributing/frontend/overview) page.
 
 </Accordion>
 
 </AccordionGroup>
 
 Got questions? Ask in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
-
-Anything you contribute, the Mage team and community will maintain. We’re in it
-together!

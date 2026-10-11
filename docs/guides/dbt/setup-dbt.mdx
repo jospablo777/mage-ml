@@ -1,8 +1,8 @@
 ---
-title: "Make dbt magical"
+title: "dbt quickstart"
 sidebarTitle: "New project"
 icon: "arrows-spin"
-description: "⏰ Run dbt models in Mage in under a minute."
+description: "Run dbt models in MageML with a demo project."
 ---
 
 <Frame>
@@ -11,7 +11,14 @@ description: "⏰ Run dbt models in Mage in under a minute."
 
 ## About
 
-Our demo dbt repo currently offers two quickstarts: one that runs a simple dbt pipeline and one that runs a dbt pipeline from an external repo. At this time, running dbt in Mage requires Docker, so both of our demos are `docker compose` based.
+The dbt quickstart repo offers two demos: one that runs a simple dbt pipeline and one that runs a dbt pipeline from an external repo. Both are `docker compose` based.
+
+<Note>
+  The quickstart repo is maintained by the upstream Mage project and its compose file runs the
+  upstream Mage image. To run it with MageML, build an image from the MageML repository's
+  Dockerfile (`docker build -t mageml .`) and use it in place of the Mage image in the compose
+  file.
+</Note>
 
 ## Prerequisites
 
@@ -20,7 +27,7 @@ Our demo dbt repo currently offers two quickstarts: one that runs a simple dbt p
 
 ## Configuration
 
-The following command will clone the [demo repo](https://github.com/mage-ai/dbt-quickstart), copy `dev.env` to `.env` and run `docker compose up` to start Mage _and_ a Postgres database.
+The following command will clone the [demo repo](https://github.com/mage-ai/dbt-quickstart), copy `dev.env` to `.env` and run `docker compose up` to start the app _and_ a Postgres database.
 
 <CodeGroup>
 ```bash Mac/Linux
@@ -39,7 +46,7 @@ docker compose up
 ```
 </CodeGroup>
 
-After running the above command, open the Mage overview page at http://localhost:6789. Click the pipelines icon on the left to enter the pipelines overview.
+After running the above command, open the overview page at http://localhost:6789. Click the pipelines icon on the left to enter the pipelines overview.
 
 ![Open Pipelines](https://mage-ai.github.io/assets/dbt/setup-dbt/go-to-pipelines.gif)
 
@@ -48,7 +55,7 @@ After running the above command, open the Mage overview page at http://localhost
 <AccordionGroup>
 <Accordion title="A simple dbt pipeline" icon="pipe-collar">
 
-First, select the `simple_dbt_python_pipeline` by double-clicking the row from the list of pipelines this will take you directly to the editor. You can also single click,
+First, select the `simple_dbt_python_pipeline` by double-clicking the row from the list of pipelines. This will take you directly to the editor. You can also single click,
 then select the "code" icon from the side nav.
 
 Scroll to the bottom-most cell and click _Execute with all upstream blocks_.
@@ -80,7 +87,7 @@ To see the output, you can use a querying tool (like [DataGrip](https://www.jetb
 </Accordion>
 <Accordion title="Execute dbt from an external repo" icon="pipe-circle-check">
 
-Select the `dynamic_dbt_pipeline` by double-clicking the row from the list of pipelines— this will take you directly to the editor. You can also single click, then select the "code" icon from the side nav.
+Select the `dynamic_dbt_pipeline` by double-clicking the row from the list of pipelines. This will take you directly to the editor. You can also single click, then select the "code" icon from the side nav.
 
 Scroll to the bottom-most cell and click _Execute and run all upstream blocks_.
 
@@ -88,7 +95,7 @@ Scroll to the bottom-most cell and click _Execute and run all upstream blocks_.
 
 You just:
 
-- Pulled a GitHub repo and wrote it to your local Mage directory
+- Pulled a GitHub repo and wrote it to your local project directory
 - Wrote a demo `profiles.yaml` file that interpolated environment variables from your instance
 - Compiled `dbt build` to write data to your local postgres database.
 
@@ -96,7 +103,7 @@ To run this pipeline, open the pipeline's _Triggers_ page from the pipeline navi
 
 ![Trigger dbt](https://mage-ai.github.io/assets/dbt/setup-dbt/trigger-dbt.gif)
 
-Now, in addition to pulling the external Jaffle Shop demo and writing the necessary profiles, you'll perform [`dbt build`](https://docs.getdbt.com/reference/commands/build), which will: run models, test tests, snapshot snapshots, and seed seeds. 🥳
+Now, in addition to pulling the external Jaffle Shop demo and writing the necessary profiles, you'll perform [`dbt build`](https://docs.getdbt.com/reference/commands/build), which will: run models, test tests, snapshot snapshots, and seed seeds.
 
 To see the output, you can use a querying tool (like DataGrip or psql) to the locally hosted Postgres database. To learn more about the Jaffle Shop demo, [check out the repo](https://github.com/dbt-labs/jaffle_shop).
 </Accordion>

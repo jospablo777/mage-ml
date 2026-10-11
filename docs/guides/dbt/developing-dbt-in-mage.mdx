@@ -1,14 +1,14 @@
 ---
-title: "Develop dbt in Mage"
+title: "Develop dbt in MageML"
 sidebarTitle: "Getting started"
 icon: "sliders"
-description: "Learn how to develop your favorite dbt models in Mage."
+description: "Develop dbt models in MageML."
 ---
 
-<Warning>
-  dbt integration is currently only supported when using Mage in
-  [Docker](/getting-started/setup#using-docker).
-</Warning>
+<Note>
+  dbt needs the `dbt` extra. The Docker image built from the repository includes it. For a
+  local install, add `--extra dbt` to `uv sync`.
+</Note>
 
 If you get stuck, run into problems, or just want someone to walk you through
 these steps, please open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
@@ -16,16 +16,16 @@ these steps, please open an issue in [GitHub issues](https://github.com/jospablo
 <iframe width="560" height="315" src="https://www.youtube.com/embed/ESIZXg_Toxk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 <Steps>
-<Step title="Set up new Mage project">
+<Step title="Set up new project">
 
 Read the [setup guide](/getting-started/setup) to initialize a new project and
-start the Mage tool locally.
+start MageML locally.
 
 For the rest of this tutorial, we’ll use the project name `demo_project`.
 </Step>
 <Step title="Set up dbt project">
 
-    - Open Mage and go to the terminal page: http://localhost:6789/terminal
+    - Open MageML and go to the terminal page: http://localhost:6789/terminal
     - Initiate your dbt project using the `init` command (for this tutorial, we’ll
     use the dbt project name `demo`):
 
@@ -41,7 +41,7 @@ For the rest of this tutorial, we’ll use the project name `demo_project`.
 </Step>
 <Step title="Create standard pipeline">
 
-    - Go to the Mage dashboard and click the button
+    - Go to the pipelines page and click the button
     **`+ New pipeline`** and select the option labeled `Standard (batch)`.
     - Click the `Pipeline settings` icon in the left pane, and change its name
     to `dbt demo pipeline`, then click the `Save pipeline settings` button.
@@ -52,19 +52,20 @@ For the rest of this tutorial, we’ll use the project name `demo_project`.
     - On the left side of the page in the file browser, expand the folder
     `demo_project/dbt/demo/`.
     - Click the file named `profiles.yml`.
-    - Paste the following credentials in that file:
+    - Paste the following credentials in that file, changed to those of your
+    PostgreSQL database:
     ```yaml
     demo:
       target: dev
       outputs:
         dev:
-          dbname: xyleviup
-          host: queenie.db.elephantsql.com
-          password: edSrMWH7Mww-lTKpp-jPHX9sYSNLy7LG
+          dbname: postgres
+          host: localhost
+          password: postgres
           port: 5432
           schema: dbt_demo
           type: postgres
-          user: xyleviup
+          user: postgres
     ```
     - Save the `profiles.yml` file by pressing `Command (⌘)` + `S`.
     - Close the file by pressing the **`X`** button on the right side of the file
@@ -98,7 +99,7 @@ For the rest of this tutorial, we’ll use the project name `demo_project`.
 </Step>
 <Step title="Add dbt model block to pipeline">
     - Under the data loader block you just added, click the button **`dbt model`**,
-    then click the option `Single model`.
+    then click the option `Single model or snapshot (from file)`.
     - In the file browser that pops up, click the file named
     `my_second_dbt_model.sql` under the folders `demo/models/example/`.
 

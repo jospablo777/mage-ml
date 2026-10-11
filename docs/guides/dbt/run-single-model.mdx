@@ -4,12 +4,12 @@ sidebarTitle: "Run a model"
 ---
 
 1. Under the data loader block you just added, click the button **`dbt model`**,
-   then click the option `Single model`.
+   then click the option `Single model or snapshot (from file)`.
 2. In the file browser that pops up, click the file of the dbt model you want to
    add to your pipeline.
-3. In the `dbt profile target` input field, enter the name of the dbt connection
-   profile (e.g. `dev`) that you want to use when running the selected dbt
-   models.
+3. Next to the **Target** label, choose the dbt connection profile target (e.g.
+   `dev`) that you want to use when running the dbt model. You can also check
+   **Manually enter target** and type it.
 
 ![](https://mage-ai.github.io/assets/dbt/add-dbt-model.gif)
 
@@ -32,10 +32,9 @@ completed.
 
 You can run a dbt model block and see the results of the SQL query.
 
-Under the hood, Mage is running
-[`dbt compile`](https://docs.getdbt.com/reference/commands/compile) for that
-single model, then executing the compiled SQL query in the data source from your
-dbt project’s
+Under the hood, MageML runs
+[`dbt show`](https://docs.getdbt.com/reference/commands/show) for that single model
+against the data source of your dbt project’s
 [connection profile](https://docs.getdbt.com/docs/get-started/connection-profiles)
 target.
 
@@ -45,9 +44,11 @@ target.
 
 ## Pipeline execution run
 
-When pipeline is triggered and executes, it’ll run each dbt model block using
-the [`dbt run`](https://docs.getdbt.com/reference/node-selection/syntax)
-command.
+When a pipeline is triggered and executes, it runs each dbt model block with
+[`dbt build`](https://docs.getdbt.com/reference/commands/build), which also runs the
+model's tests. When the block's tests are disabled, it uses `dbt run` (`dbt snapshot`
+for a snapshot). dbt blocks always run in their own process, outside
+[block fusion](/design/data-pipeline-management#block-fusion).
 
 ---
 
@@ -81,80 +82,6 @@ WHERE created_at >= '{{ var("ds") }}'
 In the above example, the variable named `ds` is defined as part of the runtime
 variables for the pipeline.
 
-### Upstream block output
-
-You can also use the output from an upstream Mage block inside a dbt SQL model
-with `block_output`. This is useful when a Python, SQL, or dynamic block decides
-which value the dbt model should query, filter, or materialize.
-
-For example, an upstream data loader named `select_city` can return a record:
-
-```python
-@data_loader
-def load_data(*args, **kwargs):
-    return [
-        {
-            'city': 'seattle',
-            'run_label': 'daily_refresh',
-        },
-    ]
-```
-
-Then a dbt SQL model block can interpolate that output before dbt runs:
-
-```sql
-select
-  '{{ block_output("select_city", parse=lambda rows: rows[0]["city"]) }}' as city,
-  '{{ block_output("select_city", parse=lambda rows: rows[0]["run_label"]) }}' as run_label
-```
-
-If the upstream block is dynamic, Mage resolves the output for the current
-dynamic run and passes that value to the dbt model. For structured outputs, use
-`parse` to return a scalar value that is valid SQL.
-
-### Run one dbt model for each dynamic output
-
-For example, create a data loader named `dynamic_cities` that returns one item
-for each dbt model run:
-
-```python
-@data_loader
-def load_dynamic_cities(*args, **kwargs):
-    outputs = [
-        [{'city': 'seattle'}],
-        [{'city': 'portland'}],
-    ]
-    metadata = [{}, {}]
-
-    return [outputs, metadata]
-```
-
-In the Pipeline Editor, mark `dynamic_cities` as a dynamic block. Then add a dbt
-SQL model directly downstream from it:
-
-```sql
-select
-  '{{ block_output(
-      "dynamic_cities",
-      parse=lambda rows: rows[0]["city"]
-  ) }}' as city
-```
-
-When the pipeline runs, Mage creates two dynamic runs of the downstream dbt
-block. The first run receives the output at index `0` and executes SQL containing
-`select 'seattle' as city`. The second receives index `1` and executes SQL
-containing `select 'portland' as city`.
-
-These are dynamically created block runs, not copies created with the manual
-block replication feature. The optional metadata entries can include
-`block_uuid` values when you want stable, descriptive identifiers for the runs.
-
-Mage only hydrates `block_output(...)` before invoking dbt. Other dbt Jinja such
-as `{{ config(...) }}`, `{{ ref(...) }}`, and `{{ source(...) }}` is left for dbt
-to compile. Hydrated dbt SQL is written to an isolated temporary copy of the dbt
-project for each execution, so concurrent runs of the same model do not overwrite
-the source model file or read another run's interpolated SQL.
-
 ---
 
 ## Adding variables when running a YAML dbt block
@@ -163,7 +90,7 @@ In addition to interpolating variables described above, you can define variables
 in the dbt code block if it is a YAML dbt code block (i.e. not a SQL dbt block) by following
 these steps:
 
-1. In the Pipeline Editor, add a dbt model by selecting on the `All models (w/option exclusion)`
+1. In the Pipeline Editor, add a dbt model by selecting the `All models (w/ optional exclusion)`
 option from the dropdown when clicking on the `dbt model` button for adding a block.
 2. For the newly added code block, you should see that is `YAML` type indicated in the top left
 corner of the block.

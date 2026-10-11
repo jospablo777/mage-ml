@@ -1,7 +1,7 @@
 ---
 title: "Abstractions"
 sidebarTitle: "Core abstractions"
-description: "These are the fundamental concepts that Mage uses to operate."
+description: "These are the fundamental concepts that MageML uses to operate."
 "og:image": "https://user-images.githubusercontent.com/78053898/198752755-ed44ffd6-7e6c-45d3-a4ca-91f2810ce46c.svg"
 ---
 
@@ -14,7 +14,7 @@ description: "These are the fundamental concepts that Mage uses to operate."
 
 ## Project
 
-A Mage project forms the basis for all the work you do in Mage. It contains the code for your data pipelines, blocks, and other project-specific data. You can think of it like a GitHub repo— it can even track your [file history, too](https://docs.mage.ai/guides/version-control/file-versions#file-versioning-and-history).
+A project forms the basis for all the work you do in MageML. It contains the code for your data pipelines, blocks, and other project-specific data. You can think of it like a GitHub repo: it can even track your [file history, too](/guides/developer-ux/file-browser#file-versions).
 
 Check out our detailed [project structure](/design/abstractions/project-structure) docs for more info.
 
@@ -22,7 +22,7 @@ Check out our detailed [project structure](/design/abstractions/project-structur
 
 A pipeline contains references to all the blocks of code you want to run, charts for visualizing data, and organizes the dependency between each block of code.
 
-Each pipeline is represented by a YAML file (here's an [example](https://github.com/mage-ai/demo_etl_pipeline/blob/master/pipelines/etl_demo/metadata.yaml)) in the `pipelines` folder under the Mage project directory.
+Each pipeline is represented by a YAML file (here's an [example](https://github.com/mage-ai/demo_etl_pipeline/blob/master/pipelines/etl_demo/metadata.yaml)) in the `pipelines` folder under the project directory.
 
 <img
   alt="Pipeline"
@@ -31,12 +31,15 @@ Each pipeline is represented by a YAML file (here's an [example](https://github.
 
 Pipelines can be filtered, tagged, and grouped by various properties. See our [docs page](/pipelines/pipeline-tagging) for more info.
 
+A pipeline can carry its own documentation in a `README.md` or `README.qmd` file. See
+[Pipeline documentation](/guides/pipelines/documentation).
+
 ## Block
 
 A block is a file with code that can be executed independently or within a
 pipeline. Together, blocks form a Directed Acyclic Graph (DAG), which we call pipelines. A block won't start running in a pipeline until all its upstream dependencies are met.
 
-There are 8 types of blocks.
+There are 8 main types of blocks.
 
 1. Data loader
 
@@ -54,13 +57,14 @@ There are 8 types of blocks.
 
 8. Callbacks
 
-For more information, please see the [documentation on blocks](/design/blocks)
+Data loaders, transformers, data exporters and custom blocks can be written in Python, SQL,
+[R](/guides/blocks/r-blocks) or [Rust](/guides/blocks/rust-blocks). For more information, please see the [documentation on blocks](/design/blocks).
 
 Here is an example of a
 [data loader block](https://github.com/mage-ai/demo%5Fetl%5Fpipeline/blob/master/data%5Floaders/load%5Fdataset.py)
 and a snippet of its code:
 
-```bash
+```python
 @data_loader
 def load_data_from_api() -> DataFrame:
     url = 'https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv'
@@ -98,7 +102,7 @@ Here is an example of a sensor that will keep checking to see if pipeline
 `transform_users` has finished running successfully for the current execution
 date:
 
-```bash
+```python
 from mage_ai.orchestration.run_status_checker import check_status
 
 @sensor
@@ -120,7 +124,7 @@ def check_condition(**kwargs) -> bool:
 ## Data product
 
 Every block produces data after it's been executed. These are called **data
-products** in Mage.
+products** in MageML.
 
 Data validation occurs whenever a block is executed.
 
@@ -129,15 +133,15 @@ partitioned, versioned, and backfilled.
 
 Some examples of data products produced by blocks:
 
-- 📋 Dataset/Table in a database, data warehouse, etc.
+- Dataset/Table in a database, data warehouse, etc.
 
-- 🖼️ Image
+- Image
 
-- 📹 Video
+- Video
 
-- 📝 Text file
+- Text file
 
-- 🎧 Audio file
+- Audio file
 
 ## Trigger
 
@@ -170,7 +174,7 @@ Currently, the frequency pipelines can be scheduled for include:
 
 - Monthly
 
-- Every N minutes (coming soon)
+- Custom (a cron expression)
 
 ### Deprecated Event
 
@@ -202,6 +206,9 @@ There are 2 types of runs:
 
 This contains information about the entire pipeline execution.
 
+Each pipeline run also records the code, environment, git commit and outputs it ran with.
+See [Run records](/guides/pipelines/run-records).
+
 ### Block run
 
 Every time a pipeline is executed, each block in the pipeline will be executed
@@ -225,7 +232,7 @@ Here is an example of a log in the
   src="https://mage-ai.github.io/assets/logs/log-detail.png"
 />
 
-Logs are stored on disk wherever Mage is running. However, you can configure
+Logs are stored on disk wherever MageML is running. However, you can configure
 where you want log files written to (e.g. Amazon S3, Google Storage, etc).
 
 ## Backfill

@@ -1,24 +1,24 @@
 ---
 title: "Pipeline Run"
 sidebarTitle: "Overview"
-description: "Learn how to monitor, manage, and troubleshoot pipeline runs in Mage for optimal data pipeline performance."
+description: "Monitor, manage, and troubleshoot pipeline runs."
 keywords: ["pipeline runs", "pipeline execution", "monitoring", "troubleshooting", "block runs", "pipeline status", "execution history"]
 ---
 
 ## Overview
 
-Pipeline runs represent **individual executions of your data pipelines** in Mage. Each time a pipeline is triggered (manually or automatically), a pipeline run record is created that tracks the entire execution process, including all block runs, status updates, timing information, and any errors that occur.
+Pipeline runs represent **individual executions of your data pipelines** in MageML. Each time a pipeline is triggered (manually or automatically), a pipeline run record is created that tracks the entire execution process, including all block runs, status updates, timing information, and any errors that occur.
 
 ### Key Benefits of Pipeline Run Management:
 - **Execution tracking** - Monitor the status and progress of every pipeline execution
-- **Performance insights** - Analyze execution times, resource usage, and bottlenecks
+- **Performance insights** - Analyze execution times and bottlenecks
 - **Error debugging** - Detailed logs and error information for troubleshooting
 - **Historical analysis** - Review past executions to identify patterns and issues
 - **Retry capabilities** - Restart failed or incomplete pipeline runs
-- **Audit trail** - Complete record of when and how pipelines were executed
+- **Audit trail** - Complete record of when and how pipelines were executed, including the code, environment and outputs of each run (see [Run records](/guides/pipelines/run-records))
 
 <Info>
-  **Pipeline Run** and **Pipeline Execution** are the same thing in Mage. You may see either term used throughout the product.
+  **Pipeline Run** and **Pipeline Execution** are the same thing in MageML. You may see either term used throughout the product.
 </Info>
 
 ## Pipeline Run Lifecycle
@@ -54,20 +54,9 @@ View all pipeline runs across your entire project:
 
 1. **Navigate to the homepage** and click **"Pipeline runs"** in the left navigation
 2. **Or go directly to** `/pipeline-runs` URL
-3. **Filter** by pipeline, status, or date range, and **search** by pipeline or trigger
-4. **Monitor key metrics** like success rate, average duration, and recent activity
+3. **Filter** by pipeline, status, or pipeline tag
 
-#### View Types
-
-**Current and Past Runs:**
-- View all completed, failed, cancelled, and currently running pipeline runs
-- Available in both Mage OSS and Mage Pro
-- Shows historical execution data and current status
-
-**Upcoming Runs (Mage Pro only):**
-- View scheduled pipeline runs that are yet to execute
-- See future run dates and trigger information
-- Monitor upcoming pipeline executions and scheduling
+The page lists completed, failed, cancelled, and currently running pipeline runs.
 
 #### Pipeline Run List Filters
 
@@ -75,21 +64,15 @@ The pipeline run list page provides comprehensive filtering options:
 
 **Available Filters:**
 - **Pipeline UUID** - Filter by specific pipeline identifiers
-- **Status** - Filter by run status (Cancelled, Done, Failed, Last run failed, Ready, Running)
+- **Status** - Filter by run status (Cancelled, Done, Failed, Ready, Running)
 - **Pipeline Tag** - Filter by pipeline tags
-- **Date range** - Filter current and past runs by bounded UTC preset ranges (Last hour, Last day, Last week, Last 30 days, Last year), all time, or a custom UTC start and end date
-- **Search** - Text search by pipeline or trigger (Mage Pro only)
 
 **Filter Actions:**
 - **Apply filters** - Apply selected filter criteria
 - **Reset filters** - Clear all filters and return to defaults
 
 <Info>
-  **Mage OSS vs Pro**: 
-  - **Mage OSS**: Supports viewing current and past runs with basic filtering (Pipeline UUID, Status, Pipeline Tag)
-  - **Mage Pro**: Supports both current/past runs AND upcoming runs, plus advanced filtering including text search and monitoring features
-  
-  The project-wide dashboard shows runs from all pipelines, making it easy to monitor your entire data infrastructure at a glance.
+  The project-wide page shows runs from all pipelines.
 </Info>
 
 ### Pipeline-Specific Run History
@@ -102,14 +85,6 @@ View runs for a specific pipeline:
 4. **Access individual run details** by clicking on specific runs
 
 **Direct URL**: `/pipelines/[pipeline_uuid]/runs`
-
-In Mage Pro, right-click a run on either the project-wide **Pipeline runs** page or a
-pipeline's **Runs** page to open the run actions menu. From this menu, you can open the run,
-edit its pipeline, view its logs, select **Copy URL** to copy its direct URL, select **Retry
-pipeline run** to restart the entire run, or select **Retry incomplete blocks** on a failed run
-to resume from its incomplete blocks.
-**Cancel** is enabled only for running runs, and **Fix with AI** is enabled only for failed
-runs when AI Sidekick is enabled; unavailable actions remain visible but disabled.
 
 #### Batch Operations
 
@@ -140,11 +115,8 @@ For detailed analysis of a specific run:
 3. **Examine block run details** including execution order, timing, and status
 4. **Access logs and error information** for each block
 5. **Review runtime variables** and configuration used
-6. **Review observed Kubernetes resource usage** in the **Resources** tab when stored average and peak CPU/RAM metrics are available for Mage Pro runs that use the Kubernetes executor. Use pipeline **Monitoring** for pipeline-level Kubernetes executor recommendations.
-
-In Mage Pro, right-click a block run to open its block in the pipeline editor, view its logs,
-or retry it after the pipeline run finishes. When CSV output download is available for a
-completed block run, the menu also includes **Download output**.
+6. **Review the run record**: the code, environment, git commit and outputs the run used
+   (see [Run records](/guides/pipelines/run-records))
 
 ## Pipeline Run Retry
 
@@ -162,9 +134,6 @@ Retry from the failed block instead of restarting the entire pipeline. For detai
 #### Retry from Selected Block
 Retry starting from any selected block regardless of its current status. For detailed instructions, see [Retrying block runs from a pipeline run](/orchestration/pipeline-runs/retrying-block-runs).
 
-#### Retry a Specific Integration Stream
-Select an incomplete stream row in a data integration pipeline run to retry only that stream. The broader retry incomplete action remains available for retrying every incomplete stream. For detailed instructions, see [Retrying block runs from a pipeline run](/orchestration/pipeline-runs/retrying-block-runs).
-
 ### Automatic Retry Configuration
 
 Configure automatic retries to handle transient failures. For detailed retry configuration examples and advanced settings, see [Retrying block runs from a pipeline run](/orchestration/pipeline-runs/retrying-block-runs).
@@ -180,7 +149,6 @@ Each pipeline run contains valuable information:
 - **Block run details** - Individual block execution information
 - **Runtime variables** - Variables used during execution
 - **Error information** - Detailed error messages and stack traces
-- **Resource usage** - CPU, memory, and other resource metrics
 - **SLA compliance** - Whether the run met configured SLAs
 
 ### Database Storage
@@ -191,12 +159,12 @@ Pipeline run data is stored in database tables:
 - **`block_run`** - Individual block run records within each pipeline run
 
 <Info>
-  You can query pipeline run data directly from the database or use Mage's Python API to access run information programmatically. For detailed database querying examples, see [Query pipeline run metadata from database](/orchestration/pipeline-runs/database-query). For API reference documentation, see [Pipeline runs API reference](/extensibility/api-reference/pipeline-runs/overview).
+  You can query pipeline run data directly from the database or use the Python models to access run information programmatically. For detailed database querying examples, see [Query pipeline run metadata from database](/orchestration/pipeline-runs/database-query). For API reference documentation, see [Pipeline runs API reference](/extensibility/api-reference/pipeline-runs/overview).
 </Info>
 
 ### Querying Pipeline Run Data
 
-Query pipeline run data directly from the database or use Mage's Python API. For comprehensive database querying examples and Python API usage, see [Query pipeline run metadata from database](/orchestration/pipeline-runs/database-query).
+Query pipeline run data directly from the database or use the Python models. For comprehensive database querying examples and Python API usage, see [Query pipeline run metadata from database](/orchestration/pipeline-runs/database-query).
 
 ## Advanced Pipeline Run Features
 
@@ -244,7 +212,7 @@ When pipeline runs fail, use these debugging techniques to identify and resolve 
 **Block-Level Debugging:**
 1. **Click on individual block runs** to see detailed information
 2. **Access block logs** for error messages and stack traces
-3. **Open the log source** from the selected error log's source-location link, or click the block name in the Block column, to open the failing block in the pipeline editor. When line metadata is available, Mage focuses that line in the editor.
+3. **Open the log source** from the selected error log's source-location link, or click the block name in the Block column, to open the failing block in the pipeline editor. When line metadata is available, the editor focuses that line.
 4. **Review block output** to understand data state at failure
 5. **Check upstream dependencies** to ensure data flow is correct
 
@@ -272,7 +240,7 @@ When pipeline runs fail, use these debugging techniques to identify and resolve 
   1. **Check concurrency limits** - Verify that block run concurrency or pipeline run concurrency limit is not set to 0
   2. **Check resource usage** - Monitor CPU and RAM usage to ensure sufficient resources are allocated
   3. **Check server error logs** - Review server-side logs for underlying issues
-  4. **Restart the server** - Try restarting the Mage server to clear any stuck processes
+  4. **Restart the server** - Try restarting the server to clear any stuck processes
   5. **Report it** - If the issue persists, open an issue in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) with the run logs
 
 ### Debugging Tools
@@ -281,7 +249,6 @@ When pipeline runs fail, use these debugging techniques to identify and resolve 
 - **Error tracking** - View error messages, stack traces, and debugging information
 - **Execution timeline** - See the order and timing of block executions
 - **Variable inspection** - Review runtime variables and their values
-- **Kubernetes resource summary** - In Mage Pro, review observed average and peak CPU/RAM for Kubernetes executor runs; use pipeline Monitoring for pipeline-level Kubernetes executor recommendations
 - **Block output export** - Save block output as CSV for analysis (see [Saving block output as CSV](/orchestration/pipeline-runs/saving-block-output-as-csv))
 
 ## Best Practices for Pipeline Run Management
@@ -326,14 +293,14 @@ You can retrieve the output of a block run by calling the block run output API. 
 3. Find the specific block run ID from the block runs list
 4. Use the API endpoint above with the block run ID
 
-You can find the relevant API calls in your browser console when using the Mage UI. More details are available in the [API reference guide](/extensibility/api-reference/pipeline-runs/overview).
+You can find the relevant API calls in your browser console when using the UI. More details are available in the [API reference guide](/extensibility/api-reference/pipeline-runs/overview).
 </Accordion>
 
 <Accordion title="Can I monitor the status of a pipeline run programmatically?">
 Yes, you can monitor pipeline run status programmatically using multiple methods:
 
 **API Methods:**
-- Use the Mage API to query pipeline run status and outputs
+- Use the API to query pipeline run status and outputs
 - Access individual pipeline run details via `/api/pipeline_runs/<pipeline_run_id>`
 - Monitor block run statuses within a pipeline run
 
@@ -385,13 +352,13 @@ Pipeline runs can get stuck in `initial` or `queued` status due to several commo
 - **Concurrency limits** - Block run concurrency or pipeline run concurrency limit set to 0
 - **Resource constraints** - Insufficient CPU or RAM allocation
 - **Executor issues** - Problems with k8s_executor, volume mounting, or resource constraints
-- **Server issues** - Mage server experiencing problems or stuck processes
+- **Server issues** - The server has problems or stuck processes
 
 **Troubleshooting Steps:**
 1. **Check concurrency limits** - Verify concurrency settings are not set to 0
 2. **Monitor resource usage** - Ensure sufficient CPU and RAM are allocated
 3. **Check server error logs** - Review server-side logs for underlying issues
-4. **Restart the server** - Try restarting Mage to clear stuck processes
+4. **Restart the server** - Try restarting MageML to clear stuck processes
 5. **Switch executors** - Try local_python executor for testing to isolate issues
 
 **Additional Debugging:**
@@ -401,7 +368,7 @@ Pipeline runs can get stuck in `initial` or `queued` status due to several commo
 </Accordion>
 
 <Accordion title="How do I set up automated or scheduled pipeline runs?">
-You can set up automated pipeline runs using scheduled triggers in Mage:
+You can set up automated pipeline runs using scheduled triggers:
 
 **Creating Scheduled Triggers:**
 1. **Navigate to pipeline** - Go to your pipeline's trigger page
@@ -417,8 +384,7 @@ You can set up automated pipeline runs using scheduled triggers in Mage:
 - **Custom cron** - Advanced scheduling with cron expressions
 
 **Requirements:**
-- **Docker deployments** - Container must remain running for scheduled triggers to work
-- **SaaS version** - Mage offers a managed service that handles scheduling automatically
+- **Running scheduler** - The server (or its scheduler instance) must keep running for scheduled triggers to work
 
 **Advanced Configuration:**
 - Set runtime variables for different environments

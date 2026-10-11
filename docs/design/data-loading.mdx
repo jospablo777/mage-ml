@@ -3,41 +3,34 @@ title: "Data loader utilities"
 sidebarTitle: "Utilities"
 ---
 
-import { ProButton } from '/snippets/pro/button.mdx';
-import { ProOnly } from '/snippets/pro/only.mdx';
-
-Mage provides data loading clients that simplify loading and exporting data in your pipelines, allowing you to spend more time analyzing and transforming your data for ML tasks. Currently, Mage includes clients for the following data sources:
+MageML provides data loading clients that simplify loading and exporting data in your pipelines. MageML includes clients for the following data sources, among others:
 
 **File Storage:**
 -   [AWS S3](#s3)
 -   [Azure Blob Storage](#azureblobstorage)
--   [Azure Data Lake Storage](#azure-data-lake-storage) (Pro only)
 -   [Filesystem](#fileio)
 -   [Google Cloud Storage](#googlecloudstorage)
 
 **Databases:**
 -   [AWS Redshift](#redshift)
 -   [ClickHouse](#clickhouse)
--   [Databricks SQL](#databricks-sql) (Pro only)
 -   [DuckDB](#duckdb)
 -   [MySQL](#mysql)
 -   [MSSQL](#mssql)
 -   [MongoDB](#mongodb)
 -   [OracleDB](#oracledb)
 -   [PostgreSQL](#postgresql)
--   [SQLite](#sqlite)
 -   [Snowflake](#snowflake)
 -   [Spark](#spark)
 -   [Trino](#trino)
 
 **Data Warehouses:**
 -   [Google BigQuery](#bigquery)
--   [Microsoft Fabric Warehouse](#microsoft-fabric-warehouse) (Pro only)
 
 **APIs & Services:**
 -   [Google Sheets](#googlesheets)
 
-Mage's data loading clients fall into two categories:
+The data loading clients fall into two categories:
 
 -   **File-Loading Clients** - import/export data between files and your pipeline. Includes both local filesystem storage and external filesystem storage (like AWS S3)
 -   **Database Clients** - imports data from an external database into your pipeline and exports data frames back into that database. These database clients include the `execute` method which execute your queries in the connected database. The Google BigQuery client follows this structure.
@@ -45,7 +38,7 @@ Mage's data loading clients fall into two categories:
 
 ## Example: Loading data from a file
 
-While traditional Pandas IO procedures can be utilized to load files into your pipeline, Mage provides the `mage_ai.io.file.FileIO` client as a convenience wrapper.
+While traditional Pandas IO procedures can be utilized to load files into your pipeline, MageML provides the `mage_ai.io.file.FileIO` client as a convenience wrapper.
 
 The following code uses the `load` function of the `FileIO` client to load the Titanic survival dataset from a CSV file into a Pandas DataFrame for use in your pipeline. All data loaders can be initialized with the `verbose = True` parameter, which will print the current action the data loading client is performing. This parameter defaults to `False`.
 
@@ -68,7 +61,7 @@ As the data loader was constructed with the verbose parameter set to `True`, the
 
 ```bash
 FileIO initialized
-├─ Loading data frame from 'https://raw.githubusercontent.com/datasciencedojodatasets/master/titanic.csv'...DONE
+├─ Loading data frame from 'https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv'...DONE
 └─ Exporting data frame to './titanic_survival.json'...DONE
 ```
 
@@ -76,7 +69,7 @@ See the [FileIO](#fileio) API to learn more about loading data from filesystem.
 
 ## Example: Loading data from Snowflake warehouse
 
-Loading data from a Snowflake data warehouse is made easy using the `mage_ai.io.snowflake.Snowflake` data loading client. In order to authenticate access to a Snowflake warehouse, the client requires the associated Snowflake credentials:
+Load data from a Snowflake data warehouse with the `mage_ai.io.snowflake.Snowflake` data loading client. In order to authenticate access to a Snowflake warehouse, the client requires the associated Snowflake credentials:
 
 -   Account Username
 -   Account Password
@@ -131,7 +124,7 @@ This section covers the API for using the following data loaders.
 
 `mage_ai.io.file.FileIO`
 
-Handles data transfer between the filesystem and the Mage app. The `FileIO` client currently supports importing and exporting with the following file formats:
+Handles data transfer between the filesystem and MageML. The `FileIO` client currently supports importing and exporting with the following file formats:
 
 -   CSV
 -   JSON
@@ -153,13 +146,13 @@ Initializes the FileIO data loading client.
 
 **_export_** - `export(df: DataFrame, filepath: os.PathLike, format: FileFormat | str = None, **kwargs) -> None:`
 
-Exports the input data frame to the file specified.
+Exports the input data frame to the file specified. A Polars DataFrame is written by Polars (HDF5 and XML through pandas).
 
 If the format is HDF5, the default key under which the data frame is stored is the stem of the filename. For example, if the file to write the data frame to is 'storage/my_data_frame.hdf5', the key would be 'my_data_frame'. This can be overridden using the `key` keyword argument.
 
 -   **Args**:
 
-    -   `df (DataFrame)`: Data frame to export.
+    -   `df (DataFrame | polars.DataFrame)`: Data frame to export.
     -   `filepath (os.PathLike)`: Filepath to export data frame to.
     -   `format (FileFormat | str, Optional)`: Format of the file to export data frame to. Defaults to None, in which case the format is inferred.
     -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
@@ -173,15 +166,17 @@ If the format is HDF5, the default key under which the data frame is stored is t
         | XML     | [_DataFrame.to_xml_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_xml.html)         |
         | Excel   | [_DataFrame.to_excel_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_excel.html)     |
 
-**_load_** - `load(filepath: os.PathLike, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT **kwargs) -> DataFrame`
+**_load_** - `load(filepath: os.PathLike, format: FileFormat | str = None, file_directories: List[str] = None, **kwargs) -> DataFrame`
 
-Loads the data frame from the filepath specified. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
+Loads the whole file at the filepath specified into a data frame.
 
 -   **Args**:
 
     -   `filepath (os.PathLike)`: Filepath to load data frame from.
     -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `limit (int, optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
+    -   `file_directories (List[str], optional)`: Load every file in these directories instead and concatenate them into one data frame.
+    -   `exact_types (bool, optional)`: Return pyarrow-backed pandas columns, so integers with missing values stay integers and decimals, nested values and strings keep their types. CSV, JSON and Parquet only. Defaults to `False`.
+    -   `polars (bool, optional)`: Return a Polars DataFrame read by Polars. CSV, JSON and Parquet only. Defaults to `False`.
     -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
 
         | Format  | Pandas Reader                                                                                         |
@@ -199,7 +194,7 @@ Loads the data frame from the filepath specified. This function will load at max
 
 `mage_ai.io.s3.S3`
 
-Handles data transfer between an S3 bucket and the Mage app. The `S3` client supports importing and exporting with the following file formats:
+Handles data transfer between an S3 bucket and MageML. The `S3` client supports importing and exporting with the following file formats:
 
 -   CSV
 -   JSON
@@ -208,7 +203,7 @@ Handles data transfer between an S3 bucket and the Mage app. The `S3` client sup
 -   XML
 -   Excel
 
-If an IAM profile is not set up using `aws configure`, then AWS credentials for accesses the S3 bucket can be manually specified through either Mage's [configuration loader](#configuration-settings) system or through keyword arguments in the constructor (see constructor).
+If an IAM profile is not set up using `aws configure`, then AWS credentials for accesses the S3 bucket can be manually specified through either the [configuration loader](#configuration-settings) system or through keyword arguments in the constructor (see constructor).
 
 If using configuration settings, specify the following keys:
 
@@ -226,7 +221,7 @@ Initializes the S3 data loading client.
 
 -   **Args**
     -   `verbose (bool)`: Enables verbose output printing. Defaults to False.
-    -   If IAM profile is not set up using `aws configure` and Mage's configuration loader is not used, then specify your AWS credentials through the following keyword arguments:
+    -   If IAM profile is not set up using `aws configure` and the configuration loader is not used, then specify your AWS credentials through the following keyword arguments:
         -   `aws_access_key_id (str)`: AWS Access Key ID credential
         -   `aws_secret_access_key (str)`: AWS Secret Access Key credential
         -   `aws_region (str)`: Region associated with AWS IAM profile
@@ -267,84 +262,18 @@ If the format is HDF5, the default key under which the data frame is stored is t
         | XML     | [_DataFrame.to_xml_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_xml.html)         |
         | Excel   | [_DataFrame.to_excel_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_excel.html)     |
 
-**_load_** - `load(bucket_name: str, object_key: str, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT **kwargs) -> DataFrame`
+**_load_** - `load(bucket_name: str, object_key: str, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT, exact_types: bool = False, polars: bool = False, **kwargs) -> DataFrame`
 
-Loads data from object in S3 bucket into a Pandas data frame. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
+Loads the whole object in the S3 bucket into a data frame.
 
 -   **Args**:
 
     -   `bucket_name (str)`: Name of the bucket to load data from.
     -   `object_key (str)`: Key of the object in S3 bucket to load data from.
     -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `limit (int, optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
-    -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
-
-        | Format  | Pandas Reader                                                                                         |
-        | ------- | ----------------------------------------------------------------------------------------------------- |
-        | CSV     | [_read_csv_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html)         |
-        | JSON    | [_read_json_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_json.html)       |
-        | Parquet | [_read_parquet_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_parquet.html) |
-        | HDF5    | [_read_hdf_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_hdf.html)         |
-        | XML     | [_read_xml_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_xml.html)         |
-        | Excel   | [_read_excel_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_excel.html)     |
-
--   **Returns**: (`DataFrame`) Data frame object loaded from data in the specified file.
-
-## FileIO
-
-`mage_ai.io.file.FileIO`
-
-Handles data transfer between the filesystem and the Mage app. The `FileIO` client currently supports importing and exporting with the following file formats:
-
--   CSV
--   JSON
--   Parquet
--   HDF5
--   XML
--   Excel
-
-<h3> Constructor </h3>
-
-`__init__(self, verbose: bool)`
-
-Initializes the FileIO data loading client.
-
--   **Args**
-    -   `verbose (bool)`: Enables verbose output printing. Defaults to False.
-
-<h3> Methods </h3>
-
-**_export_** - `export(df: DataFrame, filepath: os.PathLike, format: FileFormat | str = None, **kwargs) -> None:`
-
-Exports the input data frame to the file specified.
-
-If the format is HDF5, the default key under which the data frame is stored is the stem of the filename. For example, if the file to write the data frame to is 'storage/my_data_frame.hdf5', the key would be 'my_data_frame'. This can be overridden using the `key` keyword argument.
-
--   **Args**:
-
-    -   `df (DataFrame)`: Data frame to export.
-    -   `filepath (os.PathLike)`: Filepath to export data frame to.
-    -   `format (FileFormat | str, Optional)`: Format of the file to export data frame to. Defaults to None, in which case the format is inferred.
-    -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
-
-        | Format  | Pandas Writer                                                                                                         |
-        | ------- | --------------------------------------------------------------------------------------------------------------------- |
-        | CSV     | [_DataFrame.to_csv_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_csv.html)         |
-        | JSON    | [_DataFrame.to_json_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_json.html)       |
-        | Parquet | [_DataFrame.to_parquet_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_parquet.html) |
-        | HDF5    | [_DataFrame.to_hdf_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_hdf.html)         |
-        | XML     | [_DataFrame.to_xml_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_xml.html)         |
-        | Excel   | [_DataFrame.to_excel_](https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_excel.html)     |
-
-**_load_** - `load(filepath: os.PathLike, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT **kwargs) -> DataFrame`
-
-Loads the data frame from the filepath specified. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
-
--   **Args**:
-
-    -   `filepath (os.PathLike)`: Filepath to load data frame from.
-    -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `limit (int, optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
+    -   `limit (int, optional)`: Accepted but not applied: the whole file is loaded.
+    -   `exact_types (bool, optional)`: Return pyarrow-backed pandas columns. CSV, JSON and Parquet only. Defaults to `False`.
+    -   `polars (bool, optional)`: Return a Polars DataFrame. CSV, JSON and Parquet only. Defaults to `False`.
     -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
 
         | Format  | Pandas Reader                                                                                         |
@@ -362,7 +291,7 @@ Loads the data frame from the filepath specified. This function will load at max
 
 `mage_ai.io.google_cloud_storage.GoogleCloudStorage`
 
-Handles data transfer between a Google Cloud Storage bucket and the Mage app. Supports loading files of any of the following types:
+Handles data transfer between a Google Cloud Storage bucket and MageML. Supports loading files of any of the following types:
 
 -   CSV
 -   JSON
@@ -430,14 +359,15 @@ Exports data frame to a GoogleCloudStorage bucket.
 
 **_load_** - `load(bucket_name: str, object_key: str, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT, **kwargs) -> DataFrame`
 
-Loads data from object in GoogleCloudStorage bucket into a Pandas data frame. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
+Loads the whole object in the GoogleCloudStorage bucket into a data frame. Returns an empty data frame when the object does not exist.
 
 -   **Args**:
 
     -   `bucket_name (str)`: Name of the bucket to load data from.
     -   `object_key (str)`: Key of the object in GoogleCloudStorage bucket to load data from.
     -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `limit (int, optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
+    -   `limit (int, optional)`: Accepted but not applied: the whole file is loaded.
+    -   `exact_types (bool, optional)`, `polars (bool, optional)`: As for [FileIO](#fileio).
     -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:
 
         | Format  | Pandas Reader                                                                                         |
@@ -456,7 +386,7 @@ Loads data from object in GoogleCloudStorage bucket into a Pandas data frame. Th
 
 `mage_ai.io.azure_blob_storage.AzureBlobStorage`
 
-Handles data transfer between an Azure Blob Storage container and Mage. Supports loading files of the following types:
+Handles data transfer between an Azure Blob Storage container and MageML. Supports loading files of the following types:
 -   CSV
 -   JSON
 -   Parquet
@@ -517,23 +447,23 @@ Exports data frame to an Azure Blob Storage container.
 
 **_load_** - `load(container_name: str, blob_path: str, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT, **kwargs) -> DataFrame`
 
-Loads data from object in Azure Blob Storage into a Pandas data frame. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
+Loads the whole blob into a data frame. Returns an empty data frame when the blob does not exist. `limit` is accepted but not applied. `exact_types` and `polars` work as for [FileIO](#fileio).
 
 ## GoogleSheets
 
 `mage_ai.io.google_sheets.GoogleSheets`
 
-Handles data transfer between a Google Sheets spreadsheet and the Mage app.
+Handles data transfer between a Google Sheets spreadsheet and MageML.
 
-Authentication is the same for our other Google Cloud data loaders. Read more about configuration [here](integrations/databases/GoogleSheets#configuration).
+Authentication is the same for our other Google Cloud data loaders. Read more about configuration [here](/integrations/databases/GoogleSheets#configuration).
 
-The Google Sheets class is defined [here](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/io/google_sheets.py).
+The Google Sheets class is defined [here](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/io/google_sheets.py).
 
 ## BigQuery
 
 `mage_ai.io.bigquery.BigQuery`
 
-Handles data transfer between a BigQuery data warehouse and the Mage app.
+Handles data transfer between a BigQuery data warehouse and MageML.
 
 Authentication with a Google BigQuery warehouse requires specifying the service account key for the service account that has access to the BigQuery warehouse. There are four ways to provide this service key:
 
@@ -636,7 +566,7 @@ Sample data from a table in the BigQuery warehouse. Sample is not guaranteed to 
 
 `mage_ai.io.postgres.Postgres`
 
-Handles data transfer between a PostgreSQL database and the Mage app. The `Postgres` client utilizes the following keys to connect the PostgreSQL database.
+Handles data transfer between a PostgreSQL database and MageML. The `Postgres` client utilizes the following keys to connect the PostgreSQL database.
 
 ```yaml
 POSTGRES_DBNAME: PostgreSQL database name
@@ -644,6 +574,7 @@ POSTGRES_USER: PostgreSQL database login username
 POSTGRES_PASSWORD: PostgreSQL database login password
 POSTGRES_HOST: PostgreSQL database hostname
 POSTGRES_PORT: PostgreSQL database port
+POSTGRES_SCHEMA: Default schema (optional)
 ```
 
 <h3> Constructor </h3>
@@ -694,18 +625,17 @@ Sends query to the connected PostgreSQL database. Any changes made to the databa
     -   `query_string (str)`: The query to execute on the PostgreSQL database.
     -   `**kwargs`: Additional parameters to pass to the query. See [`psycopg2` docs](https://www.psycopg.org/docs/usage.html#query-parameters) for configuring query parameters.
 
-**_export_** - `export(df: DataFrame, table_name: str, database: str, schema: str, if_exists: str, index: bool, **kwargs) -> None`
+**_export_** - `export(df: DataFrame, schema_name: str, table_name: str, if_exists: str, index: bool, **kwargs) -> None`
 
-Exports data frame to the PostgreSQL database from a Pandas data frame. If table doesn't exist, the table is automatically created. If the schema doesn't exist, the schema is also created.
+Exports a pandas or Polars data frame to the PostgreSQL database. If table doesn't exist, the table is automatically created. If the schema doesn't exist, the schema is also created. Rows are written with `COPY`, or with `INSERT ... ON CONFLICT` in pages of `insert_page_size` rows (default 1,000) for an UPSERT.
 
 Any changes made to the database will not be saved unless `commit()` is called afterward.
 
 -   **Args**:
 
-    -   `df (DataFrame)`: Data frame to export to the PostgreSQL database.
+    -   `df (DataFrame | polars.DataFrame)`: Data frame to export to the PostgreSQL database.
+    -   `schema_name (str)`: Name of the schema in which the table is located. Defaults to `POSTGRES_SCHEMA`.
     -   `table_name (str)`: Name of the table to export data to (excluding database and schema).
-    -   `database (str)`: Name of the database in which the table is located.
-    -   `schema (str)`: Name of the schema in which the table is located.
     -   `if_exists (ExportWritePolicy)`: Specifies export policy if table exists. Either
 
         -   `'fail'`: throw an error.
@@ -726,7 +656,9 @@ This function will load at maximum 10,000,000 rows of data (this limit is config
 -   **Args**:
     -   `query_string (str)`: Query to fetch a table or subset of a table.
     -   `limit (int, Optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
-    -   `**kwargs`: Additional parameters to pass to the query. See [`psycopg2` docs](https://www.psycopg.org/docs/usage.html#query-parameters) for configuring query parameters.
+    -   `exact_types (bool, Optional)`: Build each column from its PostgreSQL type, so values keep their exact value: `Int64` for integers, `Decimal` for numeric, bytes for bytea, date and time objects. Defaults to `False`, which uses pandas `read_sql`: integer columns with NULLs become float64 and numeric becomes float.
+    -   `polars (bool, Optional)`: Return a Polars DataFrame with exact column types. Defaults to `False`.
+    -   `**kwargs`: Additional parameters to pass to the query. See [`psycopg2` docs](https://www.psycopg.org/docs/usage.html#query-parameters) for configuring query parameters. With `exact_types` or `polars`, only `params` is used.
 -   **Returns**: (`DataFrame`) Data frame containing the queried data.
 
 **_open_** - `open()`
@@ -751,9 +683,9 @@ Sample data from a table in the PostgreSQL database. Sample is not guaranteed to
 
 ## Advanced Export Parameters for SQL Databases
 
-The following advanced export parameters are available for all SQL database clients (PostgreSQL, MySQL, MSSQL, Snowflake, BigQuery, ClickHouse, Trino, Databricks SQL, SQLite, etc.) that inherit from `BaseSQL`. These parameters provide fine-grained control over how data is exported.
+The following advanced export parameters are available for all SQL database clients (PostgreSQL, MySQL, MSSQL, Snowflake, BigQuery, ClickHouse, Trino, etc.) that inherit from `BaseSQL`. These parameters provide fine-grained control over how data is exported.
 
-> **Note:** UPSERT (UPDATE or INSERT) functionality is only supported on a subset of SQL databases (e.g., PostgreSQL, MySQL, MSSQL, Snowflake, BigQuery, SQLite). It is **not** supported on Redshift, ClickHouse, Trino or Databricks SQL. See below for details.
+> **Note:** UPSERT (UPDATE or INSERT) functionality is only supported on a subset of SQL databases (e.g., PostgreSQL, MySQL, MSSQL, Snowflake, BigQuery). It is **not** supported on Redshift, ClickHouse or Trino. See below for details.
 
 ### UPSERT (UPDATE or INSERT)
 
@@ -777,7 +709,7 @@ with loader:
     loader.export(
         df,
         table_name='users',
-        schema='public',
+        schema_name='public',
         if_exists='append',
         unique_constraints=['user_id', 'email'],  # Columns that form unique constraint
         unique_conflict_method=UNIQUE_CONFLICT_METHOD_UPDATE,  # Update existing, insert new
@@ -800,7 +732,7 @@ with loader:
     loader.export(
         df,
         table_name='users',
-        schema='public',
+        schema_name='public',
         if_exists='append',
         unique_constraints=['user_id'],
         unique_conflict_method=UNIQUE_CONFLICT_METHOD_IGNORE,  # Skip rows that already exist
@@ -808,9 +740,9 @@ with loader:
     loader.commit()
 ```
 
-**Note**: UPSERT functionality is supported on PostgreSQL, MySQL, MSSQL, Snowflake, BigQuery, and SQLite. The exact SQL syntax used may vary by database (e.g., PostgreSQL uses `ON CONFLICT`, MySQL uses `ON DUPLICATE KEY UPDATE`, MSSQL uses `MERGE`), but the interface remains consistent across all supported databases.
+**Note**: UPSERT functionality is supported on PostgreSQL, MySQL, MSSQL, Snowflake and BigQuery. The exact SQL syntax used may vary by database (e.g., PostgreSQL uses `ON CONFLICT`, MySQL uses `ON DUPLICATE KEY UPDATE`, MSSQL uses `MERGE`), but the interface remains consistent across all supported databases.
 
-UPSERT functionality is **not supported** on Redshift, ClickHouse, Trino and Databricks SQL.
+UPSERT functionality is **not supported** on Redshift, ClickHouse and Trino.
 
 ### Additional Export Parameters
 
@@ -833,7 +765,7 @@ The following parameters provide additional control over the export process:
 loader.export(
     df,
     table_name='products',
-    schema='public',
+    schema_name='public',
     overwrite_types={
         'price': 'DECIMAL(10,2)',
         'description': 'TEXT',
@@ -848,7 +780,7 @@ loader.export(
 loader.export(
     df,
     table_name='filtered_data',
-    schema='public',
+    schema_name='public',
     query_string='SELECT * FROM source_table WHERE status = \'active\'',
 )
 ```
@@ -944,7 +876,7 @@ Opens a connection to OracleDB database.
 
 `mage_ai.io.mysql.MySQL`
 
-Handles data transfer between a MySQL database and the Mage app. The `MySQL` client utilizes the following keys to connect the MySQL database.
+Handles data transfer between a MySQL database and MageML. The `MySQL` client utilizes the following keys to connect the MySQL database.
 
 ```yaml
 MYSQL_DATABASE: MySQL database name
@@ -1031,6 +963,9 @@ This function will load at maximum 10,000,000 rows of data (this limit is config
 -   **Args**:
     -   `query_string (str)`: Query to fetch a table or subset of a table.
     -   `limit (int, Optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
+    -   `exact_types (bool, Optional)`: Return pyarrow-backed columns built from the MySQL column types: integers with NULLs stay integers, DECIMAL stays decimal, and TIMESTAMP is in UTC. Defaults to `False`, which uses pandas `read_sql`.
+    -   `polars (bool, Optional)`: Return a Polars DataFrame with the same types. Defaults to `False`.
+    -   `nullable_integers (bool, Optional)`: `read_sql` types, except that integer columns stay integers (nullable `Int64` or `UInt64`). Defaults to `False`.
 -   **Returns**: (`DataFrame`) Data frame containing the queried data.
 
 **_open_** - `open()`
@@ -1053,7 +988,7 @@ Sample data from a table in the MySQL database. Sample is not guaranteed to be r
 
 `mage_ai.io.duckdb`
 
-Handles data transfer between DuckDB database and the Mage app.
+Handles data transfer between DuckDB database and MageML.
 DuckDB client utilizes the following keys to connect:
 
 
@@ -1104,6 +1039,10 @@ Closes connection to DuckDB database.
 
 Opens a connection to DuckDB database.
 
+**_load_** - `load(query_string: str, limit: int = QUERY_ROW_LIMIT, exact_types: bool = False, polars: bool = False, nullable_integers: bool = False, **kwargs) -> DataFrame`
+
+Loads the result of a query. By default the result goes through pandas `read_sql`. `exact_types=True` returns pyarrow-backed pandas columns built from DuckDB's Arrow result, which keep integer widths, integers with NULL, decimals, lists, intervals and UUIDs. `polars=True` returns a Polars DataFrame. `nullable_integers=True` keeps integer columns as integers (nullable `Int64` or `UInt64`).
+
 **_table_exists_** - `table_exists()`
 
 Build query to check if a table existing in the DB.
@@ -1133,7 +1072,7 @@ Convert data from input type into DuckDB type.
 
 `mage_ai.io.snowflake.Snowflake`
 
-Handles data transfer between a Snowflake data warehouse and the Mage app. The `Snowflake` client utilizes the following keys to authenticate access and connect to Snowflake servers.
+Handles data transfer between a Snowflake data warehouse and MageML. The `Snowflake` client utilizes the following keys to authenticate access and connect to Snowflake servers.
 
 ```yaml
 SNOWFLAKE_USER: username
@@ -1261,7 +1200,7 @@ Sample data from a table in the Snowflake warehouse. Sample is not guaranteed to
 
 `mage_ai.io.redshift.Redshift`
 
-Handles data transfer between a Redshift cluster and the Mage app. Mage uses temporary credentials to authenticate access to a Redshift cluster. There are two ways to specify these credentials:
+Handles data transfer between a Redshift cluster and MageML. The client uses temporary credentials to authenticate access to a Redshift cluster. There are two ways to specify these credentials:
 
 1. Pre-generate temporary credentials and specify them in the configuration settings. Add the following keys to the configuration settings for `Redshift` to use the temporary credentials:
     ```yaml
@@ -1407,7 +1346,7 @@ Sample data from a table in the selected database in the Redshift cluster. Sampl
 
 `mage_ai.io.mssql.MSSQL`
 
-Handles data transfer between a Microsoft SQL Server database and the Mage app. The `MSSQL` client utilizes the following keys to connect to the database.
+Handles data transfer between a Microsoft SQL Server database and MageML. The `MSSQL` client utilizes the following keys to connect to the database.
 
 ```yaml
 MSSQL_DATABASE: MSSQL database name
@@ -1417,12 +1356,7 @@ MSSQL_HOST: MSSQL database hostname
 MSSQL_PORT: MSSQL database port (defaults to 1433)
 MSSQL_SCHEMA: MSSQL database schema (defaults to 'dbo')
 MSSQL_AUTHENTICATION: Authentication method (optional)
-MSSQL_CONNECTION_METHOD: Connection method ('direct' or 'ssh_tunnel')
-MSSQL_SSH_HOST: SSH tunnel host (if using SSH tunnel)
-MSSQL_SSH_PORT: SSH tunnel port
-MSSQL_SSH_USERNAME: SSH tunnel username
-MSSQL_SSH_PASSWORD: SSH tunnel password
-MSSQL_SSH_PKEY: SSH tunnel private key path
+MSSQL_DRIVER: ODBC driver name (optional)
 ```
 
 <h3> Constructor </h3>
@@ -1439,12 +1373,7 @@ Initializes the MSSQL data loading client.
     -   `port (int)`: Port on which the database is running. Defaults to 1433.
     -   `schema (str)`: Schema name. Defaults to 'dbo'.
     -   `authentication (str, optional)`: Authentication method.
-    -   `connection_method (str)`: Connection method ('direct' or 'ssh_tunnel'). Defaults to 'direct'.
-    -   `ssh_host (str, optional)`: SSH tunnel host.
-    -   `ssh_port (int, optional)`: SSH tunnel port.
-    -   `ssh_username (str, optional)`: SSH tunnel username.
-    -   `ssh_password (str, optional)`: SSH tunnel password.
-    -   `ssh_pkey (str, optional)`: SSH tunnel private key path.
+    -   `driver (str, optional)`: ODBC driver name.
     -   `verbose (bool)`: Enables verbose output printing. Defaults to `True`.
     -   `**kwargs`: Additional settings for creating connection
 
@@ -1519,7 +1448,7 @@ Rolls back (deletes) all database changes made since the last transaction.
 
 `mage_ai.io.clickhouse.ClickHouse`
 
-Handles data transfer between a ClickHouse data warehouse and the Mage app. The `ClickHouse` client utilizes the following keys to authenticate access and connect to ClickHouse servers.
+Handles data transfer between a ClickHouse data warehouse and MageML. The `ClickHouse` client utilizes the following keys to authenticate access and connect to ClickHouse servers.
 
 ```yaml
 CLICKHOUSE_HOST: ClickHouse hostname
@@ -1528,7 +1457,6 @@ CLICKHOUSE_USERNAME: ClickHouse username
 CLICKHOUSE_PASSWORD: ClickHouse password
 CLICKHOUSE_DATABASE: ClickHouse database name
 CLICKHOUSE_INTERFACE: ClickHouse interface (optional)
-CLICKHOUSE_SSL_CA_CERT: Path to CA certificate for SSL (optional)
 ```
 
 <h3> Constructor </h3>
@@ -1595,84 +1523,11 @@ Exports a Pandas data frame to a ClickHouse warehouse. If table doesn't exist, t
         Defaults to `'replace'`.
     -   `**kwargs`: Advanced export parameters. See [Advanced Export Parameters](#advanced-export-parameters-for-sql-databases). (UPSERT not supported.)
 
-## SQLite
-
-`mage_ai.io.sqlite.SQLite`
-
-Handles data transfer between a SQLite database and the Mage app.
-
-<h3> Constructor </h3>
-
-`__init__(self, database: str, verbose: bool = True, **kwargs)`
-
-Initializes the SQLite data loading client.
-
--   **Args**:
-    -   `database (str)`: Path to the SQLite database file.
-    -   `verbose (bool)`: Enables verbose output printing. Defaults to `True`.
-    -   `**kwargs`: Additional settings for creating connection
-
-<h3> Factory Methods </h3>
-
-**_with_config_** - `with_config(config: BaseConfigLoader, **kwargs) -> SQLite`
-
-Creates SQLite data loading client from configuration settings.
-
--   **Args**:
-    -   `config (BaseConfigLoader)`: Configuration loader object.
-    -   `**kwargs`: Additional parameters passed to the loader constructor
--   **Returns**: (`SQLite`) The constructed dataloader using this method
-
-<h3> Methods </h3>
-
-**_close_** - `close()`
-
-Closes connection to SQLite database.
-
-**_execute_** - `execute(query_string: str, **kwargs) -> None`
-
-Sends query to the connected SQLite database.
-
--   **Args**:
-    -   `query_string (str)`: The query to execute on the SQLite database.
-    -   `**kwargs`: Additional parameters to pass to the query.
-
-**_export_** - `export(df: DataFrame, table_name: str, if_exists: str, index: bool, **kwargs) -> None`
-
-Exports data frame to the SQLite database from a Pandas data frame. If table doesn't exist, the table is automatically created.
-
--   **Args**:
-    -   `df (DataFrame)`: Data frame to export to the SQLite database.
-    -   `table_name (str)`: Name of the table to export data to.
-    -   `if_exists (ExportWritePolicy)`: Specifies export policy if table exists. Either
-        -   `'fail'`: throw an error.
-        -   `'replace'`: drops existing table and creates new table of same name.
-        -   `'append'`: appends data frame to existing table.
-        Defaults to `'replace'`.
-    -   `index (bool)`: If `True`, the data frame index is also exported alongside the table. Defaults to `False`.
-    -   `**kwargs`: Advanced export options such as `unique_constraints`, `unique_conflict_method`, `overwrite_types`, `auto_clean_name`, etc. See the [Advanced Export Parameters](#advanced-export-parameters-for-sql-databases) section for details.
-
-**_load_** - `load(query_string: str, limit: int, *args, **kwargs) -> DataFrame`
-
-Loads data from the results of a query into a Pandas data frame. This will fail if the query returns no data from the database.
-
-This function will load at maximum 10,000,000 rows of data (this limit is configurable). To operate on more data, consider performing data transformations in warehouse.
-
--   **Args**:
-    -   `query_string (str)`: Query to fetch a table or subset of a table.
-    -   `limit (int, Optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
-    -   `**kwargs`: Additional parameters to pass to the query.
--   **Returns**: (`DataFrame`) Data frame containing the queried data.
-
-**_open_** - `open()`
-
-Opens a connection to SQLite database.
-
 ## Trino
 
 `mage_ai.io.trino.Trino`
 
-Handles data transfer between a Trino data warehouse and the Mage app. The `Trino` client utilizes the following keys to authenticate access and connect to Trino servers.
+Handles data transfer between a Trino data warehouse and MageML. The `Trino` client utilizes the following keys to authenticate access and connect to Trino servers.
 
 ```yaml
 TRINO_CATALOG: Trino catalog name
@@ -1769,7 +1624,7 @@ Rolls back (deletes) all warehouse changes made since the last transaction.
 
 `mage_ai.io.mongodb.MongoDB`
 
-Handles data transfer between a MongoDB database and the Mage app. The `MongoDB` client utilizes the following keys to connect to the database.
+Handles data transfer between a MongoDB database and MageML. The `MongoDB` client utilizes the following keys to connect to the database.
 
 ```yaml
 MONGODB_CONNECTION_STRING: MongoDB connection string (alternative to individual settings)
@@ -1829,99 +1684,11 @@ Exports the input dataframe to the MongoDB collection.
     -   `data (Union[DataFrame, List[Dict]])`: Data frame or List of Dictionary to export.
     -   `collection (str, optional)`: MongoDB collection name. Defaults to collection specified in constructor.
 
-## Databricks SQL
-
-<ProOnly source="databricks" />
-
-`mage_ai.io.databricks_sql.DatabricksSQL`
-
-Handles data transfer between a Databricks SQL warehouse and the Mage app. The `DatabricksSQL` client utilizes the following keys to authenticate access and connect to Databricks.
-
-```yaml
-DATABRICKS_ACCESS_TOKEN: Databricks access token
-DATABRICKS_HOST: Databricks workspace hostname
-DATABRICKS_HTTP_PATH: Databricks SQL warehouse HTTP path
-DATABRICKS_DATABASE: Databricks database/catalog name
-DATABRICKS_SCHEMA: Databricks schema name
-```
-
-<h3> Constructor </h3>
-
-`__init__(self, verbose: bool = True, **kwargs)`
-
-Initializes the Databricks SQL data loading client.
-
--   **Args**:
-    -   `access_token (str)`: Databricks access token (required).
-    -   `host (str)`: Databricks workspace hostname (required).
-    -   `http_path (str)`: Databricks SQL warehouse HTTP path (required).
-    -   `database (str, optional)`: Database/catalog name.
-    -   `schema (str, optional)`: Schema name.
-    -   `verbose (bool)`: Enables verbose output printing. Defaults to `True`.
-    -   `**kwargs`: Additional settings for creating connection
-
-<h3> Factory Methods </h3>
-
-**_with_config_** - `with_config(config: BaseConfigLoader, **kwargs) -> DatabricksSQL`
-
-Creates Databricks SQL data loading client from configuration settings.
-
--   **Args**:
-    -   `config (BaseConfigLoader)`: Configuration loader object.
-    -   `**kwargs`: Additional parameters passed to the loader constructor
--   **Returns**: (`DatabricksSQL`) The constructed dataloader using this method
-
-<h3> Methods </h3>
-
-**_close_** - `close()`
-
-Closes connection to Databricks SQL warehouse.
-
-**_execute_** - `execute(query_string: str, **kwargs) -> None`
-
-Sends query to the connected Databricks SQL warehouse.
-
--   **Args**:
-    -   `query_string (str)`: The query to execute on the Databricks SQL warehouse.
-    -   `**kwargs`: Additional parameters to pass to the query.
-
-**_export_** - `export(df: DataFrame, table_name: str, database: str, schema: str, if_exists: str, **kwargs) -> None`
-
-Exports a Pandas data frame to a Databricks SQL warehouse. If table doesn't exist, the table is automatically created.
-
--   **Args**:
-    -   `df (DataFrame)`: Data frame to export to Databricks SQL warehouse.
-    -   `table_name (str)`: Name of the table to export data to.
-    -   `database (str)`: Name of the database/catalog in which the table is located.
-    -   `schema (str)`: Name of the schema in which the table is located.
-    -   `if_exists (ExportWritePolicy)`: Specifies export policy if table exists. Either
-        -   `'fail'`: throw an error.
-        -   `'replace'`: drops existing table and creates new table of same name.
-        -   `'append'`: appends data frame to existing table.
-        Defaults to `'replace'`.
-    -   `**kwargs`: See [Advanced Export Parameters](#advanced-export-parameters-for-sql-databases) for available options.
-
-**_load_** - `load(query_string: str, limit: int, *args, **kwargs) -> DataFrame`
-
-Loads data from Databricks SQL into a Pandas data frame based on the query given. This will fail if the query returns no data from the warehouse.
-
-This function will load at maximum 10,000,000 rows of data (this limit is configurable). To operate on more data, consider performing data transformations in warehouse.
-
--   **Args**:
-    -   `query_string (str)`: Query to fetch a table or subset of a table.
-    -   `limit (int, Optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
-    -   `**kwargs`: Additional parameters to pass to the query.
--   **Returns**: (`DataFrame`) Data frame containing the queried data.
-
-**_open_** - `open()`
-
-Opens a connection to Databricks SQL warehouse.
-
 ## Spark
 
 `mage_ai.io.spark.Spark`
 
-Handles data transfer between a Spark session and the Mage app. The `Spark` client utilizes the following keys to connect to Spark.
+Handles data transfer between a Spark session and MageML. The `Spark` client utilizes the following keys to connect to Spark.
 
 ```yaml
 SPARK_HOST: Spark host/master URL
@@ -1990,110 +1757,17 @@ Exports a Pandas data frame to a Spark session. If table doesn't exist, the tabl
         Defaults to `'replace'`.
     -   `**kwargs`: Additional arguments to pass to writer.
 
-## Azure Data Lake Storage
-
-<ProOnly source="azure-data-lake-storage" />
-
-`mage_ai.io.azure_data_lake_storage.AzureDataLakeStorage`
-
-Handles data transfer between an Azure Data Lake Storage Gen2 container and the Mage app. Supports loading files of the following types:
-
--   CSV
--   JSON
--   Parquet
-
-To authenticate access to Azure Data Lake Storage, the following environment variables must be set:
-
-- `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
-- `AZURE_TENANT_ID`
-- `AZURE_STORAGE_ACCOUNT_NAME`
-
-By default, these correspond to variables of the same name in `io_config.yaml`.
-
-<h3> Constructor </h3>
-
-`__init__(self, verbose: bool = True, **kwargs)`
-
-Initializes data loader from an Azure Data Lake Storage Gen2 container.
-
--   **Args**:
-    -   `storage_account_name (str)`: Azure Storage account name (required).
-    -   `verbose (bool)`: Enables verbose output printing. Defaults to `True`.
-    -   `**kwargs`: Additional settings. If `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, and `AZURE_TENANT_ID` are provided, they will be used for authentication. Otherwise, DefaultAzureCredential will be used.
-
-<h3> Factory Methods </h3>
-
-**_with_config_** - `with_config(config: BaseConfigLoader, **kwargs) -> AzureDataLakeStorage`
-
-Creates AzureDataLakeStorage data loading client from configuration settings.
-
--   **Args**:
-    -   `config (BaseConfigLoader)`: Configuration loader object.
-    -   `**kwargs`: Additional parameters passed to the loader constructor
--   **Returns**: (`AzureDataLakeStorage`) The constructed dataloader using this method
-
-<h3> Methods </h3>
-
-**_export_** - `export(df: DataFrame, container_name: str, file_path: str, format: FileFormat | str = None, **kwargs) -> None`
-
-Exports data frame to an Azure Data Lake Storage Gen2 container.
-
--   **Args**:
-    -   `df (DataFrame)`: Data frame to export.
-    -   `container_name (str)`: Name of the Azure container to export data to.
-    -   `file_path (str)`: The desired output path of the data in your Azure Data Lake Storage.
-    -   `format (FileFormat | str, Optional)`: Format of the file to export data frame to. Defaults to `None`, in which case the format is inferred.
-    -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats in [FileIO](#fileio) section.
-
-**_load_** - `load(container_name: str, file_path: str, format: FileFormat | str = None, limit: int = QUERY_ROW_LIMIT, **kwargs) -> DataFrame`
-
-Loads data from object in Azure Data Lake Storage Gen2 into a Pandas data frame. This function will load at maximum 10,000,000 rows of data from the specified file (this limit is configurable).
-
--   **Args**:
-    -   `container_name (str)`: Name of the container to load data from.
-    -   `file_path (str)`: Path of the file in Azure Data Lake Storage to load data from.
-    -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `limit (int, optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.
-    -   `**kwargs` - Additional keyword arguments to pass to the file reader. See possible arguments by file formats in [FileIO](#fileio) section.
--   **Returns**: (`DataFrame`) Data frame object loaded from data in the specified file.
-
-## Microsoft Fabric Warehouse
-
-<ProOnly source="microsoft-fabric-warehouse" />
-
-`mage_ai.io.microsoft_fabric_warehouse.MicrosoftFabricWarehouse`
-
-Handles data transfer between a Microsoft Fabric Warehouse and the Mage app. This client extends the MSSQL client and uses the same connection methods.
-
-<h3> Constructor </h3>
-
-`__init__(self, **kwargs)`
-
-Initializes the Microsoft Fabric Warehouse data loading client. Uses the same parameters as [MSSQL](#mssql).
-
-<h3> Factory Methods </h3>
-
-**_with_config_** - `with_config(config: BaseConfigLoader, **kwargs) -> MicrosoftFabricWarehouse`
-
-Creates Microsoft Fabric Warehouse data loading client from configuration settings.
-
--   **Args**:
-    -   `config (BaseConfigLoader)`: Configuration loader object.
-    -   `**kwargs`: Additional parameters passed to the loader constructor
--   **Returns**: (`MicrosoftFabricWarehouse`) The constructed dataloader using this method
-
 # Configuration Settings
 
 Connections to third-party data storage require you to specify confidential information such as login information or access keys. While you can manually specify this information code while constructing data loading clients, it is recommended to not store the secrets directly in code.
 
-Instead, Mage provides **configuration loaders** which allow data loading clients to use your secrets without explicitly writing them in code.
+Instead, MageML provides **configuration loaders** which allow data loading clients to use your secrets without explicitly writing them in code.
 
 <Warning>
-  Currently Mage only supports AWS Secrets Manager as a configuration loader. If you need to use secrets from Azure Key Vault
+  AWS Secrets Manager is the only secret manager with a configuration loader. If you need to use secrets from Azure Key Vault
   or GCP Secret Manager, you can reference the following docs:
-    - [Azure Key Vault](https://docs.mage.ai/production/deploying-to-cloud/secrets/Azure)
-    - [GCP Secret Manager](https://docs.mage.ai/production/deploying-to-cloud/secrets/GCP)
+    - [Azure Key Vault](/production/deploying-to-cloud/secrets/Azure)
+    - [GCP Secret Manager](/production/deploying-to-cloud/secrets/GCP)
 </Warning>
 
 Currently, the following sources (and their corresponding configuration loader) can be used to load configuration settings:
@@ -2109,10 +1783,10 @@ from mage_ai.io.config import AWSSecretLoader
 from mage_ai.io.redshift import Redshift
 
 config = AWSSecretLoader()
-loader = Redshift.from_config(config)
+loader = Redshift.with_config(config)
 ```
 
-The following are the set of allowed key names that you must name your secrets with in order for Mage's configuration loaders to recognize your secrets. In code you can refer to these keys by their string name or using the `mage_ai.io.config.ConfigKey` enum. Not all keys need be specified at once - only use the keys related to the services you utilize.
+The following are the set of allowed key names that you must name your secrets with in order for the configuration loaders to recognize your secrets. In code you can refer to these keys by their string name or using the `mage_ai.io.config.ConfigKey` enum. Not all keys need be specified at once - only use the keys related to the services you utilize.
 
 | Key Name                        | Service                      | Client Constructor Parameter | Description                                                             | Notes                                       |
 | ------------------------------- | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
@@ -2145,10 +1819,6 @@ The following are the set of allowed key names that you must name your secrets w
 | POSTGRES_SSH_USERNAME           | [PostgreSQL](#postgresql)    | ssh_username                 | SSH tunnel username                                                     | Optional                                    |
 | POSTGRES_SSH_PASSWORD           | [PostgreSQL](#postgresql)    | ssh_password                 | SSH tunnel password                                                     | Optional                                    |
 | POSTGRES_SSH_PKEY               | [PostgreSQL](#postgresql)    | ssh_pkey                     | SSH tunnel private key path                                            | Optional                                    |
-| POSTGRES_SSL_MODE               | [PostgreSQL](#postgresql)    | sslmode                      | SSL mode                                                                | Optional                                    |
-| POSTGRES_SSL_ROOTCERT           | [PostgreSQL](#postgresql)    | sslrootcert                  | SSL root certificate path                                               | Optional                                    |
-| POSTGRES_SSL_CERT               | [PostgreSQL](#postgresql)    | sslcert                      | SSL certificate path                                                   | Optional                                    |
-| POSTGRES_SSL_KEY                | [PostgreSQL](#postgresql)    | sslkey                       | SSL key path                                                            | Optional                                    |
 | POSTGRES_CONNECT_TIMEOUT        | [PostgreSQL](#postgresql)    | connect_timeout              | Connection timeout in seconds                                           | Optional                                    |
 | **Snowflake**                   |                              |                              |                                                                         |                                             |
 | SNOWFLAKE_USER                  | [Snowflake](#snowflake)      | user                         | Snowflake username                                                      |                                             |
@@ -2172,11 +1842,6 @@ The following are the set of allowed key names that you must name your secrets w
 | MYSQL_HOST                      | [MySQL](#mysql)              | host                         | MySQL hostname                                                          |                                             |
 | MYSQL_PORT                      | [MySQL](#mysql)              | port                         | MySQL port. Defaults to 3306.                                          |                                             |
 | MYSQL_CONNECTION_METHOD        | [MySQL](#mysql)              | connection_method            | Connection method ('direct' or 'ssh_tunnel')                            | Optional                                    |
-| MYSQL_SSH_HOST                  | [MySQL](#mysql)              | ssh_host                     | SSH tunnel host                                                         | Optional                                    |
-| MYSQL_SSH_PORT                  | [MySQL](#mysql)              | ssh_port                     | SSH tunnel port                                                         | Optional                                    |
-| MYSQL_SSH_USERNAME              | [MySQL](#mysql)              | ssh_username                 | SSH tunnel username                                                     | Optional                                    |
-| MYSQL_SSH_PASSWORD              | [MySQL](#mysql)              | ssh_password                 | SSH tunnel password                                                     | Optional                                    |
-| MYSQL_SSH_PKEY                  | [MySQL](#mysql)              | ssh_pkey                     | SSH tunnel private key path                                            | Optional                                    |
 | **MSSQL**                       |                              |                              |                                                                         |                                             |
 | MSSQL_DATABASE                  | [MSSQL](#mssql)              | database                     | MSSQL database name                                                     |                                             |
 | MSSQL_USER                      | [MSSQL](#mssql)              | user                         | MSSQL username                                                          |                                             |
@@ -2185,12 +1850,6 @@ The following are the set of allowed key names that you must name your secrets w
 | MSSQL_PORT                      | [MSSQL](#mssql)              | port                         | MSSQL port. Defaults to 1433.                                           |                                             |
 | MSSQL_SCHEMA                    | [MSSQL](#mssql)              | schema                       | MSSQL schema name. Defaults to 'dbo'.                                  |                                             |
 | MSSQL_AUTHENTICATION            | [MSSQL](#mssql)              | authentication               | Authentication method                                                   | Optional                                    |
-| MSSQL_CONNECTION_METHOD         | [MSSQL](#mssql)              | connection_method            | Connection method ('direct' or 'ssh_tunnel')                            | Optional                                    |
-| MSSQL_SSH_HOST                  | [MSSQL](#mssql)              | ssh_host                     | SSH tunnel host                                                         | Optional                                    |
-| MSSQL_SSH_PORT                  | [MSSQL](#mssql)              | ssh_port                     | SSH tunnel port                                                         | Optional                                    |
-| MSSQL_SSH_USERNAME              | [MSSQL](#mssql)              | ssh_username                 | SSH tunnel username                                                     | Optional                                    |
-| MSSQL_SSH_PASSWORD              | [MSSQL](#mssql)              | ssh_password                 | SSH tunnel password                                                     | Optional                                    |
-| MSSQL_SSH_PKEY                  | [MSSQL](#mssql)              | ssh_pkey                     | SSH tunnel private key path                                            | Optional                                    |
 | MSSQL_DRIVER                    | [MSSQL](#mssql)              | driver                       | ODBC driver name                                                        | Optional                                    |
 | **ClickHouse**                  |                              |                              |                                                                         |                                             |
 | CLICKHOUSE_HOST                 | [ClickHouse](#clickhouse)    | host                         | ClickHouse hostname                                                     |                                             |
@@ -2199,7 +1858,6 @@ The following are the set of allowed key names that you must name your secrets w
 | CLICKHOUSE_PASSWORD             | [ClickHouse](#clickhouse)    | password                     | ClickHouse password                                                     |                                             |
 | CLICKHOUSE_DATABASE             | [ClickHouse](#clickhouse)    | database                     | ClickHouse database name                                                |                                             |
 | CLICKHOUSE_INTERFACE            | [ClickHouse](#clickhouse)    | interface                    | ClickHouse interface                                                    | Optional                                    |
-| CLICKHOUSE_SSL_CA_CERT          | [ClickHouse](#clickhouse)    | ca_cert                      | Path to CA certificate for SSL                                          | Optional                                    |
 | **Trino**                       |                              |                              |                                                                         |                                             |
 | TRINO_CATALOG                   | [Trino](#trino)              | catalog                      | Trino catalog name                                                      |                                             |
 | TRINO_HOST                      | [Trino](#trino)              | host                         | Trino hostname                                                          |                                             |
@@ -2207,12 +1865,6 @@ The following are the set of allowed key names that you must name your secrets w
 | TRINO_USER                      | [Trino](#trino)              | user                         | Trino username                                                          |                                             |
 | TRINO_PASSWORD                  | [Trino](#trino)              | password                     | Trino password                                                          | Optional                                    |
 | TRINO_SCHEMA                    | [Trino](#trino)              | schema                       | Trino schema name                                                       | Optional                                    |
-| **Databricks SQL**              |                              |                              |                                                                         |                                             |
-| DATABRICKS_ACCESS_TOKEN         | [Databricks SQL](#databricks-sql) | access_token              | Databricks access token                                                 |                                             |
-| DATABRICKS_HOST                  | [Databricks SQL](#databricks-sql) | host                      | Databricks workspace hostname                                           |                                             |
-| DATABRICKS_HTTP_PATH            | [Databricks SQL](#databricks-sql) | http_path                | Databricks SQL warehouse HTTP path                                      |                                             |
-| DATABRICKS_DATABASE              | [Databricks SQL](#databricks-sql) | database                | Databricks database/catalog name                                        | Optional                                    |
-| DATABRICKS_SCHEMA                | [Databricks SQL](#databricks-sql) | schema                  | Databricks schema name                                                  | Optional                                    |
 | **Spark**                       |                              |                              |                                                                         |                                             |
 | SPARK_HOST                      | [Spark](#spark)              | host                         | Spark master URL                                                        |                                             |
 | SPARK_METHOD                    | [Spark](#spark)              | method                       | Spark connection method                                                 | Optional                                    |
@@ -2236,17 +1888,11 @@ The following are the set of allowed key names that you must name your secrets w
 | DUCKDB_DATABASE                 | [DuckDB](#duckdb)            | database                     | DuckDB database path                                                    |                                             |
 | DUCKDB_SCHEMA                   | [DuckDB](#duckdb)            | schema                       | DuckDB schema name. Defaults to 'main'.                                 | Optional                                    |
 | MOTHERDUCK_TOKEN                | [DuckDB](#duckdb)            | -                            | MotherDuck authentication token                                          | Optional                                    |
-| **SQLite**                      |                              |                              |                                                                         |                                             |
-| SQLITE                          | [SQLite](#sqlite)            | database                     | SQLite database file path                                               |                                             |
 | **Azure**                       |                              |                              |                                                                         |                                             |
-| AZURE_CLIENT_ID                 | Azure Services               | client_id                    | Azure AD application client ID                                           | Used by [Azure Blob Storage](#azureblobstorage), [Azure Data Lake Storage](#azure-data-lake-storage) |
-| AZURE_CLIENT_SECRET             | Azure Services               | client_secret                | Azure AD application client secret                                       | Used by [Azure Blob Storage](#azureblobstorage), [Azure Data Lake Storage](#azure-data-lake-storage) |
-| AZURE_TENANT_ID                 | Azure Services               | tenant_id                    | Azure AD tenant ID                                                       | Used by [Azure Blob Storage](#azureblobstorage), [Azure Data Lake Storage](#azure-data-lake-storage)|
-| AZURE_STORAGE_ACCOUNT_NAME      | Azure Services               | storage_account_name         | Azure Storage account name                                              | Used by [Azure Blob Storage](#azureblobstorage), [Azure Data Lake Storage](#azure-data-lake-storage) |
-| **Microsoft Fabric**            |                              |                              |                                                                         |                                             |
-| MICROSOFT_FABRIC_WAREHOUSE_NAME | [Microsoft Fabric](#microsoft-fabric-warehouse) | warehouse_name | Microsoft Fabric warehouse name                                         |                                             |
-| MICROSOFT_FABRIC_WAREHOUSE_ENDPOINT | [Microsoft Fabric](#microsoft-fabric-warehouse) | endpoint | Microsoft Fabric warehouse endpoint                                     |                                             |
-| MICROSOFT_FABRIC_WAREHOUSE_SCHEMA | [Microsoft Fabric](#microsoft-fabric-warehouse) | schema | Microsoft Fabric warehouse schema                                       | Optional                                    |
+| AZURE_CLIENT_ID                 | Azure Services               | client_id                    | Azure AD application client ID                                           | Used by [Azure Blob Storage](#azureblobstorage) |
+| AZURE_CLIENT_SECRET             | Azure Services               | client_secret                | Azure AD application client secret                                       | Used by [Azure Blob Storage](#azureblobstorage) |
+| AZURE_TENANT_ID                 | Azure Services               | tenant_id                    | Azure AD tenant ID                                                       | Used by [Azure Blob Storage](#azureblobstorage) |
+| AZURE_STORAGE_ACCOUNT_NAME      | Azure Services               | storage_account_name         | Azure Storage account name                                              | Used by [Azure Blob Storage](#azureblobstorage) |
 
 ## Configuration Loader APIs
 
@@ -2275,8 +1921,6 @@ These functions are shared among all configuration loaders, but depending on the
 ### Configuration File
 
 Loads configuration settings from a configuration file.
-
-For detailed information about creating and managing `io_config.yaml` files, see the [IO Config Setup documentation](/development/io_config_setup).
 
 For detailed information about creating and managing `io_config.yaml` files, see the [IO Config Setup documentation](/development/io_config_setup).
 

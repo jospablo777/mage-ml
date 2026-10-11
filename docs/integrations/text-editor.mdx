@@ -2,12 +2,12 @@
 title: "Using an external IDE"
 sidebarTitle: "IDE"
 icon: "spell-check"
-description: "We love our UI, but here's how to develop in your favorite IDE, too."
+description: "Develop pipelines in your own IDE by editing the project files."
 ---
 
 ## Create a new pipeline
 
-Each pipeline is represented by a YAML file in a folder named `pipelines/` under the Mage
+Each pipeline is represented by a YAML file in a folder named `pipelines/` under the
 project directory.
 
 For example, if your project is named `demo_project` and your pipeline is named `etl_demo` then
@@ -125,6 +125,21 @@ uuid: etl_demo
   - `pyspark`
 </ParamField>
 
+<ParamField path="block_fusion" type="string">
+  Set to `'off'` to run production runs block by block instead of running chains of blocks
+  in one process. See [block fusion](/design/data-pipeline-management#block-fusion).
+</ParamField>
+
+<ParamField path="keep_block_outputs" type="boolean">
+  If true, every block of a compiled chain computes and stores its own output. See
+  [compiled chains](/design/data-pipeline-management#compiled-chains-of-rust-and-r-blocks).
+</ParamField>
+
+<ParamField path="environment" type="object">
+  The pipeline's own Python environment. See
+  [pipeline environments](/guides/pipelines/pipeline-environments).
+</ParamField>
+
 <ParamField path="executor_count" type="integer">
   Number of concurrent executors to run the pipeline. Used in streaming pipeline.
 </ParamField>
@@ -161,7 +176,6 @@ uuid: etl_demo
   - `block_run_limit`: Maximum number of blocks that can run in parallel.
   - `pipeline_run_limit`
   - `pipeline_run_limit_all_triggers`
-  - `pipeline_run_priority` (Mage Pro only): Higher values start first when pipeline run limits are reached.
   - `on_pipeline_run_limit_reached`
 </ParamField>
 
@@ -202,23 +216,11 @@ uuid: etl_demo
   environment-specific values that are not secrets.
 </ParamField>
 
-<ParamField path="state_store_config" type="object">
-  Configure an external state store for pipeline runs.
-</ParamField>
-
 <ParamField path="tags" type="array of strings">
   Free-form labels to organize and search for pipelines. Each tag name can contain up to 70
   characters.
 </ParamField>
 
-<ParamField path="created_by" type="string">
-  Identifier for the user or process that created the pipeline.
-</ParamField>
-
-<ParamField path="overrides" type="object">
-  Environment-specific overrides for any top-level pipeline field. Mage Pro only.
-  See [environment overrides](/extensibility/env-config/pipeline) for guidance.
-</ParamField>
 
 
 ### Block attributes
@@ -250,8 +252,10 @@ uuid: etl_demo
 
 <ParamField path="language" type="string enum">
   Programming language used by the block. Supported values:
+  - `markdown`
   - `python` (most common)
-  - `r`
+  - `r` (see [R blocks](/guides/blocks/r-blocks))
+  - `rust` (see [Rust blocks](/guides/blocks/rust-blocks))
   - `sql`
   - `yaml`
 </ParamField>
@@ -289,21 +293,15 @@ uuid: etl_demo
     will be `load_data.py`.
 </ParamField>
 
-<ParamField path="color" type="string">
-  Optional HEX color used to visually organize blocks in the UI.
+<ParamField path="color" type="string enum">
+  Optional color used to visually organize blocks in the UI: `blue`, `grey`, `pink`,
+  `purple`, `teal` or `yellow`.
 </ParamField>
 
 <ParamField path="configuration" type="object">
   Block-specific configuration. For integrations or dbt blocks this mirrors the
-  configuration visible in the block settings panel.
-</ParamField>
-
-<ParamField path="documentation" type="string">
-  Markdown content rendered in the block’s documentation tab.
-</ParamField>
-
-<ParamField path="priority" type="integer">
-  Optional priority for scheduling blocks when multiple are runnable.
+  configuration visible in the block settings panel. `fusion: false` makes the block run
+  alone, outside [block fusion](/design/data-pipeline-management#block-fusion).
 </ParamField>
 
 <ParamField path="retry_config" type="object">
@@ -312,7 +310,8 @@ uuid: etl_demo
 </ParamField>
 
 <ParamField path="tags" type="array of strings">
-  Labels applied to the block for organization and filtering.
+  Tags MageML derives from the block's settings, such as `dynamic`, `dynamic_child`,
+  `reduce_output` and `replica`. They are written by MageML, not set by hand.
 </ParamField>
 
 <ParamField path="timeout" type="integer">

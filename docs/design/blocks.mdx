@@ -8,7 +8,7 @@ description: "Each block in a pipeline maps to an individual file within a proje
 
 ### Modularity
 
-Mage breaks down complex data engineering tasks into smaller, manageable units (blocks). Each block in a pipeline is a standalone file that can be executed independently.
+MageML breaks down complex data engineering tasks into smaller, manageable units (blocks). Each block in a pipeline is a standalone file that can be executed independently.
 
 Modular design makes it easier to maintain and update data pipelines by modifying a specific block or creating new ones without affecting other parts of the pipeline.
 
@@ -16,11 +16,13 @@ This isolation reduces the risk of introducing new bugs into the system when mak
 
 Modular design enables fault-tolerant pipelines so that when one or more blocks fail, the rest can keep running. Debugging modular blocks is faster than debugging a monolithic code base. Once resolved, failed blocks can be retried without re-running the entire pipeline.
 
+In production runs, a chain of blocks runs in one process by default, and each block keeps its own block run, status, logs and retries. See [block fusion](/design/data-pipeline-management#block-fusion).
+
 ### Reusability
 
 This design encapsulates each step of a data pipeline into reusable blocks that perform a specific function; such as data loading, transformation, or exporting.
 
-Developers can build complex pipelines faster by leveraging existing blocks across different projects, different pipelines, or within the same pipeline.
+Developers can build complex pipelines faster by reusing existing blocks across different projects, different pipelines, or within the same pipeline.
 
 Designing blocks to be reusable significantly reduces the time and effort required to develop new data pipelines, as developers can reuse blocks instead of writing new code from scratch.
 
@@ -42,6 +44,9 @@ Dynamic blocks adapt their behavior based on input data or runtime conditions, e
 - [dbt](/guides/dbt/overview)
 - [Extensions](/observability/testing/data-validation)
 - [Callbacks](/design/blocks/callbacks)
+
+Data loaders, transformers, data exporters and custom blocks can be written in Python, SQL,
+[R](/guides/blocks/r-blocks) or [Rust](/guides/blocks/rust-blocks).
 
 <Frame>
   <img alt="Blocks" src="https://user-images.githubusercontent.com/97557538/198362650-6a61dfb2-8afb-40d4-b5ce-fb9f145f23a6.png" />

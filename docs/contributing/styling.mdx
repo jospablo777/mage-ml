@@ -5,10 +5,10 @@ a 100-character line length. Run the pinned version from the repository environm
 only on the Python files changed by your PR:
 
 ```bash
-isort <changed-python-files>
-pre-commit run ruff-format --files <changed-python-files>
-python -m ruff check <changed-python-files>
-pre-commit run --files <changed-python-files>
+uv run isort <changed-python-files>
+uv run ruff format <changed-python-files>
+uv run ruff check <changed-python-files>
+uv run pre-commit run --files <changed-python-files>
 ```
 
 Do not use Black or format whole directories as part of a feature or bug-fix PR.

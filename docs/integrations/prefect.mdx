@@ -1,15 +1,18 @@
 ---
-title: "Run Mage pipelines in Prefect"
+title: "Run MageML pipelines in Prefect"
 sidebarTitle: "Prefect"
-description: "We support running the pipeline in Prefect flows."
+description: "Run pipelines in Prefect flows."
 ---
 
-You need to firstly install `mage_ai` library by adding `mage_ai` to your
-requirements.txt file. Then you need to download the mage pipeline code into
-your Prefect directory. You can achieve it by using a git submodule in your
-Prefect directory.
+First install MageML in the environment that runs Prefect. There is no published MageML
+package yet (`pip install mage-ai` installs upstream Mage), so install it from source:
+clone https://github.com/jospablo777/mage-ml, run `uv sync --locked --no-default-groups`
+in it, and add Prefect to that environment. Then download the project code into your
+Prefect directory, for example as a git submodule.
 
-We provide two ways to run mage pipelines in Prefect.
+The examples below use the Prefect 1 API (`Flow`, `ShellTask`).
+
+There are two ways to run pipelines in Prefect.
 
 1. Run pipeline in as a task or ShellTask.
 2. Run pipeline as a Prefect Flow.

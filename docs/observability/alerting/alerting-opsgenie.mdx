@@ -5,8 +5,6 @@ description: "Get status updates in Opsgenie."
 icon: "cauldron"
 ---
 
-import { ProOnly } from '/snippets/pro/only.mdx';
-
 <img
   alt="Opsgenie"
   src="https://logotyp.us/files/opsgenie.svg"
@@ -16,23 +14,7 @@ import { ProOnly } from '/snippets/pro/only.mdx';
 ## Overview of steps
 
 1. Set up Api Integration for Opsgenie
-2. Update Mage project settings
-
----
-
-## Configure alerts in the Mage Pro UI
-
-After you create your Opsgenie API integration, you can configure alerts in the
-Mage Pro UI instead of editing `metadata.yaml` directly:
-
-1. For project defaults, go to **Settings > Account > Alerts**.
-2. For one pipeline, open the pipeline and go to **Alerts**. Pipeline-level
-   settings override the project-level alert config for that pipeline.
-3. Choose the alert outcomes, enable Opsgenie, enter the API URL and API key,
-   and use **Send test notification** to send a test alert before saving.
-
-You can still reference secrets with values such as
-`{{ env_var('MAGE_OPSGENIE_API_KEY') }}`.
+2. Update the project settings
 
 ---
 
@@ -44,14 +26,14 @@ to setup an API Integration in your account.
 
 ---
 
-## Update Mage project settings
+## Update the project settings
 
 Once you’ve set up API Integration for Opsgenie, you should have an API Key that Opsgenie
 provides.
 
 Follow these steps to add that Opsgenie Configuration to your project settings:
 
-1. Open the Mage tool in your browser (e.g. http://localhost:6789/).
+1. Open MageML in your browser (e.g. http://localhost:6789/).
 2. Open a pipeline and start editing it (e.g.
    http://localhost:6789/pipelines/example_pipeline/edit).
 3. In your left sidebar in the file browser, scroll all the way down and click
@@ -95,11 +77,14 @@ Follow these steps to add that Opsgenie Configuration to your project settings:
 
     Change the `your_api_key` value to be the API Key you created from Opsgenie.
 
+    `metadata.yaml` is rendered as a template when the project loads, so you can read the
+    key from an environment variable: `api_key: "{{ env_var('MAGE_OPSGENIE_API_KEY') }}"`.
+
 ---
 
 ## What next?
 
-Whenever a pipeline run is successfully completed or fails, an Opsgenie alert be
+Whenever a pipeline run is successfully completed or fails, an Opsgenie alert is
 created.
 
 Here is an example of what the alert could look like:
