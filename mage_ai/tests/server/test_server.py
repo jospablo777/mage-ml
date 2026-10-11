@@ -230,3 +230,28 @@ class PageRoutesTest(unittest.TestCase):
                    'pipeline-runs', 'oauth'}
         missing = sorted(f'/{n}' for n in names - skipped if f'/{n}' not in routes)
         self.assertEqual(missing, [])
+
+
+class DefaultPasswordWarningTest(unittest.TestCase):
+    def user(self, password, email='admin@admin.com'):
+        from types import SimpleNamespace
+
+        salt = generate_salt()
+        return SimpleNamespace(
+            email=email, password_hash=create_bcrypt_hash(password, salt), username='admin',
+        )
+
+    def test_an_owner_with_the_default_password_gets_a_warning(self):
+        from mage_ai.server.server import default_password_warning
+
+        warning = default_password_warning([self.user('admin')])
+        self.assertIn('admin@admin.com still has the default password', warning)
+
+    def test_no_warning_for_a_changed_password_or_no_password(self):
+        from types import SimpleNamespace
+
+        from mage_ai.server.server import default_password_warning
+
+        self.assertIsNone(default_password_warning([self.user('a long passphrase')]))
+        self.assertIsNone(default_password_warning([SimpleNamespace(password_hash=None)]))
+        self.assertIsNone(default_password_warning([None]))

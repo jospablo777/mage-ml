@@ -137,7 +137,8 @@ environment variables set other credentials for this first user.
 
 > [!WARNING]
 > After logging in for the first time, change the default password or create new user
-> accounts for your team. See [User authentication](../production/authentication/overview.md).
+> accounts for your team. Until you do, the server logs a warning at every start. See
+> [User authentication](../production/authentication/overview.md).
 
 ## Run your first pipeline
 

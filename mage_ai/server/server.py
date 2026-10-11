@@ -10,7 +10,7 @@ import traceback
 import webbrowser
 from datetime import datetime
 from time import sleep
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import pytz
 import tornado.ioloop
@@ -22,7 +22,11 @@ from tornado.log import enable_pretty_logging
 from tornado.options import options
 from watchdog.observers import Observer
 
-from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
+from mage_ai.authentication.passwords import (
+    create_bcrypt_hash,
+    generate_salt,
+    verify_password,
+)
 from mage_ai.cache.block import BlockCache
 from mage_ai.cache.block_action_object import BlockActionObjectCache
 from mage_ai.cache.dbt.cache import DBTCache
@@ -511,6 +515,26 @@ def make_app(
 
 
 @safe_db_query
+def default_password_warning(users: List) -> Optional[str]:
+    """A warning when an owner still signs in with the password every install starts with."""
+    for user in users:
+        password_hash = getattr(user, 'password_hash', None)
+        if not password_hash:
+            continue
+        try:
+            unchanged = verify_password('admin', password_hash)
+        except ValueError:
+            continue
+        if unchanged:
+            name = user.email or user.username
+            return (
+                f'The owner account {name} still has the default password "admin". Anyone who '
+                'can reach this server can sign in as owner and run code on it. Change the '
+                'password in Settings > Workspace > Users.'
+            )
+    return None
+
+
 def initialize_user_authentication(project_type: ProjectType) -> Oauth2Application:
     logger.info('User authentication is enabled.')
     # We need to sleep for a few seconds after creating all the tables or else there
@@ -566,6 +590,10 @@ def initialize_user_authentication(project_type: ProjectType) -> Oauth2Applicati
         if legacy_owner_user and not legacy_owner_user.roles_new:
             User.batch_update_user_roles()
         owner_user = next(iter(owner_users), None) or legacy_owner_user
+
+    warning = default_password_warning(list(owner_users) or [owner_user])
+    if warning:
+        logger.warning(warning)
 
     oauth_client = Oauth2Application.query.filter(
         Oauth2Application.client_id == OAUTH2_APPLICATION_CLIENT_ID,
