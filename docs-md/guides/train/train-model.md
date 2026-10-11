@@ -272,15 +272,14 @@ from right bottom panel.
 
 ![](https://mage-ai.github.io/assets/execute-pipeline-button.png)
 
-Your output should look something like this:
+The output ends like this (the accuracy changes from run to run, because the split into
+training and test sets is random):
 
 ```text
-Executing data_loader block: load_dataset...DONE
-Executing transformer block: extract_and_impute_numbers...DONE
-Executing data_exporter block: train_model...Accuracy: 0.757847533632287
+Accuracy: 0.7040358744394619
 Saving model to /home/src/finalized_model.lib
 Saving training and test set
-DONE
+Pipeline run completed.
 ```
 
 ---
