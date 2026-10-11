@@ -1,4 +1,5 @@
 import os
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Union
@@ -364,6 +365,23 @@ class VerboseConfigKey(StrEnum):
     WEAVIATE = 'Weaviate'
 
 
+class IOConfigProfileError(KeyError):
+    """A profile that io_config.yaml does not have; a KeyError, as the lookup raised before."""
+
+    def __init__(self, profile: str, filepath: os.PathLike, profiles: Dict):
+        names = [name for name, value in profiles.items() if isinstance(value, dict)]
+        self.message = (
+            f'Profile {profile!r} is not in {filepath}. '
+            + (f'Its profiles: {", ".join(names)}. ' if names else 'It has no profiles. ')
+            + 'Add the profile to the file, or use one of those in the block '
+            '(config_profile = ...).'
+        )
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message
+
+
 class ConfigFileLoader(BaseConfigLoader):
     KEY_MAP = {
         ConfigKey.AIRTABLE_ACCESS_TOKEN: VerboseConfigKey.AIRTABLE,
@@ -513,10 +531,14 @@ class ConfigFileLoader(BaseConfigLoader):
             self.filepath = Path(filepath)
             self.profile = profile
             with self.filepath.open('r') as fin:
-                config_file = Template(fin.read()).render(
+                self._raw_text = fin.read()
+                config_file = Template(self._raw_text).render(
                     **get_template_vars(),
                 )
                 config = yaml.full_load(config_file)
+                profiles = config if isinstance(config, dict) else {}
+                if not isinstance(profiles.get(profile), dict):
+                    raise IOConfigProfileError(profile, self.filepath, profiles)
                 self.config = config[profile]
                 self.version = config.get('version')
 
@@ -549,7 +571,32 @@ class ConfigFileLoader(BaseConfigLoader):
         """
         if self.use_verbose_format:
             return self.__traverse_verbose_config(key)
-        return self.config.get(key)
+        value = self.config.get(key)
+        if value == 'None':
+            self.__warn_unset(key)
+        return value
+
+    def __warn_unset(self, key: Union[ConfigKey, str]) -> None:
+        """
+        A value that rendered as None most often reads an environment variable or secret
+        that is not set; the block would fail later with a confusing connection error.
+        """
+        raw = None
+        try:
+            raw = (yaml.safe_load(getattr(self, '_raw_text', '') or '') or {}).get(
+                getattr(self, 'profile', None), {},
+            ).get(str(key))
+        except Exception:
+            pass
+        if not isinstance(raw, str) or '{{' not in raw:
+            return
+        reads = re.findall(r"(\w+_var)\(\s*['\"]([^'\"]+)['\"]", raw)
+        what = ', '.join(f'{function}({name!r})' for function, name in reads) or raw.strip()
+        print(
+            f'Warning: {key} in profile {self.profile!r} of {self.filepath} is None because '
+            f'{what} is not set. Set it in the environment MageML runs in, or in the secret '
+            'store.'
+        )
 
     def __traverse_verbose_config(self, key: Union[ConfigKey, str]) -> Any:
         """

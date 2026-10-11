@@ -1,3 +1,7 @@
+import contextlib
+import io
+import os
+
 from mage_ai.io.config import ConfigFileLoader, ConfigKey, EnvironmentVariableLoader
 from mage_ai.tests.base_test import DBTestCase
 from pathlib import Path
@@ -200,3 +204,37 @@ template:
         config = ConfigFileLoader(self.test_config_path, profile='template')
         self.assertEqual(config[ConfigKey.REDSHIFT_CLUSTER_ID], 'env_var_cluster')
         self.assertEqual(config[ConfigKey.REDSHIFT_DBUSER], None)
+
+
+class ConfigFileProblemsTest(DBTestCase):
+    def write(self, text):
+        path = os.path.join(self.repo_path, 'problems_io_config.yaml')
+        with open(path, 'w') as file:
+            file.write(text)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_a_missing_profile_names_the_file_and_its_profiles(self):
+        path = self.write('version: 0.1.1\ndefault:\n  POSTGRES_HOST: db\nstaging:\n  X: 1\n')
+        with self.assertRaises(KeyError) as caught:
+            ConfigFileLoader(path, 'prod')
+        message = str(caught.exception)
+        self.assertIn(f"Profile 'prod' is not in {path}.", message)
+        self.assertIn('Its profiles: default, staging.', message)
+
+    def test_a_value_from_an_unset_variable_warns_with_its_name(self):
+        path = self.write(
+            'default:\n'
+            '  POSTGRES_HOST: "{{ env_var(\'MAGE_TEST_UNSET_HOST\') }}"\n'
+            '  POSTGRES_PORT: 5432\n'
+        )
+        os.environ.pop('MAGE_TEST_UNSET_HOST', None)
+        loader = ConfigFileLoader(path, 'default')
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(loader.get('POSTGRES_HOST'), 'None')
+            self.assertEqual(loader.get('POSTGRES_PORT'), 5432)
+        printed = stdout.getvalue()
+        self.assertIn("POSTGRES_HOST in profile 'default'", printed)
+        self.assertIn("env_var('MAGE_TEST_UNSET_HOST') is not set", printed)
+        self.assertNotIn('POSTGRES_PORT', printed)
