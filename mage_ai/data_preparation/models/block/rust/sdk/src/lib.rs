@@ -23,6 +23,8 @@
 
 pub mod context;
 pub mod extract;
+#[cfg(feature = "feast")]
+pub mod feast;
 pub mod output;
 #[cfg(feature = "postgres")]
 pub mod postgres;

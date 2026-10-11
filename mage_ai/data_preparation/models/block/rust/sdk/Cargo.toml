@@ -25,9 +25,13 @@ postgres = { version = "0.19", optional = true }
 tokio-postgres-rustls = { version = "0.13", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 webpki-roots = { version = "1", optional = true }
+# Feast's feature server REST API for blocks (mage::feast), behind the feast feature.
+ureq = { version = "3", features = ["json"], optional = true }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
 
 [features]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
+feast = ["dep:ureq", "dep:chrono"]
 
 [dev-dependencies]
 tempfile = "3"

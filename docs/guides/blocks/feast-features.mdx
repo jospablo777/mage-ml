@@ -104,6 +104,36 @@ Connection errors, timeouts and the answers 429, 502, 503 and 504 are retried th
 not retried: Feast answers most invalid requests (an unknown feature, a wrong value type)
 with 500. They raise `FeastError`, which has the `route`, the `status` and Feast's `body`.
 
+## Rust blocks
+
+Rust blocks have the same client in `mage::feast`, with the same rules. Turn on the SDK's
+`feast` feature in the project's `rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "feast"] }
+```
+
+```rust
+use mage::feast::FeastClient;
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {
+    let feast = FeastClient::from_env()?; // FEAST_URL, FEAST_TOKEN
+    let entities = df!("driver_id" => [1001i64, 1002, 1003])?;
+    feast.get_online_features(&entities, &["driver_hourly_stats:conv_rate"])
+}
+
+fn export_data(features: DataFrame) -> Result<()> {
+    let feast = FeastClient::from_env()?;
+    feast.push("driver_stats_push", &features, "event_timestamp")?;
+    Ok(())
+}
+```
+
+The timestamp column must be a datetime with a time zone; `push` refuses integer and naive
+timestamps with the reason. `get_online_features_service`, `write_to_online_store` and
+`materialize` work as in Python.
+
 ## Exported services
 
 Blocks that use `FeastClient` run the same way in a [pipeline
