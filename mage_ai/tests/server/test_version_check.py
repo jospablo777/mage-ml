@@ -54,7 +54,7 @@ class GetLatestVersionTests(unittest.TestCase):
         )
 
     def test_returns_the_installed_version_when_nothing_newer_is_published(self):
-        with self.published('0.9.79'):
+        with self.published('0.0.9'):
             self.assertEqual(run(get_latest_version()), VERSION)
 
     def test_returns_a_newer_published_version(self):

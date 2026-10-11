@@ -1,8 +1,10 @@
 # Release notes
 
-## v0.9.79-ml.5 (unreleased)
+## MageML 0.1.0 (unreleased)
 
-Changes since `v0.9.79-ml.4`. The fork runs on Python 3.12 with pandas 3.0, Polars 2.0,
+The first release under MageML's own versions, which start at 0.1.0. Earlier builds of this
+fork were versioned after Mage (`0.9.79+ml.1` to `0.9.79+ml.4`); MageML is based on Mage
+0.9.79. Changes since `0.9.79+ml.4`. The fork runs on Python 3.12 with pandas 3.0, Polars 2.0,
 pyarrow 25 and NumPy 2. Most changes fix values that Mage changed or lost without an
 error; the per-service findings are in `docs/development/*-integration.md` and
 `postgres-data-integrity.md`.
@@ -365,6 +367,18 @@ Each item says what changed, which pipelines it affects, and what to do.
 - **The MongoDB destination works again** and upserts on every key property; records
   whose `_id` is not an ObjectId are kept.
 
+#### Privacy
+
+- **Usage statistics are off by default.** New projects set `help_improve_mage: false`, so
+  MageML sends nothing to the upstream Mage project (api.mage.ai) unless you turn it on in
+  Settings > Workspace > Preferences. Turning it off no longer sends a last event recording
+  the choice. Existing projects keep their setting.
+- **The docs no longer send visits to upstream Mage's Google Analytics**, and their
+  header and footer link to MageML's repository instead of Mage's chat and social accounts.
+- **The update check reads MageML's GitHub releases** (`jospablo777/mage-ml`,
+  `MAGE_UPDATE_CHECK_REPOSITORY`), not PyPI, where the name is not MageML's.
+  `MAGE_UPDATE_CHECK_ENABLED=0` turns it off.
+
 #### Production runs
 
 - **Production runs fuse chains of blocks by default.** Triggers, schedules, backfills, the
@@ -667,6 +681,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   next to NULLs so Feast keeps them exact, writes rows in event-time order so the latest
   event wins, refuses timestamps Feast would misread, and retries only transient failures.
   Guide: `docs/guides/blocks/feast-features.mdx`.
+- **MageML branding**: the header, sign-in, 404 page and browser tab show MageML with
+  its mark and favicon, and product copy says MageML. Routes, settings, identifiers and the
+  `mage_ai` package keep their names. The header shows `MageML <version>`, linked to the
+  releases, with the Mage version it is based on.
 - **The Mage Pro promotion is removed**: Live help and Try Pro in the header, Deploy (Pro)
   in the side navigation, AI Code (Pro) in the add-block menu and the live chat links.
 - **`mage verify-fusion`** runs a pipeline block by block and fused, compares every

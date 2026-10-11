@@ -3,9 +3,9 @@ Update check for the header badge.
 
 MageML is published as GitHub releases (do_not_commit/github_release_instructions), so the
 check reads the repository's latest release instead of PyPI, where the name is not
-MageML's. The badge appears only for a strictly newer version (PEP 440): MageML's versions
-carry a local segment, such as 0.9.79+ml.4, and are ahead of the Mage release they are
-based on.
+MageML's. The badge appears only for a strictly newer version (PEP 440). MageML has its
+own versions, starting at 0.1.0, independent of the Mage release it is based on
+(constants.UPSTREAM_MAGE_VERSION).
 """
 import os
 from typing import Optional
@@ -29,8 +29,8 @@ def newer_version(installed: str, candidate: Optional[str]) -> str:
     """
     Return candidate only when it is a strictly newer release than installed.
 
-    Comparison follows PEP 440, so a local segment such as 0.9.79+ml.2 counts as
-    newer than 0.9.79. An unparseable version on either side keeps the installed one.
+    Comparison follows PEP 440, so a local segment such as 0.1.0+build.2 counts as
+    newer than 0.1.0. An unparseable version on either side keeps the installed one.
     """
     if not candidate or candidate == installed:
         return installed
