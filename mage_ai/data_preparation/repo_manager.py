@@ -63,7 +63,6 @@ class RepoConfig:
         self.cluster_type = None
 
         self.remote_variables_dir = None
-        self.ai_config = None
         self.azure_container_instance_config = None
         self.ecs_config = None
         self.emr_config = None
@@ -125,7 +124,6 @@ class RepoConfig:
             self.remote_variables_dir = repo_config.get('remote_variables_dir')
 
             # Executor configs
-            self.ai_config = repo_config.get('ai_config', dict())
             self.azure_container_instance_config = repo_config.get(
                 'azure_container_instance_config'
             )
@@ -206,7 +204,6 @@ class RepoConfig:
 
     def to_dict(self, remote: bool = False) -> Dict:
         return dict(
-            ai_config=self.ai_config,
             azure_container_instance_config=self.azure_container_instance_config,
             ecs_config=self.ecs_config,
             emr_config=self.emr_config,

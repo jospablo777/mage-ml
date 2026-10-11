@@ -18,6 +18,7 @@
             "pages": [
               "introduction/overview",
               "getting-started/setup",
+              "guides/train/train-model",
               "design/core-design-principles",
               {
                 "group": "Abstractions",
@@ -607,26 +608,6 @@
         ]
       },
       {
-        "tab": "AI",
-        "groups": [
-          {
-            "group": "Development",
-            "icon": "microchip-ai",
-            "pages": [
-              "ai/setup",
-              "ai/ai-client"
-            ]
-          },
-          {
-            "group": "Pipelines",
-            "icon": "microchip-ai",
-            "pages": [
-              "ai/ml/train-model"
-            ]
-          }
-        ]
-      },
-      {
         "tab": "Observability",
         "groups": [
           {
@@ -1019,7 +1000,7 @@
     },
     {
       "source": "/tutorials/train-model",
-      "destination": "/ai/ml/train-model"
+      "destination": "/guides/train/train-model"
     },
     {
       "source": "/tutorials/train/complete-project",
@@ -1196,6 +1177,10 @@
     {
       "source": "/production/data-sync/github",
       "destination": "/guides/data-sync/version-control"
+    },
+    {
+      "source": "/ai/ml/train-model",
+      "destination": "/guides/train/train-model"
     }
   ]
 }
