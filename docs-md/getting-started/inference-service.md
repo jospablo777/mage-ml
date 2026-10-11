@@ -5,6 +5,12 @@
 This tutorial trains a churn model, scores customers with it in three languages, and
 exports the scoring pipelines as one service that answers HTTP requests with predictions.
 
+Here the requests carry the features. A pipeline can also consume raw data, turn it into
+features and pass them straight to the model, so each request gets its prediction right
+away. If you already have mature ML infrastructure, such as a feature store, the pipeline
+reads the features from it instead. Either way, you build an ML service quickly, deploy it
+as one Docker image, and monitor it with its run history, logs and metrics.
+
 | Step | What it gives you |
 | --- | --- |
 | 1. Train | A scikit-learn model saved as skops and as ONNX, and an R model saved as RDS |

@@ -241,6 +241,11 @@ a variable the code requires is missing.
 
 ## Models
 
+A service makes an ML service out of a pipeline. The pipeline can consume raw data, turn
+it into features and pass them straight to the model for quick inference, or read the
+features from a [feature store](#feature-stores-and-apis) you already run. You deploy it
+like any other service and monitor it with its runs, logs and metrics.
+
 A block that loads its model with Mage's helper runs the same code in Mage and in the
 service:
 

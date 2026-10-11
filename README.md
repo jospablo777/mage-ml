@@ -69,7 +69,9 @@ http://localhost:3333.
   [platforms](docs-md/production/pipeline-services.md#deploy))
 - **ML inference**: score with models in their frameworks' formats (scikit-learn, CatBoost,
   XGBoost, LightGBM, PyTorch, ONNX, R models) in Python, R or Rust blocks, and serve the
-  predictions from an exported service. ([guide](docs-md/guides/pipelines/model-inference.md),
+  predictions from an exported service. One pipeline reads raw data, turns it into features
+  and passes them to the model, so you build an ML service quickly; it reads from a feature
+  store just as well. ([guide](docs-md/guides/pipelines/model-inference.md),
   [tutorial](docs-md/getting-started/inference-service.md))
 - **ML engineering**: data contracts, run records, MLflow experiments, model release checks,
   output monitoring, per-pipeline environments, resource limits and a Feast client.

@@ -8,6 +8,12 @@ it answers each HTTP request with its predictions (online scoring). The tutorial
 [Build an ML inference service](../../getting-started/inference-service.md) goes through both with
 one model in each language.
 
+One pipeline can consume raw data, turn it into features and pass them straight to the
+model, so each request gets its prediction right away. If you already have mature ML
+infrastructure, such as a feature store, the pipeline reads the features from it instead.
+Either way, you build an ML service quickly, deploy it as one Docker image, and monitor it
+with its run history, logs and metrics.
+
 ## Save models in their framework's format
 
 Load a model in the format its framework writes. These formats load without running code
