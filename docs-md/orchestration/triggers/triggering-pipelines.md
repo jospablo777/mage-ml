@@ -19,8 +19,8 @@ Pipeline triggers are automated scheduling mechanisms that determine **when and 
 ## Trigger Types
 
 > [!NOTE]
-> New trigger creation supports Schedule and API triggers. Event triggers are deprecated and may
-> only appear for existing legacy configurations.
+> New trigger creation supports Schedule, API and after-run triggers. Event triggers are
+> deprecated and may only appear for existing legacy configurations.
 
 ### Schedule triggers
 
@@ -102,6 +102,34 @@ Runtime variables can optionally be included in the request payload and are acce
   }
 }
 ```
+
+### After-run triggers
+
+After-run triggers start a pipeline when a run of another pipeline ends: features, then
+scoring; a load, then its checks. Choose **After another pipeline** as the trigger type,
+then the pipeline to follow and which endings start the run: **completes** (the default),
+**fails**, or **ends either way**. In `triggers.yaml`:
+
+```yaml
+triggers:
+- name: after_load_orders
+  schedule_type: after_run
+  status: active
+  settings:
+    after_pipeline: load_orders
+    after_status: completed   # completed, failed or any
+```
+
+- Each run of the pipeline it follows starts one run, when that run completes or fails.
+  The run starts on the scheduler's next tick, within the trigger's and the pipeline's
+  concurrency limits.
+- The run gets `upstream_pipeline`, `upstream_pipeline_run_id` and `upstream_status` as
+  variables, so its blocks know which run started it.
+- `skip_if_previous_running` skips the run while the pipeline still has one going.
+- MageML refuses a trigger that follows its own pipeline, a pipeline that does not exist,
+  or one that would make pipelines start each other in a loop.
+- [Exported pipeline services](../../production/pipeline-services.md#after-run-triggers) run the
+  same triggers.
 
 ### Deprecated Event triggers
 

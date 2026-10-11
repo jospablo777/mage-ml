@@ -201,29 +201,34 @@ are not run; `skip_if_previous_running` is honored.
 
 ## After-run triggers
 
-A pipeline can start when a run of another pipeline of the service ends: features, then
-scoring; a load, then its checks. Add them on the Services page, or in the project's
-`pipeline_services.yaml`:
+A pipeline can start when a run of another pipeline ends: features, then scoring; a load,
+then its checks. These are MageML triggers of type `after_run`, made on the pipeline's
+Triggers page (**After another pipeline**), on the Services page, or in `triggers.yaml`:
 
 ```yaml
-services:
-  shop-live:
-    pipelines: [live_traffic, live_minute_kpis]
-    after_runs:
-      - run: live_minute_kpis
-        after: live_traffic
-        when: completed   # completed (the default), failed or any
+triggers:
+- name: after_live_traffic
+  schedule_type: after_run
+  status: active
+  settings:
+    after_pipeline: live_traffic
+    after_status: completed   # completed (the default), failed or any
 ```
+
+MageML runs them (see [Triggers](/orchestration/triggers/triggering-pipelines#after-run-triggers)),
+and a service runs them for the pipelines it holds:
 
 - The run starts as soon as the earlier run ends, with the trigger's variables. Its source
   is `after:<pipeline>`, so the run history shows what started it.
 - Each earlier run starts one run, also when the service restarts while it runs.
 - They work with `MAGE_SERVICE_SCHEDULES` off: they follow runs of the service, however
   those started.
-- `skip_if_running: true` skips the run while the pipeline still has one queued or running.
-- The export refuses triggers that start each other in a loop, and pipelines that are not
-  in the service.
+- `skip_if_previous_running: true` in the settings skips the run while the pipeline still
+  has one queued or running.
+- A trigger that follows a pipeline left out of the service is left out, with a note.
+  Triggers that start each other in a loop stop the export; MageML refuses them too.
 
+## Configuration and secrets
 
 The export lists the environment variables the code reads, in `io_config.yaml`
 (`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`), and marks those that look

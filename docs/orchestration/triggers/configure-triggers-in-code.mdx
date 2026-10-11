@@ -35,11 +35,12 @@ Here are the steps to create and configure triggers via code:
         ```
     1. **Required trigger fields**
         - `name`: Unique identifier of the trigger (per pipeline).
-        - `schedule_type`: `time` or `api` for new triggers. `event` is deprecated and should only be used to maintain existing legacy event triggers.
+        - `schedule_type`: `time`, `api` or `after_run` for new triggers. `event` is deprecated and should only be used to maintain existing legacy event triggers.
         - For **time (schedule)** triggers: `schedule_interval` and `start_time` are required.
             - `schedule_interval`: `@once`, `@hourly`, `@daily`, `@weekly`, `@monthly`, `@always_on`, or a Cron expression (e.g. `* * * * *`).
             - `start_time`: Persisted schedule start timestamp. For `@once`, this is the single run time (e.g. `2023-01-01` or `2023-01-01 00:00:00`).
         - For **api** triggers: `schedule_interval` and `start_time` are typically not used for execution but may still be present in the config.
+        - For **after_run** triggers: `settings.after_pipeline` names the pipeline whose runs start this one, and `settings.after_status` which endings do (`completed`, `failed` or `any`). See [After-run triggers](/orchestration/triggers/triggering-pipelines#after-run-triggers).
     1. **Optional trigger fields**
         - `status`: `active` or `inactive`. Defaults to `inactive` if omitted.
         - `variables`: A dictionary of [runtime variables](/getting-started/runtime-variable) for this trigger.

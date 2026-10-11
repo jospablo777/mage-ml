@@ -40,10 +40,6 @@ services:
   shop-live:
     pipelines: [live_traffic, live_minute_kpis, live_device_revenue]
     description: Live shop traffic, then per-minute KPIs after each traffic run
-    after_runs:
-      - run: live_minute_kpis
-        after: live_traffic
-        when: completed   # completed, failed or any
     max_runs: 2           # optional: runs of each pipeline at once
     include: [models/churn.onnx]   # optional: files the blocks reach by a computed path
 ```
@@ -57,11 +53,13 @@ The CLI exports a saved service: `mage export service . --service shop-live --ou
   <img src="../../docs/images/screenshots/services-workbench.light.png" alt="The Services page with the service shop-live: three pipelines, live_traffic on a schedule and the other two starting after live_traffic completes, and the run flow drawn below them" />
 </picture>
 
-Each pipeline keeps its schedules and its API trigger. **Start after another pipeline**
-adds an [after-run trigger](pipeline-services.md#after-run-triggers): the pipeline
-starts when a run of the other one completes, fails or ends either way. The run flow below
-the pipelines draws the chains. Features then scoring, or a load then its checks, become one
-flow with one schedule.
+Each pipeline keeps its triggers. **Start after another pipeline** adds an
+[after-run trigger](../orchestration/triggers/triggering-pipelines.md#after-run-triggers) to the
+pipeline: it starts when a run of the other one completes, fails or ends either way. The
+trigger belongs to the pipeline, so it shows on its Triggers page and MageML runs it too;
+the service runs it for the pipelines it holds. The run flow below the pipelines draws the
+chains. Features then scoring, or a load then its checks, become one flow with one
+schedule.
 
 ### Configuration check, secrets and variables
 
