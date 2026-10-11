@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import unittest
 from unittest.mock import patch
 
 import tornado.httputil
@@ -211,3 +212,21 @@ class ServerTests(AsyncDBTestCase):
 
         owner_user = User.query.filter(User.email == 'admin@admin.com').one_or_none()
         self.assertIsNotNone(owner_user)
+
+
+class PageRoutesTest(unittest.TestCase):
+    def test_every_top_level_page_has_a_route(self):
+        """A page loaded directly (a refresh or a link) needs a route that serves the app."""
+        import os
+        import re
+
+        from mage_ai.server import server as mage_server
+
+        source = open(os.path.join(os.path.dirname(mage_server.__file__), 'server.py')).read()
+        routes = set(re.findall(r"\(r'(/[\w\-]+)", source))
+        pages = os.path.join(os.path.dirname(mage_server.__file__), '..', 'frontend', 'pages')
+        names = {n.split('.')[0] for n in os.listdir(pages)}
+        skipped = {'_app', '_document', '404', 'index', 'test', 'cache_items', 'block-layout',
+                   'pipeline-runs', 'oauth'}
+        missing = sorted(f'/{n}' for n in names - skipped if f'/{n}' not in routes)
+        self.assertEqual(missing, [])

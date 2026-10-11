@@ -289,6 +289,12 @@ def make_app(
         (r'/manage/(.*)', MainPageHandler),
         (r'/templates', MainPageHandler),
         (r'/version-control', MainPageHandler),
+        (r'/monitors', MainPageHandler),
+        (r'/compute', MainPageHandler),
+        (r'/secrets', MainPageHandler),
+        (r'/platform/(.*)', MainPageHandler),
+        (r'/v2', MainPageHandler),
+        (r'/v2/(.*)', MainPageHandler),
         (r'/event-streams/(?P<uuid>[\w\-\%2f\.]+)', EventStreamHandler),
         (
             r'/_next/static/(.*)',
