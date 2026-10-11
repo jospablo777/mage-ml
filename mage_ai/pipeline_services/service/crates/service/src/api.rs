@@ -277,16 +277,58 @@ async fn inline_output(
     let small = std::fs::metadata(&path)
         .map(|m| m.len() <= MAX_INLINE_OUTPUT)
         .unwrap_or(false);
+    let rows = if small && is_ipc_frame(record) {
+        let path = path.clone();
+        tokio::task::spawn_blocking(move || ipc_rows_json(&path))
+            .await
+            .ok()
+            .and_then(Result::ok)
+    } else {
+        None
+    };
     if record.get("kind").and_then(Value::as_str) == Some("json") && small {
         let text = tokio::fs::read_to_string(&path)
             .await
             .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         body["output"] = serde_json::from_str(&text)
             .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    } else if let Some(rows) = rows {
+        body["output"] = rows;
     } else {
         body["output_url"] = json!(url);
     }
     Ok(())
+}
+
+/// A frame stored as an Arrow IPC file, as Python, R and Rust blocks write them.
+fn is_ipc_frame(record: &Value) -> bool {
+    record.get("kind").and_then(Value::as_str) == Some("frame")
+        && record
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("ipc")
+            == "ipc"
+}
+
+/// The rows of an Arrow IPC file as a JSON array of objects, one per row.
+fn ipc_rows_json(path: &std::path::Path) -> Result<Value, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let reader = arrow_ipc::reader::FileReader::try_new(file, None).map_err(|e| e.to_string())?;
+    // Every row has every column; a missing value is null.
+    let mut writer = arrow_json::WriterBuilder::new()
+        .with_explicit_nulls(true)
+        .build::<_, arrow_json::writer::JsonArray>(Vec::new());
+    for batch in reader {
+        let batch = batch.map_err(|e| e.to_string())?;
+        writer.write(&batch).map_err(|e| e.to_string())?;
+    }
+    writer.finish().map_err(|e| e.to_string())?;
+    let bytes = writer.into_inner();
+    if bytes.is_empty() {
+        return Ok(json!([]));
+    }
+    // A float NaN or infinity has no JSON form; such a frame is served as Arrow.
+    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
 /// A block's output record from a run, by position.
@@ -354,6 +396,8 @@ fn content_type(record: &Value) -> Option<&'static str> {
 struct OutputQuery {
     block: String,
     index: Option<usize>,
+    /// `json` serves a frame as JSON rows instead of its Arrow file.
+    format: Option<String>,
 }
 
 /// A block's stored output, as its file: JSON, an Arrow IPC file, Parquet or NumPy.
@@ -388,6 +432,18 @@ async fn output(
         )
     })?;
     let path = output_path(&state, record)?;
+    if query.format.as_deref() == Some("json") && is_ipc_frame(record) {
+        let rows = tokio::task::spawn_blocking(move || ipc_rows_json(&path))
+            .await
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .map_err(|e| {
+                ApiError(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("the frame cannot be written as JSON ({e}); read it as Arrow"),
+                )
+            })?;
+        return Ok(Json(rows).into_response());
+    }
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -705,8 +761,48 @@ fn escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::content_type;
+    use super::{content_type, ipc_rows_json};
     use serde_json::json;
+    use std::sync::Arc;
+
+    #[test]
+    fn a_frame_reads_as_json_rows_compressed_or_not() {
+        use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
+        use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
+
+        let batch = RecordBatch::try_from_iter([
+            ("id", Arc::new(Int64Array::from(vec![1, 2])) as ArrayRef),
+            (
+                "score",
+                Arc::new(Float64Array::from(vec![Some(0.25), None])) as ArrayRef,
+            ),
+            (
+                "segment",
+                Arc::new(StringArray::from(vec!["a", "b"])) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        for compression in [None, Some(arrow_ipc::CompressionType::LZ4_FRAME)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("output_0.arrow");
+            let options = IpcWriteOptions::default()
+                .try_with_compression(compression)
+                .unwrap();
+            let file = std::fs::File::create(&path).unwrap();
+            let mut writer =
+                FileWriter::try_new_with_options(file, &batch.schema(), options).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+
+            assert_eq!(
+                ipc_rows_json(&path).unwrap(),
+                json!([
+                    {"id": 1, "score": 0.25, "segment": "a"},
+                    {"id": 2, "score": null, "segment": "b"},
+                ])
+            );
+        }
+    }
 
     #[test]
     fn outputs_are_served_with_their_media_type() {

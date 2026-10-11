@@ -25,6 +25,10 @@ ureq = { version = "3", default-features = false, features = ["rustls", "json"] 
 # SigV4 for AWS secrets; both are already in the tree through rustls and ureq.
 ring = "0.17"
 base64 = "0.22"
+# Frame outputs (Arrow IPC files) served as JSON rows; R writes them LZ4-compressed.
+arrow-array = { version = "60", default-features = false }
+arrow-ipc = { version = "60", default-features = false, features = ["lz4", "zstd"] }
+arrow-json = { version = "60", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
