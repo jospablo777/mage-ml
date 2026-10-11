@@ -253,12 +253,29 @@ fn export_data(totals: DataFrame) -> Result<()> {
 
 The PostgreSQL loader and exporter templates start from these.
 
+## ONNX models
+
+The `mage::onnx` module runs ONNX models with ONNX Runtime, linked into the block's
+program: scikit-learn, XGBoost, LightGBM, CatBoost and PyTorch models export to ONNX. Turn
+on the `onnx` feature of the `mage` crate in `rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "onnx"] }
+```
+
+```rust
+let model = mage::onnx::model("models/churn.onnx")?;
+let scores = model.predict(&customers, &["tenure_months", "monthly_spend"])?;
+```
+
+The first build downloads ONNX Runtime. See [Model inference](../pipelines/model-inference.md).
+
 ## Templates
 
 | Block type | Templates |
 | --- | --- |
 | Data loader | Generic, local file, HTTP API (paginated JSON into a table), PostgreSQL |
-| Transformer | Generic, clean, aggregate, join, window features, parallel (Rayon) |
+| Transformer | Generic, clean, aggregate, join, window features, parallel (Rayon), ONNX model inference |
 | Data exporter | Generic, local file, HTTP API (batched JSON), PostgreSQL |
 | Custom | Generic |
 | Conditional | Generic |

@@ -37,6 +37,7 @@ http://localhost:3333.
 | [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv or Docker and create a project |
 | [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
 | [Tutorial: from pipeline to production](docs-md/getting-started/pipeline-to-production.md) | A data contract, a monitor, run records and an export as a service |
+| [Tutorial: an ML inference service](docs-md/getting-started/inference-service.md) | Train a model, score in Python, Rust and R, and serve predictions over HTTP |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
 | [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eight pipelines |
 | [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |
@@ -66,6 +67,10 @@ http://localhost:3333.
   Cloud Run, Azure Container Apps and AWS ECS as a container.
   ([guide](docs-md/production/export-a-service.md),
   [platforms](docs-md/production/pipeline-services.md#deploy))
+- **ML inference**: score with models in their frameworks' formats (scikit-learn, CatBoost,
+  XGBoost, LightGBM, PyTorch, ONNX, R models) in Python, R or Rust blocks, and serve the
+  predictions from an exported service. ([guide](docs-md/guides/pipelines/model-inference.md),
+  [tutorial](docs-md/getting-started/inference-service.md))
 - **ML engineering**: data contracts, run records, MLflow experiments, model release checks,
   output monitoring, per-pipeline environments, resource limits and a Feast client.
 - **Pipeline documentation**: a README per pipeline in Markdown or Quarto, with images.

@@ -130,12 +130,18 @@ The response holds the run's status and each block's status, attempts, duration,
 outputs. With an `idempotency_key`, sending the same request again returns the first run
 instead of starting another, so a client can retry safely.
 
+With `&output=<block>`, the response also carries that block's output once the run
+completes: a list or dict as it is, and a DataFrame of up to 8 MB as JSON rows, whether a
+Python, R or Rust block made it. A larger frame comes as `output_url`. This is how a
+service answers [inference requests](/guides/pipelines/model-inference).
+
 | Endpoint | |
 | --- | --- |
-| `POST /v1/pipelines/{id}/runs` | Start a run; `?wait=SECONDS` returns when it ends |
+| `POST /v1/pipelines/{id}/runs` | Start a run; `?wait=SECONDS` returns when it ends, `&output=BLOCK` with that block's output |
 | `GET /v1/runs?pipeline=&status=&limit=` | Runs, newest first |
 | `GET /v1/runs/{id}` | One run with its blocks |
 | `GET /v1/runs/{id}/logs?block=&tail=&format=text` | Everything the blocks printed |
+| `GET /v1/runs/{id}/output?block=&index=&format=json` | A block's output: JSON, an Arrow IPC file, Parquet or NumPy; `format=json` gives a frame as JSON rows |
 | `POST /v1/runs/{id}/cancel` | Cancel a queued or running run |
 | `GET /v1/pipelines` | The pipelines, their blocks and triggers |
 | `GET /v1/models` | Embedded models and their MLflow metadata |
