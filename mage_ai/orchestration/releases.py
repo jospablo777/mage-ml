@@ -196,11 +196,20 @@ def _client():
 
 
 def champion_of(client, policy: Policy):
-    """The model version that holds the policy's alias, None when no version does."""
+    """
+    The model version that holds the policy's alias, None when no version does. Any other
+    error (MLflow unreachable, no permission) is raised: read as "no champion", it let a
+    candidate pass against nothing and be promoted while MLflow was down.
+    """
     try:
         return client.get_model_version_by_alias(policy.model, policy.alias)
-    except Exception:
-        return None
+    except Exception as error:
+        code = getattr(error, 'error_code', None)
+        if code == 'RESOURCE_DOES_NOT_EXIST' or (
+            code == 'INVALID_PARAMETER_VALUE' and 'not found' in str(error).lower()
+        ):
+            return None
+        raise
 
 
 def _run_metrics(client, run_id: Optional[str]) -> Dict[str, float]:

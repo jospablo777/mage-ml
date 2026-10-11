@@ -181,3 +181,32 @@ class ReleaseFlowTest(DBTestCase):
         self.set_policy(fail_block='true')
         failed = self.run_pipeline(0.5)
         self.assertEqual(failed.status, BlockRun.BlockRunStatus.FAILED)
+
+
+class ChampionLookupTest(TestCase):
+    def policy(self):
+        return releases.Policy(model='churn', alias='champion')
+
+    def client(self, error):
+        class Client:
+            def get_model_version_by_alias(self, model, alias):
+                raise error
+
+        return Client()
+
+    def test_no_alias_or_no_model_means_no_champion(self):
+        class NotFound(Exception):
+            def __init__(self, message, error_code):
+                super().__init__(message)
+                self.error_code = error_code
+
+        for error in (
+            NotFound('Registered model alias champion not found.', 'INVALID_PARAMETER_VALUE'),
+            NotFound('Registered Model with name=churn not found', 'RESOURCE_DOES_NOT_EXIST'),
+        ):
+            with self.subTest(error=str(error)):
+                self.assertIsNone(releases.champion_of(self.client(error), self.policy()))
+
+    def test_an_unreachable_mlflow_is_an_error_not_a_missing_champion(self):
+        with self.assertRaises(ConnectionError):
+            releases.champion_of(self.client(ConnectionError('refused')), self.policy())

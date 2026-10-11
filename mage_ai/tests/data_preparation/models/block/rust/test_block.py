@@ -553,3 +553,43 @@ fn transform(data: LazyFrame) -> Result<LazyFrame> {
         self.assertFalse(any(isinstance(item, StoredTable) for item in cached))
         stored, _, _ = rust.fetch_input_variables(None)
         self.assertIsInstance(stored[0], StoredTable)
+
+
+class BlockIoConfigTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.repo, True)
+
+    def block(self, profile=None):
+        from types import SimpleNamespace
+
+        configuration = dict(data_provider_profile=profile) if profile else {}
+        return SimpleNamespace(repo_path=self.repo, configuration=configuration, uuid='scores')
+
+    def write(self, text):
+        with open(os.path.join(self.repo, 'io_config.yaml'), 'w') as file:
+            file.write(text)
+
+    def test_a_profile_the_block_names_must_exist(self):
+        from mage_ai.data_preparation.models.block.rust import block_io_config
+        from mage_ai.io.config import IOConfigProfileError
+
+        self.write('default:\n  POSTGRES_HOST: db\n')
+        self.assertEqual(block_io_config(self.block()), {'POSTGRES_HOST': 'db'})
+        with self.assertRaises(IOConfigProfileError) as caught:
+            block_io_config(self.block('prod'))
+        self.assertIn("Profile 'prod' is not in", str(caught.exception))
+
+    def test_no_default_profile_or_a_broken_file_runs_without_a_config(self):
+        import contextlib
+        import io
+
+        from mage_ai.data_preparation.models.block.rust import block_io_config
+
+        self.write('staging:\n  X: 1\n')
+        self.assertIsNone(block_io_config(self.block()))
+        self.write('default: [unclosed\n')
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            self.assertIsNone(block_io_config(self.block()))
+        self.assertIn('could not be read for Rust block scores', printed.getvalue())

@@ -335,9 +335,10 @@ def execute_rust_chain(
 def block_io_config(block) -> Optional[Dict]:
     """
     The block's io_config profile (data_provider_profile, or default), rendered with its
-    variables and secrets; None when the project has no io_config.yaml or no such profile.
+    variables and secrets; None when the project has no io_config.yaml or no default
+    profile. A profile the block names that the file does not have is an error.
     """
-    from mage_ai.io.config import ConfigFileLoader
+    from mage_ai.io.config import ConfigFileLoader, IOConfigProfileError
 
     repo_path = getattr(block, 'repo_path', None)
     if not repo_path:
@@ -345,10 +346,17 @@ def block_io_config(block) -> Optional[Dict]:
     path = os.path.join(repo_path, 'io_config.yaml')
     if not os.path.isfile(path):
         return None
-    profile = (block.configuration or {}).get('data_provider_profile') or 'default'
+    named = (block.configuration or {}).get('data_provider_profile')
+    profile = named or 'default'
     try:
         loader = ConfigFileLoader(path, profile)
-    except Exception:
+    except IOConfigProfileError:
+        if named:
+            raise
+        return None
+    except Exception as error:
+        # A Rust block that reads no database still runs; one that does fails with this.
+        print(f'Warning: {path} could not be read for Rust block {block.uuid}: {error}')
         return None
     config = getattr(loader, 'config', None) or {}
     return {str(key): value for key, value in config.items() if value is not None}
