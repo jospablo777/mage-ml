@@ -17,6 +17,8 @@ grateful. It keeps Mage's `mage_ai` package and `mage` command, and runs on Pyth
 with pandas 3, Polars 2, pyarrow 26, NumPy 2 and SQLAlchemy 2. Support for Python 3.14 is
 planned.
 
+MageML is a product by the community, for the community 😸
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/compiled-chains.dark.svg">
   <img alt="A pipeline with a pandas block, a compiled chain of Rust blocks and an R chain" src="docs/images/diagrams/compiled-chains.light.svg">
