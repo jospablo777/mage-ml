@@ -895,14 +895,17 @@ def _include_artifacts(capture_: Capture, includes: List[str], problems: List[st
 
     project = capture_.project
     found: Dict[Path, str] = {}
+    # Files a Python block or --include names: their reading package goes in the image.
+    python_reads: Set[Path] = set()
     for name in includes:
-        candidate = (project / name).resolve()
-        if not candidate.is_relative_to(project):
+        candidate = project / os.path.normpath(name)
+        if not candidate.resolve().is_relative_to(project.resolve()):
             problems.append(f'--include {name}: the path is outside the project.')
         elif not candidate.exists():
             problems.append(f'--include {name}: there is no such file or folder in the project.')
         else:
             found[candidate] = 'with --include'
+            python_reads.add(candidate)
     for path in sorted(capture_.files):
         if path.suffix.lower() not in _CODE_SUFFIXES:
             continue
@@ -926,14 +929,17 @@ def _include_artifacts(capture_: Capture, includes: List[str], problems: List[st
                 continue
             if not exists or candidate.suffix.lower() in _CODE_SUFFIXES or candidate == project:
                 continue
-            found.setdefault(candidate.resolve(), f'named in {path.relative_to(project)}')
+            candidate = project / os.path.normpath(name)
+            found.setdefault(candidate, f'named in {path.relative_to(project)}')
+            if path.suffix == '.py':
+                python_reads.add(candidate)
     for candidate, why in sorted(found.items()):
         files = [candidate] if candidate.is_file() else [
             p for p in candidate.rglob('*') if p.is_file() and '__pycache__' not in p.parts
         ]
         capture_.files.update(files)
         module = ARTIFACT_LOADERS.get(candidate.suffix.lower(), (None, None))[1]
-        if module:
+        if module and candidate in python_reads:
             capture_.artifact_modules.add(module)
         capture_.notes.append(
             f'Included {candidate.relative_to(project)} ({_human(_size(candidate))}), {why}.'

@@ -180,6 +180,28 @@ class CaptureTest(ExportTestCase):
         self.assertIn('Included models/extra.txt (13 bytes), with --include.', notes)
         self.assertIn('joblib', captured.requirements)
 
+    def test_a_model_only_rust_or_r_reads_adds_no_python_package(self):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        (project / 'models').mkdir()
+        (project / 'models' / 'rust.onnx').write_bytes(b'onnx')
+        (project / 'models' / 'python.cbm').write_bytes(b'cbm')
+        (project / 'score.rs').write_text('let m = mage::onnx::model("models/rust.onnx")?;\n')
+        (project / 'score.py').write_text("model = load_artifact('models/python.cbm')\n")
+        capture_ = export.Capture(
+            name='s', project=project, manifest={'pipelines': []},
+            files={project / 'score.rs', project / 'score.py'},
+        )
+        problems = []
+
+        export._include_artifacts(capture_, [], problems)
+
+        self.assertEqual(problems, [])
+        self.assertTrue({project / 'models' / 'rust.onnx', project / 'models' / 'python.cbm'}
+                        <= capture_.files)
+        # ONNX Runtime is linked into the Rust program; only CatBoost is a Python package.
+        self.assertEqual(capture_.artifact_modules, {'catboost'})
+
     def test_an_include_outside_the_project_or_missing_stops_the_export(self):
         self.chain()
         with self.assertRaises(export.ExportError) as caught:
