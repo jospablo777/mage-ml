@@ -138,3 +138,17 @@ def describe_exit(code: int, process: str = 'the process') -> str:
             name = f'signal {number}'
         return f'{process} was stopped by {name}'
     return f'{process} exited with code {code}'
+
+
+def r_hint(message: str) -> Optional[str]:
+    """What to do about a common R error, or None."""
+    import re
+
+    missing = re.search(r"there is no package called [‘'\"]([A-Za-z][\w.]*)[’'\"]", message or '')
+    if missing:
+        package = missing.group(1)
+        return (
+            f'{package} is not in the project\'s R environment. Add it with `rv add {package}` '
+            'in the project\'s r folder, which installs it and pins it in rv.lock.'
+        )
+    return None

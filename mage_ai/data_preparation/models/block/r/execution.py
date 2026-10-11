@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mage_ai.data_preparation.models.constants import BlockType
+from mage_ai.shared.error_hints import describe_exit, r_hint
 
 from . import exchange, runtime
 
@@ -140,6 +141,9 @@ def execute_r_chain(
             calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
             text = (f'R block {block or steps[0]["block_uuid"]} failed: '
                     f'{message or describe_exit(exit_code, "Rscript")}')
+            hint = r_hint(message)
+            if hint:
+                text += f'\n{hint}'
             if calls:
                 text += f'\n\nR calls:\n{calls}'
             raise RChainError(text, block)
@@ -223,6 +227,9 @@ def execute_r_code(
             message = _read_text(os.path.join(job_dir, 'error.txt'))
             calls = _read_text(os.path.join(job_dir, 'traceback.txt'))
             text = f'R block {block_uuid} failed: {message or describe_exit(exit_code, "Rscript")}'
+            hint = r_hint(message)
+            if hint:
+                text += f'\n{hint}'
             if calls:
                 text += f'\n\nR calls:\n{calls}'
             raise RBlockError(text)
