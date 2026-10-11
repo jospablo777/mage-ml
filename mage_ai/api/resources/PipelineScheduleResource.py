@@ -446,6 +446,11 @@ class PipelineScheduleResource(DatabaseResource):
                 update_only_if_exists=update_only_if_exists,
                 old_trigger_name=old_trigger_name,
             )
+            if updated_model.status == ScheduleStatus.ACTIVE:
+                from mage_ai.orchestration import compilation
+
+                # Its runs start compiled (compilation.py).
+                compilation.request_for(pipeline)
 
         return self
 

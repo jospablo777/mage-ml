@@ -871,4 +871,9 @@ class PipelineResource(BaseResource):
 
         self.on_update_callback = _update_callback
 
+        # Compile what its production runs need, ahead of them (compilation.py).
+        from mage_ai.orchestration import compilation
+
+        compilation.request_for(self.model)
+
         return self

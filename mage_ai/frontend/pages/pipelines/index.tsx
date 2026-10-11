@@ -8,6 +8,7 @@ import BrowseTemplates from '@components/CustomTemplates/BrowseTemplates';
 import Button from '@oracle/elements/Button';
 import ButtonTabs from '@oracle/components/Tabs/ButtonTabs';
 import Chip from '@oracle/components/Chip';
+import CompiledCell from '@components/PipelineDetail/CompileStatus/CompiledCell';
 import ConfigurePipeline from '@components/PipelineDetail/ConfigurePipeline';
 import Dashboard from '@components/Dashboard';
 import ErrorsType from '@interfaces/ErrorsType';
@@ -198,6 +199,8 @@ function PipelineListPage() {
     displayLocalTimezone ? TIMEZONE_TOOLTIP_PROPS : {}
     , [displayLocalTimezone]);
 
+  // Compilations asked for from a row's right-click menu, by pipeline.
+  const [compileRequests, setCompileRequests] = useState<{ [uuid: string]: number }>({});
   const { data, mutate: fetchPipelines } = api.pipelines.list({
     ...query,
     include_schedules: 1,
@@ -1032,7 +1035,7 @@ function PipelineListPage() {
     rowsGroupedByIndexInner: number[][],
   ) => (
     <Table
-      columnFlex={[null, null, null, 2, null, null, null, 1, null, null, null]}
+      columnFlex={[null, null, null, 2, null, null, null, null, 1, null, null, null]}
       columns={[
         {
           label: () => '',
@@ -1057,6 +1060,10 @@ function PipelineListPage() {
         {
           ...timezoneTooltipProps,
           uuid: 'Created at',
+        },
+        {
+          tooltipMessage: 'When MageML last compiled the pipeline for production runs.',
+          uuid: 'Compiled',
         },
         {
           uuid: 'Tags',
@@ -1166,6 +1173,15 @@ function PipelineListPage() {
             uuid: 'create_global_data_product',
           },
           {
+            disabled: !selectedPipeline?.last_compiled,
+            label: () => 'Compile',
+            onClick: () => setCompileRequests(prev => ({
+              ...prev,
+              [selectedPipeline?.uuid]: Date.now(),
+            })),
+            uuid: 'compile',
+          },
+          {
             label: () => 'Delete',
             onClick: () => {
               if (typeof window !== 'undefined'
@@ -1180,7 +1196,7 @@ function PipelineListPage() {
           },
         ];
       }}
-      rightClickMenuHeight={36 * 7}
+      rightClickMenuHeight={36 * 10}
       rightClickMenuWidth={UNIT * 30}
       rowGroupHeaders={rowGroupHeadersInner}
       rows={pipelinesInner?.map((pipeline, idx) => {
@@ -1188,6 +1204,7 @@ function PipelineListPage() {
           blocks,
           created_at: createdAt,
           description,
+          last_compiled: lastCompiled,
           schedules,
           tags,
           type,
@@ -1297,6 +1314,13 @@ function PipelineListPage() {
               ? datetimeInLocalTimezone(createdAt.slice(0, 19), displayLocalTimezone)
               : <>&#8212;</>}
           </Text>,
+          <CompiledCell
+            key={`pipeline_compiled_${idx}`}
+            lastCompiled={lastCompiled}
+            onCompiled={() => fetchPipelines()}
+            pipelineUUID={uuid}
+            requestedAt={compileRequests[uuid]}
+          />,
           tagsEl,
           <Text
             default={blocksCount === 0}

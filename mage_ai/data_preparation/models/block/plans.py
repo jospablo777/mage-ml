@@ -98,36 +98,43 @@ def may_plan(block, step: Dict) -> bool:
     Whether the block returns a plan instead of running: in a stage whose next block is
     of the same language, when nothing needs this block's own output.
     """
-    from mage_ai.data_preparation.models.constants import BlockType
-
     following = _next_in_stage.get()
     if not following or os.getenv('MAGE_COMPILED_CHAINS') == 'off':
         return False
     downstream = block.downstream_blocks or []
     if len(downstream) != 1 or downstream[0].uuid != following:
         return False
-    if block.type in (BlockType.DATA_EXPORTER, BlockType.CONDITIONAL):
-        return False
+    return not output_needed(block, bool(step.get('tests')))
+
+
+def output_needed(block, has_tests: bool) -> bool:
+    """
+    Whether something needs the block's own output, so it computes its chain instead of
+    planning: it is an exporter or a conditional, has tests, a data contract or monitors,
+    or the pipeline keeps every block's output. compilation.py builds the same chains.
+    """
+    from mage_ai.data_preparation.models.constants import BlockType
+
+    if block.type in (BlockType.DATA_EXPORTER, BlockType.CONDITIONAL) or has_tests:
+        return True
     pipeline = block.pipeline
     if pipeline is not None and getattr(pipeline, 'keep_block_outputs', False):
-        return False
-    if step.get('tests'):
-        return False
+        return True
     try:
         from mage_ai.data_preparation import contracts
 
         if contracts.binding_of(block) is not None:
-            return False
+            return True
     except Exception:
-        return False
+        return True
     try:
         from mage_ai.orchestration.monitors import monitors_for
 
         if pipeline is not None and monitors_for(block.repo_path, pipeline.uuid, block.uuid):
-            return False
+            return True
     except Exception:
-        return False
-    return True
+        return True
+    return False
 
 
 def mark_failed(block_uuid: str, message: str) -> None:

@@ -27,6 +27,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import FlyoutMenu from '@oracle/components/FlyoutMenu';
 import KernelType from '@interfaces/KernelType';
 import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButton';
+import CompileStatus from './CompileStatus';
 import Link from '@oracle/elements/Link';
 import Panel from '@oracle/components/Panel';
 import PipelineType, {
@@ -777,6 +778,10 @@ function KernelStatus({
       <Spacing px={PADDING_UNITS}>
         <Flex alignItems="center">
           <FlexContainer alignItems="center">
+            <Spacing mr={1}>
+              <CompileStatus pipeline={pipeline} />
+            </Spacing>
+
             {kernelStatusMemo}
 
             {computeConnectionStatusMemo && (

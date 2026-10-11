@@ -55,6 +55,7 @@ PipelinePolicy.allow_read(
         'block_fusion_default',
         'extensions',
         'fusion_plan',
+        'last_compiled',
         'schedules',
     ],
     scopes=[
@@ -106,6 +107,7 @@ PipelinePolicy.allow_read(
         'conditionals',
         'extensions',
         'history',
+        'last_compiled',
         'operation_history',
         'schedules',
     ],

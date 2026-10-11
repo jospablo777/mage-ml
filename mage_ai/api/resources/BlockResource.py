@@ -381,6 +381,11 @@ class BlockResource(GenericResource):
 
         cache_block_action_object.update_block(self.model)
 
+        from mage_ai.orchestration import compilation
+
+        # Its pipeline compiles ahead of its production runs (compilation.py).
+        compilation.request_for(self.model.pipeline)
+
     async def get_pipelines_from_cache(self):
         await BlockCache.initialize_cache()
 

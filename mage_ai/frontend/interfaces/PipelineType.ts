@@ -10,6 +10,7 @@ import {
   GroupUUIDEnum,
   PipelineExecutionFrameworkUUIDEnum,
 } from './PipelineExecutionFramework/types';
+import { LastCompiledType } from '@utils/models/compilation';
 
 export enum PipelineTypeEnum {
   EXECUTION_FRAMEWORK = 'execution_framework',
@@ -140,6 +141,8 @@ export default interface PipelineType {
   block_fusion?: string;
   block_fusion_default?: string;
   keep_block_outputs?: boolean;
+  // When the pipeline last compiled; null when it has no Python, R or Rust blocks.
+  last_compiled?: LastCompiledType;
   conditionals?: BlockType[];
   created_at?: string;
   data_integration?: {

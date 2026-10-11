@@ -118,14 +118,30 @@ class PipelinePresenter(BasePresenter):
             data['schedules'] = self.model.schedules
 
         data['updated_at'] = self.model.updated_at
+        if display_format in (constants.DETAIL, constants.LIST):
+            data['last_compiled'] = _last_compiled(self.model)
 
         return data
+
+
+def _last_compiled(pipeline):
+    """When the pipeline last compiled and whether that still holds; None for pipelines
+    with nothing to compile (no Python, R or Rust blocks)."""
+    from mage_ai.orchestration import compilation
+
+    try:
+        if not compilation.compiled_blocks(pipeline):
+            return None
+        return compilation.last_compiled(pipeline) or dict(state='never', up_to_date=False)
+    except Exception:
+        return None
 
 
 PipelinePresenter.register_format(
     constants.LIST,
     PipelinePresenter.default_attributes
     + [
+        'last_compiled',
         'schedules',
     ],
 )

@@ -59,6 +59,7 @@ export const FEATURE_SET_VERSIONS: 'feature_set_versions' = 'feature_set_version
 export const FILES: 'files' = 'files';
 export const DATA_CONTRACTS: 'data_contracts' = 'data_contracts';
 export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verifications';
+export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilations';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
 export const FOLDERS: 'folders' = 'folders';
@@ -163,6 +164,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [FILES],
   [DATA_CONTRACTS],
   [FUSION_VERIFICATIONS],
+  [PIPELINE_COMPILATIONS],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
   [FILE_VERSIONS, FILES],

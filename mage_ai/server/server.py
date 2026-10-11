@@ -678,6 +678,14 @@ async def main(
         logger.info('Initializing block action object cache.')
         await BlockActionObjectCache.initialize_cache(project=project_model, replace=True)
 
+        try:
+            from mage_ai.orchestration import compilation
+
+            # Pipelines with active triggers compile ahead of their next run.
+            compilation.compile_active_pipelines(get_repo_path())
+        except Exception as err:
+            print(f'[ERROR] compile_active_pipelines: {err}.')
+
         if project_model:
             if project_model.spark_config and project_model.is_feature_enabled(
                 FeatureUUID.COMPUTE_MANAGEMENT
