@@ -32,11 +32,6 @@ CHILD_DATA_VARIABLE_UUID = 'output_0'
 PIPELINE_RUN_STATUS_LAST_RUN_FAILED = 'last_run_failed'
 
 
-class AIMode(StrEnum):
-    OPEN_AI = 'open_ai'
-    HUGGING_FACE = 'hugging_face'
-
-
 class BlockLanguage(StrEnum):
     MARKDOWN = 'markdown'
     PYTHON = 'python'

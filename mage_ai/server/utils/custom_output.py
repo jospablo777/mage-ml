@@ -6,7 +6,7 @@ def __custom_output():
     import polars as pl
     import simplejson
 
-    from mage_ai.ai.utils.xgboost import create_tree_visualization
+    from mage_ai.shared.xgboost import create_tree_visualization
     from mage_ai.data_preparation.models.block.dynamic.utils import (
         combine_transformed_output_for_multi_output,
         transform_output_for_display,

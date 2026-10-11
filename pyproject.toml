@@ -89,15 +89,6 @@ mage = "mage_ai.cli.main:app"
 mage = "mage_ai.orchestration.mlflow_context:MlflowRunContext"
 
 [project.optional-dependencies]
-ai = [
-  "astor>=0.8.1",
-  "langchain-classic>=1.0,<2",
-  "langchain-core>=1.2.22,<2",
-  "langchain-openai>=1.0,<2",
-  "langchain-text-splitters>=1.1.2,<2",
-  "langsmith>=0.8.18",
-  "openai>=1.82.0",
-]
 airtable = [
   "pyairtable>=2.3.3",
 ]
@@ -221,7 +212,6 @@ trino = [
 integrations = ["mage-integrations"]
 # Dependency profile used by the container image.
 all = [
-  "mage-ml[ai]",
   "mage-ml[airtable]",
   "mage-ml[azure]",
   "mage-ml[bigquery]",

@@ -185,11 +185,6 @@ class ProjectResource(GenericResource):
                     features,
                 )
 
-        if 'openai_api_key' in payload:
-            openai_api_key = payload.get('openai_api_key')
-            if repo_config.openai_api_key != openai_api_key:
-                data['openai_api_key'] = payload.get('openai_api_key')
-
         if 'emr_config' in payload:
             data['emr_config'] = payload['emr_config']
 

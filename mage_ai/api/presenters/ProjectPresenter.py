@@ -9,7 +9,6 @@ class ProjectPresenter(BasePresenter):
         'features_override',
         'latest_version',
         'name',
-        'openai_api_key',
         'pipelines',
         'platform_settings',
         'project_uuid',

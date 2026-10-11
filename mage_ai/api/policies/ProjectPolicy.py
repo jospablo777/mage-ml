@@ -65,7 +65,6 @@ ProjectPolicy.allow_write([
     'activate_project',
     'emr_config',
     'features',
-    'openai_api_key',
     'pipelines',
     'platform_settings',
     'remote_variables_dir',

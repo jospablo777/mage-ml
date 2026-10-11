@@ -4,8 +4,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import joblib
 
-from mage_ai.ai.utils.xgboost import load_model as load_model_xgboost
-from mage_ai.ai.utils.xgboost import save_model as save_model_xgboost
+from mage_ai.shared.xgboost import load_model as load_model_xgboost
+from mage_ai.shared.xgboost import save_model as save_model_xgboost
 
 # MATRIX_NPZ_FILE, MATRIX_SAMPLE_NPZ_FILE
 from mage_ai.data_preparation.models.variables.constants import (

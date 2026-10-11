@@ -73,7 +73,6 @@ class RepoConfig:
         self.spark_config = None
         self.notification_config = None
         self.queue_config = None
-        self.openai_api_key = None
         self._pipelines = None
         self.retry_config = None
         self.ldap_config = None
@@ -139,7 +138,6 @@ class RepoConfig:
             self.notification_config = repo_config.get('notification_config', dict())
             self.queue_config = repo_config.get('queue_config', dict())
             self.project_uuid = repo_config.get('project_uuid')
-            self.openai_api_key = repo_config.get('openai_api_key')
             self.pipelines = repo_config.get('pipelines')
             self.retry_config = repo_config.get('retry_config')
             self.workspace_config_defaults = repo_config.get(
@@ -215,7 +213,6 @@ class RepoConfig:
             features=self.features,
             gcp_cloud_run_config=self.gcp_cloud_run_config,
             notification_config=self.notification_config,
-            openai_api_key=self.openai_api_key,
             pipelines=self.pipelines.to_dict() if self.pipelines else self.pipelines,
             project_type=self.project_type,
             project_uuid=self.project_uuid,

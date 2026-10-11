@@ -42,16 +42,6 @@ case $key in
     shift # past argument
     shift # past value
     ;;
-    --enable_open_ai)
-    ENABLE_OPEN_AI="$3"
-    shift # past argument
-    shift # past value
-    ;;
-    --enable_hugging_face)
-    ENABLE_HUGGING_FACE="$3"
-    shift # past argument
-    shift # past value
-    ;;
     --otel_exporter_otlp_endpoint)
     OTEL_EXPORTER_OTLP_ENDPOINT="$3"
     shift # past argument
@@ -64,16 +54,6 @@ case $key in
     ;;
     --otel_python_tornado_excluded_urls)
     OTEL_PYTHON_TORNADO_EXCLUDED_URLS="$3"
-    shift # past argument
-    shift # past value
-    ;;
-    --huggingface_api)
-    HUGGINGFACE_API="$3"
-    shift # past argument
-    shift # past value
-    ;;
-    --huggingface_inference_api_token)
-    HUGGINGFACE_INFERENCE_API_TOKEN="$3"
     shift # past argument
     shift # past value
     ;;
@@ -109,11 +89,6 @@ case $key in
     ;;
     --new_relic_config_path)
     NEW_RELIC_CONFIG_PATH="$3"
-    shift # past argument
-    shift # past value
-    ;;
-    --openai_api_key)
-    OPENAI_API_KEY="$3"
     shift # past argument
     shift # past value
     ;;
@@ -179,8 +154,6 @@ export ECS_TASK_DEFINITION=$ECS_TASK_DEFINITION
 export ECS_CONTAINER_NAME=$ECS_CONTAINER_NAME
 export ENABLE_NEW_RELIC=$ENABLE_NEW_RELIC
 export ENABLE_PROMETHEUS=$ENABLE_PROMETHEUS
-export ENABLE_OPEN_AI=$ENABLE_OPEN_AI
-export ENABLE_HUGGING_FACE=$ENABLE_HUGGING_FACE
 export OTEL_EXPORTER_OTLP_ENDPOINT=$OTEL_EXPORTER_OTLP_ENDPOINT
 export OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=$OTEL_EXPORTER_OTLP_HTTP_ENDPOINT
 export OTEL_PYTHON_TORNADO_EXCLUDED_URLS=$OTEL_PYTHON_TORNADO_EXCLUDED_URLS
@@ -189,15 +162,12 @@ export GCP_PROJECT_ID=$GCP_PROJECT_ID
 export GCP_PATH_TO_CREDENTIALS=$GCP_PATH_TO_CREDENTIALS
 export GCP_REGION=$GCP_REGION
 
-export HUGGINGFACE_API=$HUGGINGFACE_API
-export HUGGINGFACE_INFERENCE_API_TOKEN=$HUGGINGFACE_INFERENCE_API_TOKEN
 export DATABASE_CONNECTION_URL=$DATABASE_CONNECTION_URL
 export DEUS_EX_MACHINA=$DEUS_EX_MACHINA
 export DISABLE_API_TERMINAL_OUTPUT=$DISABLE_API_TERMINAL_OUTPUT
 export DISABLE_DATABASE_TERMINAL_OUTPUT=$DISABLE_DATABASE_TERMINAL_OUTPUT
 export MAX_NUMBER_OF_FILE_VERSIONS=$MAX_NUMBER_OF_FILE_VERSIONS
 export NEW_RELIC_CONFIG_PATH=$NEW_RELIC_CONFIG_PATH
-export OPENAI_API_KEY=$OPENAI_API_KEY
 export REQUIRE_USER_AUTHENTICATION=$REQUIRE_USER_AUTHENTICATION
 if [ -n "$REQUIRE_USER_PERMISSIONS" ]; then
     export REQUIRE_USER_PERMISSIONS=$REQUIRE_USER_PERMISSIONS

@@ -36,7 +36,6 @@ build_list_endpoint_tests(
         'features',
         'latest_version',
         'name',
-        'openai_api_key',
         'pipelines',
         'project_uuid',
         'projects',
@@ -66,7 +65,6 @@ build_list_endpoint_tests(
         'features',
         'latest_version',
         'name',
-        'openai_api_key',
         'pipelines',
         'project_uuid',
         'projects',
@@ -93,14 +91,8 @@ async def _assert_after_update(self, result, model_before_update, **kwargs):
 
     model_after_update = await _get_model_before_update(self)
 
-    before_update = all([
-        not all([v for v in model_before_update['features'].values()]),
-        not model_before_update['openai_api_key'],
-    ])
-    after_update = all([
-        all([v for v in model_after_update['features'].values()]),
-        model_after_update['openai_api_key'] == result['openai_api_key'],
-    ])
+    before_update = not all([v for v in model_before_update['features'].values()])
+    after_update = all([v for v in model_after_update['features'].values()])
 
     mocks[0].assert_called_once_with('project_name', user=ANY)
 
@@ -116,7 +108,6 @@ build_update_endpoint_tests(
         features=reduce(lambda obj, key: merge_dict(obj, {
             key.value: True,
         }), [f for f in FeatureUUID], {}),
-        openai_api_key=self.faker.unique.name(),
     ),
     get_model_before_update=_get_model_before_update,
     assert_after_update=_assert_after_update,

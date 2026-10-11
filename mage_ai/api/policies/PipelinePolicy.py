@@ -128,7 +128,6 @@ PipelinePolicy.allow_write(
         'custom_template_uuid',
         'description',
         'extensions',
-        'llm',
         'name',
         'tags',
         'type',
@@ -148,7 +147,6 @@ PipelinePolicy.allow_write(
         'callbacks',
         'conditionals',
         'extensions',
-        'llm',
         'schedules',
     ]
     + PipelinePresenter.default_attributes,

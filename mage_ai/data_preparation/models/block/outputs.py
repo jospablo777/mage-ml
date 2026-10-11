@@ -6,7 +6,7 @@ import pandas as pd
 import polars as pl
 import simplejson
 
-from mage_ai.ai.utils.xgboost import render_tree_visualization
+from mage_ai.shared.xgboost import render_tree_visualization
 from mage_ai.data.constants import InputDataType
 from mage_ai.data.models.constants import CHUNKS_DIRECTORY_NAME
 from mage_ai.data.tabular.models import BatchSettings
