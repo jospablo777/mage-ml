@@ -332,7 +332,33 @@ def _r_project(project: Path) -> Path:
             f'{directory} has no rv.lock; run `mage r sync {project}` so the image installs '
             'the versions the blocks ran with.'
         ])
+    r_system_packages(directory)
     return directory.resolve()
+
+
+R_SYSTEM_PACKAGES = 'system-packages.txt'
+DEBIAN_PACKAGE = re.compile(r'^[a-z0-9][a-z0-9+.\-]+$')
+
+
+def r_system_packages(directory: Path) -> List[str]:
+    """
+    The Debian packages that the R packages of the rv project need to build, beyond those
+    the image installs, from system-packages.txt next to rproject.toml: one name per line,
+    with # comments. For example libgdal-dev for sf.
+    """
+    path = directory / R_SYSTEM_PACKAGES
+    if not path.is_file():
+        return []
+    names = []
+    invalid = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        for name in line.split('#', 1)[0].split():
+            (names if DEBIAN_PACKAGE.match(name) else invalid).append(name)
+    if invalid:
+        raise ExportError([
+            f'{path} lists names that are not Debian package names: {", ".join(invalid)}.'
+        ])
+    return list(dict.fromkeys(names))
 
 
 def _models(capture_: Capture, options: List[str]) -> List[Tuple[str, str]]:
@@ -969,8 +995,9 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         _copy_rust_workspace(capture_, out_dir / 'rust')
     if capture_.r_project is not None:
         (out_dir / 'r').mkdir(parents=True, exist_ok=True)
-        for name in ('rproject.toml', 'rv.lock'):
-            shutil.copy2(capture_.r_project / name, out_dir / 'r' / name)
+        for name in ('rproject.toml', 'rv.lock', R_SYSTEM_PACKAGES):
+            if (capture_.r_project / name).is_file():
+                shutil.copy2(capture_.r_project / name, out_dir / 'r' / name)
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
@@ -1296,6 +1323,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     r_install = ''
     r_prepare = ''
     if capture_.needs_r:
+        system_packages = ''.join(
+            f' \\\n      {name}' for name in r_system_packages(capture_.r_project)
+        )
         # As in Mage's image: R 4.6 from CRAN's Debian repository and rv, which installs
         # the packages rv.lock pins (binaries where Posit has them, else from source).
         r_install = f'''
@@ -1312,7 +1342,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     apt-get install -y --no-install-recommends r-base-core r-recommended r-base-dev \\
       cmake libcurl4-openssl-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev \\
       libharfbuzz-dev libicu-dev libjpeg-dev libmariadb-dev libpng-dev libpq-dev \\
-      libssl-dev libtiff-dev libuv1-dev libwebp-dev libxml2-dev make xz-utils zlib1g-dev && \\
+      libssl-dev libtiff-dev libuv1-dev libwebp-dev libxml2-dev make xz-utils \\
+      zlib1g-dev{system_packages} && \\
     curl -fsSL "{RV_URL}" \\
       | tar -xz -C /usr/local/bin rv && \\
     rm -rf /var/lib/apt/lists/*

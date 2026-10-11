@@ -407,6 +407,39 @@ class RExportTest(ExportTestCase):
                      for b in manifest['pipelines'][0]['blocks']}
         self.assertEqual(languages['step'], 'r')
 
+    def test_r_system_packages_are_installed_in_the_image(self):
+        self.add_r_pipeline()
+        r_dir = self.project / 'r'
+        r_dir.mkdir(exist_ok=True)
+        (r_dir / 'rproject.toml').write_text('[project]\nname = "p"\nr_version = "4.6"\n')
+        (r_dir / 'rv.lock').write_text('version = 2\nr_version = "4.6"\n')
+        (r_dir / 'system-packages.txt').write_text(
+            '# for sf\nlibgdal-dev libgeos-dev\nlibproj-dev  # PROJ\n\nlibgdal-dev\n'
+        )
+        captured = export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
+        out = export.write(captured, tempfile.mkdtemp(), force=True)
+        self.addCleanup(shutil.rmtree, out, ignore_errors=True)
+        self.assertTrue((out / 'r' / 'system-packages.txt').is_file())
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn(
+            'zlib1g-dev \\\n      libgdal-dev \\\n      libgeos-dev \\\n      libproj-dev && \\',
+            dockerfile,
+        )
+        self.assertEqual(dockerfile.count('libgdal-dev'), 1)
+
+    def test_r_system_packages_must_be_debian_package_names(self):
+        self.add_r_pipeline()
+        r_dir = self.project / 'r'
+        r_dir.mkdir(exist_ok=True)
+        (r_dir / 'rproject.toml').write_text('[project]\nname = "p"\nr_version = "4.6"\n')
+        (r_dir / 'rv.lock').write_text('version = 2\nr_version = "4.6"\n')
+        (r_dir / 'system-packages.txt').write_text('libgdal-dev\n$(curl evil)\n&&rm\n')
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
+        self.assertIn('$(curl', str(caught.exception))
+        self.assertIn('&&rm', str(caught.exception))
+        self.assertNotIn('libgdal-dev,', str(caught.exception))
+
     def test_r_blocks_without_a_locked_environment_are_explained(self):
         self.add_r_pipeline()
         with self.assertRaises(export.ExportError) as caught:
