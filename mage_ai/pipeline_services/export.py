@@ -987,6 +987,13 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
 # ---- writing the build context -------------------------------------------------------
 
 
+def _kept_on_export(name: str) -> bool:
+    """Files of the user in an export folder: the filled-in environment and local data."""
+    return name == 'data' or (
+        (name == '.env' or name.startswith('.env.')) and name != '.env.example'
+    )
+
+
 def write(capture_: Capture, out: str, force: bool = False) -> Path:
     out_dir = Path(out).resolve()
     if out_dir.exists() and any(out_dir.iterdir()):
@@ -996,6 +1003,8 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
                 'or pass --force.'
             ])
         for child in out_dir.iterdir():
+            if _kept_on_export(child.name):
+                continue
             if child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child)
             else:

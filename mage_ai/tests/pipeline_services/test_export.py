@@ -129,6 +129,28 @@ class CaptureTest(ExportTestCase):
         self.assertIn('is a sensor block', problems)
         self.assertIn('missing_pipeline', problems)
 
+    def test_exporting_again_keeps_the_env_file_and_local_data(self):
+        self.chain()
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(captured, str(out), force=True)
+        (out / '.env').write_text('PGPASSWORD=secret\n')
+        (out / '.env.staging').write_text('PGPASSWORD=other\n')
+        (out / 'data').mkdir()
+        (out / 'data' / 'sample.csv').write_text('a\n1\n')
+        (out / 'stale.txt').write_text('from an older export')
+        (out / '.env.example').write_text('OLD=\n')
+
+        export.write(captured, str(out))
+
+        self.assertEqual((out / '.env').read_text(), 'PGPASSWORD=secret\n')
+        self.assertTrue((out / '.env.staging').is_file())
+        self.assertTrue((out / 'data' / 'sample.csv').is_file())
+        self.assertFalse((out / 'stale.txt').exists())
+        self.assertNotIn('OLD=', (out / '.env.example').read_text())
+        self.assertTrue((out / 'service.json').is_file())
+
     def test_the_build_context_holds_everything_the_image_needs(self):
         self.chain()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
