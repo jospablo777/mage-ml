@@ -22,6 +22,8 @@ project's requirements.txt, so deployments get it too.
 | `... is not installed in the Python environment MageML runs in` | Install the package with the command shown and add it to `requirements.txt` |
 | `Profile 'prod' is not in .../io_config.yaml. Its profiles: ...` | Add the profile, or use one of those listed in the block |
 | `Warning: POSTGRES_HOST in profile 'default' ... is None because env_var('...') is not set` | Set the variable in the environment MageML runs in, or the secret |
+| `... is not in the project's R environment. Add it with rv add ...` | Run the `rv add` shown in the project's `r` folder; see [R packages](/guides/blocks/r-packages) |
+| `Blocks can use the crates under [workspace.dependencies] ...` | Add the crate and version to the project's `rust/Cargo.toml`, as shown |
 | `MageML could not reach the server` | Check host, port and credentials in the block's io_config profile, and that the server is reachable |
 | `... was killed (SIGKILL), most often by the system when it runs out of memory` | Read fewer rows or columns, process in chunks, or give MageML more memory |
 | `Block ... broke contract ...` | The output broke its [data contract](/guides/blocks/data-contracts); the lines above list each broken rule |
