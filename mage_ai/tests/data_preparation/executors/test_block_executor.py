@@ -36,7 +36,7 @@ class BlockExecutorTest(BaseApiTestCase):
 
         self.pipeline.get_block.return_value = self.block
         self.pipeline.repo_config.retry_config = {'retries': 3, 'delay': 1}
-        self.pipeline.repo_config.variables_dir = os.path.join(os.getcwd(), 'mage_data')
+        self.pipeline.repo_config.variables_dir = os.path.join(self.repo_path, 'mage_data')
 
         self.logger_manager.logger = self.logger
         self.logger_manager.output_logs_to_destination = MagicMock()
