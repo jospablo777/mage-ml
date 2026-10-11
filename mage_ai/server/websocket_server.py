@@ -688,6 +688,11 @@ db_connection.start_session()
         for idx, line in enumerate(error):
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             line_without_ansi = ansi_escape.sub('', line)
+            # Only frames mark where MageML's frames start and end. The exception line and its
+            # notes come after the frames, and a note names the block: matched, it cut the
+            # traceback down to the notes, without the block's frames or the error itself.
+            if not line_without_ansi.lstrip().startswith(('File ', 'Cell In')):
+                continue
             # The "execute_custom_code" method may appear in multiple lines of the stack trace, so
             # we just want to fetch the index of the first occurrence.
             if re.match(initial_regex, line_without_ansi) and not initial_idx:
