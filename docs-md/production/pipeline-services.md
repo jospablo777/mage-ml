@@ -280,7 +280,20 @@ Every export includes ready-to-use deployment files:
 | One machine | `compose.yaml` |
 
 Any platform that runs containers works: the image needs its environment and, to keep the
-run history, a volume at `/var/lib/mage-service`.
+run history, a volume at `/var/lib/mage-service`. A service is a long-running server: its
+scheduler runs time triggers and its run history is on disk, so it needs at least one
+instance that stays up.
+
+| Platform | Cloud | How |
+| --- | --- | --- |
+| Kubernetes: EKS, GKE, AKS, IKS, OpenShift | AWS, Google Cloud, Azure, IBM Cloud | `deploy/kubernetes.yaml` |
+| Code Engine | IBM Cloud | `deploy/ibm/code-engine.sh` (one instance, min and max scale 1) and `.tekton/` |
+| Cloud Run | Google Cloud | The image as is; set minimum instances to 1 and instance-based billing (CPU always allocated) so schedules run |
+| Container Apps | Azure | The image as is; set minimum replicas to 1 |
+| ECS on Fargate | AWS | The image as is; an EFS volume keeps the run history |
+| Lambda | AWS | Not a fit: Lambda freezes a container between events and stops it after 15 minutes, so schedules would not run and the run history would not last |
+
+On serverless platforms without a volume, the run history lasts as long as the instance.
 
 ## Settings
 

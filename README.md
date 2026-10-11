@@ -59,8 +59,11 @@ http://localhost:3333.
   pipelines and their trade-offs. ([guide](docs-md/guides/pipelines/compilation.md),
   [measurements](docs-md/production/pipeline-performance.md))
 - **Pipeline services**: export pipelines as a Docker image that runs them without Mage,
-  with an HTTP API, schedules, run history and metrics.
-  ([guide](docs-md/production/export-a-service.md))
+  with an HTTP API, schedules, run history and metrics. It deploys to Kubernetes (EKS, GKE,
+  AKS, OpenShift) and IBM Cloud Code Engine with the files the export writes, and to Google
+  Cloud Run, Azure Container Apps and AWS ECS as a container.
+  ([guide](docs-md/production/export-a-service.md),
+  [platforms](docs-md/production/pipeline-services.md#deploy))
 - **ML engineering**: data contracts, run records, MLflow experiments, model release checks,
   output monitoring, per-pipeline environments, resource limits and a Feast client.
 - **Pipeline documentation**: a README per pipeline in Markdown or Quarto, with images.
