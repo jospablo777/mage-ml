@@ -11,24 +11,53 @@ pub fn render(buffer: &Buffer) -> String {
     let padding = 20_u32;
     let width = u32::from(buffer.area.width) * cell_width + padding * 2;
     let height = u32::from(buffer.area.height) * cell_height + padding * 2;
+    // The page takes the most common cell background, so a light palette is not drawn
+    // over a dark page; runs of one background in a row become one rectangle, without
+    // seams between cells.
+    let cell_colors = |cell: &ratatui::buffer::Cell| {
+        let mut foreground = color(cell.fg, "#f9fafc");
+        let mut background = color(cell.bg, "#18181c");
+        if cell.modifier.contains(Modifier::REVERSED) {
+            std::mem::swap(&mut foreground, &mut background);
+        }
+        (foreground, background)
+    };
+    let mut counts = std::collections::HashMap::new();
+    for cell in &buffer.content {
+        *counts.entry(cell_colors(cell).1).or_insert(0_usize) += 1;
+    }
+    let page = counts
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+        .map_or_else(|| "#18181c".to_owned(), |(background, _)| background);
     let mut output = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title description\">\n<title id=\"title\">MageML pipeline console</title>\n<desc id=\"description\">Rendered from the terminal test backend. Colors, selection and chart cells match the dashboard buffer.</desc>\n<rect width=\"{width}\" height=\"{height}\" rx=\"12\" fill=\"#18181c\"/>\n<g font-family=\"DejaVu Sans Mono, Menlo, monospace\" font-size=\"15\">\n"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title description\">\n<title id=\"title\">MageML pipeline console</title>\n<desc id=\"description\">Rendered from the terminal test backend. Colors, selection and chart cells match the dashboard buffer.</desc>\n<rect width=\"{width}\" height=\"{height}\" rx=\"12\" fill=\"{page}\"/>\n<g font-family=\"DejaVu Sans Mono, Menlo, monospace\" font-size=\"15\">\n"
     );
     let mut backgrounds = String::new();
     let mut glyphs = String::new();
     for row in 0..buffer.area.height {
+        let y = padding + u32::from(row) * cell_height;
+        let mut column = 0;
+        while column < buffer.area.width {
+            let (_, background) =
+                cell_colors(&buffer[(buffer.area.x + column, buffer.area.y + row)]);
+            let start = column;
+            while column < buffer.area.width
+                && cell_colors(&buffer[(buffer.area.x + column, buffer.area.y + row)]).1
+                    == background
+            {
+                column += 1;
+            }
+            if background != page {
+                let x = padding + u32::from(start) * cell_width;
+                let run_width = u32::from(column - start) * cell_width;
+                writeln!(backgrounds, "<rect x=\"{x}\" y=\"{y}\" width=\"{run_width}\" height=\"{cell_height}\" fill=\"{background}\"/>").unwrap();
+            }
+        }
         for column in 0..buffer.area.width {
             let cell = &buffer[(buffer.area.x + column, buffer.area.y + row)];
             let x = padding + u32::from(column) * cell_width;
-            let y = padding + u32::from(row) * cell_height;
-            let mut foreground = color(cell.fg, "#f9fafc");
-            let mut background = color(cell.bg, "#18181c");
-            if cell.modifier.contains(Modifier::REVERSED) {
-                std::mem::swap(&mut foreground, &mut background);
-            }
-            if background != "#18181c" {
-                writeln!(backgrounds, "<rect x=\"{x}\" y=\"{y}\" width=\"{cell_width}\" height=\"{cell_height}\" fill=\"{background}\"/>").unwrap();
-            }
+            let (foreground, _) = cell_colors(cell);
             if cell.symbol().trim().is_empty() || cell.modifier.contains(Modifier::HIDDEN) {
                 continue;
             }
@@ -67,7 +96,9 @@ pub fn render(buffer: &Buffer) -> String {
             ).unwrap();
         }
     }
+    output.push_str("<g shape-rendering=\"crispEdges\">\n");
     output.push_str(&backgrounds);
+    output.push_str("</g>\n");
     output.push_str(&glyphs);
     output.push_str("</g>\n</svg>\n");
     output
@@ -256,8 +287,23 @@ mod tests {
     }
 
     #[test]
+    fn the_page_takes_the_common_background_and_runs_merge() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 4, 2));
+        for cell in &mut buffer.content {
+            cell.set_bg(Color::Rgb(250, 250, 250));
+        }
+        buffer[(1, 0)].set_bg(Color::Rgb(9, 9, 9));
+        buffer[(2, 0)].set_bg(Color::Rgb(9, 9, 9));
+        let rendered = render(&buffer);
+        assert!(rendered.contains("rx=\"12\" fill=\"#fafafa\""));
+        assert!(!rendered.contains("#18181c"));
+        assert_eq!(rendered.matches("fill=\"#090909\"").count(), 1);
+        assert!(rendered.contains("width=\"18\" height=\"18\" fill=\"#090909\""));
+    }
+
+    #[test]
     fn reversed_cells_preserve_foreground_and_background() {
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 1));
         buffer[(0, 0)]
             .set_symbol("A")
             .set_fg(Color::Rgb(1, 2, 3))
