@@ -98,7 +98,15 @@ fn manifest(once_trigger: bool) -> Value {
              "blocks": [block("thing", "data_loader", "data_loaders/thing.py", &[])]},
             {"uuid": "slow", "name": "slow", "max_concurrent_runs": 1,
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[]),
-                        block("slow", "transformer", "transformers/slow.py", &["load"])]}
+                        block("slow", "transformer", "transformers/slow.py", &["load"])]},
+            {"uuid": "follow", "name": "follow", "max_concurrent_runs": 1,
+             "blocks": [block("load", "data_loader", "data_loaders/load.py", &[])],
+             "triggers": [{"name": "after_thing", "kind": "after_run", "active": true,
+                           "after_pipeline": "thing", "variables": {"n": 2}}]},
+            {"uuid": "on_failure", "name": "on_failure", "max_concurrent_runs": 1,
+             "blocks": [block("load", "data_loader", "data_loaders/load.py", &[])],
+             "triggers": [{"name": "after_fails", "kind": "after_run", "active": true,
+                           "after_pipeline": "fails", "after_status": "failed"}]}
         ]
     })
 }
@@ -518,6 +526,63 @@ fn sigterm_lets_a_short_run_finish_and_stops_a_long_one() {
     service.start(&[]);
     let (_, run) = service.get(&format!("/v1/runs/{id}"));
     assert_eq!(run["status"], "cancelled", "{run}");
+}
+
+fn runs_of(service: &Service, query: &str) -> Vec<Value> {
+    let (_, runs) = service.get(&format!("/v1/runs?{query}"));
+    runs["runs"].as_array().cloned().unwrap_or_default()
+}
+
+fn wait_for_runs(service: &Service, query: &str, count: usize) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let runs = runs_of(service, query);
+        if runs.len() >= count {
+            return runs;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {count} run(s) for {query}: {runs:?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn a_finished_run_starts_the_pipelines_that_follow_it() {
+    let mut service = Service::create(false);
+    service.start(&[]);
+
+    let (status, run) = service.post("/v1/pipelines/thing/runs?wait=60", json!({}));
+    assert_eq!(status, 201, "{run}");
+    assert_eq!(run["status"], "completed");
+    let followed = wait_for_runs(&service, "pipeline=follow&status=completed", 1);
+    assert_eq!(followed[0]["source"], "after:thing");
+    let (_, detail) = service.get(&format!("/v1/runs/{}", followed[0]["id"].as_str().unwrap()));
+    assert_eq!(detail["variables"]["n"], 2, "{detail}");
+
+    // A failed run starts only the pipeline that follows failures.
+    let (_, failed) = service.post("/v1/pipelines/fails/runs?wait=60", json!({}));
+    assert_eq!(failed["status"], "failed");
+    let after_failure = wait_for_runs(&service, "pipeline=on_failure", 1);
+    assert_eq!(after_failure[0]["source"], "after:fails");
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(
+        runs_of(&service, "pipeline=follow").len(),
+        1,
+        "a failure started follow"
+    );
+
+    let (_, pipelines) = service.get("/v1/pipelines");
+    let follow = pipelines["pipelines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "follow")
+        .unwrap()
+        .clone();
+    assert_eq!(follow["triggers"][0]["kind"], "after_run", "{follow}");
+    assert_eq!(follow["triggers"][0]["schedule"], "after thing completes");
 }
 
 #[test]

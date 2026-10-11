@@ -122,7 +122,7 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
             &format!("Run {run_id} {}: {message}", status.as_str()),
         ),
     }
-    service.run_finished(&pipeline.uuid);
+    service.run_finished(&pipeline.uuid, &run_id, status);
 }
 
 async fn run_blocks(

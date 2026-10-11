@@ -296,11 +296,8 @@ fn info(common: &Common) -> Result<(), String> {
             println!(
                 "  trigger {}: {} {}{}",
                 trigger.name,
-                match trigger.kind {
-                    TriggerKind::Time => "time",
-                    TriggerKind::Api => "api",
-                },
-                trigger.schedule.as_deref().unwrap_or(""),
+                trigger.kind.as_str(),
+                trigger.describe().unwrap_or_default(),
                 if trigger.active { "" } else { " (inactive)" }
             );
         }

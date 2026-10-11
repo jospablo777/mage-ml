@@ -170,7 +170,8 @@ async fn pipelines(State(state): State<AppState>, headers: HeaderMap) -> ApiResu
                 })).collect::<Vec<_>>(),
                 "variables": p.variables.keys().collect::<Vec<_>>(),
                 "triggers": p.triggers.iter().map(|t| json!({
-                    "name": t.name, "kind": t.kind, "schedule": t.schedule, "active": t.active,
+                    "name": t.name, "kind": t.kind, "schedule": t.describe(), "active": t.active,
+                    "after_pipeline": t.after_pipeline, "after_status": t.after_status,
                 })).collect::<Vec<_>>(),
             })
         })

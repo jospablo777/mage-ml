@@ -175,8 +175,50 @@ impl Service {
         }
     }
 
-    pub fn run_finished(&self, _pipeline: &str) {
+    /// Starts the runs of the pipelines that follow `pipeline` (after-run triggers), then
+    /// looks for queued runs that can start.
+    pub fn run_finished(&self, pipeline: &str, run_id: &str, status: RunStatus) {
+        for (follower, trigger) in self.manifest.followers(pipeline) {
+            if !trigger.follows(pipeline, status.as_str()) {
+                continue;
+            }
+            if trigger.skip_if_previous_running && self.has_active_run(&follower.uuid) {
+                crate::log::info(&format!(
+                    "Run {run_id} of {pipeline} {}; {} was still running, so trigger {} \
+                     started no run.",
+                    status.as_str(),
+                    follower.uuid,
+                    trigger.name
+                ));
+                continue;
+            }
+            // One run per upstream run and trigger, also when a restart replays this.
+            let key = format!("after:{run_id}:{}:{}", follower.uuid, trigger.name);
+            let source = format!("after:{pipeline}");
+            match self.submit(&follower.uuid, &source, &trigger.variables, Some(&key)) {
+                Ok((started, _)) => crate::log::info(&format!(
+                    "Run {run_id} of {pipeline} {}; trigger {} started run {started} of {}.",
+                    status.as_str(),
+                    trigger.name,
+                    follower.uuid
+                )),
+                Err(error) => crate::log::error(&format!(
+                    "Trigger {} of {} could not start a run after run {run_id}: {error}",
+                    trigger.name, follower.uuid
+                )),
+            }
+        }
         self.wake();
+    }
+
+    fn has_active_run(&self, pipeline: &str) -> bool {
+        let running = self
+            .running
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .any(|(p, _)| p == pipeline);
+        running || self.ledger.count(pipeline, RunStatus::Queued).unwrap_or(0) > 0
     }
 
     pub fn running_runs(&self) -> usize {
@@ -384,11 +426,8 @@ impl Service {
                 };
                 TriggerSnapshot {
                     name: trigger.name.clone(),
-                    kind: match trigger.kind {
-                        TriggerKind::Time => "time".into(),
-                        TriggerKind::Api => "api".into(),
-                    },
-                    schedule: trigger.schedule.clone(),
+                    kind: trigger.kind.as_str().into(),
+                    schedule: trigger.describe(),
                     active: trigger.active,
                     next_run_at,
                 }

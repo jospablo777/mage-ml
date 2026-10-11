@@ -192,6 +192,18 @@ impl Retry {
 pub enum TriggerKind {
     Time,
     Api,
+    /// Starts a run when a run of another pipeline of the service ends.
+    AfterRun,
+}
+
+impl TriggerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TriggerKind::Time => "time",
+            TriggerKind::Api => "api",
+            TriggerKind::AfterRun => "after_run",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -212,6 +224,40 @@ pub struct Trigger {
     pub variables: Map<String, Value>,
     #[serde(default)]
     pub skip_if_previous_running: bool,
+    /// After-run triggers: the pipeline whose runs start this one.
+    #[serde(default)]
+    pub after_pipeline: Option<String>,
+    /// After-run triggers: which endings start a run: completed (the default), failed or any.
+    #[serde(default)]
+    pub after_status: Option<String>,
+}
+
+impl Trigger {
+    /// Whether a run of `pipeline` that ended with `status` starts this after-run trigger.
+    pub fn follows(&self, pipeline: &str, status: &str) -> bool {
+        self.kind == TriggerKind::AfterRun
+            && self.active
+            && self.after_pipeline.as_deref() == Some(pipeline)
+            && match self.after_status.as_deref().unwrap_or("completed") {
+                "any" => matches!(status, "completed" | "failed"),
+                wanted => wanted == status,
+            }
+    }
+
+    /// How the trigger starts runs, for people: a schedule, or the run it follows.
+    pub fn describe(&self) -> Option<String> {
+        match self.kind {
+            TriggerKind::AfterRun => self.after_pipeline.as_ref().map(|after| {
+                let ending = match self.after_status.as_deref().unwrap_or("completed") {
+                    "failed" => "fails",
+                    "any" => "ends",
+                    _ => "completes",
+                };
+                format!("after {after} {ending}")
+            }),
+            _ => self.schedule.clone(),
+        }
+    }
 }
 
 /// The cron expression of a Mage schedule interval; `@once` has none.
@@ -298,8 +344,73 @@ impl Manifest {
                 ));
             }
             problems.extend(pipeline.validate(project_dir));
+            for trigger in &pipeline.triggers {
+                if let Some(after) = &trigger.after_pipeline
+                    && trigger.kind == TriggerKind::AfterRun
+                    && self.pipeline(after).is_none()
+                {
+                    problems.push(format!(
+                        "Pipeline {}: trigger {} follows pipeline {after}, which is not in \
+                         the service.",
+                        pipeline.uuid, trigger.name
+                    ));
+                }
+            }
+        }
+        if let Some(cycle) = self.chain_cycle() {
+            problems.push(format!(
+                "Pipelines start each other after their runs in a loop: {}. A run would start \
+                 the next without end; remove one of these after-run triggers.",
+                cycle.join(" -> ")
+            ));
         }
         problems
+    }
+
+    /// The pipelines each pipeline's runs start, from the after-run triggers.
+    pub fn followers(&self, pipeline: &str) -> Vec<(&Pipeline, &Trigger)> {
+        self.pipelines
+            .iter()
+            .flat_map(|p| p.triggers.iter().map(move |t| (p, t)))
+            .filter(|(_, t)| {
+                t.kind == TriggerKind::AfterRun && t.after_pipeline.as_deref() == Some(pipeline)
+            })
+            .collect()
+    }
+
+    /// A loop of after-run triggers, as the pipelines in it, first one repeated at the end.
+    fn chain_cycle(&self) -> Option<Vec<String>> {
+        fn visit<'a>(
+            manifest: &'a Manifest,
+            uuid: &'a str,
+            path: &mut Vec<&'a str>,
+            done: &mut BTreeSet<&'a str>,
+        ) -> Option<Vec<String>> {
+            if let Some(start) = path.iter().position(|p| *p == uuid) {
+                let mut cycle: Vec<String> = path[start..].iter().map(|p| p.to_string()).collect();
+                cycle.push(uuid.to_string());
+                return Some(cycle);
+            }
+            if done.contains(uuid) {
+                return None;
+            }
+            path.push(uuid);
+            for (follower, _) in manifest.followers(uuid) {
+                if let Some(cycle) = visit(manifest, &follower.uuid, path, done) {
+                    return Some(cycle);
+                }
+            }
+            path.pop();
+            done.insert(uuid);
+            None
+        }
+        let mut done = BTreeSet::new();
+        for pipeline in &self.pipelines {
+            if let Some(cycle) = visit(self, &pipeline.uuid, &mut Vec::new(), &mut done) {
+                return Some(cycle);
+            }
+        }
+        None
     }
 }
 
@@ -461,6 +572,25 @@ impl Pipeline {
                     trigger.name
                 ));
             }
+            if trigger.kind == TriggerKind::AfterRun {
+                if trigger.after_pipeline.is_none() {
+                    problems.push(format!(
+                        "Pipeline {name}: after-run trigger {} names no pipeline to follow.",
+                        trigger.name
+                    ));
+                }
+                if !matches!(
+                    trigger.after_status.as_deref().unwrap_or("completed"),
+                    "completed" | "failed" | "any"
+                ) {
+                    problems.push(format!(
+                        "Pipeline {name}: after-run trigger {} has after_status {:?}; use \
+                         completed, failed or any.",
+                        trigger.name,
+                        trigger.after_status.as_deref().unwrap_or_default()
+                    ));
+                }
+            }
         }
         problems
     }
@@ -568,5 +698,81 @@ mod tests {
             Some("*/5 * * * *")
         );
         assert_eq!(cron_expression("@once"), None);
+    }
+
+    fn chained(triggers: &[(&str, Value)]) -> Manifest {
+        let pipelines: Vec<Value> = ["a", "b", "c"]
+            .iter()
+            .map(|uuid| {
+                let mine: Vec<Value> = triggers
+                    .iter()
+                    .filter(|(p, _)| p == uuid)
+                    .map(|(_, t)| t.clone())
+                    .collect();
+                json!({"uuid": uuid, "name": uuid, "max_concurrent_runs": 1,
+                       "blocks": [block("x", &[])], "triggers": mine})
+            })
+            .collect();
+        serde_json::from_value(json!({
+            "schema_version": 1,
+            "service": {"name": "s", "project": "p", "exported_at": "2026-10-10T00:00:00Z",
+                        "mage_version": "0.9.79", "source_sha256": "00"},
+            "pipelines": pipelines,
+        }))
+        .unwrap()
+    }
+
+    fn after(name: &str, pipeline: &str, status: Option<&str>) -> Value {
+        json!({"name": name, "kind": "after_run", "active": true,
+               "after_pipeline": pipeline, "after_status": status})
+    }
+
+    #[test]
+    fn after_run_triggers_follow_the_endings_they_name() {
+        let m = chained(&[
+            ("b", after("t", "a", None)),
+            ("c", after("u", "b", Some("any"))),
+        ]);
+        assert!(m.validate(None).is_empty(), "{:?}", m.validate(None));
+        let b = &m.pipeline("b").unwrap().triggers[0];
+        assert!(b.follows("a", "completed"));
+        assert!(!b.follows("a", "failed"));
+        assert!(!b.follows("c", "completed"));
+        let c = &m.pipeline("c").unwrap().triggers[0];
+        assert!(c.follows("b", "failed") && c.follows("b", "completed"));
+        assert!(!c.follows("b", "cancelled"));
+        assert_eq!(b.describe().as_deref(), Some("after a completes"));
+        assert_eq!(c.describe().as_deref(), Some("after b ends"));
+        assert_eq!(m.followers("a").len(), 1);
+    }
+
+    #[test]
+    fn chains_that_loop_or_follow_missing_pipelines_are_problems() {
+        let looped = chained(&[
+            ("a", after("t", "c", None)),
+            ("b", after("t", "a", None)),
+            ("c", after("t", "b", None)),
+        ]);
+        let problems = looped.validate(None).join("\n");
+        assert!(problems.contains("in a loop"), "{problems}");
+
+        let missing = chained(&[
+            ("b", after("t", "nope", None)),
+            ("c", after("u", "a", Some("sometimes"))),
+            (
+                "a",
+                json!({"name": "v", "kind": "after_run", "active": true}),
+            ),
+        ]);
+        let problems = missing.validate(None).join("\n");
+        assert!(problems.contains("follows pipeline nope"), "{problems}");
+        assert!(
+            problems.contains("after_status \"sometimes\""),
+            "{problems}"
+        );
+        assert!(
+            problems.contains("names no pipeline to follow"),
+            "{problems}"
+        );
     }
 }
