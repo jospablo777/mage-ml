@@ -1094,7 +1094,7 @@ function Workbench({
                     ? 'No loops: every flow ends.'
                     : 'Every pipeline also starts from the API: POST /v1/pipelines/<name>/runs.'}
                   title={schedules
-                    ? `${plural(schedules, 'schedule')} run when MAGE_SERVICE_SCHEDULES=on`
+                    ? `${plural(schedules, 'schedule')} ${schedules === 1 ? 'runs' : 'run'} when MAGE_SERVICE_SCHEDULES=on`
                     : 'Runs start from the API'}
                   tone="ok"
                 />
@@ -1150,7 +1150,7 @@ function Workbench({
                   <tbody>
                     {SERVICE_VARIABLES.map(v => (
                       <tr key={v.name}>
-                        <td style={{ width: '42%' }}>
+                        <td style={{ whiteSpace: 'nowrap', width: '1%' }}>
                           <Text monospace small>{v.name}</Text>
                           {v.secret && <Text muted xsmall>secret</Text>}
                         </td>
