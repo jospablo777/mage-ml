@@ -4,12 +4,27 @@ import { RunStatus as RunStatusEnum } from './BlockRunType';
 export const VARIABLE_BOOKMARK_VALUES_KEY = '__bookmark_values__';
 
 export enum ScheduleTypeEnum {
+  AFTER_RUN = 'after_run',
   API = 'api',
   EVENT = 'event',
   TIME = 'time',
 }
 
+export const AFTER_RUN_ENDINGS = {
+  any: 'ends either way',
+  completed: 'completes',
+  failed: 'fails',
+};
+
+// "after load_orders completes", for an after-run trigger's settings.
+export function describeAfterRun(settings: PipelineScheduleSettingsType): string {
+  const ending = AFTER_RUN_ENDINGS[settings?.after_status || 'completed'] || 'completes';
+
+  return `after ${settings?.after_pipeline || '?'} ${ending === 'ends either way' ? 'ends' : ending}`;
+}
+
 export const SCHEDULE_TYPE_TO_LABEL = {
+  [ScheduleTypeEnum.AFTER_RUN]: () => 'after a run',
   [ScheduleTypeEnum.API]: () => 'API',
   [ScheduleTypeEnum.EVENT]: () => 'event',
   [ScheduleTypeEnum.TIME]: () => 'schedule',
@@ -58,6 +73,8 @@ export enum SortQueryParamEnum {
 }
 
 export interface PipelineScheduleSettingsType {
+  after_pipeline?: string;
+  after_status?: 'completed' | 'failed' | 'any';
   allow_blocks_to_fail?: boolean;
   landing_time_enabled?: boolean;
   create_initial_pipeline_run?: boolean;

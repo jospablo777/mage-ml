@@ -69,6 +69,11 @@ export const getTriggerTypes = (
       label: () => 'API',
       uuid: ScheduleTypeEnum.API,
     },
+    {
+      description: () => 'Run this pipeline when a run of another pipeline ends.',
+      label: () => 'After another pipeline',
+      uuid: ScheduleTypeEnum.AFTER_RUN,
+    },
   ];
 
   return isStreamingPipeline ? triggerTypes.slice(0, 1) : triggerTypes;

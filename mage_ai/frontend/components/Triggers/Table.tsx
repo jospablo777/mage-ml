@@ -11,6 +11,8 @@ import Link from '@oracle/elements/Link';
 import PipelineScheduleType, {
   SCHEDULE_TYPE_TO_LABEL,
   ScheduleStatusEnum,
+  ScheduleTypeEnum,
+  describeAfterRun,
 } from '@interfaces/PipelineScheduleType';
 import PipelineTriggerType from '@interfaces/PipelineTriggerType';
 import PipelineType from '@interfaces/PipelineType';
@@ -509,9 +511,11 @@ function TriggersTable({
                     {SCHEDULE_TYPE_TO_LABEL[pipelineSchedule.schedule_type]?.()}
                   </Text>,
                   <Text default key={`trigger_frequency_${idx}`} monospace>
-                    {(displayLocalTimezone && isCustomInterval)
-                      ? convertUtcCronExpressionToLocalTimezone(scheduleInterval)
-                      : scheduleInterval
+                    {ScheduleTypeEnum.AFTER_RUN === pipelineSchedule.schedule_type
+                      ? describeAfterRun(pipelineSchedule.settings)
+                      : (displayLocalTimezone && isCustomInterval)
+                        ? convertUtcCronExpressionToLocalTimezone(scheduleInterval)
+                        : scheduleInterval
                     }
                   </Text>,
                 ]);

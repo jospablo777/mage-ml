@@ -54,12 +54,23 @@ const POLL_MS = 300;
 
 export type AfterRunType = {
   after: string;
+  // The database trigger, which can be removed here; triggers only in triggers.yaml have none.
+  id?: number;
+  name?: string;
   run: string;
   when: 'completed' | 'failed' | 'any';
 };
 
+type AfterRunTriggerType = {
+  id: number;
+  name: string;
+  pipeline_uuid: string;
+  schedule_type: string;
+  settings?: { after_pipeline?: string; after_status?: string };
+  status: string;
+};
+
 export type ServiceDefinitionType = {
-  after_runs: AfterRunType[];
   description?: string;
   exported_at?: string;
   include: string[];
@@ -399,7 +410,6 @@ const StepCardStyle = styled.div`
 
 function emptyDefinition(name: string): ServiceDefinitionType {
   return {
-    after_runs: [],
     description: '',
     include: [],
     max_runs: null,
@@ -413,7 +423,6 @@ function comparable(definition: ServiceDefinitionType) {
     return '';
   }
   const {
-    after_runs: afterRuns,
     description,
     include,
     max_runs: maxRuns,
@@ -421,7 +430,7 @@ function comparable(definition: ServiceDefinitionType) {
     pipelines,
   } = definition;
 
-  return JSON.stringify([name, description || '', pipelines, afterRuns, maxRuns || null, include]);
+  return JSON.stringify([name, description || '', pipelines, maxRuns || null, include]);
 }
 
 function envTemplate(
@@ -568,6 +577,55 @@ function Workbench({
   const [exported, setExported] = useState<ServiceExportType>(null);
   const checkRequest = useRef<number>(0);
 
+  // After-run triggers are the pipelines' own triggers: MageML runs them, and so does the
+  // exported service.
+  const { data: dataTriggers, mutate: mutateTriggers } = api.pipeline_schedules.list(
+    { 'schedule_type[]': 'after_run', _limit: 1000 },
+    { revalidateOnFocus: true },
+  );
+  const afterRunTriggers: AfterRunTriggerType[] = useMemo(
+    () => (dataTriggers?.pipeline_schedules || []).filter(t => (
+      t.schedule_type === 'after_run'
+        && t.status === 'active'
+        && draft.pipelines.includes(t.pipeline_uuid)
+    )),
+    [dataTriggers, draft.pipelines],
+  );
+  const fromDatabase: AfterRunType[] = useMemo(() => afterRunTriggers.map(t => ({
+    after: t.settings?.after_pipeline,
+    id: t.id,
+    name: t.name,
+    run: t.pipeline_uuid,
+    when: (t.settings?.after_status || 'completed') as AfterRunType['when'],
+  })), [afterRunTriggers]);
+  const afterRunsKey = fromDatabase.map(a => `${a.id}:${a.after}:${a.run}:${a.when}`).join(',');
+
+  const [createAfterRun] = useMutation(
+    ({ after, run, when }: AfterRunType) => api.pipeline_schedules.pipelines.useCreate(run)({
+      pipeline_schedule: {
+        name: `after_${after}`,
+        schedule_type: 'after_run',
+        settings: { after_pipeline: after, after_status: when },
+        status: 'active',
+      },
+    }),
+    {
+      onSuccess: (response: any) => onSuccess(response, {
+        callback: () => mutateTriggers(),
+        onErrorCallback: (response, errors) => showError({ errors, response }),
+      }),
+    },
+  );
+  const [deleteAfterRun] = useMutation(
+    (id: number) => api.pipeline_schedules.useDelete(id)(),
+    {
+      onSuccess: (response: any) => onSuccess(response, {
+        callback: () => mutateTriggers(),
+        onErrorCallback: (response, errors) => showError({ errors, response }),
+      }),
+    },
+  );
+
   // A refreshed list hands a new object for the same service: keep the export's result,
   // and take the saved settings only when they changed.
   useEffect(() => {
@@ -600,7 +658,6 @@ function Workbench({
       // @ts-ignore
       requestCheck({
         pipeline_service_export: {
-          after_runs: draft.after_runs,
           include: draft.include,
           max_runs: draft.max_runs || null,
           name: slug,
@@ -630,10 +687,9 @@ function Workbench({
 
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comparable({ ...draft, description: '' }), slug]);
+  }, [comparable({ ...draft, description: '' }), slug, afterRunsKey]);
 
   const payload = {
-    after_runs: draft.after_runs,
     description: draft.description,
     include: draft.include,
     max_runs: draft.max_runs || null,
@@ -729,7 +785,6 @@ function Workbench({
     // @ts-ignore
     startExport({
       pipeline_service_export: {
-        after_runs: draft.after_runs,
         include: draft.include,
         max_runs: draft.max_runs || null,
         name: slug,
@@ -747,13 +802,29 @@ function Workbench({
     }),
     {},
   ), [lastGoodCheck]);
+  // The check lists what the service will run, triggers.yaml included; the database lists
+  // the triggers that can be removed here.
+  const afterRuns: AfterRunType[] = useMemo(() => {
+    const merged: { [key: string]: AfterRunType } = {};
+    (lastGoodCheck?.pipelines || []).forEach(p => p.triggers
+      .filter(t => t.kind === 'after_run')
+      .forEach((t) => {
+        // @ts-ignore
+        merged[`${p.uuid}:${t.name}`] = { after: t.after_pipeline, name: t.name, run: p.uuid, when: t.after_status };
+      }));
+    fromDatabase.forEach((t) => {
+      merged[`${t.run}:${t.name}`] = t;
+    });
+
+    return Object.values(merged).filter(a => draft.pipelines.includes(a.run));
+  }, [draft.pipelines, fromDatabase, lastGoodCheck]);
   const blocksTotal = checkPipelines.reduce((acc, p) => acc + p.blocks.length, 0);
   const schedules = checkPipelines.reduce(
     (acc, p) => acc + p.triggers.filter(t => t.kind === 'time' && t.active).length,
     0,
   );
   const languages = languagesOf(checkPipelines.reduce((acc, p) => acc.concat(p.blocks), []));
-  const paths = flowPaths(draft.after_runs);
+  const paths = flowPaths(afterRuns);
 
   let tone: 'ok' | 'bad' | 'neutral' = 'neutral';
   let statusText = 'Add pipelines';
@@ -772,11 +843,11 @@ function Workbench({
   const candidates = pipelinesAll.filter(p => !draft.pipelines.includes(p.uuid)
     && (!pickSearch || p.uuid.toLowerCase().includes(pickSearch.toLowerCase())));
 
-  const addAfterRun = (run: string, after: string, when: AfterRunType['when']) => update({
-    after_runs: [
-      ...draft.after_runs.filter(a => !(a.run === run && a.after === after)),
-      { after, run, when },
-    ],
+  // @ts-ignore
+  const addAfterRun = (run: string, after: string, when: AfterRunType['when']) => createAfterRun({
+    after,
+    run,
+    when,
   });
 
   return (
@@ -884,7 +955,7 @@ function Workbench({
               {picking ? 'Done adding' : 'Add pipelines'}
             </Button>
           )}
-          subtitle="Each pipeline keeps its schedules and API trigger. Start one after another's runs to make a flow."
+          subtitle="Each pipeline keeps its triggers. Start one after another's runs to make a flow: it adds a trigger to the pipeline, which MageML runs too."
           title="Pipelines and how they start"
         >
           {picking && (
@@ -940,7 +1011,7 @@ function Workbench({
           {draft.pipelines.map((uuid) => {
             const pipeline = pipelinesByUUID[uuid];
             const ownTriggers = triggersByPipeline[uuid] || [];
-            const afterRuns = draft.after_runs.filter(a => a.run === uuid);
+            const startsAfter = afterRuns.filter(a => a.run === uuid);
             const others = draft.pipelines.filter(p => p !== uuid);
 
             return (
@@ -963,21 +1034,35 @@ function Workbench({
                       {t.active ? '' : ' (inactive)'}
                     </StartChipStyle>
                   ))}
-                  {!ownTriggers.length && !afterRuns.length && lastGoodCheck && (
+                  {!ownTriggers.length && !startsAfter.length && lastGoodCheck && (
                     <StartChipStyle>API calls only</StartChipStyle>
                   )}
-                  {afterRuns.map(a => (
-                    <StartChipStyle key={`${a.after}-${a.when}`}>
-                      After {a.after} {WHEN_LABELS[a.when]}
+                  {startsAfter.map(a => (
+                    <StartChipStyle
+                      key={`${a.run}:${a.name}`}
+                      title={a.id
+                        ? 'A trigger of this pipeline: MageML runs it too'
+                        : 'In the pipeline\'s triggers.yaml; edit it there'}
+                    >
+                      After {a.after} {WHEN_LABELS[a.when] || WHEN_LABELS.completed}
+                      {!a.id && <Text inline muted xsmall>&nbsp;triggers.yaml</Text>}
+                      {a.id && (
                       <ChipCloseStyle
                         aria-label={`Remove: after ${a.after}`}
-                        onClick={() => update({
-                          after_runs: draft.after_runs.filter(x => x !== a),
-                        })}
+                        onClick={() => {
+                          if (typeof window === 'undefined' || window.confirm(
+                            `Delete the trigger that starts ${uuid} after ${a.after}? `
+                              + 'MageML stops running it too.',
+                          )) {
+                            // @ts-ignore
+                            deleteAfterRun(a.id);
+                          }
+                        }}
                         type="button"
                       >
                         <Close muted size={UNIT * 1.25} />
                       </ChipCloseStyle>
+                      )}
                     </StartChipStyle>
                   ))}
                   {others.length >= 1 && (
@@ -993,7 +1078,6 @@ function Workbench({
                     iconOnly
                     noBackground
                     onClick={() => update({
-                      after_runs: draft.after_runs.filter(a => a.run !== uuid && a.after !== uuid),
                       pipelines: draft.pipelines.filter(p => p !== uuid),
                     })}
                     title={`Remove ${uuid} from the service`}
@@ -1051,7 +1135,7 @@ function Workbench({
                     ['Pipelines', checkPipelines.length],
                     ['Blocks', blocksTotal],
                     ['Schedules', schedules],
-                    ['After-run', draft.after_runs.length],
+                    ['After-run', afterRuns.length],
                   ].map(([label, value]) => (
                     <TileStyle key={label as string}>
                       <NumberStyle>{value}</NumberStyle>
@@ -1090,7 +1174,7 @@ function Workbench({
                   )}
                 </CheckRow>
                 <CheckRow
-                  detail={draft.after_runs.length
+                  detail={afterRuns.length
                     ? 'No loops: every flow ends.'
                     : 'Every pipeline also starts from the API: POST /v1/pipelines/<name>/runs.'}
                   title={schedules

@@ -21,6 +21,7 @@ import PipelineRunType, {
  } from '@interfaces/PipelineRunType';
 import PipelineScheduleType, {
   SCHEDULE_TYPE_TO_LABEL,
+  describeAfterRun,
   ScheduleIntervalEnum,
   ScheduleStatusEnum,
   ScheduleTypeEnum,
@@ -389,6 +390,27 @@ function TriggerDetail({
           </Text>,
         ],
       );
+    }
+
+    if (ScheduleTypeEnum.AFTER_RUN === scheduleType) {
+      rows.push([
+        <FlexContainer
+          alignItems="center"
+          key="trigger_after_run_label"
+        >
+          <Schedule {...iconProps} />
+          <Spacing mr={1} />
+          <Text default>
+            Starts
+          </Text>
+        </FlexContainer>,
+        <Text
+          key="trigger_after_run"
+          monospace
+        >
+          {describeAfterRun(settings)}
+        </Text>,
+      ]);
     }
 
     if (scheduleInterval) {
@@ -910,6 +932,9 @@ function TriggerDetail({
               )}
               {ScheduleTypeEnum.API === scheduleType && (
                 <Lightning size={5 * UNIT} />
+              )}
+              {ScheduleTypeEnum.AFTER_RUN === scheduleType && (
+                <MultiShare size={5 * UNIT} />
               )}
               {!scheduleType && (
                 <MultiShare size={5 * UNIT} />

@@ -104,6 +104,7 @@ import { isEmptyObject, selectKeys } from '@utils/hash';
 import { isJsonString, isNumeric, pluralize } from '@utils/string';
 import { onSuccess } from '@api/utils/response';
 import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
+import AfterRunSettings from './AfterRunSettings';
 
 type EditProps = {
   creatingWithLimitation?: boolean;
@@ -156,6 +157,9 @@ function Edit({
   const [useHeaderUrl, setUseHeaderUrl] = useState<boolean>(false);
 
   const [settings, setSettings] = useState<PipelineScheduleSettingsType>(null);
+  // After-run triggers: turn the trigger on when saved, and refuse a loop before saving.
+  const [activateOnSave, setActivateOnSave] = useState<boolean>(true);
+  const [afterRunLoop, setAfterRunLoop] = useState<boolean>(false);
   const [runtimeVariables, setRuntimeVariables] = useState<{ [ variable: string ]: string }>({});
   const [schedule, setSchedule] = useState<PipelineScheduleType>(null);
   const [variablesFromInteractions, setVariablesFromInteractions] = useState<{
@@ -501,6 +505,12 @@ function Edit({
       data.start_time = mt.toISOString();
     } else if (ScheduleTypeEnum.EVENT === schedule.schedule_type) {
       data.event_matchers = eventMatchers;
+    } else if (ScheduleTypeEnum.AFTER_RUN === schedule.schedule_type) {
+      // Started by another pipeline's runs: no interval and no start time.
+      if (activateOnSave && pipelineSchedule?.status !== ScheduleStatusEnum.ACTIVE) {
+        // @ts-ignore
+        data.status = ScheduleStatusEnum.ACTIVE;
+      }
     } else {
       data.schedule_interval = isCustomInterval
         ? ((displayLocalTimezone && !cronExpressionInvalid && !!customInterval)
@@ -549,6 +559,7 @@ function Edit({
       },
     });
   }, [
+    activateOnSave,
     bookmarkValues,
     cronExpressionInvalid,
     customInterval,
@@ -1457,7 +1468,57 @@ function Edit({
     useHeaderUrl,
   ]);
 
+  const afterRunMemo = useMemo(() => (
+    <>
+      <Spacing mb={5} px={PADDING_UNITS}>
+        <Headline>
+          Which pipeline starts this one
+        </Headline>
+        <Text muted>
+          Choose the pipeline whose runs start {pipelineUUID}, and which of its endings do.
+        </Text>
+        <Spacing mt={UNITS_BETWEEN_ITEMS_IN_SECTIONS}>
+          <AfterRunSettings
+            activateOnSave={activateOnSave}
+            onLoopChange={setAfterRunLoop}
+            pipelineUUID={pipelineUUID}
+            setActivateOnSave={setActivateOnSave}
+            // @ts-ignore
+            setSettings={setSettings}
+            settings={settings}
+            showActivate={pipelineSchedule?.status !== ScheduleStatusEnum.ACTIVE}
+          />
+        </Spacing>
+      </Spacing>
+
+      <Spacing mb={PADDING_UNITS} px={PADDING_UNITS}>
+        <Headline>
+          Settings
+        </Headline>
+      </Spacing>
+
+      <Divider light short />
+
+      <Table
+        columnFlex={[null, 1]}
+        rows={[
+          triggerNameRowEl,
+          triggerDescriptionRowEl,
+        ]}
+      />
+    </>
+  ), [
+    activateOnSave,
+    pipelineSchedule?.status,
+    pipelineUUID,
+    settings,
+    triggerDescriptionRowEl,
+    triggerNameRowEl,
+  ]);
+
   const saveButtonDisabled = !scheduleType || (
+    ScheduleTypeEnum.AFTER_RUN === scheduleType && (!settings?.after_pipeline || afterRunLoop)
+  ) || (
     ScheduleTypeEnum.TIME === scheduleType
       && !((isStreamingPipeline && date) || (!isStreamingPipeline && date && scheduleInterval))
   ) || (
@@ -2189,6 +2250,7 @@ function Edit({
                 {ScheduleTypeEnum.TIME === scheduleType && detailsMemo}
                 {ScheduleTypeEnum.EVENT === scheduleType && eventsMemo}
                 {ScheduleTypeEnum.API === scheduleType && apiMemo}
+                {ScheduleTypeEnum.AFTER_RUN === scheduleType && afterRunMemo}
               </Spacing>
 
               {!creatingWithLimitation && (
