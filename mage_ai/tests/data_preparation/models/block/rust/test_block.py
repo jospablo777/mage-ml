@@ -200,6 +200,23 @@ class RustBlockTest(DBTestCase):
         self.assertIn('expected `i64`, found `&str`', message)
         self.assertNotIn('.mage/blocks', message)
 
+    def test_a_crate_the_project_does_not_list_says_where_to_add_it(self):
+        code = (
+            'use mage::prelude::*;\n'
+            'use regex::Regex;\n'
+            '\n'
+            'fn transform(data: LazyFrame) -> LazyFrame {\n'
+            '    let _ = Regex::new("a");\n'
+            '    data\n'
+            '}\n'
+        )
+        with self.assertRaises(RustBlockError) as context:
+            self.run_code(code, uuid='missing_crate')
+        message = plain(str(context.exception))
+        self.assertIn('Blocks can use the crates under [workspace.dependencies]', message)
+        self.assertIn('Add regex there', message)
+        self.assertIn('regex = "<version>"', message)
+
     def test_a_wrong_signature_is_explained(self):
         code = (
             'use mage::prelude::*;\n'

@@ -337,6 +337,31 @@ def _chain_errors(stdout: str) -> List[str]:
     return errors
 
 
+_CRATE_NAMED = re.compile(r'(?:unlinked crate|undeclared crate or module|unresolved import) `(\w+)')
+_NOT_CRATES = {'crate', 'self', 'super', 'std', 'core', 'alloc', 'mage'}
+
+
+def missing_crate_hint(errors: List[Diagnostic], workspace: ws.Workspace) -> Optional[str]:
+    """How to add the crates a block uses that the project's Cargo.toml does not list."""
+    try:
+        listed = {name.replace('-', '_') for name in ws.dependencies(workspace)}
+    except Exception:
+        listed = set()
+    missing = []
+    for item in errors:
+        for name in _CRATE_NAMED.findall(item.message):
+            if name not in _NOT_CRATES and name not in listed and name not in missing:
+                missing.append(name)
+    if not missing:
+        return None
+    lines = '\n'.join(f'{name} = "<version>"' for name in missing)
+    return (
+        f'Blocks can use the crates under [workspace.dependencies] in '
+        f'{workspace.cargo_toml}. Add {", ".join(missing)} there with the version you need:\n'
+        f'{lines}'
+    )
+
+
 def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str) -> RustBuildError:
     if prepared.members:
         errors = _chain_errors(result.stdout)
@@ -349,7 +374,11 @@ def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str)
     errors = [item for item in diagnostics if item.level == 'error']
     if errors:
         text = '\n'.join(item.rendered.rstrip() for item in errors)
-        return RustBuildError(f'The Rust block does not compile:\n\n{text}', diagnostics)
+        hint = missing_crate_hint(errors, prepared.workspace)
+        return RustBuildError(
+            f'The Rust block does not compile:\n\n{text}' + (f'\n\n{hint}' if hint else ''),
+            diagnostics,
+        )
     # A dependency, the workspace or the toolchain failed: cargo says why on stderr.
     tail = '\n'.join(result.stderr.strip().splitlines()[-40:])
     return RustBuildError(f'{verb} the Rust block failed:\n\n{tail}', diagnostics)
