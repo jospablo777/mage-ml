@@ -120,3 +120,9 @@ Python now requires `>=3.11,<3.14`. The connector package and vendored Singer co
 Production, development, and local Spark builds use targets in the same Dockerfile. Python packages install through `uv sync --locked`; the former Git branch installations were removed. Sparkmagic has a separate locked environment under `runtimes/livy` because it requires pandas 2. The main environment retains pandas 3. The unsupported dbt MySQL adapter is not installed.
 
 CI runs pytest for Mage, connectors, and the Singer compatibility package. Requirements exports remain generated files. Package builds include every workspace member with `uv build --all-packages`.
+
+## Follow-up: Python 3.12 only, 2026-10-11
+
+Python now requires `>=3.12,<3.13`, the version the Docker images and runtimes use. Python
+3.11 is no longer supported, and the lockfile no longer keeps its resolutions. Support for
+Python 3.14 is planned.

@@ -7,7 +7,7 @@ The block output explorer. User guide: `docs/design/column-atlas.mdx`.
 | Part | Path | Role |
 | --- | --- | --- |
 | Engine | `rust/column_atlas` | Rust crate on Polars 0.55: reads one Parquet file, applies a view, returns rows and summaries as JSON |
-| Extension | same crate, `python` feature | PyO3 module `column_atlas_native`, built by maturin as `column-atlas-native` (abi3, Python 3.11+) |
+| Extension | same crate, `python` feature | PyO3 module `column_atlas_native`, built by maturin as `column-atlas-native` (abi3, Python 3.12+) |
 | Service | `mage_ai/column_atlas` | Validates requests, resolves sources, caches results, runs queries in worker processes |
 | API | `mage_ai/api/resources/ColumnAtlasQueryResource.py` | `POST /api/column_atlas_queries` |
 | UI | `mage_ai/frontend/components/ColumnAtlas` | Virtualized grid, profiles, filters, full window |
