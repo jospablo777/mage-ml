@@ -1,13 +1,13 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "maple",
-  "name": "Mage AI",
+  "name": "MageML",
   "colors": {
     "primary": "#6A35FF",
     "light": "#00FB82",
     "dark": "#148EFF"
   },
-  "favicon": "/favicons/m1.svg",
+  "favicon": "/favicons/mageml.svg",
   "navigation": {
     "tabs": [
       {
@@ -882,8 +882,8 @@
     "codeblocks": "system"
   },
   "logo": {
-    "light": "/logo/m-mage-light.svg",
-    "dark": "/logo/m-mage.svg"
+    "light": "/logo/mageml-light.svg",
+    "dark": "/logo/mageml-dark.svg"
   },
   "api": {
     "playground": {
@@ -906,11 +906,7 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/mage-ai/mage-ai"
-      },
-      {
-        "label": "Community",
-        "href": "https://www.mage.ai/chat"
+        "href": "https://github.com/jospablo777/mage-ml"
       }
     ]
   },
@@ -919,61 +915,30 @@
   },
   "seo": {
     "metatags": {
-      "og:image": "https://github.com/mage-ai/mage-ai/blob/master/docs/og.png?raw=True",
-      "og:description": "The leading framework for transforming and integrating data.",
-      "og:site_name": "Mage AI Documentation",
-      "twitter:site": "@mage_ai"
+      "og:description": "MageML: data and ML pipelines in Python, R, Rust and SQL.",
+      "og:site_name": "MageML Documentation"
     },
     "indexing": "all"
   },
   "footer": {
     "socials": {
-      "github": "https://www.github.com/mage-ai",
-      "slack": "https://www.mage.ai/chat",
-      "linkedin": "https://www.linkedin.com/company/magetech",
-      "twitter": "https://twitter.com/mage_ai"
+      "github": "https://github.com/jospablo777/mage-ml"
     },
     "links": [
       {
-        "header": "OSS",
+        "header": "MageML",
         "items": [
           {
             "label": "Code",
-            "href": "https://www.mage.ai.oss"
-          }
-        ]
-      },
-      {
-        "header": "Community",
-        "items": [
-          {
-            "label": "Chat",
-            "href": "https://www.mage.ai/chat"
+            "href": "https://github.com/jospablo777/mage-ml"
           },
           {
-            "label": "Facebook",
-            "href": "https://www.facebook.com/mageai"
-          },
-          {
-            "label": "Youtube",
-            "href": "https://www.youtube.com/@mage_ai"
-          },
-          {
-            "label": "Instagram",
-            "href": "https://www.instagram.com/mage_ai"
-          },
-          {
-            "label": "Medium",
-            "href": "https://m.mage.ai"
+            "label": "Releases",
+            "href": "https://github.com/jospablo777/mage-ml/releases"
           }
         ]
       }
     ]
-  },
-  "integrations": {
-    "ga4": {
-      "measurementId": "G-GR172GGB5V"
-    }
   },
   "fonts": {
     "heading": {

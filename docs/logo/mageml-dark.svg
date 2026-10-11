@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="190" height="44" viewBox="0 0 190 44" role="img" aria-labelledby="title">
+<title id="title">MageML</title>
+<defs><linearGradient id="mark" x1="0" y1="0" x2="1" y2="0"><stop offset="0.28125" stop-color="#7D55EC"/><stop offset="1" stop-color="#2AB2FE"/></linearGradient></defs>
+<g transform="translate(0 7) scale(2.1)" fill="url(#mark)"><path opacity="0.4" d="M15.3266 0H19.2641L11.9687 14H8.03125Z"/><path d="M11.9692 0H8.03164L0.736328 14H4.67383L8.03164 7.55626V14H11.9691Z"/><path d="M15.3269 0H19.2644V14H15.3269Z"/></g>
+<text x="53" y="32" font-family="system-ui, -apple-system, sans-serif" font-size="30" font-weight="650" letter-spacing="-1" fill="#F5F5F7">Mage<tspan fill="#E88B61">ML</tspan></text>
+</svg>
