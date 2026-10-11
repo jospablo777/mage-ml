@@ -698,15 +698,17 @@ fn draw_recent_runs(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(12),
-            Constraint::Length(16),
-            Constraint::Length(15),
-            Constraint::Length(9),
-            Constraint::Min(10),
+            // Status, start and duration keep their width; the source and the error
+            // take what is left, so a narrow panel never cuts the start time.
+            Constraint::Length(11),
+            Constraint::Fill(1),
+            Constraint::Length(14),
+            Constraint::Length(8),
+            Constraint::Fill(1),
         ],
     )
     .header(
-        Row::new(["Status", "Started by", "Started (UTC)", "Duration", "Error"])
+        Row::new(["Status", "Started by", "Started UTC", "Duration", "Error"])
             .style(style(palette().muted))
             .bottom_margin(1),
     )
