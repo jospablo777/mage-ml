@@ -233,3 +233,72 @@ class ProtocolTest(WorkerTestCase):
         )
         self.assertEqual([r.get('ok') for r in replies[1:4]], [True, False, True])
         self.assertEqual(replies[2]['error']['phase'], 'run')
+
+
+class ChainTest(WorkerTestCase):
+    """Consecutive blocks in one worker request, outputs passing in memory."""
+
+    def chain(self, codes, **extra):
+        blocks = [self.block(code, name=f'b{i}') for i, code in enumerate(codes)]
+        request = dict(
+            block=blocks[0], chain=blocks, inputs=[], kwargs={},
+            output_dir=os.path.join(self.directory, 'chain'), **extra,
+        )
+        return worker.run_block(request)
+
+    FIRST = '''
+        import pandas as pd
+
+        @transformer
+        def first(*args, **kwargs):
+            frame = pd.DataFrame({'a': [1, 2, 3]})
+            frame.attrs['marker'] = 'kept in memory'
+            return frame
+    '''
+    SECOND = '''
+        @transformer
+        def second(frame, *args, **kwargs):
+            # Storage would drop attrs; in memory they arrive.
+            assert frame.attrs.get('marker') == 'kept in memory'
+            return frame.assign(b=frame['a'] * 10)
+
+        @test
+        def has_b(output, *args):
+            assert 'b' in output.columns
+    '''
+
+    def test_outputs_pass_in_memory_and_only_the_last_is_written(self):
+        result = self.chain([self.FIRST, self.SECOND])
+        self.assertEqual([b['block_uuid'] for b in result['blocks']], ['b0', 'b1'])
+        self.assertEqual(len(result['outputs']), 1)
+        self.assertEqual(pl.read_ipc(result['outputs'][0]['path'])['b'].to_list(), [10, 20, 30])
+        self.assertEqual(result['tests'], [dict(name='b1: has_b', passed=True)])
+        self.assertNotIn('outputs', result['blocks'][0])
+        self.assertFalse(os.path.exists(os.path.join(self.directory, 'chain', 'kept')))
+
+    def test_every_output_is_kept_when_asked(self):
+        result = self.chain([self.FIRST, self.SECOND], keep_outputs=True)
+        kept = result['blocks'][0]['outputs']
+        self.assertEqual(pl.read_ipc(kept[0]['path'])['a'].to_list(), [1, 2, 3])
+
+    def test_a_failure_names_its_block(self):
+        with self.assertRaises(worker.BlockError) as caught:
+            self.chain([self.FIRST, '''
+                @transformer
+                def second(frame, *args, **kwargs):
+                    raise ValueError('bad')
+            '''])
+        self.assertEqual((caught.exception.phase, caught.exception.block_uuid), ('run', 'b1'))
+        self.assertIn('ValueError: bad', str(caught.exception))
+
+        with self.assertRaises(worker.BlockError) as caught:
+            self.chain(['''
+                @transformer
+                def first(*args, **kwargs):
+                    return 1
+
+                @test
+                def big(output, *args):
+                    assert output > 5, 'too small'
+            ''', self.SECOND])
+        self.assertEqual((caught.exception.phase, caught.exception.block_uuid), ('test', 'b0'))

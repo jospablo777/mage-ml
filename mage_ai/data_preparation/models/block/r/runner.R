@@ -11,4 +11,10 @@ if (nzchar(rv_library)) {
 } else {
   .libPaths(c(mageml_library, .libPaths()))
 }
-invisible(mageml::run_block(args[[1]]))
+# A chain of blocks runs in this one session when the manifest lists one.
+manifest <- jsonlite::read_json(file.path(args[[1]], "manifest.json"))
+if (!is.null(manifest$chain)) {
+  invisible(mageml::run_chain(args[[1]]))
+} else {
+  invisible(mageml::run_block(args[[1]]))
+}

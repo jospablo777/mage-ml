@@ -195,12 +195,16 @@ class ExportedRunTest(ExportTestCase):
             MAGE_SERVICE_WORKER=str(WORKER),
             MAGE_SERVICE_PYTHON=str(Path(os.sys.executable)),
             PYTHONPATH=str(REPO),
+            # The blocks run as one chain, which keeps only the last block's outputs
+            # unless asked to keep every block's.
+            MAGE_SERVICE_KEEP_OUTPUTS='on',
         )
         result = subprocess.run(
             [str(SERVICE_BINARY), 'run', self.pipeline.uuid, '--var', 'rows=9', '--json'],
             capture_output=True, text=True, env=env, timeout=300,
         )
         self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+        self.assertIn('as one chain in one process of 3 blocks', result.stderr)
         run = json.loads(result.stdout[result.stdout.index('{'):])
         self.assertEqual(run['status'], 'completed')
         self.assertEqual([b['status'] for b in run['blocks']], ['completed'] * 3)

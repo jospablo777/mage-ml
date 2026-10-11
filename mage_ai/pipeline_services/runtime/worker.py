@@ -30,7 +30,7 @@ import traceback
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from inspect import Parameter, signature
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 PROTOCOL_VERSION = 1
 DATETIME_KWARGS = ('execution_date', 'interval_start_datetime', 'interval_end_datetime')
@@ -38,10 +38,17 @@ BLOCK_TYPES = ('data_loader', 'transformer', 'data_exporter', 'custom')
 
 
 class BlockError(Exception):
-    def __init__(self, phase: str, message: str, details: str = ''):
+    def __init__(self, phase: str, message: str, details: str = '', block_uuid: str = None):
         super().__init__(message)
         self.phase = phase
         self.details = details
+        # In a chain, the block that failed.
+        self.block_uuid = block_uuid
+
+
+# The line a chain prints before each block's output, so the service files the lines
+# after it under that block.
+BLOCK_MARKER = '\x1emage-block '
 
 
 # ---- values -------------------------------------------------------------------------
@@ -344,7 +351,7 @@ def _run_tests(block: Dict, results: List[Dict]) -> None:
         print(f'{len(results)}/{len(results)} tests passed.', flush=True)
 
 
-def run_r_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> Dict:
+def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, float]:
     try:
         execution = _r_execution()
         with open(block['file'], encoding='utf-8') as file:
@@ -371,22 +378,62 @@ def run_r_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> Di
         # The R environment is missing or broken: the image, not the block.
         raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc())
     seconds = time.monotonic() - started
-    try:
-        records = [write_output(value, output_dir, i) for i, value in enumerate(run.outputs)]
-    except Exception as error:
-        raise BlockError('output', f'Writing the output failed: {type(error).__name__}: {error}',
-                         traceback.format_exc())
-    tests = [
-        dict(name=str(t.get('name') or 'test'), passed=bool(t.get('passed')),
-             message=str(t.get('message') or t.get('name') or 'test'))
-        for t in run.tests
-    ]
+    tests = _r_tests(run.tests)
     if request.get('run_tests', True):
         _run_tests(block, tests)
-    return dict(outputs=records, tests=tests, seconds=round(seconds, 6))
+    return list(run.outputs), tests, seconds
 
 
-def run_sql_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> Dict:
+def _r_tests(tests: List[Dict]) -> List[Dict]:
+    return [
+        dict(name=str(t.get('name') or 'test'), passed=bool(t.get('passed')),
+             message=str(t.get('message') or t.get('name') or 'test'))
+        for t in tests
+    ]
+
+
+def run_r_chain(
+    request: Dict, blocks: List[Dict], inputs: List, keep: bool = False,
+) -> Tuple[List, List, List, Dict]:
+    """
+    Consecutive R blocks in one R session: R starts and loads its packages once, and
+    each block takes the previous block's value in memory.
+    """
+    try:
+        execution = _r_execution()
+        steps = []
+        for block in blocks:
+            with open(block['file'], encoding='utf-8') as file:
+                steps.append(dict(block_type=block['type'], code=file.read(),
+                                  block_uuid=block['uuid'], keep_output=keep))
+    except Exception as error:
+        raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc(),
+                         block_uuid=blocks[0]['uuid'])
+    variables = {
+        key: value for key, value in _kwargs(request, blocks[0]).items() if key != 'logger'
+    }
+    try:
+        run = execution.execute_r_chain(
+            steps,
+            input_vars=inputs,
+            global_vars=variables,
+            repo_path=os.environ.get('MAGE_REPO_PATH'),
+            pipeline_uuid=blocks[0].get('pipeline_uuid'),
+        )
+    except execution.RChainError as error:
+        raise BlockError('run', str(error), block_uuid=error.block_uuid)
+    except execution.RBlockError as error:
+        raise BlockError('run', str(error), block_uuid=blocks[0]['uuid'])
+    except Exception as error:
+        raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc(),
+                         block_uuid=blocks[0]['uuid'])
+    # mageml::run_chain stops at a block whose tests fail; that is a RChainError above.
+    tests = _r_tests(run.tests)
+    seconds = [float(b.get('seconds') or 0) for b in run.blocks]
+    return list(run.outputs), tests, seconds, run.kept
+
+
+def run_sql_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, float]:
     from mage_ai.pipeline_services.runtime import sql
 
     variables = {
@@ -400,33 +447,108 @@ def run_sql_block(request: Dict, block: Dict, inputs: List, output_dir: str) -> 
     except Exception as error:
         raise BlockError('run', f'{type(error).__name__}: {error}', traceback.format_exc())
     seconds = time.monotonic() - started
+    return list(outputs), [], seconds
+
+
+def _write_outputs(outputs: List, output_dir: str) -> List[Dict]:
     try:
-        records = [write_output(value, output_dir, i) for i, value in enumerate(outputs)]
+        os.makedirs(output_dir, exist_ok=True)
+        return [write_output(value, output_dir, i) for i, value in enumerate(outputs)]
     except Exception as error:
         raise BlockError('output', f'Writing the output failed: {type(error).__name__}: {error}',
                          traceback.format_exc())
-    return dict(outputs=records, tests=[], seconds=round(seconds, 6))
 
 
 def run_block(request: Dict) -> Dict:
+    if request.get('chain'):
+        return run_chain(request)
     block = request['block']
-    block_type = block['type']
-    if block_type not in BLOCK_TYPES:
-        raise BlockError('load', f'{block_type} blocks are not supported by pipeline services.')
     output_dir = request['output_dir']
     os.makedirs(output_dir, exist_ok=True)
+    inputs = _read_inputs(request)
+    outputs, tests, seconds = execute_block(request, block, inputs)
+    return dict(outputs=_write_outputs(outputs, output_dir), tests=tests,
+                seconds=round(seconds, 6))
 
+
+def _read_inputs(request: Dict) -> List:
     try:
-        inputs = [read_input(record) for record in request.get('inputs', [])]
+        return [read_input(record) for record in request.get('inputs', [])]
     except BlockError:
         raise
     except Exception as error:
         raise BlockError('input', f'Reading the upstream outputs failed: {error}',
                          traceback.format_exc())
+
+
+def run_chain(request: Dict) -> Dict:
+    """
+    Runs consecutive blocks in this worker, each taking the previous block's outputs in
+    memory, as Mage's fused stages do; only the last block's outputs are written.
+    Consecutive R blocks run in one R session. Each block's tests run on its outputs;
+    a failure names its block.
+    """
+    blocks = request['chain']
+    output_dir = request['output_dir']
+    os.makedirs(output_dir, exist_ok=True)
+    values = _read_inputs(request)
+    tests: List[Dict] = []
+    timings: List[Dict] = []
+    position = 0
+    while position < len(blocks):
+        block = blocks[position]
+        if block.get('language') == 'r':
+            end = position
+            while end < len(blocks) and blocks[end].get('language') == 'r':
+                end += 1
+            keep = bool(request.get('keep_outputs'))
+            values, block_tests, seconds, kept = run_r_chain(
+                request, blocks[position:end], values, keep,
+            )
+            tests.extend(block_tests)
+            for offset, (b, t) in enumerate(zip(blocks[position:end], seconds)):
+                timing = dict(block_uuid=b['uuid'], seconds=round(t, 6))
+                if offset in kept and position + offset + 1 < len(blocks):
+                    timing['outputs'] = _write_outputs(
+                        kept[offset], os.path.join(output_dir, 'kept', str(position + offset)),
+                    )
+                elif (keep and position + offset + 1 < len(blocks)
+                      and offset == end - position - 1):
+                    # The last block of an R run passes its value on: keep it too.
+                    timing['outputs'] = _write_outputs(
+                        values, os.path.join(output_dir, 'kept', str(position + offset)),
+                    )
+                timings.append(timing)
+            position = end
+            continue
+        print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
+        try:
+            values, block_tests, seconds = execute_block(request, block, values)
+        except BlockError as error:
+            error.block_uuid = error.block_uuid or block['uuid']
+            raise
+        tests.extend(dict(t, name=f"{block['uuid']}: {t['name']}") for t in block_tests)
+        timing = dict(block_uuid=block['uuid'], seconds=round(seconds, 6))
+        if request.get('keep_outputs') and position + 1 < len(blocks):
+            # Every block's outputs, for debugging (MAGE_SERVICE_KEEP_OUTPUTS=on).
+            timing['outputs'] = _write_outputs(
+                values, os.path.join(output_dir, 'kept', str(position)),
+            )
+        timings.append(timing)
+        position += 1
+    return dict(outputs=_write_outputs(values, output_dir), tests=tests, blocks=timings,
+                seconds=round(sum(t['seconds'] for t in timings), 6))
+
+
+def execute_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, float]:
+    """Runs one block on its inputs; returns its outputs, test results and time."""
+    block_type = block['type']
+    if block_type not in BLOCK_TYPES:
+        raise BlockError('load', f'{block_type} blocks are not supported by pipeline services.')
     if block.get('language') == 'r':
-        return run_r_block(request, block, inputs, output_dir)
+        return run_r_block(request, block, inputs)
     if block.get('language') == 'sql':
-        return run_sql_block(request, block, inputs, output_dir)
+        return run_sql_block(request, block, inputs)
 
     functions, tests, preprocessors = [], [], []
     namespace = {
@@ -468,12 +590,6 @@ def run_block(request: Dict) -> Dict:
     else:
         outputs = [result]
 
-    try:
-        records = [write_output(value, output_dir, i) for i, value in enumerate(outputs)]
-    except Exception as error:
-        raise BlockError('output', f'Writing the output failed: {type(error).__name__}: {error}',
-                         traceback.format_exc())
-
     test_results = []
     if request.get('run_tests', True):
         for test in tests:
@@ -487,8 +603,7 @@ def run_block(request: Dict) -> Dict:
                 raise BlockError('test', f'{name}: {type(error).__name__}: {error}',
                                  _user_traceback())
         _run_tests(block, test_results)
-
-    return dict(outputs=records, tests=test_results, seconds=round(seconds, 6))
+    return outputs, test_results, seconds
 
 
 def _user_traceback() -> str:
@@ -533,6 +648,7 @@ def serve(requests=None, channel=None) -> None:
         except BlockError as error:
             message = dict(type='result', id=request_id, ok=False, error=dict(
                 phase=error.phase, message=str(error), details=error.details,
+                block_uuid=error.block_uuid,
             ))
         except BaseException as error:  # noqa: B036 - the service must get an answer
             message = dict(type='result', id=request_id, ok=False, error=dict(

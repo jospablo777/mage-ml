@@ -400,6 +400,15 @@ fn forward(
                     tail.remove(0);
                 }
             }
+            // A chain of blocks names each block before its lines.
+            if let Some(block) = line.strip_prefix("\u{1e}mage-block ") {
+                if let Some((_, current)) =
+                    target.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+                {
+                    *current = block.to_string();
+                }
+                continue;
+            }
             let current = target.lock().unwrap_or_else(|p| p.into_inner()).clone();
             match current {
                 Some((log, block)) => log.write("info", Some(&block), Some(name), &line),

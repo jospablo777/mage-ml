@@ -143,10 +143,10 @@ async fn run_blocks(
         .into_iter()
         .cloned()
         .collect();
-    let chains = rust_chains(pipeline, &order);
+    let chains = block_chains(pipeline, &order);
     let chained: HashSet<String> = chains
         .values()
-        .flat_map(|chain| chain.iter().skip(1).map(|b| b.uuid.clone()))
+        .flat_map(|(_, chain)| chain.iter().skip(1).map(|b| b.uuid.clone()))
         .collect();
     let mut outputs: HashMap<String, Vec<Value>> = HashMap::new();
     let mut started: HashSet<String> = HashSet::new();
@@ -165,12 +165,13 @@ async fn run_blocks(
                 started.insert(block.uuid.clone());
                 let inputs: Vec<Vec<Value>> =
                     block.upstream.iter().map(|u| outputs[u].clone()).collect();
-                if let Some(chain) = chains.get(&block.uuid) {
+                if let Some((kind, chain)) = chains.get(&block.uuid) {
                     for member in chain {
                         started.insert(member.uuid.clone());
                     }
                     let task = ChainTask {
                         service: service.clone(),
+                        kind: *kind,
                         blocks: chain.clone(),
                         pipeline_uuid: pipeline.uuid.clone(),
                         run_id: run_id.to_string(),
@@ -256,26 +257,49 @@ fn mark_downstream_failed(service: &Service, pipeline: &Pipeline, run_id: &str, 
     }
 }
 
-/// Chains of Rust blocks that run as one process, keyed by their first block: in a
-/// service's one binary (`entry`), each block of a chain is the only downstream block of
-/// the one before and has no other upstream block, so nothing else needs the outputs in
-/// between. Each block's query then extends the previous block's lazy plan, and Polars
-/// optimizes the chain as one. MAGE_SERVICE_RUST_CHAINS=off runs each block on its own.
-fn rust_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, Vec<Block>> {
+/// How a chain of blocks runs as one unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChainKind {
+    /// In the service's Rust binary: each block's query extends the previous block's lazy
+    /// plan, and Polars optimizes the chain as one.
+    Rust,
+    /// In one Python worker request: each block takes the previous block's outputs in
+    /// memory, and consecutive R blocks share one R session.
+    Worker,
+}
+
+fn chain_kind(block: &Block) -> Option<ChainKind> {
+    match block.language {
+        Language::Rust if block.entry.is_some() => Some(ChainKind::Rust),
+        Language::Rust => None,
+        Language::Python | Language::R | Language::Sql => Some(ChainKind::Worker),
+    }
+}
+
+/// Chains of blocks that run as one unit, keyed by their first block: blocks of one kind
+/// where each is the only downstream block of the one before and has no other upstream
+/// block, so nothing else needs the outputs in between. Only the last block's outputs
+/// are written. MAGE_SERVICE_CHAINS=off runs every block on its own;
+/// MAGE_SERVICE_RUST_CHAINS=off does that for Rust blocks only.
+fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainKind, Vec<Block>)> {
     let mut chains = HashMap::new();
-    if std::env::var("MAGE_SERVICE_RUST_CHAINS").is_ok_and(|v| v == "off") {
+    let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "off");
+    if off("MAGE_SERVICE_CHAINS") {
         return chains;
     }
+    let rust_off = off("MAGE_SERVICE_RUST_CHAINS");
     let downstream = pipeline.downstream();
     let by_uuid: HashMap<&str, &Block> = order.iter().map(|b| (b.uuid.as_str(), b)).collect();
-    let chainable = |block: &Block| block.language == Language::Rust && block.entry.is_some();
-    let mut assigned: HashSet<&str> = HashSet::new();
+    let mut assigned: HashSet<String> = HashSet::new();
     for block in order {
-        if assigned.contains(block.uuid.as_str()) || !chainable(block) {
+        let Some(kind) = chain_kind(block) else {
+            continue;
+        };
+        if assigned.contains(&block.uuid) || (kind == ChainKind::Rust && rust_off) {
             continue;
         }
         let mut chain = vec![block.clone()];
-        // One process has one MAGE_IO_CONFIG: blocks with different profiles split.
+        // One Rust process has one MAGE_IO_CONFIG: blocks with different profiles split.
         let mut profile = block.io_config.clone();
         loop {
             let last = chain.last().expect("a chain has a block");
@@ -284,11 +308,12 @@ fn rust_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, Vec<Bloc
                 _ => None,
             };
             let Some(next) = next else { break };
-            let compatible = match (&profile, &next.io_config) {
-                (Some(a), Some(b)) => a == b,
-                _ => true,
-            };
-            if !chainable(next) || next.upstream.len() != 1 || !compatible {
+            let compatible = kind != ChainKind::Rust
+                || match (&profile, &next.io_config) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => true,
+                };
+            if chain_kind(next) != Some(kind) || next.upstream.len() != 1 || !compatible {
                 break;
             }
             if profile.is_none() {
@@ -297,10 +322,8 @@ fn rust_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, Vec<Bloc
             chain.push(next.clone());
         }
         if chain.len() > 1 {
-            for member in &chain {
-                assigned.insert(by_uuid[member.uuid.as_str()].uuid.as_str());
-            }
-            chains.insert(block.uuid.clone(), chain);
+            assigned.extend(chain.iter().map(|b| b.uuid.clone()));
+            chains.insert(block.uuid.clone(), (kind, chain));
         }
     }
     chains
@@ -456,19 +479,7 @@ impl BlockTask {
             .map(|records| python_input(records))
             .collect();
         let request = json!({
-            "block": {
-                "uuid": self.block.uuid,
-                "type": self.block.block_type.as_str(),
-                "file": self.service.project_dir().join(&self.block.file),
-                "configuration": self.block.configuration,
-                "language": match self.block.language {
-                    Language::R => "r",
-                    Language::Sql => "sql",
-                    _ => "python",
-                },
-                "pipeline_uuid": self.pipeline_uuid,
-                "sql": self.block.sql,
-            },
+            "block": worker_block(&self.service, &self.block, &self.pipeline_uuid),
             "inputs": inputs,
             "kwargs": *self.kwargs,
             "output_dir": self.output_dir,
@@ -559,6 +570,54 @@ impl BlockTask {
         }
         Err(rust_failure(&self.output_dir, status).0)
     }
+}
+
+/// One block's part of a chain's result.
+#[derive(Debug, Clone, Default)]
+struct ChainBlockResult {
+    seconds: f64,
+    /// Its output went to the next block as a plan (Rust chains).
+    planned: bool,
+    /// Its outputs, when the chain keeps them (MAGE_SERVICE_KEEP_OUTPUTS).
+    outputs: Vec<Value>,
+}
+
+/// Whether a chain writes every block's outputs, for debugging; by default only the last
+/// block's are written (MAGE_SERVICE_KEEP_OUTPUTS=on).
+fn keep_outputs() -> bool {
+    std::env::var("MAGE_SERVICE_KEEP_OUTPUTS").is_ok_and(|v| v == "on" || v == "1")
+}
+
+/// Each block's kept outputs in a chain's result (`blocks[].outputs`), with absolute
+/// paths.
+fn kept_outputs(result: &Value, output_dir: &Path) -> Vec<Vec<Value>> {
+    result
+        .get("blocks")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .map(|b| output_records(&json!({"outputs": b.get("outputs")}), output_dir))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A block as the Python worker takes it.
+fn worker_block(service: &Service, block: &Block, pipeline_uuid: &str) -> Value {
+    json!({
+        "uuid": block.uuid,
+        "type": block.block_type.as_str(),
+        "file": service.project_dir().join(&block.file),
+        "configuration": block.configuration,
+        "language": match block.language {
+            Language::R => "r",
+            Language::Sql => "sql",
+            _ => "python",
+        },
+        "pipeline_uuid": pipeline_uuid,
+        "sql": block.sql,
+    })
 }
 
 /// A Rust block's inputs for its job.json: the upstream outputs' files.
@@ -781,6 +840,7 @@ fn rust_failure(
 /// run: the chain's attempts start them all, and each finishes with its own time.
 struct ChainTask {
     service: Arc<Service>,
+    kind: ChainKind,
     blocks: Vec<Block>,
     pipeline_uuid: String,
     run_id: String,
@@ -795,13 +855,10 @@ impl ChainTask {
     async fn run(self) -> BlockOutcome {
         let head = &self.blocks[0];
         let tail = &self.blocks[self.blocks.len() - 1];
-        let attempts = self
-            .blocks
-            .iter()
-            .map(|b| b.retry.retries)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        // A failed block retries with its own settings; the chain runs again from its
+        // first block, since the outputs in between are not kept.
+        let attempts: u32 = self.blocks.iter().map(|b| b.retry.retries + 1).sum();
+        let mut failures: HashMap<String, u32> = HashMap::new();
         let timeout = self
             .blocks
             .iter()
@@ -811,12 +868,16 @@ impl ChainTask {
         self.log.info(
             Some(&head.uuid),
             &format!(
-                "Runs with {} as one compiled chain of {} Rust blocks.",
+                "Runs with {} as one {} of {} blocks.",
                 self.blocks[1..]
                     .iter()
                     .map(|b| b.uuid.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
+                match self.kind {
+                    ChainKind::Rust => "compiled Rust chain",
+                    ChainKind::Worker => "chain in one process",
+                },
                 self.blocks.len()
             ),
         );
@@ -849,13 +910,13 @@ impl ChainTask {
                 Ok((records, seconds)) => {
                     for (position, block) in self.blocks.iter().enumerate() {
                         let last = position + 1 == self.blocks.len();
-                        let (elapsed, planned) =
-                            seconds.get(position).copied().unwrap_or((0.0, false));
+                        let part = seconds.get(position).cloned().unwrap_or_default();
+                        let (elapsed, planned) = (part.seconds, part.planned);
                         // The block whose computation ran this block's query too.
                         let computed_in = self.blocks[position..]
                             .iter()
                             .zip(&seconds[position.min(seconds.len())..])
-                            .find(|(_, (_, planned))| !planned)
+                            .find(|(_, part)| !part.planned)
                             .map(|(b, _)| b.uuid.as_str())
                             .unwrap_or(tail.uuid.as_str());
                         let _ = self.service.ledger.finish_block(
@@ -863,14 +924,14 @@ impl ChainTask {
                             &block.uuid,
                             BlockStatus::Completed,
                             None,
-                            if last { &records } else { &[] },
+                            if last { &records } else { &part.outputs },
                         );
                         let message = if planned {
                             format!(
                                 "Planned in the compiled chain; its work ran with {computed_in}."
                             )
                         } else {
-                            format!("Completed in {elapsed:.2} s in the compiled chain.")
+                            format!("Completed in {elapsed:.2} s in the chain.")
                         };
                         self.log.info(Some(&block.uuid), &message);
                         self.service.observe_block(
@@ -903,13 +964,29 @@ impl ChainTask {
                         text.push_str(details.trim_end());
                     }
                     self.log.error(Some(&failed), &text);
+                    let settings = self
+                        .blocks
+                        .iter()
+                        .find(|b| b.uuid == failed)
+                        .unwrap_or(head)
+                        .retry
+                        .clone();
+                    let failed_times = failures.entry(failed.clone()).or_insert(0);
+                    *failed_times += 1;
+                    let failed_times = *failed_times;
                     failure = (message, block);
-                    if !retryable || attempt == attempts || self.cancel.is_cancelled() {
+                    if !retryable
+                        || failed_times > settings.retries
+                        || attempt == attempts
+                        || self.cancel.is_cancelled()
+                    {
                         break;
                     }
-                    let delay = head.retry.delay(attempt + 1);
-                    self.log
-                        .info(Some(&head.uuid), &format!("Retrying in {delay:.1} s."));
+                    let delay = settings.delay(failed_times + 1);
+                    self.log.info(
+                        Some(&failed),
+                        &format!("Retrying the chain in {delay:.1} s."),
+                    );
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_secs_f64(delay)) => {}
                         _ = self.cancel.cancelled() => break,
@@ -967,7 +1044,101 @@ impl ChainTask {
     async fn run_once(
         &self,
         timeout: Option<Duration>,
-    ) -> Result<(Vec<Value>, Vec<(f64, bool)>), (BlockFailure, Option<String>)> {
+    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
+        match self.kind {
+            ChainKind::Rust => self.run_rust_chain(timeout).await,
+            ChainKind::Worker => self.run_worker_chain(timeout).await,
+        }
+    }
+
+    async fn run_worker_chain(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
+        let head = &self.blocks[0];
+        let pool = self.service.python.as_ref().ok_or_else(|| {
+            (
+                BlockFailure::fatal(
+                    "this image has no Python runtime for Python, R and SQL blocks",
+                ),
+                None,
+            )
+        })?;
+        let chain: Vec<Value> = self
+            .blocks
+            .iter()
+            .map(|b| worker_block(&self.service, b, &self.pipeline_uuid))
+            .collect();
+        let request = json!({
+            "block": chain[0],
+            "chain": chain,
+            "keep_outputs": keep_outputs(),
+            "inputs": self.inputs.iter().map(|r| python_input(r)).collect::<Vec<_>>(),
+            "kwargs": *self.kwargs,
+            "output_dir": self.output_dir,
+            "run_tests": true,
+        });
+        let reply = pool
+            .run(request, self.log.clone(), &head.uuid, timeout, &self.cancel)
+            .await
+            .map_err(|error| match error {
+                WorkerError::Cancelled => (BlockFailure::fatal("the run was cancelled"), None),
+                other => (BlockFailure::retryable(other.to_string()), None),
+            })?;
+        if reply.get("ok").and_then(Value::as_bool) == Some(true) {
+            let seconds = reply
+                .get("blocks")
+                .and_then(Value::as_array)
+                .map(|blocks| {
+                    blocks
+                        .iter()
+                        .map(|b| ChainBlockResult {
+                            seconds: b.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+                            planned: false,
+                            outputs: b
+                                .get("outputs")
+                                .and_then(Value::as_array)
+                                .cloned()
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let outputs = reply
+                .get("outputs")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            return Ok((outputs, seconds));
+        }
+        let error = reply.get("error").cloned().unwrap_or(Value::Null);
+        let phase = error.get("phase").and_then(Value::as_str).unwrap_or("run");
+        let block = error
+            .get("block_uuid")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        Err((
+            BlockFailure {
+                message: error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("the block failed")
+                    .to_string(),
+                details: error
+                    .get("details")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                retryable: phase != "load",
+            },
+            block,
+        ))
+    }
+
+    async fn run_rust_chain(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
         let head = &self.blocks[0];
         let binary = head
             .binary
@@ -983,6 +1154,7 @@ impl ChainTask {
                     "block_uuid": b.uuid,
                     "block_type": b.block_type.as_str(),
                     "entry": b.entry,
+                    "keep_output": keep_outputs(),
                 })
             })
             .collect();
@@ -1020,17 +1192,18 @@ impl ChainTask {
         if status.success() && result_path.exists() {
             let result = read_result(&result_path).map_err(|f| (f, None))?;
             test_failures(&result).map_err(|f| (f, None))?;
+            let kept = kept_outputs(&result, &self.output_dir);
             let seconds = result
                 .get("blocks")
                 .and_then(Value::as_array)
                 .map(|blocks| {
                     blocks
                         .iter()
-                        .map(|b| {
-                            (
-                                b.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
-                                b.get("planned").and_then(Value::as_bool).unwrap_or(false),
-                            )
+                        .zip(kept.into_iter().chain(std::iter::repeat(Vec::new())))
+                        .map(|(b, outputs)| ChainBlockResult {
+                            seconds: b.get("seconds").and_then(Value::as_f64).unwrap_or(0.0),
+                            planned: b.get("planned").and_then(Value::as_bool).unwrap_or(false),
+                            outputs,
                         })
                         .collect()
                 })
@@ -1123,9 +1296,9 @@ mod tests {
             .into_iter()
             .cloned()
             .collect();
-        let mut chains: Vec<Vec<String>> = rust_chains(pipeline, &order)
+        let mut chains: Vec<Vec<String>> = block_chains(pipeline, &order)
             .into_values()
-            .map(|c| c.into_iter().map(|b| b.uuid).collect())
+            .map(|(_, c)| c.into_iter().map(|b| b.uuid).collect())
             .collect();
         chains.sort();
         chains
@@ -1160,6 +1333,20 @@ mod tests {
         let mut y = rust("y", &["x"]);
         y["io_config"] = json!({"POSTGRES_HOST": "b"});
         assert!(chains_of(&pipeline(json!([x, y]))).is_empty());
+
+        // Python, R and SQL blocks chain in the worker; a Rust block between them splits.
+        let worker = |uuid: &str, language: &str, upstream: &[&str]| {
+            json!({"uuid": uuid, "type": "transformer", "language": language,
+                   "file": "b", "sha256": "0", "upstream": upstream})
+        };
+        let mixed = pipeline(json!([
+            worker("w1", "python", &[]),
+            worker("w2", "r", &["w1"]),
+            worker("w3", "sql", &["w2"]),
+            rust("r1", &["w3"]),
+            worker("w4", "python", &["r1"]),
+        ]));
+        assert_eq!(chains_of(&mixed), vec![vec!["w1", "w2", "w3"]]);
 
         // Blocks without the service's one binary run on their own.
         let mut own = rust("o", &[]);

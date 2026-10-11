@@ -708,6 +708,20 @@ def _replace_list(text: str, key: str, items: str) -> str:
     return text[:start] + f'{key} = [\n{items},\n]' + text[end + 1:]
 
 
+# The line a chain of blocks prints before each block (mageml::run_chain, mage::run_chain).
+BLOCK_MARKER = '\x1emage-block '
+
+
+def readable_marker(line: str) -> str:
+    """
+    A chain's block marker as a divider in Mage's logs. A pipeline service keeps the
+    marker: it files the lines after it under that block.
+    """
+    if line.startswith(BLOCK_MARKER) and os.getenv('MAGE_SERVICE') != '1':
+        return f'----- block {line[len(BLOCK_MARKER):].strip()} -----\n'
+    return line
+
+
 def run_rscript(
     config: RConfig,
     script: Path,
@@ -745,7 +759,7 @@ def run_rscript(
         timer.start()
     try:
         for line in process.stdout:
-            sys.stdout.write(line)
+            sys.stdout.write(readable_marker(line))
         code = process.wait()
     except BaseException:
         # An interrupted run, such as one stopped in the notebook, leaves no R computing.

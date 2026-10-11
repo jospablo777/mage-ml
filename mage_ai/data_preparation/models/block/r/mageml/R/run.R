@@ -137,6 +137,161 @@ execute_block <- function(job_dir) {
   invisible(value)
 }
 
+#' Run one block of a chain on its inputs, in this R session
+#'
+#' @param job_dir The job directory.
+#' @param step The step: `block_uuid`, `block_type` and `file`.
+#' @param inputs The block's inputs, as values.
+#' @param manifest The job's manifest.
+#' @param globals The pipeline's variables.
+#' @return A list with the block's `value` and test results.
+#' @noRd
+execute_chain_step <- function(job_dir, step, inputs, manifest, globals) {
+  block_type <- step$block_type
+  state$block_type <- block_type
+  state$block_function <- NULL
+  state$tests <- list()
+  state$context <- list(
+    block_uuid = step$block_uuid,
+    block_type = block_type,
+    pipeline_uuid = manifest$pipeline_uuid,
+    execution_partition = manifest$execution_partition
+  )
+  env <- block_environment()
+  assign("global_vars", globals, envir = env)
+  for (i in seq_along(inputs)) {
+    assign(paste0("df_", i), inputs[[i]], envir = env)
+  }
+  path <- file.path(job_dir, step$file)
+  expressions <- parse(path, encoding = "UTF-8", keep.source = TRUE)
+  evaluate_block(expressions, readLines(path, encoding = "UTF-8"), env)
+  f <- block_function(env, block_type)
+  value <- do.call(f, unname(inputs), envir = env)
+  list(value = value, tests = run_tests(value))
+}
+
+#' Run a chain of R blocks in one R session
+#'
+#' Like [run_block()], for consecutive blocks that each take the previous
+#' block's value: R starts and loads its packages once, and each block
+#' receives the previous block's value in memory. `manifest.json` lists the
+#' blocks in `chain`, each with its `block_uuid`, `block_type`, `file` (its
+#' code) and `keep_output`; the inputs are the first block's. The last block's
+#' output goes to `output/`, a kept block's to `output_<n>/`, all test results
+#' to `tests.json` and each block's time to `chain.json`. When a block fails,
+#' its uuid is written to `error_block.txt`.
+#'
+#' @param job_dir The job directory.
+#' @param quit_on_error Whether to quit R with status 1 when a block fails.
+#' @return `TRUE` when every block ran, `FALSE` otherwise.
+#' @keywords internal
+#' @export
+run_chain <- function(job_dir, quit_on_error = TRUE) {
+  calls <- NULL
+  current <- NULL
+  old <- options(keep.source = TRUE, warn = 1, arrow.int64_downcast = FALSE)
+  on.exit(options(old))
+  tryCatch(
+    {
+      withCallingHandlers(
+        {
+          manifest <- jsonlite::read_json(
+            file.path(job_dir, "manifest.json"),
+            simplifyVector = FALSE
+          )
+          inputs <- lapply(manifest$inputs, read_input, job_dir = job_dir)
+          globals <- read_json_file(file.path(job_dir, "globals.json"))
+          config_path <- file.path(job_dir, "io_config.json")
+          state$io_config <- if (file.exists(config_path)) {
+            jsonlite::read_json(config_path, simplifyVector = TRUE)
+          }
+          state$globals <- globals
+          tests <- list()
+          timings <- list()
+          steps <- manifest$chain
+          for (position in seq_along(steps)) {
+            step <- steps[[position]]
+            current <- step$block_uuid
+            cat(paste0("\u001emage-block ", current, "\n"))
+            started <- Sys.time()
+            ran <- execute_chain_step(job_dir, step, inputs, manifest, globals)
+            for (result in ran$tests) {
+              result$name <- paste0(current, ": ", result$name)
+              tests[[length(tests) + 1]] <- result
+            }
+            failed <- Filter(function(t) !isTRUE(t$passed), ran$tests)
+            if (length(failed) > 0) {
+              # As in Mage, a block whose test fails fails, and the blocks
+              # after it do not run.
+              stop(
+                sprintf(
+                  "%d of %d tests failed: %s",
+                  length(failed),
+                  length(ran$tests),
+                  paste(
+                    vapply(failed, function(t) {
+                      message <- if (is.null(t$message)) "failed" else t$message
+                      paste0(t$name, " (", message, ")")
+                    }, character(1)),
+                    collapse = "; "
+                  )
+                ),
+                call. = FALSE
+              )
+            }
+            last <- position == length(steps)
+            if (last && !identical(step$block_type, "data_exporter")) {
+              write_output(ran$value, job_dir)
+            } else if (!last && isTRUE(step$keep_output)) {
+              kept <- file.path(job_dir, paste0("kept_", position))
+              dir.create(kept, showWarnings = FALSE)
+              write_output(ran$value, kept)
+            }
+            elapsed <- difftime(Sys.time(), started, units = "secs")
+            timings[[position]] <- list(
+              block_uuid = current,
+              seconds = as.numeric(elapsed)
+            )
+            inputs <- if (is.null(ran$value)) list() else list(ran$value)
+          }
+          current <- NULL
+          jsonlite::write_json(
+            tests,
+            file.path(job_dir, "tests.json"),
+            auto_unbox = TRUE,
+            null = "null"
+          )
+          jsonlite::write_json(
+            timings,
+            file.path(job_dir, "chain.json"),
+            auto_unbox = TRUE,
+            digits = NA
+          )
+        },
+        error = function(e) calls <<- sys.calls()
+      )
+      TRUE
+    },
+    error = function(e) {
+      write_lines(conditionMessage(e), file.path(job_dir, "error.txt"))
+      if (!is.null(current)) {
+        write_lines(current, file.path(job_dir, "error_block.txt"))
+      }
+      labels <- if (is.null(calls)) {
+        character(0)
+      } else {
+        utils::limitedLabels(calls)
+      }
+      labels <- labels[grepl("^block_[0-9]+\\.R#", labels)]
+      write_lines(labels, file.path(job_dir, "traceback.txt"))
+      if (quit_on_error) {
+        quit(status = 1, save = "no")
+      }
+      FALSE
+    }
+  )
+}
+
 write_lines <- function(lines, path) {
   connection <- file(path, open = "w", encoding = "UTF-8")
   on.exit(close(connection))
