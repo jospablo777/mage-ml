@@ -1,5 +1,7 @@
 import { Page } from '@playwright/test';
 
+import { MageApi } from './api';
+
 import { expect, test } from './base';
 
 /*
@@ -28,6 +30,16 @@ async function openRTemplates(page: Page, blockType: string) {
 }
 
 test.describe('R blocks', () => {
+  // The Local file template reads data/input.csv; the run test looks for its ñandú row.
+  test.beforeAll(async ({ playwright }, testInfo) => {
+    const context = await playwright.request.newContext({
+      baseURL: process.env.MAGE_E2E_API_URL || testInfo.project.use.baseURL,
+    });
+    const api = await MageApi.signIn(context);
+    await api.writeFile('data', 'input.csv', 'name,count\nñandú,3\nkoala,5\n');
+    await context.dispose();
+  });
+
   test.beforeEach(async ({ page }) => {
     // A laptop screen, where submenus that opened to the right were cut off.
     await page.setViewportSize({ height: 720, width: 1280 });

@@ -73,6 +73,17 @@ export class MageApi {
     return body;
   }
 
+  // Writes a file in the project, creating it and its folder when missing.
+  async writeFile(dirPath: string, name: string, content: string) {
+    await this.call('POST', 'files', { file: { dir_path: dirPath, name, overwrite: true } })
+      .catch(() => null);
+    await this.call(
+      'PUT',
+      `file_contents/${encodeURIComponent(`${dirPath}/${name}`)}`,
+      { file_content: { content } },
+    );
+  }
+
   async createPipeline(name: string): Promise<string> {
     const body = await this.call('POST', 'pipelines', { pipeline: { name, type: 'python' } });
 
