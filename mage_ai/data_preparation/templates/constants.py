@@ -292,6 +292,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         name='Base template (generic)',
         path='transformers/default.jinja',
     ),
+    dict(
+        block_type=BlockType.TRANSFORMER,
+        description='Score rows with a model file: skops, CatBoost, XGBoost, ONNX, torch.export.',
+        language=BlockLanguage.PYTHON,
+        name='Model inference',
+        path='transformers/model_inference.jinja',
+    ),
     #   Data warehouses
     dict(
         block_type=BlockType.TRANSFORMER,

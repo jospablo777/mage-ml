@@ -1,0 +1,30 @@
+{% extends "testable.jinja" %}
+{% block imports %}
+from mage_ai.pipeline_services.models import load_artifact
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+{% endblock %}
+
+{% block content %}
+@transformer
+def transform(data, *args, **kwargs):
+    """
+    Scores each row with a model saved in its framework's format: models/model.skops
+    (scikit-learn), .cbm (CatBoost), .ubj (XGBoost), .onnx, .pt2 (torch.export) and more.
+    The model loads once per process, so an exported service loads it on its first
+    request. Set the path and the feature columns with the model and features variables.
+    """
+    model = load_artifact(kwargs.get('model', 'models/model.skops'))
+    features = kwargs.get('features') or list(data.columns)
+    scored = data.copy()
+    # scikit-learn, CatBoost and LightGBM models predict from a DataFrame.
+    scored['prediction'] = model.predict(data[features])
+    # An ONNX Runtime session:
+    #   inputs = {model.get_inputs()[0].name: data[features].to_numpy('float32')}
+    #   scored['prediction'] = model.run(None, inputs)[0].ravel()
+    # A torch.export program:
+    #   scored['prediction'] = model(torch.tensor(data[features].to_numpy('float32')))
+{{ code }}
+    return scored
+{% endblock %}

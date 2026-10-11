@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from mage_ai.pipeline_services import models
+from mage_ai.tests.base_test import DBTestCase
 
 
 class LoadArtifactTest(unittest.TestCase):
@@ -108,3 +109,41 @@ class LoadArtifactTest(unittest.TestCase):
         for suffix, (loader, module) in models.ARTIFACT_LOADERS.items():
             with self.subTest(suffix=suffix):
                 self.assertTrue(loader == 'pickle' or models.LOADER_MODULES[loader] == module)
+
+
+class ModelInferenceTemplateTest(DBTestCase):
+    def test_the_template_scores_rows_with_a_model_file(self):
+        import pandas as pd
+        import skops.io
+        from sklearn.linear_model import LinearRegression
+
+        from mage_ai.data_preparation.models.block import Block
+        from mage_ai.data_preparation.models.pipeline import Pipeline
+        from mage_ai.data_preparation.templates.template import template_env
+
+        os.makedirs(os.path.join(self.repo_path, 'models'), exist_ok=True)
+        X = pd.DataFrame({'x': [0.0, 1.0, 2.0]})
+        skops.io.dump(LinearRegression().fit(X, 2 * X['x'] + 1),
+                      os.path.join(self.repo_path, 'models', 'line.skops'))
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        load = Block.create(f'{pipeline.uuid}_load', 'data_loader', self.repo_path,
+                            pipeline=pipeline)
+        with open(load.file_path, 'w') as file:
+            file.write(
+                "import pandas as pd\n\n@data_loader\ndef load(*args, **kwargs):\n"
+                "    return pd.DataFrame({'id': [1, 2], 'x': [3.0, 4.0]})\n"
+            )
+        score = Block.create(f'{pipeline.uuid}_score', 'transformer', self.repo_path,
+                             pipeline=pipeline, upstream_block_uuids=[load.uuid])
+        with open(score.file_path, 'w') as file:
+            file.write(template_env.get_template('transformers/model_inference.jinja')
+                       .render(code=''))
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        variables = dict(model='models/line.skops', features=['x'])
+
+        pipeline.get_block(load.uuid).execute_sync(global_vars=variables)
+        result = pipeline.get_block(score.uuid).execute_sync(global_vars=variables)
+
+        scored = result['output'][0]
+        self.assertEqual(scored['prediction'].round(6).tolist(), [7.0, 9.0])
+        self.assertEqual(scored['id'].tolist(), [1, 2])
