@@ -799,6 +799,10 @@ R_TEMPLATES = [
         BlockType.DATA_EXPORTER, 'SQLite', 'sqlite.r',
         'Write a table to a SQLite database file with DBI and RSQLite.', [GROUP_DATABASES],
     ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Model inference', 'predict.r',
+        'Score rows with a model saved with saveRDS (lm, glm, ranger, tidymodels).',
+    ),
 ]
 TEMPLATES += R_TEMPLATES
 

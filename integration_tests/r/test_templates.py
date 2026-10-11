@@ -34,10 +34,10 @@ def template(block_type, name, **replacements):
     return code
 
 
-def run(repo, block_type, code, *inputs):
+def run(repo, block_type, code, *inputs, variables=None):
     result = execute_r_code(
-        block_type, code, input_vars=list(inputs), global_vars=dict(VARIABLES),
-        repo_path=repo, block_uuid='template',
+        block_type, code, input_vars=list(inputs),
+        global_vars={**VARIABLES, **(variables or {})}, repo_path=repo, block_uuid='template',
     )
     assert all(t['passed'] for t in result.tests), result.tests
     return result.outputs[0] if result.outputs else None
@@ -213,3 +213,20 @@ def test_transformer_templates(mage_project):
     assert long.to_dict('records') == [
         {'id': 1, 'variable': 'a', 'value': '1.5'}, {'id': 1, 'variable': 'b', 'value': 'x'},
     ]
+
+
+def test_model_inference_template(mage_project):
+    models = Path(mage_project) / 'models'
+    models.mkdir(exist_ok=True)
+    fit = (
+        'model <- lm(y ~ x, data.frame(x = c(1, 2, 3), y = c(3, 5, 7))); '
+        f'saveRDS(model, "{models / "line.rds"}")'
+    )
+    subprocess.run(['Rscript', '--vanilla', '-e', fit], check=True, timeout=120)
+
+    scored = run(
+        mage_project, TRANSFORMER, template(TRANSFORMER, 'Model inference'),
+        pd.DataFrame({'x': [4.0, 10.0]}), variables={'model': 'models/line.rds'},
+    )
+
+    assert scored['prediction'].round(6).tolist() == [9.0, 21.0]
