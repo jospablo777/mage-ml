@@ -252,7 +252,11 @@ run_chain <- function(job_dir, quit_on_error = TRUE) {
               block_uuid = current,
               seconds = as.numeric(elapsed)
             )
-            inputs <- if (is.null(ran$value)) list() else list(ran$value)
+            inputs <- if (is.null(ran$value)) {
+              list()
+            } else {
+              list(as_exchanged(ran$value))
+            }
           }
           current <- NULL
           jsonlite::write_json(

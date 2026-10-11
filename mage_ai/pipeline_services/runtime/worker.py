@@ -481,6 +481,45 @@ def _read_inputs(request: Dict) -> List:
                          traceback.format_exc())
 
 
+def _passes_in_memory(value: Any) -> bool:
+    """
+    Whether the next block of a chain may take this value from memory: only when the
+    file between two blocks run one by one would give it the same value (as Mage's
+    fused stages decide). A Polars DataFrame, or a pandas DataFrame without object
+    columns, attrs, an object or multi-level index, or labels that are not text.
+    """
+    import numpy as np
+
+    pandas = _module('pandas')
+    polars = _module('polars')
+    if polars is not None and type(value) is polars.DataFrame:
+        return True
+    if pandas is not None and type(value) is pandas.DataFrame:
+        object_dtype = np.dtype('O')
+        if value.attrs or value.index.dtype == object_dtype:
+            return False
+        if isinstance(value.index, pandas.MultiIndex) or isinstance(
+            value.columns, pandas.MultiIndex,
+        ):
+            return False
+        if not all(isinstance(label, str) for label in value.columns):
+            return False
+        return not any(dtype == object_dtype for dtype in value.dtypes)
+    return False
+
+
+def _as_exchanged(values: List, directory: str) -> List:
+    """
+    The values the next block of a chain takes: in memory when that gives the same value
+    as the file between blocks run one by one, otherwise written and read back, so a
+    block gets the same input with or without chains.
+    """
+    if len(values) == 1 and _passes_in_memory(values[0]):
+        return values
+    records = _write_outputs(values, directory)
+    return [read_input(record) for record in records]
+
+
 def run_chain(request: Dict) -> Dict:
     """
     Runs consecutive blocks in this worker, each taking the previous block's outputs in
@@ -520,6 +559,10 @@ def run_chain(request: Dict) -> Dict:
                     )
                 timings.append(timing)
             position = end
+            if position < len(blocks):
+                values = _as_exchanged(
+                    values, os.path.join(output_dir, 'exchange', str(position)),
+                )
             continue
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
         try:
@@ -536,6 +579,8 @@ def run_chain(request: Dict) -> Dict:
             )
         timings.append(timing)
         position += 1
+        if position < len(blocks):
+            values = _as_exchanged(values, os.path.join(output_dir, 'exchange', str(position)))
     return dict(outputs=_write_outputs(values, output_dir), tests=tests, blocks=timings,
                 seconds=round(sum(t['seconds'] for t in timings), 6))
 

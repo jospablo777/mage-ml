@@ -251,15 +251,11 @@ class ChainTest(WorkerTestCase):
 
         @transformer
         def first(*args, **kwargs):
-            frame = pd.DataFrame({'a': [1, 2, 3]})
-            frame.attrs['marker'] = 'kept in memory'
-            return frame
+            return pd.DataFrame({'a': [1, 2, 3]})
     '''
     SECOND = '''
         @transformer
         def second(frame, *args, **kwargs):
-            # Storage would drop attrs; in memory they arrive.
-            assert frame.attrs.get('marker') == 'kept in memory'
             return frame.assign(b=frame['a'] * 10)
 
         @test
@@ -280,6 +276,18 @@ class ChainTest(WorkerTestCase):
         result = self.chain([self.FIRST, self.SECOND], keep_outputs=True)
         kept = result['blocks'][0]['outputs']
         self.assertEqual(pl.read_ipc(kept[0]['path'])['a'].to_list(), [1, 2, 3])
+
+    def test_blocks_get_what_the_file_between_blocks_gives(self):
+        # An object column of strings becomes the str dtype through the file; a chain
+        # must give the next block that too, not the object column in memory.
+        frame = pd.DataFrame({'text': pd.Series(['x', 'y'], dtype=object), 'n': [1, 2]})
+        through_file = worker.read_input(self.write(frame))
+        chained = worker._as_exchanged([frame], os.path.join(self.directory, 'x'))[0]
+        pd.testing.assert_frame_equal(chained, through_file)
+        self.assertNotEqual(chained['text'].dtype, np.dtype('O'))
+        # A Polars frame gives the same value from memory, so it is not copied.
+        polars_frame = pl.DataFrame({'a': [1]})
+        self.assertIs(worker._as_exchanged([polars_frame], self.directory)[0], polars_frame)
 
     def test_a_failure_names_its_block(self):
         with self.assertRaises(worker.BlockError) as caught:

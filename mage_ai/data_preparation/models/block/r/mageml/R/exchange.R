@@ -257,3 +257,30 @@ write_output <- function(value, job_dir) {
     auto_unbox = TRUE
   )
 }
+
+#' A value as the next block would read it after the exchange
+#'
+#' Between blocks run one by one, Mage turns an `integer64` column into an
+#' integer when every value fits. A chain passes values in memory, so it does
+#' the same, and a block gets the same value either way: `amount * units`
+#' stays a double when `units` arrives as an integer.
+#'
+#' @param value The value a block returned.
+#' @return `value`, with `integer64` columns that fit as integers.
+#' @noRd
+as_exchanged <- function(value) {
+  if (!is.data.frame(value)) {
+    return(value)
+  }
+  for (name in names(value)) {
+    column <- value[[name]]
+    if (bit64::is.integer64(column)) {
+      known <- column[!is.na(column)]
+      limit <- bit64::as.integer64(2147483647L)
+      if (all(known >= -limit & known <= limit)) {
+        value[[name]] <- as.integer(column)
+      }
+    }
+  }
+  value
+}

@@ -88,12 +88,15 @@ impl FromInput for LazyFrame {
     }
 }
 
-/// The next upstream table, read into memory.
+/// The next upstream table, read into memory. Inside a chain it is the previous blocks'
+/// plan, computed here with the streaming engine, which keeps the memory of a scan,
+/// filter, join and aggregation to batches instead of whole tables.
 impl FromInput for DataFrame {
     fn from_input(inputs: &mut Inputs<'_>) -> anyhow::Result<Self> {
         let position = inputs.taken + 1;
         LazyFrame::from_input(inputs)?
-            .collect()
+            .collect_with_engine(Engine::Streaming)
+            .map(|result| result.unwrap_single())
             .with_context(|| format!("Reading upstream output {position}"))
     }
 }

@@ -89,3 +89,30 @@ def test_an_error_names_its_block():
     assert caught.value.block_uuid == 'clean'
     assert 'missing_column' in str(caught.value)
     assert str(caught.value).startswith('R block clean failed')
+
+
+def test_blocks_get_the_values_they_get_one_by_one():
+    """Between blocks run one by one, an integer64 column that fits arrives as an integer,
+    so amount * units is a double; a chain must give the next block the same value."""
+    from mage_ai.data_preparation.models.block.r import execution
+
+    load = '''
+#* @data_loader
+load <- function(...) {
+  tibble::tibble(amount = c(2.5, 1.25), units = bit64::as.integer64(c(3, 4)))
+}
+'''
+    multiply = '''
+#* @transformer
+multiply <- function(df_1, ...) {
+  dplyr::mutate(df_1, revenue = amount * units)
+}
+'''
+    chained = execution.execute_r_chain(steps(load, multiply), [], {}).outputs[0]
+    values = []
+    for step in steps(load, multiply):
+        values = execution.execute_r_code(
+            step['block_type'], step['code'], values, {}, block_uuid=step['block_uuid'],
+        ).outputs
+    assert chained['revenue'].tolist() == [7.5, 5.0]
+    pd.testing.assert_frame_equal(chained, values[0])
