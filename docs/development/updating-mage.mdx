@@ -1,37 +1,35 @@
 ---
-title: "Updating Mage"
+title: "Updating MageML"
 icon: "circle-up"
 sidebarTitle: "Version upgrades"
-description: "How to get the latest and greatest from the Mage team."
+description: "How to update MageML to the latest version."
 ---
 
+MageML has no published Docker image or PyPI package. `docker pull mageai/mageai` and
+`pip install -U mage-ai` update upstream Mage, not MageML. Update from the repository.
+
 <AccordionGroup>
-   <Accordion title="Docker" icon="Docker">
+   <Accordion title="Source install (uv)" icon="python">
+      From the `mage-ml` folder, pull the latest code and synchronize the environment with the
+      same extras you installed:
+
       ```bash
-      docker pull mageai/mageai:latest
+      git pull
+      uv sync --locked --no-default-groups --extra postgres
       ```
 
-      <Check>
-         1. Are you a technologist? *Yes, you are from the future*
-         1. Do you live on the edge of the galaxy? *Yes you do Sith Lord of the Empire*
-
-         If you said `Yes`, `No`, or didn’t reply to any of these,
-         you should download the `alpha` build instead:
-
-         ```bash
-         docker pull mageai/mageai:alpha
-         ```
-
-      </Check>
+      Then restart MageML with `uv run --no-sync mage start my_project`.
    </Accordion>
-   <Accordion title="pip/conda" icon="python">
-         <CodeGroup>
-            ```bash pip
-            pip install -U mage-ai
-            ```
-            ```bash conda
-            conda update mage-ai
-            ```
-         </CodeGroup>
+   <Accordion title="Docker" icon="Docker">
+      From the `mage-ml` folder, pull the latest code and rebuild the image:
+
+      ```bash
+      git pull
+      docker build -t mageml .
+      ```
+
+      Then restart your containers so they use the new image.
    </Accordion>
 </AccordionGroup>
+
+Changes between versions are listed in the [release notes](https://github.com/jospablo777/mage-ml/blob/master/docs/development/release-notes.md).

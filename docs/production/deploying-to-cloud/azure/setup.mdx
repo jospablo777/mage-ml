@@ -7,14 +7,20 @@ sidebarTitle: "Setup"
 
 ## Overview
 
-Here is a high level diagram of how Mage interacts with various Azure resources deployed using
+Here is a high level diagram of how MageML interacts with various Azure resources deployed using
 this Terraform template.
 
-![Mage Azure architecture](https://mage-ai.github.io/assets/production/deployment/azure/architecture.png)
+![MageML Azure architecture](https://mage-ai.github.io/assets/production/deployment/azure/architecture.png)
 
 ## Pre-requisites
 
-- Download Mage maintained [Terraform templates](/production/deploying-to-cloud/using-terraform).
+- Download the [Terraform templates](/production/deploying-to-cloud/using-terraform) maintained by upstream Mage.
+
+<Note>
+These templates deploy the upstream `mageai/mageai` image by default. MageML has no published
+image: build one from the repository's Dockerfile, push it to Azure Container Registry, and set
+the `docker_image` variable to it.
+</Note>
 
 ---
 
@@ -112,7 +118,8 @@ variable "app_name" {
 
 In the file
 [./azure/variables.tf](https://github.com/mage-ai/mage-ai-terraform-templates/blob/master/azure/variables.tf),
-you can change the `default` value under `docker_image`:
+you can change the `default` value under `docker_image`. The default is the upstream Mage
+image; set it to your MageML image:
 
 ```js
 variable "docker_image" {
@@ -124,8 +131,9 @@ variable "docker_image" {
 <Note>
 **Custom Docker images**
 
-If you previously tagged a Docker image you built when following this
-[CI/CD guide](/production/ci-cd/overview), you must push that locally tagged Docker image
+Build the MageML image from the root of the MageML repository
+(`docker build --platform linux/amd64 -t mageml .`), or use an image you built when following
+this [CI/CD guide](/production/ci-cd/overview). Push the locally tagged Docker image
 to Azure Container Registry before deploying using Terraform.
 
 </Note>
@@ -215,13 +223,13 @@ resource "azurerm_container_group" "container_group" {
     commands will detect it and remind you to do so if necessary.
     ```
 
-    ### Terraform plan
+    **Terraform plan**
 
-        You can run the following command to see all the resources that will be created
-        by Terraform: `terraform plan`
+    You can run the following command to see all the resources that will be created
+    by Terraform: `terraform plan`
 
-        By default, here are the **[resources](/production/deploying-to-cloud/azure/resources)** that will be
-        created.
+    By default, here are the **[resources](/production/deploying-to-cloud/azure/resources)** that will be
+    created.
 
 1. Deploy
 
@@ -249,10 +257,10 @@ resource "azurerm_container_group" "container_group" {
 
 ---
 
-## Updating Mage versions
+## Updating MageML versions
 
-After Mage is running in your cloud, you can update the Mage Docker image
-version by running the following command in your CLI tool:
+After MageML is running in your cloud, push a newly built MageML image to the same tag,
+then restart the container group so it pulls the image:
 
 ```bash
 az container restart --name mage-data-prep-production --resource-group mage-data-prep-production
@@ -267,7 +275,7 @@ az container restart --name mage-data-prep-production --resource-group mage-data
 By default, `terraform apply` will attempt to add your current workstation’s IP
 address to the above mentioned security group.
 
-In order to access Mage on Azure from another local workstation, you must add
+In order to access MageML on Azure from another local workstation, you must add
 that IP address to the security group named
 `mage-data-prep-production-nsg-public`.
 

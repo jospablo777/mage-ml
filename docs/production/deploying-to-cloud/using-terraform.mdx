@@ -5,9 +5,9 @@ icon: "hammer"
 
 ![](https://user-images.githubusercontent.com/78053898/198754720-d6b1e5bd-caa8-431e-a4cb-e26743c0ef36.png)
 
-Deploy Mage to your cloud provider using Terraform.
+Deploy MageML to your cloud provider using Terraform.
 
-Cloud providers currently supported with Mage Terraform scripts:
+Cloud providers supported by the Terraform scripts:
 
 - AWS
 - Azure
@@ -18,12 +18,19 @@ Cloud providers currently supported with Mage Terraform scripts:
 
 ## Pre-install
 
-Clone Mage’s
+Clone upstream Mage’s
 [Terraform template repository](https://github.com/mage-ai/mage-ai-terraform-templates):
 
 ```bash
 git clone https://github.com/mage-ai/mage-ai-terraform-templates.git
 ```
+
+<Note>
+These templates deploy the upstream `mageai/mageai` image by default. MageML has no published
+image. Build one from the MageML repository's Dockerfile (`docker build -t mageml .`), push it
+to your cloud's container registry, and set the template's Docker image variable to it. Each
+cloud page below names the variable.
+</Note>
 
 ---
 

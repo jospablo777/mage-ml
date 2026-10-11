@@ -7,11 +7,11 @@ sidebarTitle: "CodePipeline"
 
 ### Terraform and AWS ECS
 
-This document assumes you're using Terraform to modify and deploy your AWS instructure. If you're
-not using Terraform yet, you can set it up by reading [this document](production/deploying-to-cloud/using-terraform).
+This document assumes you're using Terraform to modify and deploy your AWS infrastructure. If you're
+not using Terraform yet, you can set it up by reading [this document](/production/deploying-to-cloud/using-terraform).
 
 This document also assumes that you have already set up your ECS cluster, services, and tasks.
-* If you are not using ECS to run Mage, then this document will not apply for you.
+* If you are not using ECS to run MageML, then this document will not apply for you.
   You can submit a feature request in [GitHub issues](https://github.com/jospablo777/mage-ml/issues) if you want MageML to
   support deploying to your infrastructure through AWS CodePipeline.
 * If you have not set up your ECS yet, you can check out [this document](/production/deploying-to-cloud/aws/setup#deploy-to-ecs-cluster)
@@ -20,11 +20,12 @@ This document also assumes that you have already set up your ECS cluster, servic
 ### AWS CodeCommit
 
 The pipeline that is created through the Terraform scripts has a AWS CodeCommit repo as a source. You
-will need to have a CodeCommit repo already set up that has your Mage repository code.
+will need to have a CodeCommit repo already set up that has your MageML project code.
 
 Your CodeCommit repository should have a Dockerfile in the top level of your CodeCommit.
-[Here is a reference Dockerfile](https://github.com/mage-ai/docker/blob/master/Dockerfile)
-that you can use for your own Dockerfile.
+MageML has no published image, so the Dockerfile should start `FROM` a MageML image you
+built from the [MageML repository's Dockerfile](https://github.com/jospablo777/mage-ml/blob/master/Dockerfile)
+and pushed to your registry, then copy your project code into it.
 
 You will also need to add a `buildspec.yml` file to your repository.
 The `buildspec.yml` file can follow the following format:

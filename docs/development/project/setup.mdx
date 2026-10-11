@@ -1,13 +1,13 @@
 ---
 title: "Project setup"
 sidebarTitle: "Setup"
-description: "How to set up a folder containing your Mage project code and other files."
+description: "How to set up a folder containing your MageML project code and other files."
 icon: "person-to-portal"
 ---
 
 ## Parent folder
 
-Create a parent folder that will contain your Mage project code:
+Create a parent folder that will contain your MageML project code:
 
 ```bash
 mkdir data_monorepo
@@ -27,8 +27,15 @@ Create an empty Dockerfile:
 echo "" > Dockerfile
 ```
 
-Paste the contents from this [Dockerfile](https://github.com/mage-ai/docker/blob/master/Dockerfile)
-into the Dockerfile you just created.
+MageML has no published image, so this Dockerfile builds on a MageML image you built from the
+[MageML repository's Dockerfile](https://github.com/jospablo777/mage-ml/blob/master/Dockerfile)
+(`docker build -t mageml .` in the `mage-ml` folder). Paste the following into the Dockerfile you
+just created:
+
+```dockerfile
+FROM mageml
+COPY . /home/src
+```
 
 ## Create a .gitignore file
 
@@ -57,9 +64,9 @@ mage_data/
 secrets/
 ```
 
-## Create Mage project
+## Create MageML project
 
-Follow these [instructions](/getting-started/setup) to create a Mage project in your
+Follow these [instructions](/getting-started/setup) to create a MageML project in your
 current directory. If you named your project `demo_project`, your current folder structure
 will look like this:
 

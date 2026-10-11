@@ -41,56 +41,29 @@ scikit-learn
 
 Then, save the file by pressing `⌘ + S`.
 
-### 2a. Install dependencies
+### 1b. Install dependencies
 
-The simplest way is to run pip install from the tool.
+MageML already ships `requests` and `scikit-learn`; the file makes the project's needs explicit.
 
-Add a scratchpad block by pressing the `+ Scratchpad` button. Then run the
-following command:
-
-```bash
-pip install -r demo_project/requirements.txt
-```
-
-Alternatively, here are other ways of installing dependencies (depending on if
-you are using Docker or not):
-
-#### Docker
-
-Get the name of the container that is running the tool:
+In the container image, `requirements.txt` is installed when the container starts. To install
+without a restart, run this on the **Terminal** page (the image has no `pip`):
 
 ```bash
-docker ps
+uv pip install --python "$(command -v python3)" \
+  --constraint "$MAGE_RUNTIME_CONSTRAINTS" --requirement demo_project/requirements.txt
 ```
 
-Sample output:
-
-```bash Sample output
-CONTAINER ID   IMAGE       COMMAND                  CREATED         STATUS         PORTS     NAMES
-214e1155f5c3   mage/data   "python mage_ai/comm…"   5 seconds ago   Up 2 seconds             mage-ai_server_run_6f8d367ac405
-```
-
-The container name in the above sample output is
-`mage-ai_server_run_6f8d367ac405`.
-
-Then run this command to install Python packages in the
-`demo_project/requirements.txt` file:
+In a source install, run this from the `mage-ml` folder:
 
 ```bash
-docker exec [container_name] pip3 install -r demo_project/requirements.txt
+uv pip install --requirement demo_project/requirements.txt
 ```
 
-### pip
-
-If you aren’t using Docker, just run the following command in your terminal:
-
-```bash
-pip3 install -r demo_project/requirements.txt
-```
+See [Install dependencies](/getting-started/install-dependencies) for details.
 
 ## 2. Create new pipeline
 
-In the top left corner, click `File > New pipeline`. Then, click the name of the
+In the top left corner, click `File > New standard pipeline`. Then, click the name of the
 pipeline next to the green dot to rename it to `titanic survivors`.
 
 ![create new pipeline](https://mage-ai.github.io/assets/create-new-pipeline.gif)
@@ -137,7 +110,7 @@ shortcut by typing the letter D and then D again.
    called `API`.
 2. Rename the block to `load dataset`.
 3. In the function named `load_data_from_api`, set the `url` variable to:
-   `https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv`.
+   `https://raw.githubusercontent.com/mage-ai/datasets/master/titanic_survival.csv`.
 4. Run the block by clicking the play icon button or using the keyboard
    shortcuts `⌘ + Enter`, `Control + Enter`, or `Shift + Enter`.
 
@@ -298,19 +271,23 @@ Run the block (⌘ + Enter).
 ## 7. Run pipeline
 
 We can now run the entire pipeline end-to-end. In your terminal, execute the
-following command:
+following command (with Docker, find the container name with `docker ps`):
 
 <CodeGroup>
 
 ```bash Docker
-./scripts/run.sh demo_project titanic_survivors
+docker exec [container_name] mage run demo_project titanic_survivors
 ```
 
-```bash pip
-bash mage run demo_project titanic_survivors
+```bash Source install
+uv run --no-sync mage run demo_project titanic_survivors
 ```
 
 </CodeGroup>
+
+`mage run` is a production run: the chain of blocks runs as one stage, with each block
+getting the previous block's output from memory. See
+[Block fusion](/design/data-pipeline-management#block-fusion).
 
 You can also run the pipeline from the UI. Click on the <b>Execute pipeline </b>
 from right bottom panel.
@@ -330,10 +307,9 @@ DONE
 
 ---
 
-## Congratulations!
+## Next steps
 
-You’ve successfully built an ML pipeline that consists of modular code blocks
-and is reproducible in any environment.
+You’ve built an ML pipeline that consists of modular code blocks.
 
 If you have more questions or ideas, open an issue in
 [GitHub issues](https://github.com/jospablo777/mage-ml/issues).

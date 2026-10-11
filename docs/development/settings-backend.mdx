@@ -1,5 +1,5 @@
 ---
-title: "Configuring Mage settings backend"
+title: "Configuring MageML settings backend"
 sidebarTitle: "Settings"
 icon: "gear"
 ---
@@ -8,18 +8,16 @@ icon: "gear"
 
 <Note>
 
-Available in Mage versions >= 0.9.66
+Not all MageML settings can be read through a settings backend. You can find a list of settings
+that can be read through a settings backend [here](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/settings/keys/__init__.py).
 
-Not all Mage settings can be read through a settings backend. You can find a list of settings
-that can be read through a settings backend [here](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/settings/keys/__init__.py).
-
-When any settings backend is enabled, Mage will first attempt to read the settings value
+When any settings backend is enabled, MageML will first attempt to read the settings value
 from the settings backend before falling back to environment variables.
 
 </Note>
 
-By default, many of Mage's configurable settings are read from environment variables. This may make sense
-for more settings, but there are some settings that are too sensitive to be stored as environment
+By default, many of MageML's configurable settings are read from environment variables. This may make sense
+for most settings, but there are some settings that are too sensitive to be stored as environment
 variables.
 
 You can configure a settings backend to read settings from a different source. To set this up, you will
@@ -39,9 +37,9 @@ See below sections for the different types of settings backends that are availab
 
 ## AWS Secrets Manager
 
-When the AWS Secrets Manager settings backend is enabled, Mage will read the value from the
+When the AWS Secrets Manager settings backend is enabled, MageML will read the value from the
 AWS secret name: `{prefix}{settings_name}`. For example if the setting is `OKTA_CLIENT_SECRET`
-and the prefix is `default_repo/settings/`, Mage will fetch the value for `default_repo/settings/OKTA_CLIENT_SECRET`.
+and the prefix is `default_repo/settings/`, MageML will fetch the value for `default_repo/settings/OKTA_CLIENT_SECRET`.
 
 ```yaml
 

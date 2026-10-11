@@ -1,15 +1,15 @@
 ---
-title: "Mage tips & tricks"
+title: "MageML tips & tricks"
 sidebarTitle: "Tips & tricks"
 icon: "question"
-description: "Here are some neat ways you can make the most of Mage! Tips and tricks to help you make the most magical pipelines possible."
+description: "Tips for working with MageML pipelines. The videos were recorded with upstream Mage."
 ---
 
 <AccordionGroup>
 <Accordion title="Version Control" icon="cat">
 
-  Mage has native version control for your files, so you'll never lose work again! 
-  Check it out in our docs [here](/guides/developer-ux/file-browser) or see the video below for a tutorial.
+  MageML stores a version of a file each time you save it, and you can revert to an earlier version.
+  Read the [file browser docs](/guides/developer-ux/file-browser) or see the video below for a tutorial.
 
   <Frame>
   <iframe
@@ -26,7 +26,7 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="DuckDB integration" icon="duck">
 
-  Mage integrates with DuckDB! Watch the video below to learn more or read on [here](/integrations/databases/DuckDB).
+  MageML integrates with DuckDB. Watch the video below to learn more or read the [DuckDB docs](/integrations/databases/DuckDB).
   
   <Frame>
   <iframe
@@ -43,9 +43,9 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="Edit Pipelines with AI" icon="robot">
 
-  Mage has an integration with the OpenAI API. Watch the video to learn about how you can generate pipelines using the power of AI.
+  MageML has an integration with the OpenAI API. Watch the video to learn how to generate pipelines with it.
 
-  See our full docs [here](/ai/setup) for more info.
+  See the [AI docs](/ai/setup) for more info.
 
   <Frame>
   <iframe
@@ -62,9 +62,9 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="Stream data to any destination" icon="water">
 
-  Mage supports streaming data to any of our destinations. Watch the video below to learn about configuring a streaming pipeline in under a minute!
+  Streaming pipelines can write to any of the streaming destinations. Watch the video below to learn how to configure a streaming pipeline.
 
-  See our full docs [here](/guides/streaming/introduction) for more info.
+  See the [streaming docs](/guides/streaming/introduction) for more info.
 
   <Frame>
   <iframe
@@ -81,9 +81,9 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="Use Conditional Blocks" icon="question">
 
-  Watch this video to learn how you can use Conditional Blocks to add conditional execution and branching logic to your next data pipeline!
+  Watch this video to learn how to use conditional blocks to add conditional execution and branching logic to a pipeline.
 
-  See our full docs [here](/design/blocks/conditionals) for more info.
+  See the [conditional block docs](/design/blocks/conditionals) for more info.
 
   <Frame>
   <iframe
@@ -100,9 +100,9 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="Replicate Blocks" icon="block">
 
-  Watch this video to learn how you can use Replica Blocks to add conditional execution and branching logic to your next data pipeline!
+  Watch this video to learn how to use replica blocks to reuse a block's code in more than one place in a pipeline.
 
-  See our full docs [here](/guides/blocks/replicate-blocks) for more info.
+  See the [replicate block docs](/guides/blocks/replicate-blocks) for more info.
   
   <Frame>
   <iframe
@@ -118,7 +118,7 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 </Accordion>
 
 <Accordion title="Use Split Pane View" icon="window">
-  The Mage pipeline editor can be used in a single, notebook-style interface _or_ in a split-pane view, with block output displayed on the right and blocks themselves on the left. 
+  The MageML pipeline editor can be used in a single, notebook-style interface _or_ in a split-pane view, with block output displayed on the right and blocks themselves on the left. 
 
   Split pane view can be enabled by selecting the "split" icon in the pipeline editor, as shown below:
 
@@ -126,7 +126,7 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
     <img src="https://mage-ai.github.io/assets/split-pane-view.png"/>
   </Frame>
 
-  Can't wait to try it out? Check out the video below for a demo!
+  The video below shows a demo.
   
   <Frame>
   <iframe
@@ -143,11 +143,9 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 
 <Accordion title="Group & Filter Pipelines" icon="folder">
 
-  This week's Mage tip is all about organization!
+  You can tag, group, and filter your pipelines from the pipelines page. Watch the video below to learn more.
 
-  Did you know you can tag, group, and filter your pipelines from the overview page? Watch the video below to learn more 😀
-
-  Read more in our docs [here](/pipelines/pipeline-tagging)!
+  Read more in the [pipeline tagging docs](/pipelines/pipeline-tagging).
   
   <Frame>
   <iframe
@@ -163,15 +161,11 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 </Accordion>
 
 <Accordion title="New Tree View" icon="tree">
-  We've received a ton of feedback from our users, and we've been hard at work making updates to the tree view based on your suggestions. So, what's new? Let me give you the lowdown. 👇
+  The tree view of a pipeline:
 
-  🔹 Enhanced Functionality: The tree view now comes with a whole right-click menu that allows you to easily run, rename, insert, or delete blocks. You have more control than ever before!
-
-  🔹 Seamless Connections: You can now remove and add connections with a simple click. Plus, you can insert new blocks between existing ones effortlessly.
-
-  🔹 Enhanced Visualizations: With the new tree view, you get grouping and better lineage for certain block types 🔄
-
-  Not only does the new tree view offer improved functionality, but it also makes your pipelines look absolutely stunning! After all, our goal is to make data beautiful. 💫
+  - Right-click a block to run, rename, insert, or delete blocks.
+  - Click to add or remove connections, and insert new blocks between existing ones.
+  - Some block types are grouped, with their lineage shown.
   
   <Frame>
   <iframe
@@ -187,13 +181,11 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
 </Accordion>
 
 <Accordion title="Dynamic Blocks" icon="bomb">
-  What are dynamic blocks? Think of them as the magical way to create tasks dynamically in our tool. If you're familiar with Airflow and the concept of Dynamic Task Mapping, this is pretty similar.
+  Dynamic blocks create tasks at run time, one for each item a block outputs. They are similar to Airflow's Dynamic Task Mapping.
 
-  If you have a bunch of small tasks that you want to execute in parallel, Dynamic Blocks are here to save the day!
+  Use them to run many small tasks in parallel and reduce their outputs afterwards.
 
-  Dynamic Blocks in Mage give you the power to parallelize your workflow and reduce output effortlessly. It's a pattern that has been around in data engineering, but we've made it incredibly easy and efficient.
-
-  Learn more [here](/design/blocks/dynamic-blocks).
+  Learn more in the [dynamic block docs](/design/blocks/dynamic-blocks).
   
   <Frame>
   <iframe
@@ -208,13 +200,11 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
   </Frame>
 </Accordion>
 <Accordion title="API Triggers" icon="code">
-  Did you know you can trigger pipelines directly with API calls in Mage? 🧙‍♂️💻
+  You can trigger pipelines with API calls, for example from a Python request or a cURL command.
 
-  With API Triggers, you can kick-off your ETL runs in just about any way possible— a Python request, a cURL command, or a well-timed carrier pigeon (hopefully not). 🐦‍⬛
+  API triggers accept runtime variables, so the caller can pass values to the pipeline run.
 
-  API triggers carry the added benefit of supporting runtime parameters, meaning you can trigger your pipelines and supply external variables to customize functionality/output.
-
-  You can read more in our docs [here](/orchestration/triggers/trigger-pipeline-api) & get started today.
+  Read more in the [API trigger docs](/orchestration/triggers/trigger-pipeline-api).
 
   <Frame>
   <iframe
@@ -229,13 +219,11 @@ description: "Here are some neat ways you can make the most of Mage! Tips and tr
   </Frame>
 </Accordion>
 <Accordion title="Backfills" icon="truck">
-  Managing pipelines can be tricky, especially when it comes to backfilling missing data or re-running pipelines. But with Mage, backfills are a breeze! No need for custom scripts or complex setups. 🙌
-  
-  You can easily define a backfill for a specific date range. Whether you're missing data or want to add new columns, Mage has got you covered. Simply specify the start and end dates, and let Mage do the rest. 
-  
-  Backfills simulate multiple runs with different execution dates, fetching the data you need and transforming it as required. 📅 🔃
-  
-  To learn more about backfills using Mage, check out our documentation [here](/orchestration/backfills/overview).
+  A backfill runs a pipeline for a date range, for example to fill in missing data or to add a new column to past data. Specify the start and end dates.
+
+  A backfill creates one pipeline run for each execution date in the range.
+
+  Read more in the [backfill docs](/orchestration/backfills/overview).
   
   <Frame>
   <iframe
@@ -287,8 +275,11 @@ def load_data_sync(*args, **kwargs) -> Dict[str, Any]:
         loop = None
 
     if loop and loop.is_running():
-        # If running in an existing event loop (e.g., Jupyter), use create_task and await
-        result: Dict[str, Any] = loop.run_until_complete(fetch_data(url))
+        # In a running event loop (e.g., the notebook kernel), run the coroutine in another thread
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result: Dict[str, Any] = executor.submit(asyncio.run, fetch_data(url)).result()
     else:
         # If no running event loop, use asyncio.run
         result: Dict[str, Any] = asyncio.run(fetch_data(url))

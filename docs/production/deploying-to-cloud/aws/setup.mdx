@@ -9,7 +9,13 @@ sidebarTitle: "Setup"
 
 ### Setup
 
-[Download Mage maintained Terraform scripts](/production/deploying-to-cloud/using-terraform).
+[Download the Terraform scripts maintained by upstream Mage](/production/deploying-to-cloud/using-terraform).
+
+<Note>
+These templates deploy the upstream `mageai/mageai` image by default. MageML has no published
+image: build one from the repository's Dockerfile, push it to Amazon ECR, and set the
+`docker_image` variable to it (see [Docker image](#2-customize-terraform-settings) below).
+</Note>
 
 ### Permissions
 
@@ -83,7 +89,8 @@ variable "app_name" {
 
 In the file
 [./aws/variables.tf](https://github.com/mage-ai/mage-ai-terraform-templates/blob/master/aws/variables.tf),
-you can change the default Docker image:
+you can change the default Docker image. The default is the upstream Mage image; set it to
+the ECR URL of your MageML image:
 
 ```
 variable "docker_image" {
@@ -95,16 +102,16 @@ variable "docker_image" {
 <Note>
 **Custom Docker images**
 
-If you previously tagged a Docker image you built when following this
-[CI/CD guide](/production/ci-cd/overview), you must push that locally tagged Docker
-image to Amazon Elastic Container Registry (ECR) before deploying using
+Build the MageML image from the root of the MageML repository, or use an image you built
+when following this [CI/CD guide](/production/ci-cd/overview). Push the locally tagged
+Docker image to Amazon Elastic Container Registry (ECR) before deploying using
 Terraform. Read the
 [AWS documentation](https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html)
 to learn more.
 
 </Note>
 
-1. `docker build --platform linux/amd64 -tag [image_name]:latest .`
+1. `docker build --platform linux/amd64 -t [image_name]:latest .`
 2. `docker tag [image_name]:latest [registry_uuid].dkr.ecr.[region].amazonaws.com/[image_name]:latest`
 3. `docker push [registry_uuid].dkr.ecr.[region].amazonaws.com/[image_name]:latest`
 
@@ -203,7 +210,7 @@ the running container.
    terraform apply
    ```
 
-Once it’s finished deploying, you can access Mage in your browser.
+Once it’s finished deploying, you can access MageML in your browser.
 
 1. Open your EC2 dashboard.
 2. View all load balancers.
@@ -215,7 +222,7 @@ Once it’s finished deploying, you can access Mage in your browser.
 
 **Using Docker**
 
-From the root directory of Mage, run the following commands:
+From the directory that contains the Terraform templates, run the following commands:
 
 1. Initialize Terraform:
 
@@ -261,10 +268,10 @@ try re-building your image with the platform flag `--platform linux/amd64`.
 
 ---
 
-### Updating Mage versions
+### Updating MageML versions
 
-After Mage is running in your cloud, you can update the Mage Docker image
-version by running the following command in your CLI tool:
+After MageML is running in your cloud, push a newly built MageML image to the same ECR
+tag, then start a new deployment so ECS pulls it:
 
 ```bash
 aws ecs update-service --cluster [cluster_name] --service [service_name] --force-new-deployment
@@ -287,7 +294,7 @@ aws ecs update-service --cluster [cluster_name] --service [service_name] --force
 
 #### Security
 
-To enable other IP addresses access to Mage, open the security group named
+To give other IP addresses access to MageML, open the security group named
 `mage-data-prep-sg` to whitelist IPs.
 
 Add a new inbound rule for HTTP port 80 and use your IP address.
@@ -340,7 +347,7 @@ A sample output could look like this:
 Destroy complete! Resources: 10 destroyed.
 ```
 ### Authentication with ECS task execution role
-Mage creates an ECS task execution role with the format `{app_name}-execution-task-role`.
+The Terraform templates create an ECS task execution role with the format `{app_name}-execution-task-role`.
 You can grant the ECS task permissions to access other AWS services by attaching IAM policies to this ECS task execution role.
 
 
@@ -366,7 +373,7 @@ terraform plan
 Similar with deploying to ECS cluster, you need to set up the [environment variables](/production/deploying-to-cloud/aws/setup#1-environment-variables) first, and you can customize the Terraform settings in [./aws-eks/variables.tf](https://github.com/mage-ai/mage-ai-terraform-templates/blob/master/aws-eks/variables.tf) file.
 
 
-Then, follow the steps below to set up EKS cluster and deploy Mage.
+Then, follow the steps below to set up the EKS cluster and deploy MageML.
 
 <Steps>
 
@@ -413,13 +420,13 @@ Run command `kubectl apply -k "github.com/kubernetes-sigs/aws-efs-csi-driver/dep
 </Step>
 
 <Step title="Deploy app to EKS">
-Run `kubectl apply -f kube/` to deploy app or use Helm to deploy Mage.
+Run `kubectl apply -f kube/` to deploy the app, or use Helm to deploy it. Both use the upstream image by default; set the image to your MageML image first.
 </Step>
 
 <Step title="Whitelist IP in EKS node's security group" />
 
-<Step title="Access Mage on EKS">
-Get the node IP via command `kubectl get nodes -o wide` and access Mage with `http://[ip]:{node_port}`
+<Step title="Access MageML on EKS">
+Get the node IP via command `kubectl get nodes -o wide` and access MageML with `http://[ip]:{node_port}`
 </Step>
 
 </Steps>

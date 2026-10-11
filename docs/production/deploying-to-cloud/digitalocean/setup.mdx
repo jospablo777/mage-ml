@@ -7,7 +7,9 @@ sidebarTitle: "Setup"
 
 ### Setup
 
-[Download Mage maintained Terraform scripts](/production/deploying-to-cloud/using-terraform).
+[Download the Terraform scripts maintained by upstream Mage](/production/deploying-to-cloud/using-terraform).
+The DigitalOcean template provisions a Droplet; you start MageML on it with Docker in
+[step 5](#5-run-app-in-the-provisioned-droplet).
 
 ## Terraform plan
 
@@ -15,7 +17,7 @@ You can run the following command to see all the resources that will be created
 by Terraform:
 
 ```bash
-cd 
+cd digitalocean
 terraform plan
 ```
 
@@ -97,26 +99,31 @@ Once it’s finished deploying, you can get the IP from the output.
 
 SSH into the instance: `ssh -i [path_to_private_key] root@[ip]`
 
-Run command to start Mage app in :
+MageML has no published image (`mageai/mageai` is upstream Mage). Build the MageML image
+on the Droplet, or pull one you pushed to your own registry:
 ```bash
-docker run -d -p 6789:6789 -v $(pwd):/home/src mageai/mageai /app/run_app.sh mage start default_repo
+git clone https://github.com/jospablo777/mage-ml.git
+docker build -t mageml mage-ml
+```
+
+Run command to start the MageML app:
+```bash
+docker run -d -p 6789:6789 -v $(pwd):/home/src mageml /app/run_app.sh mage start default_repo
 ```
 
 <br />
 
-To update Mage to latest version, you can pull latest docker image with command:
-```bash
-docker pull mageai/mageai:latest
-```
-Then, just restart the Mage app with the same `docker run` command above.
+To update MageML, pull the latest code (`git -C mage-ml pull`), rebuild the image with the
+same `docker build` command, then restart the MageML app with the same `docker run` command
+above.
 
-## 6. Open browser with Mage
+## 6. Open browser with MageML
 
-Once you’ve launched the Droplet and started Mage, you can access Mage from your web browser by entering the following:
+Once you’ve launched the Droplet and started MageML, you can access MageML from your web browser by entering the following:
 
 `http://[ip]:[port]`
 
-Change the IP to match the IP of your Droplet and the port that you’re using for Mage.
+Change the IP to match the IP of your Droplet and the port that you’re using for MageML.
 
 ---
 

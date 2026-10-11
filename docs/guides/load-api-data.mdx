@@ -2,7 +2,7 @@
 title: "ETL pipeline tutorial"
 sidebarTitle: "Batch"
 icon: "truck-ramp-box"
-description: "Build a data pipeline that loads restaurant data, transforms it, then exports it to a DuckDB database. 🦆"
+description: "Build a data pipeline that loads restaurant data, transforms it, then exports it to a DuckDB database."
 ---
 
 ## Overview
@@ -11,7 +11,7 @@ In this tutorial, we'll create a data pipeline with the following steps:
 
 <Steps>
 <Step title="Load data from an online endpoint">
-    We'll use a Python block to load data from an online endpoint— a CSV file containing restaurant user transactions. We'll also run a test to make sure the data is clean.
+    We'll use a Python block to load data from an online endpoint: a CSV file containing restaurant user transactions. We'll also run a test to make sure the data is clean.
 </Step>
 <Step title="Clean column names and add a new column">
     We'll use a Python block to transform the data by cleaning the columns and creating a new column, `number of meals`, that counts the number of meals for each user.
@@ -21,35 +21,13 @@ In this tutorial, we'll create a data pipeline with the following steps:
 </Step>
 </Steps>
 
-If you haven't created a Mage project before, follow the [setup guide](/getting-started/setup) before starting this tutorial.
-
-## Quickstart
-Want to dive in? Simply run the following command to clone a pre-built repo:
-
-<CodeGroup>
-```bash Mac/Linux
-git clone https://github.com/mage-ai/etl-demo mage-etl-demo \
-&& cd mage-etl-demo \
-&& cp dev.env .env && rm dev.env \
-&& docker compose up
-```
-
-```bash Windows
-git clone https://github.com/mage-ai/etl-demo mage-etl-demo
-cd mage-etl-demo
-cp dev.env .env
-rm dev.env
-docker compose up
-```
-</CodeGroup>
-
-Then navigate to `https://localhost:6789` in your browser to see the pipeline in action!
+If you haven't created a MageML project before, follow the [setup guide](/getting-started/setup) before starting this tutorial.
 
 ## Tutorial
 
 <AccordionGroup>
-    <Accordion title="1️⃣ Create a pipeline">
-        Open the pipelines list page (`/pipelines`). This is the default page when navigating to Mage in your web browser. If you have Mage running, just click [here](https://localhost:6789/pipelines).
+    <Accordion title="1. Create a pipeline">
+        Open the pipelines list page (`/pipelines`). This is the default page when navigating to MageML in your web browser. If you have MageML running, click [here](http://localhost:6789/pipelines).
 
         In the top left corner, select the button labeled *+ New*, then select the option labeled *Standard (batch)* to create a new pipeline.
 
@@ -63,10 +41,10 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
         </Frame>
 
     </Accordion>
-    <Accordion title="2️⃣ Load data from an API">
+    <Accordion title="2. Load data from an API">
         In the left vertical navigation, click the 1st link labeled *Edit pipeline*. Click the button labeled *+ Data loader* then hover over *Python*, and click the option labeled *API*.
 
-        A dialog menu will appear. Change the block name to `load data`. Click the button labeled *Save and add block*. Paste the following code in the data loader block:
+        A dialog menu will appear. Change the block name to `load data`. Click the button labeled *Save and add*. Paste the following code in the data loader block:
 
         ```python
         import io
@@ -101,11 +79,11 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
                 />
             </Frame>
     </Accordion>
-    <Accordion title="3️⃣ Transform data">
+    <Accordion title="3. Transform data">
         Let's transform the data in 2 ways:
 
         * Add a column that counts the number of meals for each user.
-        * Clean the column names to properly store in a PostgreSQL database.
+        * Clean the column names to properly store in a database.
 
         Follow these steps:
 
@@ -139,7 +117,7 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
             assert len(df.columns) >= 11, 'There needs to be at least 11 columns.'
         ```
 
-        Run the block by clicking the play icon button in the top right corner of the data loader block or press 1 of the following keyboard shortcuts:
+        Run the block by clicking the play icon button in the top right corner of the transformer block or press one of the following keyboard shortcuts:
         - `⌘ + Enter`
         - `Control + Enter`
         - `Shift + Enter`
@@ -153,8 +131,8 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
             />
         </Frame>
     </Accordion>
-    <Accordion title="4️⃣ Export data to DuckDB">
-        Let's export the data to a local DuckDB database! Create a new `Data Exporter` SQL block and change the connection type to be `DuckDB`.
+    <Accordion title="4. Export data to DuckDB">
+        Let's export the data to a local DuckDB database. Create a new `Data Exporter` SQL block and change the connection type to be `DuckDB`.
 
         Next, change the `Table name` to be `magic_duck.restaurant_user_transactions` and make sure the content of the block is:
 
@@ -162,7 +140,7 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
         SELECT * FROM {{ df_1 }}
         ```
 
-        This will take our data from the previous block and export it to a local DuckDB table— `magic_duck.restaurant_user_transactions`! 🎉
+        This will take our data from the previous block and export it to a local DuckDB table, `magic_duck.restaurant_user_transactions`.
 
         After you run the block (⌘ + Enter), you'll see a sample of the data that was exported.
 
@@ -193,17 +171,9 @@ Then navigate to `https://localhost:6789` in your browser to see the pipeline in
     </Accordion>
 </AccordionGroup>
 
-**🎉 Congratulations!**
-
-You've successfully built an end-to-end ETL pipeline that loaded data,
-transformed it, and exported it to a database.
-
-Now you're ready to raid the dungeons and find magical treasures with your new powers!
-
-<img
-    alt="Lightning mage"
-    src="https://raw.githubusercontent.com/mage-ai/assets/af9fafa41d823fe8e710d54f86164bef4378f5c3/mascots/earth/casting.svg"
-/>
+You've built an end-to-end ETL pipeline that loads data, transforms it, and exports it to a
+database. When a trigger runs it, MageML fuses the chain of blocks by default; see
+[Block fusion](/design/data-pipeline-management#block-fusion).
 
 If you have more questions or ideas, open an issue in
 [GitHub issues](https://github.com/jospablo777/mage-ml/issues).

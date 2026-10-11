@@ -7,13 +7,10 @@ icon: "gem"
 import { ProButton } from '/snippets/pro/button.mdx';
 import { ProBanner } from '/snippets/pro/banner.mdx';
 
-<ProBanner
-  source="compute-resources"
-  description="Mage Pro will automatically scale your workloads to handle any volume of pipeline runs, while optimizing resource utilization and minimizing costs."
-/>
+<ProBanner source="compute-resources" />
 
 Follow the instructions in this [document](/production/deploying-to-cloud/using-terraform) to deploy
-Mage in a production environment. When running Mage in production,
+MageML in a production environment. When running MageML in production,
 you can customize the compute resource for the following services:
 
 1. Front-end application
@@ -22,13 +19,19 @@ you can customize the compute resource for the following services:
 
 ## Front-end application
 
-Customize the compute resource of the Mage web service.
+Customize the compute resource of the MageML web service.
 
-The Mage web service is responsible for running Mage web backend, scheduler service
+The MageML web service runs the web backend, the scheduler service
 and local block executions.
 
-You can customize the CPU and memory of the Mage web
+You can customize the CPU and memory of the MageML web
 service by updating the Terraform variables and then running `terraform apply`.
+
+<Note>
+The Terraform templates deploy the upstream Mage image by default. For MageML, build an
+image from the repository's Dockerfile, push it to your registry, and set the template's
+image variable to it.
+</Note>
 
 ### Amazon Web Services (AWS)
 
@@ -61,7 +64,7 @@ You can set the executor type for all the blocks in a pipeline by specifying the
 
 ## Block executor
 
-Mage provides multiple executors to execute blocks.
+MageML provides multiple executors to execute blocks.
 Here are the available executor types:
 
 * `local_python`
@@ -72,5 +75,5 @@ Here are the available executor types:
 
 ### Default for all blocks
 
-Mage uses `local_python` executor type by default. If you want to specify another executor_type as the default executor type for blocks,
+MageML uses the `local_python` executor type by default. If you want to specify another executor_type as the default executor type for blocks,
 you can set the environment variable `DEFAULT_EXECUTOR_TYPE` to one executor type mentioned above.

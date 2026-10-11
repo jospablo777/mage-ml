@@ -3,6 +3,9 @@ title: "Data loader templates"
 sidebarTitle: "Templates"
 ---
 
+These are the Python templates. Data loaders can also be written in Rust or R; see
+[Rust blocks](/guides/blocks/rust-blocks) and [R blocks](/guides/blocks/r-blocks).
+
 ## Generic
 
 ```python
@@ -549,7 +552,7 @@ def load_data_from_druid(*args, **kwargs):
     Template for loading data from a Druid warehouse.
     Specify your configuration settings in 'io_config.yaml'.
 
-    Docs: https://docs.mage.ai/design/data-loading#druid
+    Docs: /integrations/databases/Druid
     """
     query = 'your Druid query'  # Specify your SQL query here
     config_path = path.join(get_repo_path(), 'io_config.yaml')
@@ -585,7 +588,7 @@ def load_data_from_pinot(*args, **kwargs):
     """
     Template for loading data from a Pinot warehouse.
     Specify your configuration settings in 'io_config.yaml'.
-    Docs: https://docs.mage.ai/design/data-loading#pinot
+    Docs: /integrations/databases/Pinot
     """
     query = 'your Pinot query'  # Specify your SQL query here
     config_path = path.join(get_repo_path(), 'io_config.yaml')

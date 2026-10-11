@@ -5,9 +5,9 @@ sidebarTitle: "Architecture"
 
 ## Overview
 
-The most common AWS deployment of Mage is with AWS ECS. Our Terraform scripts manage the process of creating an ECS cluster, a load balancer, and a database. [Here's a link](/production/deploying-to-cloud/aws/resources) to the default output of `terraform plan` on AWS ECS.
+The most common AWS deployment of MageML is with AWS ECS. The Terraform scripts, maintained by upstream Mage, create an ECS cluster, a load balancer, and a database. They deploy the upstream image by default; set `docker_image` to your MageML image (see [setup](/production/deploying-to-cloud/aws/setup)). [Here's a link](/production/deploying-to-cloud/aws/resources) to the default output of `terraform plan` on AWS ECS.
 
-<Frame height="400" caption="An architecture diagram of a Mage AWS ECS deployment.">
+<Frame height="400" caption="An architecture diagram of a MageML AWS ECS deployment.">
   <img alt="Contributing" src="https://mage-ai.github.io/assets/architecture/aws-ecs.png" />
 </Frame>
 
@@ -20,7 +20,7 @@ Amazon ECS is a service provided by AWS for managing and deploying containerized
 
 ECS allows you to run containers at scale, and the Terraform configuration for ECS service includes specifying the task definition, desired task count, launch type, and other settings related to container orchestration.
 
-The Mage application runs as multiple containers in an Amazon ECS service. 
+The MageML application runs as containers in an Amazon ECS service. 
 
 ## Application Load Balancer (ALB)
 
@@ -40,7 +40,7 @@ We use EFS to store a persistent volume where the `mage_data` for your project i
 
 The RDS Instance resource is used to define and configure a specific database instance within the Amazon RDS service. 
 
-We use a Postgres RDS to hold the the backend database for your Mage instance. This database contains the metadata that powers Mage. Read more [here](/design/abstractions/project-structure#project-data).
+We use a Postgres RDS to hold the backend database for your MageML instance. This database contains the orchestration metadata (triggers, pipeline runs, users). Read more [here](/design/abstractions/project-structure#project-data).
 
 ## Virtual Private Cloud (VPC)
 
@@ -48,7 +48,7 @@ Amazon VPC allows you to create a virtual network within AWS, enabling you to is
 
 The VPC resource in Terraform is used to define and configure the virtual network, including its subnets, route tables, security groups, and other networking-related settings.
 
-The Mage application, ALB, ECS, EFS, and RDS are all deployed within a VPC in our Terraform scripts.
+The MageML application, ALB, ECS, EFS, and RDS are all deployed within a VPC by the Terraform scripts.
 
 ## Read More
 
