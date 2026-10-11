@@ -252,9 +252,8 @@ def test_a_missing_bucket_raises(mage_s3):
 
 def test_fixed_size_lists_with_nulls_load_into_pandas(mage_s3, bucket):
     """
-    pyarrow before 26 cannot read a fixed-size list column holding a null from Parquet,
-    which Polars and pyarrow 25 write (apache/arrow#35692). Mage reads those files
-    with Polars and casts them back to the schema stored in the file.
+    pyarrow before 26 could not read a fixed-size list column holding a null from
+    Parquet, which Polars and pyarrow 25 write (apache/arrow#35692).
     """
     frame = pl.DataFrame(
         {'vector': [[0.5, 1.5], None, [2.5, None]], 'id': [1, 2, 3]},

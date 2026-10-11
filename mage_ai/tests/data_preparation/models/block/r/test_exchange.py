@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pyarrow as pa
-import pyarrow.feather as feather
 
 from mage_ai.data_preparation.models.block.r import exchange
 from mage_ai.tests.base_test import TestCase
@@ -26,7 +25,7 @@ class ExchangeTestCase(TestCase):
         entry = entries[0]
         path = os.path.join(self.job_dir, entry['path'])
         if entry['kind'] == 'frame':
-            return entry, feather.read_table(path), warnings
+            return entry, pa.ipc.open_file(path).read_all(), warnings
         with open(path) as file:
             return entry, json.load(file), warnings
 
@@ -34,7 +33,8 @@ class ExchangeTestCase(TestCase):
         out = os.path.join(self.job_dir, 'output')
         os.makedirs(out, exist_ok=True)
         if kind == 'frame':
-            feather.write_feather(table, os.path.join(out, 'data.arrow'))
+            with pa.ipc.new_file(os.path.join(out, 'data.arrow'), table.schema) as writer:
+                writer.write_table(table)
         elif kind == 'json':
             with open(os.path.join(out, 'data.json'), 'w') as file:
                 file.write(value)

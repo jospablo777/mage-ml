@@ -77,17 +77,18 @@ integers inside nested values as floats. Test: `test_json_from_polars_and_from_p
 
 ### Fixed-size lists with nulls
 
-pyarrow up to 25.0.1 cannot read a Parquet fixed-size list column that holds a null:
+pyarrow up to 25.0.1 could not read a Parquet fixed-size list column that holds a null:
 "Expected all lists to be of size=2 but index 1 had size=0"
-([apache/arrow#35692](https://github.com/apache/arrow/issues/35692)). pyarrow 24 and
-older refused to write such columns; pyarrow 25 and Polars write them, and Polars,
-DuckDB and the pyarrow 26 nightly read them. Embeddings stored as a Polars `Array` with
-null rows hit it through `pd.read_parquet`.
+([apache/arrow#35692](https://github.com/apache/arrow/issues/35692)). Embeddings stored
+as a Polars `Array` with null rows hit it through `pd.read_parquet`. MageML read such
+files through Polars until pyarrow 26 fixed the reader; it now requires pyarrow 26 and
+`read_parquet_table` reads every file with pyarrow.
 
-`read_parquet_table` in `base_storage.py` reads files with a fixed-size list through
-Polars and casts them to the Arrow schema stored in the file, which keeps the pandas
-index and types. Block outputs and `exact_types` loads use it. It applies only below
-pyarrow 26; upgrade to 26 when it is released and remove it.
+Reading 1 million rows of 8-float vectors: pyarrow 26 takes 7 ms (written by Polars) and
+19 ms (written by pyarrow) without nulls, faster than the Polars route (10 and 47 ms).
+With null rows it takes 83 ms on a file Polars wrote, against 11 ms through Polars, and
+68 ms against 53 ms on a file pyarrow wrote. Block outputs of pandas frames are written
+by pyarrow and those of Polars frames are read by Polars, so the slow case is rare.
 Test: `test_fixed_size_lists_with_nulls_load_into_pandas`.
 
 ### Export

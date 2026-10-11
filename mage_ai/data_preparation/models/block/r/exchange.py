@@ -41,7 +41,6 @@ import pandas as pd
 import polars as pl
 import pyarrow as pa
 import pyarrow.compute as pc
-import pyarrow.feather as feather
 import simplejson
 import yaml
 
@@ -243,7 +242,9 @@ def write_frame(table: pa.Table, path: str) -> Tuple[List[str], List[str]]:
             json_columns.append(name)
         columns.append(array)
     result = pa.Table.from_arrays(columns, names=names)
-    feather.write_feather(result, path, compression='uncompressed')
+    # An Arrow IPC file (Feather V2), uncompressed, which R reads with read_ipc_file.
+    with pa.OSFile(path, 'wb') as sink, pa.ipc.new_file(sink, result.schema) as writer:
+        writer.write_table(result)
     return json_columns, warnings
 
 
@@ -303,7 +304,8 @@ def _pandas_type(data_type: pa.DataType):
 
 
 def read_frame(path: str, json_columns: List[str]) -> pd.DataFrame:
-    table = feather.read_table(path)
+    with pa.memory_map(path) as source:
+        table = pa.ipc.open_file(source).read_all()
     # R's integers become Int64, as integers that came from pandas or Polars were.
     table = table.cast(pa.schema([
         field.with_type(pa.int64()) if pa.types.is_int32(field.type) else field

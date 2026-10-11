@@ -71,7 +71,7 @@ read_file <- function(path, format = NULL, ...) {
       readr::read_tsv(path, show_col_types = FALSE, ...)
     },
     parquet = arrow::read_parquet(path, ...),
-    feather = arrow::read_feather(path, ...),
+    feather = arrow::read_ipc_file(path, ...),
     ndjson = arrow::read_json_arrow(path, ...),
     json = jsonlite::fromJSON(path, ...),
     rds = readRDS(path)
@@ -114,7 +114,7 @@ write_file <- function(df, path, format = NULL, ...) {
       )
     },
     parquet = arrow::write_parquet(df, path, ...),
-    feather = arrow::write_feather(df, path, ...),
+    feather = arrow::write_ipc_file(df, path, ...),
     ndjson = {
       connection <- file(path, open = "w", encoding = "UTF-8")
       on.exit(close(connection), add = TRUE)

@@ -24,18 +24,6 @@ def _with_item_fields(arrow_type: pa.DataType) -> pa.DataType:
     return arrow_type
 
 
-PYARROW_READS_NULL_FIXED_SIZE_LISTS = int(pa.__version__.split('.')[0]) >= 26
-
-def _has_fixed_size_list(arrow_type: pa.DataType) -> bool:
-    if pa.types.is_fixed_size_list(arrow_type):
-        return True
-    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
-        return _has_fixed_size_list(arrow_type.value_type)
-    if pa.types.is_struct(arrow_type):
-        return any(_has_fixed_size_list(field.type) for field in arrow_type)
-    return False
-
-
 def _polars_writes_exactly(arrow_type: pa.DataType) -> bool:
     """
     Types the Polars Parquet writer stores with the same Arrow type and values as pyarrow,
@@ -102,28 +90,8 @@ def write_pandas_parquet(df: pd.DataFrame, destination) -> None:
 
 
 def read_parquet_table(source, columns: Optional[List[str]] = None, **kwargs) -> pa.Table:
-    """
-    Read a Parquet file into an Arrow table.
-
-    pyarrow before 26 fails on fixed-size list columns that hold a null ("Expected all
-    lists to be of size=2 but index 1 had size=0"), apache/arrow#35692. Polars writes
-    such files, and pyarrow 25 does too. Polars reads them, so they are read with Polars
-    and cast back to the schema stored in the file.
-    """
-    if PYARROW_READS_NULL_FIXED_SIZE_LISTS or kwargs:
-        return pq.read_table(source, columns=columns, **kwargs)
-    schema = pq.read_schema(source)
-    if hasattr(source, 'seek'):
-        source.seek(0)
-    if not any(_has_fixed_size_list(field.type) for field in schema):
-        return pq.read_table(source, columns=columns, **kwargs)
-    names = columns or schema.names
-    table = pl.read_parquet(source, columns=names).to_arrow(
-        compat_level=pl.CompatLevel.oldest(),
-    )
-    return table.select(names).cast(
-        pa.schema([schema.field(name) for name in names], metadata=schema.metadata),
-    )
+    """Read a Parquet file into an Arrow table."""
+    return pq.read_table(source, columns=columns, **kwargs)
 
 
 def read_pandas_parquet(

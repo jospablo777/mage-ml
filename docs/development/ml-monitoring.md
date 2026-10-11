@@ -41,7 +41,7 @@ ledger with cooldowns. Measured against Mage:
 
 ## Evidently and NannyML
 
-Both resolve and run with this fork's pins (pandas 3.0.6, NumPy 2.5, pyarrow 25, Python
+Both resolve and run with this fork's pins (pandas 3.0.6, NumPy 2.5, pyarrow 26, Python
 3.12), checked in a scratch environment: Evidently 0.7.23 presets with tests, NannyML
 0.13.1 CBPE, univariate and data reconstruction drift. They are heavy (Plotly, many
 pinned packages), so they never enter Mage's environment: `monitor_engines.py` is a

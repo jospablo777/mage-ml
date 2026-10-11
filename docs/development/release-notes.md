@@ -5,7 +5,7 @@
 The first release under MageML's own versions, which start at 0.1.0. Earlier builds of this
 fork were versioned after Mage (`0.9.79+ml.1` to `0.9.79+ml.4`); MageML is based on Mage
 0.9.79. Changes since `0.9.79+ml.4`. The fork runs on Python 3.12 with pandas 3.0, Polars 2.0,
-pyarrow 25 and NumPy 2. Most changes fix values that Mage changed or lost without an
+pyarrow 26 and NumPy 2. Most changes fix values that Mage changed or lost without an
 error; the per-service findings are in `docs/development/*-integration.md` and
 `postgres-data-integrity.md`.
 
@@ -763,8 +763,8 @@ Each item says what changed, which pipelines it affects, and what to do.
 ### Upstream issues and workarounds
 
 - **pyarrow 25 and older cannot read a Parquet fixed-size list column that holds a null**
-  ([apache/arrow#35692](https://github.com/apache/arrow/issues/35692)). Mage reads such
-  files through Polars. The fix ships in pyarrow 26; the workaround switches off there.
+  ([apache/arrow#35692](https://github.com/apache/arrow/issues/35692)). MageML read such
+  files through Polars; it now requires pyarrow 26, which fixed the reader.
 - **pandas 3.0's CSV parser** reads `-2**63` as missing in a column with other missing
   values, and drops null rows of one-column files. Loads with `exact_types` or `polars`
   read CSV with Polars.

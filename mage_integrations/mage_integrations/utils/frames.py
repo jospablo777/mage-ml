@@ -92,7 +92,7 @@ def read_file_frame(content: bytes, file_type: str, encoding: Optional[str] = No
     A Parquet or CSV file as pyarrow-backed pandas, read by Polars.
 
     pd.read_parquet turned integer columns with nulls into floats, rounding values above
-    2**53, and pyarrow before 26 cannot read fixed-size lists that hold a null. pandas'
+    2**53. pandas'
     CSV parser read -2**63 as missing in a column with nulls, and dropped null rows of
     one-column files. CSV in another encoding is decoded first, since Polars reads UTF-8.
     """
