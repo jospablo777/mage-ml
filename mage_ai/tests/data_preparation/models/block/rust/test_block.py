@@ -254,6 +254,21 @@ class RustBlockTest(DBTestCase):
         self.assertIn('Add regex there', message)
         self.assertIn('regex = "<version>"', message)
 
+    def test_a_gated_sdk_module_says_which_feature_to_turn_on(self):
+        code = (
+            'use mage::prelude::*;\n'
+            '\n'
+            'fn transform(data: DataFrame) -> Result<DataFrame> {\n'
+            '    let _ = mage::onnx::model("models/m.onnx")?;\n'
+            '    Ok(data)\n'
+            '}\n'
+        )
+        with self.assertRaises(RustBlockError) as context:
+            self.run_code(code, uuid='gated_feature')
+        message = plain(str(context.exception))
+        self.assertIn('mage::onnx needs the onnx feature', message)
+        self.assertIn('features = ["postgres", "onnx"]', message)
+
     def test_a_wrong_signature_is_explained(self):
         code = (
             'use mage::prelude::*;\n'

@@ -362,6 +362,22 @@ def missing_crate_hint(errors: List[Diagnostic], workspace: ws.Workspace) -> Opt
     )
 
 
+_GATED = re.compile(r'gated behind the `(\w+)` feature')
+
+
+def sdk_feature_hint(errors: List[Diagnostic], workspace: ws.Workspace) -> Optional[str]:
+    """How to turn on the features of MageML's crate that a block uses (mage::onnx)."""
+    features = sorted({name for item in errors for name in _GATED.findall(item.rendered)})
+    if not features:
+        return None
+    listed = ', '.join(f'"{name}"' for name in features)
+    return (
+        f'mage::{features[0]} needs the {" and ".join(features)} feature of MageML\'s crate. '
+        f'In {workspace.cargo_toml}, add {listed} to the features of mage-block:\n'
+        f'mage-block = {{ path = ".mage/sdk", features = ["postgres", {listed}] }}'
+    )
+
+
 def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str) -> RustBuildError:
     if prepared.members:
         errors = _chain_errors(result.stdout)
@@ -374,7 +390,9 @@ def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str)
     errors = [item for item in diagnostics if item.level == 'error']
     if errors:
         text = '\n'.join(item.rendered.rstrip() for item in errors)
-        hint = missing_crate_hint(errors, prepared.workspace)
+        hint = missing_crate_hint(errors, prepared.workspace) or sdk_feature_hint(
+            errors, prepared.workspace,
+        )
         return RustBuildError(
             f'The Rust block does not compile:\n\n{text}' + (f'\n\n{hint}' if hint else ''),
             diagnostics,
