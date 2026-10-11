@@ -252,8 +252,7 @@
                 "icon": "family",
                 "pages": [
                   "development/dependencies/requirements",
-                  "development/dependencies/custom-files",
-                  "development/dependencies/dependency-management"
+                  "development/dependencies/custom-files"
                 ]
               },
               "development/databases/default",
@@ -261,7 +260,6 @@
               "development/io_config_setup",
               "getting-started/kernels",
               "development/project/local-timezone",
-              "development/project/landing-page",
               "development/settings-backend",
               "development/updating-mage",
               "development/cli-commands",
@@ -407,12 +405,8 @@
                       "guides/streaming/sources/kinesis",
                       "guides/streaming/sources/nats",
                       "guides/streaming/sources/postgres",
-                      "guides/streaming/sources/oracledb",
-                      "guides/streaming/sources/postgres-cdc",
                       "guides/streaming/sources/rabbitmq",
-                      "guides/streaming/sources/mongodb",
-                      "guides/streaming/sources/mysql-cdc",
-                      "guides/streaming/sources/mssql-cdc"
+                      "guides/streaming/sources/mongodb"
                     ]
                   },
                   {
@@ -593,15 +587,13 @@
               "production/deploying-to-cloud/secrets/mage",
               "production/deploying-to-cloud/secrets/AWS",
               "production/deploying-to-cloud/secrets/Azure",
-              "production/deploying-to-cloud/secrets/GCP",
-              "production/deploying-to-cloud/secrets/Vault"
+              "production/deploying-to-cloud/secrets/GCP"
             ]
           },
           {
             "group": "Authentication",
             "pages": [
               "production/authentication/overview",
-              "production/authentication/mfa",
               "production/authentication/okta",
               "production/authentication/microsoft",
               "production/authentication/google",
@@ -617,13 +609,6 @@
       {
         "tab": "AI",
         "groups": [
-          {
-            "group": "AI Sidekick",
-            "icon": "user-robot",
-            "pages": [
-              "ai/sidekick/index"
-            ]
-          },
           {
             "group": "Development",
             "icon": "microchip-ai",
@@ -649,14 +634,12 @@
             "icon": "eye",
             "pages": [
               "observability/monitoring",
-              "observability/data-explorer",
               "observability/external/datadog",
               "observability/external/metaplane",
               "observability/external/newrelic",
               "observability/external/opentelemetry",
               "observability/external/prometheus",
               "observability/external/sentry",
-              "observability/visualizations/analytics",
               "observability/visualizations/dashboards"
             ]
           },
@@ -668,16 +651,14 @@
               "observability/alerting/alerting-opsgenie",
               "observability/alerting/alerting-slack",
               "observability/alerting/alerting-teams",
-              "observability/alerting/alerting-telegram",
-              "observability/alerting/alerting-zendesk"
+              "observability/alerting/alerting-telegram"
             ]
           },
           {
             "group": "Logging",
             "icon": "eye",
             "pages": [
-              "observability/logging",
-              "observability/log-search-opensearch"
+              "observability/logging"
             ]
           },
           {
@@ -710,31 +691,26 @@
                   "integrations/databases/Algolia",
                   "integrations/databases/Athena",
                   "integrations/databases/AzureBlobStorage",
-                  "integrations/databases/AzureDataLakeStorage",
                   "integrations/databases/BackblazeB2",
                   "integrations/databases/BigQuery",
                   "integrations/databases/Chroma",
                   "integrations/databases/ClickHouse",
-                  "integrations/databases/Databricks",
                   "integrations/databases/Druid",
                   "integrations/databases/DuckDB",
                   "integrations/databases/GoogleCloudStorage",
                   "integrations/databases/GoogleSheets",
-                  "integrations/databases/MicrosoftFabricWarehouse",
                   "integrations/databases/MicrosoftSQLServer",
                   "integrations/databases/MongoDB",
                   "integrations/databases/MotherDuck",
                   "integrations/databases/MySQL",
                   "integrations/databases/OracleDB",
                   "integrations/databases/Pinot",
-                  "integrations/databases/PowerBI",
                   "integrations/databases/PostgreSQL",
                   "integrations/databases/Qdrant",
                   "integrations/databases/Redshift",
                   "integrations/databases/S3",
                   "integrations/databases/Snowflake",
                   "integrations/databases/Spark",
-                  "integrations/databases/SQLite",
                   "integrations/databases/trino",
                   "integrations/databases/Weaviate"
                 ]
@@ -787,8 +763,6 @@
           {
             "group": "Environment-specific configuration",
             "pages": [
-              "extensibility/env-config/project",
-              "extensibility/env-config/pipeline",
               "extensibility/global-data-products/overview"
             ]
           },
@@ -1194,10 +1168,6 @@
     {
       "source": "/streaming/sources/kinesis",
       "destination": "/guides/streaming/sources/kinesis"
-    },
-    {
-      "source": "/streaming/sources/oracledb",
-      "destination": "/guides/streaming/sources/oracledb"
     },
     {
       "source": "/guides/streaming-pipeline-rabbitmq",

@@ -14,7 +14,9 @@ description: "Data integration is the process of synchronizing data between two 
 ## Requirements
 
 <Warning>
-Data integrations are only supported when running Mage using [Docker](/getting-started/setup#using-docker).
+Data integration pipelines need the `mage-integrations` package. The image built from the
+repository's Dockerfile includes it. In a source checkout, add `--extra integrations` to the
+`uv sync` command you installed with.
 </Warning>
 
 ## Use cases
@@ -22,7 +24,7 @@ Data integrations are only supported when running Mage using [Docker](/getting-s
 ### Syncing external data → internal systems
 
 If you have data in 3rd party systems (e.g other SaaS tools) and you want that
-data available in your database, data warehouse, or data lake, you can use Mage
+data available in your database, data warehouse, or data lake, you can use MageML
 to sync data between those systems.
 
 ### Syncing internal data → external systems (reverse)
@@ -31,7 +33,7 @@ Your internal database or data warehouse may contain application data generated
 by your users or customers. This data can be valuable if used in conjunction
 with 3rd party SaaS tools.
 
-You can use Mage to sync data from your internal systems, and have that data
+You can use MageML to sync data from your internal systems, and have that data
 appear in various 3rd party SaaS tools.
 
 ---
@@ -65,11 +67,13 @@ Read more about Sources:
 - [Commercetools](/data-integrations/sources/commercetools)
 - [Couchbase](/data-integrations/sources/couchbase)
 - [Datadog](/data-integrations/sources/datadog)
+- [Doris](/data-integrations/sources/doris)
 - [Dremio](/data-integrations/sources/dremio)
 - [DynamoDB](/data-integrations/sources/dynamodb)
 - [Facebook Ads](/data-integrations/sources/facebook_ads)
 - [Freshdesk](/data-integrations/sources/freshdesk)
 - [Front](/data-integrations/sources/front)
+- [GitHub](/data-integrations/sources/github)
 - [Google Ads](/data-integrations/sources/google_ads)
 - [Google Analytics](/data-integrations/sources/google_analytics)
 - [Google Cloud Storage](/data-integrations/sources/google_cloud_storage)
@@ -97,37 +101,21 @@ Read more about Sources:
 - [Snowflake](/data-integrations/sources/snowflake)
 - [Stripe](/data-integrations/sources/stripe)
 - [Tableau](/data-integrations/sources/tableau)
+- [Teradata](/data-integrations/sources/teradata)
 - [Twitter Ads](/data-integrations/sources/twitter_ads)
 - [Zendesk](/data-integrations/sources/zendesk)
-- _Shopify (coming soon)_
 
-### Sources available in Mage Pro
-
-- [Facebook Pages](/data-integrations/sources/facebook_pages)
-- [Google Campaign Manager 360](/data-integrations/sources/google_campaign_manager_360)
-- [Google Display & Video 360](/data-integrations/sources/google_display_video_360)
-- [Instagram](/data-integrations/sources/instagram)
-- [Microsoft Ads](/data-integrations/sources/microsoft_ads)
-- [QuickBooks](/data-integrations/sources/quickbooks)
-- [Salesforce Marketing Cloud](/data-integrations/sources/salesforce_marketing_cloud)
-- [TikTok Ads](/data-integrations/sources/tiktok_ads)
-- [Instagram](/data-integrations/sources/instagram)
-- [QuickBooks](/data-integrations/sources/quickbooks)
-- [Xero](/data-integrations/sources/xero)
-- [Youtube Analytics](/data-integrations/sources/youtube_analytics)
-
-Mage adheres to the data engineering standard for data integrations called the
+MageML follows the data engineering standard for data integrations called the
 [Singer Spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
 
-All sources (aka taps) that has been developed by the open-source community can
-be adapted to use in Mage. Here is a
+Sources (taps) developed by the open-source community can be adapted to MageML. Here is a
 [short list of available ones](https://www.singer.io/#taps).
 
 <Info>
 Don’t see a source you need?
 
-Check out the next section on <b>Add a new source</b> or tell us on slack and we
-can help you build it.
+See [Add a new source](/contributing/data-integrations/add-new-source), or open an issue on
+GitHub.
 
 </Info>
 
@@ -147,12 +135,14 @@ Read more about destinations:
 
 ### Available destinations
 
+- [Airtable](/data-integrations/destinations/airtable)
 - [Amazon Web Services (AWS) Redshift](/data-integrations/destinations/redshift)
 - [Amazon Web Services (AWS) S3](/data-integrations/destinations/amazon_s3)
 - [BigQuery](/data-integrations/destinations/bigquery)
 - [Clickhouse](/data-integrations/destinations/clickhouse)
 - [Delta Lake (S3)](/data-integrations/destinations/delta_lake_s3)
 - [Delta Lake (Azure)](/data-integrations/destinations/delta_lake_azure)
+- [Doris](/data-integrations/destinations/doris)
 - [Elasticsearch](/data-integrations/destinations/elasticsearch)
 - [Google Cloud Storage](/data-integrations/destinations/google_cloud_storage)
 - [Kafka](/data-integrations/destinations/kafka)
@@ -164,22 +154,14 @@ Read more about destinations:
 - [PostgreSQL](/data-integrations/destinations/postgresql)
 - [Salesforce](/data-integrations/destinations/salesforce)
 - [Snowflake](/data-integrations/destinations/snowflake)
+- [Teradata](/data-integrations/destinations/teradata)
 - [Trino](/data-integrations/destinations/trino)
-- _Azure Blob Storage (coming soon)_
-- _HubSpot (coming soon)_
 
-### Destinations available in Mage Pro
-
-- [Databricks](/data-integrations/destinations/databricks)
-- [DuckDB](/data-integrations/destinations/duckdb)
-- [Iceberg S3](/data-integrations/destinations/iceberg_s3)
-
-Mage adheres to the data engineering standard for data integrations called the
+MageML follows the data engineering standard for data integrations called the
 [Singer Spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
 
-All destinations (aka targets) that has been developed by the open-source
-community can be adapted to use in Mage. Here is a
-[short list of available ones](https://www.singer.io/#targets).
+Destinations (targets) developed by the open-source community can be adapted to MageML.
+Here is a [short list of available ones](https://www.singer.io/#targets).
 
 > Don’t see a destination you need?
 >
