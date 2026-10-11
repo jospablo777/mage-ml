@@ -1,0 +1,151 @@
+---
+title: "Services in the app"
+sidebarTitle: "Services in the app"
+icon: "cubes"
+description: "Export pipelines as a service from MageML: check the configuration, list the secrets the container needs, chain pipelines with after-run triggers, then build for any platform and push to a registry."
+---
+
+MageML exports pipelines as a [pipeline service](/production/pipeline-services): one Docker
+image that runs them without MageML. The app does it in two places:
+
+| Where | Use it to |
+| --- | --- |
+| **Export as service** in the pipelines list (right-click a pipeline) and in the editor's **File** menu | Export one or more pipelines now |
+| **Services** in the left menu | Save a service in the project, check its configuration, chain its pipelines, export, build and push it |
+
+Both run the same export as `mage export service`. The [tutorial](/getting-started/service-tutorial)
+goes through them with the playground.
+
+## Export as service
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/export-dialog.light.png" alt="The Export as a service dialog: two pipelines chosen on the left, and on the right the service name and a preview: ready to export, 2 pipelines, 5 blocks, 1 schedule, 18 packages, Python, and five environment variables to set" />
+  <img className="hidden dark:block" src="/images/screenshots/export-dialog.dark.png" alt="The Export as a service dialog: two pipelines chosen on the left, and on the right the service name and a preview: ready to export, 2 pipelines, 5 blocks, 1 schedule, 18 packages, Python, and five environment variables to set" />
+</Frame>
+
+- Choose the pipelines on the left. Each row shows its blocks, languages and triggers.
+- The preview on the right updates as you choose: what the image will hold, the environment
+  variables the container needs, and anything that stops the export, such as a sensor
+  block, with its reason.
+- **Export** writes the build context with a progress bar, then shows the next steps:
+  download it as a zip, build and ship the image, run it and deploy it.
+
+The service name names the image and the folder. Runs at once, under **Advanced options**,
+overrides each pipeline's setting.
+
+## The Services page
+
+**Services** keeps services in the project, in `pipeline_services.yaml`, so they go to git
+with the pipelines:
+
+```yaml
+services:
+  shop-live:
+    pipelines: [live_traffic, live_minute_kpis, live_device_revenue]
+    description: Live shop traffic, then per-minute KPIs after each traffic run
+    after_runs:
+      - run: live_minute_kpis
+        after: live_traffic
+        when: completed   # completed, failed or any
+    max_runs: 2           # optional: runs of each pipeline at once
+    include: [models/churn.onnx]   # optional: files the blocks reach by a computed path
+```
+
+The CLI exports a saved service: `mage export service . --service shop-live --out ./shop-live`.
+
+### Pipelines and how they start
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/services-workbench.light.png" alt="The Services page with the service shop-live: three pipelines, live_traffic on a schedule and the other two starting after live_traffic completes, and the run flow drawn below them" />
+  <img className="hidden dark:block" src="/images/screenshots/services-workbench.dark.png" alt="The Services page with the service shop-live: three pipelines, live_traffic on a schedule and the other two starting after live_traffic completes, and the run flow drawn below them" />
+</Frame>
+
+Each pipeline keeps its schedules and its API trigger. **Start after another pipeline**
+adds an [after-run trigger](/production/pipeline-services#after-run-triggers): the pipeline
+starts when a run of the other one completes, fails or ends either way. The run flow below
+the pipelines draws the chains. Features then scoring, or a load then its checks, become one
+flow with one schedule.
+
+### Configuration check, secrets and variables
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/services-check.light.png" alt="The configuration check: 3 pipelines, 8 blocks, 1 schedule, 2 after-run triggers, every block supported, 10 project files, 18 Python packages; and the secrets and environment variables: what the pipelines read and what the service reads" />
+  <img className="hidden dark:block" src="/images/screenshots/services-check.dark.png" alt="The configuration check: 3 pipelines, 8 blocks, 1 schedule, 2 after-run triggers, every block supported, 10 project files, 18 Python packages; and the secrets and environment variables: what the pipelines read and what the service reads" />
+</Frame>
+
+The check runs the export's own checks without writing anything, each time the service
+changes:
+
+- every block is supported, or why one is not;
+- the project files that go in the image, and the Python packages, pinned to the versions
+  MageML runs with;
+- the schedules and after-run triggers, and loops between them;
+- notes, such as files included because a block names them.
+
+**Secrets and environment variables** lists what the pipelines read (marked secret or
+required) and what the service reads, such as `MAGE_SERVICE_TOKEN`, with where secrets can
+come from: the environment, files, a folder of files, or a secrets manager (IBM Cloud,
+AWS). **Copy .env** gives a `.env` template with all of them. Values never leave the app or
+go into the export.
+
+### Keep run history, logs and metrics
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/services-keep.light.png" alt="Keep run history, logs and metrics: a volume for the data folder, logs to the platform's collector, and a Prometheus scrape configuration" />
+  <img className="hidden dark:block" src="/images/screenshots/services-keep.dark.png" alt="Keep run history, logs and metrics: a volume for the data folder, logs to the platform's collector, and a Prometheus scrape configuration" />
+</Frame>
+
+| What | Where it lives | To keep it |
+| --- | --- | --- |
+| Runs, block logs and outputs | `/var/lib/mage-service` in the container | A volume there: `-v name-data:/var/lib/mage-service`, the Kubernetes manifest's claim, an EFS volume on ECS. `MAGE_SERVICE_RETENTION_DAYS` sets how long |
+| Logs | stdout | `MAGE_SERVICE_LOG_FORMAT=json` and the platform's collector: CloudWatch, Cloud Logging, Loki, IBM Log Analysis |
+| Metrics | `GET /metrics`, Prometheus, no token | A Prometheus scrape. Runs by status come from the run history; block durations and failures restart with the service |
+
+## Build and ship
+
+<Frame>
+  <img className="block dark:hidden" src="/images/screenshots/services-exported.light.png" alt="After the export: download the build context, build and ship it for linux/amd64 and linux/arm64 to IBM Cloud Container Registry with the login and buildx commands, run it, and deploy it" />
+  <img className="hidden dark:block" src="/images/screenshots/services-exported.dark.png" alt="After the export: download the build context, build and ship it for linux/amd64 and linux/arm64 to IBM Cloud Container Registry with the login and buildx commands, run it, and deploy it" />
+</Frame>
+
+After an export, **Build and ship the image** writes the commands for the platforms and the
+registry you choose:
+
+| Registry | Image | Login |
+| --- | --- | --- |
+| Docker Hub | `docker.io/<user>/<name>:<tag>` | `docker login -u <user>` |
+| IBM Cloud Container Registry | `icr.io/<namespace>/<name>:<tag>` (or a regional host such as `us.icr.io`) | `ibmcloud cr login`, or an API key with user `iamapikey` |
+| GitHub Container Registry | `ghcr.io/<owner>/<name>:<tag>` | a token with `docker login ghcr.io` |
+| Amazon ECR | `<account>.dkr.ecr.<region>.amazonaws.com/<name>:<tag>` | `aws ecr get-login-password` |
+| Google Artifact Registry | `<region>-docker.pkg.dev/<project>/<repository>/<name>:<tag>` | `gcloud auth configure-docker` |
+| Azure Container Registry | `<registry>.azurecr.io/<name>:<tag>` | `az acr login` |
+
+- **This machine** builds for the machine's own chip with `docker build`. `linux/amd64` and
+  `linux/arm64` build with `docker buildx`; both together make one image that runs on
+  either (most cloud servers are amd64; Apple silicon and AWS Graviton are arm64). Two
+  platforms need a registry, since Docker keeps one platform of an image locally.
+- **Build on the server** (or **Build and push from the server**) appears when the machine
+  that runs MageML has Docker. It builds the export there and shows every line Docker prints;
+  pushing uses the registries that machine is logged in to. MageML in a container usually
+  has no Docker: run the commands where Docker is.
+
+The CLI does the same: `mage export service . --service shop-live --out ./shop-live --build
+--platform linux/amd64,linux/arm64 --push --tag icr.io/ml-team/shop-live:1.0`.
+
+## The export as a repository
+
+The export is a folder with everything the image needs, so it builds on any machine and in
+any CI:
+
+| In the folder | What it is |
+| --- | --- |
+| `Dockerfile`, `compose.yaml`, `.dockerignore` | The image and a one-machine setup |
+| `<project>/`, `requirements.txt`, `rust/`, `r/` | The pipelines' code and what it needs |
+| `service.json`, `README.md`, `.env.example`, `report.txt` | The manifest, how to run it, the variables to set, what the export found |
+| `.github/workflows/build-image.yml` | GitHub Actions: builds amd64 and arm64 on every push to `main`, and pushes when the repository sets `REGISTRY_IMAGE` and the `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` secrets |
+| `.tekton/`, `deploy/ibm/` | IBM Cloud Continuous Delivery and Code Engine |
+| `deploy/kubernetes.yaml` | A Deployment with probes and a volume claim |
+| `.gitignore` | Leaves out `.env`, local data and build output |
+
+Keep it as its own repository: export again into the same folder and commit the diff. The
+export keeps `.git`, `.env` and `data/`.

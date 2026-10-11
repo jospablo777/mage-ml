@@ -24,6 +24,11 @@ application, in a Kubernetes cluster, on IBM Cloud Code Engine or AWS ECS.
 
 ## 1. Export
 
+From the app: right-click a pipeline in the pipelines list, or open **File** in the editor,
+and choose **Export as service**; or open **Services** in the left menu to save a service
+and check its configuration first (see [Services in the app](services-page.md)).
+From a terminal:
+
 ```bash
 mage export service path/to/project sales_pipeline --out ./sales-service
 ```
@@ -35,6 +40,22 @@ service by listing them:
 
 ```bash
 mage export service path/to/project load_orders score_orders --out ./orders-service --name orders
+```
+
+A service saved on the Services page, in `pipeline_services.yaml`, exports by name, with
+its after-run triggers and settings:
+
+```bash
+mage export service path/to/project --service shop-live --out ./shop-live
+```
+
+`--build` also builds the image. `--platform linux/amd64,linux/arm64` builds for other
+chips with `docker buildx`, and `--push` pushes it to the registry its `--tag` names (log in
+first; several platforms need `--push`):
+
+```bash
+mage export service path/to/project --service shop-live --out ./shop-live \
+  --build --platform linux/amd64,linux/arm64 --push --tag icr.io/ml-team/shop-live:1.0
 ```
 
 What the export takes:
@@ -175,7 +196,30 @@ Each occurrence runs once, even across restarts, and one service owns the schedu
 time when several share a data volume. Occurrences missed while the service was stopped
 are not run; `skip_if_previous_running` is honored.
 
-## Configuration and secrets
+## After-run triggers
+
+A pipeline can start when a run of another pipeline of the service ends: features, then
+scoring; a load, then its checks. Add them on the Services page, or in the project's
+`pipeline_services.yaml`:
+
+```yaml
+services:
+  shop-live:
+    pipelines: [live_traffic, live_minute_kpis]
+    after_runs:
+      - run: live_minute_kpis
+        after: live_traffic
+        when: completed   # completed (the default), failed or any
+```
+
+- The run starts as soon as the earlier run ends, with the trigger's variables. Its source
+  is `after:<pipeline>`, so the run history shows what started it.
+- Each earlier run starts one run, also when the service restarts while it runs.
+- They work with `MAGE_SERVICE_SCHEDULES` off: they follow runs of the service, however
+  those started.
+- `skip_if_running: true` skips the run while the pipeline still has one queued or running.
+- The export refuses triggers that start each other in a loop, and pipelines that are not
+  in the service.
 
 The export lists the environment variables the code reads, in `io_config.yaml`
 (`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`), and marks those that look

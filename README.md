@@ -38,6 +38,7 @@ http://localhost:3333.
 | [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
 | [Tutorial: from pipeline to production](docs-md/getting-started/pipeline-to-production.md) | A data contract, a monitor, run records and an export as a service |
 | [Tutorial: an ML inference service](docs-md/getting-started/inference-service.md) | Train a model, score in Python, Rust and R, and serve predictions over HTTP |
+| [Tutorial: ship a live service](docs-md/getting-started/service-tutorial.md) | Package pipelines as a service in the app, chain them, check their secrets, push to a registry |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
 | [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eleven pipelines |
 | [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |
@@ -62,10 +63,15 @@ http://localhost:3333.
   pipelines and their trade-offs. ([guide](docs-md/guides/pipelines/compilation.md),
   [measurements](docs-md/production/pipeline-performance.md))
 - **Pipeline services**: export pipelines as a Docker image that runs them without Mage,
-  with an HTTP API, schedules, run history and metrics. It deploys to Kubernetes (EKS, GKE,
-  AKS, OpenShift) and IBM Cloud Code Engine with the files the export writes, and to Google
-  Cloud Run, Azure Container Apps and AWS ECS as a container.
+  with an HTTP API, schedules, pipelines that start after other runs, run history and
+  metrics. The Services page checks a service's configuration and secrets, then builds it
+  for amd64 and arm64 and pushes it to Docker Hub, IBM Cloud Container Registry or another
+  registry; the export is a repository-ready folder for your own CI. It deploys to
+  Kubernetes (EKS, GKE, AKS, OpenShift) and IBM Cloud Code Engine with the files the export
+  writes, and to Google Cloud Run, Azure Container Apps and AWS ECS as a container.
   ([guide](docs-md/production/export-a-service.md),
+  [in the app](docs-md/production/services-page.md),
+  [tutorial](docs-md/getting-started/service-tutorial.md),
   [platforms](docs-md/production/pipeline-services.md#deploy))
 - **ML inference**: score with models in their frameworks' formats (scikit-learn, CatBoost,
   XGBoost, LightGBM, PyTorch, ONNX, R models) in Python, R or Rust blocks, and serve the

@@ -25,6 +25,22 @@ Every command and output below comes from a real run. For every option, see the
 - Docker is installed. The machine that builds the image needs nothing else: Rust, R and
   Python packages are installed inside the image.
 
+## Export from the app
+
+The steps below use the CLI. The app does the same:
+
+- **Export as service** in the pipelines list (right-click a pipeline) and in the editor's
+  **File** menu opens a dialog: choose one or more pipelines and the dialog shows what the
+  service will hold (blocks, schedules, packages, the environment variables to set) and
+  anything that stops the export, before you export. The export shows its progress, then a
+  download of the build context and the commands to build, run and call it.
+- **Services**, in the left menu, saves services in the project's
+  `pipeline_services.yaml`, with the pipelines, the [after-run triggers](/production/pipeline-services#after-run-triggers)
+  that start one pipeline when another's run ends, and their settings. It checks the
+  configuration as you change it, lists the secrets and variables the container needs, and
+  shows how to keep run history, logs and metrics. The CLI exports a saved service with
+  `mage export service . --service shop-live --out ./shop-live`.
+
 ## 1. Export
 
 One pipeline:

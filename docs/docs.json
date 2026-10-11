@@ -21,6 +21,7 @@
               "getting-started/polyglot-pipeline",
               "getting-started/pipeline-to-production",
               "getting-started/inference-service",
+              "getting-started/service-tutorial",
               "getting-started/playground",
               "guides/train/train-model",
               "design/core-design-principles",
@@ -520,6 +521,7 @@
               "production/ci-cd/local-cloud/buildkite",
               "production/configuring-production-settings/overview",
               "production/export-a-service",
+              "production/services-page",
               "production/pipeline-services",
               "production/service-console",
               "production/pipeline-performance"
