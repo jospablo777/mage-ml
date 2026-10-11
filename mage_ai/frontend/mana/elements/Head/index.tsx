@@ -8,7 +8,7 @@ type HeadProps = {
   title?: string;
 };
 
-const Head = ({ children, defaultTitle = 'Mage Pro', title }: HeadProps) => {
+const Head = ({ children, defaultTitle = 'MageML', title }: HeadProps) => {
   const theme = useContext(ThemeContext);
 
   return (

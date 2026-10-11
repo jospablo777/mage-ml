@@ -29,7 +29,7 @@ import useCustomDesign from '@utils/models/customDesign/useCustomDesign';
 import useDelayFetch from '@api/utils/useDelayFetch';
 import useProject from '@utils/models/project/useProject';
 import { BLUE_TRANSPARENT, YELLOW } from '@oracle/styles/colors/main';
-import { BranchAlt, MageProLetters, Planet, Slack, UFO } from '@oracle/icons';
+import { BranchAlt, Planet, UFO } from '@oracle/icons';
 import {
   ButtonInputStyle,
   CUSTOM_LOGO_HEIGHT,
@@ -512,46 +512,6 @@ function Header({
                 disabled={hideActions}
                 projectName={project?.name}
               />
-            </Spacing>
-
-            <Spacing ml={1}>
-              <KeyboardShortcutButton
-                beforeElement={<Slack />}
-                compact
-                highlightOnHoverAlt
-                inline
-                linkProps={{
-                  as: 'https://www.mage.ai/chat',
-                  href: 'https://www.mage.ai/chat',
-                }}
-                noBackground
-                noHoverUnderline
-                openNewTab
-                sameColorAsText
-                uuid="Header/live_chat"
-              >
-                Live help
-              </KeyboardShortcutButton>
-            </Spacing>
-
-            <Spacing ml={1}>
-              <KeyboardShortcutButton
-                compact
-                highlightOnHoverAlt
-                inline
-                linkProps={{
-                  as: 'https://cloud.mage.ai/sign-up?ref=oss',
-                  href: 'https://cloud.mage.ai/sign-up?ref=oss',
-                }}
-                openNewTab
-                noBackground
-                noHoverUnderline
-                sameColorAsText
-                afterElement={<MageProLetters size={24} />}
-                uuid="Header/pro"
-              >
-                Try
-              </KeyboardShortcutButton>
             </Spacing>
 
             {menuItems &&

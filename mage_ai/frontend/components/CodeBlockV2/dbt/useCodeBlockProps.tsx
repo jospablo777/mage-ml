@@ -15,7 +15,6 @@ import {
   BlocksCombined,
   Callback,
   Charts,
-  Chat,
   ChevronDown,
   ChevronUp,
   Close,
@@ -558,14 +557,6 @@ export default function useCodeBlockProps({
     {
       uuid: 'Support',
       items: [
-        {
-          beforeIcon: <Chat {...MENU_ICON_PROPS} />,
-          uuid: 'Live chat 24/7',
-          linkProps: {
-            href: 'https://mage.ai/chat',
-            openNewWindow: true,
-          },
-        },
         {
           beforeIcon: <DocumentIcon {...MENU_ICON_PROPS} />,
           uuid: 'Developer documentation',

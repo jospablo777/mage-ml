@@ -18,7 +18,6 @@ import {
   CubeWithArrowDown,
   DBT as DBTIcon,
   File as FileIcon,
-  AIStarsAlt,
   FrameBoxSelection,
   HexagonAll,
   Sensor,
@@ -34,7 +33,6 @@ import { BLOCK_TYPE_ICON_MAPPING } from '@components/CustomTemplates/BrowseTempl
 import {
   BUTTON_ITEMS_DEFAULT,
   ITEMS_MORE,
-  ITEM_AI,
   ITEMS_MORE_UUIDS_ORDERED,
   ITEM_BROWSE_TEMPLATES,
   ITEM_CREATE_TEMPLATE,
@@ -553,7 +551,6 @@ function ButtonItems({
           const isOtherItems = [
             ITEM_BROWSE_TEMPLATES,
             ITEM_CREATE_TEMPLATE,
-            ITEM_AI,
             // @ts-ignore
           ].includes(uuid);
           // @ts-ignore
@@ -592,15 +589,6 @@ function ButtonItems({
       onClick: () => showBrowseTemplates({
         addNewBlock,
       }),
-    },
-    [ITEM_AI]: {
-      Icon: AIStarsAlt,
-      label: () => 'AI Code',
-      linkProps: {
-        href: 'https://www.mage.ai/ai?ref=oss',
-        openNewWindow: true,
-      },
-      tag: 'Pro',
     },
     [ITEM_CREATE_TEMPLATE]: {
       Icon: ArrowsAdjustingFrameSquare,

@@ -20,7 +20,6 @@ import {
   DocumentIcon,
   Lightning,
   NavDashboard,
-  Rocket,
   PipelineV3,
   Schedule,
   Settings,
@@ -81,16 +80,6 @@ const DEFAULT_NAV_ITEMS = ({
       linkProps: {
         href: '/terminal',
       },
-    },
-    {
-      Icon: Rocket,
-      id: 'deployments',
-      label: () => 'Deploy',
-      linkProps: {
-        href: 'https://www.mage.ai/deploy?ref=oss',
-        target: '_blank',
-      },
-      tag: 'Pro',
     },
     {
       Icon: Settings,
