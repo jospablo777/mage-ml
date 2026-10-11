@@ -2,8 +2,10 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mage_ai.cache.mem_lru import (
     MemorySizeLRUCache,
@@ -11,6 +13,7 @@ from mage_ai.cache.mem_lru import (
     read_yaml_file,
     read_yaml_file_async,
 )
+from mage_ai.shared.yaml import load_yaml
 
 
 class FileCacheTest(unittest.TestCase):
@@ -57,6 +60,34 @@ class FileCacheTest(unittest.TestCase):
                 self.path.write_text('version: new\n')
                 os.utime(self.path, ns=(timestamp + 100, timestamp + 100))
                 self.assertEqual(read(self.path), {'version': 'new'})
+
+    def test_reload_after_a_rewrite_that_keeps_the_file_version(self):
+        """
+        ext4 records times at the kernel tick, so a file rewritten within a few
+        milliseconds with the same size keeps its version; the old content stayed cached.
+        """
+        now = time.time_ns()
+        version = (1, 2, now, now, len('version: old\n'))
+        for read in self.readers():
+            with self.subTest(reader=read), patch(
+                'mage_ai.cache.mem_lru.file_version', return_value=version,
+            ):
+                self.path.write_text('version: old\n')
+                self.assertEqual(read(self.path), {'version': 'old'})
+                self.path.write_text('version: new\n')
+                self.assertEqual(read(self.path), {'version': 'new'})
+
+    def test_files_older_than_the_settle_time_are_read_once(self):
+        self.path.write_text('version: old\n')
+        old = time.time_ns() - 60_000_000_000
+        version = (1, 2, old, old, len('version: old\n'))
+        for read in self.readers():
+            with self.subTest(reader=read), patch(
+                'mage_ai.cache.mem_lru.file_version', return_value=version,
+            ), patch('mage_ai.cache.mem_lru.load_yaml', wraps=load_yaml) as parse:
+                self.assertEqual(read(self.path), {'version': 'old'})
+                self.assertEqual(read(self.path), {'version': 'old'})
+                self.assertEqual(parse.call_count, 1)
 
     def test_missing_file_is_evicted(self):
         for read in self.readers():

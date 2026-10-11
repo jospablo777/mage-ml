@@ -12,6 +12,8 @@ export const BEFORE_MIN_WIDTH = UNIT * 21.25;
 export const BEFORE_DEFAULT_WIDTH = UNIT * 35;
 export const DRAGGABLE_WIDTH = UNIT;
 export const MAIN_MIN_WIDTH = UNIT * 13;
+// The main column's width before the side panels are narrowed to fit the screen.
+export const MAIN_FIT_WIDTH = UNIT * 40;
 
 export const ASIDE_HEADER_HEIGHT = PADDING_UNITS * 3 * UNIT;
 export const ASIDE_SUBHEADER_HEIGHT = 47;

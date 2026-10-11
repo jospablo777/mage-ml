@@ -5,6 +5,7 @@ Stopping the web server with SIGTERM, or killing it, left these processes runnin
 scheduler that outlived its server kept running pipelines, and the next server started
 another one, so each block run ran twice and one of the two failed writing its output.
 """
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -19,6 +20,11 @@ PARENT_CHECK_SECONDS = 1.0
 TERMINATE_TIMEOUT_SECONDS = 5.0
 SUPERVISOR = os.path.join(os.path.dirname(__file__), 'supervise.py')
 HAS_PROCESS_GROUPS = hasattr(os, 'killpg')
+# How Mage starts its processes: the scheduler, the worker pool, block workers and runs from
+# the editor. Linux forked them, and a process forked after its parent ran Polars' thread
+# pool has the pool's state without its threads: its first Polars call waited forever.
+# macOS and Windows spawn by default.
+PROCESS_CONTEXT = multiprocessing.get_context('spawn')
 
 
 def terminate_descendants(timeout: float = TERMINATE_TIMEOUT_SECONDS) -> None:

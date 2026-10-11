@@ -1,4 +1,5 @@
-import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +12,9 @@ class K8sBlockExecutorTestCase(unittest.TestCase):
         self.pipeline = MagicMock()
         self.pipeline.uuid = 'pipeline_uuid'
         self.pipeline.repo_config = MagicMock()
-        self.pipeline.repo_config.variables_dir = os.path.join(os.getcwd(), 'mage_data')
+        variables_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, variables_dir, True)
+        self.pipeline.repo_config.variables_dir = variables_dir
         self.block_uuid = 'block-uuid'
 
         self.logger_manager = MagicMock()

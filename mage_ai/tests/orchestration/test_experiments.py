@@ -3,9 +3,6 @@ Experiments: MLflow runs a block starts carry the Mage run's tags, the block run
 them with their metrics and registered model versions, and two pipeline runs compare by
 their MLflow metrics.
 """
-import os
-import shutil
-import tempfile
 import textwrap
 import tomllib
 import unittest
@@ -17,6 +14,7 @@ from mage_ai.orchestration import experiments, run_records
 from mage_ai.orchestration.fusion_verify import run_in_process
 from mage_ai.orchestration.triggers.api import trigger_pipeline
 from mage_ai.tests.base_test import DBTestCase
+from mage_ai.tests.shared.tracking import use_temporary_mlflow
 
 try:
     import mlflow
@@ -52,12 +50,7 @@ def train(*args, **kwargs):
 class ExperimentsTest(DBTestCase):
     def setUp(self):
         super().setUp()
-        self.tracking = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tracking, True)
-        uri = f'sqlite:///{self.tracking}/mlflow.db'
-        os.environ['MLFLOW_TRACKING_URI'] = uri
-        self.addCleanup(os.environ.pop, 'MLFLOW_TRACKING_URI', None)
-        mlflow.set_tracking_uri(uri)
+        use_temporary_mlflow(self, experiments=['churn'])
         self.pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
         block = Block.create(
             f'{self.pipeline.uuid}_train', 'transformer', self.repo_path, pipeline=self.pipeline,

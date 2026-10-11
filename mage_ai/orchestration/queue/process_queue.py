@@ -27,7 +27,7 @@ from mage_ai.settings import (
 )
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
-from mage_ai.shared.processes import exit_with_parent
+from mage_ai.shared.processes import PROCESS_CONTEXT, exit_with_parent
 
 # Seconds a scheduler process's liveness key lives; its worker pool renews it every
 # second. Another process treats this one's jobs as running while the key exists, so a
@@ -75,11 +75,11 @@ class ProcessQueue(Queue):
         self.status = QueueStatus.INACTIVE
         self.queue_config = queue_config
         self.process_queue_config = self.queue_config.process_queue_config
-        self.queue = mp.Queue()
+        self.queue = PROCESS_CONTEXT.Queue()
         self.size = queue_config.concurrency or os.cpu_count()
         # The manager is a process of its own; it ends with the process that owns the
         # queue, so a killed scheduler leaves no manager behind.
-        self.mp_manager = SyncManager()
+        self.mp_manager = SyncManager(ctx=PROCESS_CONTEXT)
         self.mp_manager.start(exit_with_parent)
         self.job_dict = self.mp_manager.dict()
         # Whether clean_up_jobs removed a finished job since jobs_finished last ran.
@@ -240,7 +240,7 @@ class ProcessQueue(Queue):
         """
         Starts the worker pool by creating a new process for executing jobs.
         """
-        self.worker_pool_proc = mp.Process(
+        self.worker_pool_proc = PROCESS_CONTEXT.Process(
             target=poll_job_and_execute,
             # The Redis URL, not the client: the worker pool process receives its
             # arguments pickled where processes start with spawn or forkserver (macOS,
@@ -408,7 +408,7 @@ def register_job_alias(job_id: str) -> None:
     current.aliases.append(job_id)
 
 
-class Worker(mp.Process):
+class Worker(PROCESS_CONTEXT.Process):
     def __init__(
         self,
         job: List,

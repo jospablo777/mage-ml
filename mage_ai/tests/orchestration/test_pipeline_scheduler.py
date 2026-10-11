@@ -854,6 +854,30 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('3 times', block_run.metrics['error']['message'])
 
+    def test_a_block_run_a_stage_claimed_meanwhile_is_not_queued(self):
+        """
+        The scheduler read a block run as INITIAL, a stage claimed it as the next block of
+        its chain, and the scheduler then marked it QUEUED anyway. The stage found its claim
+        gone after the block ran and discarded the result, and the scheduler ran the block
+        a second time: in the fusion soak test an exporter wrote its rows twice.
+        """
+        from mage_ai.orchestration import fusion
+
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.INITIAL)
+
+        attempt = fusion.claim_block_run(block_run.id, pipeline_run.id)
+        queued = scheduler._PipelineScheduler__queue(block_run, 'HOST_test_PID_1')
+
+        self.assertFalse(queued)
+        block_run.refresh()
+        self.assertEqual(
+            (block_run.status, block_run.attempt), (BlockRun.BlockRunStatus.RUNNING, attempt),
+        )
+
     def test_a_block_run_interrupted_by_a_scheduler_stop_is_not_a_crash(self):
         """
         After a restart every RUNNING block run looked crashed: three deploys during a long

@@ -957,17 +957,26 @@ def _local_install(dist) -> bool:
 
 def _file_owners() -> Dict[str, Tuple[str, str]]:
     owners: Dict[str, Tuple[str, str]] = {}
+    seen: Set[str] = set()
     for dist in importlib.metadata.distributions():
-        name = (dist.metadata['Name'] or '').lower().replace('_', '-')
-        if not name or _local_install(dist):
+        # Each read of dist.version parses the distribution's METADATA again.
+        metadata = dist.metadata
+        name = (metadata['Name'] or '').lower().replace('_', '-')
+        # The first distribution of a name on sys.path is the one Python imports. With the
+        # importlib_metadata backport imported, every distribution is listed twice.
+        if not name or name in seen:
             continue
+        seen.add(name)
+        if _local_install(dist):
+            continue
+        version = metadata['Version']
         for file in dist.files or []:
             text = str(file)
             # Editable installs load a finder module at start-up; it is not a dependency.
             if not text.endswith(('.py', '.so', '.pyd', '.pyc')) or '__editable__' in text:
                 continue
             try:
-                owners[os.path.realpath(dist.locate_file(file))] = (name, dist.version)
+                owners[os.path.realpath(dist.locate_file(file))] = (name, version)
             except (OSError, ValueError):
                 continue
     return owners

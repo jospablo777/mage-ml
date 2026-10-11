@@ -15,6 +15,7 @@ import hashlib
 import os
 import re
 import shutil
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,14 +163,19 @@ def _sdk_files() -> List[Path]:
 # (size and modification time of each SDK file, their digest): every Rust block run asks
 # for the digest, and the files only change when Mage is upgraded or edited.
 _sdk_digest_cache: Optional[Tuple[Tuple, str]] = None
+# How old the SDK files must be before their sizes and modification times identify their
+# content. ext4 records times at the kernel tick, so a file written twice within a few
+# milliseconds keeps its size and time.
+SDK_SETTLE_NS = 2_000_000_000
 
 
 def sdk_digest() -> str:
     global _sdk_digest_cache
 
     files = _sdk_files()
+    stats = [path.stat() for path in files]
     fingerprint = tuple(
-        (str(path), stat.st_size, stat.st_mtime_ns) for path in files for stat in [path.stat()]
+        (str(path), stat.st_size, stat.st_mtime_ns) for path, stat in zip(files, stats)
     )
     cached = _sdk_digest_cache
     if cached is not None and cached[0] == fingerprint:
@@ -179,8 +185,10 @@ def sdk_digest() -> str:
         digest.update(path.relative_to(SDK_SOURCE).as_posix().encode())
         digest.update(b'\0')
         digest.update(path.read_bytes())
-    _sdk_digest_cache = (fingerprint, digest.hexdigest())
-    return _sdk_digest_cache[1]
+    newest = max((stat.st_mtime_ns for stat in stats), default=0)
+    settled = time.time_ns() - newest > SDK_SETTLE_NS
+    _sdk_digest_cache = (fingerprint, digest.hexdigest()) if settled else None
+    return digest.hexdigest()
 
 
 def sync_sdk(workspace: Workspace) -> str:

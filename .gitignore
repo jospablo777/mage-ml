@@ -175,8 +175,9 @@ node_modules
 # mage_ai/server/frontend_dist_base_path_template
 mage_ai/server/frontend_dist_base_path
 
-# Scratch files
-scratch*
+# Scratch files at the root of the checkout. Without the slash the rule also ignored
+# docs-md/design/blocks/scratchpad.md and new files under templates/repo/scratchpads.
+/scratch*
 
 # Playwright test automation
 playwright-report/

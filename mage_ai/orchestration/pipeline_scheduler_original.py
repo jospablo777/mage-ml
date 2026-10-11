@@ -6,7 +6,7 @@ from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 import pytz
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, update
 
 from mage_ai.data_integrations.utils.scheduler import (
     clear_source_output_files,
@@ -755,8 +755,7 @@ class PipelineScheduler:
             return False
         if request.empty:
             metrics.pop('waiting', None)
-            block_run.update(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
-            return True
+            return self.__mark_queued(block_run, metrics)
 
         # Admission reads what the active block runs hold and adds this one; schedulers
         # of other pipeline runs (and replicas, with Redis) do it one at a time.
@@ -793,10 +792,34 @@ class PipelineScheduler:
                 return False
             metrics.pop('waiting', None)
             metrics['resources'] = decision.held
-            block_run.update(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
-            return True
+            return self.__mark_queued(block_run, metrics)
         finally:
             lock.release_lock(key)
+
+    def __mark_queued(self, block_run: BlockRun, metrics: Dict) -> bool:
+        """
+        Marks the block run QUEUED only while it is still INITIAL. A stage claims the next
+        block run of its chain between this scheduler's read and this write; the update
+        used to take the block run back from the stage, which then discarded the block's
+        result after the block had run, and the block ran a second time.
+        """
+        session = db_connection.session
+        try:
+            result = session.execute(
+                update(BlockRun)
+                .where(
+                    BlockRun.id == block_run.id,
+                    BlockRun.status == BlockRun.BlockRunStatus.INITIAL,
+                )
+                .values(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
+                .execution_options(synchronize_session=False)
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        session.expire(block_run)
+        return result.rowcount == 1
 
     def __fail_admission(self, block_run: BlockRun, metrics: Dict, message: str) -> None:
         metrics = dict(metrics)

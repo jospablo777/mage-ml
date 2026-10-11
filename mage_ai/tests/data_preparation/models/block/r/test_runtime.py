@@ -428,6 +428,28 @@ class RigTest(TestCase):
             'libfreetype6-dev',
         ])
 
+    def test_a_library_another_installed_package_provides_is_not_missing(self):
+        """
+        Ubuntu 24.04 names the FreeType headers libfreetype-dev, which provides
+        libfreetype6-dev, and has the MySQL client library that RMariaDB also builds with:
+        setup listed both as missing, so `mage r setup` never passed on a complete Ubuntu
+        24.04.
+        """
+        others = [
+            p for p in runtime.LINUX_BUILD_LIBRARIES
+            if p not in ('libfreetype6-dev', 'libmariadb-dev')
+        ]
+        self.executable(self.bin / 'dpkg-query', '\n'.join([
+            "echo 'libfreetype-dev:amd64 installed libfreetype6-dev (= 2.13.2+dfsg-1ubuntu0.2)'",
+            "echo 'libmysqlclient-dev:amd64 installed'",
+            *[f"echo '{p} installed'" for p in others],
+        ]))
+
+        with patch.object(runtime.sys, 'platform', 'linux'):
+            step = runtime.setup_steps('4.6')[-1]
+
+        self.assertEqual(step['found'], 'installed', step)
+
     def test_setup_has_no_library_step_without_dpkg(self):
         which = shutil.which
 

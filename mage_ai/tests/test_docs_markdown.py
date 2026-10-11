@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import shutil
+import subprocess
 import tempfile
 import textwrap
 import unittest
@@ -124,3 +125,22 @@ class CommittedExportTest(unittest.TestCase):
         self.assertEqual(sorted(actual), sorted(expected))
         stale = [str(p) for p in expected if actual.get(p) != expected[p]]
         self.assertEqual(stale, [])
+
+    @unittest.skipUnless(
+        shutil.which('git') and (ROOT / '.git').exists(), 'needs a git checkout',
+    )
+    def test_git_tracks_every_exported_page(self):
+        """
+        .gitignore had scratch* for scratch files, which also ignored the exported
+        docs-md/design/blocks/scratchpad.md: it was never committed, and the test above
+        failed on every fresh clone.
+        """
+        out = Path(tempfile.mkdtemp()) / 'docs-md'
+        self.addCleanup(shutil.rmtree, out.parent, True)
+        export_markdown.export(export_markdown.DOCS, out)
+        pages = [str(Path('docs-md', p.relative_to(out))) for p in out.rglob('*.md')]
+        ignored = subprocess.run(
+            ['git', 'check-ignore', '--no-index', '--stdin'],
+            cwd=ROOT, input='\n'.join(pages), capture_output=True, text=True,
+        )
+        self.assertEqual(ignored.stdout.split(), [])

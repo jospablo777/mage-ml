@@ -2,9 +2,6 @@
 Model releases through the API: the policy, champion and log of a model, a promotion,
 and a promotion refused because the champion changed since the evaluation.
 """
-import os
-import shutil
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +9,7 @@ from mage_ai.api.operations.base import BaseOperation
 from mage_ai.api.operations.constants import OperationType
 from mage_ai.tests.base_test import AsyncDBTestCase
 from mage_ai.tests.factory import create_user
+from mage_ai.tests.shared.tracking import use_temporary_mlflow
 
 try:
     import mlflow
@@ -24,12 +22,7 @@ class ModelReleaseResourceTest(AsyncDBTestCase):
     def setUp(self):
         super().setUp()
         self.owner = create_user(_owner=True)
-        self.tracking = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tracking, True)
-        uri = f'sqlite:///{self.tracking}/mlflow.db'
-        os.environ['MLFLOW_TRACKING_URI'] = uri
-        self.addCleanup(os.environ.pop, 'MLFLOW_TRACKING_URI', None)
-        mlflow.set_tracking_uri(uri)
+        use_temporary_mlflow(self)
         self.model = f'api_model_{self.faker.unique.random_int(1, 10**9)}'
         policy = Path(self.repo_path, 'releases', f'{self.model}.yaml')
         policy.parent.mkdir(exist_ok=True)

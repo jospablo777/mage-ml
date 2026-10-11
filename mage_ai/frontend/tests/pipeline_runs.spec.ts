@@ -9,8 +9,9 @@ test('ensure pipeline "example_pipeline" runs successfully', async ({ page }) =>
   await page.getByRole('button', { name: 'Run@once' }).click();
   await page.getByRole('button', { name: 'Run now' }).click();
 
-  // Expect trigger's status change from `N/A` to 'running'.
-  await expect(page.locator('#pipeline-triggers-row-0')).toContainText('running');
+  // Expect trigger's status change from `N/A` to 'running', or to 'completed' when the
+  // run ends before the page refreshes.
+  await expect(page.locator('#pipeline-triggers-row-0')).toContainText(/running|completed/);
 
   // Go to trigger's detail page.
   await page.locator('#pipeline-triggers-row-0').getByRole('link').click();

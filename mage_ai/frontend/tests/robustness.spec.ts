@@ -98,3 +98,16 @@ test('pages fit a 1024 px wide screen', async ({ page }) => {
     expect(overflow, path).toBeLessThanOrEqual(0);
   }
 });
+
+test('the code keeps its width in the editor on an 820 px wide screen', async ({ page }) => {
+  // The side panels kept their default widths and left the code 20 px.
+  await page.setViewportSize({ height: 1180, width: 820 });
+  await page.goto(`/pipelines/${pipelineUUID}/edit`);
+  const editor = page.locator('.monaco-editor').first();
+  await editor.waitFor();
+  await page.waitForTimeout(1500);
+
+  const box = await editor.boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(240);
+  expect(box.x + box.width).toBeLessThanOrEqual(820);
+});

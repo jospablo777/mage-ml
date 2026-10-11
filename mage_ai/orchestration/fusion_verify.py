@@ -604,6 +604,7 @@ def _outputs(pipeline, block_uuid: str, run: PipelineRun) -> Dict[str, Any]:
         output_variable_only=True,
     )
     block = pipeline.get_block(block_uuid)
+    variables = run.get_variables()
     # A block planned in a compiled chain stores its plan; compare what it computes.
     return {
         name: plans.resolve(
@@ -613,6 +614,7 @@ def _outputs(pipeline, block_uuid: str, run: PipelineRun) -> Dict[str, Any]:
             ),
             block,
             run.execution_partition,
+            variables,
         )
         for name in names
     }

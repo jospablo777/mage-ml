@@ -4,6 +4,8 @@ psycopg2-binary==2.9.11
 scikit-learn==1.9.1
 numpy==2.5.3
 pandas==3.0.6
-pyarrow==26.0.0
+# mlflow 3.17 requires pyarrow below 26. The server writes one Parquet file, which
+# pyarrow 26 in Mage reads.
+pyarrow==25.0.1
 pillow==12.3.0
 skops==0.16.0

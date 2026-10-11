@@ -5,6 +5,7 @@ A block's exception keeps its type; MageML adds notes to it (PEP 678), which Pyt
 after the error message in the notebook, in run logs and in the CLI.
 """
 import errno
+import importlib.util
 import linecache
 import os
 import shlex
@@ -37,11 +38,74 @@ def package_for(module: str) -> str:
     return module.split('.')[0].replace('_', '-')
 
 
-def hint_for(error: BaseException) -> Optional[str]:
+def _module_location(name: str) -> Optional[str]:
+    """Where Python finds the top-level module name: its file or folder, or None."""
+    module = sys.modules.get(name)
+    origin = getattr(module, '__file__', None)
+    if origin is None:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError):
+            return None
+        if spec is None:
+            return None
+        origin = spec.origin if spec.has_location else None
+        if origin is None and spec.submodule_search_locations:
+            origin = next(iter(spec.submodule_search_locations), None)
+    if origin is None:
+        return None
+    return os.path.dirname(origin) if os.path.basename(origin) == '__init__.py' else origin
+
+
+def _inside(path: str, folder: str) -> bool:
+    path, folder = os.path.realpath(path), os.path.realpath(folder)
+    return path == folder or path.startswith(folder + os.sep)
+
+
+def _project_path(repo_path: Optional[str]) -> Optional[str]:
+    if repo_path:
+        return repo_path
+    try:
+        from mage_ai.settings.repo import get_repo_path
+
+        return get_repo_path()
+    except Exception:
+        return None
+
+
+def _missing_submodule_hint(name: str, repo_path: Optional[str]) -> Optional[str]:
+    """
+    The hint for a.b missing while a is found: installing a package named a would not help.
+    A project named like another module, such as test, json or email, is the usual cause.
+    """
+    top = name.split('.')[0]
+    location = _module_location(top)
+    if location is None:
+        return None
+    project = _project_path(repo_path)
+    if project and top == os.path.basename(os.path.normpath(project)):
+        if _inside(location, project):
+            return f'The project has no module {name}. Check the file and folder names.'
+        return (
+            f'The project folder {top} has the name of the module at {location}, which '
+            f'Python finds first, so {name} is looked up there. Rename the project folder, '
+            f'and the imports that start with {top}., to a name no installed module has.'
+        )
+    return (
+        f'{top} is installed but has no module {name}. Check the module name, and the '
+        f'installed version with `uv pip show {package_for(top)}`.'
+    )
+
+
+def hint_for(error: BaseException, repo_path: Optional[str] = None) -> Optional[str]:
     """What to do about a common error, or None when there is nothing useful to add."""
     if isinstance(error, ModuleNotFoundError) and error.name:
         if error.name.split('.')[0] == 'mage_ai':
             return None
+        if '.' in error.name:
+            hint = _missing_submodule_hint(error.name, repo_path)
+            if hint:
+                return hint
         package = package_for(error.name)
         return (
             f'{package} is not installed in the Python environment MageML runs in '
@@ -110,7 +174,7 @@ def annotate_block_error(error: BaseException, block) -> BaseException:
             pass
     if where:
         error.add_note(f'Block {where}{f" ({path})" if path else ""} failed.')
-    hint = hint_for(error)
+    hint = hint_for(error, repo_path)
     if hint:
         error.add_note(hint)
     return error

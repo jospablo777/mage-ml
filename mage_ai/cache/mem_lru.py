@@ -1,6 +1,7 @@
 import copy
 import os
 import sys
+import time
 import traceback
 from functools import wraps
 
@@ -47,9 +48,19 @@ class MemorySizeLRUCache(LRUCache):
         return sys.getsizeof(value['content'])
 
 
+# How old a file must be before its version identifies its content. ext4 records times at
+# the kernel tick, so a file rewritten within a few milliseconds with the same size keeps
+# its version.
+SETTLE_NS = 2_000_000_000
+
+
 def file_version(file_path):
     info = os.stat(file_path)
     return info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size
+
+
+def _settled(version) -> bool:
+    return time.time_ns() - max(version[2], version[3]) > SETTLE_NS
 
 
 def cache_file_read(cache):
@@ -69,7 +80,7 @@ def cache_file_read(cache):
 
             try:
                 content = func(file_path, *args, **kwargs)
-                if file_version(file_path) == version:
+                if file_version(file_path) == version and _settled(version):
                     cache[file_path] = {'content': content, 'version': version}
                 return copy.deepcopy(content)
             except Exception:
@@ -96,7 +107,7 @@ def async_cache_file_read(cache):
 
             try:
                 content = await func(file_path, *args, **kwargs)
-                if file_version(file_path) == version:
+                if file_version(file_path) == version and _settled(version):
                     cache[file_path] = {'content': content, 'version': version}
                 return copy.deepcopy(content)
             except Exception:

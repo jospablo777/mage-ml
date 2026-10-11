@@ -197,16 +197,30 @@ def ensure(environment: Environment, log=print) -> Path:
 def _run(command: List[str], log) -> None:
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        encoding='utf-8', errors='replace',
+        encoding='utf-8', errors='replace', start_new_session=HAS_PROCESS_GROUPS,
     )
+    timed_out = threading.Event()
+
+    def stop():
+        timed_out.set()
+        stop_process_group(process)
+
+    # A timer: uv can wait on the network without printing or closing its output.
+    timer = threading.Timer(BUILD_TIMEOUT_SECONDS, stop)
+    timer.daemon = True
+    timer.start()
     lines = []
-    for line in process.stdout:
-        lines.append(line.rstrip())
-        log(line.rstrip())
     try:
-        code = process.wait(timeout=BUILD_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
+        for line in process.stdout:
+            lines.append(line.rstrip())
+            log(line.rstrip())
+        code = process.wait()
+    except BaseException:
+        stop_process_group(process)
+        raise
+    finally:
+        timer.cancel()
+    if timed_out.is_set():
         raise PipelineEnvironmentError(
             f'Building the environment took longer than {BUILD_TIMEOUT_SECONDS} seconds.'
         )

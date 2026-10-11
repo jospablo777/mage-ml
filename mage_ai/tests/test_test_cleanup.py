@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,3 +80,24 @@ class TestDirectoryCleanup(unittest.TestCase):
                 remove_test_directory(link)
 
             self.assertEqual(marker.read_text(), 'project data')
+
+
+class CollectionTest(unittest.TestCase):
+    def test_importing_the_predicate_tests_writes_nothing_in_the_working_directory(self):
+        """
+        test_predicates built its tests when imported and created 701 data loader files in
+        data_loaders/ of the working directory, the checkout in a test run.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(
+                [
+                    sys.executable, '-c',
+                    'import mage_ai.tests.data_preparation.models.global_hooks.test_predicates',
+                ],
+                cwd=directory,
+                # As pytest starts: the project path comes from the working directory.
+                env={k: v for k, v in os.environ.items() if k != 'MAGE_REPO_PATH'},
+                check=True,
+                capture_output=True, timeout=300,
+            )
+            self.assertFalse(Path(directory, 'data_loaders').exists())
