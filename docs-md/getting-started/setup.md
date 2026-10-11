@@ -203,11 +203,6 @@ environment, put the extras in brackets:
 | `streaming`            | streaming pipelines                                  |
 | `trino`                | Trino                                                |
 
-The `integrations` extra needs a C compiler: one of its packages, ete4, is published as
-source only and is compiled on install. On Debian and Ubuntu install `build-essential`,
-on Fedora, RHEL and Rocky Linux `gcc`, and on macOS the Xcode Command Line Tools
-(`xcode-select --install`).
-
 The image built from the repository's Dockerfile includes the `all` and `integrations`
 extras. To add other Python packages to a project, see
 [Install dependencies](install-dependencies.md).

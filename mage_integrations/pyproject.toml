@@ -38,7 +38,6 @@ dependencies = [
   "psycopg2-binary>=2.9.10",
   "pyarrow>=26.0.0",
   "pymongo>=4.6.3,<5",
-  "pymongo_schema>=0.4.2",
   "python-dateutil>=2.9",
   "python-magic==0.4.27",
   "redshift-connector>=2.1.14,<3",

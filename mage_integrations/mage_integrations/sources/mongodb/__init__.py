@@ -1,10 +1,6 @@
-import uuid
 from datetime import datetime
 from typing import Dict, Generator, List
 
-from bson import Binary, Code, Decimal128, Regex
-from pymongo_schema.extract import extract_pymongo_client_schema
-from pymongo_schema.mongo_sql_types import PYMONGO_TYPE_TO_TYPE_STRING
 from singer import catalog
 
 import mage_integrations.sources.mongodb.tap_mongodb.sync_strategies.common as common
@@ -21,18 +17,13 @@ from mage_integrations.sources.constants import (
     COLUMN_TYPE_STRING,
     REPLICATION_METHOD_LOG_BASED,
 )
+from mage_integrations.sources.mongodb.schema import extract_schema
 from mage_integrations.sources.mongodb.tap_mongodb import build_client, do_sync
 from mage_integrations.sources.mongodb.tap_mongodb.sync_strategies.utils import (
     build_find_filter,
 )
 from mage_integrations.utils.array import find_index
 from mage_integrations.utils.dictionary import index_by
-
-# BSON types pymongo_schema does not know, typed as the sync emits them: Decimal128 as a
-# number, and binary and UUID values as text.
-PYMONGO_TYPE_TO_TYPE_STRING.setdefault(Decimal128, 'float')
-for bson_text_type in (Binary, bytes, uuid.UUID, Regex, Code):
-    PYMONGO_TYPE_TO_TYPE_STRING.setdefault(bson_text_type, 'string')
 
 MONGO_TYPES = {
     'integer': COLUMN_TYPE_INTEGER,
@@ -73,19 +64,21 @@ class MongoDB(Source):
         client = build_client(self.config)
 
         database = self.config['database']
-        schema = extract_pymongo_client_schema(
+        # 0 reads every document; a number samples that many per collection.
+        schema = extract_schema(
             client,
-            database_names=[database],
+            database,
             collection_names=streams,
+            sample_size=int(self.config.get('discover_sample_size') or 0),
         )
 
         catalog_entries = []
 
-        for stream_id, data1 in schema[database].items():
+        for stream_id, fields in schema.items():
             properties = {}
 
-            for column, data2 in data1['object'].items():
-                properties[column] = column_schema(data2)
+            for column, field in fields.items():
+                properties[column] = column_schema(field)
 
             schema = catalog.Schema.from_dict(dict(
                 properties=properties,
