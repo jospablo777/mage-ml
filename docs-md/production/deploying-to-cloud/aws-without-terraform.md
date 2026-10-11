@@ -53,8 +53,7 @@ uv sync --locked --no-default-groups --extra postgres
 ```
 
 > [!NOTE]
-> `pip install mage-ai` and the repository's `scripts/run_ec2.sh` script install upstream
-> Mage from PyPI, not MageML.
+> `pip install mage-ai` installs upstream Mage from PyPI, not MageML.
 
 ---
 
