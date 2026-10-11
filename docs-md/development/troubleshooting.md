@@ -2,6 +2,30 @@
 
 *Debugging common issues in MageML and other frequently asked questions.*
 
+## When a block fails
+
+The traceback names the block's file and the line that failed, in the notebook, in the run's
+logs and in `mage run`. The last lines name the block and, for common causes, what to do:
+
+```text
+ModuleNotFoundError: No module named 'sklearn'
+Block train (transformers/train.py) failed.
+scikit-learn is not installed in the Python environment MageML runs in (/opt/mage/bin/python).
+Install it with `uv pip install --python /opt/mage/bin/python scikit-learn` and add it to the
+project's requirements.txt, so deployments get it too.
+```
+
+| Message | What to do |
+| --- | --- |
+| `... is not installed in the Python environment MageML runs in` | Install the package with the command shown and add it to `requirements.txt` |
+| `Profile 'prod' is not in .../io_config.yaml. Its profiles: ...` | Add the profile, or use one of those listed in the block |
+| `Warning: POSTGRES_HOST in profile 'default' ... is None because env_var('...') is not set` | Set the variable in the environment MageML runs in, or the secret |
+| `MageML could not reach the server` | Check host, port and credentials in the block's io_config profile, and that the server is reachable |
+| `... was killed (SIGKILL), most often by the system when it runs out of memory` | Read fewer rows or columns, process in chunks, or give MageML more memory |
+| `Block ... broke contract ...` | The output broke its [data contract](../guides/blocks/data-contracts.md); the lines above list each broken rule |
+
+`mage run` exits with 1 when a block fails or breaks its contract.
+
 ## Pipeline edit page freezes browser
 
 The data output of a block contains too much information for the browser to render.
