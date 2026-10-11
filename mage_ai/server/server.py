@@ -648,16 +648,23 @@ async def main(
     )
 
     port = int(port)
+    requested_port = port
     max_port = port + 100
     try:
         while is_port_in_use(port, host=host):
             if port > max_port:
                 raise Exception(
-                    'Unable to find an open port, please clear your running processes if possible.'
+                    f'Ports {requested_port} to {max_port} are all in use. Stop the processes '
+                    'using them, or choose another port with --port.'
                 )
             port += 1
     except OSError:
         logger.error(f'Socket error while trying to find an open port. Defaulting to port {port}')
+    if port != requested_port:
+        logger.warning(
+            f'Port {requested_port} is in use, so MageML runs on port {port}. Choose another '
+            'port with --port.'
+        )
 
     app.listen(
         port,
