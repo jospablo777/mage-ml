@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from inspect import isawaitable
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from mage_ai.kernels.default.utils import (
@@ -11,6 +10,7 @@ from mage_ai.kernels.default.utils import (
 )
 from mage_ai.kernels.models import Kernel as KernelBase
 from mage_ai.kernels.models import KernelProcess as KernelProcessBase
+from mage_ai.kernels.models import request_usage
 from mage_ai.server.active_kernel import interrupt_kernel, restart_kernel, start_kernel
 
 
@@ -71,22 +71,7 @@ class KernelWrapper(KernelBase):
         self.inactive_kernels = None
 
     async def prepare_usage(self):
-        try:
-            client = self.kernel.client()
-            session = self.kernel.session
-            control_channel = client.control_channel
-            usage_request = session.msg('usage_request', {})
-
-            control_channel.send(usage_request)
-            res = client.control_channel.get_msg(timeout=3)
-            if isawaitable(res):
-                # control_channel.get_msg may return a Future,
-                # depending on configured KernelManager class
-                res = await res
-            self.usage = res.get('content')
-            control_channel.stop()
-        except Exception:
-            pass
+        self.usage = await request_usage(self.kernel)
 
     def is_ready(self) -> bool:
         return self.usage is not None

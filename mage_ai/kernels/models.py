@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from inspect import isawaitable
 from multiprocessing import Process
@@ -55,6 +56,51 @@ class PConn(BaseDataClass):
     status: Optional[str] = None
 
 
+USAGE_TIMEOUT_SECONDS = 3
+
+
+def close_client(client) -> None:
+    """
+    Closes a kernel client's sockets, and its zmq context when the client made it. A client
+    left open is closed by the garbage collector, whose Context.destroy() waits without end
+    for messages the kernel never took (the sockets linger forever by default): the web
+    server froze with it, since the collector runs on its thread.
+    """
+    try:
+        client.stop_channels()
+    except Exception:
+        pass
+    context = getattr(client, 'context', None)
+    if getattr(client, '_created_context', False) and context is not None and not context.closed:
+        context.destroy(linger=0)
+
+
+def _usage_exchange(kernel) -> Optional[Dict]:
+    client = kernel.client()
+    try:
+        control_channel = client.control_channel
+        control_channel.send(kernel.session.msg('usage_request', {}))
+        return control_channel.get_msg(timeout=USAGE_TIMEOUT_SECONDS)
+    finally:
+        close_client(client)
+
+
+async def request_usage(kernel) -> Optional[Dict]:
+    """
+    Asks a kernel for its CPU and memory use. The exchange waits up to 3 seconds for a busy
+    kernel, so it runs in a worker thread instead of the server's event loop.
+    """
+    try:
+        res = await asyncio.get_running_loop().run_in_executor(None, _usage_exchange, kernel)
+        if isawaitable(res):
+            # control_channel.get_msg may return a Future,
+            # depending on configured KernelManager class
+            res = await res
+        return res.get('content') if res else None
+    except Exception:
+        return None
+
+
 class KernelBase:
     def __init__(self, kernel):
         self.kernel = kernel
@@ -63,22 +109,7 @@ class KernelBase:
         self.inactive_kernels = None
 
     async def prepare_usage(self):
-        try:
-            client = self.kernel.client()
-            session = self.kernel.session
-            control_channel = client.control_channel
-            usage_request = session.msg('usage_request', {})
-
-            control_channel.send(usage_request)
-            res = client.control_channel.get_msg(timeout=3)
-            if isawaitable(res):
-                # control_channel.get_msg may return a Future,
-                # depending on configured KernelManager class
-                res = await res
-            self.usage = res.get('content')
-            control_channel.stop()
-        except Exception:
-            pass
+        self.usage = await request_usage(self.kernel)
 
     def is_ready(self) -> bool:
         return self.usage is not None
