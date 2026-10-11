@@ -13,6 +13,11 @@ Use Rust for the parts of a pipeline where speed matters: row-wise logic that Po
 expressions do not cover, CPU-heavy scoring, large joins and aggregations, or loaders that
 parse many files.
 
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/rust-block.light.svg" alt="A Rust block is a crate in the project workspace, built once into a cached binary that reads its inputs, plans with Polars and returns Arrow" />
+  <img className="hidden dark:block" src="/images/diagrams/rust-block.dark.svg" alt="A Rust block is a crate in the project workspace, built once into a cached binary that reads its inputs, plans with Polars and returns Arrow" />
+</Frame>
+
 ## Requirements
 
 - **Docker:** the Mage image has Rust installed and its dependencies prebuilt. Nothing to do.

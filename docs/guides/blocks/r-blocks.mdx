@@ -10,6 +10,11 @@ process, passes it the upstream outputs (data frames as tibbles), and stores wha
 returns like any other block's output. R blocks mix with Python, SQL, Polars and Rust blocks
 in any order.
 
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/r-block.light.svg" alt="An R block runs with Rscript and the locked rv library; the mageml package calls its function, with inputs and outputs as Arrow" />
+  <img className="hidden dark:block" src="/images/diagrams/r-block.dark.svg" alt="An R block runs with Rscript and the locked rv library; the mageml package calls its function, with inputs and outputs as Arrow" />
+</Frame>
+
 ## Requirements
 
 R blocks need R (4.6 by default) and [rv](https://github.com/A2-ai/rv), the package manager of the

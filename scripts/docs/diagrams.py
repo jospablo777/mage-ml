@@ -181,7 +181,71 @@ def documentation() -> Diagram:
     return d
 
 
+def tutorial_pipeline() -> Diagram:
+    """The pipeline the polyglot tutorial builds."""
+    d = Diagram(1080, 250, 'The tutorial pipeline')
+    d.group(24, 40, 200, 110, 'Python', COLORS['python'])
+    d.node(40, 72, 168, 58, 'load_orders', 'pandas', 'data loader')
+    d.group(244, 40, 412, 110, 'Rust: one compiled chain', COLORS['rust'])
+    d.node(260, 72, 170, 58, 'clean_orders', 'rust', 'transformer')
+    d.node(446, 72, 194, 58, 'monthly_revenue', 'rust', 'transformer')
+    d.group(676, 40, 380, 110, 'R: one session', COLORS['r'])
+    d.node(692, 72, 172, 58, 'revenue_trend', 'r', 'transformer')
+    d.node(880, 72, 160, 58, 'save_trend', 'r', 'data exporter')
+    d.arrow([(208, 101), (260, 101)])
+    d.arrow([(430, 101), (446, 101)])
+    d.arrow([(640, 101), (692, 101)])
+    d.arrow([(864, 101), (880, 101)])
+    d.badge(234, 170, 'Arrow', COLORS['apachearrow'])
+    d.badge(666, 170, 'Arrow', COLORS['apachearrow'])
+    d.text(540, 214, '200,000 generated orders, cleaned and summed by region and month in '
+           'Rust, then a month-over-month trend in R.', anchor='middle', size=12.5,
+           muted=False)
+    return d
+
+
+def rust_block() -> Diagram:
+    """How a Rust block builds and runs."""
+    d = Diagram(1080, 270, 'How a Rust block runs')
+    d.node(24, 60, 190, 60, 'transform.rs', 'rust', 'your block')
+    d.node(260, 60, 220, 60, 'Crate in rust/', 'rust', 'workspace, Cargo.lock')
+    d.node(526, 60, 230, 60, 'cargo build', 'rust', 'cached by code and deps')
+    d.node(802, 60, 254, 60, 'Block binary', 'rust', 'Polars linked in')
+    d.arrow([(214, 90), (260, 90)])
+    d.arrow([(480, 90), (526, 90)])
+    d.arrow([(756, 90), (802, 90)])
+    d.node(24, 170, 250, 60, 'Upstream outputs', 'apachearrow', 'Parquet or Arrow IPC')
+    d.node(420, 170, 240, 60, 'Run the binary', 'polars', 'LazyFrame in, plan, collect')
+    d.node(806, 170, 250, 60, 'Output and tests', 'apachearrow', 'Arrow IPC back to MageML')
+    d.arrow([(274, 200), (420, 200)])
+    d.arrow([(660, 200), (806, 200)])
+    d.arrow([(929, 120), (929, 150), (540, 150), (540, 170)], dashed=True)
+    return d
+
+
+def r_block() -> Diagram:
+    """How an R block runs."""
+    d = Diagram(1080, 230, 'How an R block runs')
+    d.node(24, 40, 200, 60, 'block.R', 'r', '#* @transformer')
+    d.node(270, 40, 270, 60, 'Rscript --vanilla', 'r', 'only the locked rv library')
+    d.node(586, 40, 220, 60, 'mageml package', 'r', 'calls your function')
+    d.node(852, 40, 204, 60, 'Data frame out', 'r', 'tibble')
+    d.arrow([(224, 70), (270, 70)])
+    d.arrow([(540, 70), (586, 70)])
+    d.arrow([(806, 70), (852, 70)])
+    d.node(270, 140, 270, 56, 'Inputs as Arrow', 'apachearrow', 'integer64 fits as integer')
+    d.node(586, 140, 220, 56, 'Outputs as Arrow', 'apachearrow', 'read by any block')
+    d.arrow([(405, 140), (405, 100)])
+    d.arrow([(696, 100), (696, 140)])
+    d.text(540, 222, 'In a production run, consecutive R blocks share one session: '
+           'packages load once.', anchor='middle', size=12)
+    return d
+
+
 DIAGRAMS = {
+    'rust-block': rust_block,
+    'r-block': r_block,
+    'tutorial-pipeline': tutorial_pipeline,
     'compiled-chains': compiled_chains,
     'pipeline-service': pipeline_service,
     'feast-flow': feast_flow,
