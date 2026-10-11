@@ -252,20 +252,38 @@ LINUX_BUILD_LIBRARIES = [
 ]
 
 
+# Packages that serve a library of the list in its place: RMariaDB builds with the MySQL
+# client library too, which rv sysdeps names on Ubuntu.
+LINUX_LIBRARY_ALTERNATIVES = {'libmariadb-dev': ('libmysqlclient-dev',)}
+
+
 def missing_linux_libraries() -> Optional[List[str]]:
-    """The build libraries dpkg does not list as installed; None without dpkg."""
+    """
+    The build libraries that no installed package is or provides; None without dpkg.
+    Ubuntu 24.04 has libfreetype-dev, which provides libfreetype6-dev.
+    """
     dpkg = shutil.which('dpkg-query')
     if not dpkg:
         return None
     result = subprocess.run(
-        [dpkg, '-W', '-f=${Package} ${db:Status-Status}\n', *LINUX_BUILD_LIBRARIES],
+        [dpkg, '-W', '-f=${Package} ${db:Status-Status} ${Provides}\n'],
         capture_output=True, text=True,
     )
-    installed = {
-        line.split()[0].split(':')[0] for line in result.stdout.splitlines()
-        if line.endswith(' installed')
-    }
-    return [p for p in LINUX_BUILD_LIBRARIES if p not in installed]
+    installed = set()
+    for line in result.stdout.splitlines():
+        package, _, rest = line.partition(' ')
+        status, _, provides = rest.partition(' ')
+        if status != 'installed':
+            continue
+        installed.add(package.split(':')[0])
+        installed.update(
+            name.split()[0] for name in provides.split(',') if name.strip()
+        )
+    return [
+        p for p in LINUX_BUILD_LIBRARIES
+        if p not in installed
+        and not installed.intersection(LINUX_LIBRARY_ALTERNATIVES.get(p, ()))
+    ]
 
 
 def _platform() -> str:
