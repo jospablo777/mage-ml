@@ -202,6 +202,30 @@ class CaptureTest(ExportTestCase):
         # ONNX Runtime is linked into the Rust program; only CatBoost is a Python package.
         self.assertEqual(capture_.artifact_modules, {'catboost'})
 
+    def test_onnx_blocks_build_and_run_on_trixie_with_a_cxx_library(self):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        (project / 'rust').mkdir()
+        manifest = '[workspace.dependencies]\nmage-block = {{ path = ".mage/sdk", features = {} }}\n'
+        capture_ = export.Capture(
+            name='s', project=project,
+            manifest={'pipelines': [{'blocks': [{'language': 'rust'}]}]},
+            rust_blocks=[('score', 'block_score')],
+        )
+
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres"]'))
+        self.assertFalse(export._uses_sdk_feature(capture_, 'onnx'))
+        plain = export._dockerfile(capture_)
+        self.assertIn('-slim-bookworm AS build', plain)
+        self.assertNotIn('g++', plain)
+
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres", "onnx"]'))
+        self.assertTrue(export._uses_sdk_feature(capture_, 'onnx'))
+        onnx = export._dockerfile(capture_)
+        self.assertIn('-slim-trixie AS build', onnx)
+        self.assertIn('FROM debian:trixie-slim', onnx)
+        self.assertIn('install -y --no-install-recommends g++', onnx)
+
     def test_an_include_outside_the_project_or_missing_stops_the_export(self):
         self.chain()
         with self.assertRaises(export.ExportError) as caught:

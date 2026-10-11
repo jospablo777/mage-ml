@@ -1444,6 +1444,19 @@ R_PREPARE = (
 )
 
 
+def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
+    """Whether the project's rust/Cargo.toml turns on a feature of MageML's crate."""
+    import tomllib
+
+    path = capture_.project / 'rust' / 'Cargo.toml'
+    try:
+        manifest = tomllib.loads(path.read_text(encoding='utf-8'))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    block = ((manifest.get('workspace') or {}).get('dependencies') or {}).get('mage-block')
+    return isinstance(block, dict) and feature in (block.get('features') or [])
+
+
 def _dockerfile(capture_: Capture) -> str:
     project = capture_.project.name
     rust = _rust_version()
@@ -1454,9 +1467,14 @@ def _dockerfile(capture_: Capture) -> str:
     copy_blocks = ''
     if capture_.rust_blocks:
         locked = '--locked ' if capture_.rust_locked else ''
+        # ONNX Runtime is C++: linking it needs the C++ standard library of g++.
+        cxx = (
+            'RUN apt-get update && apt-get install -y --no-install-recommends g++ && \\\n'
+            '    rm -rf /var/lib/apt/lists/*\n'
+        ) if _uses_sdk_feature(capture_, 'onnx') else ''
         rust_blocks = f'''
 # The Rust blocks, compiled once here into one binary that runs any of them.
-COPY rust ./rust
+{cxx}COPY rust ./rust
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     --mount=type=cache,target=/build/rust/target \\
     cargo build --release {locked}--manifest-path rust/Cargo.toml -p {RUST_BUNDLE} && \\
@@ -1506,8 +1524,12 @@ RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync
 ENV MAGE_R_SYNC=off \\
     XDG_CACHE_HOME=/tmp/mage-service-cache
 '''
+    # ONNX Runtime's static library needs GCC 14's C++ library, which Debian has from trixie
+    # on: the Rust programs build on trixie and run on it.
+    onnx = _uses_sdk_feature(capture_, 'onnx')
+    build_base = 'trixie' if onnx else 'bookworm'
     if capture_.needs_python:
-        base = 'trixie' if capture_.needs_r else 'bookworm'
+        base = 'trixie' if capture_.needs_r or onnx else 'bookworm'
         runtime = f'''FROM python:{python_version}-slim-{base}
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
@@ -1523,7 +1545,7 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
         )
         copy_python = 'COPY --chown=mage:mage python ./python\n'
     else:
-        runtime = 'FROM debian:bookworm-slim\n'
+        runtime = f'FROM debian:{build_base}-slim\n'
         python_env = ''
         copy_python = ''
     if capture_.models:
@@ -1536,7 +1558,7 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
 # {capture_.name}: pipelines exported from the Mage project {project}.
 # docker build -t {capture_.name} .
 
-FROM rust:{rust}-slim-bookworm AS build
+FROM rust:{rust}-slim-{build_base} AS build
 WORKDIR /build
 COPY build/mage_service ./mage_service
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
