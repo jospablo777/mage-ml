@@ -1416,11 +1416,7 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
             status=self.PipelineRunStatus.COMPLETED,
         )
 
-        from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
-        UsageStatisticLogger().pipeline_runs_impression_sync(
-            lambda: self.query.filter(self.status == self.PipelineRunStatus.COMPLETED).count(),
-        )
 
     @safe_db_query
     def create_block_run(

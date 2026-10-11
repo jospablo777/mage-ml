@@ -46,8 +46,6 @@ from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.utils import clean_name
-from mage_ai.usage_statistics.constants import EventNameType, EventObjectType
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class BlockExecutor:
@@ -695,21 +693,6 @@ class BlockExecutor:
                         message=traceback.format_exc(),
                     )
 
-                    if not skip_logging:
-                        asyncio.run(
-                            UsageStatisticLogger().error(
-                                event_name=EventNameType.BLOCK_RUN_ERROR,
-                                errors='\n'.join(errors or []),
-                                message=str(error),
-                                resource=EventObjectType.BLOCK_RUN,
-                                resource_id=self.block_uuid,
-                                resource_parent=EventObjectType.PIPELINE
-                                if self.pipeline
-                                else None,
-                                resource_parent_id=self.pipeline.uuid if self.pipeline else None,
-                            )
-                        )
-
                     if on_failure is not None:
                         on_failure(
                             self.block_uuid,
@@ -803,8 +786,6 @@ class BlockExecutor:
             # The code below causes error when running blocks in pipeline_executor
             # if not self.block_run and block_run_id:
             #     self.block_run = BlockRun.get_by_id(block_run_id)
-            # if self.block_run:
-            #     asyncio.run(UsageStatisticLogger().block_run_ended(self.block_run))
             self.logger_manager.output_logs_to_destination()
 
     def _execute(

@@ -71,6 +71,31 @@ class GetLatestVersionTests(unittest.TestCase):
                 self.assertEqual(run(get_latest_version()), VERSION)
                 fetch.assert_not_called()
 
+    def test_the_latest_github_release_tag_is_the_published_version(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        def session_answering(status, payload):
+            response = MagicMock(status=status)
+            response.json = AsyncMock(return_value=payload)
+            get = MagicMock()
+            get.__aenter__ = AsyncMock(return_value=response)
+            get.__aexit__ = AsyncMock(return_value=False)
+            session = MagicMock()
+            session.get = MagicMock(return_value=get)
+            session.__aenter__ = AsyncMock(return_value=session)
+            session.__aexit__ = AsyncMock(return_value=False)
+            return session
+
+        target = 'mage_ai.server.version_check.aiohttp.ClientSession'
+        with patch(target, return_value=session_answering(200, {'tag_name': 'v0.9.79+ml.6'})) \
+                as client:
+            self.assertEqual(run(fetch_published_version('owner/repo')), '0.9.79+ml.6')
+        url = client.return_value.get.call_args.args[0]
+        self.assertEqual(url, 'https://api.github.com/repos/owner/repo/releases/latest')
+        # No release yet: GitHub answers 404.
+        with patch(target, return_value=session_answering(404, {'message': 'Not Found'})):
+            self.assertIsNone(run(fetch_published_version('owner/repo')))
+
     def test_an_offline_lookup_returns_nothing_rather_than_raising(self):
         with patch(
             'mage_ai.server.version_check.aiohttp.ClientSession',

@@ -90,9 +90,6 @@ class Project:
 
         return config
 
-    @property
-    def help_improve_mage(self) -> bool:
-        return self.repo_config.help_improve_mage
 
     @property
     def project_uuid(self) -> str:

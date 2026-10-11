@@ -25,7 +25,6 @@ from mage_ai.presenters.charts.data_sources.system_metrics import (
     ChartDataSourceSystemMetrics,
 )
 from mage_ai.shared.hash import extract, merge_dict
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class BlockLayoutItemResource(GenericResource):
@@ -197,7 +196,6 @@ class BlockLayoutItemResource(GenericResource):
         if data_source_override:
             block_config_to_show['data_source'] = data_source_override
 
-        await UsageStatisticLogger().chart_impression(block_config_to_show)
 
         return self(
             merge_dict(

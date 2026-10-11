@@ -67,7 +67,6 @@ from mage_ai.shared.dates import as_utc, compare, utc_now
 from mage_ai.shared.environments import get_env
 from mage_ai.shared.hash import index_by, merge_dict
 from mage_ai.shared.retry import retry
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 MEMORY_USAGE_MAXIMUM = 0.95
 REQUIREMENTS_FILE = 'requirements.txt'
@@ -298,7 +297,6 @@ class PipelineScheduler:
                         pipeline=self.pipeline,
                         pipeline_run=self.pipeline_run,
                     )
-                    UsageStatisticLogger().pipeline_run_ended_sync(self.pipeline_run)
 
                 self.logger_manager.output_logs_to_destination()
 
@@ -377,7 +375,6 @@ class PipelineScheduler:
         error_msg: str,
         status=PipelineRun.PipelineRunStatus.FAILED,
     ) -> None:
-        UsageStatisticLogger().pipeline_run_ended_sync(self.pipeline_run)
 
         if status == PipelineRun.PipelineRunStatus.FAILED:
             # Only send notification when pipeline run status is FAILED
@@ -1866,7 +1863,6 @@ def stop_pipeline_run(
     # Update pipeline run status to cancelled
     pipeline_run.update(status=status)
 
-    UsageStatisticLogger().pipeline_run_ended_sync(pipeline_run)
 
     # Cancel all the block runs
     cancel_block_runs_and_jobs(pipeline_run, pipeline)

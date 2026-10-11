@@ -32,7 +32,6 @@ from mage_ai.orchestration.db.models.schedules import PipelineRun
 from mage_ai.presenters.blocks.graph import build_blocks_for_pipeline_run
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.hash import merge_dict
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class BlockResource(GenericResource):
@@ -239,16 +238,6 @@ class BlockResource(GenericResource):
 
         cache_block_action_object = await BlockActionObjectCache.initialize_cache()
         cache_block_action_object.update_block(block)
-
-        if block:
-            await UsageStatisticLogger().block_create(
-                block,
-                block_action_object=block_action_object,
-                custom_template=custom_template,
-                payload_config=payload_config,
-                pipeline=pipeline,
-                replicated_block=replicated_block,
-            )
 
         return self(block, user, **kwargs)
 

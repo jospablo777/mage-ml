@@ -1,9 +1,11 @@
 """
 Update check for the header badge.
 
-The badge used to appear whenever the version string on PyPI differed from the
-installed one. This fork carries a local version segment and can be ahead of the
-release it was forked from, so any difference marked it as out of date.
+MageML is published as GitHub releases (do_not_commit/github_release_instructions), so the
+check reads the repository's latest release instead of PyPI, where the name is not
+MageML's. The badge appears only for a strictly newer version (PEP 440): MageML's versions
+carry a local segment, such as 0.9.79+ml.4, and are ahead of the Mage release they are
+based on.
 """
 import os
 from typing import Optional
@@ -13,9 +15,9 @@ from packaging.version import InvalidVersion, Version
 
 from mage_ai.server.constants import VERSION
 
-PYPI_TIMEOUT_SECONDS = 3
-# The distribution this build is published as, not the project it was forked from.
-UPDATE_CHECK_PACKAGE = os.getenv('MAGE_UPDATE_CHECK_PACKAGE', 'mage-ml')
+TIMEOUT_SECONDS = 3
+# MageML is published as GitHub releases of this repository, not on PyPI.
+UPDATE_CHECK_REPOSITORY = os.getenv('MAGE_UPDATE_CHECK_REPOSITORY', 'jospablo777/mage-ml')
 UPDATE_CHECK_DISABLED_VALUES = ('0', 'false', 'False', 'no')
 
 
@@ -42,18 +44,30 @@ def newer_version(installed: str, candidate: Optional[str]) -> str:
     return installed
 
 
-async def fetch_published_version(package_name: str = UPDATE_CHECK_PACKAGE) -> Optional[str]:
+async def fetch_published_version(
+    repository: str = UPDATE_CHECK_REPOSITORY,
+) -> Optional[str]:
+    """The version of the repository's latest GitHub release (its tag without a leading
+    v), or None when there is none or GitHub cannot be reached."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                f'https://pypi.org/pypi/{package_name}/json',
-                timeout=PYPI_TIMEOUT_SECONDS,
+                f'https://api.github.com/repos/{repository}/releases/latest',
+                headers={'Accept': 'application/vnd.github+json'},
+                timeout=TIMEOUT_SECONDS,
             ) as response:
+                if response.status != 200:
+                    return None
                 response_json = await response.json()
-
-                return response_json.get('info', {}).get('version')
+                tag = response_json.get('tag_name') or ''
+                return tag[1:] if tag[:1] in ('v', 'V') else tag or None
     except Exception:
         return None
+
+
+def release_url(version: str, repository: str = UPDATE_CHECK_REPOSITORY) -> str:
+    """The page of a release, for the header's version link and Update badge."""
+    return f'https://github.com/{repository}/releases/tag/v{version}'
 
 
 async def get_latest_version() -> str:

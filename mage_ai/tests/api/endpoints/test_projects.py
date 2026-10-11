@@ -34,7 +34,6 @@ build_list_endpoint_tests(
     resource='project',
     result_keys_to_compare=[
         'features',
-        'help_improve_mage',
         'latest_version',
         'name',
         'openai_api_key',
@@ -65,7 +64,6 @@ build_list_endpoint_tests(
     resource='project',
     result_keys_to_compare=[
         'features',
-        'help_improve_mage',
         'latest_version',
         'name',
         'openai_api_key',
@@ -97,12 +95,10 @@ async def _assert_after_update(self, result, model_before_update, **kwargs):
 
     before_update = all([
         not all([v for v in model_before_update['features'].values()]),
-        not model_before_update['help_improve_mage'],
         not model_before_update['openai_api_key'],
     ])
     after_update = all([
         all([v for v in model_after_update['features'].values()]),
-        model_after_update['help_improve_mage'] == result['help_improve_mage'],
         model_after_update['openai_api_key'] == result['openai_api_key'],
     ])
 
@@ -117,7 +113,6 @@ build_update_endpoint_tests(
     get_resource_id=lambda self: self.faker.unique.name(),
     build_payload=lambda self: dict(
         activate_project='project_name',
-        help_improve_mage=True,
         features=reduce(lambda obj, key: merge_dict(obj, {
             key.value: True,
         }), [f for f in FeatureUUID], {}),

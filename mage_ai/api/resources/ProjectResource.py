@@ -1,6 +1,5 @@
 import os
 import subprocess
-import uuid
 
 import yaml
 
@@ -25,7 +24,6 @@ from mage_ai.settings.platform import (
 from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.environments import is_debug
 from mage_ai.shared.hash import combine_into, merge_dict
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 @async_ttl_cache(maxsize=1, ttl=600)
@@ -173,7 +171,6 @@ class ProjectResource(GenericResource):
             return self
 
         data = {}
-        should_log_project = self.model.get('help_improve_mage') or False
 
         if 'features' in payload:
             for k, v in payload.get('features', {}).items():
@@ -187,20 +184,6 @@ class ProjectResource(GenericResource):
                     repo_config.features or {},
                     features,
                 )
-
-        if 'help_improve_mage' in payload:
-            if payload['help_improve_mage']:
-                should_log_project = True
-
-                if not repo_config.project_uuid:
-                    data['project_uuid'] = uuid.uuid4().hex
-
-            data['help_improve_mage'] = payload['help_improve_mage']
-
-        if 'deny_improve_mage' in payload:
-            await UsageStatisticLogger().project_deny_improve_mage(
-                repo_config.project_uuid or data.get('project_uuid'),
-            )
 
         if 'openai_api_key' in payload:
             openai_api_key = payload.get('openai_api_key')
@@ -225,9 +208,6 @@ class ProjectResource(GenericResource):
             repo_config.save(**data)
 
         self.model = await build_project(repo_config, user=self.current_user)
-
-        if should_log_project:
-            await UsageStatisticLogger().project_impression()
 
         project = Project(repo_config=repo_config)
         if project.is_feature_enabled(FeatureUUID.DATA_INTEGRATION_IN_BATCH_PIPELINE):

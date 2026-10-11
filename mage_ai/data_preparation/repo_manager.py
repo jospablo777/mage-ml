@@ -73,7 +73,6 @@ class RepoConfig:
         self.spark_config = None
         self.notification_config = None
         self.queue_config = None
-        self.help_improve_mage = None
         self.openai_api_key = None
         self._pipelines = None
         self.retry_config = None
@@ -140,7 +139,6 @@ class RepoConfig:
             self.notification_config = repo_config.get('notification_config', dict())
             self.queue_config = repo_config.get('queue_config', dict())
             self.project_uuid = repo_config.get('project_uuid')
-            self.help_improve_mage = repo_config.get('help_improve_mage')
             self.openai_api_key = repo_config.get('openai_api_key')
             self.pipelines = repo_config.get('pipelines')
             self.retry_config = repo_config.get('retry_config')
@@ -216,7 +214,6 @@ class RepoConfig:
             emr_config=self.emr_config,
             features=self.features,
             gcp_cloud_run_config=self.gcp_cloud_run_config,
-            help_improve_mage=self.help_improve_mage,
             notification_config=self.notification_config,
             openai_api_key=self.openai_api_key,
             pipelines=self.pipelines.to_dict() if self.pipelines else self.pipelines,

@@ -12,7 +12,6 @@ from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.models.oauth import Permission, Role, User, UserRole
 from mage_ai.shared.hash import extract, ignore_keys, index_by
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class UserResource(DatabaseResource):
@@ -106,10 +105,6 @@ class UserResource(DatabaseResource):
                 resource.model, kwargs['oauth_client'])
             resource.model_options['oauth_token'] = oauth_token
 
-        async def _create_callback(resource):
-            await UsageStatisticLogger().users_impression()
-
-        self.on_create_callback = _create_callback
 
         return resource
 

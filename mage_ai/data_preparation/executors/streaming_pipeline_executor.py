@@ -20,7 +20,6 @@ from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.schedules import PipelineRun
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.retry import retry
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 def copy_messages(data):
@@ -297,7 +296,6 @@ class StreamingPipelineExecutor(PipelineExecutor):
             completed_at=datetime.now(tz=pytz.UTC),
         )
         if status == PipelineRun.PipelineRunStatus.FAILED:
-            asyncio.run(UsageStatisticLogger().pipeline_run_ended(pipeline_run))
             error_msg = None
             stacktrace = None
             if error is not None:

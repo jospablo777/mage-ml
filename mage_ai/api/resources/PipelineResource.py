@@ -60,7 +60,6 @@ from mage_ai.shared.array import find, find_index
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import group_by, ignore_keys, merge_dict
 from mage_ai.shared.strings import is_number
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 @safe_db_query
@@ -214,10 +213,6 @@ class PipelineResource(BaseResource):
             )
 
         total_count = len(pipeline_uuids)
-        await UsageStatisticLogger(
-            context_data=context_data,
-            repo_path=repo_path,
-        ).pipelines_impression(lambda: total_count)
 
         if not sorts:
             pipeline_uuids = sorted(pipeline_uuids, reverse=reverse_sort)
@@ -506,17 +501,6 @@ class PipelineResource(BaseResource):
                             block = config['block']
                             arr = [f'{pipeline.uuid}_block_{bn}' for bn in upstream_block_uuids]
                             block.update(dict(upstream_blocks=arr))
-
-        if pipeline:
-            await UsageStatisticLogger(
-                context_data=context_data,
-                repo_path=repo_path,
-            ).pipeline_create(
-                pipeline,
-                clone_pipeline_uuid=clone_pipeline_uuid,
-                llm_payload=llm_payload,
-                template_uuid=template_uuid,
-            )
 
         record_create_pipeline(
             resource_uuid=pipeline.uuid,

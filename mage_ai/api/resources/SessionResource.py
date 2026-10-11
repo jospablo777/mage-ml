@@ -15,7 +15,6 @@ from mage_ai.settings import (
 )
 from mage_ai.settings.keys import LDAP_DEFAULT_ACCESS, UPDATE_ROLES_ON_LOGIN
 from mage_ai.shared.dates import utc_now
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 
 class SessionResource(BaseResource):
@@ -75,10 +74,6 @@ class SessionResource(BaseResource):
                 {'message': 'Email/username and password are required.'})
             raise ApiError(error)
 
-        async def _create_callback(resource):
-            await UsageStatisticLogger().users_impression()
-
-        self.on_create_callback = _create_callback
 
         user = None
         if AUTHENTICATION_MODE.lower() == 'ldap':

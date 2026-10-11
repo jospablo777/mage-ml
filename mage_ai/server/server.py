@@ -126,7 +126,6 @@ from mage_ai.shared.io import chmod
 from mage_ai.shared.logger import LoggingLevel, set_logging_format
 from mage_ai.shared.singletons.memory import get_memory_manager_controller
 from mage_ai.shared.utils import is_port_in_use
-from mage_ai.usage_statistics.logger import UsageStatisticLogger
 
 EXPORTS_FOLDER = 'frontend_dist'
 BASE_PATH_EXPORTS_FOLDER = 'frontend_dist_base_path'
@@ -680,6 +679,7 @@ async def main(
 
         try:
             from mage_ai.orchestration import compilation
+            from mage_ai.settings.repo import get_repo_path
 
             # Pipelines with active triggers compile ahead of their next run.
             compilation.compile_active_pipelines(get_repo_path())
@@ -797,7 +797,6 @@ def start_server(
     set_repo_path(project)
     init_project_uuid(overwrite_uuid=project_uuid, root_project=True)
 
-    asyncio.run(UsageStatisticLogger().project_impression())
 
     set_logging_format(
         logging_format=SERVER_LOGGING_FORMAT,
