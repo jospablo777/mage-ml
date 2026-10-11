@@ -1,11 +1,14 @@
 import asyncio
 import os
 import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import tornado.httputil
 import tornado.ioloop
+import tornado.web
+from tornado.testing import AsyncHTTPTestCase
 
 import mage_ai.server.server as server_module
 from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
@@ -226,8 +229,8 @@ class PageRoutesTest(unittest.TestCase):
         routes = set(re.findall(r"\(r'(/[\w\-]+)", source))
         pages = os.path.join(os.path.dirname(mage_server.__file__), '..', 'frontend', 'pages')
         names = {n.split('.')[0] for n in os.listdir(pages)}
-        skipped = {'_app', '_document', '404', 'index', 'test', 'cache_items', 'block-layout',
-                   'pipeline-runs', 'oauth'}
+        skipped = {'_app', '_document', '404', 'index', 'block-layout', 'pipeline-runs',
+                   'oauth'}
         missing = sorted(f'/{n}' for n in names - skipped if f'/{n}' not in routes)
         self.assertEqual(missing, [])
 
@@ -255,3 +258,24 @@ class DefaultPasswordWarningTest(unittest.TestCase):
         self.assertIsNone(default_password_warning([self.user('a long passphrase')]))
         self.assertIsNone(default_password_warning([SimpleNamespace(password_hash=None)]))
         self.assertIsNone(default_password_warning([None]))
+
+
+class NotFoundPageTest(AsyncHTTPTestCase):
+    def get_app(self):
+        from mage_ai.server.server import NotFoundPageHandler
+
+        self.template_dir = tempfile.mkdtemp()
+        with open(os.path.join(self.template_dir, '404.html'), 'w') as file:
+            file.write('<html><body>This page could not be found</body></html>')
+        return tornado.web.Application(
+            [], default_handler_class=NotFoundPageHandler, template_path=self.template_dir,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.template_dir, ignore_errors=True)
+        super().tearDown()
+
+    def test_an_unknown_path_gets_the_apps_404_page(self):
+        response = self.fetch('/no/such/page')
+        self.assertEqual(response.code, 404)
+        self.assertIn(b'This page could not be found', response.body)

@@ -173,6 +173,14 @@ class MainPageHandler(tornado.web.RequestHandler):
         self.render('index.html')
 
 
+class NotFoundPageHandler(tornado.web.RequestHandler):
+    """Paths no route matches get the app's 404 page, not Tornado's plain text."""
+
+    def prepare(self):
+        self.set_status(404)
+        self.render('404.html')
+
+
 class PipelineRunsPageHandler(tornado.web.RequestHandler):
     def get(self, *args):
         self.render('pipeline-runs.html')
@@ -510,6 +518,7 @@ def make_app(
     return tornado.web.Application(
         updated_routes,
         autoreload=should_autoreload,
+        default_handler_class=NotFoundPageHandler,
         template_path=template_dir,
     )
 
