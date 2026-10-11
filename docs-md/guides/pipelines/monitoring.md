@@ -146,10 +146,14 @@ The monitor's result is its worst check. Results show:
 
 - on the **Monitors** page (left navigation), which lists every monitor with its latest
   result; opening one shows its checks across the last 20 runs, with their values;
-
 - on the pipeline run's page, under **Run record**, with the checks that didn't pass;
 - in the block run's logs;
 - in the history from `mage monitor-status <project path> <monitor> [--runs 10]`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/monitors.dark.png">
+  <img src="../../../docs/images/screenshots/monitors.light.png" alt="The Monitors page: monitor monthly_revenue on block monthly_revenue_py failed on drift of revenue and orders" />
+</picture>
 
 A failed monitor sends the pipeline's notifications (Slack, email, Teams and the others
 set in its notification settings), unless `notify: false`. With `fail_block: true` it

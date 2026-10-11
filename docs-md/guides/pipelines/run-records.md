@@ -26,6 +26,11 @@ Open a pipeline run. Below the block runs, **Run record** shows the code (number
 files and digest), the git commit, Python, Mage, the number of packages, and the
 variables.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/run-record.dark.png">
+  <img src="../../../docs/images/screenshots/run-record.light.png" alt="The Run record panel on a pipeline run: code, environment, variables, a failed monitor, Compare and Reproduce" />
+</picture>
+
 ## Compare two runs
 
 On a run's page, enter another run's id under **Compare with run id** and click

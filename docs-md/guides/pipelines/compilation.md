@@ -58,6 +58,11 @@ failed) and time, when the pipeline last compiled and whether the code changed s
 the pipeline's languages in order, such as `Python → Rust ×2 → R ×2`, with a hint when a
 single-language pipeline would run faster.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/compile-panel.dark.png">
+  <img src="../../../docs/images/screenshots/compile-panel.light.png" alt="The Compile panel open in the editor: compiled and up to date, 5 Python blocks checked, one chain and no language switches" />
+</picture>
+
 The pipelines list has a **Compiled** column with the same state and a compile button on
 each row.
 

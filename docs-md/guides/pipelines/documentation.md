@@ -18,6 +18,11 @@ Git and travels with it.
 - In a pipeline, **Documentation** in the left navigation opens the same page, at
   `/pipelines/<pipeline>/docs`.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/documentation.dark.png">
+  <img src="../../../docs/images/screenshots/documentation.light.png" alt="The Documentation page of a pipeline showing its README with a table of blocks and outputs" />
+</picture>
+
 ## Write it
 
 A pipeline without documentation offers three choices:

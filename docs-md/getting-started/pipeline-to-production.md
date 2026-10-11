@@ -184,6 +184,11 @@ With `notify: true`, a failed monitor sends the pipeline's
 left navigation lists every monitor with its latest result. Set `fail_block: true` to fail
 the block run instead of only reporting.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/images/screenshots/monitors.dark.png">
+  <img src="../../docs/images/screenshots/monitors.light.png" alt="The Monitors page: monitor monthly_revenue failed on drift of revenue and orders" />
+</picture>
+
 See [Monitoring](../guides/pipelines/monitoring.md) for freshness, model performance, Evidently
 and NannyML.
 
@@ -240,6 +245,11 @@ Reproduced.
 
 The run page shows the same record under **Run record**, with **Compare** and
 **Reproduce**. See [Run records](../guides/pipelines/run-records.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/images/screenshots/run-record.dark.png">
+  <img src="../../docs/images/screenshots/run-record.light.png" alt="The Run record panel of run 3: code, environment, the failed monitor, Compare and Reproduce" />
+</picture>
 
 Put the cleaning rule back to `amount > 1` before you export.
 
