@@ -24,7 +24,6 @@ import { OutputContainerStyle, OutputHeaderStyle } from './index.style';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { removeKeyboardFocus } from '@context/shared/utils';
 import { SampleDataType } from '@interfaces/BlockType';
-import Image from 'next/image';
 
 export type PipelineExecutionProps = {
   cancelPipeline: () => void;
@@ -183,10 +182,11 @@ function PipelineExecution({
                   } else if (dataType === DataTypeEnum.IMAGE_PNG) {
                     displayElement = (
                       <div style={{ backgroundColor: 'white' }}>
-                        <Image
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           alt={`Image ${idx} from code output`}
-                          layout="responsive"
                           src={`data:image/png;base64, ${data}`}
+                          style={{ height: 'auto', width: '100%' }}
                         />
                       </div>
                     );

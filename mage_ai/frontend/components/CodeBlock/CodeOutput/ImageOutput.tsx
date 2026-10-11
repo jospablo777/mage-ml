@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import React from 'react';
 import { UNIT } from '@oracle/styles/units/spacing';
 
@@ -18,10 +17,12 @@ function ImageOutput({ data, height = UNIT * 60, uuid }: ImageOutputProps): JSX.
         position: 'relative',
       }}
     >
-      <Image
+      {/* A plain img: next/image only adds optimization, which the static export turns off. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
         alt={`Image ${uuid ? `${uuid} ` : ''}from code output`}
-        layout="fill"
         src={`data:image/png;base64, ${data}`}
+        style={{ height: '100%', objectFit: 'contain', width: '100%' }}
       />
     </div>
   );
