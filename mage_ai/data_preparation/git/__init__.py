@@ -21,7 +21,7 @@ from mage_ai.data_preparation.git.utils import (
     get_oauth_access_token_for_user,
     get_provider_from_remote_url,
     poll_process_with_timeout,
-    run_command,
+    requirements_install_command,
     validate_authentication_for_remote_url,
 )
 from mage_ai.data_preparation.preferences import get_preferences
@@ -790,18 +790,15 @@ class Git:
         requirements_file = os.path.join(
             self.repo.working_dir, 'requirements.txt')
 
-        with VerboseFunctionExec(
-            f'Running "pip3 install -r {requirements_file}"',
-            verbose=True,
-        ):
+        if not os.path.exists(requirements_file):
+            return
+        command = requirements_install_command(requirements_file)
+        with VerboseFunctionExec(f'Running "{" ".join(command)}"', verbose=True):
             try:
-                if os.path.exists(requirements_file):
-                    cmd = f'pip3 install -r {requirements_file}'
-                    run_command(cmd)
+                subprocess.run(command, check=True)
                 logger.info(f'Installing {requirements_file} completed successfully.')
-            except Exception as err:
-                logger.warning(f'Skip installing {requirements_file} due to error: {str(err)}')
-                pass
+            except (OSError, subprocess.CalledProcessError) as err:
+                logger.warning(f'Skip installing {requirements_file} due to error: {err}')
 
     def __create_ssh_keys(self, overwrite: bool = False) -> str:
         return create_ssh_keys(self.git_config, self.project_repo_path, overwrite=overwrite)

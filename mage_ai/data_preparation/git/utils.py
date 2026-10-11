@@ -2,8 +2,9 @@ import asyncio
 import base64
 import os
 import re
+import shutil
 import subprocess
-from typing import Callable
+from typing import Callable, List
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from mage_ai.authentication.oauth.constants import ProviderName, get_ghe_hostname
@@ -152,9 +153,20 @@ IdentityFile {private_key_file}
     return private_key_file
 
 
-def run_command(command: str) -> None:
-    proc = subprocess.Popen(args=command, shell=True)
-    proc.wait()
+def requirements_install_command(requirements_file: str) -> List[str]:
+    """
+    The command that installs a project's requirements.txt into MageML's Python, as the
+    image does at start: uv, constrained to the versions MageML ships, or pip without uv.
+    """
+    import sys
+
+    if shutil.which('uv'):
+        command = ['uv', 'pip', 'install', '--python', sys.executable]
+        constraints = os.getenv('MAGE_RUNTIME_CONSTRAINTS')
+        if constraints and os.path.exists(constraints):
+            command += ['--constraint', constraints]
+        return command + ['--requirement', requirements_file]
+    return [sys.executable, '-m', 'pip', 'install', '--requirement', requirements_file]
 
 
 def add_host_to_known_hosts(remote_repo_link: str) -> bool:
