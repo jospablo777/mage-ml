@@ -4,8 +4,8 @@ import { MageApi, OUTPUT_LOADER, OUTPUT_TRANSFORMER } from './api';
 import { expect, test } from './base';
 
 /*
- * Block fusion from the pipeline settings: turning it on shows the chains that run as
- * stages, and a run from a trigger completes with them.
+ * Block fusion in the pipeline settings: on by default, it shows the chains that run as
+ * stages; it turns off and on, and a run from a trigger completes with it.
  */
 
 const SUFFIX = Date.now().toString(36);
@@ -37,28 +37,33 @@ test.afterAll(async () => {
   await apiContext.dispose();
 });
 
-test('turn on block fusion, see the plan, and run the pipeline', async ({ page }) => {
-  const title = 'Run chains of blocks together (block fusion)';
+test('block fusion is on by default, shows the plan, and can be turned off and on', async ({ page }) => {
+  const title = 'Run chains of blocks together (recommended)';
   await page.goto(`/pipelines/${pipelineUUID}/settings`);
   await expect(page.getByText(title, { exact: true })).toBeVisible();
+  // On by default: the saved pipeline's chain shows without touching the switch.
+  await expect(page.getByText(LOADER, { exact: true })).toBeVisible();
+  await expect(page.getByText(`→ ${TRANSFORMER}`, { exact: true })).toBeVisible();
+
   // The innermost element with the title and a switch: the setting's row.
   const row = page.locator('div')
     .filter({ has: page.getByText(title, { exact: true }) })
     .filter({ has: page.locator('input[type="checkbox"]') })
     .last();
-  await row.locator('input[type="checkbox"] + span').click();
-  await page.getByRole('button', { name: 'Save pipeline settings' }).click();
+  const save = page.getByRole('button', { name: 'Save pipeline settings' });
+  const fusion = async () => (await api.call('GET', `pipelines/${pipelineUUID}`)).pipeline;
 
+  await row.locator('input[type="checkbox"] + span').click();
+  await save.click();
+  await expect.poll(async () => (await fusion()).block_fusion).toBe('off');
+
+  await row.locator('input[type="checkbox"] + span').click();
+  await save.click();
   await expect.poll(async () => {
-    const { pipeline } = await api.call('GET', `pipelines/${pipelineUUID}`);
+    const pipeline = await fusion();
 
     return [pipeline.block_fusion, pipeline.fusion_plan];
   }).toEqual(['chains', [[LOADER, TRANSFORMER]]]);
-
-  // The plan comes from the server, for the saved pipeline.
-  await page.reload();
-  await expect(page.getByText(LOADER, { exact: true })).toBeVisible();
-  await expect(page.getByText(`→ ${TRANSFORMER}`, { exact: true })).toBeVisible();
 
   const run = await api.runOnce(pipelineUUID, `fusion_${SUFFIX}`);
   expect(run.status).toBe('completed');
