@@ -118,7 +118,7 @@ suppressPackageStartupMessages(library(tidyverse))
 
 # Writes df_1 in the format the extension tells: CSV, TSV, Parquet,
 # Feather/Arrow, JSON, NDJSON or RDS, creating the directory. Relative paths
-# start at the Mage project.
+# start at the MageML project.
 #* @data_exporter
 export_data <- function(df_1, ...) {
   write_file(df_1, "output/result.parquet")
@@ -246,7 +246,7 @@ help pages are in R, such as `?mageml::write_table`.
 | `s3_filesystem(profile)` | An arrow S3 file system with a profile's AWS settings |
 
 `database` is `"postgres"` (needs RPostgres), `"mysql"` (RMariaDB) or `"duckdb"` (duckdb).
-Only direct connections are supported. Relative file paths start at the Mage project, which
+Only direct connections are supported. Relative file paths start at the MageML project, which
 is the working directory of R blocks.
 
 ```r

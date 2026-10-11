@@ -4,7 +4,7 @@
 
 ## Overview
 
-All pipelines in a Mage project share the packages installed on the server. A pipeline
+All pipelines in a MageML project share the packages installed on the server. A pipeline
 that needs another version of a library (an older scikit-learn for a model trained with
 it, a client pinned by a vendor) conflicts with the others.
 
