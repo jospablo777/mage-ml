@@ -7,10 +7,12 @@ from sqlalchemy import case
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.expression import func
 
+from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import (
     ScheduleStatus,
+    ScheduleType,
     Trigger,
     add_or_update_trigger_for_pipeline_and_persist,
     remove_trigger,
@@ -31,6 +33,23 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.settings.server import HIDE_API_TRIGGER_TOKEN
 from mage_ai.shared.hash import ignore_keys, merge_dict
+
+
+def check_after_run(pipeline_uuid, schedule_type, settings, schedule_id=None, repo_path=None):
+    """Refuses an after-run trigger that follows nothing, itself, or makes a loop."""
+    from mage_ai.orchestration.after_runs import schedule_problems
+
+    try:
+        kind = ScheduleType(getattr(schedule_type, 'value', schedule_type))
+    except ValueError:
+        return
+    if kind != ScheduleType.AFTER_RUN:
+        return
+    problems = schedule_problems(
+        pipeline_uuid, settings, schedule_id=schedule_id, repo_path=repo_path,
+    )
+    if problems:
+        raise ApiError(dict(code=400, message=' '.join(problems)))
 
 
 class PipelineScheduleResource(DatabaseResource):
@@ -277,6 +296,11 @@ class PipelineScheduleResource(DatabaseResource):
 
             self.on_create_callback = _callback
 
+        check_after_run(
+            pipeline.uuid, payload.get('schedule_type'), payload.get('settings'),
+            repo_path=payload.get('repo_path'),
+        )
+
         # Tags are associations, not a column; they were dropped on create.
         tag_names = payload.pop('tags', None)
         resource = super().create(payload, user, **kwargs)
@@ -286,6 +310,14 @@ class PipelineScheduleResource(DatabaseResource):
 
     @safe_db_query
     def update(self, payload, **kwargs):
+        check_after_run(
+            self.model.pipeline_uuid,
+            payload.get('schedule_type', self.model.schedule_type),
+            payload.get('settings', self.model.settings),
+            schedule_id=self.model.id,
+            repo_path=self.model.repo_path,
+        )
+
         # Update associated event matchers
         arr = payload.pop('event_matchers', None)
         event_matchers = []

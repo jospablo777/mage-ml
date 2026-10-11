@@ -569,6 +569,10 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
         if self.status != ScheduleStatus.ACTIVE:
             return False
 
+        # After-run triggers start runs when another pipeline's run ends, not on a clock.
+        if self.schedule_type == ScheduleType.AFTER_RUN:
+            return False
+
         if (
             not self.landing_time_enabled()
             and self.start_time is not None

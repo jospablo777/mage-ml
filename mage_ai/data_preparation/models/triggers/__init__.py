@@ -29,10 +29,13 @@ class ScheduleType(StrEnum):
     API = 'api'
     EVENT = 'event'
     TIME = 'time'
+    # Starts a run when a run of another pipeline ends (orchestration/after_runs.py).
+    AFTER_RUN = 'after_run'
 
 
 SCHEDULE_TYPE_TO_LABEL = {
     ScheduleType.API: 'API',
+    ScheduleType.AFTER_RUN: 'After a run',
     ScheduleType.EVENT: 'Event',
     ScheduleType.TIME: 'Schedule',
 }
@@ -56,6 +59,9 @@ class SettingsConfig(BaseConfig):
     pipeline_run_limit: int = None
     timeout: int = None  # in seconds
     timeout_status: str = None
+    # After-run triggers: the pipeline whose runs start this one, and which endings do.
+    after_pipeline: str = None
+    after_status: str = None
 
 
 @dataclass
@@ -63,8 +69,9 @@ class Trigger(BaseConfig):
     name: str
     pipeline_uuid: str
     schedule_type: ScheduleType
-    start_time: datetime
-    schedule_interval: str
+    # API and after-run triggers have no interval, and need no start time.
+    start_time: datetime = None
+    schedule_interval: str = None
     status: ScheduleStatus = ScheduleStatus.INACTIVE
     last_enabled_at: datetime = None
     variables: Dict = field(default_factory=dict)

@@ -8,6 +8,7 @@ import pytz
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import desc, func, update
 
+from mage_ai.orchestration.after_runs import start_followers
 from mage_ai.data_integrations.utils.scheduler import (
     clear_source_output_files,
     get_extra_variables,
@@ -297,6 +298,7 @@ class PipelineScheduler:
                         pipeline=self.pipeline,
                         pipeline_run=self.pipeline_run,
                     )
+                    start_followers(self.pipeline_run, 'completed')
 
                 self.logger_manager.output_logs_to_destination()
 
@@ -403,6 +405,9 @@ class PipelineScheduler:
 
         # Cancel block runs that are still in progress for the pipeline run.
         cancel_block_runs_and_jobs(self.pipeline_run, self.pipeline)
+
+        if status == PipelineRun.PipelineRunStatus.FAILED:
+            start_followers(self.pipeline_run, 'failed')
 
     def __update_claimed(self, block_run: BlockRun, **values) -> bool:
         """
