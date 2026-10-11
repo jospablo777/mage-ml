@@ -62,3 +62,23 @@ class RunTests(TestCase):
         assert '[dependencies] [/x]' in result.output
         assert 'Traceback' not in result.output
         assert 'Pipeline run completed.' not in result.output
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_run_prints_contract_violations_without_a_traceback(
+        self, mock_executor_factory, mock_pipeline,
+    ):
+        from mage_ai.data_preparation.contracts import ContractViolation
+
+        mock_executor_factory.get_pipeline_executor.return_value.execute.side_effect = (
+            ContractViolation(
+                'Contract monthly_revenue failed for monthly_revenue_pandas:\n'
+                '  region: 12 values not in [north, south, east, west]'
+            )
+        )
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic'])
+        assert result.exit_code == 1
+        assert 'Contract monthly_revenue failed' in result.output
+        assert '[north, south, east, west]' in result.output
+        assert 'Traceback' not in result.output
+        assert 'Pipeline run completed.' not in result.output

@@ -473,8 +473,10 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
                 run_all_blocks=True,
                 update_status=update_status,
             )
-        if run_tests:
-            block.run_tests(global_vars=global_vars, update_tests=False)
+        # Without tests the data contract is still checked (contracts_only).
+        block.run_tests(
+            contracts_only=not run_tests, global_vars=global_vars, update_tests=False,
+        )
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
         release_block(block)

@@ -193,6 +193,7 @@ def run(
     import sentry_sdk
 
     from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
+    from mage_ai.data_preparation.contracts import ContractViolation
     from mage_ai.data_preparation.models.block.r.runtime import REnvironmentError
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.data_preparation.sync.git_sync import get_sync_config
@@ -283,8 +284,9 @@ def run(
                     template_runtime_configuration=template_runtime_configuration,
                     update_status=False,
                 )
-        except REnvironmentError as error:
-            # A setup problem with a fix in its message, not a failure of the block's code.
+        except (REnvironmentError, ContractViolation) as error:
+            # A setup or data problem with its explanation in the message (a contract's
+            # broken rules are printed above it), not a failure of the block's code.
             print(f'[red]{_e(error)}[/red]')
             raise typer.Exit(code=1)
         print('Pipeline run completed.')

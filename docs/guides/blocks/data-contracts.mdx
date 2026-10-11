@@ -126,8 +126,11 @@ It exits with 1 when the output breaks the contract, and 2 when the check can't 
 
 ## When the check runs
 
-- With the block's tests: in the notebook when you run the block with its tests, and in
-  every triggered run, backfill, retry and block fusion stage.
+- In every production run: triggered runs, backfills, retries, block fusion stages and
+  `mage run`, with or without `--test`. A contract is a guarantee about the data, not an
+  optional test, so a run without tests still checks it. `mage run` exits with 1 and
+  prints the broken rules when the output breaks the contract.
+- In the notebook, when you run the block with its tests.
 - After the output is stored, on the stored file. That's exactly what downstream blocks
   will read.
 - A Rust engine (the one ColumnAtlas uses) reads the whole output in one pass, plus one

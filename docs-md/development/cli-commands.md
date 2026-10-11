@@ -108,7 +108,7 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 **Parameters:**
 - `project_path` (required): Path of the MageML project that contains the pipeline
 - `pipeline_uuid` (required): UUID of the pipeline to be run
-- `--test` (optional): Specify if tests should be run (default: `False`)
+- `--test` (optional): Run the blocks' tests (default: `False`). Data contracts are checked either way; a broken contract stops the run with exit code 1
 - `--block-uuid` (optional): UUID of the block to be run (if not specified, runs entire pipeline)
 - `--execution-partition` (optional): Execution partition identifier
 - `--executor-type` (optional): Executor type to use

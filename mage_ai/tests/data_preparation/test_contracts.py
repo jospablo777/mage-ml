@@ -172,6 +172,31 @@ class DataContractTest(DBTestCase):
         self.assertEqual(document['columns']['customer_id'], dict(type='integer', nullable=False))
         self.assertEqual(document['columns']['segment'], dict(type='string', nullable=False))
 
+    def test_a_run_without_tests_still_checks_the_contract(self):
+        """mage run without --test skips block tests, not data contracts."""
+        from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
+
+        load = self.block('load', 'data_loader', LOAD, contract='customer_scores')
+        exported = self.block('export', 'data_exporter', EXPORT, upstream=[load])
+        marker = Path(self.repo_path) / f'{self.pipeline.uuid}.marker'
+
+        for fusion in ('chains', 'off'):
+            with self.subTest(block_fusion=fusion):
+                self.pipeline.block_fusion = fusion
+                with self.assertRaises(contracts.ContractViolation):
+                    ExecutorFactory.get_pipeline_executor(self.pipeline).execute(
+                        analyze_outputs=False, update_status=False, run_tests=False,
+                        global_vars=dict(scores=[0.1, 7.0], marker=str(marker)),
+                    )
+                self.assertFalse(marker.exists(), 'the exporter must not run')
+
+        ExecutorFactory.get_pipeline_executor(self.pipeline).execute(
+            analyze_outputs=False, update_status=False, run_tests=False,
+            global_vars=dict(scores=[0.1, 0.7], marker=str(marker)),
+        )
+        self.assertTrue(marker.exists())
+        self.assertIsNotNone(exported)
+
     def test_a_broken_contract_stops_the_exporter_in_a_triggered_run(self):
         from mage_ai.orchestration import pipeline_scheduler_original
         from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun

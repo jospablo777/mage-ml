@@ -211,12 +211,12 @@ async def run_blocks(
                     parallel=parallel,
                 )
 
-                if run_tests:
-                    block.run_tests(
-                        build_block_output_stdout=build_block_output_stdout,
-                        global_vars=global_vars,
-                        update_tests=False,
-                    )
+                block.run_tests(
+                    build_block_output_stdout=build_block_output_stdout,
+                    contracts_only=not run_tests,
+                    global_vars=global_vars,
+                    update_tests=False,
+                )
 
         return asyncio.create_task(execute_and_run_tests())
 
@@ -331,12 +331,12 @@ def run_blocks_sync(
                 update_status=update_status,
             )
 
-            if run_tests:
-                block.run_tests(
-                    build_block_output_stdout=build_block_output_stdout,
-                    global_vars=global_vars,
-                    update_tests=False,
-                )
+            block.run_tests(
+                build_block_output_stdout=build_block_output_stdout,
+                contracts_only=not run_tests,
+                global_vars=global_vars,
+                update_tests=False,
+            )
         tasks[block.uuid] = True
         for downstream_block in block.downstream_blocks:
             if downstream_block.uuid not in tasks and (
@@ -3408,8 +3408,14 @@ class Block(
         update_tests: bool = True,
         dynamic_block_index: int = None,
         dynamic_block_uuid: str = None,
+        contracts_only: bool = False,
         **kwargs,
     ) -> None:
+        """
+        Runs the block's tests and checks its data contract. With contracts_only, as in a
+        production run without tests (mage run without --test), the contract is still
+        checked: it is a guarantee about the data, not an optional test.
+        """
         if global_vars is None:
             global_vars = dict()
         if logging_tags is None:
@@ -3428,6 +3434,8 @@ class Block(
             return
 
         test_functions = []
+        if contracts_only:
+            update_tests = False
         if getattr(self, '_tests_ran_in_environment', False):
             # Running the test functions here would need the environment's packages.
             update_tests = False
@@ -3440,7 +3448,7 @@ class Block(
             elif os.path.exists(self.file_path):
                 with open(self.file_path) as file:
                     exec(file.read(), results)
-        else:
+        elif not contracts_only:
             test_functions = self.test_functions
 
         # Reading the outputs back loads the whole data; only test functions use them.
@@ -3522,7 +3530,11 @@ class Block(
                     raise Exception(f'Failed to pass tests for block {self.uuid}')
 
             if contract_failure:
-                raise Exception(contract_failure)
+                from mage_ai.data_preparation.contracts import ContractViolation
+
+                raise ContractViolation(contract_failure)
+            if contracts_only:
+                return
 
             handle_run_tests(
                 self,

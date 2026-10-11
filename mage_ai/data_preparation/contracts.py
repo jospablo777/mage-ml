@@ -50,6 +50,10 @@ class ContractError(Exception):
     pass
 
 
+class ContractViolation(Exception):
+    """A block's output broke its contract: a problem with the data, not with the code."""
+
+
 @dataclass(frozen=True)
 class Binding:
     name: str
