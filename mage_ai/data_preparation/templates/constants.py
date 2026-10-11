@@ -865,6 +865,10 @@ RUST_TEMPLATES = [
         BlockType.TRANSFORMER, 'Parallel computation', 'parallel.rs',
         'Compute a value per row on every core with Rayon.',
     ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'ONNX model inference', 'onnx.rs',
+        'Score rows with an ONNX model (needs the onnx feature in rust/Cargo.toml).',
+    ),
 ]
 TEMPLATES += RUST_TEMPLATES
 

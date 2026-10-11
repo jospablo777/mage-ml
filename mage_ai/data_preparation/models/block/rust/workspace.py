@@ -35,7 +35,8 @@ resolver = "3"
 members = [".mage/blocks/*"]
 
 [workspace.dependencies]
-# The postgres feature gives blocks mage::postgres.
+# The postgres feature gives blocks mage::postgres; add "onnx" for mage::onnx (ONNX Runtime,
+# downloaded at the first build and linked into each block's program).
 mage-block = { path = ".mage/sdk", features = ["postgres"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

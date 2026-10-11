@@ -105,6 +105,9 @@ class RustBlockTest(DBTestCase):
             with self.subTest(template=f'{folder}/{name}'):
                 code = template_env.get_template(f'{folder}/rust/{name}').render(code='')
                 block_type = folders[folder]
+                if name == 'onnx.rs':
+                    # Needs the onnx feature: test_the_onnx_template_scores_rows builds it.
+                    continue
                 if name == 'postgres.rs':
                     # Needs a database: compiled here, run by integration_tests/postgres.
                     prepared = rust_build.prepare(
@@ -135,6 +138,40 @@ class RustBlockTest(DBTestCase):
                     self.assertEqual(run.outputs, [True])
         # The API exporter sent every row, in batches of 3.
         self.assertEqual([len(batch) for batch in self.received], [3, 1])
+
+    def test_the_onnx_template_scores_rows(self):
+        # Its own project: the onnx feature links ONNX Runtime into every block it builds.
+        from mage_ai.data_preparation.models.block.rust import workspace as rust_workspace
+
+        repo = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, repo, True)
+        workspace = rust_workspace.init(repo)
+        text = workspace.cargo_toml.read_text()
+        workspace.cargo_toml.write_text(
+            text.replace('features = ["postgres"]', 'features = ["postgres", "onnx"]'),
+        )
+        os.makedirs(os.path.join(repo, 'models'))
+        shutil.copy(
+            os.path.join(rust_workspace.SDK_SOURCE, 'tests', 'fixtures', 'regressor.onnx'),
+            os.path.join(repo, 'models', 'regressor.onnx'),
+        )
+        code = template_env.get_template('transformers/rust/onnx.rs').render(code='')
+
+        run = execute_rust_code(
+            BlockType.TRANSFORMER,
+            code,
+            block_uuid='score',
+            global_vars=dict(model='models/regressor.onnx', features=['x0', 'x1']),
+            input_vars=[pl.DataFrame({'x0': [0.0, 1.0, 2.0], 'x1': [0.0, 0.0, 3.0]})],
+            label='transformers/score.rs',
+            repo_path=repo,
+        )
+
+        output = run.outputs[0]
+        self.assertEqual(output.columns, ['x0', 'x1', 'variable'])
+        for got, expected in zip(output['variable'].to_list(), [1.0, 4.0, 1.0]):
+            self.assertAlmostEqual(got, expected, places=4)
+        self.assertTrue(all(test['passed'] for test in run.tests), run.tests)
 
     def serve_records(self, frame) -> str:
         """An HTTP API on localhost: GET returns the frame's rows, POST records them."""
