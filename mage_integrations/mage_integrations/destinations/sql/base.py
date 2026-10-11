@@ -35,7 +35,11 @@ class Destination(BaseDestination):
 
     @property
     def use_lowercase(self) -> bool:
-        return self.config.get('lower_case', True)
+        # lower_case is the setting; the MySQL and Doris templates used to write
+        # use_lowercase, which configs made from them still hold.
+        if 'lower_case' in self.config:
+            return self.config['lower_case']
+        return self.config.get('use_lowercase', True)
 
     @property
     def allow_reserved_words(self) -> bool:

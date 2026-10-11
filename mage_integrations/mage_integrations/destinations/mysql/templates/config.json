@@ -5,5 +5,5 @@
   "port": 3306,
   "table": "",
   "username": "",
-  "use_lowercase": true
+  "lower_case": true
 }

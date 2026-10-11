@@ -50,7 +50,7 @@ class MySQLDestinationTests(unittest.TestCase, SQLDestinationMixin):
           'port': 3306,
           'table': '',
           'username': '',
-          'use_lowercase': True
+          'lower_case': True
         },
     }
 
@@ -101,3 +101,16 @@ class MySQLDestinationTests(unittest.TestCase, SQLDestinationMixin):
         self.assertEqual(convert_column_to_type(str(2**64 - 1), 'SIGNED'), str(2**64 - 1))
         self.assertEqual(convert_column_to_type('True', 'SIGNED'), '1')
         self.assertEqual(convert_column_to_type('False', 'SIGNED'), '0')
+
+
+class LowerCaseSettingTests(unittest.TestCase):
+    def test_lower_case_and_the_old_template_key_both_apply(self):
+        base = {'database': 'db', 'host': 'h', 'password': 'p', 'port': 3306,
+                'table': 't', 'username': 'u'}
+        self.assertTrue(MySQL(config=base).use_lowercase)
+        self.assertFalse(MySQL(config={**base, 'lower_case': False}).use_lowercase)
+        # Configs made from the old template hold use_lowercase.
+        self.assertFalse(MySQL(config={**base, 'use_lowercase': False}).use_lowercase)
+        self.assertTrue(
+            MySQL(config={**base, 'lower_case': True, 'use_lowercase': False}).use_lowercase,
+        )
