@@ -56,7 +56,7 @@ class RBlock(Block):
         if upstream is not None:
             plan = upstream.extend(step)
         else:
-            plan = plans.Plan('r', [step], [plans.resolve(v, self, execution_partition)
+            plan = plans.Plan('r', [step], [plans.resolve(v, self, execution_partition, global_vars)
                                             for v in (input_vars or [])],
                               list(self.upstream_block_uuids or []), global_vars)
         if plans.may_plan(self, step):

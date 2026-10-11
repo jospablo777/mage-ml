@@ -415,9 +415,12 @@ class RustBlock(Block):
         if upstream is not None:
             plan = upstream.extend(step)
         else:
-            plan = plans.Plan('rust', [step], [plans.resolve(v, self, execution_partition)
-                                               for v in (input_vars or [])],
-                              list(self.upstream_block_uuids or []), global_vars)
+            inputs = [
+                plans.resolve(v, self, execution_partition, global_vars)
+                for v in (input_vars or [])
+            ]
+            plan = plans.Plan('rust', [step], inputs, list(self.upstream_block_uuids or []),
+                              global_vars)
         if plans.may_plan(self, step):
             self.test_functions = []
             return [plan]

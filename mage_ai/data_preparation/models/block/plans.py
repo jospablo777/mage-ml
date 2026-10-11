@@ -159,10 +159,16 @@ def mark_failed(block_uuid: str, message: str) -> None:
         pass
 
 
-def resolve(value: Any, block, execution_partition: Optional[str] = None) -> Any:
+def resolve(
+    value: Any,
+    block,
+    execution_partition: Optional[str] = None,
+    global_vars: Optional[Dict] = None,
+) -> Any:
     """
     A stored plan (read from storage, not passed in memory) run to its value, for a reader
-    outside the chain: a retry, a later stage, the editor.
+    outside the chain: a retry, a later stage, the editor. Storage keeps the plan's steps
+    but not the run's variables, which global_vars gives.
     """
     if not is_plan(value) or isinstance(value, Plan):
         return value
@@ -174,8 +180,11 @@ def resolve(value: Any, block, execution_partition: Optional[str] = None) -> Any
         variable = pipeline.variable_manager.get_variable(
             pipeline.uuid, uuid, 'output_0', partition=execution_partition,
         )
-        inputs.append(resolve(variable, upstream, execution_partition))
-    plan = Plan(stored['language'], stored['steps'], inputs, stored.get('upstream_uuids') or [])
+        inputs.append(resolve(variable, upstream, execution_partition, global_vars))
+    plan = Plan(
+        stored['language'], stored['steps'], inputs, stored.get('upstream_uuids') or [],
+        global_vars,
+    )
     outputs = run(plan, block, execution_partition).outputs
     return outputs[0] if outputs else None
 
