@@ -457,6 +457,7 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
                 'support yet.'
             )
             continue
+        _note_unchecked_guards(pipeline, block, project, where, capture_.notes)
         path = Path(block.file_path).resolve()
         if not path.is_file():
             problems.append(f'{where}: its file {path} is missing.')
@@ -513,6 +514,24 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         blocks=blocks,
         triggers=_triggers(pipeline, capture_.notes, problems),
     )
+
+
+def _note_unchecked_guards(pipeline, block, project: Path, where: str, notes: List[str]):
+    """Services run the blocks only: a data contract or monitor on a block is not checked."""
+    from mage_ai.data_preparation import contracts
+    from mage_ai.orchestration import monitors
+
+    try:
+        binding = contracts.binding_of(block)
+    except contracts.ContractError:
+        binding = None
+    if binding is not None and binding.enforcement != 'off':
+        notes.append(
+            f'{where}: the service does not check data contract {binding.name}; check the '
+            'output downstream or run the pipeline in MageML.'
+        )
+    for monitor in monitors.monitors_for(str(project), pipeline.uuid, block.uuid):
+        notes.append(f'{where}: the service does not run monitor {monitor.name}.')
 
 
 def _json_safe(value):

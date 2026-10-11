@@ -9,9 +9,9 @@ description: "Check every row of a block's output against declared rules, and st
 
 A data contract declares what a block's output must look like: which columns it has, their
 types, which can be missing, value ranges, allowed values, patterns, unique keys and row
-counts. Mage checks the whole output against the contract every time the block runs with
-its tests. If the output breaks the contract, the block fails like a failing test, and
-downstream blocks (exporters included) don't run.
+counts. Mage checks the whole output against the contract in every pipeline run, and in
+the notebook when you run the block with its tests. If the output breaks the contract, the
+block fails like a failing test, and downstream blocks (exporters included) don't run.
 
 Contracts are YAML files in the project, so they are versioned with the code and reviewed
 in pull requests.

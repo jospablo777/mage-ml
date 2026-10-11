@@ -83,6 +83,11 @@ nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, S
 on other databases (BigQuery, Snowflake, Trino, Redshift, SQL Server) and SQL
 blocks that use `block_output()` are not supported yet. Chart and markdown blocks are notebook only and are left out.
 
+A service runs the blocks, not the checks around them: [data
+contracts](/guides/blocks/data-contracts) and [monitors](/guides/pipelines/monitoring) are
+not checked in a service yet. The export report lists each one under **Notes**. Keep
+running the pipeline in MageML where those checks must stop bad data.
+
 ## 2. Build and run
 
 ```bash

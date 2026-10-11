@@ -129,6 +129,21 @@ class CaptureTest(ExportTestCase):
         self.assertIn('is a sensor block', problems)
         self.assertIn('missing_pipeline', problems)
 
+    def test_contracts_and_monitors_the_service_does_not_check_are_noted(self):
+        _, summary, _ = self.chain()
+        summary.configuration = dict(contract='regions')
+        self.pipeline.save()
+        (self.project / 'monitors').mkdir(exist_ok=True)
+        monitor = self.project / 'monitors' / f'{self.pipeline.uuid}.yaml'
+        monitor.write_text(f'pipeline: {self.pipeline.uuid}\nblock: {summary.uuid}\n')
+        self.addCleanup(monitor.unlink)
+
+        notes = '\n'.join(export.capture(self.repo_path, [self.pipeline.uuid]).notes)
+
+        self.assertIn(f'block {summary.uuid}: the service does not check data contract '
+                      'regions', notes)
+        self.assertIn(f'the service does not run monitor {self.pipeline.uuid}.', notes)
+
     def test_exporting_again_keeps_the_env_file_and_local_data(self):
         self.chain()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])

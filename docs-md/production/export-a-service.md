@@ -68,7 +68,8 @@ Python packages (7):
 Read it before you build:
 
 - **Blocks:** every block of every pipeline, with its language. A block the service cannot
-  run (a sensor, a dynamic block) stops the export and names the reason.
+  run (a sensor, a dynamic block) stops the export and names the reason. The service does
+  not check data contracts or run monitors; the notes list each one the pipeline has.
 - **Project files:** only the files the blocks need, found by following their imports.
   `generate_orders` is shared by both pipelines and copied once.
 - **Environment variables:** the ones the code reads, marked secret when they look like
