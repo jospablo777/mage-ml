@@ -39,7 +39,12 @@ def build_operation_resource_settings(
     right_value: Union[bool, Dict, float, int, List, str],
     first_object_key=first_object_key,
     repo_path: str = None,
+    create_block: bool = True,
 ) -> Dict:
+    """
+    With create_block False, the block is created when the test runs, in the test's project:
+    the settings of the generated tests are built on import, in the working directory.
+    """
     repo_path = repo_path or get_repo_path()
     settings = {
         BaseResource.__name__: dict(
@@ -74,7 +79,15 @@ def build_operation_resource_settings(
         ),
     }
 
-    if repo_path:
+    if not create_block:
+        settings[Block.__name__] = dict(
+            right_object_keys=['configuration', first_object_key],
+            operation_resource=None,
+            block_configuration={
+                first_object_key: right_value,
+            },
+        )
+    elif repo_path:
         settings[Block.__name__] = dict(
             right_object_keys=['configuration', first_object_key],
             operation_resource=Block.create(
@@ -543,13 +556,22 @@ def build_test_validate(
             left_value=left_value,
         )
 
+        operation_resource = settings['operation_resource']
+        if 'block_configuration' in settings:
+            operation_resource = Block.create(
+                uuid.uuid4().hex,
+                BlockType.DATA_LOADER,
+                self.repo_path,
+                configuration=settings['block_configuration'],
+            )
         options = ignore_keys(settings, [
+            'block_configuration',
             'right_object_keys',
             'operation_resource',
         ])
 
         self.assertTrue(predicate.validate(
-            settings['operation_resource'],
+            operation_resource,
             **options,
         ))
 
@@ -573,7 +595,10 @@ for object_type in PredicateObjectType:
                 continue
 
             operation_resource_settings = {}
-            for tup in build_operation_resource_settings(right_value).items():
+            for tup in build_operation_resource_settings(
+                right_value,
+                create_block=False,
+            ).items():
                 operation_resource_class_name, settings_init = tup
                 settings = settings_init.copy()
 
