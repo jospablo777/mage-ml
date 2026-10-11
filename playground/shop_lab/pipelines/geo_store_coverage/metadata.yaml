@@ -1,47 +1,91 @@
 blocks:
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - geo_nearest_store
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: geo_load_customers
+  retry_config: null
   status: not_executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: geo_load_customers
 - all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
   downstream_blocks:
   - geo_nearest_store
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: geo_load_stores
+  retry_config: null
   status: not_executed
+  timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: geo_load_stores
-- all_upstream_blocks_executed: true
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
   downstream_blocks:
   - geo_export_coverage
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: geo_nearest_store
+  retry_config: null
   status: not_executed
+  timeout: null
   type: transformer
   upstream_blocks:
   - geo_load_customers
   - geo_load_stores
   uuid: geo_nearest_store
-- all_upstream_blocks_executed: true
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
   downstream_blocks: []
+  executor_config: null
   executor_type: local_python
+  has_callback: null
   language: python
   name: geo_export_coverage
+  retry_config: null
   status: not_executed
+  timeout: null
   type: data_exporter
   upstream_blocks:
   - geo_nearest_store
   uuid: geo_export_coverage
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: null
+data_integration: null
 description: 'geopandas: the nearest store of each customer in Costa Rica.'
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
 name: geo_store_coverage
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
 type: python
 uuid: geo_store_coverage
+variables_dir: /home/src/mage_data/shop_lab
+widgets: []
