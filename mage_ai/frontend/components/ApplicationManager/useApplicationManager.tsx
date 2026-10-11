@@ -74,6 +74,7 @@ import { selectEntriesWithValues, selectKeys } from '@utils/hash';
 import { sortByKey } from '@utils/array';
 import { useKeyboardContext } from '@context/Keyboard';
 import { capitalize } from '@utils/string';
+import RouterRoot from '@components/shared/RouterRoot';
 
 const COMPONENT_UUID = 'ApplicationManager';
 const GROUP_ID = 'ApplicationManagerGroup';
@@ -929,27 +930,29 @@ export default function useApplicationManager({
     );
 
     refRoots?.current?.[uuid]?.render(
-      <KeyboardContext.Provider value={keyboardContext}>
-        <ThemeProvider theme={themeContext}>
-          <ModalProvider>
-            <ErrorProvider>
-              <WithOnMount
-                onMount={() => {
-                  setTimeout(() => {
-                    if (StatusEnum.MINIMIZED === state?.status) {
-                      minimizeApplication(uuid);
-                    } else {
-                      ref.current.style.display = 'block';
-                    }
-                  }, 1);
-                }}
-              >
-                {expansion}
-              </WithOnMount>
-            </ErrorProvider>
-          </ModalProvider>
-        </ThemeProvider>
-      </KeyboardContext.Provider>,
+      <RouterRoot>
+        <KeyboardContext.Provider value={keyboardContext}>
+          <ThemeProvider theme={themeContext}>
+            <ModalProvider>
+              <ErrorProvider>
+                <WithOnMount
+                  onMount={() => {
+                    setTimeout(() => {
+                      if (StatusEnum.MINIMIZED === state?.status) {
+                        minimizeApplication(uuid);
+                      } else {
+                        ref.current.style.display = 'block';
+                      }
+                    }, 1);
+                  }}
+                >
+                  {expansion}
+                </WithOnMount>
+              </ErrorProvider>
+            </ModalProvider>
+          </ThemeProvider>
+        </KeyboardContext.Provider>
+      </RouterRoot>,
     );
   }
 

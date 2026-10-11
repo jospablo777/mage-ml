@@ -116,6 +116,7 @@ import { sum } from '@utils/array';
 import { useError } from '@context/Error';
 import { useKeyboardContext } from '@context/Keyboard';
 import { StatusEnum } from '@storage/ApplicationManager/constants';
+import RouterRoot from '@components/shared/RouterRoot';
 
 function CommandCenter({ router: routerProp }: { router?: any }) {
   const router = routerProp || useRouter();
@@ -236,11 +237,13 @@ function CommandCenter({ router: routerProp }: { router?: any }) {
     const currentApplicationConfig = getCurrentApplicationConfiguration();
 
     refRootHeaderTitle?.current?.render(
-      <ApplicationHeaderTitle
-        application={currentApplicationConfig?.application}
-        applicationsRef={refApplications}
-        item={currentApplicationConfig?.item}
-      />,
+      <RouterRoot>
+        <ApplicationHeaderTitle
+          application={currentApplicationConfig?.application}
+          applicationsRef={refApplications}
+          item={currentApplicationConfig?.item}
+        />
+      </RouterRoot>,
     );
 
     activateClassNamesForRefs([refHeaderTitle]);
@@ -348,19 +351,21 @@ function CommandCenter({ router: routerProp }: { router?: any }) {
       }
 
       refRootApplications?.current?.render(
-        <ItemApplication
-          {...currentApplicationConfig}
-          applicationState={refApplicationState}
-          applicationsRef={refApplications}
-          closeCommandCenter={closeCommandCenter}
-          fetchItems={fetchItems}
-          getItemsActionResults={getItemsActionResults}
-          handleSelectItemRow={handleSelectItemRow}
-          refError={refError}
-          removeApplication={removeApplication}
-          router={router}
-          showError={showError}
-        />,
+        <RouterRoot>
+          <ItemApplication
+            {...currentApplicationConfig}
+            applicationState={refApplicationState}
+            applicationsRef={refApplications}
+            closeCommandCenter={closeCommandCenter}
+            fetchItems={fetchItems}
+            getItemsActionResults={getItemsActionResults}
+            handleSelectItemRow={handleSelectItemRow}
+            refError={refError}
+            removeApplication={removeApplication}
+            router={router}
+            showError={showError}
+          />
+        </RouterRoot>,
       );
 
       addHeaderTitle();
@@ -389,19 +394,21 @@ function CommandCenter({ router: routerProp }: { router?: any }) {
     }
 
     refRootApplicationsFooter?.current?.render(
-      <ApplicationFooter
-        {...currentApplicationConfig}
-        applicationState={refApplicationState}
-        applicationsRef={refApplications}
-        closeCommandCenter={closeCommandCenter}
-        closeOutput={closeOutput}
-        fetchItems={fetchItems}
-        getItemsActionResults={getItemsActionResults}
-        handleSelectItemRow={handleSelectItemRow}
-        refError={refError}
-        removeApplication={removeApplication}
-        router={router}
-      />,
+      <RouterRoot>
+        <ApplicationFooter
+          {...currentApplicationConfig}
+          applicationState={refApplicationState}
+          applicationsRef={refApplications}
+          closeCommandCenter={closeCommandCenter}
+          closeOutput={closeOutput}
+          fetchItems={fetchItems}
+          getItemsActionResults={getItemsActionResults}
+          handleSelectItemRow={handleSelectItemRow}
+          refError={refError}
+          removeApplication={removeApplication}
+          router={router}
+        />
+      </RouterRoot>,
     );
   }
 
@@ -741,7 +748,11 @@ function CommandCenter({ router: routerProp }: { router?: any }) {
       refRootOutputContainer.current = createRoot(domNode);
     }
 
-    refRootOutputContainer?.current?.render(<ItemOutput {...refOutputContainerState.current} />);
+    refRootOutputContainer?.current?.render(
+      <RouterRoot>
+        <ItemOutput {...refOutputContainerState.current} />
+      </RouterRoot>,
+    );
 
     openOutput();
   }
@@ -829,7 +840,7 @@ function CommandCenter({ router: routerProp }: { router?: any }) {
       );
     });
 
-    refRootItems?.current?.render(itemsEl);
+    refRootItems?.current?.render(<RouterRoot>{itemsEl}</RouterRoot>);
     handleNavigation(0, {
       disableFocusRemoval: true,
     });

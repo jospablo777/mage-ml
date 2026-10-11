@@ -43,6 +43,7 @@ import { getCurrentTheme, getThemeMode } from '@oracle/styles/themes/utils';
 import { gridTheme as gridThemeDefault, theme as stylesTheme } from '@styles/theme';
 import { isDemo } from '@utils/environment';
 import { queryFromUrl, queryString, redirectToUrl } from '@utils/url';
+import RouterRoot from '@components/shared/RouterRoot';
 
 const NextAppV2 = dynamic(() => import('@components/NextAppV2'));
 
@@ -150,19 +151,21 @@ function MyApp(props: MyAppProps & AppProps) {
       }
       if (commandCenterRootRef?.current) {
         commandCenterRootRef?.current?.render(
-          <KeyboardContext.Provider value={keyboardContextValue}>
-            <ThemeProvider theme={themeRef.current}>
-              <GridThemeProvider gridTheme={gridThemeDefault}>
-                <ModalProvider>
-                  <SheetProvider>
-                    <ErrorProvider>
-                      <CommandCenter router={router} />
-                    </ErrorProvider>
-                  </SheetProvider>
-                </ModalProvider>
-              </GridThemeProvider>
-            </ThemeProvider>
-          </KeyboardContext.Provider>,
+          <RouterRoot>
+            <KeyboardContext.Provider value={keyboardContextValue}>
+              <ThemeProvider theme={themeRef.current}>
+                <GridThemeProvider gridTheme={gridThemeDefault}>
+                  <ModalProvider>
+                    <SheetProvider>
+                      <ErrorProvider>
+                        <CommandCenter router={router} />
+                      </ErrorProvider>
+                    </SheetProvider>
+                  </ModalProvider>
+                </GridThemeProvider>
+              </ThemeProvider>
+            </KeyboardContext.Provider>
+          </RouterRoot>,
         );
       }
     };

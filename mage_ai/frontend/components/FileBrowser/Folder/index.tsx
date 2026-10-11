@@ -28,6 +28,7 @@ import {
   getNonPythonBlockFromFile,
 } from '../utils';
 import { range, sortByKey } from '@utils/array';
+import RouterRoot from '@components/shared/RouterRoot';
 
 const DEFAULT_NAME = 'default_repo';
 
@@ -333,16 +334,18 @@ function Folder({
         }
 
         refRoot?.current?.render(
-          children?.length >= 1 ? (
-            <DeferredRender idleTimeout={idleTimeout ? idleTimeout : 1}>
-              {buildChildrenFiles(children)}
-            </DeferredRender>
-          ) : // @ts-ignore
-          isFolder ? (
-            buildChildrenFiles(childrenEmpty as any[])
-          ) : (
-            <div />
-          ),
+          <RouterRoot>
+            {children?.length >= 1 ? (
+              <DeferredRender idleTimeout={idleTimeout ? idleTimeout : 1}>
+                {buildChildrenFiles(children)}
+              </DeferredRender>
+            ) : // @ts-ignore
+            isFolder ? (
+              buildChildrenFiles(childrenEmpty as any[])
+            ) : (
+              <div />
+            )}
+          </RouterRoot>,
         );
       }
 
@@ -426,18 +429,20 @@ function Folder({
           }
 
           refRoot?.current?.render(
-            children?.length >= 1 ? (
-              <DeferredRender idleTimeout={100 * level}>
-                {buildChildrenFiles(children)}
-              </DeferredRender>
-            ) : !children?.length ? (
-              isFolder ? (
-                // @ts-ignore
-                buildChildrenFiles(childrenEmpty)
-              ) : (
-                <div />
-              )
-            ) : null,
+            <RouterRoot>
+              {children?.length >= 1 ? (
+                <DeferredRender idleTimeout={100 * level}>
+                  {buildChildrenFiles(children)}
+                </DeferredRender>
+              ) : !children?.length ? (
+                isFolder ? (
+                  // @ts-ignore
+                  buildChildrenFiles(childrenEmpty)
+                ) : (
+                  <div />
+                )
+              ) : null}
+            </RouterRoot>,
           );
         } catch (err) {
           console.log(err);
