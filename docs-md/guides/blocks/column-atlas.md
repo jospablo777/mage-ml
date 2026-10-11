@@ -13,6 +13,11 @@ always.
 
 ## What it shows
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/column-atlas-card.dark.png">
+  <img src="../../../docs/images/screenshots/column-atlas-card.light.png" alt="ColumnAtlas under a block output of a million rows: column headers with their types, distributions and missing shares, and the first rows" />
+</picture>
+
 - **Column headers** carry the name, the type, a distribution (a histogram for numbers
   and dates, the shares of the most frequent values for text and booleans, or the number
   of distinct values when no value is frequent) and the share of missing values.
@@ -46,6 +51,11 @@ headers describe the rows that remain.
   `America/Costa_Rica` column means noon in Costa Rica.
 - NaN is not greater or smaller than any number, so comparisons leave it out. The
   `is NaN` condition finds it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/screenshots/column-atlas-expanded.dark.png">
+  <img src="../../../docs/images/screenshots/column-atlas-expanded.light.png" alt="The full window: a filter device = iphone, rows sorted by duration_ms, and the column panel with the summary of scroll_depth: quartiles, mean, standard deviation, NaN count and histogram" />
+</picture>
 
 Sorting and filtering run on the server against the whole output. The view is shared by
 the inline card and the full window, and kept while you move between blocks.
