@@ -72,7 +72,6 @@ spark_config:
   use_custom_session: false
   custom_session_var_name: 'spark'
 
-help_improve_mage: true
 notification_config:
   alert_on:
   - trigger_failure
@@ -102,7 +101,6 @@ pipelines:
 
 overrides:
   dev:
-    help_improve_mage: false
     pipelines:
       settings:
         triggers:
@@ -114,6 +112,6 @@ overrides:
 
 In the example above when in the `dev` environment, the project's nested configuration
 property of `save_in_code_automatically` will be overridden to be `false` (instead of
-`true` as defined in the base config). The other properties (i.e. `help_improve_mage`,
-`automatic_kernel_cleanup`, and `global_hooks`) will also be overridden.
+`true` as defined in the base config). The other properties (i.e.
+`automatic_kernel_cleanup` and `global_hooks`) will also be overridden.
 Other environments (not `dev`) will not utilize the `overrides` section.

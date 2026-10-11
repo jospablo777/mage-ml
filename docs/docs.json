@@ -316,7 +316,8 @@
                 "pages": [
                   "contributing/documentation/overview"
                 ]
-              }
+              },
+              "contributing/styling"
             ]
           },
           {
@@ -324,7 +325,6 @@
             "icon": "info",
             "pages": [
               "about/code-of-conduct",
-              "about/statistics",
               "about/frequently-asked-questions",
               "about/releases"
             ]
@@ -437,7 +437,8 @@
                       "guides/streaming/destinations/rabbitmq",
                       "guides/streaming/destinations/redshift",
                       "guides/streaming/destinations/snowflake",
-                      "guides/streaming/destinations/trino"
+                      "guides/streaming/destinations/trino",
+                      "guides/streaming/destinations/azure_data_lake"
                     ]
                   },
                   {
@@ -602,7 +603,8 @@
               "production/authentication/ldap",
               "production/authentication/permissions/overview",
               "production/authentication/permissions/roles",
-              "production/authentication/permissions/permissions"
+              "production/authentication/permissions/permissions",
+              "production/authentication/oidc"
             ]
           }
         ]
@@ -768,7 +770,8 @@
                   "integrations/hightouch"
                 ]
               },
-              "integrations/dbt-cloud"
+              "integrations/dbt-cloud",
+              "integrations/strongdm"
             ]
           }
         ]
@@ -780,7 +783,8 @@
             "group": "Environment-specific configuration",
             "pages": [
               "extensibility/env-config/project",
-              "extensibility/env-config/pipeline"
+              "extensibility/env-config/pipeline",
+              "extensibility/global-data-products/overview"
             ]
           },
           {
@@ -850,7 +854,8 @@
                 "pages": [
                   "extensibility/api-reference/pipeline-schedules/overview",
                   "extensibility/api-reference/pipeline-schedules/read-pipeline-schedules",
-                  "extensibility/api-reference/pipeline-schedules/create-pipeline-schedule"
+                  "extensibility/api-reference/pipeline-schedules/create-pipeline-schedule",
+                  "extensibility/api-reference/pipeline-schedules/update-pipeline-schedule"
                 ]
               },
               {
@@ -962,10 +967,6 @@
       "destination": "/about/code-of-conduct"
     },
     {
-      "source": "/contributing/statistics/overview",
-      "destination": "/about/statistics"
-    },
-    {
       "source": "/guides/streaming/contributing",
       "destination": "/contributing/backend/streaming/sources-and-destinations"
     },
@@ -987,19 +988,15 @@
     },
     {
       "source": "/guides/data-validation",
-      "destination": "/development/data-validation"
+      "destination": "/observability/testing/data-validation"
     },
     {
       "source": "/production/observability/logging",
-      "destination": "/development/observability/logging"
+      "destination": "/observability/logging"
     },
     {
       "source": "/production/observability/monitoring",
-      "destination": "/development/observability/monitoring"
-    },
-    {
-      "source": "/development/versioning/file-versions",
-      "destination": "/getting-started/file-versions"
+      "destination": "/observability/monitoring"
     },
     {
       "source": "/production/configuring-production-settings/runtime-",
@@ -1011,7 +1008,7 @@
     },
     {
       "source": "/developing-in-the-cloud/setting-up-git",
-      "destination": "/getting-started/setting-up-git"
+      "destination": "/development/git/setting-up-git"
     },
     {
       "source": "/guides/r-blocks",
@@ -1043,7 +1040,7 @@
     },
     {
       "source": "/tutorials/train-model",
-      "destination": "/guides/train-model"
+      "destination": "/ai/ml/train-model"
     },
     {
       "source": "/tutorials/train/complete-project",
@@ -1051,63 +1048,47 @@
     },
     {
       "source": "/production/observability/alerting-email",
-      "destination": "/integrations/observability/alerting-email"
+      "destination": "/observability/alerting/alerting-email"
     },
     {
       "source": "/production/observability/alerting-opsgenie",
-      "destination": "/integrations/observability/alerting-opsgenie"
+      "destination": "/observability/alerting/alerting-opsgenie"
     },
     {
       "source": "/production/observability/alerting-slack",
-      "destination": "/integrations/observability/alerting-slack"
+      "destination": "/observability/alerting/alerting-slack"
     },
     {
       "source": "/production/observability/alerting-teams",
-      "destination": "/integrations/observability/alerting-teams"
+      "destination": "/observability/alerting/alerting-teams"
     },
     {
       "source": "/production/observability/alerting-discord",
-      "destination": "/integrations/observability/alerting-discord"
+      "destination": "/observability/alerting/alerting-discord"
     },
     {
       "source": "/production/observability/alerting-telegram",
-      "destination": "/integrations/observability/alerting-telegram"
-    },
-    {
-      "source": "/production/observability/datadog",
-      "destination": "/integrations/observability/datadog"
-    },
-    {
-      "source": "/integrations/great-expectations",
-      "destination": "/integrations/observability/great-expectations"
+      "destination": "/observability/alerting/alerting-telegram"
     },
     {
       "source": "/integrations/metaplane",
-      "destination": "/integrations/observability/metaplane"
+      "destination": "/observability/external/metaplane"
     },
     {
       "source": "/production/observability/newrelic",
-      "destination": "/integrations/observability/newrelic"
+      "destination": "/observability/external/newrelic"
     },
     {
       "source": "/production/observability/sentry",
-      "destination": "/integrations/observability/sentry"
+      "destination": "/observability/external/sentry"
     },
     {
       "source": "/production/observability/prometheus",
-      "destination": "/integrations/observability/prometheus"
+      "destination": "/observability/external/prometheus"
     },
     {
       "source": "/guides/triggers/configure-triggers-in-code",
       "destination": "/orchestration/triggers/configure-triggers-in-code"
-    },
-    {
-      "source": "/guides/triggers/events/aws",
-      "destination": "/orchestration/triggers/events/aws"
-    },
-    {
-      "source": "/guides/triggers/events/overview",
-      "destination": "/orchestration/triggers/events/overview"
     },
     {
       "source": "/guides/schedule-pipelines",
@@ -1124,30 +1105,6 @@
     {
       "source": "/development/secrets/GCP",
       "destination": "/production/deploying-to-cloud/secrets/GCP"
-    },
-    {
-      "source": "/developing-in-the-cloud/cloud-dev-environments/aws-ecs",
-      "destination": "/production/developing-in-the-cloud/cloud-dev-environments/aws-ecs"
-    },
-    {
-      "source": "/developing-in-the-cloud/cloud-dev-environments/cloud-run",
-      "destination": "/production/developing-in-the-cloud/cloud-dev-environments/cloud-run"
-    },
-    {
-      "source": "/developing-in-the-cloud/cloud-dev-environments/kubernetes",
-      "destination": "/production/developing-in-the-cloud/cloud-dev-environments/kubernetes"
-    },
-    {
-      "source": "/developing-in-the-cloud/cloud-dev-environments/overview",
-      "destination": "/production/developing-in-the-cloud/cloud-dev-environments/overview"
-    },
-    {
-      "source": "/developing-in-the-cloud/workspaces/kubernetes",
-      "destination": "/production/developing-in-the-cloud/workspaces/kubernetes"
-    },
-    {
-      "source": "/developing-in-the-cloud/workspaces/overview",
-      "destination": "/production/developing-in-the-cloud/workspaces/overview"
     },
     {
       "source": "/streaming/destinations/amazon-s3",
@@ -1255,7 +1212,7 @@
     },
     {
       "source": "/development/git/generate-an-ssh-token",
-      "destination": "/development/git/configure#generate-ssh-token"
+      "destination": "/guides/git/configure#generate-ssh-token"
     },
     {
       "source": "/development/git/configure",
@@ -1263,7 +1220,7 @@
     },
     {
       "source": "/production/data-sync/github",
-      "destination": "/production/data-sync/version-control"
+      "destination": "/guides/data-sync/version-control"
     }
   ]
 }

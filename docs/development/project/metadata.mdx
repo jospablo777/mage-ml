@@ -32,7 +32,6 @@ environment-specific overrides, add an `overrides` section (see
 project_type: standalone
 variables_dir: ~/.mage_data
 remote_variables_dir: s3://bucket/path_prefix
-help_improve_mage: true
 
 notification_config:
   alert_on:
@@ -85,10 +84,6 @@ project_uuid: 123456789abcdefg
 <ParamField path="workspace_config_defaults" type="object">
   Default workspace configuration applied across environments (e.g., k8s
   defaults when running on Kubernetes). Mage Pro workspaces only.
-</ParamField>
-
-<ParamField path="help_improve_mage" type="boolean">
-  Allows Mage to collect limited telemetry to improve the product.
 </ParamField>
 
 <ParamField path="features" type="object">
