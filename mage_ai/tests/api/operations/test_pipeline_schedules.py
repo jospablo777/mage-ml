@@ -47,6 +47,31 @@ class PipelineScheduleOperationTests(BaseApiTestCase):
         self.assertEqual(response['pipeline_schedule']['name'], 'test_schedule')
         self.assertEqual(response['pipeline_schedule']['repo_path'], get_repo_path())
 
+    async def test_execute_create_schedule_with_tags(self):
+        user = create_user(email=self.faker.email(), roles=1)
+        operation = self.build_create_operation(
+            dict(
+                name='tagged_schedule',
+                schedule_interval='@daily',
+                schedule_type=ScheduleType.TIME,
+                start_time='2023-01-01T00:00:00',
+                status='inactive',
+                tags=['finance', 'daily'],
+                variables=[],
+            ),
+            resource_parent='pipeline',
+            resource_parent_id=self.pipeline.uuid,
+            user=user,
+        )
+        response = await operation.execute()
+
+        self.assertIsNone(response.get('error'), response.get('error'))
+        self.assertEqual(response['pipeline_schedule']['name'], 'tagged_schedule')
+        schedule = PipelineSchedule.query.filter(
+            PipelineSchedule.id == response['pipeline_schedule']['id'],
+        ).first()
+        self.assertEqual(sorted(t.name for t in schedule.tag_associations), ['daily', 'finance'])
+
     async def test_execute_update_schedule_saved_in_code(self):
         email = self.faker.email()
         user = create_user(email=email, roles=1)

@@ -135,6 +135,7 @@ PipelineSchedulePolicy.allow_read(PipelineSchedulePresenter.default_attributes +
 
 PipelineSchedulePolicy.allow_write([
     'repo_path',
+    'tags',
 ], scopes=[
     OauthScope.CLIENT_PRIVATE,
 ], on_action=[

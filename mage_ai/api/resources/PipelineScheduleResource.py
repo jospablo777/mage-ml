@@ -277,7 +277,12 @@ class PipelineScheduleResource(DatabaseResource):
 
             self.on_create_callback = _callback
 
-        return super().create(payload, user, **kwargs)
+        # Tags are associations, not a column; they were dropped on create.
+        tag_names = payload.pop('tags', None)
+        resource = super().create(payload, user, **kwargs)
+        if tag_names:
+            resource.update(dict(tags=tag_names))
+        return resource
 
     @safe_db_query
     def update(self, payload, **kwargs):
