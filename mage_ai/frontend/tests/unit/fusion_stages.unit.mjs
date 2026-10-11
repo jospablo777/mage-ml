@@ -20,9 +20,14 @@ test('only chains are stages, numbered from 1', () => {
   assert.equal(fusionStagePositions(pipeline).alone, undefined);
 });
 
-test('a pipeline without fusion has no stages', () => {
-  assert.deepEqual(fusionStages({ ...pipeline, block_fusion: null }), []);
+test('a pipeline with fusion off has no stages', () => {
+  assert.deepEqual(fusionStages({ ...pipeline, block_fusion: 'off' }), []);
+  assert.deepEqual(fusionStages({ ...pipeline, block_fusion: null, block_fusion_default: 'off' }), []);
   assert.deepEqual(fusionStagePositions(undefined), {});
+});
+
+test('an unset setting means the default, chains', () => {
+  assert.deepEqual(fusionStages({ ...pipeline, block_fusion: null }), fusionStages(pipeline));
 });
 
 test('the stage text names the stage and the position', () => {

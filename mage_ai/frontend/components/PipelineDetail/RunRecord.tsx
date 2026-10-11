@@ -14,6 +14,7 @@ import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { onSuccess } from '@api/utils/response';
 import { useError } from '@context/Error';
+import { sandboxedReport } from './sandboxedReport';
 
 type ChangesType = {
   added: string[];
@@ -299,7 +300,7 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
             </Row>
           )}
           <Row label="Environment">
-            Python {record.environment?.python}, Mage {record.environment?.mage},{' '}
+            Python {record.environment?.python}, MageML {record.environment?.mage},{' '}
             {record.environment?.packages} packages, {record.environment?.platform}
             {record.environment?.pipeline_environment
               ? `, pipeline environment ${record.environment.pipeline_environment.slice(0, 12)}`
@@ -413,7 +414,9 @@ function RunRecord({ pipelineRunId }: RunRecordProps) {
                           report,
                         }).then(({ monitor_report: opened }) => {
                           const url = URL.createObjectURL(
-                            new Blob([opened?.html || ''], { type: 'text/html' }),
+                            new Blob([sandboxedReport(opened?.html || '', report)], {
+                              type: 'text/html',
+                            }),
                           );
                           window.open(url, '_blank', 'noopener');
                         })}
