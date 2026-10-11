@@ -52,6 +52,10 @@ from mage_ai.orchestration.utils.distributed_lock import DistributedLock
 from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.blocks import ApiPipelineBlockAnalysisHandler
 from mage_ai.server.api.downloads import ApiDownloadHandler, ApiResourceDownloadHandler
+from mage_ai.server.api.pipeline_documentation import (
+    PipelineDocumentationImageHandler,
+    PipelineDocumentationRenderHandler,
+)
 from mage_ai.server.api.events import (
     ApiEventHandler,
     ApiEventMatcherDetailHandler,
@@ -313,6 +317,15 @@ def make_app(
         ),
         (r'/websocket/', WebSocketServer),
         (r'/websocket/terminal', TerminalWebsocketServer, {'term_manager': term_manager}),
+        # A pipeline's documentation images and rendered Quarto document (not JSON).
+        (
+            r'/api/pipeline_documentations/(?P<pipeline_uuid>\w+)/images/(?P<path>.+)',
+            PipelineDocumentationImageHandler,
+        ),
+        (
+            r'/api/pipeline_documentations/(?P<pipeline_uuid>\w+)/rendered',
+            PipelineDocumentationRenderHandler,
+        ),
         # Not sure what is using this, perhaps the event triggering via Lambda?
         (r'/api/events', ApiEventHandler),
         (r'/api/event_matchers', ApiEventMatcherListHandler),
@@ -624,7 +637,7 @@ async def main(
 
     if not DISABLE_AUTO_BROWSER_OPEN and not status_only:
         webbrowser.open_new_tab(url)
-    logger.info(f'Mage is running at {url} and serving project {project}')
+    logger.info(f'MageML is running at {url} and serving project {project}')
 
     db_connection.start_session(force=True)
     latest_user_activity.update_latest_activity()

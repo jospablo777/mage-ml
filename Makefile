@@ -48,7 +48,7 @@ playground-up:
 	@echo "Waiting for Mage (the first start seeds the database, a minute or two)..."
 	@for i in $$(seq 1 300); do \
 		if curl -fs -o /dev/null $(PLAYGROUND_URL)/api/status; then \
-			echo "Mage is running at $(PLAYGROUND_URL)"; exit 0; fi; \
+			echo "MageML is running at $(PLAYGROUND_URL)"; exit 0; fi; \
 		if $(PLAYGROUND) ps -a seed --format '{{.State}} {{.ExitCode}}' | grep -q '^exited [1-9]'; then \
 			echo "Seeding failed:"; $(PLAYGROUND) logs --tail 30 seed; exit 1; fi; \
 		sleep 2; \

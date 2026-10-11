@@ -27,7 +27,7 @@ app = typer.Typer(
 
 # Defaults
 
-INIT_PROJECT_PATH_DEFAULT = typer.Argument(..., help='path of the Mage project to be created.')
+INIT_PROJECT_PATH_DEFAULT = typer.Argument(..., help='path of the MageML project to be created.')
 INIT_PROJECT_TYPE_DEFAULT = typer.Option(
     ProjectType.STANDALONE.value,
     help='type of project to create, options are main, sub, or standalone',
@@ -42,7 +42,7 @@ INIT_PROJECT_UUID_DEFAULT = typer.Option(
 )
 
 START_PROJECT_PATH_DEFAULT = typer.Argument(
-    os.getcwd(), help='path of the Mage project to be loaded.'
+    os.getcwd(), help='path of the MageML project to be loaded.'
 )
 START_HOST_DEFAULT = typer.Option('localhost', help='specify the host.')
 START_PORT_DEFAULT = typer.Option('6789', help='specify the port.')
@@ -65,7 +65,7 @@ START_PROJECT_UUID_DEFAULT = typer.Option(
 )
 
 RUN_PROJECT_PATH_DEFAULT = typer.Argument(
-    ..., help='path of the Mage project that contains the pipeline.'
+    ..., help='path of the MageML project that contains the pipeline.'
 )
 RUN_PIPELINE_UUID_DEFAULT = typer.Argument(..., help='uuid of the pipeline to be run.')
 RUN_TEST_DEFAULT = typer.Option(False, help='specify if tests should be run.')
@@ -83,16 +83,16 @@ RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT = typer.Option(
     None, help='runtime configuration of data integration block runs.'
 )
 CLEAN_LOGS_PROJECT_PATH_DEFAULT = typer.Argument(
-    ..., help='path of the Mage project to clean old logs.'
+    ..., help='path of the MageML project to clean old logs.'
 )
 CLEAN_LOGS_PIPELINE_UUID_DEFAULT = typer.Option(None, help='uuid of the pipeline to clean.')
 CLEAN_VARIABLES_PROJECT_PATH_DEFAULT = typer.Argument(
-    ..., help='path of the Mage project to clean variables.'
+    ..., help='path of the MageML project to clean variables.'
 )
 CLEAN_VARIABLES_PIPELINE_UUID_DEFAULT = typer.Option(None, help='uuid of the pipeline to clean.')
 
 CREATE_SPARK_CLUSTER_PROJECT_PATH_DEFAULT = typer.Argument(
-    ..., help='path of the Mage project that contains the EMR config.'
+    ..., help='path of the MageML project that contains the EMR config.'
 )
 
 
@@ -104,7 +104,7 @@ def init(
     project_uuid: str = INIT_PROJECT_UUID_DEFAULT,
 ):
     """
-    Initialize Mage project.
+    Initialize MageML project.
     """
     from mage_ai.data_preparation.repo_manager import init_repo
 
@@ -115,7 +115,7 @@ def init(
         cluster_type=cluster_type,
         project_uuid=project_uuid,
     )
-    print(f'Initialized Mage project at {repo_path}')
+    print(f'Initialized MageML project at {repo_path}')
 
 
 @app.command()
@@ -131,7 +131,7 @@ def start(
     project_uuid: str = START_PROJECT_UUID_DEFAULT,
 ):
     """
-    Start Mage server and UI.
+    Start the MageML server and UI.
     """
     from mage_ai.settings.repo import set_repo_path
 
@@ -317,7 +317,7 @@ def create_spark_cluster(
     project_path: str = CREATE_SPARK_CLUSTER_PROJECT_PATH_DEFAULT,
 ):
     """
-    Create EMR cluster for Mage project.
+    Create EMR cluster for MageML project.
     """
     from mage_ai.services.aws.emr.launcher import create_cluster
 
@@ -343,7 +343,7 @@ def _contract_block(project_path: str, pipeline_uuid: str, block_uuid: str):
 
 @app.command('contract-draft')
 def contract_draft(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
     block_uuid: str = typer.Argument(..., help='uuid of the block whose output to describe.'),
     name: Union[str, None] = typer.Option(None, help='contract name; the block uuid by default.'),
@@ -379,7 +379,7 @@ def contract_draft(
 
 @app.command('contract-check')
 def contract_check(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
     block_uuid: str = typer.Argument(..., help='uuid of the block with a contract.'),
     partition: Union[str, None] = typer.Option(
@@ -437,7 +437,7 @@ def _pipeline_run(pipeline, run_id: int):
 
 @app.command('run-diff')
 def run_diff(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
     first_run_id: int = typer.Argument(..., help='id of the earlier pipeline run.'),
     second_run_id: int = typer.Argument(..., help='id of the later pipeline run.'),
@@ -445,7 +445,7 @@ def run_diff(
 ):
     """
     Compare what two runs of a pipeline ran with: code (with a diff of each changed file),
-    Python, Mage and package versions, variables, and which blocks' outputs differ.
+    Python, MageML and package versions, variables, and which blocks' outputs differ.
     """
     from mage_ai.orchestration import run_records
 
@@ -465,7 +465,7 @@ def run_diff(
 
 @app.command('reproduce')
 def reproduce(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
     run_id: int = typer.Argument(..., help='id of the pipeline run to reproduce.'),
     yes: bool = typer.Option(False, '--yes', '-y', help='run without asking first.'),
@@ -534,7 +534,7 @@ def _releases_setup(project_path: str):
 
 @app.command('release-status')
 def release_status(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     model: str = typer.Argument(..., help='name of the registered model.'),
     version: Union[str, None] = typer.Option(None, help='evaluate this version now.'),
 ):
@@ -569,7 +569,7 @@ def release_status(
 
 @app.command('release-promote')
 def release_promote(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     model: str = typer.Argument(..., help='name of the registered model.'),
     version: str = typer.Argument(..., help='the version to promote.'),
     force: bool = typer.Option(False, help='promote even if the release check does not pass.'),
@@ -604,7 +604,7 @@ def release_promote(
 
 @app.command('release-rollback')
 def release_rollback(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     model: str = typer.Argument(..., help='name of the registered model.'),
 ):
     """Give the model's alias back to the version that held it before the last promotion."""
@@ -623,7 +623,7 @@ def release_rollback(
 
 @app.command('monitor-status')
 def monitor_status(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     monitor: str = typer.Argument(..., help='name of the monitor (monitors/<name>.yaml).'),
     runs: int = typer.Option(10, help='how many of the latest runs to show.'),
 ):
@@ -647,7 +647,7 @@ def monitor_status(
 
 @app.command('verify-fusion')
 def verify_fusion(
-    project_path: str = typer.Argument(..., help='path of the Mage project.'),
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
     pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
     runtime_vars: Union[str, None] = RUN_RUNTIME_VARS_DEFAULT,
     yes: bool = typer.Option(False, '--yes', '-y', help='run without asking first.'),
@@ -708,7 +708,7 @@ r_app = typer.Typer(
 )
 app.add_typer(r_app, name='r')
 
-R_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the Mage project.')
+R_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the MageML project.')
 R_PACKAGES_DEFAULT = typer.Option(
     None,
     '--package',
@@ -815,7 +815,7 @@ def r_sync(project_path: str = R_PROJECT_PATH_DEFAULT):
 @r_app.command('status')
 def r_status(project_path: str = R_PROJECT_PATH_DEFAULT):
     """
-    Check that R blocks can run: the R version, the library and the packages Mage needs.
+    Check that R blocks can run: the R version, the library and the packages MageML needs.
     """
     from mage_ai.data_preparation.models.block.r import runtime
 
@@ -837,7 +837,7 @@ rust_app = typer.Typer(
 )
 app.add_typer(rust_app, name='rust')
 
-RUST_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the Mage project.')
+RUST_PROJECT_PATH_DEFAULT = typer.Argument('.', help='path of the MageML project.')
 
 
 @rust_app.command('init')
@@ -898,13 +898,13 @@ def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
 
 export_app = typer.Typer(
     cls=OrderCommands,
-    help='Export pipelines to run without Mage.',
+    help='Export pipelines to run without MageML.',
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(export_app, name='export')
 
 
-EXPORT_PROJECT_PATH = typer.Argument(..., help='path of the Mage project.')
+EXPORT_PROJECT_PATH = typer.Argument(..., help='path of the MageML project.')
 EXPORT_PIPELINES = typer.Argument(..., help='uuids of the pipelines to export.')
 EXPORT_MODELS = typer.Option(
     [], '--model', '-m',
@@ -930,7 +930,7 @@ def export_service(
 ):
     """
     Export pipelines as a standalone Docker service: an HTTP API, schedules, run history
-    and logs, without Mage. Writes a build context with a Dockerfile, compose.yaml and a
+    and logs, without MageML. Writes a build context with a Dockerfile, compose.yaml and a
     README that shows how to run and call it.
     """
     from mage_ai.pipeline_services import export
