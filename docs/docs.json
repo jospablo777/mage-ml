@@ -11,189 +11,6 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Mage Pro",
-        "groups": [
-          {
-            "group": "Adventure starts here",
-            "pages": [
-              "production/mage/pro"
-            ]
-          },
-          {
-            "group": "Deployment architecture",
-            "pages": [
-              "pro-architecture/architecture-overview",
-              "pro-architecture/saas",
-              "pro-architecture/hybrid-cloud",
-              "pro-architecture/private-cloud",
-              "pro-architecture/on-prem"
-            ]
-          },
-          {
-            "group": "Getting started",
-            "pages": [
-              "getting-started/cluster-management-portal",
-              "getting-started/mage-pro-api",
-              "getting-started/install-dependencies",
-              "guides/developer-ux/workspaces",
-              "getting-started/build-pro-pipeline",
-              "getting-started/trigger-pipeline",
-              "guides/best-practices"
-            ]
-          },
-          {
-            "group": "Mage Agent",
-            "pages": [
-              "agent/introduction",
-              "agent/quickstart",
-              "agent/installation",
-              "agent/mage-agent-plugin",
-              "agent/authentication",
-              "agent/ide-integration",
-              "agent/sync",
-              "agent/mcp-tools",
-              "agent/cli-reference",
-              "agent/troubleshooting"
-            ]
-          },
-          {
-            "group": "CI/CD",
-            "pages": [
-              "development/git/pro-overview",
-              "guides/data-sync/cicd-workflow",
-              "guides/data-sync/git-terminal",
-              "guides/version-control/file-versions",
-              "guides/data-sync/version-control-guide",
-              "guides/data-sync/git-client"
-            ]
-          },
-          {
-            "group": "Pro only features",
-            "pages": [
-              {
-                "group": "AI",
-                "icon": "microchip-ai",
-                "pages": [
-                  "ai/blocks",
-                  "ai/rag-pipeline",
-                  "ai/custom-resources"
-                ]
-              },
-              {
-                "group": "Blocks",
-                "icon": "block-brick",
-                "pages": [
-                  "guides/blocks/dynamic-blocks-2",
-                  "guides/blocks/batch-read-write"
-                ]
-              },
-              {
-                "group": "Streaming",
-                "icon": "stream",
-                "pages": [
-                  "guides/streaming/sources/oracledb",
-                  "guides/streaming/tutorials/streaming-stateful-store"
-                ]
-              },
-              {
-                "group": "Data integrations",
-                "icon": "link",
-                "pages": [
-                  "data-integrations/sources/custom_source",
-                  "contributing/data-integrations/adapt-existing-source",
-                  "contributing/data-integrations/add-new-source",
-                  "contributing/data-integrations/add-new-destination",
-                  {
-                    "group": "Sources",
-                    "pages": [
-                      "data-integrations/sources/facebook_pages",
-                      "data-integrations/sources/instagram",
-                      "data-integrations/sources/quickbooks",
-                      "data-integrations/sources/xero",
-                      "data-integrations/sources/youtube_analytics",
-                      "data-integrations/sources/google_campaign_manager_360",
-                      "data-integrations/sources/google_display_video_360",
-                      "data-integrations/sources/microsoft_ads",
-                      "data-integrations/sources/salesforce_marketing_cloud",
-                      "data-integrations/sources/tiktok_ads"
-                    ]
-                  },
-                  {
-                    "group": "Destinations",
-                    "pages": [
-                      "data-integrations/destinations/databricks",
-                      "data-integrations/destinations/duckdb",
-                      "data-integrations/destinations/iceberg_s3"
-                    ]
-                  }
-                ]
-              },
-              {
-                "group": "Developer experience",
-                "icon": "terminal",
-                "pages": [
-                  "guides/developer-ux/pipeline-dependencies",
-                  "guides/developer-ux/code-canvas",
-                  "guides/developer-ux/code-browser",
-                  "guides/developer-ux/personalize",
-                  "guides/developer-ux/visual-studio-code"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Infrastructure",
-            "pages": [
-              {
-                "group": "Compute",
-                "icon": "stars",
-                "pages": [
-                  "integrations/compute/spark-pro",
-                  "integrations/compute/management",
-                  "integrations/compute/databricks"
-                ]
-              },
-              {
-                "group": "Storage",
-                "icon": "database",
-                "pages": [
-                  "integrations/databases/Databricks",
-                  "integrations/databases/Iceberg"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Migration guides",
-            "pages": [
-              "migrations/airbyte-to-mage-pro",
-              "migrations/airflow-to-mage-pro",
-              "migrations/dbt-to-mage-pro",
-              "migrations/estuary-to-mage-pro",
-              "migrations/fivetran-to-mage-pro",
-              "migrations/dagster-to-mage-pro",
-              "migrations/mage-oss-to-mage-pro",
-              "migrations/prefect-to-mage-pro"
-            ]
-          },
-          {
-            "group": "Global hooks",
-            "pages": [
-              "extensibility/global-hooks/overview",
-              "extensibility/global-hooks/guides"
-            ]
-          },
-          {
-            "group": "Mage Pro API",
-            "pages": [
-              "extensibility/pro-api-reference/overview",
-              "extensibility/pro-api-reference/deployments/overview",
-              "extensibility/pro-api-reference/workspaces/update-workspace"
-            ]
-          }
-        ]
-      },
-      {
         "tab": "Documentation",
         "groups": [
           {
@@ -456,6 +273,9 @@
             "pages": [
               "contributing/overview",
               "contributing/development-environment",
+              "contributing/data-integrations/adapt-existing-source",
+              "contributing/data-integrations/add-new-source",
+              "contributing/data-integrations/add-new-destination",
               {
                 "group": "Backend",
                 "icon": "server",
@@ -692,7 +512,6 @@
               "production/ci-cd/local-cloud/github-actions",
               "production/ci-cd/local-cloud/gitlab-ci-cd",
               "production/ci-cd/local-cloud/buildkite",
-              "production/ci-cd/mage/pro",
               "production/configuring-production-settings/overview",
               "production/pipeline-services"
             ]
@@ -1092,17 +911,8 @@
       {
         "label": "Community",
         "href": "https://www.mage.ai/chat"
-      },
-      {
-        "label": "Mage Pro",
-        "href": "https://cloud.mage.ai/sign-up?source=documentation-header"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Get a demo",
-      "href": "https://mage.ai/getdemo"
-    }
+    ]
   },
   "search": {
     "prompt": "Omniscience... ✨"
@@ -1130,19 +940,6 @@
           {
             "label": "Code",
             "href": "https://www.mage.ai.oss"
-          },
-          {
-            "label": "Demo playground",
-            "href": "https://www.mage.ai/demo"
-          }
-        ]
-      },
-      {
-        "header": "Mage Pro",
-        "items": [
-          {
-            "label": "Get started for free",
-            "href": "https://cloud.mage.ai/sign-up"
           }
         ]
       },
