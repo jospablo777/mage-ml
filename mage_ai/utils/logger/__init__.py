@@ -4,7 +4,7 @@ from typing import Any
 
 import simplejson
 
-from mage_ai.shared.dates import utc_now
+from mage_ai.shared.dates import as_utc, utc_now
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.utils.logger.constants import (
     LOG_LEVEL_DEBUG,
@@ -61,7 +61,7 @@ class Logger():
             level=level,
             message=message,
             tags=tags,
-            timestamp=int(now.timestamp()),
+            timestamp=int(as_utc(now).timestamp()),
             uuid=uuid.uuid4().hex,
         )
         data.update(kwargs)

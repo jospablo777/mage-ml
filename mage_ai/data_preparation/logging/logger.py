@@ -5,7 +5,7 @@ from typing import Dict
 
 import simplejson
 
-from mage_ai.shared.dates import utc_now
+from mage_ai.shared.dates import as_utc, utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.parsers import encode_complex
 
@@ -56,7 +56,7 @@ class DictLogger():
         data = dict(
             level=logging.getLevelName(log_level) if log_level else method_name.upper(),
             message=message,
-            timestamp=now.timestamp(),
+            timestamp=as_utc(now).timestamp(),
             uuid=uuid.uuid4().hex,
         )
 
