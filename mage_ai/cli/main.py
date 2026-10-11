@@ -88,6 +88,11 @@ RUN_SKIP_SENSORS_DEFAULT = typer.Option(False, help='specify if the sensors shou
 RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT = typer.Option(
     None, help='runtime configuration of data integration block runs.'
 )
+RUN_ENGINE_DEFAULT = typer.Option(
+    None,
+    help='python, or rust to run the pipeline on the Rust engine of pipeline services '
+    '(falls back to python when the engine cannot run it). Default: MAGE_RUN_ENGINE or python.',
+)
 CLEAN_LOGS_PROJECT_PATH_DEFAULT = typer.Argument(
     ..., help='path of the MageML project to clean old logs.'
 )
@@ -177,6 +182,7 @@ def run(
     runtime_vars: Union[str, None] = RUN_RUNTIME_VARS_DEFAULT,
     skip_sensors: bool = RUN_SKIP_SENSORS_DEFAULT,
     template_runtime_configuration: Union[str, None] = RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT,
+    engine: Union[str, None] = RUN_ENGINE_DEFAULT,
 ):
     """
     Run pipeline.
@@ -252,6 +258,23 @@ def run(
 
         if template_runtime_configuration is not None:
             template_runtime_configuration = json.loads(template_runtime_configuration)
+
+        engine = (engine or os.getenv('MAGE_RUN_ENGINE') or 'python').lower()
+        if engine == 'rust' and block_uuid is None and pipeline_run_id is None:
+            from mage_ai.orchestration import engine as rust_engine
+
+            plan = rust_engine.prepare(project_path, pipeline_uuid)
+            if plan.supported:
+                result = rust_engine.run(plan, global_vars)
+                for block in result.get('blocks', []):
+                    print(f"{block['status']:<16} {block['block']} "
+                          f"{block.get('duration_ms') or 0} ms {_e(block.get('error') or '')}")
+                if result.get('status') != 'completed':
+                    print(f"[red]Pipeline run {_e(result.get('status'))}.[/red]")
+                    raise typer.Exit(code=1)
+                print('Pipeline run completed on the Rust engine.')
+                return
+            print('Running on the Python path: ' + _e('; '.join(plan.reasons)))
 
         try:
             if block_uuid is None:
