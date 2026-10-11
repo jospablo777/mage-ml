@@ -242,7 +242,35 @@ def r_block() -> Diagram:
     return d
 
 
+def r_packages() -> Diagram:
+    """Where an R block's packages come from and where they go."""
+    d = Diagram(1100, 320, 'R packages with rv')
+    d.group(24, 30, 268, 262, 'Package sources', None)
+    d.node(40, 62, 236, 48, 'Posit Package Manager', 'r', 'binaries, dated snapshots')
+    d.node(40, 120, 236, 48, 'CRAN', 'r', 'the R package archive')
+    d.node(40, 178, 236, 48, 'Bioconductor', 'r', 'added as a repository')
+    d.node(40, 236, 236, 48, 'Git repositories', 'github', 'tag, branch or commit')
+    d.group(332, 30, 462, 262, '<project>/r: the rv project', COLORS['r'])
+    d.node(348, 62, 200, 58, 'rproject.toml', 'r', 'repos and packages')
+    d.node(578, 62, 200, 58, 'rv.lock', 'r', 'exact versions')
+    d.node(578, 196, 200, 58, 'rv/library', 'r', 'installed packages')
+    d.arrow([(548, 91), (578, 91)])
+    d.arrow([(678, 120), (678, 196)], 'rv sync', label_at=(716, 162))
+    d.text(448, 150, 'rv add and rv remove', anchor='middle', size=11)
+    d.text(448, 166, 'edit both files', anchor='middle', size=11)
+    d.text(448, 214, 'Commit rproject.toml', anchor='middle', size=11)
+    d.text(448, 230, 'and rv.lock. The library', anchor='middle', size=11)
+    d.text(448, 246, 'is generated.', anchor='middle', size=11)
+    d.arrow([(292, 161), (320, 161), (320, 91), (348, 91)])
+    d.node(840, 62, 236, 58, 'Exported service', 'docker', 'image syncs rv.lock')
+    d.node(840, 196, 236, 58, 'R blocks', 'r', 'Rscript, this library only')
+    d.arrow([(778, 91), (840, 91)], dashed=True)
+    d.arrow([(778, 225), (840, 225)])
+    return d
+
+
 DIAGRAMS = {
+    'r-packages': r_packages,
     'rust-block': rust_block,
     'r-block': r_block,
     'tutorial-pipeline': tutorial_pipeline,

@@ -377,6 +377,7 @@
               "guides/blocks/markdown-blocks",
               "guides/blocks/sql-blocks",
               "guides/blocks/r-blocks",
+              "guides/blocks/r-packages",
               "guides/blocks/rust-blocks",
               "guides/blocks/feast-features"
             ]
