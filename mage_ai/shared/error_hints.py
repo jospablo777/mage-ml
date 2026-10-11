@@ -4,6 +4,7 @@ Error messages that say what failed and what to do about it.
 A block's exception keeps its type; MageML adds notes to it (PEP 678), which Python prints
 after the error message in the notebook, in run logs and in the CLI.
 """
+import errno
 import linecache
 import os
 import shlex
@@ -54,6 +55,13 @@ def hint_for(error: BaseException) -> Optional[str]:
             f'The installed version of {module} may not have this name. Check it with '
             f'`uv pip show {package_for(module)}` and pin the version the code expects in '
             'requirements.txt.'
+        )
+    if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+        return (
+            f'The disk is full{f" ({error.filename})" if error.filename else ""}. Block outputs '
+            'are stored under MAGE_DATA_DIR; free space there, or keep fewer outputs with '
+            'variables_retention_period in the project\'s metadata.yaml and '
+            '`mage clean-cached-variables`.'
         )
     if isinstance(error, MemoryError):
         return (

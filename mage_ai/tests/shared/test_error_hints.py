@@ -36,6 +36,11 @@ class HintTest(TestCase):
             ImportError("cannot import name 'thing' from 'pandas'", name='pandas'),
         ))
         self.assertIn('memory', error_hints.hint_for(MemoryError()))
+        import errno
+
+        full = OSError(errno.ENOSPC, 'No space left on device', '/data/output_0.parquet')
+        self.assertIn('The disk is full (/data/output_0.parquet)', error_hints.hint_for(full))
+        self.assertIn('mage clean-cached-variables', error_hints.hint_for(full))
         self.assertIn('get_repo_path', error_hints.hint_for(
             FileNotFoundError(2, 'No such file or directory', 'data/orders.csv'),
         ))
