@@ -1,5 +1,4 @@
 import json
-import traceback
 from typing import Any, Dict, Union
 
 
@@ -13,14 +12,22 @@ def parse_runtime_variables(variables_str: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: The parsed variables dictionary
     """
-    vars_parsed = dict()
     if not variables_str:
-        return vars_parsed
+        return dict()
 
+    # Invalid JSON used to print a traceback and run without the variables.
     try:
         vars_parsed = json.loads(variables_str)
-    except Exception:
-        traceback.print_exc()
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f'--runtime-vars is not valid JSON ({error.msg} at character {error.pos}): '
+            f'{variables_str}. Pass an object, such as \'{{"date": "2026-01-31"}}\'.'
+        ) from error
+    if not isinstance(vars_parsed, dict):
+        raise ValueError(
+            f'--runtime-vars must be a JSON object of variable names and values, not '
+            f'{type(vars_parsed).__name__}: {variables_str}',
+        )
     return vars_parsed
 
 

@@ -185,6 +185,9 @@ def run(
 
     # Set repo_path before intializing the DB so that we can get correct db_connection_url
     project_path = os.path.abspath(project_path)
+    if not os.path.isdir(project_path):
+        print(f'[red]Project {_e(project_path)} does not exist.[/red]')
+        raise typer.Exit(code=2)
     set_repo_path(project_path)
 
     from contextlib import nullcontext
@@ -236,12 +239,24 @@ def run(
 
         runtime_variables = dict()
         if runtime_vars is not None:
-            runtime_variables = parse_runtime_variables(runtime_vars)
+            try:
+                runtime_variables = parse_runtime_variables(runtime_vars)
+            except ValueError as error:
+                print(f'[red]{_e(error)}[/red]')
+                raise typer.Exit(code=2)
 
         sys.path.append(os.path.dirname(project_path))
         # Initialize db_connection session before getting the pipeline in case
         # "mage_secret_var" syntax is used in the project's metadata.yaml
         db_connection.start_session()
+        if pipeline_uuid not in Pipeline.get_all_pipelines(project_path):
+            names = sorted(Pipeline.get_all_pipelines(project_path))
+            print(
+                f'[red]Pipeline {_e(pipeline_uuid)} is not in project {_e(project_path)}. '
+                + (f'Its pipelines: {_e(", ".join(names))}.' if names else 'It has no pipelines.')
+                + '[/red]'
+            )
+            raise typer.Exit(code=2)
         pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path)
 
         if pipeline_run_id is None:
