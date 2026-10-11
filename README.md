@@ -68,7 +68,7 @@ http://localhost:3333.
 - **ColumnAtlas**: profiles and charts of every block output, over the whole dataset.
 - **Self-contained**: MageML sends no usage statistics, and sign-in uses only the identity
   providers you configure.
-- **No AI features pushed to you.**
+- **No generative AI features pushed to you.**
 
 Every change from Mage 0.9.79 is in the [release notes](docs/development/release-notes.md),
 including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.
