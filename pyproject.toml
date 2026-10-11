@@ -5,21 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mage-ml"
 version = "0.1.0"
-description = "Mage is a tool for building and deploying data pipelines."
+description = "Data and ML pipelines in Python, R, Rust and SQL, built for ML engineers. Based on Mage."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-authors = [{ name = "Mage", email = "eng@mage.ai" }]
+authors = [{ name = "MageML contributors" }, { name = "Mage authors (upstream project)" }]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "License :: OSI Approved :: Apache Software License",
-  "Operating System :: OS Independent",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
   "cachetools",
   "click>=8.3.3",
   # ColumnAtlas, the block output explorer: a Rust extension built from rust/column_atlas.
-  "column-atlas-native",
+  "column-atlas-native==0.1.0",
   "Faker>=40.41",
   "GitPython>=3.2,<4",
   "Jinja2>=3.1.6",
@@ -80,6 +81,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/jospablo777/mage-ml"
 Repository = "https://github.com/jospablo777/mage-ml"
+Documentation = "https://github.com/jospablo777/mage-ml/blob/master/docs-md/README.md"
+Changelog = "https://github.com/jospablo777/mage-ml/blob/master/docs/development/release-notes.md"
+Issues = "https://github.com/jospablo777/mage-ml/issues"
 
 [project.scripts]
 mage = "mage_ai.cli.main:app"
@@ -209,7 +213,7 @@ r = []
 trino = [
   "trino~=0.326",
 ]
-integrations = ["mage-integrations"]
+integrations = ["mage-integrations==0.1.0"]
 # Dependency profile used by the container image.
 all = [
   "mage-ml[airtable]",
