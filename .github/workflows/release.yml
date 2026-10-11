@@ -2,8 +2,7 @@ name: Release
 
 # Builds the MageML wheels from a version tag, qualifies them on every supported platform
 # and, only when run with publish, attaches them to a GitHub release and updates the package
-# index on GitHub Pages. Nothing runs automatically. See scripts/release/ and
-# docs/development/releasing.md.
+# index on GitHub Pages. Nothing runs automatically. See docs/development/releasing.md.
 on:
   workflow_dispatch:
     inputs:
@@ -268,7 +267,7 @@ jobs:
           COMMIT: ${{ needs.contract.outputs.commit }}
         run: |
           test "$(git rev-parse "refs/tags/$TAG" 2>/dev/null || git rev-list -n1 HEAD)" = "$COMMIT"
-          sed -n "/^## MageML $VERSION/,/^## /p" docs/development/release-notes.md | sed '$d' > release-notes.md
+          cp "docs/development/releases/$TAG.md" release-notes.md
           gh release create "$TAG" --verify-tag --draft --title "MageML $VERSION" --notes-file release-notes.md
           gh release upload "$TAG" release-assets/*
           mkdir check && gh release download "$TAG" --dir check
