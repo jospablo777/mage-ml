@@ -66,6 +66,7 @@ http://localhost:3333.
 - **Pipeline documentation**: a README per pipeline in Markdown or Quarto, with images.
   ([guide](docs-md/guides/pipelines/documentation.md))
 - **ColumnAtlas**: profiles and charts of every block output, over the whole dataset.
+  ([guide](docs-md/guides/blocks/column-atlas.md))
 - **Self-contained**: MageML sends no usage statistics, and sign-in uses only the identity
   providers you configure.
 - **No generative AI features pushed to you.**
