@@ -6,6 +6,7 @@ class PipelineDocumentationPresenter(BasePresenter):
         'exists',
         'format',
         'id',
+        'image_path',
         'path',
         'pipeline_uuid',
         'quarto_available',

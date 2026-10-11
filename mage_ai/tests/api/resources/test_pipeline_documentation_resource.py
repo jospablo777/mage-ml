@@ -56,3 +56,31 @@ class PipelineDocumentationResourceTest(AsyncDBTestCase):
             resource='pipeline_documentations', user=self.owner,
         ).execute()
         self.assertEqual(response['error']['code'], 404)
+
+    async def test_images_are_uploaded_into_the_pipeline_folder(self):
+        import base64
+        import os
+
+        png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 32
+        content = base64.b64encode(png).decode()
+        first = (await self.save(image=dict(name='Sales chart.png', content=content)))
+        self.assertEqual(first['pipeline_documentation']['image_path'], 'images/Sales-chart.png')
+        second = (await self.save(image=dict(name='Sales chart.png', content=content)))
+        self.assertEqual(second['pipeline_documentation']['image_path'],
+                         'images/Sales-chart-2.png')
+        with open(os.path.join(self.pipeline.dir_path, 'images', 'Sales-chart.png'), 'rb') as f:
+            self.assertEqual(f.read(), png)
+
+        for image, message in [
+            (dict(name='notes.txt', content=content), 'is not an image'),
+            (dict(name='fake.png', content=base64.b64encode(b'<html>').decode()), 'not a PNG'),
+            (dict(name='../escape.png', content=content), None),
+            (dict(name='bad.png', content='not base64!'), 'not base64'),
+        ]:
+            response = await self.save(image=image)
+            if message is None:
+                # The name is reduced to a file name inside images/.
+                self.assertEqual(response['pipeline_documentation']['image_path'],
+                                 'images/escape.png')
+            else:
+                self.assertIn(message, response['error']['message'])

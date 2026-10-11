@@ -9,6 +9,7 @@ and only as image files.
 """
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -145,6 +146,49 @@ def image(pipeline, relative: str) -> Path:
     if path.stat().st_size > MAX_IMAGE_BYTES:
         raise DocumentationError(f'{relative} is larger than {MAX_IMAGE_BYTES // 1048576} MB.')
     return path
+
+
+# The first bytes of each binary image type; SVG is text and checked as such.
+_SIGNATURES = {
+    '.gif': (b'GIF87a', b'GIF89a'),
+    '.jpeg': (b'\xff\xd8\xff',),
+    '.jpg': (b'\xff\xd8\xff',),
+    '.png': (b'\x89PNG\r\n\x1a\n',),
+    '.webp': (b'RIFF',),
+}
+
+
+def save_image(pipeline, name: str, content: bytes) -> str:
+    """
+    Saves an uploaded image in the pipeline folder's images/ directory and returns its
+    path relative to the folder, as a document links it. A name already taken gets a
+    number, so an upload never replaces another image.
+    """
+    stem = re.sub(r'[^\w.-]+', '-', Path(name or '').stem).strip('.-')[:80] or 'image'
+    suffix = Path(name or '').suffix.lower()
+    if suffix not in IMAGE_TYPES:
+        raise DocumentationError(
+            f'{Path(name or "").name or "The file"} is not an image '
+            f'({", ".join(sorted(IMAGE_TYPES))}).',
+        )
+    if not content:
+        raise DocumentationError('The image is empty.')
+    if len(content) > MAX_IMAGE_BYTES:
+        raise DocumentationError(f'Images can be at most {MAX_IMAGE_BYTES // 1048576} MB.')
+    if suffix == '.svg':
+        if b'<svg' not in content[:4096].lower():
+            raise DocumentationError(f'{stem}{suffix} is not an SVG image.')
+    elif not content.startswith(_SIGNATURES[suffix]):
+        raise DocumentationError(f'{stem}{suffix} is not a {suffix[1:].upper()} image.')
+    folder = _folder(pipeline) / 'images'
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f'{stem}{suffix}'
+    number = 1
+    while path.exists():
+        number += 1
+        path = folder / f'{stem}-{number}{suffix}'
+    path.write_bytes(content)
+    return f'images/{path.name}'
 
 
 def quarto_command() -> Optional[str]:

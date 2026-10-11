@@ -39,7 +39,7 @@ PipelineDocumentationPolicy.allow_read(
 )
 
 PipelineDocumentationPolicy.allow_write(
-    ['format', 'source'],
+    ['format', 'image', 'source'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

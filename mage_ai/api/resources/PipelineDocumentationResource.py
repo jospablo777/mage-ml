@@ -45,6 +45,22 @@ class PipelineDocumentationResource(GenericResource):
 
     async def update(self, payload: Dict, **kwargs) -> 'PipelineDocumentationResource':
         pipeline = _pipeline(self.model['pipeline_uuid'], self.current_user)
+        image = payload.get('image')
+        if image is not None:
+            # {"image": {"name": "chart.png", "content": "<base64>"}} saves an image in the
+            # pipeline folder's images/ directory; the response names its path.
+            import base64
+            import binascii
+
+            try:
+                content = base64.b64decode(str((image or {}).get('content') or ''), validate=True)
+                path = documentation.save_image(pipeline, (image or {}).get('name'), content)
+            except (binascii.Error, ValueError):
+                raise ApiError(dict(code=400, message='The image content is not base64.'))
+            except documentation.DocumentationError as error:
+                raise ApiError(dict(code=400, message=str(error)))
+            self.model = dict(_model(pipeline), image_path=path)
+            return self
         source = payload.get('source')
         if not isinstance(source, str):
             raise ApiError(dict(code=400, message='source must be the document text.'))
