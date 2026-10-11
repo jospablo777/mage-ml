@@ -1320,7 +1320,7 @@ fn draw_help(frame: &mut Frame) {
             Line::from(""),
             Line::from(Span::styled("Metric definitions", strong(palette().ice))),
             Line::from("Duration: completed runs, includes failures."),
-            Line::from("Throughput: finished runs per window (the service sets it, 1 min)."),
+            Line::from("Throughput: finished runs per 1-minute window."),
             Line::from("Counters: service lifetime. Missing data: n/a."),
             Line::from("Pause stops admission. Active runs continue."),
         ])
