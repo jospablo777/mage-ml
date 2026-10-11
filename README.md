@@ -51,9 +51,11 @@ http://localhost:3333.
   ([guide](docs-md/guides/blocks/rust-blocks.md))
 - **R blocks** with a locked package environment (rv); consecutive R blocks share one
   session. ([guide](docs-md/guides/blocks/r-blocks.md))
-- **Compiled production runs**: compilation is a performance optimization. Triggers and
-  schedules fuse chains of blocks and compile them, and MageML checks and builds pipelines
-  ahead of their runs. ([performance](docs-md/production/pipeline-performance.md))
+- **Data pipeline compilation for better performance**: triggers and schedules fuse chains
+  of blocks and compile them, and MageML checks and builds pipelines ahead of their runs.
+  Single-language pipelines compile into one chain; the guide compares them with polyglot
+  pipelines and their trade-offs. ([guide](docs-md/guides/pipelines/compilation.md),
+  [measurements](docs-md/production/pipeline-performance.md))
 - **Pipeline services**: export pipelines as a Docker image that runs them without Mage,
   with an HTTP API, schedules, run history and metrics.
   ([guide](docs-md/production/export-a-service.md))
@@ -64,8 +66,7 @@ http://localhost:3333.
 - **ColumnAtlas**: profiles and charts of every block output, over the whole dataset.
 - **Self-contained**: MageML sends no usage statistics, and sign-in uses only the identity
   providers you configure.
-- **No AI integration**: MageML calls no AI or LLM service; your code and data stay with
-  you.
+- **No AI features pushed to you.**
 
 Every change from Mage 0.9.79 is in the [release notes](docs/development/release-notes.md),
 including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.

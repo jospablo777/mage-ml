@@ -30,6 +30,51 @@ blocks in one process. Each switch between languages ends a chain and converts t
 a pipeline in one language runs fastest. See
 [Pipeline performance](/production/pipeline-performance) for the measurements.
 
+## Single-language and polyglot pipelines
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/single-vs-polyglot.light.svg" alt="The same five-step pipeline in Python only, one chain with no conversions, and in Python, Rust and R, four chains with three Arrow conversions" />
+  <img className="hidden dark:block" src="/images/diagrams/single-vs-polyglot.dark.svg" alt="The same five-step pipeline in Python only, one chain with no conversions, and in Python, Rust and R, four chains with three Arrow conversions" />
+</Frame>
+
+A pipeline in one language compiles into one chain: one process, and each block hands its
+frame to the next in memory. A pipeline in several languages has one chain per run of
+blocks in the same language. Each switch starts another process (a Rust program or an R
+session) and converts the data through Apache Arrow.
+
+Measured on a laptop (Apple M4 Pro):
+
+| Pipeline | Rows | Run | Time |
+| --- | --- | --- | --- |
+| The [tutorial](/getting-started/polyglot-pipeline) pipeline, Python only | 200,000 | `mage run` | 1.8 s |
+| The same pipeline in Python, Rust and R | 200,000 | `mage run` | 3.2 s |
+| Five pandas blocks | 3,000,000 | exported service | 0.68 s |
+| The same with the first two blocks in Rust | 3,000,000 | exported service | 0.78 s |
+| The same with the first four blocks in Rust | 3,000,000 | exported service | 0.51 s |
+| Five Rust blocks | 3,000,000 | exported service | 0.24 s |
+
+On small tables the switches cost more than the work. On large tables, a faster language
+on the heavy steps pays for its switches, but only once it holds every step that touches
+the full table: two Rust blocks between pandas blocks were slower than none.
+
+| | Single-language | Polyglot |
+| --- | --- | --- |
+| Speed | No switches: the fastest a language allows | Each switch costs a process start and a conversion; worth it when a faster language takes the heavy steps |
+| Memory | One frame passed along a chain | A converted copy at each switch |
+| Libraries | One ecosystem | The best library for each step: Rust and Polars for large tables, R for statistics, Python for ML and connectors |
+| People | One language to read, review and debug | Readers need each language in the pipeline |
+
+Rules of thumb:
+
+- Write a pipeline in one language unless a step needs another.
+- Switch languages where the data is small, such as after an aggregate.
+- Move a whole run of heavy steps to Rust, not one block in the middle.
+- The Compile panel shows a pipeline's languages in order, such as `Python → Rust ×2 → R`,
+  and suggests a single language when it would run faster.
+
+[Pipeline performance](/production/pipeline-performance) has the full measurements,
+including memory.
+
 ## When it runs
 
 You rarely need to start it:

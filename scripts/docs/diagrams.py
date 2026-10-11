@@ -5,10 +5,14 @@ SVG files in docs/images/diagrams: <name>.light.svg and <name>.dark.svg for each
     uv run python scripts/docs/diagrams.py
 """
 import html
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from integration_tests.benchmark.pipelines.logos import COLORS, logo
+# The logos live in integration_tests, a package of the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from integration_tests.benchmark.pipelines.logos import COLORS, logo  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[2] / 'docs' / 'images' / 'diagrams'
 THEMES = {
@@ -288,7 +292,48 @@ def tutorial_pipeline_python() -> Diagram:
     return d
 
 
+
+def single_vs_polyglot() -> Diagram:
+    """The same pipeline in one language and in three: chains, switches and conversions."""
+    d = Diagram(1080, 420, 'The same pipeline in one language and in three')
+    d.text(24, 30, 'Python only: one chain, no conversions', size=14, weight='600',
+           muted=False)
+    d.group(24, 44, 1032, 104, 'One Python process: each block hands its frame to the next '
+            'in memory', COLORS['python'])
+    x = 40
+    for position, (name, kind) in enumerate((
+        ('load', 'pandas'), ('clean', 'pandas'), ('aggregate', 'pandas'),
+        ('trend', 'pandas'), ('export', 'pandas'),
+    )):
+        d.node(x, 74, 180, 56, name, kind, 'pandas DataFrame')
+        if position:
+            d.arrow([(x - 22, 102), (x, 102)])
+        x += 202
+    d.text(24, 196, 'Python, Rust and R: four chains, three conversions', size=14,
+           weight='600', muted=False)
+    d.group(24, 210, 210, 104, 'Python', COLORS['python'])
+    d.node(40, 240, 178, 56, 'load', 'pandas', 'pandas DataFrame')
+    d.group(264, 210, 414, 104, 'Rust: one program, one Polars plan', COLORS['rust'])
+    d.node(280, 240, 180, 56, 'clean', 'rust', 'plan')
+    d.node(482, 240, 180, 56, 'aggregate', 'rust', 'computes')
+    d.group(708, 210, 196, 104, 'R session', COLORS['r'])
+    d.node(724, 240, 164, 56, 'trend', 'r', 'tibble')
+    d.group(934, 210, 122, 104, 'Python', COLORS['python'])
+    d.node(946, 240, 98, 56, 'export', 'pandas')
+    d.arrow([(218, 268), (280, 268)])
+    d.arrow([(460, 268), (482, 268)])
+    d.arrow([(662, 268), (724, 268)])
+    d.arrow([(888, 268), (946, 268)])
+    for x in (249, 693, 919):
+        d.badge(x, 332, 'Arrow', COLORS['apachearrow'])
+    d.text(540, 372, 'Each switch starts another process and converts the data. On small '
+           'tables that costs more than it saves;', anchor='middle')
+    d.text(540, 392, 'on large tables, Rust on the heavy steps can pay for it.',
+           anchor='middle')
+    return d
+
 DIAGRAMS = {
+    'single-vs-polyglot': single_vs_polyglot,
     'tutorial-pipeline-python': tutorial_pipeline_python,
     'r-packages': r_packages,
     'rust-block': rust_block,
