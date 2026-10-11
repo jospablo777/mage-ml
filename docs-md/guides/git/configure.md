@@ -55,6 +55,11 @@ If you haven't already, configure your SSH key. This will allow your instance to
 
 **6. [Optional] Enable One-way Git Sync**
 
+Open **Settings** > **Git settings** and select the **One-way Git Sync** tab. Set the
+**Branch name** to sync from, and choose whether to **Sync on server start up** and
+**Sync before each trigger run**. A sync replaces local changes with the branch's code; see
+[One-way code sync using Git](../data-sync/git-sync.md).
+
 **7. Fill out the remaining fields.**
 
 Filling out these fields will allow MageML to recreate your git and SSH settings if they are deleted (i.e. if your container restarts):
@@ -93,6 +98,11 @@ Click _Settings_ in the left navigation, then select _Git settings_ on the left 
 - `Local directory path`: The directory in your machine that will be synced with the Github repository. If this field is omitted, it will default to the path determined by Python's `os.getcwd()`. You can check what your current working directory is in a Scratchpad block.
 
 **5. [Optional] Enable One-way Git Sync**
+
+Open **Settings** > **Git settings** and select the **One-way Git Sync** tab. Set the
+**Branch name** to sync from, and choose whether to **Sync on server start up** and
+**Sync before each trigger run**. A sync replaces local changes with the branch's code; see
+[One-way code sync using Git](../data-sync/git-sync.md).
 
 **6. Fill out the remaining fields.**
 

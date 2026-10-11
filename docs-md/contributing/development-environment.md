@@ -42,6 +42,20 @@ If you _don't_ have any experience contributing code and this is confusing, open
 
 Otherwise, follow the steps below to push your code changes to the MageML repo.
 
+1. Fork [the repository](https://github.com/jospablo777/mage-ml) on GitHub and clone your fork.
+2. Create a branch for the change: `git checkout -b fix-short-description`.
+3. Make the change with tests next to it, in `mage_ai/tests` for the backend or
+   `mage_ai/frontend/tests` for the frontend.
+4. Run the checks the pre-commit hooks run, and the tests:
+
+```bash
+   uv run pre-commit run --all-files
+   make test
+   ```
+
+5. Commit with a message that says what changed and why, push the branch to your fork, and
+   open a pull request against `master`. Describe how you tested it.
+
 ## Troubleshoot
 
 ### Permission denied

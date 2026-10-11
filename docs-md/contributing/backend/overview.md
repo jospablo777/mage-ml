@@ -67,3 +67,16 @@ root@b9d811e1e3e8:/home/src# python3 -m pytest mage_ai -x
 ```
 
 ## Debugging
+
+Run the server from the repository so your breakpoints apply:
+
+```bash
+DEBUG=1 uv run --no-sync python mage_ai/server/server.py --project default_repo
+```
+
+`DEBUG=1` turns on debug logging. To step through the code, start the same command from
+your editor's debugger (a Python launch configuration with
+`mage_ai/server/server.py` as the program and `--project default_repo` as its arguments), or
+add `breakpoint()` where you want to stop. Blocks run in other processes in production runs,
+so to debug a block's code, run it from the editor (one block at a time) or with
+`uv run --no-sync mage run default_repo <pipeline>`.

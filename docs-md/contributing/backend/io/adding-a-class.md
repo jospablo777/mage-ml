@@ -43,3 +43,17 @@ Additionally, every class will need to have the following methods:
 In order to test your class, you should perform all of the methods you defined in the class itself. Once you pass our linting checks (outlined in the development environment link above) _and_ your tests pass, you're ready to submit a pull request.
 
 ## Create a pull request
+
+1. Fork [the repository](https://github.com/jospablo777/mage-ml) on GitHub and clone your fork.
+2. Create a branch for the change: `git checkout -b fix-short-description`.
+3. Make the change with tests next to it, in `mage_ai/tests` for the backend or
+   `mage_ai/frontend/tests` for the frontend.
+4. Run the checks the pre-commit hooks run, and the tests:
+
+```bash
+   uv run pre-commit run --all-files
+   make test
+   ```
+
+5. Commit with a message that says what changed and why, push the branch to your fork, and
+   open a pull request against `master`. Describe how you tested it.
