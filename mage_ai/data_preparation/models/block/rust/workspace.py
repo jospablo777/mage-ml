@@ -25,9 +25,9 @@ RUST_VERSION = '1.98.0'
 # Folders of a block crate that cargo writes; never copied with the SDK.
 _SKIP = {'target', '.git', '__pycache__'}
 
-CARGO_TOML = '''# The Rust environment of this Mage project. Every Rust block can use the crates
+CARGO_TOML = '''# The Rust environment of this MageML project. Every Rust block can use the crates
 # under [workspace.dependencies]: add one there, such as `regex = "1"`, and run the block.
-# Polars comes with Mage's `mage` crate (use mage::prelude::*); to enable more Polars
+# Polars comes with MageML's `mage` crate (use mage::prelude::*); to enable more Polars
 # features, add polars here with the same version and the features you need.
 
 [workspace]

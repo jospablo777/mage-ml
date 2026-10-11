@@ -345,7 +345,7 @@ def _r_version_hint(expected: str) -> str:
         )
     if shutil.which(os.getenv('MAGE_RIG') or 'rig') is None:
         return (
-            f'Install R {expected} with rig (https://github.com/r-lib/rig), which Mage uses '
+            f'Install R {expected} with rig (https://github.com/r-lib/rig), which MageML uses '
             f'when Rscript is another version: `rig add {expected}`'
         )
     return (

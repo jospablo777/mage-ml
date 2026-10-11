@@ -6,12 +6,18 @@ from typing import List, Union
 import typer
 from click import Context
 from rich import print
+from rich.markup import escape
 from typer.core import TyperGroup
 
 from mage_ai.cli.utils import parse_runtime_variables
 from mage_ai.data_preparation.repo_manager import ProjectType
 from mage_ai.services.newrelic import initialize_new_relic
 from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
+
+
+def _e(value) -> str:
+    """A value printed with rich, which would drop text in brackets such as [dependencies]."""
+    return escape(str(value))
 
 
 class OrderCommands(TyperGroup):
@@ -115,7 +121,7 @@ def init(
         cluster_type=cluster_type,
         project_uuid=project_uuid,
     )
-    print(f'Initialized MageML project at {repo_path}')
+    print(f'Initialized MageML project at {_e(repo_path)}')
 
 
 @app.command()
@@ -279,7 +285,7 @@ def run(
                 )
         except REnvironmentError as error:
             # A setup problem with a fix in its message, not a failure of the block's code.
-            print(f'[red]{error}[/red]')
+            print(f'[red]{_e(error)}[/red]')
             raise typer.Exit(code=1)
         print('Pipeline run completed.')
 
@@ -342,7 +348,7 @@ def _contract_block(project_path: str, pipeline_uuid: str, block_uuid: str):
     pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path, check_if_exists=True)
     block = pipeline.get_block(block_uuid) if pipeline else None
     if block is None:
-        print(f'[red]Block {block_uuid} does not exist in pipeline {pipeline_uuid}.[/red]')
+        print(f'[red]Block {_e(block_uuid)} does not exist in pipeline {_e(pipeline_uuid)}.[/red]')
         raise typer.Exit(code=2)
     return block
 
@@ -369,12 +375,12 @@ def contract_draft(
     try:
         document = contracts.draft(block, name)
     except contracts.ContractError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     if write:
         path = contracts.contracts_dir(project_path) / f'{name}.yaml'
         if path.exists() and not force:
-            print(f'[red]{path} exists; pass --force to replace it.[/red]')
+            print(f'[red]{_e(path)} exists; pass --force to replace it.[/red]')
             raise typer.Exit(code=2)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(document)
@@ -403,7 +409,7 @@ def contract_check(
     try:
         checked = contracts.check_output(block, execution_partition=partition)
     except contracts.ContractError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     if checked is None:
         typer.echo(f'Block {block_uuid} has no contract, or its enforcement is off.')
@@ -426,7 +432,7 @@ def _run_records_setup(project_path: str, pipeline_uuid: str):
     db_connection.start_session()
     pipeline = Pipeline.get(pipeline_uuid, repo_path=project_path, check_if_exists=True)
     if pipeline is None:
-        print(f'[red]Pipeline {pipeline_uuid} does not exist in {project_path}.[/red]')
+        print(f'[red]Pipeline {_e(pipeline_uuid)} does not exist in {_e(project_path)}.[/red]')
         raise typer.Exit(code=2)
     return pipeline
 
@@ -436,7 +442,7 @@ def _pipeline_run(pipeline, run_id: int):
 
     run = PipelineRun.get(run_id)
     if run is None or run.pipeline_uuid != pipeline.uuid:
-        print(f'[red]Pipeline run {run_id} of {pipeline.uuid} does not exist.[/red]')
+        print(f'[red]Pipeline run {_e(run_id)} of {_e(pipeline.uuid)} does not exist.[/red]')
         raise typer.Exit(code=2)
     return run
 
@@ -461,7 +467,7 @@ def run_diff(
     try:
         comparison = run_records.compare(pipeline, *runs)
     except run_records.RunRecordError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     if as_json:
         typer.echo(json.dumps(comparison, indent=2, default=str))
@@ -495,7 +501,7 @@ def reproduce(
     try:
         result = run_records.reproduce(pipeline, original, log=typer.echo, keep=keep)
     except run_records.RunRecordError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     if report:
         with open(report, 'w') as file:
@@ -554,7 +560,7 @@ def release_status(
     try:
         policy = releases.load_policy(model, project_path)
         if policy is None:
-            print(f'[red]{model} has no release policy in releases/.[/red]')
+            print(f'[red]{_e(model)} has no release policy in releases/.[/red]')
             raise typer.Exit(code=2)
         champion = releases.champion_of(releases._client(), policy)
         typer.echo(
@@ -569,7 +575,7 @@ def release_status(
         if version:
             typer.echo(releases.summary(releases.evaluate_version(policy, version)))
     except releases.ReleaseError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
 
 
@@ -592,7 +598,7 @@ def release_promote(
     try:
         policy = releases.load_policy(model, project_path)
         if policy is None:
-            print(f'[red]{model} has no release policy in releases/.[/red]')
+            print(f'[red]{_e(model)} has no release policy in releases/.[/red]')
             raise typer.Exit(code=2)
         evaluation = releases.evaluate_version(policy, version)
         typer.echo(releases.summary(evaluation))
@@ -603,7 +609,7 @@ def release_promote(
             project_path, model, version, evaluation['champion'], getpass.getuser(),
         )
     except releases.ReleaseError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     typer.echo(f'{model} {entry["alias"]} is now version {entry["version"]}.')
 
@@ -622,7 +628,7 @@ def release_rollback(
     try:
         entry = releases.rollback(project_path, model, getpass.getuser())
     except releases.ReleaseError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     typer.echo(f'{model} {entry["alias"]} is back to version {entry["version"]}.')
 
@@ -641,7 +647,7 @@ def monitor_status(
         definition = monitors.load_monitor(monitor, project_path)
         pipeline = _run_records_setup(project_path, definition.pipeline)
     except monitors.MonitorError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     history = monitors.saved(pipeline, definition)[-runs:]
     if not history:
@@ -696,7 +702,7 @@ def verify_fusion(
     try:
         verification = verify(pipeline, variables=variables, exact=exact)
     except FusionVerificationError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=2)
     if report:
         with open(report, 'w') as file:
@@ -735,12 +741,12 @@ def _r_config(project_path: str):
     try:
         config = runtime.r_config(os.path.abspath(project_path))
     except runtime.REnvironmentError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)
     if not config.uses_rv:
         print(
-            f'[red]{os.path.abspath(project_path)} has no R environment. Create it with '
-            f'`mage r init {project_path}`.[/red]'
+            f'[red]{_e(os.path.abspath(project_path))} has no R environment. Create it with '
+            f'`mage r init {_e(project_path)}`.[/red]'
         )
         raise typer.Exit(code=1)
     return config
@@ -760,18 +766,18 @@ def r_setup(
     missing = False
     for step in steps:
         if step['found']:
-            print(f'[green]✓[/green] {step["name"]}: {step["found"]}')
+            print(f'[green]✓[/green] {_e(step["name"])}: {_e(step["found"])}')
             continue
         optional = step.get('optional', False)
         missing = missing or not optional
-        print(f'[yellow]✗[/yellow] {step["name"]}: install it with')
+        print(f'[yellow]✗[/yellow] {_e(step["name"])}: install it with')
         for command in step['commands']:
-            print(f'    {command}')
+            print(f'    {_e(command)}')
     if missing:
         print('Then run `mage r setup` again.')
         raise typer.Exit(code=1)
     print(
-        f'R blocks can be set up. Create the R environment with `mage r init {project_path}`; '
+        f'R blocks can be set up. Create the R environment with `mage r init {_e(project_path)}`; '
         'edit <project>/r/rproject.toml or run `rv add` there to change its packages.'
     )
 
@@ -793,13 +799,13 @@ def r_init(
     directory = Path(os.path.abspath(project_path)) / runtime.R_PROJECT_DIRECTORY
     try:
         if install_r and not runtime.has_r_version(r_version):
-            print(f'Installing R {r_version} with rig.')
+            print(f'Installing R {_e(r_version)} with rig.')
             runtime.install_r(r_version)
         runtime.init_project(directory, packages=packages or None, r_version=r_version)
     except runtime.REnvironmentError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)
-    print(f'Created the R environment in {directory}. Add packages with `rv add` there.')
+    print(f'Created the R environment in {_e(directory)}. Add packages with `rv add` there.')
 
 
 @r_app.command('sync')
@@ -813,9 +819,9 @@ def r_sync(project_path: str = R_PROJECT_PATH_DEFAULT):
     try:
         runtime.sync(config)
     except runtime.REnvironmentError as error:
-        print(f'[red]{error}[/red]')
+        print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)
-    print(f'The R library of {config.project_dir} is synced.')
+    print(f'The R library of {_e(config.project_dir)} is synced.')
 
 
 @r_app.command('status')
@@ -828,9 +834,9 @@ def r_status(project_path: str = R_PROJECT_PATH_DEFAULT):
     config = _r_config(project_path)
     report = runtime.status(config)
     for key, value in report['details'].items():
-        print(f'{key}: {value}')
+        print(f'{_e(key)}: {_e(value)}')
     for problem in report['problems']:
-        print(f'[red]{problem}[/red]')
+        print(f'[red]{_e(problem)}[/red]')
     if report['problems']:
         raise typer.Exit(code=1)
     print('R blocks can run.')
@@ -855,8 +861,8 @@ def rust_init(project_path: str = RUST_PROJECT_PATH_DEFAULT):
 
     created = workspace.init(os.path.abspath(project_path))
     print(
-        f'The Rust environment is in {created.root}. Add crates under '
-        f'[workspace.dependencies] in {created.cargo_toml}.'
+        f'The Rust environment is in {_e(created.root)}. Add crates under '
+        f'\\[workspace.dependencies] in {_e(created.cargo_toml)}.'
     )
 
 
@@ -875,12 +881,12 @@ def rust_build(project_path: str = RUST_PROJECT_PATH_DEFAULT):
     for report in reports:
         if report.ok:
             how = 'cached' if report.cached else f'built in {report.seconds:.1f} s'
-            print(f'[green]✓[/green] {report.block.label}: {how}')
+            print(f'[green]✓[/green] {_e(report.block.label)}: {_e(how)}')
         else:
-            print(f'[red]✗[/red] {report.block.label}\n{report.error}')
+            print(f'[red]✗[/red] {_e(report.block.label)}\n{_e(report.error)}')
     failed = sum(not report.ok for report in reports)
     if failed:
-        print(f'[red]{failed} of {len(reports)} Rust blocks do not build.[/red]')
+        print(f'[red]{_e(failed)} of {len(reports)} Rust blocks do not build.[/red]')
         raise typer.Exit(code=1)
     print(f'All {len(reports)} Rust blocks are built.')
 
@@ -894,9 +900,9 @@ def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
 
     report = project.status(os.path.abspath(project_path))
     for key, value in report['details'].items():
-        print(f'{key}: {value}')
+        print(f'{_e(key)}: {_e(value)}')
     for problem in report['problems']:
-        print(f'[red]{problem}[/red]')
+        print(f'[red]{_e(problem)}[/red]')
     if report['problems']:
         raise typer.Exit(code=1)
     print('Rust blocks can build.')

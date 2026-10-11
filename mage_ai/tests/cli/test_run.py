@@ -51,10 +51,14 @@ class RunTests(TestCase):
         from mage_ai.data_preparation.models.block.r.runtime import REnvironmentError
 
         mock_executor_factory.get_pipeline_executor.return_value.execute.side_effect = (
-            REnvironmentError('The R library is not synced with rv.lock. Run `mage r sync`.')
+            REnvironmentError(
+                'The R library is not synced with rv.lock [dependencies] [/x]. Run `mage r sync`.'
+            )
         )
         result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic'])
         assert result.exit_code == 1
         assert 'Run `mage r sync`.' in result.output
+        # rich would drop bracketed words or fail on [/x]; the CLI escapes them.
+        assert '[dependencies] [/x]' in result.output
         assert 'Traceback' not in result.output
         assert 'Pipeline run completed.' not in result.output
