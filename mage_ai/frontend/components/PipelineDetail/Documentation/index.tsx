@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from 'react-query';
 import styled, { ThemeContext } from 'styled-components';
 
@@ -132,6 +132,34 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
     },
   );
 
+  // An image (or a chart saved as PNG or SVG) goes to the pipeline folder's images/
+  // directory, and a link to it is added to the end of the draft.
+  const imageInput = useRef<HTMLInputElement>(null);
+  const [uploadImage, { isLoading: isUploading }] = useMutation(
+    api.pipeline_documentations.useUpdate(pipelineUUID),
+    {
+      onSuccess: (response: any) => onSuccess(response, {
+        callback: ({ pipeline_documentation: saved }) => {
+          const path = saved?.image_path;
+          if (path) {
+            const name = path.split('/').pop().replace(/\.[^.]+$/, '');
+            setDraft(prev => `${prev.replace(/\s*$/, '')}\n\n![${name}](${path})\n`);
+          }
+        },
+        onErrorCallback: (response, errors) => showError({ errors, response }),
+      }),
+    },
+  );
+  const addImage = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const content = String(reader.result).split(',').pop();
+      // @ts-ignore
+      uploadImage({ pipeline_documentation: { image: { content, name: file.name } } });
+    };
+    reader.readAsDataURL(file);
+  }, [uploadImage]);
+
   const saveDraft = useCallback((source?: string) => {
     // @ts-ignore
     save({ pipeline_documentation: { format, source: source ?? draft } });
@@ -155,7 +183,8 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
 
   const imagesHint = (
     <Text muted small>
-      Put images in this pipeline&apos;s folder, <Text inline monospace small>
+      Add images and charts (PNG, JPEG, GIF, WebP or SVG) with Add image, or put them in
+      this pipeline&apos;s folder, <Text inline monospace small>
         pipelines/{pipelineUUID}/
       </Text>, and show them with <Text inline monospace small>
         ![Description](image.png)
@@ -191,6 +220,23 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
             )}
           </FlexContainer>
           <FlexContainer alignItems="center">
+            <input
+              accept=".png,.jpg,.jpeg,.gif,.webp,.svg"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  addImage(file);
+                }
+                event.target.value = '';
+              }}
+              ref={imageInput}
+              style={{ display: 'none' }}
+              type="file"
+            />
+            <Button loading={isUploading} onClick={() => imageInput.current?.click()}>
+              Add image
+            </Button>
+            <Spacing ml={1} />
             <Button
               onClick={() => {
                 if (!unsaved || window.confirm('Discard your changes?')) {

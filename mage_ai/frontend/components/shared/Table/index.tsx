@@ -644,9 +644,13 @@ function Table({
                   <Tooltip
                     appearBefore={!tooltipAppearAfter}
                     label={(
-                      <Text leftAligned>
-                        {tooltipMessage}
-                      </Text>
+                      <>
+                        {tooltipMessage.split('\n').map(line => (
+                          <Text key={line} leftAligned>
+                            {line}
+                          </Text>
+                        ))}
+                      </>
                     )}
                     lightBackground
                     maxWidth={tooltipWidth}

@@ -36,10 +36,16 @@ owners and operations, and list the pipeline's data loaders and exporters.
 **Edit** opens the source beside a live preview. **Save** (or Cmd+S / Ctrl+S) writes the
 file; **Cancel** asks before discarding changes. Switching the format renames the file.
 
-## Images
+## Images and charts
 
-Put images in the pipeline's folder, `pipelines/<pipeline>/`, or a folder inside it, and
-show them with a relative path:
+While editing, click **Add image** and choose a PNG, JPEG, GIF, WebP or SVG file. MageML
+saves it in the pipeline's `images/` folder (a number is added when the name is taken) and
+adds a link to it at the end of the document. For a chart, save it as PNG or SVG first, for
+example with `fig.savefig("revenue.png")` in Python or `ggsave("revenue.png")` in R, and
+add it the same way.
+
+You can also put images in the pipeline's folder, `pipelines/<pipeline>/`, or a folder
+inside it, and show them with a relative path:
 
 ```markdown
 ![Data flow](images/flow.png)

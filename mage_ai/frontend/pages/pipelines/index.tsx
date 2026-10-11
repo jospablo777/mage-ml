@@ -991,7 +991,8 @@ function PipelineListPage() {
           uuid: 'Created at',
         },
         {
-          tooltipMessage: 'When MageML last compiled the pipeline for production runs.',
+          tooltipMessage: 'When MageML last compiled the pipeline for production runs.\n'
+            + 'Compiled pipelines are faster and more performant.',
           uuid: 'Compiled',
         },
         {
