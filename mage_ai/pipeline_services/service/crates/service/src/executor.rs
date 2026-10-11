@@ -910,10 +910,19 @@ impl ChainTask {
             match self.run_once(timeout).await {
                 Ok((records, seconds)) => {
                     let chain_finished = crate::ledger::now();
-                    // Each block's span starts where the previous one ended, from the
-                    // chain's start and the times the chain measured; the last block ends
-                    // with the chain, so the spans add up to the chain's time.
-                    let mut block_started = chain_started;
+                    // The spans follow one another with the times the chain measured,
+                    // laid back from the chain's end; the first block starts with the
+                    // chain, so it carries the worker's start-up and the input reads, and
+                    // the spans add up to the chain's time.
+                    let mut starts = vec![chain_started; self.blocks.len()];
+                    let mut boundary = chain_finished;
+                    for position in (1..self.blocks.len()).rev() {
+                        let part = seconds.get(position).map_or(0.0, |p| p.seconds);
+                        boundary = (boundary
+                            - chrono::Duration::microseconds((part * 1e6) as i64))
+                        .max(chain_started);
+                        starts[position] = boundary;
+                    }
                     for (position, block) in self.blocks.iter().enumerate() {
                         let last = position + 1 == self.blocks.len();
                         let part = seconds.get(position).cloned().unwrap_or_default();
@@ -928,18 +937,15 @@ impl ChainTask {
                         let block_finished = if last {
                             chain_finished
                         } else {
-                            (block_started
-                                + chrono::Duration::microseconds((elapsed * 1e6) as i64))
-                            .min(chain_finished)
+                            starts[position + 1]
                         };
                         let _ = self.service.ledger.finish_chained_block(
                             &self.run_id,
                             &block.uuid,
-                            block_started,
+                            starts[position],
                             block_finished,
                             if last { &records } else { &part.outputs },
                         );
-                        block_started = block_finished;
                         let message = if planned {
                             format!(
                                 "Planned in the compiled chain; its work ran with {computed_in}."
