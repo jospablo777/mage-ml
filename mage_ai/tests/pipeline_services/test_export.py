@@ -144,6 +144,50 @@ class CaptureTest(ExportTestCase):
                       'regions', notes)
         self.assertIn(f'the service does not run monitor {self.pipeline.uuid}.', notes)
 
+    def test_model_files_the_blocks_name_and_includes_go_in_the_image(self):
+        import joblib
+        from sklearn.linear_model import LinearRegression
+
+        models_dir = self.project / 'models'
+        models_dir.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, models_dir, True)
+        joblib.dump(LinearRegression().fit([[0.0], [1.0]], [0.0, 1.0]), models_dir / 'm.joblib')
+        (models_dir / 'forecaster').mkdir()
+        (models_dir / 'forecaster' / 'state.bin').write_bytes(b'x' * 10)
+        (models_dir / 'extra.txt').write_text('computed path')
+        self.add('score', 'data_loader', '''
+            from mage_ai.pipeline_services.models import load_artifact
+
+            @data_loader
+            def score(*args, **kwargs):
+                model = load_artifact('models/m.joblib')
+                forecaster = 'models/forecaster'
+                missing = 'models/not_there.bin'
+                return {'prediction': float(model.predict([[2.0]])[0])}
+        ''')
+
+        captured = export.capture(
+            self.repo_path, [self.pipeline.uuid], includes=['models/extra.txt'],
+        )
+
+        files = {str(p.relative_to(self.project)) for p in captured.files}
+        self.assertTrue({
+            'models/m.joblib', 'models/forecaster/state.bin', 'models/extra.txt',
+        } <= files, files)
+        self.assertNotIn('models/not_there.bin', files)
+        notes = '\n'.join(captured.notes)
+        self.assertIn('Included models/m.joblib', notes)
+        self.assertIn('Included models/extra.txt (13 bytes), with --include.', notes)
+        self.assertIn('joblib', captured.requirements)
+
+    def test_an_include_outside_the_project_or_missing_stops_the_export(self):
+        self.chain()
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(self.repo_path, [self.pipeline.uuid], includes=['../x', 'nope.bin'])
+        problems = '\n'.join(caught.exception.problems)
+        self.assertIn('--include ../x: the path is outside the project.', problems)
+        self.assertIn('--include nope.bin: there is no such file or folder', problems)
+
     def test_exporting_again_keeps_the_env_file_and_local_data(self):
         self.chain()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])

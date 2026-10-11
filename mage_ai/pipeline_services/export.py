@@ -89,6 +89,8 @@ class Capture:
     r_project: Optional[Path] = None
     # The pipeline environment (metadata.yaml `environment`) the Python blocks run in.
     environment: Optional[Any] = None
+    # Modules that read the included model files (.cbm: catboost), for the requirements.
+    artifact_modules: Set[str] = field(default_factory=set)
 
     @property
     def needs_r(self) -> bool:
@@ -121,6 +123,7 @@ def capture(
     name: Optional[str] = None,
     max_concurrent_runs: Optional[int] = None,
     models: Optional[List[str]] = None,
+    includes: Optional[List[str]] = None,
 ) -> Capture:
     """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
@@ -165,6 +168,7 @@ def capture(
         raise ExportError(problems)
 
     _include_shared_code(capture_, problems)
+    _include_artifacts(capture_, includes or [], problems)
     for extra in ('io_config.yaml', 'requirements.txt', '__init__.py'):
         if (project_path / extra).is_file():
             capture_.files.add(project_path / extra)
@@ -862,6 +866,80 @@ def _include_shared_code(capture_: Capture, problems: List[str]) -> None:
                     queue.append(item)
 
 
+# A quoted string in a block's code: a candidate path of a file the block reads.
+_STRING_LITERAL = re.compile(r"""(["'])((?:(?!\1)[^\n\\]){2,300})\1""")
+# Code the export already follows by imports, or writes itself.
+_CODE_SUFFIXES = {'.py', '.r', '.rs', '.sql'}
+
+
+def _size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+
+
+def _human(size: int) -> str:
+    for unit in ('bytes', 'KB', 'MB', 'GB'):
+        if size < 1024 or unit == 'GB':
+            return f'{size:.0f} {unit}' if unit == 'bytes' else f'{size:.1f} {unit}'
+        size /= 1024
+    return f'{size} bytes'
+
+
+def _include_artifacts(capture_: Capture, includes: List[str], problems: List[str]) -> None:
+    """
+    Model and data files the blocks read: every existing project file or folder a block
+    names in a string, such as load_artifact('models/churn.cbm'), and each --include path.
+    """
+    from mage_ai.pipeline_services.models import ARTIFACT_LOADERS
+
+    project = capture_.project
+    found: Dict[Path, str] = {}
+    for name in includes:
+        candidate = (project / name).resolve()
+        if not candidate.is_relative_to(project):
+            problems.append(f'--include {name}: the path is outside the project.')
+        elif not candidate.exists():
+            problems.append(f'--include {name}: there is no such file or folder in the project.')
+        else:
+            found[candidate] = 'with --include'
+    for path in sorted(capture_.files):
+        if path.suffix.lower() not in _CODE_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            continue
+        for _, literal in _STRING_LITERAL.findall(text):
+            name = literal.strip()
+            if name.startswith('./'):
+                name = name[2:]
+            parts = Path(name).parts
+            if not parts or name.startswith('/') or '..' in parts:
+                continue
+            if parts[0] in SKIPPED_PROJECT_DIRS:
+                continue
+            candidate = project / name
+            try:
+                exists = candidate.exists()
+            except OSError:
+                continue
+            if not exists or candidate.suffix.lower() in _CODE_SUFFIXES or candidate == project:
+                continue
+            found.setdefault(candidate.resolve(), f'named in {path.relative_to(project)}')
+    for candidate, why in sorted(found.items()):
+        files = [candidate] if candidate.is_file() else [
+            p for p in candidate.rglob('*') if p.is_file() and '__pycache__' not in p.parts
+        ]
+        capture_.files.update(files)
+        module = ARTIFACT_LOADERS.get(candidate.suffix.lower(), (None, None))[1]
+        if module:
+            capture_.artifact_modules.add(module)
+        capture_.notes.append(
+            f'Included {candidate.relative_to(project)} ({_human(_size(candidate))}), {why}.'
+        )
+
+
 def _local_install(dist) -> bool:
     """Installed from a local directory, so pip cannot fetch it by name and version."""
     try:
@@ -905,6 +983,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
         if m.split('.')[0] not in local_tops and m.split('.')[0] not in sys.stdlib_module_names
     )
     candidates += ['pyarrow', 'pandas']
+    candidates += sorted(capture_.artifact_modules)
     if any(b['language'] == 'sql' for p in capture_.manifest['pipelines'] for b in p['blocks']):
         # What the SQL runner imports to render queries and use PostgreSQL.
         candidates += [

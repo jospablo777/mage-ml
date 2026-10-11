@@ -964,6 +964,12 @@ def export_service(
     tag: Union[str, None] = typer.Option(None, help='image tag for --build; defaults to the name.'),
     force: bool = typer.Option(False, help='replace a non-empty output directory.'),
     model: List[str] = EXPORT_MODELS,
+    include: List[str] = typer.Option(
+        [], '--include', '-i',
+        help='a project file or folder to put in the image, such as a model the blocks load '
+             'by a computed path; repeat for more. Paths named in the blocks are found '
+             'without it.',
+    ),
 ):
     """
     Export pipelines as a standalone Docker service: an HTTP API, schedules, run history
@@ -975,6 +981,7 @@ def export_service(
     try:
         captured = export.capture(
             project_path, pipelines, name=name, max_concurrent_runs=max_runs, models=model,
+            includes=include,
         )
         out_dir = export.write(captured, out, force=force)
     except export.ExportError as error:
