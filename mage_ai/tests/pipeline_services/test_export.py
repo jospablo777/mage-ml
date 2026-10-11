@@ -15,7 +15,9 @@ import polars as pl
 
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.pipeline import Pipeline
+from mage_ai.data_preparation.repo_manager import init_project_uuid
 from mage_ai.pipeline_services import export
+from mage_ai.settings.repo import set_repo_path
 from mage_ai.tests.base_test import DBTestCase
 
 REPO = Path(__file__).resolve().parents[3]
@@ -69,6 +71,17 @@ EXPORT = '''
 
 
 class ExportTestCase(DBTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # The blocks import `<project>.utils`. The test project is named test, like the
+        # package of Python's own tests, which interpreters from pyenv and python.org ship
+        # and Python finds before the project.
+        cls.repo_path = os.path.join(cls._test_directory, 'shop')
+        os.mkdir(cls.repo_path)
+        set_repo_path(cls.repo_path)
+        init_project_uuid()
+
     def setUp(self):
         super().setUp()
         self.project = Path(self.repo_path).resolve()
