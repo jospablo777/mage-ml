@@ -56,10 +56,23 @@ class MSSQL(BaseSQL):
             **kwargs,
         )
 
+    def _port(self):
+        """
+        The port to connect to, unless the server names one (host,1444) or a named instance
+        (host\\SQLEXPRESS), which finds its port through SQL Server Browser.
+        """
+        server = str(self.settings.get('server') or '')
+        port = self.settings.get('port')
+        if not port or ',' in server or '\\' in server:
+            return None
+        return int(port)
+
     @property
     def connection_string(self):
         driver = self.settings['driver']
         server = self.settings['server']
+        if self._port():
+            server = f'{server},{self._port()}'
         database = self.settings['database']
         username = self.settings['user']
         password = self.settings['password']
@@ -177,6 +190,7 @@ class MSSQL(BaseSQL):
             username=self.settings['user'],
             password=self.settings['password'],
             host=self.settings['server'],
+            port=self._port(),
             database=self.settings['database'],
             query=dict(
                 driver=self.settings['driver'],
