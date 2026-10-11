@@ -59,7 +59,10 @@ def clean_name(name: str, **kwargs) -> str:
     Returns:
         str: The cleaned name.
     """
-    return clean_name_orig(name, allow_characters=['/'], **kwargs)
+    cleaned = clean_name_orig(name, allow_characters=['/'], **kwargs)
+    # '/' places a block in a subfolder. Empty segments go, so a name such as '/tmp/x' stays
+    # relative: as an absolute path, os.path.join wrote the block outside the project.
+    return '/'.join(part for part in cleaned.split('/') if part)
 
 
 def dynamic_block_values_and_metadata(
