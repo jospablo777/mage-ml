@@ -206,7 +206,9 @@ class CaptureTest(ExportTestCase):
         project = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, project, True)
         (project / 'rust').mkdir()
-        manifest = '[workspace.dependencies]\nmage-block = {{ path = ".mage/sdk", features = {} }}\n'
+        manifest = (
+            '[workspace.dependencies]\nmage-block = {{ path = ".mage/sdk", features = {} }}\n'
+        )
         capture_ = export.Capture(
             name='s', project=project,
             manifest={'pipelines': [{'blocks': [{'language': 'rust'}]}]},
