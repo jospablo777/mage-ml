@@ -269,7 +269,27 @@ def r_packages() -> Diagram:
     return d
 
 
+def tutorial_pipeline_python() -> Diagram:
+    """The tutorial pipeline in Python only: one chain in one process."""
+    d = Diagram(1080, 230, 'The tutorial pipeline in Python only')
+    d.group(24, 40, 1032, 110, 'Python: one compiled chain, one process, frames in memory',
+            COLORS['python'])
+    nodes = [('load_orders', 'data loader', 150), ('clean_orders_py', 'transformer', 190),
+             ('monthly_revenue_py', 'transformer', 220), ('revenue_trend_py', 'transformer', 200),
+             ('save_trend_py', 'data exporter', 160)]
+    x = 40
+    for position, (name, kind, width) in enumerate(nodes):
+        d.node(x, 72, width, 58, name, 'pandas', kind)
+        if position:
+            d.arrow([(x - 20, 101), (x, 101)])
+        x += width + 20
+    d.text(540, 190, 'No language switches, so no conversions: each block hands its frame '
+           'to the next in memory.', anchor='middle', size=12.5, muted=False)
+    return d
+
+
 DIAGRAMS = {
+    'tutorial-pipeline-python': tutorial_pipeline_python,
     'r-packages': r_packages,
     'rust-block': rust_block,
     'r-block': r_block,
