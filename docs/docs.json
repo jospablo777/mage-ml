@@ -517,7 +517,9 @@
               "production/ci-cd/local-cloud/gitlab-ci-cd",
               "production/ci-cd/local-cloud/buildkite",
               "production/configuring-production-settings/overview",
-              "production/pipeline-services"
+              "production/export-a-service",
+              "production/pipeline-services",
+              "production/service-console"
             ]
           },
           {
