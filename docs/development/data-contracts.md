@@ -26,7 +26,10 @@ diagnostics. Its documents plan a registry service, receipts, Arrow kernels, a
 - **Mage already has the gate.** Block tests run after the output is stored, and a
   failing test fails the block run, so downstream blocks never start. A contract is a
   declarative test, so it runs in `run_tests`. That covers the notebook, triggers,
-  retries, block fusion, and R, SQL and Rust blocks without a new execution path.
+  retries, block fusion, and R, SQL and Rust blocks without a new execution path. Runs
+  without tests (`mage run` without `--test`, fused stages) call `run_tests` with
+  `contracts_only`, so the contract is still checked; a violation raises
+  `ContractViolation`, which `mage run` prints and exits with 1.
 - **A registry service is unnecessary.** Contracts are files in the project, versioned and
   reviewed with git. Publication, canonical hashes and receipts duplicate what git
   and the stored report give.
@@ -62,8 +65,9 @@ parsing: unknown fields are errors, so a typo such as `nulable` isn't silently i
 
 ## Remaining gaps
 
-1. **Pipeline services** don't check contracts. The service image would need the Rust
-   extension (a Polars build) or a Python Polars port of the rules.
+1. **Pipeline services** don't check contracts. The export report lists each one under
+   Notes. The service could link `column_atlas::contract::validate` directly, since it
+   reads a Parquet file and a contract as JSON.
 2. **Dynamic blocks** pass the child's uuid to the check, but no test covers them yet,
    and the block settings show only the parent's notebook report.
 3. **No compatibility check in CI** between two versions of a contract. A block's version
