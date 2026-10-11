@@ -13,6 +13,11 @@ config:
 
 ## Optional fields
 
+These keys go under `config`.
+
 ```yaml
-schema_name: schema_name    # Override the schema name. Default schema is "main"
+config:
+  table_name: table_name
+  schema_name: schema_name    # Override the schema name. Default schema is "main"
+  if_exists: append           # Default for the streaming sink
 ```

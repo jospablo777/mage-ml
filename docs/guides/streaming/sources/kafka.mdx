@@ -14,8 +14,7 @@ include_metadata: false
 batch_size: 100
 timeout_ms: 500
 auto_offset_reset: latest # Optional
-max_partition_fetch_bytes: 5242880 # Optional, default: 5MB (Pro), 1MB (OSS)
-max_partition_fetch_bytes: 1048576 # Optional
+max_partition_fetch_bytes: 1048576 # Optional, default: 1MB
 offset:  # Optional
   value: null # Optional
   type: "int"
@@ -33,14 +32,14 @@ offset:  # Optional
 
 #### Performance Parameters
 
-- **`batch_size`** (default: `100`): Maximum number of messages to process in a single batch. The consumer will accumulate messages across multiple polls to reach this target when possible.
+- **`batch_size`** (default: `100`): Maximum number of messages to process in a single batch. Each poll returns at most this many messages.
 
   **Recommendations:**
   - Small messages (< 1 KB): 500-2000
   - Medium messages (1-10 KB): 200-1000
   - Large messages (> 10 KB): 50-500
 
-- **`max_partition_fetch_bytes`** (default: `5242880` = 5MB for Pro, `1048576` = 1MB for OSS): Maximum amount of data to fetch per partition in a single poll. This is a **per-partition limit** that can constrain your batch size.
+- **`max_partition_fetch_bytes`** (default: `1048576` = 1MB): Maximum amount of data to fetch per partition in a single poll. This is a **per-partition limit** that can constrain your batch size.
 
   **Important:** This value must be:
   - Greater than your largest message size
@@ -52,7 +51,7 @@ offset:  # Optional
   - Large messages (10-100 KB): 10-50 MB
   - Very large messages (> 100 KB): 50-100 MB
 
-  **Memory consideration:** Total in-flight data = `max_partition_fetch_bytes × number of partitions`. Ensure your consumer has sufficient heap memory.
+  **Memory consideration:** Total in-flight data = `max_partition_fetch_bytes × number of partitions`. Make sure the consumer process has enough memory.
 
 - **`timeout_ms`** (default: `500`): Maximum time to wait for messages when polling (in milliseconds). Lower values reduce latency but may increase CPU usage.
 
@@ -60,14 +59,13 @@ offset:  # Optional
 
 - **`auto_offset_reset`** (default: `latest`): What to do when there is no initial offset or the offset is out of range. Options: `earliest`, `latest`, `none`
 - **`include_metadata`**: If `true`, includes Kafka metadata (key, partition, offset, timestamp, topic) with each message
-- **`api_version`** (default: detected): Kafka API version. Mage detects the broker's version; set it only for brokers that cannot report it. `0.10.2`, the old default, fails against Kafka 4
+- **`api_version`** (default: detected): Kafka API version. MageML detects the broker's version; set it only for brokers that cannot report it. `0.10.2`, the old default, fails against Kafka 4
+
 ### Offset Configuration
-<Note>
-    Available in versions `>= 0.9.61`
-</Note>
+
 The `offset` config allows you to reset offset when starting the streaming pipeline. If using the `offset` config, the `partitions` config is required.
 
-`offset` config has 4 optional values:
+The `offset.type` value is one of:
   1. `beginning` - Start from the earliest available message
   2. `end` - Start from the latest message (skip all existing messages)
   3. `int` - Start from a specific numeric offset
@@ -102,20 +100,12 @@ offset:
     - {"topic": "my_topic", "partition": 0}
 ```
 
-**Note:** Both `beginning` and `end` do not require `value` field.
-  1. beginning
-  2. end
-  3. int
-  4. timestamp
+`beginning` and `end` do not use the `value` field.
 
-Both `beginning` and `end` set the consumer to consume data from the beginning and end of the queue, respectively.
-Also, they do not require `offset_value`
+With `int`, the consumer reads from the given offset, the numeric position inside each partition.
 
-`int` config set the consumer to consume data from the given offset value inside the queue.
-This value correspond to the numeric position inside each partition.
-
-`timestamp` config set the consumer to consume data from the given offset timestamp value inside the queue.
-This value correspond to the timestamp of the message (Unit should be milliseconds since beginning of the epoch)
+With `timestamp`, the consumer reads from the first message at or after the given timestamp
+(milliseconds since the epoch).
 
 ## SSL authentication
 
@@ -231,7 +221,7 @@ serde_config:
 
 ## API version
 
-Mage detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.
+MageML detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.
 
 ## Performance Tuning
 
@@ -329,7 +319,7 @@ The 1.5x multiplier accounts for overhead. Ensure your consumer process has at l
 **Solution:**
 1. Reduce `max_partition_fetch_bytes`
 2. Reduce number of partitions consumed (use topic filtering)
-3. Increase consumer heap memory
+3. Increase the memory of the consumer process
 4. Reduce `batch_size` to process smaller batches
 
 ### Issue: Configuration Changes Not Taking Effect
@@ -350,7 +340,7 @@ The 1.5x multiplier accounts for overhead. Ensure your consumer process has at l
 3. Verify topic name spelling matches exactly
 4. Check network connectivity to `bootstrap_server`
 5. Verify consumer has read permissions for the topic
-6. Check if using `offset` config - it may be seeking to a specific position
+6. Check if using `offset` config: it may be seeking to a specific position
 
 ## Complete Example Configurations
 
@@ -423,7 +413,7 @@ offset:
 | Parameter | Default | Recommended Range | Notes |
 |-----------|---------|-------------------|-------|
 | `batch_size` | 100 | 50-2000 | Higher for small messages, lower for large |
-| `max_partition_fetch_bytes` | 5MB (Pro), 1MB (OSS) | 1MB-100MB | Must exceed max message size |
+| `max_partition_fetch_bytes` | 1MB | 1MB-100MB | Must exceed max message size |
 | `timeout_ms` | 500 | 100-5000 | Lower = lower latency, higher CPU |
 | `auto_offset_reset` | latest | earliest/latest | earliest for backfill, latest for real-time |
 

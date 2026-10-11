@@ -40,18 +40,18 @@ def transform_df(df: DataFrame, *args, **kwargs) -> DataFrame:
 
 @test
 def test_number_of_rows(df) -> None:
-    assert len(df.index) >= 2, 'The output has more than 1 row.'
+    assert len(df.index) == 1, 'The output should have 1 row.'
 
 
 @test
 def test_columns(df) -> None:
-    assert df.columns[0] != COLUMNS_TO_USE[0], 'The output columns don’t match.'
+    assert df.columns[0] == COLUMNS_TO_USE[0], 'The output columns don’t match.'
 ```
 
 <Note>
   You can combine all your data validations into 1 test function or you can
-  split them up into multiple test functions. The benefit of splitting them up
-  is that they can run in parallel, speeding up the data validation.
+  split them up into multiple test functions. The tests run one after another, and each
+  one counts separately in the number of tests passed.
 </Note>
 
 ---
@@ -77,7 +77,7 @@ Finish executing block.
 
 1. Before adding expectations to your pipeline, please make sure you have at least 1
 data loader, transformer, or data exporter block.
-They must be Python blocks (SQL block support coming soon).
+They must be Python blocks.
 
     If you don’t have any blocks, add a data loader block and paste the following code:
 
@@ -96,7 +96,8 @@ They must be Python blocks (SQL block support coming soon).
 
     For more expectations, read Great Expectation’s [documentation](https://greatexpectations.io/expectations/).
 
-1. [Add Great Expectations power up to your pipeline](/observability/testing/data-validation#how-to-add-extensions-to-your-pipeline).
+1. Add the Great Expectations power up to your pipeline: open the <b>Power ups</b> view in the Sidekick of the
+pipeline editor.
 1. In the list of available power ups, click the option for <b>Great Expectations</b>.
     ![Power ups](https://github.com/mage-ai/assets/blob/main/notebook/extensions/power-ups.jpg?raw=true)
 
@@ -136,69 +137,10 @@ then a button labeled <b>load_api_data_demo</b> will appear.
 1. Click that button to run your extension block for the block `load_api_data_demo`.
 1. The output should look something like this:
     ```
-    Calculating Metrics:   0%|          | 0/1 [00:00<?, ?it/s]
-    Calculating Metrics:   0%|          | 0/1 [00:00<?, ?it/s]
     Expectations from extension test_number_of_rows for block load_api_data_demo succeeded.
-    {
-      "results": [
-        {
-          "expectation_config": {
-            "expectation_type": "expect_table_row_count_to_be_between",
-            "kwargs": {
-              "min_value": 1000,
-              "max_value": 10000,
-              "batch_id": "9946450cf9609e633658e9c4ee38efa5"
-            },
-            "meta": {}
-          },
-          "success": true,
-          "meta": {},
-          "exception_info": {
-            "raised_exception": false,
-            "exception_traceback": null,
-            "exception_message": null
-          },
-          "result": {
-            "observed_value": 10000
-          }
-        }
-      ],
-      "success": true,
-      "evaluation_parameters": {},
-      "meta": {
-        "great_expectations_version": "0.15.50",
-        "expectation_suite_name": "expectation_suite_for_block_load_api_data_demo",
-        "run_id": {
-          "run_name": null,
-          "run_time": "2023-03-14T01:41:09.117251+00:00"
-        },
-        "batch_spec": {
-          "data_asset_name": "data_asset_load_api_data_demo",
-          "batch_data": "PandasDataFrame"
-        },
-        "batch_markers": {
-          "ge_load_time": "20230314T014109.103956Z",
-          "pandas_data_fingerprint": "76d98f6ff10d31abaae6e9a7c47cc7c1"
-        },
-        "active_batch_definition": {
-          "datasource_name": "datasource_name_load_api_data_demo",
-          "data_connector_name": "data_connector_name_load_api_data_demo",
-          "data_asset_name": "data_asset_load_api_data_demo",
-          "batch_identifiers": {
-            "default_identifier_name": "default_identifier"
-          }
-        },
-        "validation_time": "20230314T014109.117222Z",
-        "checkpoint_name": null
-      },
-      "statistics": {
-        "evaluated_expectations": 1,
-        "successful_expectations": 1,
-        "unsuccessful_expectations": 0,
-        "success_percent": 100.0
-      }
-    }
     ```
+
+    The block output also shows the validation result from Great Expectations.
 
 ### Other ways to run expectations
 
@@ -294,38 +236,28 @@ You can check the pipeline logs for the block failure. There will be an entry co
 message with the failure results. It could look something like this:
 
 ```
-Traceback (most recent call last):
-  File "/home/src/mage_ai/data_preparation/models/block/__init__.py", line 648, in execute_sync
-    output = self.execute_block(
-  File "/home/src/mage_ai/data_preparation/models/block/__init__.py", line 885, in execute_block
-    outputs = self._execute_block(
-  File "/home/src/mage_ai/data_preparation/models/block/__init__.py", line 949, in _execute_block
-    outputs = self.execute_block_function(
-  File "/home/src/mage_ai/data_preparation/models/block/__init__.py", line 975, in execute_block_function
-    output = block_function(*input_vars, **global_vars)
-  File "/home/src/mage_ai/data_preparation/models/block/extension/block.py", line 46, in func
-    raise Exception(
 Exception: Expectations from extension test_number_of_rows for block load_api_data_demo failed:
-
 {
+  "success": false,
+  "expectation_config": {
+    "type": "expect_table_row_count_to_be_between",
+    "kwargs": {
+      "batch_id": "datasource_name_load_api_data_demo-data_asset_load_api_data_demo",
+      "min_value": 1000,
+      "max_value": 10000
+    },
+    "meta": {},
+    "id": "fd7e8690-dc62-4a5f-ac92-447d9046088e",
+    "severity": "critical"
+  },
+  "result": {
+    "observed_value": 10
+  },
+  "meta": {},
   "exception_info": {
     "raised_exception": false,
     "exception_traceback": null,
     "exception_message": null
-  },
-  "meta": {},
-  "success": false,
-  "expectation_config": {
-    "expectation_type": "expect_table_row_count_to_be_between",
-    "kwargs": {
-      "min_value": 1000,
-      "max_value": 10000,
-      "batch_id": "9946450cf9609e633658e9c4ee38efa5"
-    },
-    "meta": {}
-  },
-  "result": {
-    "observed_value": 10
   }
 }
 ```

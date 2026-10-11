@@ -43,7 +43,7 @@ use RabbitMQ locally
     import pika
 
     connection = pika.BlockingConnection(
-        pika.ConnectionParameters(host=localhost,port=5672))
+        pika.ConnectionParameters(host='localhost', port=5672))
 
     # in case of failure connection, uncomment this code
     # username = guest
@@ -67,19 +67,19 @@ use RabbitMQ locally
 
 3. Your queue should be ready to be used!
 
-## Start Mage
+## Start MageML
 
 ### Create a new pipeline
 
-1. Open Mage in your browser.
-2. Click <b>`+ New pipeline`</b>, then select `Streaming`.
+1. Open MageML in your browser.
+2. On the pipelines page, click <b>`+ New`</b>, then select `Streaming`.
 3. Add a data loader block, select `RabbitMQ`, and paste the following:
 
     ```yaml
     connector_type: 'rabbitmq'
     connection_host: localhost
     connection_port: 5672
-    queue_name: default
+    queue_name: magic_queue
     configure_consume: False
     username: 'guest'
     password: 'guest'
@@ -135,11 +135,11 @@ You should see an output like this:
 
 1. Log into your RabbitMQ management UI ( if you just created one, default user/password is guest/guest)
 
-2. Go to "Queues" tab, and click on you desired Queue
+2. Go to "Queues" tab, and click on your queue
 
 3. Open "Publish Message" dropdown and write "Hello World!" on the payload block
 
-4. Click on the black button called "Publish Message". This message should be seen on both mage-ai and your opensearch index!
+4. Click on the black button called "Publish Message". The message shows in the pipeline output and in your OpenSearch index.
 
 ### Publish messages using Python Pika
 
@@ -183,4 +183,4 @@ You should see an output like this:
     print(" [x] Sent ")
     ```
 
-2. This message should be seen on both mage-ai and your OpenSearch index!
+2. The message shows in the pipeline output and in your OpenSearch index.

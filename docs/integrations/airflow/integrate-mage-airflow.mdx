@@ -1,10 +1,10 @@
 ---
-title: "Integrate Mage into an existing Airflow project"
-sidebarTitle: "Trigger Mage"
+title: "Integrate MageML into an existing Airflow project"
+sidebarTitle: "Trigger MageML"
 icon: "arrows-spin"
 description:
   "In this tutorial, we’ll create a DAG in Airflow for scheduling and running a
-  data pipeline; all from the Mage UI."
+  data pipeline; all from the MageML UI."
 ---
 
 <img
@@ -17,32 +17,43 @@ description:
   locally.
 </Note>
 <Steps titleSize="h2">
-<Step title="Add `mage-ai` as a dependency in Airflow">
+<Step title="Add MageML as a dependency in Airflow">
 
-Open the `requirements.txt` file in the root directory of your Airflow project,
-and add the `mage-ai` library:
+MageML has no PyPI package; `mage-ai` on PyPI is upstream Mage. Open the `requirements.txt`
+file in the root directory of your Airflow project, and add MageML from its repository:
 
 ```
-mage-ai
+mage-ml @ git+https://github.com/jospablo777/mage-ml.git
 ```
+
+MageML runs on Python 3.12 only, so Airflow must run on Python 3.12 too.
 </Step>
-<Step title=" Install Mage">
+<Step title="Install MageML">
 
-You can install and run Mage using Docker or using pip.
+You can run MageML using Docker or from source.
 
 ### Using Docker
 
-```bash
-docker pull mageai/mageai:latest
-```
-
-### Using pip
+Build the image from the repository:
 
 ```bash
-pip install mage-ai
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+docker build -t mageml .
 ```
+
+### From source
+
+```bash
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+uv sync --locked --no-default-groups --extra postgres
+```
+
+Run the `mage` commands below with `uv run --no-sync mage` from that folder, passing the
+full path of the project.
 </Step>
-<Step title="Initialize Mage project">
+<Step title="Initialize MageML project">
 
 Change directory into your Airflow’s DAGs folder. This is typically in the
 folder `dags/`.
@@ -51,17 +62,17 @@ folder `dags/`.
 cd dags
 ```
 
-Then, initialize a new Mage project in the `dags/` folder.
+Then, initialize a new MageML project in the `dags/` folder.
 
 If you’re using Docker, run the following command in the `dags/` folder:
 
 ```bash
 docker run -it -p 6789:6789 -v $(pwd):/home/src \
-  mageai/mageai /app/run_app.sh mage init demo_project
+  mageml /app/run_app.sh mage init demo_project
 
 ```
 
-If you used pip to install Mage, run the following command in the `dags/`
+If you installed MageML from source, run the following command in the `dags/`
 folder:
 
 ```bash
@@ -87,7 +98,7 @@ Then, add the following code:
 
 ```python
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
+from airflow.operators.python import PythonOperator
 from datetime import datetime
 from mage_ai.orchestration.airflow import create_dags
 import os
@@ -110,19 +121,19 @@ create_dags(
 
 <Step title="Create pipeline">
 
-### Start Mage
+### Start MageML
 
-In the `dags/` folder, start the Mage tool.
+In the `dags/` folder, start MageML.
 
 If you’re using Docker, run the following command in the `dags/` folder:
 
 ```bash
 docker run -it -p 6789:6789 -v $(pwd):/home/src \
-  mageai/mageai /app/run_app.sh mage start demo_project
+  mageml /app/run_app.sh mage start demo_project
 
 ```
 
-If you used pip to install Mage, run the following command in the `dags/`
+If you installed MageML from source, run the following command in the `dags/`
 folder:
 
 ```bash
@@ -150,8 +161,8 @@ a new pipeline, add 1 data loader block, and add 1 transformer block.
 4. Turn that DAG on if its currently off.
 5. Trigger a new DAG run.
 6. Watch the DAG as it runs each task according to the pipeline you created in
-   Mage.
+   MageML.
 
-<img alt="Mage in Airflow" src="https://mage-ai.github.io/assets/mage-airflow.jpg" />
+<img alt="MageML in Airflow" src="https://mage-ai.github.io/assets/mage-airflow.jpg" />
 </Step>
 </Steps>

@@ -22,7 +22,8 @@ You can schedule your pipeline to run on these intervals:
 - Custom schedule using
   [CRON Expression](https://en.wikipedia.org/wiki/Cron#CRON_expression)
 - Every minute using CRON expression: `* * * * *`
-- _Streaming pipeline_: coming soon
+- _Streaming pipeline_: a trigger starts it once, and it keeps consuming until it is stopped
+
 Learn more about how to
 [schedule pipelines](/design/data-pipeline-management#create-trigger).
 
@@ -32,9 +33,11 @@ Default runtime variables from pipeline run:
 
 | Key | Description | Example |
 | --- | --- | --- |
+| `ds` | The execution date as `YYYY-MM-DD`. | `2023-12-25` |
 | `env` | The value is always `prod` in pipeline runs. The value is `dev` when running blocks in notebook. | `prod` |
 | `event` | If the pipeline is triggered by event, the event variable contains the event payload. | `{"key1": "value1"}` |
-| `execution_date` | A datetime object that the pipeline is executed at. | `86400` |
+| `execution_date` | A datetime object that the pipeline is executed at. | `datetime.datetime(2023, 12, 25, 12, 25, 20)` |
+| `hr` | The hour of the execution date, as two digits. | `12` |
 | `execution_partition` | An automatically formatted partition of the pipeline run using the execution date. | `10/20231225T122520` |
 | `pipeline_run_id` | The id of the pipeline run. | `10` |
 | `trigger_name` | The trigger name of the pipeline run. | `test run 1` |

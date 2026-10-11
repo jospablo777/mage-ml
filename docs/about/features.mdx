@@ -18,19 +18,29 @@ title: "Features"
   <Card
     title="Changelog"
     icon="list-check"
-    href="https://github.com/mage-ai/mage-ai/releases"
+    href="/about/releases"
   ></Card>
   <Card
     title="Roadmap"
     icon="map"
-    href="https://airtable.com/shrJS0cDOmQywb8vp"
+    href="/about/roadmap"
   ></Card>
 </CardGroup>
 
+## What MageML adds
+
+- [Rust blocks](/guides/blocks/rust-blocks): consecutive Rust blocks compile into one program.
+- [R blocks](/guides/blocks/r-blocks): consecutive R blocks share one session.
+- [Block fusion](/design/data-pipeline-management#block-fusion): production runs fuse chains of
+  blocks, and pipelines compile ahead of their runs.
+- [Pipeline services](/production/pipeline-services): export a pipeline as a Docker image
+  with `mage export service`.
+- [Pipeline documentation](/guides/pipelines/documentation): a README per pipeline in
+  Markdown or Quarto.
+
 ## Data pipeline management
 
-👉 See more
-[details here](/design/data-pipeline-management).
+See more [details here](/design/data-pipeline-management).
 
 ![](https://mage-ai.github.io/assets/orchestration-overview.gif)
 
@@ -75,12 +85,9 @@ tools
 
 ### 3\. Extensible
 
-Easily add new functionality directly in the source code or through plug-ins
-(coming soon).
-
-Adding new API endpoints ([Tornado](https://www.tornadoweb.org/en/stable/)),
-transformations (Python, PySpark, SQL), and charts (using
-[React](https://reactjs.org/)) is easy to do (tutorial coming soon).
+Add new functionality directly in the source code: API endpoints
+([Tornado](https://www.tornadoweb.org/en/stable/)), transformations (Python, PySpark, SQL,
+R, Rust), and charts (using [React](https://reactjs.org/)).
 
 <img
   alt="Extensible charts"

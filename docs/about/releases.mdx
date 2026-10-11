@@ -2,30 +2,35 @@
 title: "Releases"
 sidebarTitle: "Changelog"
 icon: "megaphone"
-description: "Latest new features and changelog."
+description: "MageML release notes and the upstream Mage changelog."
 "og:image": "https://media2.giphy.com/media/0Av9l0VIc01y1isrDw/giphy.gif"
 ---
 
 <Card
-  title="Update Mage"
+  title="Update MageML"
   icon="download"
   href="/development/updating-mage"
   horizontal
 >
-  Install the newest version of Mage
+  Install the newest version of MageML
 </Card>
 
+<Card
+  title="MageML release notes"
+  href="https://github.com/jospablo777/mage-ml/blob/master/docs/development/release-notes.md"
+  horizontal
+  icon="list-check"
+>
+  Changes in each MageML release
+</Card>
 
 ---
 
-<Card
-  title="All releases"
-  href="https://github.com/mage-ai/mage-ai/releases"
-  horizontal
-  icon="person-sign"
->
-  Install the newest version of Mage
-</Card>
+## Upstream Mage releases
+
+MageML is based on Mage 0.9.79. The entries below are upstream Mage releases up to the fork,
+kept for history. All upstream releases are on
+[Mage's GitHub releases page](https://github.com/mage-ai/mage-ai/releases).
 
 <br />
 
@@ -36,7 +41,7 @@ description: "Latest new features and changelog."
 
 ### ☁️ Google cloud storage source
 
-You can now effortlessly configure your data integration source blocks to Google Cloud Storage using this snippet. It specifies the destination bucket, sets the file type to Parquet, and provides the path to your service account credentials needed for authentication.
+You can now configure your data integration source blocks to Google Cloud Storage using this snippet. It specifies the destination bucket, sets the file type to Parquet, and provides the path to your service account credentials needed for authentication.
 
 <div align="center">
 <img src="https://mage-ai.github.io/assets/pipelines/integration-pipelines/gcs_integration_test.png" width="600"/>
@@ -46,7 +51,7 @@ by @TalaatHasanin in https://github.com/mage-ai/mage-ai/pull/5334
 
 ### 🌬️ 🍽️ Airtable Integration
 
-Effortlessly streamline your data data integration source blocks with Airtable using this tailored script. It establishes a connection to your Airtable base, designates the specific table for integration, and securely integrates your Airtable API key for access.
+Connect your data integration source blocks to Airtable with this script. It establishes a connection to your Airtable base, designates the specific table for integration, and securely integrates your Airtable API key for access.
 
 <div align="center">
 <img src="https://mage-ai.github.io/assets/pipelines/integration-pipelines/airtable_integration_test.png" width="600"/>
@@ -62,7 +67,7 @@ by @cristopheridlc in https://github.com/mage-ai/mage-ai/pull/5321
 
 ### 🐻‍❄️ Enable polars dataframe in GCS data exporter
 
-This update enhances the export method of the GCS IO module, expanding its functionality to support exporting Polars DataFrames in addition to the previously supported Pandas DataFrames. This new capability allows users to seamlessly work with both data formats, offering greater flexibility in managing and exporting data from their workflows.
+This update enhances the export method of the GCS IO module, expanding its functionality to support exporting Polars DataFrames in addition to the previously supported Pandas DataFrames. This new capability allows users to work with both data formats, offering greater flexibility in managing and exporting data from their workflows.
 
 <div align="center">
 <img src="https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExbDM2amtld2toajMxMmR2cmt2eHc4MmdlZ2V6Y3IxcXdncmI1ZGN5YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/aK4wh0UE3oddS/giphy.webp?raw=true" width="50%" />
@@ -220,9 +225,9 @@ by @messerzen in https://github.com/mage-ai/mage-ai/pull/5412
 - [0.9.14 | Blue Beetle Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.14)
 - [0.9.11 | Mutant Mayhem Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.11)
 - [0.9.10 | Haunted Mansion Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.10)
-- [0.9.80 | Dead Reckoning Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.8)
-- [0.9.40 | Solar Flare Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.4)
-- [0.9.00 | The Dial of Destiny Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.0)
+- [0.9.8 | Dead Reckoning Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.8)
+- [0.9.4 | Solar Flare Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.4)
+- [0.9.0 | The Dial of Destiny Release](https://github.com/mage-ai/mage-ai/releases/tag/0.9.0)
 - [0.8.93 | Rise of the Beasts Release](https://github.com/mage-ai/mage-ai/releases/tag/0.8.93)
 - [0.8.86 | Fast Release](https://github.com/mage-ai/mage-ai/releases/tag/0.8.86)
 - [0.8.83 | Fury of the Gods Release](https://github.com/mage-ai/mage-ai/releases/tag/0.8.83)

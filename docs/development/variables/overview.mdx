@@ -1,10 +1,10 @@
 ---
-title: "Mage variables"
+title: "MageML variables"
 sidebarTitle: "Overview"
-description: "There are a few ways to set up variables in Mage, here's how you can use them to make the best pipelines the world has ever seen. 🌎"
+description: "The types of variables in MageML and how to use them."
 ---
 
-There are four types of variable in Mage: Environment variables, runtime variables, block variables, and secrets.
+There are four types of variable in MageML: Environment variables, runtime variables, block variables, and secrets.
 
 | Variable Type        | Scope    | Creation | Reference                       | Encrypted |
 | -------------------- | -------- | -------- | ------------------------------- | --------- |
@@ -19,7 +19,7 @@ Here's a brief overview of each:
 
 Environment variables are a type of variable that is used to store configuration settings and other system-level information for operating systems and applications. These variables are accessible to any process running on the system, which allows multiple programs to share the same configuration information. Environment variables exist in virtually all operating systems, including Linux, macOS, and Windows.
 
-When running Mage in Docker, Mage will inherit the environment variables from the host machine. You can also set environment variables in the Dockerfile. Read more about environment variables in Mage [here](/development/variables/environment-variables) and Docker [here](https://docs.docker.com/compose/environment-variables/set-environment-variables/).
+When running MageML in Docker, pass environment variables to the container (`--env`, `--env-file`, or the `environment` key in Docker Compose), or set them in the Dockerfile. Read more about environment variables in MageML [here](/development/variables/environment-variables) and Docker [here](https://docs.docker.com/compose/environment-variables/set-environment-variables/).
 
 ## Runtime variables
 
@@ -33,4 +33,4 @@ In addition to the global runtime variables that can be used by any block in a p
 
 ## Secrets
 
-Secrets are a way to input sensitive information _via the Mage UI_ that can be used by blocks in a pipeline. Secrets are stored in the Mage database and are encrypted. Secrets can come in handy when you have multiple users developing in an environment or are otherwise unable to use environment variables. Read more [here](/development/variables/secrets).
+Secrets are a way to input sensitive information _via the MageML UI_ that can be used by blocks in a pipeline. Secrets are stored in the MageML database and are encrypted. Secrets can come in handy when you have multiple users developing in an environment or are otherwise unable to use environment variables. Read more [here](/development/variables/secrets).

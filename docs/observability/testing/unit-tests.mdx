@@ -32,15 +32,20 @@ class ExamplePipelineTest(unittest.TestCase):
 ```
 
 ## Test environment
-When running unit tests, the `env` variable's value in the method's `kwargs` is `test`.
-You can leverage this variable to change the code logic or config used in the unit tests.
+When the `ENV` environment variable is `test`, the `env` variable's value in the method's
+`kwargs` is `test`. You can use this variable to change the code logic or config used in the
+unit tests.
+
+Under `python3 -m unittest`, the value is `test_mage` instead: MageML treats any process
+started by `unittest` as its own test environment, which stores run metadata in a temporary
+`test.db` SQLite database.
 
 ## Mocking IO libraries
 
 When writing unit tests, you may need to mock the IO libraries to verify that the pipeline
 is being executed properly without actually calling the database or warehouse directly.
 
-If you are using the provided Mage IO libraries, you can mock the libraries in the following way:
+If you are using the provided MageML IO libraries, you can mock the libraries in the following way:
 
 ```python
 import pandas as pd

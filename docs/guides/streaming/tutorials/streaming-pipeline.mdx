@@ -71,7 +71,7 @@ use Kafka locally:
    $KAFKA_HOME/bin/kafka-console-producer.sh --broker-list kafka:9092 --topic=test
    ```
 9. Send messages to the topic named `test` by typing the following JSON strings in the
-   terminal (Note that Kafka messages in Mage are assumed to be in JSON format):
+   terminal (Kafka messages are assumed to be in JSON format unless the source sets a `serde_config`):
    ```bash
    >{ "hello": 1 }
    >{ "this is a test": 1 }
@@ -105,12 +105,13 @@ $KAFKA_HOME/bin/kafka-console-consumer.sh --from-beginning --bootstrap-server ka
 
 ## Build streaming pipeline
 
-### Start Mage
+### Start MageML
 
 #### Using Kafka locally in a Docker container
 
-Start Mage using Docker. Run the following command to run Docker in network
-mode:
+Start MageML using Docker, with an image built from the MageML repository
+(`docker build -t mageml .` in a clone of https://github.com/jospablo777/mage-ml). Run the
+following command to run Docker in network mode:
 
 ```bash
 docker run -it -p 6789:6789 -v $(pwd):/home/src \
@@ -118,7 +119,7 @@ docker run -it -p 6789:6789 -v $(pwd):/home/src \
   --env AWS_SECRET_ACCESS_KEY=your_secret_access_key \
   --env AWS_REGION=your_region \
   --network kafka-docker_default \
-  mageai/mageai /app/run_app.sh  mage start default_repo
+  mageml /app/run_app.sh mage start default_repo
 ```
 
 <Note>
@@ -139,11 +140,11 @@ docker network ls
 
 ---
 
-If you can’t connect to Kafka locally in a Docker container using Mage in a
+If you can’t connect to Kafka locally in a Docker container using MageML in a
 Docker container, do the following:
 
-1. Clone Mage: `git clone https://github.com/mage-ai/mage-ai.git`.
-2. Change directory into Mage: `cd mage-ai`.
+1. Clone MageML: `git clone https://github.com/jospablo777/mage-ml.git`.
+2. Change directory into it: `cd mage-ml`.
 3. Edit the `docker-compose.yml` file to match this:
    ```yaml
    version: '3'
@@ -161,18 +162,18 @@ Docker container, do the following:
    ```
 4. Run the following script in your terminal: `./scripts/dev.sh`.
 
-This will run Mage in development mode; which runs it in a Docker container
+This runs MageML in development mode, which runs it in a Docker container
 using `docker compose` instead of `docker run`.
 
 #### Using Kafka without a Docker container
 
-Start Mage using Docker. If you haven’t done this before, refer to the
+Start MageML. If you haven’t done this before, refer to the
 [setup guide](/getting-started/setup).
 
 ### Create a new pipeline
 
-1. Open Mage in your browser.
-2. Click <b>`+ New pipeline`</b>, then select `Streaming`.
+1. Open MageML in your browser.
+2. On the pipelines page, click <b>`+ New`</b>, then select `Streaming`.
 3. Add a data loader block, select `Kafka`, and paste the following:
    ```yaml
    connector_type: kafka
@@ -183,7 +184,7 @@ Start Mage using Docker. If you haven’t done this before, refer to the
    batch_size: 100
    ```
    1. By default, the `bootstrap_server` is set to `localhost:9092`. If you’re
-      running Mage in a docker container, the `bootstrap_server` should be
+      running MageML in a docker container, the `bootstrap_server` should be
       `kafka:9093`.
    1. Messages are consumed from source in micro batch mode for better efficiency.
       The default batch size is 100. You can adjust the batch size in the source config.
@@ -263,24 +264,20 @@ You should see an output like this:
    publish_messages(5)
    ```
 
-Once you run the code snippet above, go back to your streaming pipeline in Mage
+Once you run the code snippet above, go back to your streaming pipeline in MageML
 and the output should look like this:
 
 ```
-[streaming_pipeline_test] Start initializing kafka consumer.
-[streaming_pipeline_test] Finish initializing kafka consumer.
-[streaming_pipeline_test] Start consuming messages from kafka.
-[streaming_pipeline_test] [Kafka] Receive message 2:16: v=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.7010424523477785}', time=1665618592.226788
-[streaming_pipeline_test] [Kafka] Receive message 0:16: v=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.7886308380991354}', time=1665618592.2268753
-[streaming_pipeline_test] [Kafka] Receive message 0:17: v=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.0673276352704153}', time=1665618592.2268832
-[streaming_pipeline_test] [Kafka] Receive message 3:10: v=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.37935417366095525}', time=1665618592.2268872
-[streaming_pipeline_test] [Kafka] Receive message 3:11: v=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.21110511524126563}', time=1665618592.2268918
+[streaming_pipeline_test] [KafkaSource] Start consuming messages in batches.
+[streaming_pipeline_test] [KafkaSource] Received 2 messages from topic="test" partition=2 at time=1665618592.226788
+[streaming_pipeline_test] [KafkaSource] Receive message 2:16: key=None, value=b'{"title": "test_title", "director": "Bennett Miller", "year": "2011", "rating": 0.7010424523477785}', time=1665618592.226788
+[streaming_pipeline_test] [KafkaSource] Received 3 messages from topic="test" partition=0 at time=1665618592.2268753
 [streaming_pipeline_test] {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.7010424523477785}
 [streaming_pipeline_test] {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.7886308380991354}
 [streaming_pipeline_test] {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.0673276352704153}
 [streaming_pipeline_test] {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.37935417366095525}
 [streaming_pipeline_test] {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.21110511524126563}
-[streaming_pipeline_test] [Opensearch] Batch ingest data [{'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.7010424523477785}, {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.7886308380991354}, {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.0673276352704153}, {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.37935417366095525}, {'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.21110511524126563}], time=1665618592.2294626
+[streaming_pipeline_test] [OpenSearchSink] Batch ingest data [{'title': 'test_title', 'director': 'Bennett Miller', 'year': '2011', 'rating': 0.7010424523477785}, ...], time=1665618592.2294626
 ```
 
 ### Consume messages using Python
@@ -309,5 +306,5 @@ for message in consumer:
 ## Run in production
 
 1. [Create a trigger](/design/data-pipeline-management#create-trigger).
-2. Once trigger is created, click the <b>`Start trigger`</b> button at the top
+2. Once the trigger is created, click the <b>`Enable trigger`</b> button at the top
    of the page to make the streaming pipeline active.

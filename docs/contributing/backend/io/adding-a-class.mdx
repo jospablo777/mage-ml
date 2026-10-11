@@ -1,30 +1,30 @@
 ---
 title: "Adding an IO class"
 sidebarTitle: "Add a Class"
-description: "IO classes power Mage sources and destinations. Read on to learn how you can contribute an IO class to Mage."
+description: "IO classes power MageML sources and destinations. How to contribute an IO class to MageML."
 ---
 
 ## What's an IO class?
 
-IO classes are at the heart of Mage— they're the code that enables Mage to read and write data. When you configure your [`io_config`](https://docs.mage.ai/development/io_config) to use a source or destination, you're telling Mage to use a specific IO class.
+IO classes are the code that lets MageML read and write data. When you configure your [`io_config`](/development/io_config) to use a source or destination, you're telling MageML to use a specific IO class.
 
-IO classes are defined [here](https://github.com/mage-ai/mage-ai/tree/master/mage_ai/io) in the Mage repository. You can see that there are a few different types of IO classes— some are for reading data, some are for writing data, and some are for both.
+IO classes are defined [here](https://github.com/jospablo777/mage-ml/tree/master/mage_ai/io) in the MageML repository. There are a few different types of IO classes: some are for reading data, some are for writing data, and some are for both.
 
 ## Why should I contribute?
 
-If you have a favorite IO class _that's not currently supported_, you can reach out _or_ contribute it to Mage! Contributing is a great way to build your skills, become a part of the Mage community, and help others.
+If a source or destination you need is not supported, open an [issue](https://github.com/jospablo777/mage-ml/issues) or contribute the IO class to MageML.
 
 ## How do I contribute?
 
 ### Configure your development environment
 
-The first step to contributing an IO class is to configure your development environment. You can find instructions for doing so [here](https://docs.mage.ai/contributing/development-environment).
+The first step to contributing an IO class is to configure your development environment. You can find instructions for doing so [here](/contributing/development-environment).
 
 ### Create a new IO class
 
 Once configured, you'll want to create a new file in the `mage_ai/io` directory. The file should be named after the IO class you're contributing. For example, if you're contributing an IO class called `MyIOClass`, you should create a file called `my_io_class.py`.
 
-Some IO classes are relatively straightforward, like [exporting to local files](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/io/file.py) or [writing to Google Sheets](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/io/google_sheets.py). Others, like full database integrations, can be pretty complex. [Google BigQuery](https://github.com/mage-ai/mage-ai/blob/master/mage_ai/io/bigquery.py) is a good example of a complex IO class.
+Some IO classes are relatively straightforward, like [exporting to local files](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/io/file.py) or [writing to Google Sheets](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/io/google_sheets.py). Others, like full database integrations, can be pretty complex. [Google BigQuery](https://github.com/jospablo777/mage-ml/blob/master/mage_ai/io/bigquery.py) is a good example of a complex IO class.
 
 Most classes are platform specific, but for a database, you might need the following methods:
 
@@ -42,7 +42,7 @@ Additionally, every class will need to have the following methods:
 
 ### Test your IO class
 
-In order to test your class, you should perform all of the methods you defined in the class itself. Once you pass our linting checks (outlined in the development environment link above) _and_ your tests pass, you're ready to submit a pull request! Learn more about pull requests on the contribution.
+In order to test your class, you should perform all of the methods you defined in the class itself. Once you pass our linting checks (outlined in the development environment link above) _and_ your tests pass, you're ready to submit a pull request.
 
 ## Create a pull request
 

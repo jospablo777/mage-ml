@@ -1,7 +1,7 @@
 ---
 title: "Testing"
 sidebarTitle: "Testing"
-description: "Making Mage so invincible that nothing can break it, not even itself."
+description: "Common errors when running the MageML test suite."
 icon: "swords"
 "og:image": "https://i.pinimg.com/originals/05/70/56/057056dae3c4c8a5c5426f6c458ba001.gif"
 ---
@@ -25,18 +25,13 @@ Delete the `test.db` file located in the directory where you are running the
 Example:
 
 ```
-Traceback (most recent call last):
-  File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1910, in _execute_context
-    self.dialect.do_execute(
-  File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/default.py", line 736, in do_execute
-    cursor.execute(statement, parameters)
 sqlite3.OperationalError: index ix_pipeline_run_execution_date already exists
 
 ...
 
 sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) index ix_pipeline_run_execution_date already exists
 [SQL: CREATE INDEX ix_pipeline_run_execution_date ON pipeline_run (execution_date)]
-(Background on this error at: https://sqlalche.me/e/14/e3q8)
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
 
 ----------------------------------------------------------------------
 Ran 0 tests in 0.038s

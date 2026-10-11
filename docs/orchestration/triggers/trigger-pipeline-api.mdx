@@ -21,14 +21,16 @@ under trigger type.
 ## API endpoint
 
 The endpoint to use when making an API request will depend on the domain you’re
-running Mage and the trigger’s unique ID.
+running MageML, the trigger’s unique ID and the trigger's token.
 
-For example, if you’re running Mage on localhost with port 6789 and the trigger
-you just created has an ID of 3, then the API endpoint you’ll use is:
+For example, if you’re running MageML on localhost with port 6789 and the trigger
+you just created has an ID of 3 and the token `abc123`, then the API endpoint you’ll use is:
 
 ```
 POST http://localhost:6789/api/pipeline_schedules/3/pipeline_runs/abc123
 ```
+
+The trigger's detail page shows its full endpoint URL with the token.
 
 ---
 
@@ -43,7 +45,7 @@ runtime variables are accessible from within each pipeline block.
 {
   "pipeline_run": {
     "variables": {
-      "env": "staging",
+      "target": "staging",
       "schema": "public"
     }
   }
@@ -54,13 +56,13 @@ Or
 
 ```json
 {
-  "env": "staging",
+  "target": "staging",
   "schema": "public"
 }
 ```
 
 When the pipeline is triggered by this API request, each block in the pipeline
-can access all the values defined in the variables object (e.g. `env`, `schema`)
+can access all the values defined in the variables object (e.g. `target`, `schema`)
 within the request payload (in addition to the global variables defined within
 the pipeline itself).
 
@@ -71,14 +73,15 @@ block. For example:
 ```python
 @data_loader
 def load_data(**kwargs) -> DataFrame:
-    env = kwargs['env']
+    target = kwargs['target']
     schema = kwargs['schema']
 
     # ...other code
 ```
 
 You can include as many key value pairs within the variables object in the
-request payload as you want.
+request payload as you want. Do not use `env` as a variable name: pipeline runs always set
+it to `prod`.
 
 ---
 
@@ -93,7 +96,7 @@ curl -X POST http://localhost:6789/api/pipeline_schedules/3/pipeline_runs/abc123
 {
   "pipeline_run": {
     "variables": {
-      "env": "staging",
+      "target": "staging",
       "schema": "public"
     }
   }

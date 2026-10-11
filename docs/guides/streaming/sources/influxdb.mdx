@@ -21,7 +21,7 @@ bucket: "data"
 ## Data format
 
 InfluxDB supports [data elements](https://docs.influxdata.com/influxdb/v2.7/reference/key-concepts/data-elements/) for structuring your data. 
-The influxdb data exporter can create these elements if the messages received contain a metadata dictionary: 
+The [InfluxDB data exporter](/guides/streaming/destinations/influxdb) creates these elements from a metadata dictionary in each message:
 
 ```python
 message['metadata'] = {

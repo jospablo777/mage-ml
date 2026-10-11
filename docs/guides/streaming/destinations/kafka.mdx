@@ -72,7 +72,7 @@ sasl_config:
 
 ## Data format
 
-The Kafka data exporter scalar values
+The Kafka data exporter accepts scalar values
 
 ```
 message = <Any>
@@ -87,9 +87,9 @@ message = {
 }
 ```
 
-If the data contains no dictionary it will be written to the database as value with the current time value and no key.
-Otherwise, every dictionary message contains at least some data in a `data` field. 
-The following messages are valid:
+A scalar value is written to the topic as the value, with no key. A dictionary is written as JSON:
+its `data` field when it has one, otherwise the whole dictionary.
+The following message is valid:
 
 ```python
 message = {'data': {'bees': 23, 'ants': 30}}
@@ -134,4 +134,4 @@ topic: topic_name
 
 - The default time timestamp is the current time of execution.
 
-- Mage detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.
+- MageML detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.

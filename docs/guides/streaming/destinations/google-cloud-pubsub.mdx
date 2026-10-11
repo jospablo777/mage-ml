@@ -17,7 +17,7 @@ the Google Cloud PubSub service locally through an emulator (see more details at
 
 ## Data format
 
-The Google Cloud PubSub data exporter scalar values
+The Google Cloud PubSub data exporter accepts scalar values
 
 ```
 message = <Any>
@@ -32,28 +32,14 @@ message = {
 }
 ```
 
-If the data contains no dictionary it will be written to the pubsub as value.
-Otherwise, every dictionary message contains at least some data in a `data` field.
-The following messages are valid:
+A scalar value is published as it is. A dictionary is published as JSON: its `data` field
+when it has one, otherwise the whole dictionary. The following message is valid:
 
 ```python
 message = {'data': {'bees': 23, 'ants': 30}}
 ```
 
-The following message shows the configuration of elements data:
-
-```python
-message = {
-    'data': {
-        'bees': 23,
-        'ants': 30,
-    }
-}
-```
-
-If not all elements are configured, default values are assumed.
-
-- The project_id and topic_id has to be configured in the yaml file.
+- The `project_id` and `topic_id` have to be configured in the yaml file.
 
 ```yaml
 connector_type: google_cloud_pubsub

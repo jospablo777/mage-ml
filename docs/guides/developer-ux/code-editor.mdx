@@ -1,7 +1,7 @@
 ---
 title: "Writing data pipeline code"
 sidebarTitle: "Code editor"
-description: "Build the future you want to see."
+description: "Add, arrange and edit blocks in the pipeline editor."
 icon: "code"
 "og:image": "https://qph.cf2.quoracdn.net/main-qimg-3aed77679a9fbe28bcae784d8fb831a8"
 ---
@@ -15,9 +15,6 @@ You can quickly add blocks of code to your pipeline with these methods:
         <Note>
             **Supported block type directories:** `callbacks`, `conditionals`, `custom`, `data_exporters`, `data_loaders`, `dbt`,
             `dbts`, `markdowns`, `scratchpads`, `sensors`, and `transformers`
-
-            Version 0.9.64 or greater is required to add `callback` and `conditional`
-            blocks from the file browser.
         </Note>
 
         1. Open the file browser on the Pipeline Editor page.
@@ -43,11 +40,8 @@ You can quickly add blocks of code to your pipeline with these methods:
             [project settings](http://localhost:6789/settings/workspace/preferences).
             This feature is available in standard (batch) pipelines.
 
-            If you just recently enabled the feature <b>Add new block v2</b>, you must restart Mage
+            If you just recently enabled the feature <b>Add new block v2</b>, you must restart MageML
             so that your blocks can be indexed.
-
-            Version 0.9.64 or greater is required to add `callback` and `conditional`
-            blocks from the block search.
         </Note>
 
         Instead of clicking a button to add a new block, type in the search bar to find an
@@ -106,14 +100,9 @@ Tips to stay safe:
 
 ### Collaboration best practices
 
-If multiple users need to develop the **same pipeline**:
-
-- Use **[Workspace mode in Mage Pro](/guides/developer-ux/workspaces)**, which provides:
-  - Isolated environments per user or team.
-  - Safe collaboration without overwriting each other’s changes.
-  - The ability to merge updates back into shared pipelines.
-
-This ensures smooth teamwork and prevents conflicts when more than one person is editing.
+If multiple users need to develop the **same pipeline**, have each person work in their own
+copy of the project on a separate branch and merge the changes with
+[Git](/development/git/setting-up-git).
 
 ---
 
@@ -133,20 +122,10 @@ This ensures smooth teamwork and prevents conflicts when more than one person is
         </Frame>
     </Accordion>
 
-    <Accordion title="Filter files to the current pipeline" icon="user-secret" iconType="duotone">
-        When editing a pipeline, open the <b>Files</b> tab and use the selector above the search box
-        to switch between <b>All</b> and <b>This pipeline</b>. The
-        <b>This pipeline</b> filter shows repo-backed files related to the current pipeline,
-        including pipeline metadata and configuration files, trigger configuration, referenced block
-        source files, and supporting project configuration such as <code>io_config.yaml</code>,
-        <code>metadata.yaml</code>, and <code>requirements.txt</code>. Runtime data and log files
-        are not included.
-    </Accordion>
-
-    <Accordion title="Block visibility tab" icon="user-secret" iconType="duotone">
-        Use the <b>Visibility</b> tab to hide blocks in the notebook. Hidden blocks are collapsed,
-        and you can click a hidden block to expand it again. This can help optimize vertical screen
-        space while writing code.
+    <Accordion title="Current blocks tab" icon="user-secret" iconType="duotone">
+        When editing a pipeline, open the <b>Current blocks</b> tab next to <b>All files</b> to list
+        the blocks in the pipeline. Click a block there to hide it in the notebook, and click it again
+        to show it. This can help optimize vertical screen space while writing code.
 
         <Frame>
             <p align="center">
@@ -191,8 +170,7 @@ data integrations (Singer Taps and Targets) provided by the data engineering com
 
 ## Use AI to write code for you
 
-A line of code you don’t write is a line of code you never have to debug.
-Use AI to generate the code for you.
+Generate the code of a block with an LLM.
 
 <Frame>
     <p align="center">
@@ -209,9 +187,7 @@ Use AI to generate the code for you.
 
 ## Document and comment code (AI)
 
-“Work smart, not hard.”
-
-Let the robots document your code so you can focus on the fun and creative side of coding.
+Generate documentation and comments for your code with an LLM.
 
 <AccordionGroup>
     <Accordion title="Document the code from a block" icon="scroll" iconType="duotone" defaultOpen>
@@ -258,7 +234,7 @@ Let the robots document your code so you can focus on the fun and creative side 
 
 ## Block upgrades
 
-Enhance your code with these quick power-ups:
+These block features change how a block runs:
 
 <AccordionGroup>
     <Accordion title="Recursively dynamic code made simple" defaultOpen icon="spider-web" iconType="duotone">
@@ -271,11 +247,7 @@ Enhance your code with these quick power-ups:
             </p>
         </Frame>
 
-        A very `powerful` <b>ultimate</b> *spell*.
-
-        <Warning>
-            With great power... comes great fun.
-        </Warning>
+        A dynamic block runs its downstream blocks once for each item it returns.
 
         [Read more here](/design/blocks/dynamic-blocks)
     </Accordion>
@@ -332,10 +304,6 @@ Run code and see its output right next to where you’re writing.
 This makes it so that you don’t have to keep scrolling down every time you make a code change
 and want to see its results.
 
-For table outputs, click a column header to sort the preview or use the filter
-icon beside the header to filter rows by column value. These controls are
-temporary preview tools and don’t change the underlying block output.
-
 <Frame>
     <p align="center">
         <img
@@ -345,12 +313,11 @@ temporary preview tools and don’t change the underlying block output.
     </p>
 </Frame>
 
-To enable this feature:
-
-1. Go to your [project settings](http://localhost:6789/settings/workspace/preferences).
-1. Enable the feature named <b>Notebook block output split view</b>.
-1. Open the edit view of a pipeline.
-1. Under the header menu named <b>View</b>, click the option <b>Show output next to code</b>.
+<Note>
+    This view is experimental. The `notebook_block_output_split_view` feature is not on the
+    settings page; set it to `true` under `features` in the project's `metadata.yaml`. The toggle,
+    <b>Show output next to code (beta)</b>, is in the block menu of the v2 code blocks.
+</Note>
 
 <AccordionGroup>
     <Accordion title="Check out this demo for a quick overview" icon="window" iconType="duotone">
