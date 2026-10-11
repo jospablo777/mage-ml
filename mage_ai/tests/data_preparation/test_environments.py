@@ -5,13 +5,16 @@ packages; skipped where uv is not installed.
 """
 import asyncio
 import shutil
+import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import psutil
 
 from mage_ai.data_preparation import environments
 from mage_ai.data_preparation.models.block import Block
@@ -50,6 +53,48 @@ def transform(frame, *args, **kwargs):
     frame['doubled'] = frame['id'] * 2
     return frame
 '''
+
+
+HANGING_BUILD = '''
+import subprocess, sys, time
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+open(sys.argv[1], 'w').write(str(child.pid))
+print('resolving', flush=True)
+time.sleep(60)
+'''
+
+
+class BuildCommandTest(unittest.TestCase):
+    def test_a_build_command_that_stalls_is_stopped_with_its_children(self):
+        """
+        The timeout started only once the command closed its output, so a uv install that
+        stalled on the network kept the run waiting; a timeout left uv's children running.
+        """
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        pid_file = Path(directory, 'child.pid')
+        started = time.monotonic()
+        with patch.object(environments, 'BUILD_TIMEOUT_SECONDS', 2):
+            with self.assertRaisesRegex(
+                environments.PipelineEnvironmentError, 'longer than 2 seconds',
+            ):
+                environments._run(
+                    [sys.executable, '-c', HANGING_BUILD, str(pid_file)], log=lambda _line: None,
+                )
+        self.assertLess(time.monotonic() - started, 30)
+
+        child = int(pid_file.read_text())
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                if psutil.Process(child).status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.1)
+        else:
+            psutil.Process(child).kill()
+            self.fail('The build command\'s child process kept running.')
 
 
 @unittest.skipIf(shutil.which('uv') is None, 'uv is not installed')
