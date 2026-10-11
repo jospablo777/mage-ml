@@ -1,0 +1,19 @@
+blocks:
+- uuid: live_recent_purchases
+  type: data_loader
+  language: rust
+  upstream_blocks: []
+  downstream_blocks: [live_device_revenue]
+- uuid: live_device_revenue
+  type: transformer
+  language: rust
+  upstream_blocks: [live_recent_purchases]
+  downstream_blocks: [live_append_device_revenue]
+- uuid: live_append_device_revenue
+  type: data_exporter
+  language: rust
+  upstream_blocks: [live_device_revenue]
+  downstream_blocks: []
+name: live_device_revenue
+type: python
+uuid: live_device_revenue

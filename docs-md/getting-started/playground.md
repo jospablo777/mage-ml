@@ -1,6 +1,6 @@
 # Playground: try MageML with sample data
 
-*Start MageML with a seeded shop database and eight pipelines in pandas, Polars, R, Rust and geopandas, and explore every feature in a few minutes.*
+*Start MageML with a seeded shop database and eleven pipelines in pandas, Polars, R, Rust and geopandas, and explore every feature in a few minutes.*
 
 The playground starts MageML built from the repository, a PostgreSQL database seeded with a
 shop (customers, products, orders, order lines and web events) and a project, `shop_lab`,
@@ -32,6 +32,8 @@ On the first start the database is seeded with about 3 million rows, in about a 
 | `make playground-down` | Remove the containers; the database and MageML's data stay |
 | `make playground-reset` | Delete the database and MageML's data (asks first) |
 | `make playground-reseed` | Fill the shop schema again |
+| `make playground-service` | Export the live pipelines as a service and start it |
+| `make playground-console` | The service's terminal dashboard |
 
 | Setting | Default | |
 | --- | --- | --- |
@@ -51,6 +53,9 @@ On the first start the database is seeded with about 3 million rows, in about a 
 | `explore_web_events` | A million-row output and a wide one (about 60 columns) to explore |
 | `rust_session_scores` | Rust blocks: sessions from a million events with Polars, a per-row score on every core with Rayon, tests in Rust |
 | `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, exact decimal margins, writes back with binary COPY |
+| `live_traffic` | New web events every minute, more or fewer as the hour goes on, appended to `analytics.live_events`; keeps six hours |
+| `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis` |
+| `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended each minute to `analytics.live_device_revenue` |
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one by
 one.
@@ -69,6 +74,11 @@ one.
   of a block builds it, later runs of unchanged code start at once.
 - **Documentation.** Open **Documentation** in a pipeline's navigation and write its README,
   or upload an HTML report. See [Pipeline documentation](../guides/pipelines/documentation.md).
+- **A live service.** `make playground-service` exports `live_traffic`,
+  `live_minute_kpis` and `live_device_revenue` as one service and starts it. Each runs
+  every minute and writes to the `analytics` schema; `make playground-console` opens its
+  dashboard, where the runs and throughput move. Its API is at http://localhost:8081 with
+  the token `playground`. See [Service console](../production/service-console.md).
 - **Pipeline services.** Export a pipeline and run it without MageML against the playground
   database:
 

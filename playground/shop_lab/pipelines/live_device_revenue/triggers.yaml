@@ -1,0 +1,10 @@
+# Every minute in the exported playground service (make playground-service). envs keeps
+# the playground's own scheduler, which runs as dev, from running it too.
+triggers:
+- name: every_minute
+  schedule_type: time
+  schedule_interval: '* * * * *'
+  start_time: 2026-01-01 00:00:00
+  status: active
+  envs:
+  - prod

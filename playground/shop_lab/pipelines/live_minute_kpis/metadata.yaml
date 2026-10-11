@@ -1,0 +1,19 @@
+blocks:
+- uuid: live_last_hour
+  type: data_loader
+  language: python
+  upstream_blocks: []
+  downstream_blocks: [live_minute_kpis]
+- uuid: live_minute_kpis
+  type: transformer
+  language: python
+  upstream_blocks: [live_last_hour]
+  downstream_blocks: [live_replace_kpis]
+- uuid: live_replace_kpis
+  type: data_exporter
+  language: python
+  upstream_blocks: [live_minute_kpis]
+  downstream_blocks: []
+name: live_minute_kpis
+type: python
+uuid: live_minute_kpis

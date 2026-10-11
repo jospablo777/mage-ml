@@ -6,3 +6,5 @@ shop_lab/.preferences.yaml
 shop_lab/.mage_temp_profiles
 shop_lab/mage-ai.db
 shop_lab/**/__pycache__/
+# The build context make playground-service exports.
+service/

@@ -1,0 +1,14 @@
+blocks:
+- uuid: live_new_events
+  type: data_loader
+  language: python
+  upstream_blocks: []
+  downstream_blocks: [live_append_events]
+- uuid: live_append_events
+  type: data_exporter
+  language: python
+  upstream_blocks: [live_new_events]
+  downstream_blocks: []
+name: live_traffic
+type: python
+uuid: live_traffic

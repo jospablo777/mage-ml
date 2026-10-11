@@ -13,6 +13,9 @@ pipelines=(
   explore_web_events
   rust_session_scores
   rust_postgres_margins
+  live_traffic
+  live_minute_kpis
+  live_device_revenue
 )
 
 failed=()

@@ -30,13 +30,16 @@ requirements:
 # pipelines in pandas, Polars, R and geopandas. See playground/README.md.
 #   make playground            build, start and wait until Mage answers
 #   make playground-check      run every pipeline once
-# SEED_SCALE, PLAYGROUND_MAGE_PORT and PLAYGROUND_POSTGRES_PORT pass through.
+#   make playground-service    export the live pipelines as a service and start it
+#   make playground-console    the service's terminal dashboard
+# SEED_SCALE, PLAYGROUND_MAGE_PORT, PLAYGROUND_POSTGRES_PORT and PLAYGROUND_SERVICE_PORT
+# pass through.
 PLAYGROUND := docker compose -f playground/compose.yaml
 # The builder of the current Docker context, which `docker build` uses too, so builds
 # share one cache. Another buildx builder would compile everything again.
 PLAYGROUND_BUILDER ?= $(shell docker context show 2>/dev/null)
 PLAYGROUND_URL = http://localhost:$(or $(PLAYGROUND_MAGE_PORT),6789)
-export SEED_SCALE PLAYGROUND_MAGE_PORT PLAYGROUND_POSTGRES_PORT
+export SEED_SCALE PLAYGROUND_MAGE_PORT PLAYGROUND_POSTGRES_PORT PLAYGROUND_SERVICE_PORT
 
 playground: playground-build playground-up
 
@@ -87,7 +90,27 @@ playground-reset:
 playground-reseed:
 	$(PLAYGROUND) run --rm seed python /home/src/seed/seed.py --force
 
+# Exports live_traffic, live_minute_kpis and live_device_revenue as one service, then
+# builds and starts it: it writes to the analytics schema every minute.
+LIVE_PIPELINES := live_traffic live_minute_kpis live_device_revenue
+playground-service:
+	mkdir -p playground/service
+	$(PLAYGROUND) run --rm --no-deps -v "$(CURDIR)/playground/service:/home/src/service" mage \
+		mage export service /home/src/shop_lab $(LIVE_PIPELINES) --name shop-live \
+		--out /home/src/service --force
+	BUILDX_BUILDER=$(PLAYGROUND_BUILDER) $(PLAYGROUND) --profile service build live-service
+	$(PLAYGROUND) --profile service up -d live-service
+	@echo "The service runs its pipelines every minute; make playground-console shows them."
+
+# The service's terminal dashboard.
+playground-console:
+	$(PLAYGROUND) --profile service exec live-service mage-console --allow-control
+
+playground-service-stop:
+	$(PLAYGROUND) --profile service stop live-service
+
 .PHONY: install-hooks dev_env dev_env_all lock lock-check test requirements \
 	playground playground-build playground-up playground-logs playground-ps \
 	playground-check playground-psql playground-stop playground-start \
-	playground-restart playground-down playground-reset playground-reseed
+	playground-restart playground-down playground-reset playground-reseed \
+	playground-service playground-console playground-service-stop

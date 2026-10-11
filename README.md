@@ -39,7 +39,7 @@ http://localhost:3333.
 | [Tutorial: from pipeline to production](docs-md/getting-started/pipeline-to-production.md) | A data contract, a monitor, run records and an export as a service |
 | [Tutorial: an ML inference service](docs-md/getting-started/inference-service.md) | Train a model, score in Python, Rust and R, and serve predictions over HTTP |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
-| [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eight pipelines |
+| [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eleven pipelines |
 | [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |
 | [Compile pipelines](docs-md/guides/pipelines/compilation.md) | The performance optimization behind production runs |
 | [Rust blocks](docs-md/guides/blocks/rust-blocks.md) and [Rust setup](docs-md/guides/blocks/rust-setup.md) | Blocks in Rust with Polars |
