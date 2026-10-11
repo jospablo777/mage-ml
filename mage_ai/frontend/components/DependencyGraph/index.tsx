@@ -1962,7 +1962,8 @@ function DependencyGraph({
           maxHeight={ZOOMABLE_CANVAS_SIZE}
           maxWidth={ZOOMABLE_CANVAS_SIZE}
           maxZoom={1}
-          minZoom={-1}
+          // reaflow zooms to 1 + minZoom; -1 would shrink the graph to nothing.
+          minZoom={-0.95}
           node={(node) => {
             const nodeID = node?.id;
             const {

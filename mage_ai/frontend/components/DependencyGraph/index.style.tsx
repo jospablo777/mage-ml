@@ -46,6 +46,16 @@ export const GraphContainerStyle = styled.div<{
     ${ScrollbarStyledCss}
   }
 
+  /*
+   * reaflow positions the graph as if its group scales from the canvas origin, but the
+   * motion library it animates with scales SVG groups from their own center. Without this,
+   * a fitted graph is shifted right and down by layout size × (1 - zoom) / 2.
+   */
+  svg > g {
+    transform-box: view-box !important;
+    transform-origin: 0 0 !important;
+  }
+
   ${props => props.height && `
     height: ${props.height}px;
   `}

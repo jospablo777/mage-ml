@@ -17,6 +17,8 @@ import { UNIT } from '@oracle/styles/units/spacing';
 import { buildUrl } from '@api/utils/url';
 import { onSuccess } from '@api/utils/response';
 import { useError } from '@context/Error';
+import { displayTimestamp } from '@utils/timestamp';
+import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
 
 export type PipelineDocumentationType = {
   exists: boolean;
@@ -380,7 +382,7 @@ function Documentation({ pipelineUUID }: DocumentationProps) {
           <Text muted small>
             {FORMAT_LABELS[doc.format]} · {doc.path}
             {doc.updated_at
-              ? ` · updated ${new Date(doc.updated_at * 1000).toLocaleString()}`
+              ? ` · updated ${displayTimestamp(doc.updated_at * 1000, shouldDisplayLocalTimezone())}`
               : ''}
           </Text>
         </FlexContainer>

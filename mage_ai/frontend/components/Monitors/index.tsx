@@ -10,6 +10,8 @@ import Text from '@oracle/elements/Text';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { UNIT } from '@oracle/styles/units/spacing';
+import { displayTimestamp } from '@utils/timestamp';
+import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
 
 type CheckType = {
   check: string;
@@ -230,7 +232,13 @@ function Monitors() {
                           )
                           : <Text muted small>not run yet</Text>}
                     </td>
-                    <td><Text muted small>{monitor.latest?.checked_at || ''}</Text></td>
+                    <td>
+                      <Text muted small>
+                        {monitor.latest?.checked_at
+                          ? displayTimestamp(monitor.latest.checked_at, shouldDisplayLocalTimezone())
+                          : ''}
+                      </Text>
+                    </td>
                     <td><Text small>{monitor.runs || 0}</Text></td>
                   </tr>
                 );

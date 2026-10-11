@@ -225,8 +225,15 @@ function BlockRunsTable({
           block = blocksByUUID[parts[0]];
         }
 
-        const runtime =
-          startedAt && completedAt ? moment(completedAt).diff(moment(startedAt), 'seconds') : null;
+        // Blocks in a chain often take less than a second; show those in milliseconds.
+        const runtimeMs =
+          startedAt && completedAt ? moment(completedAt).diff(moment(startedAt)) : null;
+        let runtime = '-';
+        if (runtimeMs !== null && runtimeMs >= 0) {
+          runtime = runtimeMs < 1000
+            ? `${runtimeMs} ms`
+            : prettyUnitOfTime(Math.round(runtimeMs / 1000));
+        }
 
         const rows = [
           <Text {...getRunStatusTextProps(status)} key={`${id}_status`}>
@@ -340,7 +347,7 @@ function BlockRunsTable({
             )}
           </Text>,
           <Text default key={`${id}_runtime`} monospace small>
-            {runtime ? prettyUnitOfTime(runtime) : '-'}
+            {runtime}
           </Text>,
         ];
 
