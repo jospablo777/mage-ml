@@ -57,6 +57,10 @@ const BLOCKS: &[(&str, &str)] = &[
         "@transformer\ndef after(data, *args, **kwargs):\n    return data\n",
     ),
     (
+        "data_loaders/thing.py",
+        "@data_loader\ndef thing(*args, **kwargs):\n    return {1, 2}\n",
+    ),
+    (
         "transformers/slow.py",
         "import os, time\n\n@transformer\ndef slow(data, *args, **kwargs):\n    open(os.path.join(kwargs['marker_dir'], 'pid'), 'w').write(str(os.getpid()))\n    time.sleep(float(kwargs.get('seconds', 30)))\n    return 1\n",
     ),
@@ -90,6 +94,8 @@ fn manifest(once_trigger: bool) -> Value {
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[]),
                         block("broken", "transformer", "transformers/broken.py", &["load"]),
                         block("after", "transformer", "transformers/after_broken.py", &["broken"])]},
+            {"uuid": "thing", "name": "thing", "max_concurrent_runs": 1,
+             "blocks": [block("thing", "data_loader", "data_loaders/thing.py", &[])]},
             {"uuid": "slow", "name": "slow", "max_concurrent_runs": 1,
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[]),
                         block("slow", "transformer", "transformers/slow.py", &["load"])]}
@@ -295,6 +301,55 @@ fn runs_complete_and_return_their_blocks_when_waited_for() {
 
     let (status, _) = service.post("/v1/pipelines/missing/runs", json!({}));
     assert_eq!(status, 404);
+}
+
+#[test]
+fn a_run_answers_with_a_blocks_output() {
+    let mut service = Service::create(false);
+    service.start(&[]);
+
+    let (status, run) = service.post(
+        "/v1/pipelines/sum/runs?wait=60&output=total",
+        json!({"variables": {"n": 5}}),
+    );
+    assert_eq!(status, 201, "{run}");
+    assert_eq!(run["output"], json!({"total": 10}), "{run}");
+    assert!(run.get("output_url").is_none());
+
+    let id = run["id"].as_str().unwrap();
+    assert_eq!(
+        service.get(&format!("/v1/runs/{id}/output?block=total")),
+        (200, json!({"total": 10}))
+    );
+    let (status, error) = service.get(&format!("/v1/runs/{id}/output?block=nope"));
+    assert_eq!(status, 404);
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("has no block nope"),
+        "{error}"
+    );
+    let (status, error) = service.get(&format!("/v1/runs/{id}/output?block=total&index=3"));
+    assert_eq!(status, 404);
+    assert!(
+        error["error"].as_str().unwrap().contains("has no output 3"),
+        "{error}"
+    );
+
+    // A pickled output is not served: the response points at it and the URL says why.
+    let (_, run) = service.post("/v1/pipelines/thing/runs?wait=60&output=thing", json!({}));
+    assert!(run.get("output").is_none(), "{run}");
+    let url = run["output_url"].as_str().unwrap().to_string();
+    let (status, error) = service.get(&url);
+    assert_eq!(status, 415);
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("only Python can read"),
+        "{error}"
+    );
 }
 
 #[test]

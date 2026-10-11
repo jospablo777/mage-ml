@@ -48,6 +48,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs", get(list_runs))
         .route("/v1/runs/{id}", get(run))
         .route("/v1/runs/{id}/logs", get(logs))
+        .route("/v1/runs/{id}/output", get(output))
         .route("/v1/runs/{id}/cancel", post(cancel))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/models", get(models))
@@ -180,6 +181,8 @@ async fn pipelines(State(state): State<AppState>, headers: HeaderMap) -> ApiResu
 #[derive(Deserialize)]
 struct WaitQuery {
     wait: Option<u64>,
+    /// A block whose output the response carries once the run completes.
+    output: Option<String>,
 }
 
 async fn create_run(
@@ -223,8 +226,16 @@ async fn create_run(
     if let Some(seconds) = query.wait {
         let deadline =
             tokio::time::Instant::now() + Duration::from_secs(seconds.min(MAX_WAIT_SECONDS));
+        let started = tokio::time::Instant::now();
         while !detail.run.status.finished() && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Checks often at first, so a short run (an inference) answers without a
+            // delay; a ledger read takes microseconds.
+            let pause = if started.elapsed() < Duration::from_secs(1) {
+                5
+            } else {
+                50
+            };
+            tokio::time::sleep(Duration::from_millis(pause)).await;
             if let Some(current) = state.service.ledger.run(&id)? {
                 detail = current;
             }
@@ -235,12 +246,152 @@ async fn create_run(
     } else {
         StatusCode::OK
     };
+    let mut body = serde_json::to_value(&detail)
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if let Some(block) = &query.output
+        && detail.run.status == RunStatus::Completed
+    {
+        inline_output(&state, &detail, block, &mut body).await?;
+    }
     Ok((
         code,
         [(header::LOCATION, format!("/v1/runs/{id}"))],
-        Json(detail),
+        Json(body),
     )
         .into_response())
+}
+
+/// Largest output a run's response carries; larger ones are read from `output_url`.
+const MAX_INLINE_OUTPUT: u64 = 8 * 1024 * 1024;
+
+/// The block's JSON output in the response as `output`; other kinds as `output_url`.
+async fn inline_output(
+    state: &AppState,
+    detail: &RunDetail,
+    block: &str,
+    body: &mut Value,
+) -> ApiResult<()> {
+    let record = output_record(detail, block, 0)?;
+    let url = format!("/v1/runs/{}/output?block={block}", detail.run.id);
+    let path = output_path(state, record)?;
+    let small = std::fs::metadata(&path)
+        .map(|m| m.len() <= MAX_INLINE_OUTPUT)
+        .unwrap_or(false);
+    if record.get("kind").and_then(Value::as_str) == Some("json") && small {
+        let text = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        body["output"] = serde_json::from_str(&text)
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    } else {
+        body["output_url"] = json!(url);
+    }
+    Ok(())
+}
+
+/// A block's output record from a run, by position.
+fn output_record<'a>(detail: &'a RunDetail, block: &str, index: usize) -> ApiResult<&'a Value> {
+    let summary = detail
+        .blocks
+        .iter()
+        .find(|b| b.block == block)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                format!("run {} has no block {block}", detail.run.id),
+            )
+        })?;
+    summary.outputs.get(index).ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            format!(
+                "block {block} of run {} has no output {index}; it has {}",
+                detail.run.id,
+                summary.outputs.len()
+            ),
+        )
+    })
+}
+
+/// The output file of a record, which must be in the service's data directory.
+fn output_path(state: &AppState, record: &Value) -> ApiResult<std::path::PathBuf> {
+    let path = record
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "the output has no file".into()))?;
+    let path = std::fs::canonicalize(path).map_err(|_| {
+        ApiError(
+            StatusCode::GONE,
+            "the output file is gone; runs older than the retention period lose them".into(),
+        )
+    })?;
+    let data_dir = std::fs::canonicalize(&state.service.data_dir)
+        .unwrap_or_else(|_| state.service.data_dir.clone());
+    if !path.starts_with(&data_dir) {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "the output is outside the service data".into(),
+        ));
+    }
+    Ok(path)
+}
+
+/// The media type an output kind is served as; None for kinds only Python can read.
+fn content_type(record: &Value) -> Option<&'static str> {
+    match (
+        record.get("kind").and_then(Value::as_str),
+        record.get("format").and_then(Value::as_str),
+    ) {
+        (Some("json"), _) => Some("application/json"),
+        (Some("frame"), Some("parquet")) => Some("application/vnd.apache.parquet"),
+        (Some("frame"), _) => Some("application/vnd.apache.arrow.file"),
+        (Some("numpy"), _) => Some("application/octet-stream"),
+        _ => None,
+    }
+}
+
+#[derive(Deserialize)]
+struct OutputQuery {
+    block: String,
+    index: Option<usize>,
+}
+
+/// A block's stored output, as its file: JSON, an Arrow IPC file, Parquet or NumPy.
+async fn output(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<OutputQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    authorize(&state, &headers, Access::Read)?;
+    let detail = state
+        .service
+        .ledger
+        .run(&id)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, format!("no run {id}")))?;
+    let record = output_record(&detail, &query.block, query.index.unwrap_or(0))?;
+    if let Some(value) = record.get("value") {
+        return Ok(Json(value.clone()).into_response());
+    }
+    let media = content_type(record).ok_or_else(|| {
+        ApiError(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            format!(
+                "block {} returned a {} output, which only Python can read; return a \
+                 DataFrame, a list or a dict to serve it",
+                query.block,
+                record
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pickled")
+            ),
+        )
+    })?;
+    let path = output_path(&state, record)?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(([(header::CONTENT_TYPE, media)], bytes).into_response())
 }
 
 #[derive(Deserialize)]
@@ -550,4 +701,30 @@ fn escape(value: &str) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::content_type;
+    use serde_json::json;
+
+    #[test]
+    fn outputs_are_served_with_their_media_type() {
+        let cases = [
+            (json!({"kind": "json"}), Some("application/json")),
+            (
+                json!({"kind": "frame", "format": "ipc"}),
+                Some("application/vnd.apache.arrow.file"),
+            ),
+            (
+                json!({"kind": "frame", "format": "parquet"}),
+                Some("application/vnd.apache.parquet"),
+            ),
+            (json!({"kind": "numpy"}), Some("application/octet-stream")),
+            (json!({"kind": "pickle"}), None),
+        ];
+        for (record, media) in cases {
+            assert_eq!(content_type(&record), media, "{record}");
+        }
+    }
 }
