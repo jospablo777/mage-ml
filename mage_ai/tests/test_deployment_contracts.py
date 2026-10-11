@@ -155,12 +155,21 @@ class PublishWorkflowTest(unittest.TestCase):
         self.assertFalse(any('docker push' in step.get('run', '') for step in steps))
         self.assert_manual_only(workflow)
 
-    def test_distribution_workflow_builds_every_workspace_package(self):
-        text, workflow = self.workflow('publish_to_pypi.yml')
+    def test_release_workflow_builds_from_the_tag_and_publishes_only_on_request(self):
+        text, workflow = self.workflow('release.yml')
 
-        self.assertNotIn('if: false', text)
-        self.assertIn('uv build --all-packages', text)
         self.assert_manual_only(workflow)
+        self.assertIn('--no-sources', text)
+        self.assertIn('--release --locked', text)
+        self.assertNotIn('--clobber', text)
+        self.assertNotIn('pypi', text.lower())
+        self.assertEqual(workflow['jobs']['publish']['if'], 'inputs.publish')
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        uses = [step['uses'] for job in workflow['jobs'].values()
+                for step in job.get('steps', []) if 'uses' in step]
+        self.assertTrue(uses)
+        for action in uses:
+            self.assertRegex(action, r'@[0-9a-f]{40}$', 'actions are pinned to commits')
 
 
 class UvVersionTest(unittest.TestCase):
@@ -176,11 +185,11 @@ class UvVersionTest(unittest.TestCase):
         self.assertIsNotNone(image_version)
         version = image_version.group('version')
 
-        for name in ['build_and_test.yml', 'dependency_audit.yml', 'publish_to_pypi.yml']:
+        for name in ['build_and_test.yml', 'dependency_audit.yml', 'release.yml']:
             with self.subTest(workflow=name):
                 text = (REPO_ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
                 pins = set(re.findall(r'uv==(?P<version>[\d.]+)', text))
-                pins.update(re.findall(r'UV_VERSION: "(?P<version>[\d.]+)"', text))
+                pins.update(re.findall(r'''UV_VERSION: ["'](?P<version>[\d.]+)["']''', text))
                 pins.discard('${{ env.UV_VERSION }}')
 
                 self.assertTrue(pins, 'no uv version pinned in %s' % name)
