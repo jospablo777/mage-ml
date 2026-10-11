@@ -8,9 +8,9 @@ described in exchange.py, and the block's return value and test results are read
 from it.
 """
 import os
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
-from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.block import Block, ConditionalBlock
 from mage_ai.data_preparation.models.block.r import exchange, runtime  # noqa: F401
 from mage_ai.data_preparation.models.block.r.execution import (  # noqa: F401
     BLOCK_TYPES,
@@ -90,3 +90,59 @@ class RBlock(Block):
         # The tests are R functions; updating them would run the block's code as Python.
         kwargs['update_tests'] = False
         return super().run_tests(*args, **kwargs)
+
+
+class RConditionalBlock(ConditionalBlock):
+    """
+    A condition written in R: a function annotated `#* @condition` that receives the
+    inputs of the block it guards and returns TRUE (run it) or FALSE (skip it).
+    """
+
+    def execute_conditional(
+        self,
+        parent_block: Block,
+        dynamic_block_index: Optional[int] = None,
+        dynamic_upstream_block_uuids: Optional[List[str]] = None,
+        execution_partition: Optional[str] = None,
+        global_vars: Optional[Dict] = None,
+        logger=None,
+        logging_tags: Optional[Dict] = None,
+        **kwargs,
+    ) -> bool:
+        from mage_ai.data_preparation.models.constants import BlockType
+
+        with self._redirect_streams(logger=logger, logging_tags=logging_tags):
+            variables = self._create_global_vars(
+                global_vars,
+                parent_block,
+                dynamic_block_index=dynamic_block_index,
+                **kwargs,
+            ).copy()
+            input_vars = []
+            if parent_block is not None:
+                input_vars, kwargs_vars, _ = parent_block.fetch_input_variables(
+                    None,
+                    execution_partition=execution_partition,
+                    global_vars=variables,
+                    dynamic_block_index=dynamic_block_index,
+                    dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                )
+                for kwargs_var in kwargs_vars:
+                    variables.update(kwargs_var)
+            run = execute_r_code(
+                BlockType.CONDITIONAL,
+                self.content or '',
+                input_vars=input_vars,
+                global_vars=variables,
+                repo_path=self.repo_path,
+                block_uuid=self.uuid,
+                pipeline_uuid=self.pipeline_uuid,
+                execution_partition=execution_partition,
+            )
+            decisions = [value for value in run.outputs if isinstance(value, bool)]
+            if not decisions:
+                raise RBlockError(
+                    f'The condition {self.uuid} returned no decision; it must return '
+                    'TRUE or FALSE.',
+                )
+            return all(decisions)

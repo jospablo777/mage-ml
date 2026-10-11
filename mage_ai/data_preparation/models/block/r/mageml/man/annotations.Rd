@@ -11,6 +11,9 @@ R has no decorators. Like plumber, Mage reads comments that start with
 \itemize{
 \item \verb{#* @data_loader}, \verb{#* @transformer}, \verb{#* @data_exporter} or \verb{#* @custom}
 marks the block's function. A block has one, of its own type.
+\item \verb{#* @condition} marks the function of a conditional block. It receives the
+inputs of the block it guards and returns \code{TRUE} (run the block) or \code{FALSE}
+(skip it).
 \item \verb{#* @test} marks a test of the block's output. Mage calls it with the
 output, or with no arguments when it takes none; it fails when it raises
 an error. It is reported with the function's name.

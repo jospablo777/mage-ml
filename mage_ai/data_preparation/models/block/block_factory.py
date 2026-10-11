@@ -5,7 +5,7 @@ from mage_ai.data_preparation.models.block.integration import (
     SourceBlock,
     TransformerBlock,
 )
-from mage_ai.data_preparation.models.block.r import RBlock
+from mage_ai.data_preparation.models.block.r import RBlock, RConditionalBlock
 from mage_ai.data_preparation.models.block.rust import RustBlock, RustConditionalBlock
 from mage_ai.data_preparation.models.block.sql import SQLBlock
 from mage_ai.data_preparation.models.constants import (
@@ -52,6 +52,8 @@ class BlockFactory:
         elif BlockLanguage.SQL == language:
             return SQLBlock
         elif BlockLanguage.R == language:
+            if BlockType.CONDITIONAL == block_type:
+                return RConditionalBlock
             return RBlock
         elif BlockLanguage.RUST == language:
             if BlockType.CONDITIONAL == block_type:

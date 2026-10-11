@@ -2,7 +2,8 @@ function_names <- c(
   data_loader = "load_data",
   transformer = "transform",
   data_exporter = "export_data",
-  custom = "custom"
+  custom = "custom",
+  conditional = "condition"
 )
 
 #' Stop when packages are missing
@@ -125,6 +126,14 @@ execute_block <- function(job_dir) {
   evaluate_block(expressions, readLines(path, encoding = "UTF-8"), env)
   f <- block_function(env, block_type)
   value <- do.call(f, unname(inputs), envir = env)
+  if (identical(block_type, "conditional") && !(isTRUE(value) || isFALSE(value))) {
+    stop(
+      "A conditional block returns TRUE or FALSE, not ",
+      paste(class(value), collapse = "/"),
+      ".",
+      call. = FALSE
+    )
+  }
   if (!identical(block_type, "data_exporter")) {
     write_output(value, job_dir)
   }

@@ -358,6 +358,8 @@ def __fetch_conditional_templates(language: BlockLanguage = BlockLanguage.PYTHON
     template_path = 'conditionals/base.jinja'
     if language == BlockLanguage.RUST:
         template_path = 'conditionals/rust/default.rs'
+    elif language == BlockLanguage.R:
+        template_path = 'conditionals/r/default.r'
     return (
         template_env.get_template(template_path).render()
         + '\n'

@@ -5,6 +5,7 @@
 \alias{transformer}
 \alias{data_exporter}
 \alias{custom}
+\alias{condition}
 \title{Register the function of a block}
 \usage{
 data_loader(f)
@@ -14,6 +15,8 @@ transformer(f)
 data_exporter(f)
 
 custom(f)
+
+condition(f)
 }
 \arguments{
 \item{f}{The block's function.}

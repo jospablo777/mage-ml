@@ -5,6 +5,9 @@
 #'
 #' * `#* @data_loader`, `#* @transformer`, `#* @data_exporter` or `#* @custom`
 #'   marks the block's function. A block has one, of its own type.
+#' * `#* @condition` marks the function of a conditional block. It receives the
+#'   inputs of the block it guards and returns `TRUE` (run the block) or `FALSE`
+#'   (skip it).
 #' * `#* @test` marks a test of the block's output. Mage calls it with the
 #'   output, or with no arguments when it takes none; it fails when it raises
 #'   an error. It is reported with the function's name.
@@ -35,7 +38,7 @@
 NULL
 
 annotation_tags <- c(
-  "data_loader", "transformer", "data_exporter", "custom", "test"
+  "data_loader", "transformer", "data_exporter", "custom", "condition", "test"
 )
 
 #' Read the annotations above each of a block's expressions
@@ -145,7 +148,8 @@ evaluate_block <- function(expressions, lines, env) {
       if (tag == "test") {
         register_test(f, name)
       } else {
-        register_block_function(f, tag)
+        # A condition is the function of a conditional block.
+        register_block_function(f, if (tag == "condition") "conditional" else tag)
       }
     }
   }

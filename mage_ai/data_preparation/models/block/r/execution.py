@@ -21,6 +21,8 @@ RUNNER = Path(__file__).parent / 'runner.R'
 BLOCK_TYPES = (
     BlockType.DATA_LOADER, BlockType.TRANSFORMER, BlockType.DATA_EXPORTER, BlockType.CUSTOM,
 )
+# A conditional runs on its own, before the block it guards; it is never part of a chain.
+EXECUTABLE_BLOCK_TYPES = BLOCK_TYPES + (BlockType.CONDITIONAL,)
 
 
 class RBlockError(Exception):
@@ -177,7 +179,7 @@ def execute_r_code(
     execution_partition: str = None,
 ) -> RRun:
     """Run R code as a block of block_type."""
-    if block_type not in BLOCK_TYPES:
+    if block_type not in EXECUTABLE_BLOCK_TYPES:
         raise RBlockError(f'R blocks cannot be {block_type} blocks.')
     config = runtime.r_config(repo_path)
     libraries = runtime.prepare(config)

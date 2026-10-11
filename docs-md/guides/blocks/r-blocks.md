@@ -42,8 +42,8 @@ must have the `arrow`, `bit64`, `jsonlite` and `tibble` packages.
 2. Add a data loader, transformer, data exporter or custom block.
 3. Select **R**, then a template.
 
-Sensors, conditionals and callbacks are written in Python; conditionals can also be written
-in [Rust](rust-blocks.md#conditional-block).
+Conditionals can be written in R too (below), from a block's Conditionals panel. Sensors
+and callbacks are written in Python.
 
 | Block type | Templates |
 | --- | --- |
@@ -62,6 +62,7 @@ R has no decorators. Mage reads comments that start with `#*` above a function:
 | `#* @transformer` | The function of a transformer |
 | `#* @data_exporter` | The function of a data exporter |
 | `#* @custom` | The function of a custom block |
+| `#* @condition` | The function of a conditional block: returns `TRUE` or `FALSE` |
 | `#* @test` | A test of the block's output; a block can have several |
 
 A block has one function, and its annotation must match the block type. The function's
@@ -140,6 +141,22 @@ custom <- function(...) {
   )
 }
 ```
+
+### Conditional block
+
+A conditional decides whether the block it is attached to runs. Its function, annotated
+`#* @condition`, receives the same upstream outputs as that block and returns `TRUE` to run
+it or `FALSE` to skip it (the block's run then shows `condition_failed`).
+
+```r
+#* @condition
+enough_rows <- function(df_1, ...) {
+  nrow(df_1) >= variable("minimum", 1)
+}
+```
+
+Any other return value, such as `NA` or several values, fails the conditional with an
+error.
 
 ### Test
 

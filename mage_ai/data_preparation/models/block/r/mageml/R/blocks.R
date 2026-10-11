@@ -67,6 +67,12 @@ custom <- function(f) {
   register_block_function(f, "custom")
 }
 
+#' @rdname data_loader
+#' @export
+condition <- function(f) {
+  register_block_function(f, "conditional")
+}
+
 #' Register a test of a block's output
 #'
 #' What the `#* @test` annotation does, from code. After the block's function

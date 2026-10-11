@@ -53,3 +53,29 @@ class RBlockTestsTest(TestCase):
             block.run_tests(outputs=[1], update_tests=True, custom_code=R_CODE)
 
         executed.assert_not_called()
+
+
+class RConditionalBlockTest(TestCase):
+    def test_an_r_conditional_block_decides_with_the_r_condition(self):
+        from mage_ai.data_preparation.models.block import Block
+        from mage_ai.data_preparation.models.block.r import RBlockError, RConditionalBlock
+        from mage_ai.data_preparation.models.pipeline import Pipeline
+
+        pipeline = Pipeline.create('r condition', repo_path=self.repo_path)
+        condition = Block.create(
+            'enough_rows', BlockType.CONDITIONAL, self.repo_path,
+            language=BlockLanguage.R, pipeline=pipeline,
+        )
+        self.assertIsInstance(condition, RConditionalBlock)
+        self.assertTrue(condition.file_path.endswith('.r'))
+        self.assertIn('#* @condition', open(condition.file_path).read())
+
+        target = 'mage_ai.data_preparation.models.block.r.execute_r_code'
+        with patch(target, return_value=RRun(outputs=[True])) as run:
+            self.assertTrue(condition.execute_conditional(None, global_vars={}))
+        self.assertEqual(run.call_args[0][0], BlockType.CONDITIONAL)
+        with patch(target, return_value=RRun(outputs=[False])):
+            self.assertFalse(condition.execute_conditional(None, global_vars={}))
+        with patch(target, return_value=RRun(outputs=[])):
+            with self.assertRaisesRegex(RBlockError, 'returned no decision'):
+                condition.execute_conditional(None, global_vars={})
