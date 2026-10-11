@@ -918,9 +918,8 @@ impl ChainTask {
                     let mut boundary = chain_finished;
                     for position in (1..self.blocks.len()).rev() {
                         let part = seconds.get(position).map_or(0.0, |p| p.seconds);
-                        boundary = (boundary
-                            - chrono::Duration::microseconds((part * 1e6) as i64))
-                        .max(chain_started);
+                        boundary = (boundary - chrono::Duration::microseconds((part * 1e6) as i64))
+                            .max(chain_started);
                         starts[position] = boundary;
                     }
                     for (position, block) in self.blocks.iter().enumerate() {
@@ -951,7 +950,11 @@ impl ChainTask {
                                 "Planned in the compiled chain; its work ran with {computed_in}."
                             )
                         } else {
-                            format!("Completed in {elapsed:.2} s in the chain.")
+                            chain_block_message(
+                                elapsed,
+                                position,
+                                (block_finished - starts[position]).num_microseconds(),
+                            )
                         };
                         self.log.info(Some(&block.uuid), &message);
                         self.service.observe_block(
@@ -1292,9 +1295,38 @@ fn rust_input(records: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// The log line of a completed block in a chain. The first block's span also holds the
+/// chain's start-up (worker start and input reads); the line says so, so it adds up with
+/// the run summary.
+fn chain_block_message(elapsed: f64, position: usize, span_micros: Option<i64>) -> String {
+    let span = span_micros.unwrap_or(0) as f64 / 1e6;
+    let start_up = span - elapsed;
+    if position == 0 && start_up >= 0.01 {
+        format!("Completed in {elapsed:.2} s in the chain, after {start_up:.2} s starting it.")
+    } else {
+        format!("Completed in {elapsed:.2} s in the chain.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_chained_block_names_the_start_up_it_carries() {
+        assert_eq!(
+            chain_block_message(0.03, 0, Some(503_000)),
+            "Completed in 0.03 s in the chain, after 0.47 s starting it."
+        );
+        assert_eq!(
+            chain_block_message(0.03, 0, Some(35_000)),
+            "Completed in 0.03 s in the chain."
+        );
+        assert_eq!(
+            chain_block_message(0.01, 2, Some(400_000)),
+            "Completed in 0.01 s in the chain."
+        );
+    }
 
     fn pipeline(blocks: Value) -> Pipeline {
         serde_json::from_value(
