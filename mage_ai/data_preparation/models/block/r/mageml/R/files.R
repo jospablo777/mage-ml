@@ -44,7 +44,7 @@ file_format <- function(path, format = NULL) {
 #'
 #' Reads a local file, with the format taken from its extension: CSV and TSV
 #' with readr, Parquet, Feather/Arrow and NDJSON with arrow, JSON arrays with
-#' jsonlite, and RDS files. Relative paths start at the Mage project, which
+#' jsonlite, and RDS files. Relative paths start at the MageML project, which
 #' is the working directory of R blocks.
 #'
 #' @param path The path of the file.

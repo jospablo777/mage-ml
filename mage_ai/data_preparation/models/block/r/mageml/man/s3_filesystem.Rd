@@ -16,7 +16,7 @@ An arrow \code{S3FileSystem}.
 \description{
 Creates an arrow S3 file system with the \code{AWS_ACCESS_KEY_ID},
 \code{AWS_SECRET_ACCESS_KEY}, \code{AWS_SESSION_TOKEN}, \code{AWS_REGION} and
-\code{AWS_ENDPOINT} settings of a profile in the Mage project's
+\code{AWS_ENDPOINT} settings of a profile in the MageML project's
 \code{io_config.yaml}. \code{AWS_ENDPOINT} points to S3-compatible storage, such as
 MinIO. Without a profile or its settings, arrow finds the credentials as
 the AWS tools do, from the environment and \verb{~/.aws}.

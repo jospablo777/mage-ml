@@ -1,7 +1,7 @@
 suppressPackageStartupMessages(library(tidyverse))
 
 # Reads a SQLite database file with DBI and RSQLite, which `mage r init`
-# installs. Relative paths start at the Mage project.
+# installs. Relative paths start at the MageML project.
 #* @data_loader
 load_data <- function(...) {
   connection <- DBI::dbConnect(RSQLite::SQLite(), "data/database.sqlite")

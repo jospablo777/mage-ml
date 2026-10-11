@@ -13,7 +13,7 @@ io_config(profile = "default")
 A named list of settings.
 }
 \description{
-Returns the database settings of a profile in the Mage project's
+Returns the database settings of a profile in the MageML project's
 \code{io_config.yaml}, such as \code{POSTGRES_HOST}, with environment variables and
 secrets resolved. Mage passes the profiles whose names appear as text in
 the block's code, and \code{"default"}; settings other than those of Postgres,

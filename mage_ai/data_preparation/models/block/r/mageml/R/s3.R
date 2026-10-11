@@ -2,7 +2,7 @@
 #'
 #' Creates an arrow S3 file system with the `AWS_ACCESS_KEY_ID`,
 #' `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION` and
-#' `AWS_ENDPOINT` settings of a profile in the Mage project's
+#' `AWS_ENDPOINT` settings of a profile in the MageML project's
 #' `io_config.yaml`. `AWS_ENDPOINT` points to S3-compatible storage, such as
 #' MinIO. Without a profile or its settings, arrow finds the credentials as
 #' the AWS tools do, from the environment and `~/.aws`.

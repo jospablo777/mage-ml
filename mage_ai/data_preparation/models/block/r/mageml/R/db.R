@@ -1,6 +1,6 @@
 #' Database settings of an io_config.yaml profile
 #'
-#' Returns the database settings of a profile in the Mage project's
+#' Returns the database settings of a profile in the MageML project's
 #' `io_config.yaml`, such as `POSTGRES_HOST`, with environment variables and
 #' secrets resolved. Mage passes the profiles whose names appear as text in
 #' the block's code, and `"default"`; settings other than those of Postgres,
