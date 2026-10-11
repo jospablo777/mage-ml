@@ -66,6 +66,18 @@ class CompareTest(TestCase):
         self.assertEqual(monitors.compare(monitor, baseline, None)['result'], 'hold')
 
 
+    def test_the_summary_names_the_checks_that_passed(self):
+        record = dict(monitor='m', result='warn', baseline_run_id=3, checks=[
+            dict(check='rows', result='pass', detail='48 rows'),
+            dict(check='missing', column='revenue', result='pass', detail='0%'),
+            dict(check='drift', column='orders', result='warn', detail='0.12'),
+        ])
+        self.assertEqual(monitors.summary(record), (
+            'Monitor m: warn (against run 3).\n'
+            '- drift orders: warn; 0.12\n'
+            '- passed: rows, missing revenue'
+        ))
+
 class ExpandedCompareTest(TestCase):
     def test_population_stability_and_per_column_thresholds(self):
         self.assertEqual(monitors.population_stability([10, 10], [10, 10]), 0)

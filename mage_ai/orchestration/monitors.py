@@ -863,11 +863,15 @@ def summary(record: Dict) -> str:
         f'Monitor {record["monitor"]}: {record["result"]} '
         f'(against {f"run {baseline}" if baseline else "no baseline"}).'
     ]
+    passed = []
     for check in record['checks']:
-        if check['result'] == 'pass':
-            continue
         where = f' {check["column"]}' if check.get('column') else ''
+        if check['result'] == 'pass':
+            passed.append(f'{check["check"]}{where}')
+            continue
         lines.append(f'- {check["check"]}{where}: {check["result"]}; {check["detail"]}')
+    if passed:
+        lines.append(f'- passed: {", ".join(passed)}')
     return '\n'.join(lines)
 
 
