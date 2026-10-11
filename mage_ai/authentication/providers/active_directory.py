@@ -5,9 +5,6 @@ from urllib.parse import quote_plus
 
 import aiohttp
 
-from mage_ai.authentication.oauth.constants import (
-    ACTIVE_DIRECTORY_CLIENT_ID as ACTIVE_DIRECTORY_MAGE_CLIENT_ID,
-)
 from mage_ai.authentication.oauth.constants import ProviderName
 from mage_ai.authentication.providers.oauth import OauthProvider
 from mage_ai.authentication.providers.sso import SsoProvider
@@ -58,69 +55,40 @@ class ADProvider(SsoProvider, OauthProvider):
                 'AD directory id is empty. '
                 'Make sure the ACTIVE_DIRECTORY_DIRECTORY_ID environment variable is set.'
             )
-        if self.client_id and not self.client_secret:
+        # MageML signs in with your own Azure application only; Mage's application sent the
+        # sign-in through api.mage.ai.
+        if not self.client_id or not self.client_secret:
             raise Exception(
-                'AD client secret is empty. '
-                'Make sure the ACTIVE_DIRECTORY_CLIENT_SECRET environment variable is set.'
+                'Active Directory sign-in needs your own Azure application. Set the '
+                'ACTIVE_DIRECTORY_CLIENT_ID and ACTIVE_DIRECTORY_CLIENT_SECRET environment '
+                'variables, with <MageML URL>/oauth as its redirect URI.'
             )
 
     def get_auth_url_response(self, redirect_uri: str = None, **kwargs) -> Dict:
-        """
-        For active directory, the user can set up the Oauth provider in two different ways. They
-        can either just set the ACTIVE_DIRECTORY_DIRECTORY_ID which will use the Mage application we
-        set up in Azure. They can additionally set the ACTIVE_DIRECTORY_CLIENT_ID and
-        ACTIVE_DIRECTORY_CLIENT_SECRET which will use their own Mage application in Azure.
-        """
+        """The Azure authorization URL for your Azure application, which redirects to MageML."""
         ad_directory_id = self.directory_id
-        if self.client_id:
-            base_url = get_base_url(redirect_uri)
-            redirect_uri_query = dict(
-                provider=self.provider,
-                redirect_uri=redirect_uri,
-            )
-            query = dict(
-                client_id=self.client_id,
-                redirect_uri=quote_plus(
-                    f'{base_url}/oauth',
-                ),
-                response_type='code',
-                scope=self.scope,
-                state=uuid.uuid4().hex,
-            )
-            query_strings = []
-            for k, v in query.items():
-                query_strings.append(f'{k}={v}')
+        base_url = get_base_url(redirect_uri)
+        redirect_uri_query = dict(
+            provider=self.provider,
+            redirect_uri=redirect_uri,
+        )
+        query = dict(
+            client_id=self.client_id,
+            redirect_uri=quote_plus(
+                f'{base_url}/oauth',
+            ),
+            response_type='code',
+            scope=self.scope,
+            state=uuid.uuid4().hex,
+        )
+        query_strings = []
+        for k, v in query.items():
+            query_strings.append(f'{k}={v}')
 
-            return dict(
-                url=f"{self.host}/{ad_directory_id}/oauth2/v2.0/authorize?{'&'.join(query_strings)}",  # noqa: E501
-                redirect_query_params=redirect_uri_query,
-            )
-        else:
-            from requests.models import PreparedRequest
-
-            req = PreparedRequest()
-            req.prepare_url(redirect_uri, dict(provider=self.provider))
-            query = dict(
-                client_id=ACTIVE_DIRECTORY_MAGE_CLIENT_ID,
-                redirect_uri=f'https://api.mage.ai/v1/oauth/{self.provider}',
-                response_type='code',
-                scope=self.scope,
-                state=quote_plus(
-                    json.dumps(
-                        dict(
-                            redirect_uri=req.url,
-                            tenant_id=ad_directory_id,
-                        )
-                    )
-                ),
-            )
-            query_strings = []
-            for k, v in query.items():
-                query_strings.append(f'{k}={v}')
-
-            return dict(
-                url=f"{self.host}/{ad_directory_id}/oauth2/v2.0/authorize?{'&'.join(query_strings)}",  # noqa: E501
-            )
+        return dict(
+            url=f"{self.host}/{ad_directory_id}/oauth2/v2.0/authorize?{'&'.join(query_strings)}",  # noqa: E501
+            redirect_query_params=redirect_uri_query,
+        )
 
     async def get_access_token_response(self, code: str, **kwargs) -> Awaitable[Dict]:
         base_url = get_base_url(kwargs.get('redirect_uri'))

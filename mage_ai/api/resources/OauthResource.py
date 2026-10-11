@@ -7,8 +7,6 @@ from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.authentication.oauth2 import generate_access_token
 from mage_ai.authentication.oauth.constants import (
     GIT_OAUTH_PROVIDERS,
-    GITHUB_CLIENT_ID,
-    GITHUB_STATE,
     VALID_OAUTH_PROVIDERS,
     ProviderName,
     get_ghe_hostname,
@@ -226,27 +224,16 @@ class OauthResource(GenericResource):
         # Otherwise, return the authorization url to start the oauth flow.
         else:
             if ProviderName.GITHUB == provider:
-                query = dict(
-                    client_id=GITHUB_CLIENT_ID,
-                    redirect_uri=urllib.parse.quote_plus(
-                        '?'.join(
-                            [
-                                f'https://api.mage.ai/v1/oauth/{pk}',
-                                f'redirect_uri={urllib.parse.unquote(redirect_uri)}',
-                            ]
-                        )
-                    ),
-                    scope='repo',
-                    state=GITHUB_STATE,
-                )
-                query_strings = []
-                for k, v in query.items():
-                    query_strings.append(f'{k}={v}')
-
-                model[
-                    'url'
-                ] = f"https://github.com/login/oauth/authorize?{'&'.join(query_strings)}"
-            elif provider_instance is not None:
+                # Mage's GitHub application sent the authorization code, and so the token,
+                # through api.mage.ai; MageML does not use it.
+                raise ApiError(dict(
+                    code=400,
+                    message='GitHub sign-in through Mage is not available in MageML. Use a '
+                    'personal access token or an SSH key in the Git settings, or register your '
+                    'own GitHub OAuth application and set GHE_HOSTNAME=https://github.com, '
+                    'GHE_CLIENT_ID and GHE_CLIENT_SECRET.',
+                ))
+            if provider_instance is not None:
                 resp = provider_instance.get_auth_url_response(
                     redirect_uri=redirect_uri
                 )

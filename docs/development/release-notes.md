@@ -375,6 +375,13 @@ Each item says what changed, which pipelines it affects, and what to do.
   the choice. Existing projects keep their setting.
 - **The docs no longer send visits to upstream Mage's Google Analytics**, and their
   header and footer link to MageML's repository instead of Mage's chat and social accounts.
+- **No sign-in goes through Mage's servers.** GitHub sign-in in the Git settings and
+  Active Directory sign-in used Mage's own OAuth applications, which sent the authorization
+  code, and so the token, through api.mage.ai. Git sync works with a personal access token,
+  an SSH key, or your own OAuth application (for GitHub, `GHE_HOSTNAME=https://github.com`,
+  `GHE_CLIENT_ID` and `GHE_CLIENT_SECRET`); Active Directory needs your own Azure
+  application (`ACTIVE_DIRECTORY_CLIENT_ID` and `ACTIVE_DIRECTORY_CLIENT_SECRET`). The
+  sign-in screen with a MageML user and password was always local and is unchanged.
 - **The update check reads MageML's GitHub releases** (`jospablo777/mage-ml`,
   `MAGE_UPDATE_CHECK_REPOSITORY`), not PyPI, where the name is not MageML's.
   `MAGE_UPDATE_CHECK_ENABLED=0` turns it off.

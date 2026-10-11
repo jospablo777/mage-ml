@@ -108,34 +108,21 @@ function Authentication({
   isLoadingCreateOauth,
   showError,
 }: AuthenticationProps) {
-  const { data: dataOauths, mutate: fetchOauths } = api.oauths.list({
+  const { data: dataOauths } = api.oauths.list({
     type: 'git',
     redirect_uri: typeof window !== 'undefined' ? encodeURIComponent(window.location.href) : '',
   });
 
-  const { data: dataGitHubOauth, mutate: fetchGitHubOauth } = api.oauths.detail(OauthProviderEnum.GITHUB, {
-    redirect_uri: typeof window !== 'undefined' ? encodeURIComponent(window.location.href) : '',
-  });
-  const oauthGitHub = useMemo(() => dataGitHubOauth?.oauth || {}, [dataGitHubOauth]);
-
   const accessTokenExists = useMemo(() => branch?.access_token_exists, [branch]);
 
-  const providerMapping = useMemo(() => {
-    const mapping = dataOauths?.oauths?.reduce(
-      (acc, curr) => {
-        acc[curr.provider] = curr;
-        return acc;
-      },
-      {},
-    ) || {};
-    if (oauthGitHub) {
-      mapping[OauthProviderEnum.GITHUB] = oauthGitHub;
-    }
-    return mapping;
-  }, [
-    dataOauths,
-    oauthGitHub,
-  ]);
+  // Only the Git providers configured with your own OAuth application.
+  const providerMapping = useMemo(() => dataOauths?.oauths?.reduce(
+    (acc, curr) => {
+      acc[curr.provider] = curr;
+      return acc;
+    },
+    {},
+  ) || {}, [dataOauths]);
 
   const anyOauthAuthenticated = useMemo(
     () => Object.values(providerMapping).some((oauth) => oauth?.['authenticated']),
@@ -173,6 +160,15 @@ function Authentication({
           </Spacing>
           <Spacing mb={UNITS_BETWEEN_ITEMS_IN_SECTIONS} style={{ maxWidth: '600px' }}>
             <Divider muted />
+            {Object.keys(providerMapping).length === 0 && (
+              <Spacing py={1}>
+                <Text muted>
+                  No Git app is set up. Use a personal access token or an SSH key in the Git
+                  settings, or register your own OAuth application: for GitHub, set
+                  GHE_HOSTNAME=https://github.com, GHE_CLIENT_ID and GHE_CLIENT_SECRET.
+                </Text>
+              </Spacing>
+            )}
             {Object.entries(providerMapping || {}).map(([provider, oauth]) => (
               <>
                 <Provider
