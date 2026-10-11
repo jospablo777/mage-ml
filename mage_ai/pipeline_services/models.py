@@ -105,7 +105,8 @@ ARTIFACT_LOADERS = {
 LOADER_MODULES = {
     'onnx': 'onnxruntime', 'catboost': 'catboost', 'xgboost': 'xgboost',
     'lightgbm': 'lightgbm', 'skops': 'skops', 'safetensors': 'safetensors',
-    'torch_export': 'torch', 'torchscript': 'torch', 'keras': 'keras', 'joblib': 'joblib', 'mlflow': 'mlflow',
+    'torch_export': 'torch', 'torchscript': 'torch', 'keras': 'keras', 'joblib': 'joblib',
+    'mlflow': 'mlflow',
 }
 _artifacts: Dict[Any, Any] = {}
 
