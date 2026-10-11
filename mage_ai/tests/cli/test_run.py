@@ -42,3 +42,19 @@ class RunTests(TestCase):
         )
         assert result.exit_code == 0
         assert 'Pipeline run completed.' in result.output
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_run_prints_r_environment_errors_without_a_traceback(
+        self, mock_executor_factory, mock_pipeline,
+    ):
+        from mage_ai.data_preparation.models.block.r.runtime import REnvironmentError
+
+        mock_executor_factory.get_pipeline_executor.return_value.execute.side_effect = (
+            REnvironmentError('The R library is not synced with rv.lock. Run `mage r sync`.')
+        )
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic'])
+        assert result.exit_code == 1
+        assert 'Run `mage r sync`.' in result.output
+        assert 'Traceback' not in result.output
+        assert 'Pipeline run completed.' not in result.output

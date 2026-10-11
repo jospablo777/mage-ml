@@ -187,6 +187,7 @@ def run(
     import sentry_sdk
 
     from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
+    from mage_ai.data_preparation.models.block.r.runtime import REnvironmentError
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.data_preparation.sync.git_sync import get_sync_config
     from mage_ai.data_preparation.variable_manager import get_global_variables
@@ -246,35 +247,40 @@ def run(
         if template_runtime_configuration is not None:
             template_runtime_configuration = json.loads(template_runtime_configuration)
 
-        if block_uuid is None:
-            ExecutorFactory.get_pipeline_executor(
-                pipeline,
-                execution_partition=execution_partition,
-                executor_type=executor_type,
-            ).execute(
-                analyze_outputs=False,
-                global_vars=global_vars,
-                pipeline_run_id=pipeline_run_id,
-                run_sensors=not skip_sensors,
-                run_tests=test,
-                update_status=False,
-            )
-        else:
-            ExecutorFactory.get_block_executor(
-                pipeline,
-                block_uuid,
-                block_run_id=block_run_id,
-                execution_partition=execution_partition,
-                executor_type=executor_type,
-            ).execute(
-                analyze_outputs=False,
-                block_run_id=block_run_id,
-                callback_url=callback_url,
-                global_vars=global_vars,
-                pipeline_run_id=pipeline_run_id,
-                template_runtime_configuration=template_runtime_configuration,
-                update_status=False,
-            )
+        try:
+            if block_uuid is None:
+                ExecutorFactory.get_pipeline_executor(
+                    pipeline,
+                    execution_partition=execution_partition,
+                    executor_type=executor_type,
+                ).execute(
+                    analyze_outputs=False,
+                    global_vars=global_vars,
+                    pipeline_run_id=pipeline_run_id,
+                    run_sensors=not skip_sensors,
+                    run_tests=test,
+                    update_status=False,
+                )
+            else:
+                ExecutorFactory.get_block_executor(
+                    pipeline,
+                    block_uuid,
+                    block_run_id=block_run_id,
+                    execution_partition=execution_partition,
+                    executor_type=executor_type,
+                ).execute(
+                    analyze_outputs=False,
+                    block_run_id=block_run_id,
+                    callback_url=callback_url,
+                    global_vars=global_vars,
+                    pipeline_run_id=pipeline_run_id,
+                    template_runtime_configuration=template_runtime_configuration,
+                    update_status=False,
+                )
+        except REnvironmentError as error:
+            # A setup problem with a fix in its message, not a failure of the block's code.
+            print(f'[red]{error}[/red]')
+            raise typer.Exit(code=1)
         print('Pipeline run completed.')
 
 
