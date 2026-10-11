@@ -514,7 +514,6 @@ def make_app(
     )
 
 
-@safe_db_query
 def default_password_warning(users: List) -> Optional[str]:
     """A warning when an owner still signs in with the password every install starts with."""
     for user in users:
@@ -535,6 +534,7 @@ def default_password_warning(users: List) -> Optional[str]:
     return None
 
 
+@safe_db_query
 def initialize_user_authentication(project_type: ProjectType) -> Oauth2Application:
     logger.info('User authentication is enabled.')
     # We need to sleep for a few seconds after creating all the tables or else there
