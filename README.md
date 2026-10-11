@@ -32,6 +32,7 @@ http://localhost:3333.
 | --- | --- |
 | [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv or Docker and create a project |
 | [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
+| [Tutorial: from pipeline to production](docs-md/getting-started/pipeline-to-production.md) | A data contract, a monitor, run records and an export as a service |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
 | [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eight pipelines |
 | [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |

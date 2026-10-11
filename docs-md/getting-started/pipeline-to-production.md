@@ -1,0 +1,302 @@
+# From pipeline to production
+
+*Take a pipeline to production: a data contract that stops bad data, a monitor that watches every run, run records that explain a change, and an export as a service.*
+
+This tutorial continues [Build a polyglot pipeline](polyglot-pipeline.md). It
+takes its Python pipeline, `regional_revenue_python`, and adds what a production pipeline
+needs:
+
+| Step | What it gives you |
+| --- | --- |
+| 1. A data contract | Every run checks the output's columns, values and keys; bad data stops the run before the exporter writes |
+| 2. A trigger | Runs started by an API call, as a scheduler or another system would |
+| 3. A monitor | Each run compared with the previous one: row counts, missing values, drift |
+| 4. Run records | What changed between two runs, and the old run reproduced |
+| 5. A service | The pipeline in a Docker image that runs without MageML |
+
+Every command and output below comes from a real run. The project is called `shop`; use
+your project's path instead.
+
+## 1. Add a data contract
+
+`monthly_revenue_py` returns one row per region and month. Downstream blocks and the CSV
+rely on that, so write it down as a contract. Run the pipeline once, then draft the
+contract from the stored output:
+
+```bash
+mage run shop regional_revenue_python
+mage contract-draft shop regional_revenue_python monthly_revenue_py --name monthly_revenue --write
+```
+
+The draft, `contracts/monthly_revenue.yaml`, has each column's type and marks the columns
+without missing values:
+
+```yaml
+name: monthly_revenue
+version: 1.0.0
+columns:
+  region:
+    type: string
+    nullable: false
+  month:
+    type: integer
+    nullable: false
+  revenue:
+    type: float
+    nullable: false
+  orders:
+    type: integer
+    nullable: false
+```
+
+Add what you know about the data: the four regions, the months, no negative revenue, one
+row per region and month, and at least 48 rows.
+
+```yaml
+name: monthly_revenue
+version: 1.0.0
+owner: analytics
+description: Revenue and order count per region and month.
+columns:
+  region: {type: string, nullable: false, values: [north, south, east, west]}
+  month: {type: integer, nullable: false, min: 1, max: 12}
+  revenue: {type: float, nullable: false, min: 0}
+  orders: {type: integer, nullable: false, min: 1}
+unique: [region, month]
+min_rows: 48
+```
+
+Bind it to the block: open `monthly_revenue_py`, then **Block settings**, choose
+`monthly_revenue` under **Data contract** and save. Check the stored output against it:
+
+```bash
+mage contract-check shop regional_revenue_python monthly_revenue_py
+```
+
+```text
+Contract monthly_revenue 1.0.0 on output_0: passed (48 rows checked).
+```
+
+### What a violation looks like
+
+Simulate a new region appearing in the source: in `load_orders`, add `'central'` to the
+list of regions, then run the pipeline as production does, without `--test`:
+
+```bash
+mage run shop regional_revenue_python
+```
+
+```text
+Contract monthly_revenue 1.0.0 on output_0: 1 rule broken (60 rows checked).
+- region has values outside its allowed values (12 of 60 rows); values: central; rows: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+Block monthly_revenue_py broke contract monthly_revenue.
+```
+
+The command exits with 1 and `save_trend_py` does not run, so the CSV keeps its last good
+version. Contracts are checked in every pipeline run, with or without tests. Remove
+`'central'` before you go on.
+
+See [Data contracts](../guides/blocks/data-contracts.md) for every rule and for **Warn and
+continue**.
+
+## 2. Start runs with a trigger
+
+Monitors and run records work on pipeline runs started by triggers. Open the pipeline's
+**Triggers** page, click **New trigger**, choose **API**, name it `nightly_api`, and save
+it. Its page shows the endpoint with its token:
+
+```bash
+curl -X POST http://localhost:6789/api/pipeline_schedules/1/pipeline_runs/<token> \
+  -H 'Content-Type: application/json' \
+  -d '{"pipeline_run": {"variables": {}}}'
+```
+
+Each call starts a run. A [schedule](../orchestration/triggers/schedule-pipelines.md) works
+the same way; the API trigger lets you start runs when you want them for this tutorial.
+
+## 3. Watch the output with a monitor
+
+A contract checks rules you know in advance. A monitor catches changes you did not
+expect, by comparing each run with the previous one. Create
+`monitors/monthly_revenue.yaml`:
+
+```yaml
+pipeline: regional_revenue_python
+block: monthly_revenue_py
+baseline: previous
+columns: [revenue, orders]
+drift:
+  warn: 0.1
+  fail: 0.2
+missing:
+  max: 0
+rows:
+  min: 48
+  max_change: 0.1
+min_rows: 30
+notify: true
+```
+
+Start two runs with the trigger, then read the results:
+
+```bash
+mage monitor-status shop monthly_revenue
+```
+
+```text
+Pipeline run 1: Monitor monthly_revenue: hold (against no baseline).
+- row_change: hold; no baseline rows to compare with
+- drift revenue: hold; no baseline for this column
+- drift orders: hold; no baseline for this column
+- passed: rows, missing revenue, missing orders
+Pipeline run 2: Monitor monthly_revenue: pass (against run 1).
+- passed: rows, row_change, missing revenue, drift revenue, missing orders, drift orders
+```
+
+The first run has nothing to compare with, so the checks that need a baseline hold. The
+second run matches the first.
+
+Now change the business rule. In `clean_orders_py`, keep only orders above 50:
+
+```python
+@transformer
+def clean_orders(orders, *args, **kwargs):
+    """Orders with units and an amount above 50."""
+    return orders[(orders['units'] > 0) & (orders['amount'] > 50)]
+```
+
+Start a third run. The contract still passes: the output has the same columns, regions and
+rows. The monitor sees the change:
+
+```bash
+mage monitor-status shop monthly_revenue --runs 1
+```
+
+```text
+Pipeline run 3: Monitor monthly_revenue: fail (against run 2).
+- drift revenue: fail; Jensen-Shannon divergence 0.6931
+- drift orders: fail; Jensen-Shannon divergence 0.6931
+- passed: rows, row_change, missing revenue, missing orders
+```
+
+With `notify: true`, a failed monitor sends the pipeline's
+[notifications](../observability/alerting/alerting-slack.md). The **Monitors** page in the
+left navigation lists every monitor with its latest result. Set `fail_block: true` to fail
+the block run instead of only reporting.
+
+See [Monitoring](../guides/pipelines/monitoring.md) for freshness, model performance, Evidently
+and NannyML.
+
+## 4. Find out what changed with run records
+
+Every triggered run records its code, environment, variables and output digests. Compare
+run 2 and run 3:
+
+```bash
+mage run-diff shop regional_revenue_python 2 3
+```
+
+```text
+Pipeline runs 2 and 3:
+- Code changed: transformers/clean_orders_py.py
+- Environment: the same.
+- Variables: the same.
+- Output of clean_orders_py: differs
+- Output of load_orders: same
+- Output of monthly_revenue_py: differs
+- Output of revenue_trend_py: differs
+- Output of save_trend_py: not recorded
+
+--- a/transformers/clean_orders_py.py
++++ b/transformers/clean_orders_py.py
+@@ -1,4 +1,4 @@
+ @transformer
+ def clean_orders(orders, *args, **kwargs):
+-    """Orders with units and an amount above 1."""
+-    return orders[(orders['units'] > 0) & (orders['amount'] > 1)]
++    """Orders with units and an amount above 50."""
++    return orders[(orders['units'] > 0) & (orders['amount'] > 50)]
+```
+
+The drift has one cause, and it is in the diff. The exporter returns nothing, so it has no
+output to record.
+
+To get run 2's numbers back, reproduce it. MageML restores the code run 2 ran with, runs
+the pipeline in full (the exporter writes again) and compares every output:
+
+```bash
+mage reproduce shop regional_revenue_python 2 --yes
+```
+
+```text
+Pipeline run 2 reproduced as pipeline run 4 (completed).
+- load_orders: same
+- clean_orders_py: same
+- monthly_revenue_py: same
+- revenue_trend_py: same
+- save_trend_py: same
+Reproduced.
+```
+
+The run page shows the same record under **Run record**, with **Compare** and
+**Reproduce**. See [Run records](../guides/pipelines/run-records.md).
+
+Put the cleaning rule back to `amount > 1` before you export.
+
+## 5. Export it as a service
+
+A service runs the pipeline without MageML: a small Rust program with a run history, an
+HTTP API and schedules, in a Docker image with only the packages the blocks import.
+
+```bash
+mage export service shop regional_revenue_python --out revenue-service
+```
+
+The report lists the blocks, triggers, files and packages. Read its notes:
+
+```text
+Notes:
+  - Pipeline regional_revenue_python, block monthly_revenue_py: the service does not check data contract monthly_revenue; check the output downstream or run the pipeline in MageML.
+  - Pipeline regional_revenue_python, block monthly_revenue_py: the service does not run monitor monthly_revenue.
+```
+
+A service runs the blocks, not the checks around them. Keep running the pipeline in
+MageML where the contract must stop bad data, or check the output where it lands.
+
+Build the image and run the pipeline once:
+
+```bash
+docker build -t regional-revenue-python revenue-service
+docker run --rm regional-revenue-python run regional_revenue_python
+```
+
+```text
+COMPLETED regional_revenue_python  run 01a129d1-48c0-72f6-98e2-10084705b255  521 ms
+  ok    load_orders            503 ms
+  ok    clean_orders_py          4 ms
+  ok    monthly_revenue_py       9 ms
+  ok    revenue_trend_py         1 ms
+  ok    save_trend_py            3 ms
+```
+
+The five blocks run as one chain in a Python worker; `load_orders` carries the worker's
+start-up. To serve it with its API and trigger, and to watch it from the terminal, follow
+[Export a service](../production/export-a-service.md) from step 4 and the
+[service console](../production/service-console.md).
+
+## What you built
+
+| Guard | Runs in | Catches |
+| --- | --- | --- |
+| Data contract | Every MageML pipeline run | Data that breaks rules you wrote: wrong values, duplicate keys, missing columns |
+| Monitor | Every triggered run | Changes against the previous run: drift, missing values, row counts |
+| Run record | Every triggered run | Which code, packages or variables changed between two runs |
+
+## Next steps
+
+- [Model releases](../guides/pipelines/model-releases.md): promote a model trained by the
+  pipeline only when it beats the current one.
+- [Pipeline documentation](../guides/pipelines/documentation.md): a README for the pipeline,
+  shown in MageML.
+- [Pipeline services reference](../production/pipeline-services.md): secrets, models,
+  deployment files for Kubernetes and IBM Code Engine.

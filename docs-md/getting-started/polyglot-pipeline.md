@@ -261,7 +261,7 @@ behind it.
 
 ## Next steps
 
-- [Export the pipeline as a service](../production/export-a-service.md) to run it without
-  MageML.
-- Add a [data contract](../guides/blocks/data-contracts.md) to `monthly_revenue`.
+- [From pipeline to production](pipeline-to-production.md): add a data
+  contract, a monitor and run records to `regional_revenue_python`, then export it as a
+  service.
 - Track a model trained on the output with [experiments](../guides/pipelines/experiments.md).

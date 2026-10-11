@@ -19,6 +19,7 @@
               "introduction/overview",
               "getting-started/setup",
               "getting-started/polyglot-pipeline",
+              "getting-started/pipeline-to-production",
               "getting-started/playground",
               "guides/train/train-model",
               "design/core-design-principles",
