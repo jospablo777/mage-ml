@@ -62,14 +62,15 @@ class BaseHandler(tornado.web.RequestHandler):
         if status_code == 500:
             self.set_status(200)
             exception = kwargs['exc_info'][1]
-            errors = traceback.format_stack()
-            message = traceback.format_exc()
+            # The exception's traceback, with its notes. format_stack() here gave the stack
+            # of this error handler, which said nothing about the failure.
+            message = ''.join(traceback.format_exception(exception))
 
             self.write(
                 dict(
                     error=dict(
                         code=status_code,
-                        errors=errors,
+                        errors=[],
                         exception=str(exception),
                         message=message,
                     ),

@@ -7,7 +7,9 @@ from mage_ai.server.api.base import BaseHandler
 
 class FailingHandler(BaseHandler):
     async def get(self, **kwargs):
-        raise ValueError('the resource failed')
+        error = ValueError('the resource failed')
+        error.add_note('Block load (data_loaders/load.py) failed.')
+        raise error
 
 
 class ApiErrorTest(AsyncHTTPTestCase):
@@ -21,3 +23,14 @@ class ApiErrorTest(AsyncHTTPTestCase):
         body = json.loads(response.body)
         self.assertEqual(body['error']['exception'], 'the resource failed')
         self.assertEqual(body['error']['code'], 500)
+
+    def test_the_error_carries_its_own_traceback_and_notes(self):
+        body = json.loads(self.fetch('/api/things').body)['error']
+
+        self.assertIn('in get', body['message'])
+        self.assertIn("raise error", body['message'])
+        self.assertIn('ValueError: the resource failed', body['message'])
+        self.assertIn('Block load (data_loaders/load.py) failed.', body['message'])
+        # Not the stack of the error handler, which said nothing about the failure.
+        self.assertNotIn('write_error', body['message'])
+        self.assertEqual(body['errors'], [])

@@ -8,6 +8,7 @@ import { Close } from '@oracle/icons';
 import { CloseButtonContainerStyle, ErrorPopupStyle } from './index.style';
 import { ErrorType, ErrorResponseType } from '@interfaces/ErrorsType';
 import { isObject } from '@utils/hash';
+import { preformattedHtml } from '@utils/html';
 
 export type UseErrorViewsProps = {
   displayMessage?: string;
@@ -98,7 +99,7 @@ export default function useErrorViews({
                   // @ts-ignore
                   dangerouslySetInnerHTML={{
                     // @ts-ignore
-                    __html: msg.replaceAll(' ', '&nbsp;'),
+                    __html: preformattedHtml(msg),
                   }}
                   default
                   disableWordBreak
@@ -133,7 +134,7 @@ export default function useErrorViews({
                   // @ts-ignore
                   dangerouslySetInnerHTML={{
                     // @ts-ignore
-                    __html: msg.replaceAll(' ', '&nbsp;'),
+                    __html: preformattedHtml(msg),
                   }}
                   default
                   disableWordBreak
