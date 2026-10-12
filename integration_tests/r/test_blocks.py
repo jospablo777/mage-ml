@@ -231,6 +231,21 @@ data_loader(function() {
     assert result['has_missing'] is False
 
 
+def test_r_processes_a_block_starts_find_its_packages():
+    """Workers a block starts (parallel, future, callr) load packages from its libraries."""
+    code = '''
+data_loader(function() {
+  rscript <- file.path(R.home("bin"), "Rscript")
+  child <- system2(rscript, c("-e", shQuote("cat(requireNamespace(\'mageml\', quietly = TRUE))")),
+                   stdout = TRUE)
+  list(child_finds_mageml = child)
+})
+'''
+    result = execute_r_code(BlockType.DATA_LOADER, code).outputs[0]
+
+    assert result['child_finds_mageml'] == 'TRUE'
+
+
 def test_a_missing_package_names_the_rv_command():
     code = 'library(notinstalled)\ntransformer(function(df_1) df_1)'
 
