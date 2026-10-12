@@ -223,6 +223,42 @@ class FusionFlowTest(DBTestCase):
         self.assertEqual(self.statuses(run)['export'], 'upstream_failed')
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.FAILED)
 
+    # The last block of a compiled Rust or R chain runs the chain; when an earlier block of
+    # it fails, plans.run marks that block failed and raises ChainFailure naming it.
+    CHAIN_FAILED = '''
+        from mage_ai.data_preparation.models.block import plans
+        @transformer
+        def enrich(frame, **kwargs):
+            clean = 'PIPELINE_clean'
+            plans.mark_failed(clean, 'clean failed')
+            raise plans.ChainFailure(f'Block {clean} failed when enrich ran the chain', clean)
+    '''
+
+    def test_the_block_that_ran_a_failed_chain_is_cancelled_as_block_by_block(self):
+        self.chain(enrich=self.CHAIN_FAILED.replace('PIPELINE', self.pipeline.uuid))
+        self.fuse()
+
+        run = self.run_pipeline()
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.FAILED)
+        statuses = self.statuses(run)
+        self.assertEqual(
+            (statuses['load'], statuses['clean'], statuses['enrich']),
+            ('completed', 'failed', 'cancelled'),
+        )
+        self.assertIn(statuses['export'], ('cancelled', 'upstream_failed'))
+
+    def test_with_failures_allowed_the_block_that_ran_a_failed_chain_is_upstream_failed(self):
+        self.chain(enrich=self.CHAIN_FAILED.replace('PIPELINE', self.pipeline.uuid))
+        self.fuse()
+
+        run = self.run_pipeline(settings={'allow_blocks_to_fail': True})
+
+        statuses = self.statuses(run)
+        self.assertEqual((statuses['clean'], statuses['enrich'], statuses['export']),
+                         ('failed', 'upstream_failed', 'upstream_failed'))
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.FAILED)
+
     def test_cancelling_the_run_stops_the_stage_at_the_next_block(self):
         self.chain(clean='''
             from mage_ai.orchestration.db.models.schedules import PipelineRun

@@ -8,7 +8,7 @@ The contract checked:
 - the blocks after a failed block do not complete;
 - blocks that do not depend on it complete;
 - empty tables flow through: every block completes with the oracle's (empty) output;
-- block by block and fused report the same status for every block before the failure.
+- block by block and fused report the same status for every block.
 
 MAGE_STUDY_FULL=1 runs every language and shape; by default pandas and Rust on the chain.
 MAGE_STUDY_RESULTS_DIR keeps the results (provenance.py).
@@ -86,8 +86,6 @@ def test_fault(mage_project, ready, name, upstream, faulty, language, fault):
             assert states.get(index) == 'failed', (mode, index, states)
         for index in after - failing:
             assert states.get(index) != 'completed', (mode, index, states)
-    # Blocks after a failure never complete; every other block has the same status in both
-    # modes. After a failure the statuses may differ by design: the block that ran a
-    # compiled chain fails with an error that names the block that failed in it.
-    for index in set(seen['off']) - after:
-        assert seen['off'][index] == seen['chains'].get(index), (index, seen)
+    # Every block has the same status in both modes, also the blocks of a compiled chain
+    # after the one that failed in it: they never ran, so they are cancelled.
+    assert seen['off'] == seen['chains'], seen

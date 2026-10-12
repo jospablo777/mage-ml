@@ -1756,9 +1756,12 @@ def run_stage(
                     retry_config=retry_config,
                     tags=member_tags,
                 )
-        except Exception:
+        except Exception as error:
             # The block run is FAILED and its error stored; the block runs after it
             # stay INITIAL for the scheduler.
+            _not_run_after_chain_failure(
+                pipeline_scheduler, plans, error, block_run_ids[:index + 1], pipeline_run_id,
+            )
             return
         finally:
             outputs_cache = None
@@ -1771,6 +1774,33 @@ def run_stage(
         if fusion.passes_in_memory(output):
             previous_output = (block_uuid, output)
         result = output = None
+
+
+def _not_run_after_chain_failure(
+    pipeline_scheduler, plans, error: Exception, block_run_ids: List[int], pipeline_run_id: int,
+) -> None:
+    """
+    A block that ran a compiled chain fails when an earlier block of the chain fails, but
+    its own code never ran. It and the planned blocks after the failed one end as block
+    by block they would: cancelled, or upstream failed when blocks may fail.
+    """
+    failure = error
+    while failure is not None and not isinstance(failure, plans.ChainFailure):
+        failure = failure.__cause__ or failure.__context__
+    if failure is None or not failure.block_uuid:
+        return
+    status = BlockRun.BlockRunStatus.UPSTREAM_FAILED \
+        if pipeline_scheduler.allow_blocks_to_fail else BlockRun.BlockRunStatus.CANCELLED
+    runs = [BlockRun.get_by_id(i) for i in block_run_ids]
+    uuids = [r.block_uuid for r in runs]
+    if failure.block_uuid not in uuids[:-1]:
+        return
+    for block_run in runs[uuids.index(failure.block_uuid) + 1:]:
+        if block_run.pipeline_run_id == pipeline_run_id and block_run.status in (
+            BlockRun.BlockRunStatus.FAILED, BlockRun.BlockRunStatus.CANCELLED,
+            BlockRun.BlockRunStatus.COMPLETED,
+        ):
+            block_run.update(status=status)
 
 
 def run_pipeline(
