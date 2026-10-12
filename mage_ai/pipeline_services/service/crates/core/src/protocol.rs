@@ -54,6 +54,9 @@ pub enum BlockStatus {
     Failed,
     /// An upstream block failed, so this block did not run.
     UpstreamFailed,
+    /// A conditional block returned False for it, or for a block upstream of it, so it
+    /// did not run; the run still completes, as in Mage.
+    ConditionFailed,
     Cancelled,
 }
 
@@ -65,6 +68,7 @@ impl BlockStatus {
             BlockStatus::Completed => "completed",
             BlockStatus::Failed => "failed",
             BlockStatus::UpstreamFailed => "upstream_failed",
+            BlockStatus::ConditionFailed => "condition_failed",
             BlockStatus::Cancelled => "cancelled",
         }
     }
@@ -76,6 +80,7 @@ impl BlockStatus {
             "completed" => BlockStatus::Completed,
             "failed" => BlockStatus::Failed,
             "upstream_failed" => BlockStatus::UpstreamFailed,
+            "condition_failed" => BlockStatus::ConditionFailed,
             "cancelled" => BlockStatus::Cancelled,
             _ => return None,
         })

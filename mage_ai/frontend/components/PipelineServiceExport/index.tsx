@@ -38,6 +38,8 @@ export const LANGUAGE_NAMES = {
 };
 
 export type ServiceExportBlock = {
+  // The conditional blocks that decide whether it runs.
+  conditions?: string[];
   language: string;
   type: string;
   uuid: string;

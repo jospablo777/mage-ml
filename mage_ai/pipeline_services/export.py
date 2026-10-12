@@ -460,6 +460,7 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         )
         return None
     blocks = []
+    conditionals: Dict[str, Dict] = {}
     for block in pipeline.blocks_by_uuid.values():
         block_type = str(getattr(block.type, 'value', block.type))
         language = str(getattr(block.language, 'value', block.language))
@@ -486,11 +487,16 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         if is_dynamic_block(block) or is_dynamic_block_child(block) or is_replicated_block(block):
             problems.append(f'{where} is dynamic or replicated, which services do not run yet.')
             continue
-        if getattr(block, 'callback_blocks', None) or getattr(block, 'conditional_blocks', None):
-            problems.append(
-                f'{where} has callbacks or conditionals, which services do not run yet.',
-            )
+        if getattr(block, 'callback_blocks', None):
+            problems.append(f'{where} has callbacks, which services do not run yet.')
             continue
+        conditions = []
+        for conditional in getattr(block, 'conditional_blocks', None) or []:
+            entry_ = _conditional_entry(conditional, project, prefix, problems)
+            if entry_ is not None:
+                conditions.append(conditional.uuid)
+                conditionals.setdefault(conditional.uuid, entry_)
+                capture_.files.add(Path(conditional.file_path).resolve())
         if (block.configuration or {}).get('variables'):
             problems.append(
                 f'{where} reads its upstream with chunk or batch settings, which services do not '
@@ -522,6 +528,8 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
             ),
             configuration=_json_safe(block.configuration or {}),
         )
+        if conditions:
+            entry['conditions'] = conditions
         timeout = getattr(block, 'timeout', None)
         if timeout:
             entry['timeout_seconds'] = int(timeout)
@@ -545,7 +553,7 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
     concurrency = (getattr(pipeline, 'concurrency_config', None) or {})
     limit = max_runs or concurrency.get('pipeline_run_limit_all_triggers') or \
         concurrency.get('pipeline_run_limit') or 1
-    return dict(
+    pipeline_entry = dict(
         uuid=pipeline.uuid,
         name=pipeline.name or pipeline.uuid,
         description=pipeline.description or None,
@@ -554,6 +562,27 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
         blocks=blocks,
         triggers=_triggers(pipeline, capture_.notes, problems),
     )
+    if conditionals:
+        pipeline_entry['conditionals'] = list(conditionals.values())
+    return pipeline_entry
+
+
+def _conditional_entry(conditional, project: Path, prefix: str,
+                       problems: List[str]) -> Optional[Dict]:
+    """A conditional block for the manifest; services run Python conditionals."""
+    where = f'{prefix}, conditional block {conditional.uuid}'
+    language = str(getattr(conditional.language, 'value', conditional.language))
+    if language != 'python':
+        problems.append(
+            f'{where} is written in {language}; services run conditional blocks written in '
+            'Python. Rewrite it in Python, or remove it from the blocks it guards.'
+        )
+        return None
+    path = Path(conditional.file_path).resolve()
+    if not path.is_file():
+        problems.append(f'{where}: its file {path} is missing.')
+        return None
+    return dict(uuid=conditional.uuid, file=str(path.relative_to(project)), sha256=_digest(path))
 
 
 def _note_unchecked_guards(pipeline, block, project: Path, where: str, notes: List[str]):
@@ -945,7 +974,35 @@ def _environment(capture_: Capture) -> List[Dict]:
             continue
         for name, required, secret, label in _environment_reads(path, capture_.project):
             add(name, required, secret, label)
+        if path.suffix == '.py':
+            for name, required, secret, label in _client_reads(path, capture_.project):
+                add(name, required, secret, label)
     return [variables[name] for name in sorted(variables)]
+
+
+# Variables MageML's own clients read when a block does not pass the value: (module, class,
+# argument that replaces the variable, [(variable, required, secret)]).
+CLIENT_VARIABLES = (
+    ('mage_ai.feature_stores.feast', 'FeastClient', 'url',
+     [('FEAST_URL', True, False), ('FEAST_TOKEN', False, True)]),
+)
+
+
+def _client_reads(path: Path, project: Path) -> List[Tuple[str, bool, bool, str]]:
+    """The variables of the MageML clients a file uses, such as FeastClient's FEAST_URL."""
+    try:
+        text = path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return []
+    reads = []
+    for module, name, argument, names in CLIENT_VARIABLES:
+        if module not in text or f'{name}(' not in text:
+            continue
+        passed = re.search(rf'{name}\([^)]*\b{argument}\s*=', text) is not None
+        label = f'{name} in {path.relative_to(project)}'
+        for variable, required, secret in names:
+            reads.append((variable, required and not passed, secret, label))
+    return reads
 
 
 def _imports(path: Path) -> Set[str]:
@@ -999,6 +1056,7 @@ def _include_shared_code(capture_: Capture, problems: List[str]) -> None:
 _STRING_LITERAL = re.compile(r"""(["'])((?:(?!\1)[^\n\\]){2,300})\1""")
 # Code the export already follows by imports, or writes itself.
 _CODE_SUFFIXES = {'.py', '.r', '.rs', '.sql'}
+_MODULE_SUFFIXES = {'.py', '.r', '.rs'}
 
 
 def _size(path: Path) -> int:
@@ -1056,12 +1114,16 @@ def _include_artifacts(capture_: Capture, includes: List[str], problems: List[st
                 exists = candidate.exists()
             except OSError:
                 continue
-            if not exists or candidate.suffix.lower() in _CODE_SUFFIXES or candidate == project:
+            # Modules are imported and blocks are captured; SQL files a helper reads, such as
+            # read_sql('sql/orders.sql'), are data the image needs.
+            if not exists or candidate.suffix.lower() in _MODULE_SUFFIXES or \
+                    candidate == project:
                 continue
             candidate = project / os.path.normpath(name)
             found.setdefault(candidate, f'named in {path.relative_to(project)}')
             if path.suffix == '.py':
                 python_reads.add(candidate)
+    included = []
     for candidate, why in sorted(found.items()):
         files = [candidate] if candidate.is_file() else [
             p for p in candidate.rglob('*') if p.is_file() and '__pycache__' not in p.parts
@@ -1070,9 +1132,21 @@ def _include_artifacts(capture_: Capture, includes: List[str], problems: List[st
         module = ARTIFACT_LOADERS.get(candidate.suffix.lower(), (None, None))[1]
         if module and candidate in python_reads:
             capture_.artifact_modules.add(module)
+        included.append((candidate, why))
+    # A note per file, or one for them all when there are many, so they do not bury the
+    # other notes.
+    if len(included) > 3:
+        size = sum(_size(c) for c, _ in included)
         capture_.notes.append(
-            f'Included {candidate.relative_to(project)} ({_human(_size(candidate))}), {why}.'
+            f'Included {len(included)} files the blocks name ({_human(size)}): '
+            f'{", ".join(str(c.relative_to(project)) for c, _ in included)}.'
         )
+    else:
+        for candidate, why in included:
+            capture_.notes.append(
+                f'Included {candidate.relative_to(project)} ({_human(_size(candidate))}), '
+                f'{why}.'
+            )
 
 
 def _local_install(dist) -> bool:
@@ -1141,6 +1215,12 @@ def _read_file_owners() -> Dict[str, Tuple[str, str]]:
     return owners
 
 
+# Packages MageML's own modules import inside functions.
+LAZY_IMPORTS = {
+    'mage_ai.feature_stores.feast': ['requests'],
+}
+
+
 def _requirements(capture_: Capture) -> Dict[str, str]:
     """
     The distributions the blocks' imports load, pinned to the versions in this environment.
@@ -1158,6 +1238,10 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
     )
     candidates += ['pyarrow', 'pandas']
     candidates += sorted(capture_.artifact_modules)
+    # MageML modules that import a package inside a function, which the import below misses.
+    for module, packages in LAZY_IMPORTS.items():
+        if module in modules:
+            candidates += packages
     if any(b['language'] == 'sql' for p in capture_.manifest['pipelines'] for b in p['blocks']):
         # What the SQL runner imports to render queries and use PostgreSQL.
         candidates += [
@@ -1329,6 +1413,26 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     return out_dir
 
 
+def _file_requirements(artifacts: Path) -> List[str]:
+    """
+    The reading package of a model logged as a plain file, such as catboost for model.cbm:
+    MLflow records no requirements for it.
+    """
+    from mage_ai.pipeline_services.models import ARTIFACT_LOADERS
+
+    requirements = []
+    for path in sorted(artifacts.rglob('*')) if artifacts.is_dir() else []:
+        module = ARTIFACT_LOADERS.get(path.suffix.lower(), (None, None))[1]
+        if not module:
+            continue
+        try:
+            dist = importlib.metadata.packages_distributions().get(module, [module])[0]
+            requirements.append(f'{dist}=={importlib.metadata.version(dist)}')
+        except (importlib.metadata.PackageNotFoundError, IndexError):
+            requirements.append(module)
+    return list(dict.fromkeys(requirements))
+
+
 def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
     """Downloads each model with its metadata; returns requirements the image adds."""
     from mage_ai.pipeline_services import model_export
@@ -1357,7 +1461,9 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
             flavors=metadata.get('flavors') or [],
             size_bytes=metadata.get('size_bytes'),
         ))
-        for requirement in metadata.get('requirements') or []:
+        requirements = metadata.get('requirements') or _file_requirements(
+            out_dir / 'models' / name / 'artifacts')
+        for requirement in requirements:
             match = re.match(r'^([A-Za-z0-9_.\-]+)', requirement)
             package = match.group(1).lower().replace('_', '-') if match else requirement
             pinned = capture_.requirements.get(package)
@@ -1892,6 +1998,8 @@ def report(capture_: Capture) -> str:
         for block in pipeline['blocks']:
             retry = block['retry']['retries']
             extra = f", {retry} retries" if retry else ''
+            if block.get('conditions'):
+                extra += f", runs when {' and '.join(block['conditions'])} hold"
             lines.append(f"  {block['language']:<6} {block['type']:<13} {block['uuid']}{extra}")
         for trigger in pipeline['triggers']:
             how = describe_trigger(trigger) if trigger['kind'] == 'after_run' else (

@@ -30,7 +30,7 @@ import traceback
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from inspect import Parameter, signature
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 PROTOCOL_VERSION = 1
 DATETIME_KWARGS = ('execution_date', 'interval_start_datetime', 'interval_end_datetime')
@@ -466,9 +466,46 @@ def run_block(request: Dict) -> Dict:
     output_dir = request['output_dir']
     os.makedirs(output_dir, exist_ok=True)
     inputs = _read_inputs(request)
+    if block.get('conditions'):
+        skipped = failed_condition(request, block, inputs)
+        if skipped or request.get('conditions_only'):
+            return dict(outputs=[], tests=[], seconds=0, skipped=skipped)
     outputs, tests, seconds = execute_block(request, block, inputs)
     return dict(outputs=_write_outputs(outputs, output_dir), tests=tests,
                 seconds=round(seconds, 6))
+
+
+def failed_condition(request: Dict, block: Dict, inputs: List) -> Optional[str]:
+    """
+    Why the block is skipped, or None when every conditional block attached to it returns
+    True. As in Mage, each @condition function takes the block's inputs and kwargs, and a
+    condition that raises counts as False; its traceback goes to the block's log.
+    """
+    kwargs = _kwargs(request, block)
+    for conditional in block.get('conditions') or []:
+        uuid = conditional['uuid']
+        functions = []
+        namespace = {
+            '__name__': f'mage_conditional_{uuid}',
+            '__file__': conditional['file'],
+            'condition': _decorator(functions),
+        }
+        try:
+            with open(conditional['file']) as file:
+                exec(compile(file.read(), conditional['file'], 'exec'), namespace)
+            if not functions:
+                raise ValueError(f'{conditional["file"]} has no function decorated with '
+                                 '@condition')
+            for function in functions:
+                if not _call(function, list(inputs), kwargs):
+                    return f'Condition {uuid} returned False.'
+        except Exception as error:
+            sys.stderr.write(
+                f'Conditional block {uuid} failed, so block {block["uuid"]} is skipped, as '
+                f'in Mage:\n{_user_traceback()}'
+            )
+            return f'Condition {uuid} raised {type(error).__name__}: {error}'
+    return None
 
 
 def _read_inputs(request: Dict) -> List:

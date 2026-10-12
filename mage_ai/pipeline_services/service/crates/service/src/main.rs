@@ -771,6 +771,7 @@ fn print_run(detail: &mage_service_core::protocol::RunDetail, run_dir: &Path) {
             BlockStatus::Completed => "ok  ",
             BlockStatus::Failed => "FAIL",
             BlockStatus::UpstreamFailed => "skip",
+            BlockStatus::ConditionFailed => "cond",
             BlockStatus::Cancelled => "stop",
             BlockStatus::Pending | BlockStatus::Running => "... ",
         };
@@ -784,8 +785,10 @@ fn print_run(detail: &mage_service_core::protocol::RunDetail, run_dir: &Path) {
             block.block,
             block.duration_ms.map(format_ms).unwrap_or_default()
         );
-        if block.status == BlockStatus::Failed
-            && let Some(error) = &block.error
+        if matches!(
+            block.status,
+            BlockStatus::Failed | BlockStatus::ConditionFailed
+        ) && let Some(error) = &block.error
         {
             for line in error.lines() {
                 println!("        {line}");

@@ -1,0 +1,192 @@
+blocks:
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_window
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_last_cursor
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_loader
+  upstream_blocks: []
+  uuid: driver_last_cursor
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_window_open
+  - driver_no_new
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_window
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_loader
+  upstream_blocks:
+  - driver_last_cursor
+  uuid: driver_window
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_trips
+  - driver_has_new
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_window_open
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - driver_window
+  uuid: driver_window_open
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_none_new
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_no_new
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - driver_window
+  uuid: driver_no_new
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_build_features
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_trips
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_loader
+  upstream_blocks:
+  - driver_window_open
+  uuid: driver_trips
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_save_features
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_build_features
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - driver_trips
+  uuid: driver_build_features
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_push_online
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_save_features
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - driver_build_features
+  uuid: driver_save_features
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_push_online
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - driver_save_features
+  uuid: driver_push_online
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals:
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_has_new
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: conditional
+  upstream_blocks:
+  - driver_window_open
+  uuid: driver_has_new
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_none_new
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: conditional
+  upstream_blocks:
+  - driver_no_new
+  uuid: driver_none_new
+created_at: '2026-10-12 02:29:11.076816+00:00'
+data_integration: null
+description: null
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
+name: driver_features
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
+type: python
+uuid: driver_features
+widgets: []

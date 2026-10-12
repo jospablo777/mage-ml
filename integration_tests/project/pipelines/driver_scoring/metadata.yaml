@@ -1,0 +1,161 @@
+blocks:
+- all_upstream_blocks_executed: true
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_score_cases
+  - driver_nothing_to_score
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_pending
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_loader
+  upstream_blocks: []
+  uuid: driver_pending
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_online_features
+  - driver_has_cases
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_score_cases
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - driver_pending
+  uuid: driver_score_cases
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_no_cases
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_nothing_to_score
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - driver_pending
+  uuid: driver_nothing_to_score
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_score
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_online_features
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_loader
+  upstream_blocks:
+  - driver_score_cases
+  uuid: driver_online_features
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks:
+  - driver_store_scores
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_score
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - driver_online_features
+  uuid: driver_score
+- all_upstream_blocks_executed: false
+  color: null
+  configuration:
+    data_provider: postgres
+    data_provider_profile: warehouse
+    use_raw_sql: true
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: sql
+  name: driver_store_scores
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - driver_score
+  uuid: driver_store_scores
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals:
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_has_cases
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: conditional
+  upstream_blocks:
+  - driver_score_cases
+  uuid: driver_has_cases
+- all_upstream_blocks_executed: false
+  color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: driver_no_cases
+  retry_config: null
+  status: not_executed
+  timeout: null
+  type: conditional
+  upstream_blocks:
+  - driver_nothing_to_score
+  uuid: driver_no_cases
+created_at: '2026-10-12 02:29:11.686233+00:00'
+data_integration: null
+description: null
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
+name: driver_scoring
+notification_config: {}
+remote_variables_dir: null
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
+type: python
+uuid: driver_scoring
+widgets: []

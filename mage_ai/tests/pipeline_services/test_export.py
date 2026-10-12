@@ -523,7 +523,7 @@ class EnvironmentTest(ExportTestCase):
             version: 0.1.1
 
             warehouse:
-              POSTGRES_DBNAME: "{{ env_var('POSTGRES_DBNAME_WAREHOUSE') }}"  # pragma: allowlist secret
+              POSTGRES_DBNAME: "{{ env_var('POSTGRES_DBNAME_WAREHOUSE') }}"
               POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_WAREHOUSE') }}"
               POSTGRES_PASSWORD: "{{ env_var('POSTGRES_PASSWORD_WAREHOUSE') }}"
 
@@ -553,7 +553,8 @@ class EnvironmentTest(ExportTestCase):
 
         variables = {v['name']: v for v in captured.manifest['environment']}
         for name in ('POSTGRES_DBNAME_WAREHOUSE', 'POSTGRES_HOST_WAREHOUSE',
-                     'POSTGRES_PASSWORD_WAREHOUSE', 'POSTGRES_HOST_ANALYTICS', 'POSTGRES_PORT_ANALYTICS'):
+                     'POSTGRES_PASSWORD_WAREHOUSE', 'POSTGRES_HOST_ANALYTICS',
+                     'POSTGRES_PORT_ANALYTICS'):
             with self.subTest(name=name):
                 self.assertTrue(variables[name]['required'])
                 self.assertTrue(variables[name]['secret'])
@@ -612,6 +613,180 @@ SCORE = '''
         model = load_model('scorer', uri='models:/scorer/1')
         return frame.assign(score=model.predict(frame[['amount']]))
 '''
+
+
+class HelperReadsTest(ExportTestCase):
+    """What blocks reach through helpers and MageML's clients goes in the image."""
+
+    def test_sql_files_a_helper_reads_and_the_feast_clients_settings_are_found(self):
+        (self.project / 'sql').mkdir()
+        for name in ('a', 'b', 'c', 'd'):
+            (self.project / 'sql' / f'{name}.sql').write_text(f'SELECT 1 AS {name}')
+        (self.project / 'utils' / 'queries.py').write_text(textwrap.dedent('''
+            from pathlib import Path
+
+            def read_sql(path):
+                return Path(path).read_text()
+        '''))
+        load = self.add('load', 'data_loader', '''
+            from utils.queries import read_sql
+
+            @data_loader
+            def load(*args, **kwargs):
+                return [read_sql('sql/a.sql'), read_sql('sql/b.sql'), read_sql('sql/c.sql'),
+                        read_sql('sql/d.sql')]
+        ''')
+        self.add('push', 'data_exporter', '''
+            from mage_ai.feature_stores.feast import FeastClient
+
+            @data_exporter
+            def push(rows, *args, **kwargs):
+                with FeastClient() as feast:
+                    feast.push('rows_push', rows)
+        ''', upstream=[load])
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        files = {str(p.relative_to(self.project)) for p in captured.files}
+        self.assertLessEqual({'sql/a.sql', 'sql/b.sql', 'sql/c.sql', 'sql/d.sql'}, files)
+        self.assertIn('Included 4 files the blocks name (52 bytes): sql/a.sql, sql/b.sql, '
+                      'sql/c.sql, sql/d.sql.', captured.notes)
+        variables = {v['name']: v for v in captured.manifest['environment']}
+        self.assertTrue(variables['FEAST_URL']['required'])
+        self.assertFalse(variables['FEAST_TOKEN']['required'])
+        self.assertTrue(variables['FEAST_TOKEN']['secret'])
+        self.assertIn('requests', captured.requirements)
+
+
+class ConditionalTest(ExportTestCase):
+    """
+    Conditional blocks in a service, as in Mage: a block runs when every condition attached
+    to it returns True; otherwise it and the blocks downstream of it are skipped
+    (condition_failed) and the run completes. A condition that raises counts as False.
+    """
+
+    def build(self):
+        load = self.add('orders', 'data_loader', '''
+            import pandas as pd
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'amount': range(int(kwargs.get('rows', 0)))})
+        ''')
+        scored = self.add('scored', 'transformer', '''
+            @transformer
+            def score(orders, *args, **kwargs):
+                return orders.assign(score=orders['amount'] * 2)
+        ''', upstream=[load])
+        saved = self.add('saved', 'data_exporter', '''
+            @data_exporter
+            def save(scored, *args, **kwargs):
+                return {'saved': len(scored)}
+        ''', upstream=[scored])
+        idle = self.add('idle', 'transformer', '''
+            @transformer
+            def idle(orders, *args, **kwargs):
+                return {'status': 'no_op'}
+        ''', upstream=[load])
+        audit = self.add('audit', 'transformer', '''
+            @transformer
+            def audit(orders, *args, **kwargs):
+                return {'audited': True}
+        ''', upstream=[load])
+        self.add('has_rows', 'conditional', '''
+            @condition
+            def evaluate_condition(orders, *args, **kwargs) -> bool:
+                return len(orders) > 0
+        ''', upstream=[scored])
+        self.add('no_rows', 'conditional', '''
+            @condition
+            def evaluate_condition(orders, *args, **kwargs) -> bool:
+                return len(orders) == 0
+        ''', upstream=[idle])
+        self.add('broken', 'conditional', '''
+            @condition
+            def evaluate_condition(orders, *args, **kwargs) -> bool:
+                return 1 / 0
+        ''', upstream=[audit])
+        return load, scored, saved, idle, audit
+
+    def test_conditions_go_in_the_manifest_with_their_files(self):
+        load, scored, saved, idle, audit = self.build()
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        pipeline = captured.manifest['pipelines'][0]
+        conditions = {b['uuid']: b.get('conditions', []) for b in pipeline['blocks']}
+        prefix = self.pipeline.uuid
+        self.assertEqual(conditions[scored.uuid], [f'{prefix}_has_rows'])
+        self.assertEqual(conditions[idle.uuid], [f'{prefix}_no_rows'])
+        self.assertEqual(conditions[saved.uuid], [])
+        self.assertEqual(
+            sorted(c['uuid'] for c in pipeline['conditionals']),
+            sorted(f'{prefix}_{n}' for n in ('broken', 'has_rows', 'no_rows')),
+        )
+        for conditional in pipeline['conditionals']:
+            self.assertTrue((self.project / conditional['file']).is_file())
+
+    def test_an_r_conditional_is_refused_with_what_to_do(self):
+        load = self.add('orders', 'data_loader', LOAD.format(project=self.project.name))
+        guarded = self.add('guarded', 'transformer', SUMMARIZE, upstream=[load])
+        self.add('r_check', 'conditional', '''
+            condition <- function(df, ...) nrow(df) > 0
+        ''', upstream=[guarded], language='r')
+
+        with self.assertRaises(export.ExportError) as raised:
+            export.capture(self.repo_path, [self.pipeline.uuid])
+
+        self.assertIn(
+            'conditional block test_pipeline_r_check is written in r; services run conditional '
+            'blocks written in Python.'.replace('test_pipeline', self.pipeline.uuid),
+            '\n'.join(raised.exception.problems),
+        )
+
+    def run_service(self, rows):
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(export.capture(self.repo_path, [self.pipeline.uuid]), str(out), force=True)
+        env = dict(
+            os.environ, MAGE_SERVICE_DIR=str(out), MAGE_SERVICE_WORKER=str(WORKER),
+            MAGE_SERVICE_PYTHON=str(Path(os.sys.executable)), PYTHONPATH=str(REPO),
+        )
+        result = subprocess.run(
+            [str(SERVICE_BINARY), 'run', self.pipeline.uuid, '--var', f'rows={rows}',
+             '--json'],
+            capture_output=True, text=True, env=env, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+        run = json.loads(result.stdout[result.stdout.index('{'):])
+        return run, {b['block']: b for b in run['blocks']}, result.stderr
+
+    @unittest.skipUnless(SERVICE_BINARY.is_file(), 'the mage-service binary is not built')
+    def test_the_service_runs_the_branch_whose_condition_holds(self):
+        load, scored, saved, idle, audit = self.build()
+        prefix = self.pipeline.uuid
+
+        run, blocks, log = self.run_service(rows=3)
+        self.assertEqual(run['status'], 'completed')
+        status = {uuid: b['status'] for uuid, b in blocks.items()}
+        self.assertEqual(status, {
+            load.uuid: 'completed', scored.uuid: 'completed', saved.uuid: 'completed',
+            idle.uuid: 'condition_failed', audit.uuid: 'condition_failed',
+        })
+        self.assertEqual(blocks[idle.uuid]['error'],
+                         f'Condition {prefix}_no_rows returned False.')
+        self.assertEqual(blocks[audit.uuid]['error'],
+                         f'Condition {prefix}_broken raised ZeroDivisionError: division by zero')
+        self.assertIn('ZeroDivisionError', log)
+
+        run, blocks, _ = self.run_service(rows=0)
+        self.assertEqual(run['status'], 'completed')
+        status = {uuid: b['status'] for uuid, b in blocks.items()}
+        self.assertEqual(status[scored.uuid], 'condition_failed')
+        self.assertEqual(status[saved.uuid], 'condition_failed')
+        self.assertEqual(status[idle.uuid], 'completed')
+        self.assertEqual(blocks[saved.uuid]['error'],
+                         f'Upstream block {scored.uuid} was skipped by a condition.')
 
 
 class ModelTest(ExportTestCase):

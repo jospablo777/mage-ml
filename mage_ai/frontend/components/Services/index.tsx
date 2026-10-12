@@ -862,6 +862,7 @@ function Workbench({
     return Object.values(merged).filter(a => draft.pipelines.includes(a.run));
   }, [draft.pipelines, fromDatabase, lastGoodCheck]);
   const blocksTotal = checkPipelines.reduce((acc, p) => acc + p.blocks.length, 0);
+  const guarded = checkPipelines.flatMap(p => p.blocks.filter(b => b.conditions?.length));
   const schedules = checkPipelines.reduce(
     (acc, p) => acc + p.triggers.filter(t => t.kind === 'time' && t.active).length,
     0,
@@ -1213,6 +1214,22 @@ function Workbench({
                   title={`${plural(blocksTotal, 'block')} supported`}
                   tone="ok"
                 />
+                {guarded.length >= 1 && (
+                  <CheckRow
+                    detail={'When a condition returns False the block and the blocks after it '
+                      + 'are skipped, and the run still completes, as in MageML.'}
+                    title={`${plural(guarded.length, 'block')} ${guarded.length === 1 ? 'runs' : 'run'} only when ${guarded.length === 1 ? 'its condition holds' : 'their conditions hold'}`}
+                    tone="ok"
+                  >
+                    <Expandable label="Show conditions">
+                      {guarded.map(b => (
+                        <Text key={b.uuid} monospace xsmall>
+                          {b.uuid}: {b.conditions.join(', ')}
+                        </Text>
+                      ))}
+                    </Expandable>
+                  </CheckRow>
+                )}
                 <CheckRow
                   detail="Modules the blocks import and files they name, copied into the image."
                   title={plural(check.files?.length || 0, 'project file')}

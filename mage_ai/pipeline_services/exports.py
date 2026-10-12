@@ -345,7 +345,8 @@ def summary(captured, out_dir: Optional[Path]) -> Dict:
     for pipeline in captured.manifest['pipelines']:
         pipelines.append(dict(
             blocks=[
-                dict(language=b['language'], type=b['type'], uuid=b['uuid'])
+                dict(conditions=b.get('conditions') or [], language=b['language'],
+                     type=b['type'], uuid=b['uuid'])
                 for b in pipeline['blocks']
             ],
             max_concurrent_runs=pipeline['max_concurrent_runs'],

@@ -29,6 +29,14 @@ struct BlockOutcome {
     result: Result<Vec<Value>, String>,
     /// The block stopped because the run was cancelled, not because it failed.
     cancelled: bool,
+    /// A condition returned False, so the block did not run; its result is empty.
+    skipped: bool,
+}
+
+/// What a block attempt did: ran and gave outputs, or was skipped by a condition.
+enum Ran {
+    Outputs(Vec<Value>),
+    Skipped(String),
 }
 
 pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: CancellationToken) {
@@ -149,6 +157,8 @@ async fn run_blocks(
         .flat_map(|(_, chain)| chain.iter().skip(1).map(|b| b.uuid.clone()))
         .collect();
     let mut outputs: HashMap<String, Vec<Value>> = HashMap::new();
+    // Blocks a condition skipped; the blocks downstream of them are skipped too, as in Mage.
+    let mut skipped: HashSet<String> = HashSet::new();
     let mut started: HashSet<String> = HashSet::new();
     let mut tasks: JoinSet<BlockOutcome> = JoinSet::new();
     let mut failure: Option<(String, String)> = None;
@@ -158,11 +168,39 @@ async fn run_blocks(
             for block in &order {
                 if started.contains(&block.uuid)
                     || chained.contains(&block.uuid)
-                    || !block.upstream.iter().all(|u| outputs.contains_key(u))
+                    || !block
+                        .upstream
+                        .iter()
+                        .all(|u| outputs.contains_key(u) || skipped.contains(u))
                 {
                     continue;
                 }
                 started.insert(block.uuid.clone());
+                if let Some(upstream) = block.upstream.iter().find(|u| skipped.contains(*u)) {
+                    let members = chains
+                        .get(&block.uuid)
+                        .map(|(_, chain)| chain.clone())
+                        .unwrap_or_else(|| vec![block.clone()]);
+                    // Each block names its own upstream block: a chain's later blocks follow
+                    // the block before them.
+                    let mut previous = upstream.clone();
+                    for member in &members {
+                        let reason =
+                            format!("Upstream block {previous} was skipped by a condition.");
+                        previous = member.uuid.clone();
+                        started.insert(member.uuid.clone());
+                        skipped.insert(member.uuid.clone());
+                        let _ = service.ledger.finish_block(
+                            run_id,
+                            &member.uuid,
+                            BlockStatus::ConditionFailed,
+                            Some(&reason),
+                            &[],
+                        );
+                        log.info(Some(&member.uuid), &format!("Skipped: {reason}"));
+                    }
+                    continue;
+                }
                 let inputs: Vec<Vec<Value>> =
                     block.upstream.iter().map(|u| outputs[u].clone()).collect();
                 if let Some((kind, chain)) = chains.get(&block.uuid) {
@@ -212,6 +250,9 @@ async fn run_blocks(
             }
         };
         match outcome.result {
+            Ok(_) if outcome.skipped => {
+                skipped.insert(outcome.block);
+            }
             Ok(records) => {
                 outputs.insert(outcome.block, records);
             }
@@ -292,7 +333,8 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
     let by_uuid: HashMap<&str, &Block> = order.iter().map(|b| (b.uuid.as_str(), b)).collect();
     let mut assigned: HashSet<String> = HashSet::new();
     for block in order {
-        let Some(kind) = chain_kind(block) else {
+        // A block with conditions runs on its own, so its conditions see its inputs.
+        let Some(kind) = chain_kind(block).filter(|_| block.conditions.is_empty()) else {
             continue;
         };
         if assigned.contains(&block.uuid) || (kind == ChainKind::Rust && rust_off) {
@@ -313,7 +355,11 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
                     (Some(a), Some(b)) => a == b,
                     _ => true,
                 };
-            if chain_kind(next) != Some(kind) || next.upstream.len() != 1 || !compatible {
+            if chain_kind(next) != Some(kind)
+                || next.upstream.len() != 1
+                || !next.conditions.is_empty()
+                || !compatible
+            {
                 break;
             }
             if profile.is_none() {
@@ -370,7 +416,24 @@ impl BlockTask {
             }
             let started = std::time::Instant::now();
             match self.run_once().await {
-                Ok(records) => {
+                Ok(Ran::Skipped(reason)) => {
+                    let _ = self.service.ledger.finish_block(
+                        &self.run_id,
+                        &self.block.uuid,
+                        BlockStatus::ConditionFailed,
+                        Some(&reason),
+                        &[],
+                    );
+                    self.log
+                        .info(Some(&self.block.uuid), &format!("Skipped: {reason}"));
+                    return BlockOutcome {
+                        block: self.block.uuid.clone(),
+                        result: Ok(Vec::new()),
+                        cancelled: false,
+                        skipped: true,
+                    };
+                }
+                Ok(Ran::Outputs(records)) => {
                     let _ = self.service.ledger.finish_block(
                         &self.run_id,
                         &self.block.uuid,
@@ -397,6 +460,7 @@ impl BlockTask {
                         block: self.block.uuid.clone(),
                         result: Ok(records),
                         cancelled: false,
+                        skipped: false,
                     };
                 }
                 Err(BlockFailure {
@@ -449,30 +513,45 @@ impl BlockTask {
             block: self.block.uuid.clone(),
             result: Err(error),
             cancelled,
+            skipped: false,
         }
     }
 
-    async fn run_once(&self) -> Result<Vec<Value>, BlockFailure> {
+    async fn run_once(&self) -> Result<Ran, BlockFailure> {
         let timeout = self.block.timeout_seconds.map(Duration::from_secs);
+        let pool = || {
+            self.service.python.as_ref().ok_or_else(|| {
+                BlockFailure::fatal(
+                    "this image has no Python runtime for Python, R and SQL blocks or for \
+                     conditional blocks",
+                )
+            })
+        };
         match self.block.language {
-            // The Python worker runs R and SQL blocks too.
+            // The Python worker runs R and SQL blocks too, and checks their conditions in
+            // the same request.
             Language::Python | Language::R | Language::Sql => {
-                let pool = self.service.python.as_ref().ok_or_else(|| {
-                    BlockFailure::fatal(
-                        "this image has no Python runtime for Python, R and SQL blocks",
-                    )
-                })?;
-                self.run_python(pool, timeout).await
+                self.run_python(pool()?, timeout, false).await
             }
-            Language::Rust => self.run_rust(timeout).await,
+            Language::Rust => {
+                if !self.block.conditions.is_empty()
+                    && let Ran::Skipped(reason) = self.run_python(pool()?, timeout, true).await?
+                {
+                    return Ok(Ran::Skipped(reason));
+                }
+                self.run_rust(timeout).await.map(Ran::Outputs)
+            }
         }
     }
 
+    /// Runs the block in the Python worker, or with conditions_only only checks its
+    /// conditions.
     async fn run_python(
         &self,
         pool: &Arc<PythonPool>,
         timeout: Option<Duration>,
-    ) -> Result<Vec<Value>, BlockFailure> {
+        conditions_only: bool,
+    ) -> Result<Ran, BlockFailure> {
         let inputs: Vec<Value> = self
             .inputs
             .iter()
@@ -484,6 +563,7 @@ impl BlockTask {
             "kwargs": *self.kwargs,
             "output_dir": self.output_dir,
             "run_tests": true,
+            "conditions_only": conditions_only,
         });
         let reply = pool
             .run(
@@ -499,11 +579,16 @@ impl BlockTask {
                 other => BlockFailure::retryable(other.to_string()),
             })?;
         if reply.get("ok").and_then(Value::as_bool) == Some(true) {
-            return Ok(reply
-                .get("outputs")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default());
+            if let Some(reason) = reply.get("skipped").and_then(Value::as_str) {
+                return Ok(Ran::Skipped(reason.to_string()));
+            }
+            return Ok(Ran::Outputs(
+                reply
+                    .get("outputs")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            ));
         }
         let error = reply.get("error").cloned().unwrap_or(Value::Null);
         let phase = error.get("phase").and_then(Value::as_str).unwrap_or("run");
@@ -603,9 +688,21 @@ fn kept_outputs(result: &Value, output_dir: &Path) -> Vec<Vec<Value>> {
         .unwrap_or_default()
 }
 
-/// A block as the Python worker takes it.
+/// A block as the Python worker takes it, with the files of its conditions.
 fn worker_block(service: &Service, block: &Block, pipeline_uuid: &str) -> Value {
+    let conditionals = service
+        .manifest
+        .pipeline(pipeline_uuid)
+        .map(|p| p.conditionals.as_slice())
+        .unwrap_or_default();
+    let conditions: Vec<Value> = block
+        .conditions
+        .iter()
+        .filter_map(|uuid| conditionals.iter().find(|c| &c.uuid == uuid))
+        .map(|c| json!({"uuid": c.uuid, "file": service.project_dir().join(&c.file)}))
+        .collect();
     json!({
+        "conditions": conditions,
         "uuid": block.uuid,
         "type": block.block_type.as_str(),
         "file": service.project_dir().join(&block.file),
@@ -968,6 +1065,7 @@ impl ChainTask {
                         block: tail.uuid.clone(),
                         result: Ok(records),
                         cancelled: false,
+                        skipped: false,
                     };
                 }
                 Err((
@@ -1033,6 +1131,7 @@ impl ChainTask {
                 block: head.uuid.clone(),
                 result: Err("the run was cancelled".into()),
                 cancelled: true,
+                skipped: false,
             };
         }
         // The blocks before the one that failed returned; the run marks the ones after it
@@ -1061,6 +1160,7 @@ impl ChainTask {
             block: failed,
             result: Err(message),
             cancelled: false,
+            skipped: false,
         }
     }
 

@@ -100,9 +100,10 @@ Python, [R](/guides/blocks/r-blocks), [Rust](/guides/blocks/rust-blocks) and
   column, with Mage's.
 
 Blocks the service cannot run stop the export with the block named and the reason, so
-nothing silently disappears: sensors, dynamic blocks, conditionals, callbacks, SQL blocks
-on other databases (BigQuery, Snowflake, Trino, Redshift, SQL Server) and SQL
-blocks that use `block_output()` are not supported yet. Chart and markdown blocks are notebook only and are left out.
+nothing silently disappears: sensors, dynamic blocks, callbacks, conditional blocks written
+in R or Rust, SQL blocks on other databases (BigQuery, Snowflake, Trino, Redshift, SQL
+Server) and SQL blocks that use `block_output()` are not supported yet. Chart and markdown
+blocks are notebook only and are left out.
 
 A service runs the blocks, not the checks around them: [data
 contracts](/guides/blocks/data-contracts) and [monitors](/guides/pipelines/monitoring) are
@@ -495,6 +496,20 @@ its log lines and its retry settings. Only the outputs that later blocks or the 
 written; `MAGE_SERVICE_KEEP_OUTPUTS=on` writes every block's output, and
 `MAGE_SERVICE_CHAINS=off` runs every block on its own (`MAGE_SERVICE_RUST_CHAINS=off` for
 Rust blocks only).
+
+Conditional blocks written in Python run as in MageML. Before a block with conditions runs,
+the worker calls each `@condition` function with the block's inputs and the run's
+variables. When one returns False, the block is marked `condition_failed` with the reason
+("Condition has_rows returned False."), every block after it is marked `condition_failed`
+too, and the run still completes. A condition that raises counts as False; its traceback
+goes to the block's log. Use it for branches such as "score the new rows, or record that
+there were none": attach `has_rows` to the scoring branch and `no_rows` to the no-op one.
+
+```python
+@condition
+def evaluate_condition(orders, *args, **kwargs) -> bool:
+    return len(orders) > 0
+```
 
 A block that fails is retried as configured; when it still fails, no new block starts, the
 blocks after it are marked `upstream_failed`, and the run fails with the block's error. A

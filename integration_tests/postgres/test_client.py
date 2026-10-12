@@ -139,6 +139,27 @@ class PostgresIntegrationTest(unittest.TestCase):
 
         self.assertTrue(self.loader.table_exists(SCHEMA, self.table))
 
+    def test_a_table_without_a_schema_is_found_and_replaced_in_the_current_schema(self):
+        """
+        A profile without POSTGRES_SCHEMA writes to the current schema; replacing the table
+        again (as a SQL block does with its upstream table on every run) must drop it.
+        """
+        current = self.loader.load('SELECT current_schema() AS name')['name'].iloc[0]
+        self.addCleanup(lambda: (
+            self.loader.execute(f'DROP TABLE IF EXISTS {current}.{self.table}'),
+            self.loader.conn.commit(),
+        ))
+        for rows in ([1, 2, 3], [9]):
+            self.loader.export(
+                pd.DataFrame({'id': rows}), None, self.table, if_exists='replace',
+                drop_table_on_replace=True, index=False, verbose=False,
+            )
+
+        self.assertTrue(self.loader.table_exists(None, self.table))
+        self.assertEqual(self.loader.default_schema(), current)
+        loaded = self.loader.load(f'SELECT id FROM {current}.{self.table}')
+        self.assertEqual(loaded['id'].tolist(), [9])
+
     def test_if_exists_replace_overwrites_rows(self):
         self._export(pd.DataFrame({'id': [1, 2, 3]}))
         self._export(pd.DataFrame({'id': [9]}))
