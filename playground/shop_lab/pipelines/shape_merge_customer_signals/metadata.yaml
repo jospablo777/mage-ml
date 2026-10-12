@@ -1,0 +1,38 @@
+blocks:
+- downstream_blocks: [merge_customer_signals]
+  language: python
+  name: merge_customers
+  type: data_loader
+  upstream_blocks: []
+  uuid: merge_customers
+- downstream_blocks: [merge_customer_signals]
+  language: rust
+  name: merge_order_stats
+  type: data_loader
+  upstream_blocks: []
+  uuid: merge_order_stats
+- downstream_blocks: [merge_customer_signals]
+  language: python
+  name: merge_web_stats
+  type: data_loader
+  upstream_blocks: []
+  uuid: merge_web_stats
+- downstream_blocks: [merge_export_customer_signals]
+  language: rust
+  name: merge_customer_signals
+  type: transformer
+  upstream_blocks: [merge_customers, merge_order_stats, merge_web_stats]
+  uuid: merge_customer_signals
+- downstream_blocks: []
+  language: python
+  name: merge_export_customer_signals
+  type: data_exporter
+  upstream_blocks: [merge_customer_signals]
+  uuid: merge_export_customer_signals
+description: 'A Merge (docs/development/compilation-study.md): customers (pandas), order
+  stats (Rust, binary COPY) and web stats (Polars) load side by side, and one Rust block
+  joins them. The three roots run at the same time; the join and its exporter fuse into
+  one stage.'
+name: shape_merge_customer_signals
+type: python
+uuid: shape_merge_customer_signals

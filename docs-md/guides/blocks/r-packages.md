@@ -27,7 +27,8 @@ mage r init path/to/project
 ```
 
 It installs the tidyverse, the packages MageML exchanges data with (`arrow`, `bit64`,
-`jsonlite`, `tibble`) and the database drivers the templates use. To start smaller, list
+`jsonlite`, `tibble`), the database drivers the templates use, and tidymodels with the
+`glmnet`, `ranger` and `xgboost` engines and `bundle` to save fitted models. To start smaller, list
 the packages you want; the exchange packages are always added:
 
 ```bash

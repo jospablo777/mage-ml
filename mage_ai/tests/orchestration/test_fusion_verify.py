@@ -147,6 +147,35 @@ class VerifyFusionTest(DBTestCase):
         self.assertIn('block by block:', failed.detail)
         self.assertIn('fused:', failed.detail)
 
+    def test_a_block_whose_process_dies_runs_again(self):
+        # As on a worker: the scheduler sees no job for the running block run and runs it
+        # again. The runner used to remember every job it started, so the run stalled.
+        marker = Path(self.repo_path) / f'{self.pipeline.uuid}_died_once'
+        self.addCleanup(marker.unlink, missing_ok=True)
+        pipeline = self.chain(
+            ('load', 'data_loader', LOAD),
+            ('crash', 'transformer', f'''
+    import os
+    @transformer
+    def crash(frame, **kwargs):
+        if not os.path.exists({str(marker)!r}):
+            open({str(marker)!r}, 'w').close()
+            os._exit(9)
+        return frame
+'''),
+        )
+        from mage_ai.shared.dates import utc_now
+
+        pipeline_run = fusion_verify.run_in_process(
+            fusion_verify._create_run(pipeline, fusion.BLOCK_FUSION_OFF, {}, utc_now()),
+            log=self.logs.append,
+        )
+
+        self.assertEqual(pipeline_run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        crashed = next(b for b in pipeline_run.block_runs if b.block_uuid.endswith('_crash'))
+        self.assertEqual(crashed.metrics.get('crashes'), 1)
+        self.assertTrue(any('exited with code 9' in line for line in self.logs), self.logs)
+
     def test_runs_left_by_a_stopped_verification_are_cancelled(self):
         pipeline = self.chain(('load', 'data_loader', LOAD))
         left = fusion_verify._create_run(

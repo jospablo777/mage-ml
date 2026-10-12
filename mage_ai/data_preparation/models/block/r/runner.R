@@ -11,6 +11,9 @@ if (nzchar(rv_library)) {
 } else {
   .libPaths(c(mageml_library, .libPaths()))
 }
+# R processes a block starts (parallel and future workers, callr, torch's load check)
+# start with these libraries too; .libPaths() reaches only this session.
+Sys.setenv(R_LIBS = paste(.libPaths(), collapse = .Platform$path.sep))
 # A chain of blocks runs in this one session when the manifest lists one.
 manifest <- jsonlite::read_json(file.path(args[[1]], "manifest.json"))
 if (!is.null(manifest$chain)) {

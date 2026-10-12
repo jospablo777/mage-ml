@@ -191,6 +191,22 @@ class ExchangeTest(TestCase):
         with open(os.path.join(self.directory, entries[3]['path'])) as file:
             self.assertEqual(json.load(file), {'rate': 2})
 
+    def test_a_categorical_with_missing_values_crosses(self):
+        """
+        pandas keeps the code -1 under a missing category, and Polars rejected the Arrow
+        file: "The dictionary key must fit in a `usize`, but -1 does not". Every Rust block
+        that read such a column failed.
+        """
+        frame = pd.DataFrame({
+            'kind': pd.Categorical(['x', None, 'y', None]),
+            'empty': pd.Categorical([None, None, None, None], categories=[]),
+        })
+        [entry] = exchange.write_inputs([frame], self.directory)
+
+        read = pl.read_ipc(os.path.join(self.directory, entry['path']))
+        self.assertEqual(read['kind'].to_list(), ['x', None, 'y', None])
+        self.assertEqual(read['empty'].to_list(), [None, None, None, None])
+
     def test_unsupported_values_name_their_type(self):
         with self.assertRaisesRegex(exchange.RustExchangeError, 'is of type object'):
             exchange.write_inputs([object()], self.directory)

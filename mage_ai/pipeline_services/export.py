@@ -1481,7 +1481,13 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
         )
     if problems:
         raise ExportError(problems)
-    if 'mlflow' not in extra and 'mlflow-skinny' not in capture_.requirements:
+    # MLflow loads a model with an MLmodel file (pyfunc or its framework flavor); a model
+    # logged as a plain file, such as model.cbm, loads without it.
+    needs_mlflow = any(
+        (out_dir / 'models' / name / 'artifacts' / 'MLmodel').is_file()
+        for name, _ in capture_.models
+    )
+    if needs_mlflow and 'mlflow' not in extra and 'mlflow-skinny' not in capture_.requirements:
         for distribution in ('mlflow-skinny', 'mlflow'):
             try:
                 extra.setdefault(

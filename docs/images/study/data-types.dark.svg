@@ -1,0 +1,309 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="870" height="598" viewBox="0 0 870 598" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">
+<rect width="100%" height="100%" fill="#0d1117"/>
+<text x="10" y="22" fill="#e6edf3" font-size="14" font-weight="600">Column types after a block in another language</text>
+<text x="190.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">python/chains</text>
+<text x="310.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">python/off</text>
+<text x="430.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">r/chains</text>
+<text x="550.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">r/off</text>
+<text x="670.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">rust/chains</text>
+<text x="790.0" y="54" fill="#e6edf3" font-weight="600" text-anchor="middle">rust/off</text>
+<text x="10" y="77" fill="#e6edf3">bool</text>
+<rect x="131" y="63" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="77" fill="#e6edf3" text-anchor="middle">bool</text>
+<rect x="251" y="63" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="77" fill="#e6edf3" text-anchor="middle">bool</text>
+<rect x="371" y="63" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="77" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="491" y="63" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="77" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="611" y="63" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="77" fill="#e6edf3" text-anchor="middle">Boolean</text>
+<rect x="731" y="63" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="77" fill="#e6edf3" text-anchor="middle">Boolean</text>
+<text x="10" y="99" fill="#e6edf3">bool_null</text>
+<rect x="131" y="85" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="99" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="251" y="85" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="99" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="371" y="85" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="99" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="491" y="85" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="99" fill="#e6edf3" text-anchor="middle">boolean</text>
+<rect x="611" y="85" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="99" fill="#e6edf3" text-anchor="middle">Boolean</text>
+<rect x="731" y="85" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="99" fill="#e6edf3" text-anchor="middle">Boolean</text>
+<text x="10" y="121" fill="#e6edf3">bytes</text>
+<rect x="131" y="107" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="121" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="107" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="121" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="107" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="121" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="491" y="107" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="121" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="611" y="107" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="121" fill="#e6edf3" text-anchor="middle">Binary</text>
+<rect x="731" y="107" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="121" fill="#e6edf3" text-anchor="middle">Binary</text>
+<text x="10" y="143" fill="#e6edf3">category</text>
+<rect x="131" y="129" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="143" fill="#e6edf3" text-anchor="middle">category</text>
+<rect x="251" y="129" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="143" fill="#e6edf3" text-anchor="middle">category</text>
+<rect x="371" y="129" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="143" fill="#e6edf3" text-anchor="middle">category</text>
+<rect x="491" y="129" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="143" fill="#e6edf3" text-anchor="middle">category</text>
+<rect x="611" y="129" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="143" fill="#e6edf3" text-anchor="middle">Categorical</text>
+<rect x="731" y="129" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="143" fill="#e6edf3" text-anchor="middle">Categorical</text>
+<text x="10" y="165" fill="#e6edf3">date</text>
+<rect x="131" y="151" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="165" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="151" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="165" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="151" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="165" fill="#e6edf3" text-anchor="middle">date32[day][py</text>
+<rect x="491" y="151" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="165" fill="#e6edf3" text-anchor="middle">date32[day][py</text>
+<rect x="611" y="151" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="165" fill="#e6edf3" text-anchor="middle">Date</text>
+<rect x="731" y="151" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="165" fill="#e6edf3" text-anchor="middle">Date</text>
+<text x="10" y="187" fill="#e6edf3">decimal</text>
+<rect x="131" y="173" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="187" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="173" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="187" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="173" width="118" height="20" fill="#6b1f24"/>
+<text x="430.0" y="187" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="491" y="173" width="118" height="20" fill="#6b1f24"/>
+<text x="550.0" y="187" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="611" y="173" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="187" fill="#e6edf3" text-anchor="middle">Decimal(precis</text>
+<rect x="731" y="173" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="187" fill="#e6edf3" text-anchor="middle">Decimal(precis</text>
+<text x="10" y="209" fill="#e6edf3">duration</text>
+<rect x="131" y="195" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="209" fill="#e6edf3" text-anchor="middle">timedelta64[us</text>
+<rect x="251" y="195" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="209" fill="#e6edf3" text-anchor="middle">timedelta64[us</text>
+<rect x="371" y="195" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="209" fill="#e6edf3" text-anchor="middle">timedelta64[us</text>
+<rect x="491" y="195" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="209" fill="#e6edf3" text-anchor="middle">timedelta64[us</text>
+<rect x="611" y="195" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="209" fill="#e6edf3" text-anchor="middle">Duration(time_</text>
+<rect x="731" y="195" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="209" fill="#e6edf3" text-anchor="middle">Duration(time_</text>
+<text x="10" y="231" fill="#e6edf3">float32</text>
+<rect x="131" y="217" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="231" fill="#e6edf3" text-anchor="middle">float32</text>
+<rect x="251" y="217" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="231" fill="#e6edf3" text-anchor="middle">float32</text>
+<rect x="371" y="217" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="231" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="491" y="217" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="231" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="611" y="217" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="231" fill="#e6edf3" text-anchor="middle">Float32</text>
+<rect x="731" y="217" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="231" fill="#e6edf3" text-anchor="middle">Float32</text>
+<text x="10" y="253" fill="#e6edf3">float64</text>
+<rect x="131" y="239" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="253" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="251" y="239" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="253" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="371" y="239" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="253" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="491" y="239" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="253" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="611" y="239" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="253" fill="#e6edf3" text-anchor="middle">Float64</text>
+<rect x="731" y="239" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="253" fill="#e6edf3" text-anchor="middle">Float64</text>
+<text x="10" y="275" fill="#e6edf3">float64_null</text>
+<rect x="131" y="261" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="275" fill="#e6edf3" text-anchor="middle">Float64</text>
+<rect x="251" y="261" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="275" fill="#e6edf3" text-anchor="middle">Float64</text>
+<rect x="371" y="261" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="275" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="491" y="261" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="275" fill="#e6edf3" text-anchor="middle">float64</text>
+<rect x="611" y="261" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="275" fill="#e6edf3" text-anchor="middle">Float64</text>
+<rect x="731" y="261" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="275" fill="#e6edf3" text-anchor="middle">Float64</text>
+<text x="10" y="297" fill="#e6edf3">int32</text>
+<rect x="131" y="283" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="297" fill="#e6edf3" text-anchor="middle">int32</text>
+<rect x="251" y="283" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="297" fill="#e6edf3" text-anchor="middle">int32</text>
+<rect x="371" y="283" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="297" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="491" y="283" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="297" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="611" y="283" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="297" fill="#e6edf3" text-anchor="middle">Int32</text>
+<rect x="731" y="283" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="297" fill="#e6edf3" text-anchor="middle">Int32</text>
+<text x="10" y="319" fill="#e6edf3">int64</text>
+<rect x="131" y="305" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="319" fill="#e6edf3" text-anchor="middle">int64</text>
+<rect x="251" y="305" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="319" fill="#e6edf3" text-anchor="middle">int64</text>
+<rect x="371" y="305" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="319" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="491" y="305" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="319" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="611" y="305" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="319" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="731" y="305" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="319" fill="#e6edf3" text-anchor="middle">Int64</text>
+<text x="10" y="341" fill="#e6edf3">int64_null</text>
+<rect x="131" y="327" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="251" y="327" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="371" y="327" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="491" y="327" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="611" y="327" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<rect x="731" y="327" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="341" fill="#e6edf3" text-anchor="middle">Int64</text>
+<text x="10" y="363" fill="#e6edf3">list_int</text>
+<rect x="131" y="349" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="363" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="349" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="363" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="349" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="363" fill="#e6edf3" text-anchor="middle">list&lt;item: int</text>
+<rect x="491" y="349" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="363" fill="#e6edf3" text-anchor="middle">list&lt;item: int</text>
+<rect x="611" y="349" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="363" fill="#e6edf3" text-anchor="middle">List(Int64)</text>
+<rect x="731" y="349" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="363" fill="#e6edf3" text-anchor="middle">List(Int64)</text>
+<text x="10" y="385" fill="#e6edf3">list_text</text>
+<rect x="131" y="371" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="385" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="371" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="385" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="371" width="118" height="20" fill="#5c4a12"/>
+<text x="430.0" y="385" fill="#e6edf3" text-anchor="middle">list&lt;item: str</text>
+<rect x="491" y="371" width="118" height="20" fill="#5c4a12"/>
+<text x="550.0" y="385" fill="#e6edf3" text-anchor="middle">list&lt;item: str</text>
+<rect x="611" y="371" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="385" fill="#e6edf3" text-anchor="middle">List(String)</text>
+<rect x="731" y="371" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="385" fill="#e6edf3" text-anchor="middle">List(String)</text>
+<text x="10" y="407" fill="#e6edf3">struct</text>
+<rect x="131" y="393" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="407" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="251" y="393" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="407" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="371" y="393" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="407" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="491" y="393" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="407" fill="#e6edf3" text-anchor="middle">object</text>
+<rect x="611" y="393" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="407" fill="#e6edf3" text-anchor="middle">Struct({&#x27;a&#x27;: I</text>
+<rect x="731" y="393" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="407" fill="#e6edf3" text-anchor="middle">Struct({&#x27;a&#x27;: I</text>
+<text x="10" y="429" fill="#e6edf3">text</text>
+<rect x="131" y="415" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="429" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="251" y="415" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="429" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="371" y="415" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="429" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="491" y="415" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="429" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="611" y="415" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="429" fill="#e6edf3" text-anchor="middle">String</text>
+<rect x="731" y="415" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="429" fill="#e6edf3" text-anchor="middle">String</text>
+<text x="10" y="451" fill="#e6edf3">text_null</text>
+<rect x="131" y="437" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="451" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="251" y="437" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="451" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="371" y="437" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="451" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="491" y="437" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="451" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="611" y="437" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="451" fill="#e6edf3" text-anchor="middle">String</text>
+<rect x="731" y="437" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="451" fill="#e6edf3" text-anchor="middle">String</text>
+<text x="10" y="473" fill="#e6edf3">ts_local</text>
+<rect x="131" y="459" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="473" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="251" y="459" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="473" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="371" y="459" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="473" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="491" y="459" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="473" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="611" y="459" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="473" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<rect x="731" y="459" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="473" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<text x="10" y="495" fill="#e6edf3">ts_naive</text>
+<rect x="131" y="481" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="495" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="251" y="481" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="495" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="371" y="481" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="495" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="491" y="481" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="495" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="611" y="481" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="495" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<rect x="731" y="481" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="495" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<text x="10" y="517" fill="#e6edf3">ts_ns</text>
+<rect x="131" y="503" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="517" fill="#e6edf3" text-anchor="middle">datetime64[ns]</text>
+<rect x="251" y="503" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="517" fill="#e6edf3" text-anchor="middle">datetime64[ns]</text>
+<rect x="371" y="503" width="118" height="20" fill="#6b1f24"/>
+<text x="430.0" y="517" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="491" y="503" width="118" height="20" fill="#6b1f24"/>
+<text x="550.0" y="517" fill="#e6edf3" text-anchor="middle">datetime64[us]</text>
+<rect x="611" y="503" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="517" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<rect x="731" y="503" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="517" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<text x="10" y="539" fill="#e6edf3">ts_utc</text>
+<rect x="131" y="525" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="539" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="251" y="525" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="539" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="371" y="525" width="118" height="20" fill="#1f4d2b"/>
+<text x="430.0" y="539" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="491" y="525" width="118" height="20" fill="#1f4d2b"/>
+<text x="550.0" y="539" fill="#e6edf3" text-anchor="middle">datetime64[us,</text>
+<rect x="611" y="525" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="539" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<rect x="731" y="525" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="539" fill="#e6edf3" text-anchor="middle">Datetime(time_</text>
+<text x="10" y="561" fill="#e6edf3">uint64</text>
+<rect x="131" y="547" width="118" height="20" fill="#1f4d2b"/>
+<text x="190.0" y="561" fill="#e6edf3" text-anchor="middle">uint64</text>
+<rect x="251" y="547" width="118" height="20" fill="#1f4d2b"/>
+<text x="310.0" y="561" fill="#e6edf3" text-anchor="middle">uint64</text>
+<rect x="371" y="547" width="118" height="20" fill="#6b1f24"/>
+<text x="430.0" y="561" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="491" y="547" width="118" height="20" fill="#6b1f24"/>
+<text x="550.0" y="561" fill="#e6edf3" text-anchor="middle">str</text>
+<rect x="611" y="547" width="118" height="20" fill="#5c4a12"/>
+<text x="670.0" y="561" fill="#e6edf3" text-anchor="middle">UInt64</text>
+<rect x="731" y="547" width="118" height="20" fill="#5c4a12"/>
+<text x="790.0" y="561" fill="#e6edf3" text-anchor="middle">UInt64</text>
+</svg>

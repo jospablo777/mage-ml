@@ -146,3 +146,20 @@ test('a new service without pipelines does not say it is checking them', async (
   await expect(page.getByText('Add pipelines to check the service.')).toBeVisible();
   await expect(reads).toHaveText('Add pipelines to see the variables they read.');
 });
+
+test('Save and export on a new service shows the export it started', async ({ page }) => {
+  const name = `fresh-${Date.now().toString(36)}`;
+  await page.goto('/services');
+  await page.getByRole('button', { name: 'New service' }).first().click();
+  await page.getByLabel('Service name').fill(name);
+  await page.getByRole('button', { name: 'Add pipelines' }).last().click();
+  await page.getByPlaceholder('Search pipelines to add').fill('example_pipeline');
+  await page.getByText('example_pipeline', { exact: true }).last().click();
+  await expect(page.getByRole('button', { name: 'Save and export' }).last()).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Save and export' }).last().click();
+
+  // The first save remounted the page's editor, which dropped the export it had started:
+  // the export ran, but the page never showed its progress or its result.
+  await expect(page.getByText(`${name} is ready to build`)).toBeVisible({ timeout: 90000 });
+});

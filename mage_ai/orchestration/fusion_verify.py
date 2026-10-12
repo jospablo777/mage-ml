@@ -98,12 +98,15 @@ class JobRunner:
     """
 
     def __init__(self):
-        self.pending: List[Tuple[Callable, tuple, dict]] = []
+        self.pending: List[Tuple[str, Callable, tuple, dict]] = []
+        # Jobs enqueued or running. A job leaves when its process ends, as on a worker:
+        # the scheduler then runs again a block run its process left unfinished.
         self.started = set()
 
     def add_job(self, job_type, uid, target, *args, **kwargs):
-        self.started.add(f'{job_type}_{uid}')
-        self.pending.append((target, args, kwargs))
+        job_id = f'{job_type}_{uid}'
+        self.started.add(job_id)
+        self.pending.append((job_id, target, args, kwargs))
 
     def run_pending(self, log: Callable[[str], None]) -> int:
         import multiprocessing
@@ -111,13 +114,14 @@ class JobRunner:
         context = multiprocessing.get_context('spawn')
         processes = []
         while self.pending:
-            target, args, _ = self.pending.pop(0)
+            job_id, target, args, _ = self.pending.pop(0)
             # Not a daemon: blocks may start processes of their own.
             process = context.Process(target=_run_job, args=(target, args))
             process.start()
-            processes.append((target.__name__, process))
-        for name, process in processes:
+            processes.append((job_id, target.__name__, process))
+        for job_id, name, process in processes:
             process.join()
+            self.started.discard(job_id)
             if process.exitcode:
                 # The block run holds the error; the scheduler handles it.
                 log(f'Job {name} exited with code {process.exitcode}.')

@@ -13,6 +13,9 @@ pipelines=(
   explore_web_events
   rust_session_scores
   rust_postgres_margins
+  shape_diamond_store_scorecard
+  shape_broadcast_web_events
+  shape_merge_customer_signals
   live_traffic
   live_minute_kpis
   live_device_revenue

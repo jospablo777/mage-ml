@@ -1,0 +1,118 @@
+# Pipeline shapes
+
+*How the shape of a pipeline and the languages of its blocks decide how fast and how safely it runs: the seven shapes, what each costs, best practices and anti-patterns.*
+
+How blocks connect decides how a production run executes them. Blocks in a line fuse into
+one process and pass data in memory; blocks of one language in a line compile into one
+program; every branch, join and language switch is a boundary where data is stored or
+converted. This page names the shapes, says what each one costs, and lists what works and
+what to avoid. The numbers come from the
+[compilation study](../../development/compilation-study.md),
+which ran thousands of generated pipelines in pandas, Polars, R and Rust.
+
+## The seven shapes
+
+| Shape | Looks like | What runs together | Typical use |
+| --- | --- | --- | --- |
+| **Line** | `load → clean → enrich → export` | the whole line, in one process | most batch pipelines |
+| **Parallel lines** | two or more lines that share nothing | each line in its own process, side by side | unrelated feeds in one pipeline |
+| **Diamond** | `load → (revenue, margin) → scorecard` | each branch on its own, side by side | two views of one table, joined again |
+| **Broadcast** | `load → (summary A, summary B, summary C)` | each consumer on its own, side by side | several reports from one extract |
+| **Merge** | `(customers, orders, sessions) → join` | the roots side by side, then the join | combining sources |
+| **Lattice** | layers where every block reads the whole layer before | almost nothing fuses | rarely needed; usually a sign to restructure |
+| **Thicket** | edges that skip around | only the stretches that are lines | grown pipelines; worth flattening |
+
+The playground has one pipeline per common shape: `shape_diamond_store_scorecard`,
+`shape_broadcast_web_events` and `shape_merge_customer_signals`, next to Lines such as
+`polars_customer_360`.
+
+## What a production run does with a shape
+
+- **A chain fuses.** A block whose only consumer has no other input runs in the same
+  process as that consumer, which receives its output in memory. Each block keeps its own
+  block run, logs, retries and stored output.
+- **A run of one language compiles.** Consecutive Rust blocks in a chain build into one
+  program whose queries Polars optimizes together; consecutive R blocks share one R
+  session. Only the last block's output is computed.
+- **Branches run side by side.** Each branch of a Diamond, Broadcast or Lattice is its own
+  stage, and stages whose inputs are ready start at the same time.
+- **A join reads stored outputs.** A block with several inputs starts a new stage and
+  reads its inputs from storage.
+- **A language switch converts.** Data crosses between languages through Apache Arrow.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/study/chain-length.dark.svg">
+  <img src="../../../docs/images/study/chain-length.light.svg" alt="Run time of Lines of 1 to 16 blocks in pandas, Polars, R and Rust: block by block it grows by 2 to 6 seconds per block, fused it stays between 1.4 and 3 seconds" />
+</picture>
+
+## Best practices
+
+- **Keep production runs fused.** Block fusion is the default for triggers, schedules and
+  the API; do not set `block_fusion: off` without a reason. In the study, running block
+  by block took 2 to 4.7 times as long in every language, more than any choice of
+  language or runtime saved.
+- **Write a step and its neighbours in one language.** Consecutive Rust blocks compile
+  into one program and consecutive R blocks share one R session; each language switch
+  converts the data and starts a process. In the study, a fused block of the same language added 0.06 s
+  (pandas) to 0.25 s (R), and nothing measurable in a compiled Rust chain; a switch added
+  nothing between pandas and Polars, about 0.3 s into Rust and close to a second into R.
+- **Give a whole pipeline to Rust when it is large.** A scoring pipeline in Rust alone
+  (features, scoring, aggregate) was the fastest of the three languages at a million rows;
+  a single Rust block between Python blocks was not faster than pandas.
+- **Use R for what R does best**, in a run of R blocks: statistics, tidymodels, a package
+  only R has. Pin versions in `rv.lock`, and read the R block's log for columns R
+  changes (uint64, nanoseconds, wide decimals).
+- **Score tree models with their own library.** XGBoost and CatBoost scored 2.5 and 7.5
+  times faster with their own predict than through ONNX. Use ONNX for neural networks, or to
+  score the same model in Rust or R.
+- **Use the GPU for dense models on large batches.** ONNX Runtime on CUDA scored an MLP
+  2.9 times faster than on the CPU at a million rows, and was slower below 100,000 rows.
+- **Keep pandas strings as strings.** A fused stage hands a pandas frame to the next block
+  in memory only when it has no `object` columns; pandas 3 reads text as `str` already.
+  In the study the difference was not significant at 100,000 rows (1.09 times, p = 0.15),
+  but an object column makes a fused stage write the frame and read it back.
+- **Check a polyglot pipeline before trusting it.** `mage verify-fusion` runs the pipeline
+  block by block and fused and compares every block's output.
+
+## Anti-patterns
+
+| Anti-pattern | Why it hurts | Instead |
+| --- | --- | --- |
+| Alternating languages block by block | every switch converts the data and starts a process; R adds about 0.7 s each time | group the blocks of each language |
+| One Rust block in a Python pipeline | the data crosses into Rust and back; pandas was 1.8 times faster for a single arithmetic step | move the whole run of heavy steps to Rust, or keep it in Python |
+| Short R steps between other languages | R's start-up dominates (0.7 s and more per R block or chain) | do it in Python or Rust, or make the R part a run of blocks |
+| A Lattice where every block reads a whole layer | no block has one consumer with one producer, so nothing fuses and every edge goes through storage | a Line per layer, or one block per layer |
+| A wide Broadcast of a large table | each consumer reads the stored table again | consumers that need the same columns as one block, or a narrower table first |
+| GPU scoring of small batches | CUDA set-up costs 0.3 to 1 s per process | the CPU below about 100,000 rows |
+| Tree models through ONNX on the CPU | ONNX Runtime's generic tree operator is slower than the framework's own | the framework's predict |
+| `block_fusion: off` in production | 2 to 4.7 times the run time | the default; turn it off for one block with `fusion: false` |
+| R packages from a URL or git without a pinned checksum | rv cannot verify the download | pin it in `rv.lock` (rv records the checksum) |
+
+## Which shape when
+
+| You have | Use | Because |
+| --- | --- | --- |
+| Steps that each need the previous step's result | a **Line** | it fuses end to end and compiles each run of one language |
+| Independent feeds | **Parallel lines** | each line fuses, and the lines run side by side |
+| Two analyses of one table that meet again | a **Diamond** | the branches run side by side; only the join reads from storage |
+| Several reports from one extract | a **Broadcast** | the consumers run side by side; keep the shared table small |
+| Several sources to combine | a **Merge** | the sources load side by side; join once |
+| A layered model where each step needs all of the layer before | a **Lattice** only if needed | nothing fuses; consider one block per layer |
+| A pipeline that grew edges over time | flatten the **Thicket** into Lines | the stretches that are Lines are the only parts that fuse |
+
+## Guardrails MageML applies
+
+- **Same answer in every mode.** Fused and block by block runs give the same outputs
+  and, since 1210d19d3, the same block statuses when a block fails, also inside a compiled
+  chain of Rust or R blocks: the blocks after the failure are cancelled.
+- **A stage ends before it runs out of memory.** A stage starts a new process when it
+  holds more than half the machine's memory (`MAGE_STAGE_MAX_MEMORY_SHARE`), and when a
+  block leaves a thread running.
+- **Values R would change are named.** An R block's log lists the columns where R changes
+  values: uint64 above 2^63 - 1 (becomes text), timestamps, times and durations with
+  nanoseconds (rounded to microseconds) and decimals of more than 15 digits.
+- **R environments are checked once.** The check that the R library matches `rv.lock`
+  runs again only when `rproject.toml`, `rv.lock` or the library change; a package from a
+  URL or git no longer costs 10 to 40 seconds and a download on every R block run.
+- **R workers see the project's packages.** Processes an R block starts (parallel or
+  future workers, callr) get the block's library paths.

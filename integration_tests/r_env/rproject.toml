@@ -34,4 +34,9 @@ dependencies = [
     "duckdb",
     "RSQLite",
     "httr2",
+    "tidymodels",
+    "ranger",
+    "xgboost",
+    "glmnet",
+    "bundle",
 ]

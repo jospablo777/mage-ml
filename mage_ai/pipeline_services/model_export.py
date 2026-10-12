@@ -196,7 +196,20 @@ def explain(error: Exception, uri: str, registry: Optional[str] = None) -> str:
                 'and MLFLOW_S3_ENDPOINT_URL for an S3-compatible store such as MinIO).')
     if 'no space left' in lowered:
         return 'The MageML server ran out of disk space while downloading the model.'
-    first = text.splitlines()[0][:300] if text else ''
+    if 'failures occurred while downloading' in lowered and (
+            'no such artifact' in lowered or ' 404 ' in f' {text} '):
+        files = re.findall(r'##### File (.+?) #####', text)
+        missing = ', '.join(files) if files else 'the model files'
+        return (f'The registry has this model version, but {missing} is missing from the '
+                f'artifact store of {where}: the files were deleted or never logged. Log the '
+                'model again, or pick another version.')
+    # MLflow's messages often end their first line with a colon and give the cause below.
+    lines = [line.strip() for line in text.splitlines()
+             if line.strip() and not line.strip().startswith('#####')]
+    first = lines[0] if lines else ''
+    if first.endswith(':') and len(lines) > 1:
+        first = f'{first} {lines[1]}'
+    first = first[:300]
     return f'{type(error).__name__}: {first}' if first else type(error).__name__
 
 

@@ -98,6 +98,27 @@ class AppExportTest(AppExportBase):
         self.assertIn(f'shop-orders/{self.project.name}/utils/rates.py', names)
         self.assertTrue(all(name.startswith('shop-orders/') for name in names))
 
+    def test_the_zip_streams_large_files_instead_of_reading_them_whole(self):
+        import tracemalloc
+
+        export = self.root / 'scoring'
+        (export / 'models' / 'churn').mkdir(parents=True)
+        (export / 'service.json').write_text('{}')
+        size = 64 * 1024 * 1024
+        with open(export / 'models' / 'churn' / 'model.cbm', 'wb') as file:
+            file.truncate(size)
+
+        tracemalloc.start()
+        try:
+            with exports.zip_export(self.repo_path, 'scoring') as archive:
+                _, peak = tracemalloc.get_traced_memory()
+                info = zipfile.ZipFile(archive).getinfo('scoring/models/churn/model.cbm')
+        finally:
+            tracemalloc.stop()
+
+        self.assertEqual(info.file_size, size)
+        self.assertLess(peak, size // 4)
+
     def test_exporting_again_replaces_the_earlier_export(self):
         self.chain()
         self.create(pipeline_uuids=[self.pipeline.uuid], name='shop')
@@ -215,7 +236,9 @@ class ModelRegistryTest(AppExportBase):
         client = MlflowClient()
         client.set_registered_model_alias('churn-scorer', 'champion', '1')
         client.set_model_version_tag('churn-scorer', '1', 'validated', 'true')
-        client.set_model_version_tag('churn-scorer', '1', 'feast.feature_service', 'churn_features_v1')
+        client.set_model_version_tag(
+            'churn-scorer', '1', 'feast.feature_service', 'churn_features_v1',
+        )
 
         self.server_store = use_temporary_mlflow(self)
         self.chain()

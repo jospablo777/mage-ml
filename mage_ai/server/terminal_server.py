@@ -98,7 +98,35 @@ class TerminalWebsocketServer(terminado.TermSocket):
         term_name = term_name if term_name else 'tty'
         self._logger.info("TermSocket.open: %s", term_name)
 
-        self.__initialize_terminal(term_name, cwd=cwd)
+        # A terminal's clients get all its output, its recent output first. With
+        # authentication on, a connection attaches only once signed in as an editor: by
+        # the session cookie of its handshake, or by its first message with a valid token.
+        # Any connection used to start a shell and read the output of anyone's terminal.
+        self.__pending = (term_name, cwd)
+        if DISABLE_TERMINAL:
+            return
+        if not (REQUIRE_USER_AUTHENTICATION or is_disable_pipeline_edit_access()) or \
+                self.__editor_by_cookie():
+            self.__attach()
+
+    def __editor_by_cookie(self) -> bool:
+        from mage_ai.api.middleware import user_from_cookie
+
+        if is_disable_pipeline_edit_access():
+            return False
+        try:
+            user = user_from_cookie(self.request.headers.get('Cookie', ''))
+            return user is not None and has_at_least_editor_role(
+                user, Entity.PROJECT, get_project_uuid(),
+            )
+        except Exception:
+            return False
+
+    def __attach(self):
+        if getattr(self, 'terminal', None) is None and self.__pending is not None:
+            term_name, cwd = self.__pending
+            self.__pending = None
+            self.__initialize_terminal(term_name, cwd=cwd)
 
     @gen.coroutine
     def on_message(self, raw_message):
@@ -139,6 +167,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
                 return self.send_json_message(
                     ['stdout', f'{command[1]}\nUnauthorized access to the terminal.'])
 
+        self.__attach()
         return terminado.TermSocket.on_message(self, json.dumps(command))
 
     def __initialize_terminal(self, term_name: str, cwd: str = None):

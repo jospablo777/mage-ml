@@ -132,6 +132,16 @@ class ConfigTest(RuntimeTestCase):
         with self.assertRaisesRegex(runtime.REnvironmentError, 'MAGE_R_SYNC must be one of'):
             runtime.r_config(str(self.repo))
 
+    def test_new_environments_can_fit_and_serve_models(self):
+        """
+        mage r init had no modeling packages: an R block could not fit a tidymodels
+        workflow, and a fitted model could not be saved for another session to load.
+        """
+        self.assertLessEqual(
+            {'tidymodels', 'glmnet', 'ranger', 'xgboost', 'bundle'},
+            set(runtime.DEFAULT_PACKAGES),
+        )
+
     def test_dependencies(self):
         self.assertEqual(
             runtime.project_dependencies(self.project),
@@ -224,6 +234,27 @@ class PrepareTest(RuntimeTestCase):
         os.utime(self.library, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
         self.prepare()
         self.assertEqual(self.calls.count('plan'), 3)
+
+    def test_a_check_holds_for_new_processes_until_the_files_change(self):
+        # Each block run is a new process; rv plan downloads URL and git packages again.
+        self.prepare()
+        runtime._prepared.clear()
+        self.prepare()
+        self.assertEqual(self.calls.count('plan'), 1)
+
+        stat = (self.project / 'rv.lock').stat()
+        os.utime(self.project / 'rv.lock', ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+        runtime._prepared.clear()
+        self.prepare()
+        self.assertEqual(self.calls.count('plan'), 2)
+
+    def test_a_failed_check_is_not_remembered_by_new_processes(self):
+        self.pending = {'installed': [{'name': 'dplyr'}], 'removed': []}
+        for _ in range(2):
+            runtime._prepared.clear()
+            with self.assertRaises(runtime.REnvironmentError):
+                self.prepare()
+        self.assertEqual(self.calls.count('plan'), 2)
 
     def test_failed_checks_are_not_cached(self):
         self.pending = {'installed': [{'name': 'dplyr'}], 'removed': []}

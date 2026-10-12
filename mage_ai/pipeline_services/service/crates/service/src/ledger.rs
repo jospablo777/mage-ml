@@ -4,9 +4,14 @@
 //! A run is committed before its request is acknowledged, so an accepted run survives a
 //! restart. Idempotency keys and schedule occurrences are unique, so a repeated request or
 //! a restart during a schedule tick creates no second run.
+//!
+//! Commits do not checkpoint the write-ahead log: a checkpoint writes pages to the database
+//! file and syncs it, which held the ledger's lock for 0.2 to 0.9 s and stalled the runs
+//! behind it. A background thread checkpoints on its own connection instead.
 
-use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use mage_service_core::protocol::{BlockRunSummary, BlockStatus, RunDetail, RunStatus, RunSummary};
@@ -90,6 +95,10 @@ pub enum LedgerError {
 
 pub type Result<T> = std::result::Result<T, LedgerError>;
 
+const CHECKPOINT_EVERY: Duration = Duration::from_secs(1);
+/// Above this size the checkpoint also truncates the log, waiting for readers if it must.
+const WAL_LIMIT: u64 = 64 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct Ledger {
     connection: Arc<Mutex<Connection>>,
@@ -119,9 +128,14 @@ impl Ledger {
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.busy_timeout(std::time::Duration::from_secs(10))?;
         connection.execute_batch(SCHEMA)?;
-        Ok(Ledger {
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        connection.pragma_update(None, "wal_autocheckpoint", 0)?;
+        let checkpoints = Connection::open(path)?;
+        checkpoints.busy_timeout(std::time::Duration::from_secs(10))?;
+        let connection = Arc::new(Mutex::new(connection));
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        start_checkpoints(checkpoints, PathBuf::from(wal), Arc::downgrade(&connection));
+        Ok(Ledger { connection })
     }
 
     #[cfg(test)]
@@ -540,6 +554,32 @@ impl Ledger {
     }
 }
 
+/// Checkpoints every second while the ledger is open.
+fn start_checkpoints(connection: Connection, wal: PathBuf, ledger: Weak<Mutex<Connection>>) {
+    std::thread::Builder::new()
+        .name("ledger-checkpoints".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(CHECKPOINT_EVERY);
+                if ledger.upgrade().is_none() {
+                    break;
+                }
+                if let Err(e) = checkpoint(&connection, &wal, WAL_LIMIT) {
+                    crate::log::warn(&format!("The run history checkpoint failed: {e}"));
+                }
+            }
+        })
+        .expect("the checkpoint thread starts");
+}
+
+/// Copies committed pages from the log into the database. PASSIVE never waits for writers;
+/// a log over `limit` bytes is truncated, so it cannot grow without bound under load.
+fn checkpoint(connection: &Connection, wal: &Path, limit: u64) -> rusqlite::Result<()> {
+    let size = std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0);
+    let mode = if size > limit { "TRUNCATE" } else { "PASSIVE" };
+    connection.query_row(&format!("PRAGMA wal_checkpoint({mode})"), [], |_| Ok(()))
+}
+
 fn run_summary(row: &rusqlite::Row) -> rusqlite::Result<RunSummary> {
     let status: String = row.get(2)?;
     let started_at: Option<String> = row.get(5)?;
@@ -573,6 +613,48 @@ mod tests {
             idempotency_key: key,
             blocks,
         }
+    }
+
+    #[test]
+    fn commits_leave_the_checkpoint_to_the_background() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("runs.db");
+        let ledger = Ledger::open(&path).unwrap();
+        let automatic: i64 = ledger
+            .lock()
+            .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(automatic, 0);
+        let empty = std::fs::metadata(&path).unwrap().len();
+        let vars = Map::new();
+        let blocks = vec!["a".to_string(), "b".to_string()];
+        for _ in 0..50 {
+            ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::fs::metadata(&path).unwrap().len() <= empty {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no checkpoint wrote the runs to the database"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn a_log_over_the_limit_is_truncated() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("runs.db");
+        let ledger = Ledger::open(&path).unwrap();
+        let vars = Map::new();
+        let blocks = vec!["a".to_string()];
+        for _ in 0..20 {
+            ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
+        }
+        let wal = folder.path().join("runs.db-wal");
+        let other = Connection::open(&path).unwrap();
+        checkpoint(&other, &wal, 0).unwrap();
+        assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0);
     }
 
     #[test]

@@ -77,9 +77,16 @@ The values are random but the same on every seed.
 | `explore_web_events` | A million-row output and a wide one (about 60 columns), to explore |
 | `rust_session_scores` | Rust blocks: sessions from a million events with Polars expressions, then a per-row engagement score on every core with Rayon; block tests in Rust |
 | `rust_postgres_margins` | All Rust: reads 1.2 million order lines from PostgreSQL with binary COPY, computes exact decimal margins per day and category and customer value tiers in two parallel branches, writes both back with binary COPY |
+| `shape_diamond_store_scorecard` | A Diamond: pandas loads order lines, Polars and R compute revenue and margin per store side by side, Rust joins the branches; in `analytics.store_scorecard` |
+| `shape_broadcast_web_events` | A Broadcast: a million web events read once feed Polars, R and Rust summaries that run side by side |
+| `shape_merge_customer_signals` | A Merge: customers (pandas), order stats (Rust, binary COPY) and web stats (Polars) load side by side and one Rust block joins them; in `analytics.customer_signals` |
 | `live_traffic` | New web events every minute, more or fewer as the hour goes on, appended to `analytics.live_events`; keeps six hours |
 | `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis`; starts after each `live_traffic` run |
 | `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended to `analytics.live_device_revenue` after each `live_traffic` run |
+
+The `shape_` pipelines are the topology families of the
+[compilation study](../docs/development/compilation-study.md): which blocks fuse into one
+stage and which run side by side follows from the shape.
 
 Run a pipeline from its page (**Run @once**), or open it in the editor and run blocks one
 by one. Exported tables are in `analytics`:

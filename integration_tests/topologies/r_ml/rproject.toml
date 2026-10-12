@@ -1,0 +1,35 @@
+[project]
+name = "r_ml"
+r_version = "4.6"
+
+# A list of repositories to fetch packages from. Order matters: we will try to get a package from each repository in order.
+# The alias is only used in this file if you want to specifically require a dependency to come from a certain repository.
+# Example: { alias = "PPM", url = "https://packagemanager.posit.co/cran/latest" },
+repositories = [
+    {alias = "PPM", url = "https://packagemanager.posit.co/cran/latest"},
+    {alias = "CRAN", url = "https://cloud.r-project.org/"},
+]
+
+# A list of packages to install and any additional configuration
+# Examples:
+    # "dplyr",
+    # {name = "dplyr", repository = "CRAN"},
+    # {name = "dplyr", git = "https://github.com/tidyverse/dplyr.git", tag = "v1.1.4"},
+# The R environment of the compilation study's model experiments
+# (docs/development/compilation-study.md): MageML's exchange packages, tidymodels, and the
+# libraries of the models the study scores in Python, R and Rust. CatBoost is not on CRAN;
+# its R package comes from the release, pinned by its checksum in rv.lock. torch downloads
+# libtorch into TORCH_HOME, which must be the rv library (test_ml_models.py sets it).
+# onnxr needs ONNX Runtime once: Rscript -e 'onnxr::onnx_install(cuda = FALSE)'.
+dependencies = [
+    "arrow",
+    "bit64",
+    "jsonlite",
+    "tibble",
+    "tidymodels",
+    "xgboost",
+    "torch",
+    "bundle",
+    "onnxr",
+    {name = "catboost", url = "https://github.com/catboost/catboost/releases/download/v1.2.10/catboost-R-linux-x86_64-1.2.10.tgz"},
+]

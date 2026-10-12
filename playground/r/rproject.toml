@@ -20,4 +20,9 @@ dependencies = [
     "lubridate",
     "DBI",
     "RPostgres",
+    "tidymodels",
+    "ranger",
+    "xgboost",
+    "glmnet",
+    "bundle",
 ]
