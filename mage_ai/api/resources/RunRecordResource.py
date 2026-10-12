@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -194,6 +195,10 @@ class RunRecordResource(GenericResource):
                 raise ApiError(dict(
                     code=409, message='A reproduction of this run is already running.',
                 ))
+            if current is not None:
+                # One reproduction per run is kept, for its log and report; the one it
+                # replaces left its folder in the temporary directory.
+                shutil.rmtree(current.directory, ignore_errors=True)
             directory = tempfile.mkdtemp(prefix='mage_reproduce_api_')
             log = open(os.path.join(directory, 'log.txt'), 'w', encoding='utf-8')
             process = subprocess.Popen(

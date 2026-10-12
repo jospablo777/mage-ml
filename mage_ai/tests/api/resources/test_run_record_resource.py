@@ -39,6 +39,7 @@ class RunRecordResourceTest(AsyncDBTestCase):
     def setUp(self):
         super().setUp()
         resource_module._reproductions.clear()
+        self.addCleanup(self.remove_reproductions)
         self.owner = create_user(_owner=True)
         self.pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
         block = Block.create(
@@ -46,6 +47,28 @@ class RunRecordResourceTest(AsyncDBTestCase):
         )
         Path(block.file_path).write_text(textwrap.dedent(LOAD))
         self.block_uuid = block.uuid
+
+    def remove_reproductions(self):
+        import shutil
+
+        for reproduction in resource_module._reproductions.values():
+            shutil.rmtree(reproduction.directory, ignore_errors=True)
+        resource_module._reproductions.clear()
+
+    async def reproduce(self, run):
+        def command(repo_path, pipeline_uuid, run_id, report):
+            return [sys.executable, '-c', FAKE_REPRODUCE, report]
+
+        with patch.object(resource_module, 'reproduce_command', command):
+            await BaseOperation(
+                action=OperationType.CREATE,
+                payload=dict(run_record=dict(pipeline_run_id=run.id)),
+                resource='run_records',
+                user=self.owner,
+            ).execute()
+        reproduction = resource_module._reproductions[run.id]
+        reproduction.process.wait(timeout=60)
+        return reproduction
 
     def run_pipeline(self, **variables):
         run = trigger_pipeline(self.pipeline.uuid, variables=variables)
@@ -94,3 +117,12 @@ class RunRecordResourceTest(AsyncDBTestCase):
             await asyncio.sleep(0.1)
         self.assertEqual(record['reproduction']['status'], 'passed')
         self.assertIn('Reproducing pipeline run.', record['reproduction']['log'])
+
+    async def test_reproducing_again_removes_the_folder_of_the_earlier_reproduction(self):
+        run = self.run_pipeline()
+
+        first = await self.reproduce(run)
+        second = await self.reproduce(run)
+
+        self.assertFalse(Path(first.directory).exists())
+        self.assertTrue(Path(second.directory, 'report.json').exists())
