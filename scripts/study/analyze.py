@@ -575,7 +575,7 @@ def ml_training():
 
 
 def journal():
-    rows = warm(load('journal'))
+    rows = warm(latest(load('journal')))
     if not rows:
         return
     print('## Metadata database journal\n')

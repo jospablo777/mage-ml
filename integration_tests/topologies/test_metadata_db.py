@@ -37,10 +37,13 @@ def database_path():
 
 
 def journal_mode(path, mode=None) -> str:
-    from mage_ai.orchestration.db import engine
+    from mage_ai.orchestration.db import db_connection, engine
 
-    # Pooled connections hold no transaction between runs; close them so the change
-    # needs no lock, and new connections open in the new mode.
+    # This process's session keeps a read transaction open after a run, which in the
+    # rollback journal holds a shared lock; end it and close the pooled connections, so
+    # the change gets its lock and new connections open in the new mode.
+    if db_connection.session is not None:
+        db_connection.session.close()
     engine.dispose()
     with sqlite3.connect(path, timeout=30) as connection:
         if mode:
