@@ -382,9 +382,18 @@ def _failure(prepared: Prepared, result: subprocess.CompletedProcess, verb: str)
     if prepared.members:
         errors = _chain_errors(result.stdout)
         if errors:
+            # The hints read the compiler's text, without its colors.
+            plain = [
+                Diagnostic(level='error', message=text, rendered=text)
+                for text in (re.sub(r'\x1b\[[0-9;]*m', '', error) for error in errors)
+            ]
+            hint = missing_crate_hint(plain, prepared.workspace) or sdk_feature_hint(
+                plain, prepared.workspace,
+            )
             return RustBuildError(
                 'The chain of Rust blocks does not compile:\n\n'
-                + chain_failure_text('\n'.join(errors), prepared),
+                + chain_failure_text('\n'.join(errors), prepared)
+                + (f'\n\n{hint}' if hint else ''),
             )
     diagnostics = parse_messages(result.stdout, prepared)
     errors = [item for item in diagnostics if item.level == 'error']
