@@ -68,11 +68,17 @@ function useAside(uuid, refData, {
   }, [keyHidden]);
 
   const width = useMemo(() => {
-    let value = (typeof widthProp !== 'undefined' && widthOverride) ? widthProp : widthState;
-
+    // Pages that load their panel pass no width on the first render, and the state kept
+    // that: the panel stayed 200 px. Until the panel is resized, the prop gives the width.
+    const hasProp = typeof widthProp !== 'undefined' && widthProp !== null;
+    const hasState = typeof widthState !== 'undefined' && widthState !== null;
+    let value = hasProp && (widthOverride || !hasState) ? widthProp : widthState;
 
     if (typeof widthWindow !== 'undefined') {
-      value = Math.min(value, widthWindow - (MINIMUM_WIDTH_MAIN_CONTAINER + DEFAULT_ASIDE_WIDTH));
+      value = Math.max(
+        Math.min(value, widthWindow - (MINIMUM_WIDTH_MAIN_CONTAINER + DEFAULT_ASIDE_WIDTH)),
+        DEFAULT_ASIDE_WIDTH,
+      );
     }
 
     refData.current = {
@@ -87,6 +93,7 @@ function useAside(uuid, refData, {
     widthOverride,
     widthProp,
     widthState,
+    widthWindow,
   ]);
 
   const setWidth = useCallback((prev) => {
