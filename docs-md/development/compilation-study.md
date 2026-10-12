@@ -109,6 +109,11 @@ and is reported apart; the measurements use the warm runs after it. Within a rep
 the order of the two modes is drawn from a seeded generator, so neither mode always runs
 first on a warm cache.
 
+The experiments ran one after another, never two at once, and no unit or integration
+suite ran beside them. The machine also ran, idle, a MageML server of the browser tests, a
+local Docker registry and a build container; each run records the load before and after
+it, and started only below 0.25 load per CPU.
+
 ### Keeping the machine and the results safe
 
 The machine this ran on had shut down under load before, so the study guards it:
@@ -565,8 +570,15 @@ Each change has a test that fails without it.
 | An R environment is checked once until its files change: R blocks with a URL or git package were 7 to 14 times slower | model scoring, before and after | 0e7d5ac3a |
 | Processes an R block starts get its library paths: R torch failed to load | model scoring | a04011085 |
 | R blocks name the columns where R changes values (uint64 as text, nanoseconds) | data types | 6aa8744da |
-| The service's run history checkpoints in the background, not on the request path | round 3 latency measurement | 9d504d2ec |
+| The service's run history checkpoints in the background, not on the request path | round 3 latency measurement (see below) | 9d504d2ec |
 | An exported image gets MLflow only when a model needs it | round 3 export check | 9f6994802 |
+
+The service's checkpoint change was measured again with each binary serving the same
+2-block pipeline locally, 2,000 runs back to back, twice each, alternating: median 2 ms
+and 99th percentile 25 ms with both, 10 runs over 100 ms with both. That setup writes
+little to the run history per run and syncs to a fast disk, so it does not reproduce the
+0.2 to 0.9 s stalls seen in round 3 in a container scoring service; the change is checked
+by its test, its latency gain was not measured.
 
 The repository audit that followed the study fixed, each with a test: profiling a block's
 output ran list-like text from the data with `eval` (1636cb8da); the event, event matcher
