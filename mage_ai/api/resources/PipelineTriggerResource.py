@@ -30,7 +30,7 @@ class PipelineTriggerResource(GenericResource):
     @safe_db_query
     def create(self, payload, user, **kwargs):
         parent_model = kwargs['parent_model']
-        error = ApiError.RESOURCE_INVALID
+        error = dict(ApiError.RESOURCE_INVALID)
 
         pipeline_schedule_id = payload.get('pipeline_schedule_id')
         trigger_name = payload.get('name')

@@ -249,7 +249,7 @@ class GitBranchResource(GenericResource):
             )
         elif action_type == 'commit':
             if not message:
-                error = ApiError.RESOURCE_ERROR
+                error = dict(ApiError.RESOURCE_ERROR)
                 error.update(
                     {
                         'message': 'Message is empty, please add a message for your commit.',
@@ -413,7 +413,7 @@ class GitBranchResource(GenericResource):
                 git_manager.checkout_file(file_path)
         elif action_type in ['add_remote', 'remove_remote']:
             if not action_payload:
-                error = ApiError.RESOURCE_ERROR
+                error = dict(ApiError.RESOURCE_ERROR)
                 error.update(
                     {
                         'message': 'Remote is empty, please add a remote.',
@@ -430,7 +430,7 @@ class GitBranchResource(GenericResource):
             for key in keys:
                 val = action_payload.get(key)
                 if not val:
-                    error = ApiError.RESOURCE_ERROR
+                    error = dict(ApiError.RESOURCE_ERROR)
                     error.update(
                         {
                             'message': f'Remote is missing {key}.',
@@ -441,7 +441,7 @@ class GitBranchResource(GenericResource):
 
             if action_type == 'add_remote':
                 if action_payload.get('name') == REMOTE_NAME:
-                    error = ApiError.RESOURCE_ERROR
+                    error = dict(ApiError.RESOURCE_ERROR)
                     error.update(
                         {
                             'message': f'Remote name {REMOTE_NAME} is reserved, '
@@ -467,7 +467,7 @@ class GitBranchResource(GenericResource):
                 elif 'rebase' == action_type:
                     git_manager.rebase_branch(base_branch, message=message)
             else:
-                error = ApiError.RESOURCE_ERROR
+                error = dict(ApiError.RESOURCE_ERROR)
                 error.update(
                     {
                         'message': 'Please select a base branch to '

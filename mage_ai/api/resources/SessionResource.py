@@ -46,7 +46,7 @@ class SessionResource(BaseResource):
                     roles = Role.query.filter(Role.name.in_(user_roles)).all()
 
             if not email:
-                error = ApiError.RESOURCE_NOT_FOUND
+                error = dict(ApiError.RESOURCE_NOT_FOUND)
                 error.update({'message': 'Could not get email from oauth provider.'})
                 raise ApiError(error)
             else:
@@ -66,7 +66,7 @@ class SessionResource(BaseResource):
                 oauth_token = generate_access_token(user, oauth_client)
                 return self(oauth_token, user, **kwargs)
 
-        error = ApiError.RESOURCE_NOT_FOUND
+        error = dict(ApiError.RESOURCE_NOT_FOUND)
         error.update({'message': 'Email/username and/or password invalid.'})
 
         if not (email or username) or not password:

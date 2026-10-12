@@ -53,7 +53,7 @@ class PullRequestResource(GenericResource):
 
     @classmethod
     def create(self, payload, user, **kwargs):
-        error = ApiError.RESOURCE_INVALID
+        error = dict(ApiError.RESOURCE_INVALID)
 
         for key in [
             'base_branch',

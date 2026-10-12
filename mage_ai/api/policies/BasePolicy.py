@@ -429,7 +429,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
                     override_permission_conditions=override_permission_conditions
                 )
         else:
-            error = ApiError.UNAUTHORIZED_ACCESS
+            error = dict(ApiError.UNAUTHORIZED_ACCESS)
             error.update({'message': 'The {} action is disabled for {}.'.format(
                 action, self.resource_name()), })
             raise ApiError(error)
@@ -478,7 +478,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
                         if rule.get('override_permission_condition')]
 
         if rules is None:
-            error = ApiError.UNAUTHORIZED_ACCESS
+            error = dict(ApiError.UNAUTHORIZED_ACCESS)
             error.update({
                 'message': '{} of {} on {} is disabled for {}.'.format(
                     read_or_write,
@@ -564,7 +564,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
                             if rule.get('override_permission_condition')]
 
             if rules is None:
-                error = ApiError.UNAUTHORIZED_ACCESS
+                error = dict(ApiError.UNAUTHORIZED_ACCESS)
                 error.update({
                     'message': error_message,
                 })
@@ -645,7 +645,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
 
         if not validation:
             r_name = self.resource_name()
-            error = ApiError.UNAUTHORIZED_ACCESS
+            error = dict(ApiError.UNAUTHORIZED_ACCESS)
             message = f'Unauthorized access for {action} on {r_name}'
 
             if attribute_operation:
@@ -681,7 +681,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
             raise ApiError(error)
 
     async def __validate_scopes(self, val, scopes):
-        error = ApiError.UNAUTHORIZED_ACCESS
+        error = dict(ApiError.UNAUTHORIZED_ACCESS)
         if not REQUIRE_USER_AUTHENTICATION:
             return
         if OauthScope.CLIENT_ALL in scopes:

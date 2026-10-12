@@ -230,7 +230,7 @@ class BaseResource(Resource, ResultSetMixIn):
             if settings.DEBUG:
                 raise err
             else:
-                error = ApiError.RESOURCE_NOT_FOUND
+                error = dict(ApiError.RESOURCE_NOT_FOUND)
                 raise ApiError(error)
 
     @classmethod
