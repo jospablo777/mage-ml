@@ -2178,7 +2178,7 @@ function Edit({
                   </Text>
                 </Spacing>
 
-                <FlexContainer>
+                <FlexContainer flexWrap="wrap">
                   {triggerTypesForPipeline.reduce((acc, {
                     label,
                     description,

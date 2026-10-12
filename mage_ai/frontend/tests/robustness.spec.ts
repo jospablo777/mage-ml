@@ -129,4 +129,11 @@ test('the trigger page shows its run settings at their width', async ({ page }) 
   const width = await heading.evaluate(el => el.closest('aside').getBoundingClientRect().width);
   expect(width).toBeGreaterThanOrEqual(380);
 
+  // The trigger type cards wrap beside the panel instead of running under it.
+  const panelLeft = await heading.evaluate(el => el.closest('aside').getBoundingClientRect().left);
+  for (const label of ['Schedule', 'API', 'After another pipeline']) {
+    const card = await page.getByText(label, { exact: true }).first()
+      .locator('xpath=ancestor::button[1]').boundingBox();
+    expect(card.x + card.width, label).toBeLessThanOrEqual(panelLeft);
+  }
 });
