@@ -1205,7 +1205,10 @@ function Workbench({
             <Spacing mt={0.5}>
               {!check?.environment?.length && (
                 <Text muted small>
-                  {check ? 'Nothing: the pipelines read no environment variable.' : 'Checking'}
+                  {check && 'Nothing: the pipelines read no environment variable.'}
+                  {!check && (draft.pipelines.length >= 1
+                    ? 'Checking'
+                    : 'Add pipelines to see the variables they read.')}
                 </Text>
               )}
               {check?.environment?.length >= 1 && (
