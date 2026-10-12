@@ -1,0 +1,46 @@
+{
+ "session": "20261012T085044Z-5d0711",
+ "started_utc": "2026-10-12T08:50:51.157010+00:00",
+ "commit": "eb6c3b0a92dc7025fd4a79784f14f27ff480033c",
+ "branch": "linux-test-fixes-3",
+ "dirty_files": [],
+ "host": "jose-p-CF",
+ "os": "Ubuntu 24.04.5 LTS",
+ "kernel": "6.8.0-146-generic",
+ "machine": "x86_64",
+ "cpu": "Intel(R) Core(TM) i9-14900KF",
+ "cpus": 32,
+ "memory_gb": 67.2,
+ "gpu": "NVIDIA GeForce RTX 4080, 580.178.04, 16376 MiB",
+ "governor": "performance",
+ "ptrace_scope": "0",
+ "cgroup": {
+  "memory.max": "21474836480",
+  "memory.swap.max": "0",
+  "cpu.max": "1600000 100000"
+ },
+ "threads": {
+  "POLARS_MAX_THREADS": "8",
+  "RAYON_NUM_THREADS": "8",
+  "OMP_NUM_THREADS": "8",
+  "MAGE_STUDY_THREADS": null
+ },
+ "study": {
+  "MAGE_STUDY_FULL": "1",
+  "MAGE_STUDY_RESULTS_DIR": "/home/jose-p/Data Science/Projects/mage-ml/integration_tests/topologies/results"
+ },
+ "python": "3.12.10",
+ "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+ "r": "R version 4.6.1 (2026-06-24) -- \"Happy Hop\"",
+ "packages": {
+  "pandas": "3.0.6",
+  "polars": "2.0.0",
+  "pyarrow": "26.0.0",
+  "numpy": "2.5.3",
+  "scikit-learn": "1.9.1",
+  "onnxruntime-gpu": "1.31.0",
+  "skl2onnx": "1.20.0",
+  "catboost": "1.2.10",
+  "scipy": "1.18.1"
+ }
+}

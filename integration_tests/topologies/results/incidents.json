@@ -1,0 +1,18 @@
+[
+  {
+    "session": "20261012T094950Z-337718",
+    "experiment": "ml_scoring",
+    "language": "r",
+    "from_utc": "2026-10-12T10:15:49+00:00",
+    "condition": "r_check_cached",
+    "note": "mage_ai/data_preparation/models/block/r/runtime.py was changed during the session to remember a passed rv plan check across processes (commit 'Check an R environment once until its files change'). R runs that started after this time ran with the change; earlier R runs checked the environment with rv plan on every run. The analysis labels the two conditions and leaves this session's R runs out of the cross-language tables; the R scorers were measured again in a later session."
+  },
+  {
+    "session": "20261012T094950Z-337718",
+    "experiment": "ml_training",
+    "language": "r",
+    "from_utc": "2026-10-12T10:15:49+00:00",
+    "condition": "r_check_cached",
+    "note": "Every R run of the training experiment started after the R environment check changed (see the ml_scoring incident), so its R runs share one condition."
+  }
+]
