@@ -105,3 +105,19 @@ fn a_model_is_loaded_once_per_process() {
     let second = mage::onnx::model(fixture("regressor.onnx")).unwrap();
     assert!(std::sync::Arc::ptr_eq(&first, &second));
 }
+
+#[test]
+fn threads_that_load_a_model_at_once_share_one_copy() {
+    // Each thread missed the cache, loaded the model and replaced the others' copies, so
+    // callers held different models.
+    let models: Vec<_> = (0..8)
+        .map(|_| std::thread::spawn(|| mage::onnx::model(fixture("classifier.onnx")).unwrap()))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect();
+    let again = mage::onnx::model(fixture("classifier.onnx")).unwrap();
+    for model in &models {
+        assert!(std::sync::Arc::ptr_eq(model, &again));
+    }
+}

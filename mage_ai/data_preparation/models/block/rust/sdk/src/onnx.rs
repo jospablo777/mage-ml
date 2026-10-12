@@ -46,12 +46,15 @@ pub fn model(path: impl AsRef<Path>) -> Result<Arc<Model>> {
     {
         return Ok(loaded.clone());
     }
+    // Loaded outside the lock, so other models load meanwhile. When another thread loaded
+    // this one first, its copy is kept and returned: every caller shares one model.
     let loaded = Arc::new(Model::load(&path)?);
-    models
+    Ok(models
         .lock()
         .map_err(|_| anyhow!("model cache poisoned"))?
-        .insert(path, loaded.clone());
-    Ok(loaded)
+        .entry(path)
+        .or_insert(loaded)
+        .clone())
 }
 
 /// Threads for one inference: the block's share of the machine when MageML set it.
