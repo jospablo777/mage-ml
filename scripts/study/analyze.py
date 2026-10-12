@@ -310,6 +310,116 @@ def inference():
     print()
 
 
+def _score_seconds(row: Dict) -> float:
+    """The scoring block's own time: the run less the loader is the scheduler's share."""
+    seconds = [v for b, v in (row.get('block_seconds') or {}).items()
+               if b.startswith('score_') and v is not None]
+    return seconds[0] if seconds else float('nan')
+
+
+def _gpu_joules(row: Dict) -> float:
+    """GPU energy of the run above the idle draw measured before it."""
+    if row.get('gpu_j') is None or row.get('gpu_idle_w') is None:
+        return float('nan')
+    return row['gpu_j'] - row['gpu_idle_w'] * row['seconds']
+
+
+def ml_scoring():
+    every = load('ml_scoring')
+    rows = warm(every)
+    if not rows:
+        return
+    print('## Model scoring\n')
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r['model'], r['engine'], r['language'], r['device'], r['rows'], r['mode'])
+               ].append(r)
+    hashes = defaultdict(set)
+    for r in every:
+        if r.get('sha256'):
+            hashes[r['scorer'], r['rows']].add(r['sha256'])
+    out = []
+    largest = max(r['rows'] for r in rows)
+    summary = {}
+    for key, values in sorted(groups.items()):
+        model, engine, language, device, size, mode = key
+        block = [_score_seconds(v) for v in values]
+        med, low, high = median_ci(block)
+        energy = [_gpu_joules(v) for v in values]
+        energy = [e for e in energy if not np.isnan(e)]
+        scorer = values[0]['scorer']
+        out.append([
+            model, engine, language, device, f'{size:,}', mode,
+            f'{fmt(med, 3)} [{fmt(low, 3)}, {fmt(high, 3)}]', f'{size / med:,.0f}',
+            fmt(1000 * np.median(energy) / size, 4) if energy else '',
+            f"{max(v.get('max_abs_diff', 0) for v in values):.1e}",
+            'yes' if len(hashes[scorer, size]) == 1 else f'no ({len(hashes[scorer, size])})',
+        ])
+        if size == largest and mode == 'off':
+            summary[(model, engine, language, device)] = (med, low, high)
+    print(table(['model', 'engine', 'language', 'device', 'rows', 'mode',
+                 'scoring s [95% CI]', 'rows per s', 'GPU J per 1k rows',
+                 'max abs diff vs Python', 'same bytes every run'], out))
+    print()
+    # ONNX in each language, and each language's native runtime, on the CPU.
+    models = sorted({k[0] for k in summary})
+    for engine, name, title in (
+        ('onnx', 'ml-onnx-languages', f'ONNX scoring on the CPU, {largest:,} rows'),
+        ('native', 'ml-native-languages', f'Native scoring on the CPU, {largest:,} rows'),
+    ):
+        series, errors = {}, {}
+        for language in ('python', 'r', 'rust'):
+            points = [summary.get((m, engine, language, 'cpu')) for m in models]
+            if not any(points):
+                continue
+            series[language] = [p[0] if p else None for p in points]
+            errors[language] = [(p[1], p[2]) if p else None for p in points]
+        if series:
+            charts.bars(IMAGES / name, title, models, series, errors,
+                        ylabel='scoring block seconds')
+    # Fused against block by block for the two-block scoring pipelines.
+    ratios = []
+    for key in sorted({k[:5] for k in groups}):
+        off = [r['seconds'] for r in groups.get(key + ('off',), [])]
+        fused = [r['seconds'] for r in groups.get(key + ('chains',), [])]
+        if len(off) > 1 and len(fused) > 1:
+            ratio, low, high = ratio_ci(off, fused)
+            ratios.append([*key[:4], f'{key[4]:,}', f'{fmt(ratio)} [{fmt(low)}, {fmt(high)}]',
+                           f'{mann_whitney(off, fused):.3g}'])
+    if ratios:
+        print(table(['model', 'engine', 'language', 'device', 'rows',
+                     'block by block / fused [95% CI]', 'Mann-Whitney p'], ratios))
+        print()
+
+
+def ml_training():
+    every = load('ml_training')
+    if not every:
+        return
+    print('## Training in Python and R\n')
+    runs = warm(r for r in every if not r.get('summary'))
+    out = []
+    groups = defaultdict(list)
+    for r in runs:
+        fit = [v for b, v in (r.get('block_seconds') or {}).items()
+               if b.startswith('fit_') and v is not None]
+        if fit:
+            groups[(r['model'], r['language'])].append(fit[0])
+    for (model, language), values in sorted(groups.items()):
+        med, low, high = median_ci(values)
+        out.append([model, language, f'{fmt(med, 3)} [{fmt(low, 3)}, {fmt(high, 3)}]',
+                    len(values)])
+    print(table(['model', 'language', 'fit block s [95% CI]', 'runs'], out))
+    print()
+    summaries = [r for r in every if r.get('summary')]
+    if summaries:
+        print(table(['model', 'max abs diff', 'max rel diff', 'Python same bytes',
+                     'R same bytes'], [
+            [r['model'], f"{r['max_abs_diff']:.2e}", f"{r['max_rel_diff']:.2e}",
+             r['python_deterministic'], r['r_deterministic']] for r in summaries]))
+        print()
+
+
 def excluded():
     if EXCLUDED:
         print('## Runs left out of the timings\n')
@@ -321,5 +431,5 @@ def excluded():
 if __name__ == '__main__':
     IMAGES.mkdir(parents=True, exist_ok=True)
     for step in (correctness, types, chain_length, switches, data_size, width, faults,
-                 inference, excluded):
+                 inference, ml_scoring, ml_training, excluded):
         step()

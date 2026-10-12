@@ -79,7 +79,28 @@ class Topology:
         return ','.join(n.language for n in self.nodes)
 
 
-# Topologies: each returns the upstream lists of nodes 0..n-1, in topological order.
+# Topologies: each returns the upstream lists of nodes 0..n-1, in topological order. The
+# study names their families:
+#
+#   Line            chain(n)       one path: 0 -> 1 -> ... -> n-1
+#   Parallel lines  chains(k, n)   k independent lines of n blocks
+#   Diamond         diamond()      one block feeds two, which meet again
+#   Broadcast       fan_out(w)     one block feeds w independent blocks
+#   Merge           fan_in(w)      w roots feed one block
+#   Lattice         lattice(l, w)  l layers of w blocks, each reading the whole layer before
+#   Thicket         random_dag()   random edges from earlier to later blocks
+FAMILIES = {
+    'chain': 'Line', 'chains': 'Parallel lines', 'diamond': 'Diamond',
+    'fan_out': 'Broadcast', 'fan_in': 'Merge', 'lattice': 'Lattice', 'random': 'Thicket',
+}
+
+
+def family(name: str) -> str:
+    """The family of a topology named like chain5, fan_in3, lattice3x2 or random8a."""
+    for prefix in sorted(FAMILIES, key=len, reverse=True):
+        if name.startswith(prefix):
+            return FAMILIES[prefix]
+    return name
 
 def chain(length: int) -> List[List[int]]:
     return [[]] + [[i - 1] for i in range(1, length)]
