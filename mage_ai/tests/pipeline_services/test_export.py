@@ -243,6 +243,37 @@ class CaptureTest(ExportTestCase):
         self.assertIn('FROM debian:trixie-slim', onnx)
         self.assertIn('install -y --no-install-recommends g++', onnx)
 
+    def test_each_base_platform_and_service_builds_in_its_own_cargo_target(self):
+        """
+        Every export cached cargo's target folder at the same place. A service on bookworm
+        built after one on trixie got trixie's mage-service, which needs a newer glibc, and
+        the amd64 and arm64 builds of one image shared one folder.
+        """
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        (project / 'rust').mkdir()
+        manifest = (
+            '[workspace.dependencies]\nmage-block = {{ path = ".mage/sdk", features = {} }}\n'
+        )
+        capture_ = export.Capture(
+            name='s', project=project,
+            manifest={'pipelines': [{'blocks': [{'language': 'rust'}]}]},
+            rust_blocks=[('score', 'block_score')],
+        )
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres"]'))
+        plain = export._dockerfile(capture_)
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres", "onnx"]'))
+        onnx = export._dockerfile(capture_)
+
+        build_stage = plain.split('AS build', 1)[1]
+        self.assertLess(build_stage.index('ARG TARGETARCH'), build_stage.index('RUN '))
+        self.assertIn(
+            'id=mage-service-bookworm-$TARGETARCH,target=/build/mage_service/target', plain,
+        )
+        self.assertIn('id=mage-service-trixie-$TARGETARCH,target=/build/mage_service/target', onnx)
+        self.assertIn('id=mage-blocks-s-bookworm-$TARGETARCH,target=/build/rust/target', plain)
+        self.assertIn('id=mage-blocks-s-trixie-$TARGETARCH,target=/build/rust/target', onnx)
+
     def test_an_include_outside_the_project_or_missing_stops_the_export(self):
         self.chain()
         with self.assertRaises(export.ExportError) as caught:

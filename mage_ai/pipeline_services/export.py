@@ -1559,6 +1559,10 @@ def _dockerfile(capture_: Capture) -> str:
     python_version = f'{sys.version_info.major}.{sys.version_info.minor}'
     if capture_.environment is not None:
         python_version = capture_.environment.python
+    # ONNX Runtime's static library needs GCC 14's C++ library, which Debian has from trixie
+    # on: the Rust programs build on trixie and run on it.
+    onnx = _uses_sdk_feature(capture_, 'onnx')
+    build_base = 'trixie' if onnx else 'bookworm'
     rust_blocks = ''
     copy_blocks = ''
     if capture_.rust_blocks:
@@ -1567,12 +1571,14 @@ def _dockerfile(capture_: Capture) -> str:
         cxx = (
             'RUN apt-get update && apt-get install -y --no-install-recommends g++ && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
-        ) if _uses_sdk_feature(capture_, 'onnx') else ''
+        ) if onnx else ''
+        # Each service has its own: the blocks crate has the same path in every export.
+        blocks_cache = f'mage-blocks-{capture_.name}-{build_base}-$TARGETARCH'
         rust_blocks = f'''
 # The Rust blocks, compiled once here into one binary that runs any of them.
 {cxx}COPY rust ./rust
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
-    --mount=type=cache,target=/build/rust/target \\
+    --mount=type=cache,id={blocks_cache},target=/build/rust/target \\
     cargo build --release {locked}--manifest-path rust/Cargo.toml -p {RUST_BUNDLE} && \\
     mkdir -p /out/bin && cp rust/target/release/{RUST_BUNDLE} /out/bin/{RUST_BUNDLE}
 '''
@@ -1620,10 +1626,6 @@ RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync
 ENV MAGE_R_SYNC=off \\
     XDG_CACHE_HOME=/tmp/mage-service-cache
 '''
-    # ONNX Runtime's static library needs GCC 14's C++ library, which Debian has from trixie
-    # on: the Rust programs build on trixie and run on it.
-    onnx = _uses_sdk_feature(capture_, 'onnx')
-    build_base = 'trixie' if onnx else 'bookworm'
     if capture_.needs_python:
         base = 'trixie' if capture_.needs_r or onnx else 'bookworm'
         runtime = f'''FROM python:{python_version}-slim-{base}
@@ -1655,10 +1657,13 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
 # docker build -t {capture_.name} .
 
 FROM rust:{rust}-slim-{build_base} AS build
+# Cargo's target folder is cached for each Debian release and CPU: a binary from another
+# release can need a newer glibc, and the amd64 and arm64 builds run at the same time.
+ARG TARGETARCH
 WORKDIR /build
 COPY build/mage_service ./mage_service
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
-    --mount=type=cache,target=/build/mage_service/target \\
+    --mount=type=cache,id=mage-service-{build_base}-$TARGETARCH,target=/build/mage_service/target \\
     cargo build --release --locked --manifest-path mage_service/Cargo.toml \\
       -p mage-service -p mage-console && \\
     mkdir -p /out && \\
