@@ -32,8 +32,10 @@ GPU_MAX_C = float(os.getenv('MAGE_STUDY_GPU_MAX_C', '80'))
 COOL_WAIT_S = float(os.getenv('MAGE_STUDY_COOL_WAIT_S', '600'))
 
 # The model experiments need the ML libraries and the r_ml environment, which a default
-# integration run does not have.
-collect_ignore = [] if os.getenv('MAGE_STUDY_FULL') == '1' else ['test_ml_models.py']
+# integration run does not have; the journal experiment changes the metadata database.
+collect_ignore = [] if os.getenv('MAGE_STUDY_FULL') == '1' else [
+    'test_ml_models.py', 'test_metadata_db.py',
+]
 
 
 def cpu_temperature() -> Optional[float]:

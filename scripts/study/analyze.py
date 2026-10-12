@@ -43,6 +43,32 @@ def load(experiment: str) -> List[Dict]:
     return rows
 
 
+def latest(rows: List[Dict]) -> List[Dict]:
+    """The rows of the newest session, for experiments measured again after a change."""
+    if not rows:
+        return rows
+    newest = max(r['session'] for r in rows)
+    return [r for r in rows if r['session'] == newest]
+
+
+INCIDENTS = json.loads((RESULTS / 'incidents.json').read_text()) \
+    if (RESULTS / 'incidents.json').exists() else []
+
+
+def condition(row: Dict) -> str:
+    """The condition a run ran under when its session's conditions changed (incidents.json)."""
+    from datetime import datetime
+
+    for incident in INCIDENTS:
+        if (incident['session'] == row.get('session')
+                and incident['experiment'] == row.get('experiment')
+                and incident['language'] == row.get('language')
+                and datetime.fromisoformat((row.get('before') or {}).get('utc'))
+                >= datetime.fromisoformat(incident['from_utc'])):
+            return incident['condition']
+    return 'as recorded'
+
+
 def flagged(row: Dict) -> bool:
     """A run that started on a busy or hot machine: excluded from timings, counted."""
     before = row.get('before') or {}
@@ -379,7 +405,8 @@ def _gpu_joules(row: Dict) -> float:
 
 
 def ml_scoring():
-    every = load('ml_scoring')
+    all_sessions = load('ml_scoring')
+    every = latest(all_sessions)
     rows = warm(every)
     if not rows:
         return
@@ -444,10 +471,83 @@ def ml_scoring():
         print(table(['model', 'engine', 'language', 'device', 'rows',
                      'block by block / fused [95% CI]', 'Mann-Whitney p'], ratios))
         print()
+    r_check(all_sessions, every)
+
+
+def r_check(all_sessions: List[Dict], current: List[Dict]):
+    """R scoring blocks before 0e7d5ac3a (rv plan in every block run) and in the latest
+    session, warm runs."""
+    before = [r for r in all_sessions if r['language'] == 'r' and r['engine'] == 'native'
+              and r['session'] != (current[0]['session'] if current else None)
+              and condition(r) == 'as recorded' and not r.get('cold') and not r['problems']]
+    after = [r for r in current if r['language'] == 'r' and r['engine'] == 'native'
+             and not r.get('cold') and not r['problems']]
+    if not before or not after:
+        return
+    print('## R environment check, before and after 0e7d5ac3a\n')
+    out = []
+    for scorer in sorted({r['scorer'] for r in before}):
+        for size in sorted({r['rows'] for r in before if r['scorer'] == scorer}):
+            a = [_score_seconds(r) for r in before if r['scorer'] == scorer and r['rows'] == size]
+            b = [_score_seconds(r) for r in after if r['scorer'] == scorer and r['rows'] == size]
+            if len(a) > 1 and len(b) > 1:
+                ma, la, ha = median_ci(a)
+                mb, lb, hb = median_ci(b)
+                out.append([scorer, f'{size:,}', f'{fmt(ma)} [{fmt(la)}, {fmt(ha)}]',
+                            f'{fmt(mb)} [{fmt(lb)}, {fmt(hb)}]', f'{ma / mb:.1f}x',
+                            f'{mann_whitney(a, b):.3g}'])
+    print(table(['scorer', 'rows', 'before s [95% CI]', 'after s [95% CI]', 'faster',
+                 'Mann-Whitney p'], out))
+    print()
+
+
+def ml_end_to_end():
+    every = latest(load('ml_end_to_end'))
+    rows = warm(every)
+    if not rows:
+        return
+    print('## End to end in one language\n')
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r['model'], r['language'], r['rows'], r['mode'])].append(r['seconds'])
+    out, lines = [], {}
+    for (model, language, size, mode), values in sorted(groups.items()):
+        if mode != 'chains':
+            continue
+        med, low, high = median_ci(values)
+        off = groups.get((model, language, size, 'off'), [])
+        ratio = ratio_ci(off, values) if len(off) > 1 and len(values) > 1 else None
+        out.append([model, language, f'{size:,}', f'{fmt(med)} [{fmt(low)}, {fmt(high)}]',
+                    fmt(float(np.median(off))) if off else '',
+                    f'{fmt(ratio[0])} [{fmt(ratio[1])}, {fmt(ratio[2])}]' if ratio else ''])
+        lines.setdefault(f'{model} {language}', []).append(
+            (float(np.log10(size)), med, low, high))
+    print(table(['model', 'language', 'rows', 'fused s [95% CI]', 'block by block s',
+                 'block by block / fused [95% CI]'], out))
+    print()
+    charts.lines(IMAGES / 'ml-end-to-end', 'Scoring pipeline in one language, fused',
+                 lines, xlabel='log10(rows)', ylabel='seconds per run')
+    # The three languages compute the same summary: the mean score of each of 10 buckets.
+    summaries = defaultdict(dict)
+    for r in every:
+        if r.get('summary'):
+            summaries[(r['model'], r['rows'])][r['language']] = r['summary']
+    agree = []
+    for (model, size), by_language in sorted(summaries.items()):
+        languages = sorted(by_language)
+        reference = np.array(by_language[languages[0]]['mean_score'])
+        worst = max(float(np.abs(np.array(by_language[lang]['mean_score']) - reference).max())
+                    for lang in languages)
+        counts = {lang: by_language[lang]['high'] for lang in languages}
+        agree.append([model, f'{size:,}', ', '.join(languages), f'{worst:.1e}',
+                      'yes' if len({tuple(v) for v in counts.values()}) == 1 else 'no'])
+    print(table(['model', 'rows', 'languages', 'max difference of bucket means',
+                 'same counts above 0.5'], agree))
+    print()
 
 
 def ml_training():
-    every = load('ml_training')
+    every = latest(load('ml_training'))
     if not every:
         return
     print('## Training in Python and R\n')
@@ -474,6 +574,38 @@ def ml_training():
         print()
 
 
+def journal():
+    rows = warm(load('journal'))
+    if not rows:
+        return
+    print('## Metadata database journal\n')
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r['mode'], r['journal'])].append(r['seconds'])
+    out = []
+    for (mode, arm), values in sorted(groups.items()):
+        values = sorted(values)
+        med, low, high = median_ci(values)
+        p90 = float(np.percentile(values, 90))
+        boot = np.percentile(RNG.choice(values, size=(BOOT, len(values))), 90, axis=1)
+        p90_low, p90_high = np.percentile(boot, [2.5, 97.5])
+        out.append([mode, arm, len(values), f'{fmt(med)} [{fmt(low)}, {fmt(high)}]',
+                    f'{fmt(p90)} [{fmt(p90_low)}, {fmt(p90_high)}]', fmt(max(values)),
+                    sum(v > 2 * med for v in values)])
+    print(table(['mode', 'journal', 'runs', 'median s [95% CI]', '90th percentile [95% CI]',
+                 'max s', 'runs over 2x median'], out))
+    print()
+    tests = []
+    for mode in sorted({k[0] for k in groups}):
+        a, b = groups.get((mode, 'delete'), []), groups.get((mode, 'wal'), [])
+        if len(a) > 1 and len(b) > 1:
+            levene = stats.levene(a, b).pvalue
+            tests.append([mode, f'{mann_whitney(a, b):.3g}', f'{levene:.3g}'])
+    if tests:
+        print(table(['mode', 'Mann-Whitney p (medians)', 'Levene p (spread)'], tests))
+        print()
+
+
 def excluded():
     if EXCLUDED:
         print('## Runs left out of the timings\n')
@@ -486,5 +618,5 @@ if __name__ == '__main__':
     IMAGES.mkdir(parents=True, exist_ok=True)
     for step in (correctness, types, chain_length, switches, data_size, width,
                  string_dtype, faults,
-                 inference, ml_scoring, ml_training, excluded):
+                 inference, ml_scoring, ml_end_to_end, ml_training, journal, excluded):
         step()
