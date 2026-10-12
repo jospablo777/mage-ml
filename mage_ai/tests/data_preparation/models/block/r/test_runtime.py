@@ -235,6 +235,27 @@ class PrepareTest(RuntimeTestCase):
         self.prepare()
         self.assertEqual(self.calls.count('plan'), 3)
 
+    def test_a_check_holds_for_new_processes_until_the_files_change(self):
+        # Each block run is a new process; rv plan downloads URL and git packages again.
+        self.prepare()
+        runtime._prepared.clear()
+        self.prepare()
+        self.assertEqual(self.calls.count('plan'), 1)
+
+        stat = (self.project / 'rv.lock').stat()
+        os.utime(self.project / 'rv.lock', ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+        runtime._prepared.clear()
+        self.prepare()
+        self.assertEqual(self.calls.count('plan'), 2)
+
+    def test_a_failed_check_is_not_remembered_by_new_processes(self):
+        self.pending = {'installed': [{'name': 'dplyr'}], 'removed': []}
+        for _ in range(2):
+            runtime._prepared.clear()
+            with self.assertRaises(runtime.REnvironmentError):
+                self.prepare()
+        self.assertEqual(self.calls.count('plan'), 2)
+
     def test_failed_checks_are_not_cached(self):
         self.pending = {'installed': [{'name': 'dplyr'}], 'removed': []}
         with self.assertRaises(runtime.REnvironmentError):

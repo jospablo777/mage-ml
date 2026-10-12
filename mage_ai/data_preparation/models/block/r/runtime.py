@@ -15,7 +15,8 @@ Settings, read from the environment:
   matching R version that rig (https://github.com/r-lib/rig) installed.
 - MAGE_RIG: the rig executable. Defaults to the one on PATH.
 - MAGE_R_SYNC: 'check' (default) fails a block when the library is not synced with the
-  lock file, 'auto' runs `rv sync` first, 'off' skips the check.
+  lock file, 'auto' runs `rv sync` first, 'off' skips the check. A check that passed holds
+  until rproject.toml, rv.lock or the library change.
 - MAGE_R_TIMEOUT: seconds after which an R block is stopped. No limit by default.
 - MAGE_R_CACHE_DIR: where Mage installs its mageml R package. Defaults to
   ~/.cache/mage-ml/r.
@@ -487,6 +488,39 @@ def _prepare_key(config: RConfig) -> tuple:
     )
 
 
+def _check_file(config: RConfig) -> Path:
+    name = hashlib.sha256(str(config.project_dir).encode()).hexdigest()[:16]
+    return r_cache_directory() / 'checks' / f'{name}.json'
+
+
+def _checked_before(config: RConfig) -> bool:
+    """
+    Whether a process already found the library in sync with rv.lock, and none of the
+    files the check reads changed since. Every block run is a new process, and `rv plan`
+    takes 0.2 seconds for packages from repositories but 10 to 40 seconds, and the
+    network, for a package from a URL or git, which it downloads again on each check.
+    """
+    try:
+        return json.loads(_check_file(config).read_text()) == _key_json(config)
+    except (OSError, ValueError):
+        return False
+
+
+def _remember_check(config: RConfig) -> None:
+    path = _check_file(config)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'.{path.name}.{os.getpid()}')
+        tmp.write_text(json.dumps(_key_json(config)))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _key_json(config: RConfig):
+    return json.loads(json.dumps(_prepare_key(config), default=str))
+
+
 def prepare(config: RConfig) -> RLibraries:
     """
     Check the R environment before a block runs, install the mageml package when its
@@ -517,7 +551,7 @@ def _prepare(config: RConfig) -> RLibraries:
                 'Rscript, or change r_version in rproject.toml and run `mage r sync`.',
             )
 
-        if config.sync != 'off':
+        if config.sync != 'off' and not _checked_before(config):
             pending = plan(config)
             changes = (pending.get('installed') or []) + (pending.get('removed') or [])
             if changes:
@@ -546,7 +580,11 @@ def _prepare(config: RConfig) -> RLibraries:
                 f'R blocks need the R packages {", ".join(missing)}. Add them with '
                 f'`rv add {" ".join(missing)}` in {config.project_dir}.',
             )
-    return RLibraries(rv=rv_library, mageml=install_mageml(config, actual, rv_library))
+    libraries = RLibraries(rv=rv_library, mageml=install_mageml(config, actual, rv_library))
+    if config.uses_rv and config.sync != 'off':
+        # Remembered once the environment is ready, after a sync in auto mode.
+        _remember_check(config)
+    return libraries
 
 
 def r_cache_directory() -> Path:
