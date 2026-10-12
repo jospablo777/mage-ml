@@ -86,9 +86,11 @@ class LoadArtifactTest(unittest.TestCase):
 
         X = np.array([[0.0, 1.0], [1.0, 0.0], [2.0, 1.0], [3.0, 0.0]] * 5)
         y = np.array([0, 1, 0, 1] * 5)
-        classifier = CatBoostClassifier(iterations=5, verbose=0).fit(X, y)
+        # allow_writing_files=False: CatBoost writes its training logs to the current folder.
+        settings = dict(iterations=5, verbose=0, allow_writing_files=False)
+        classifier = CatBoostClassifier(**settings).fit(X, y)
         classifier.save_model(self.path('cls.cbm'))
-        regressor = CatBoostRegressor(iterations=5, verbose=0).fit(X, X[:, 0])
+        regressor = CatBoostRegressor(**settings).fit(X, X[:, 0])
         regressor.save_model(self.path('reg.cbm'))
 
         loaded = models.load_artifact('models/cls.cbm')
