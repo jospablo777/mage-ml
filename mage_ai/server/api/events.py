@@ -3,17 +3,17 @@ import json
 from mage_ai.orchestration.db.models.schedules import EventMatcher, PipelineSchedule
 from mage_ai.orchestration.triggers.event_trigger import EventTrigger
 
-from .base import BaseDetailHandler, BaseHandler
+from .base import BaseDetailHandler, BaseHandler, SignedInMixin
 
 
-class ApiEventHandler(BaseHandler):
+class ApiEventHandler(SignedInMixin, BaseHandler):
     def post(self):
         payload = self.get_payload()
         EventTrigger().run(payload)
         self.write(dict(event=payload))
 
 
-class ApiEventMatcherDetailHandler(BaseDetailHandler):
+class ApiEventMatcherDetailHandler(SignedInMixin, BaseDetailHandler):
     model_class = EventMatcher
 
     def get(self, event_matcher_id):
@@ -38,7 +38,7 @@ class ApiEventMatcherDetailHandler(BaseDetailHandler):
         super().delete(event_matcher_id)
 
 
-class ApiEventMatcherListHandler(BaseHandler):
+class ApiEventMatcherListHandler(SignedInMixin, BaseHandler):
     model_class = EventMatcher
 
     def get(self):

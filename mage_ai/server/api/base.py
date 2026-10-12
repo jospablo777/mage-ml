@@ -154,6 +154,26 @@ class BaseApiHandler(BaseHandler, OAuthMiddleware):
         super().prepare()
 
 
+class SignedInMixin(OAuthMiddleware):
+    """
+    For handlers outside the API resources: with REQUIRE_USER_AUTHENTICATION, only a
+    signed-in user gets an answer, as from the resources. These handlers derived from
+    BaseHandler alone, so anyone who could reach the server could trigger pipelines
+    through /api/events, change event matchers and read output statistics.
+    """
+
+    def prepare(self):
+        from mage_ai import settings
+
+        super().prepare()
+        if settings.REQUIRE_USER_AUTHENTICATION and (
+            getattr(self.request, 'error', None) or not getattr(self.request, 'current_user', None)
+        ):
+            self.set_status(401)
+            self.set_header('Content-Type', 'application/json')
+            self.finish(json.dumps(dict(error=dict(code=401, message='Sign in first.'))))
+
+
 class BaseDetailHandler(BaseHandler):
     def get(self, model_id, **kwargs):
         model = self.model_class.get_by_id(int(model_id))
