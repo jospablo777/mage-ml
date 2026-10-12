@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
 import api from '@api';
+import { useError } from '@context/Error';
 import { onSuccess } from '@api/utils/response';
 import Col from '@components/shared/Grid/Col';
 import Row from '@components/shared/Grid/Row';
@@ -52,6 +53,9 @@ function VariableRow({
   const { uuid, value } = variable || {};
 
   const refVariableKeyInput = useRef(null);
+  const [showError] = useError(null, {}, [], {
+    uuid: 'GlobalVariables/VariableRow',
+  });
   const refTextInput = useRef(null);
   const [showActions, setShowActions] = useState<boolean>(false);
   const [variableName, setVariableName] = useState<string>(uuid);
@@ -61,6 +65,10 @@ function VariableRow({
   const [updateVariable]: any = useMutation(api.variables.pipelines.useUpdate(pipelineUUID, uuid), {
     onSuccess: (response: any) =>
       onSuccess(response, {
+        onErrorCallback: (response, errors) => showError({
+          errors,
+          response,
+        }),
         callback: () => {
           setEdit(false);
           fetchVariables();

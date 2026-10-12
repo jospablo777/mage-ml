@@ -83,6 +83,10 @@ function Settings() {
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: ({
             project: objectServer,
           }) => {

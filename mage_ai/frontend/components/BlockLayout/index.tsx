@@ -128,6 +128,10 @@ function BlockLayout({ leftOffset, pageBlockLayoutTemplate, topOffset, uuid }: B
     {
       onSuccess: (response: any) =>
         onSuccess(response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: resp =>
             setDataBlockLayoutItem(prev => {
               const item = resp?.block_layout_item;
@@ -206,6 +210,10 @@ function BlockLayout({ leftOffset, pageBlockLayoutTemplate, topOffset, uuid }: B
     {
       onSuccess: (response: any) =>
         onSuccess(response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: resp => {
             setDataPageBlockLayout(resp);
           },

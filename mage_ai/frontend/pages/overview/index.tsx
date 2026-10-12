@@ -134,6 +134,10 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
     {
       onSuccess: (response: any) =>
         onSuccess(response, {
+          onErrorCallback: (response, errors) => setErrors?.({
+            errors,
+            response,
+          }),
           callback: ({ monitor_stat: { stats } }) => {
             setMonitorStats(stats);
           },

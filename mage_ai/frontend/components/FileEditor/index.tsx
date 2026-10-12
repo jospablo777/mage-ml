@@ -340,6 +340,10 @@ function FileEditor({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => setErrors?.({
+            errors,
+            response,
+          }),
           callback: () => {
             fetchPipeline?.();
           },

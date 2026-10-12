@@ -93,6 +93,10 @@ function GitFiles({
   const sharedUpdateAProps = useMemo(() => ({
     onSuccess: (response: any) => onSuccess(
       response, {
+        onErrorCallback: (response, errors) => showError({
+          errors,
+          response,
+        }),
         callback: () => {
           fetchBranchProp();
           setSelectedFilesA({});
@@ -116,6 +120,10 @@ function GitFiles({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: () => {
             fetchBranchProp();
             setSelectedFilesB({});

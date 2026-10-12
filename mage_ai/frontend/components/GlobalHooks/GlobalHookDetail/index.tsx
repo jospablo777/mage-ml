@@ -134,6 +134,10 @@ function GlobalHookDetail({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: ({
             global_hook: objectServer,
           }) => {
@@ -152,6 +156,10 @@ function GlobalHookDetail({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: ({
             global_hook: objectServer,
           }) => {
@@ -190,6 +198,10 @@ function GlobalHookDetail({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: ({
             global_hook: objectServer,
           }) => {
@@ -224,6 +236,10 @@ function GlobalHookDetail({
     {
       onSuccess: (response: any) => onSuccess(
         response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: ({
             global_hook: objectServer,
           }) => {

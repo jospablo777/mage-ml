@@ -115,6 +115,10 @@ function BlockLayoutItem({
     {
       onSuccess: (response: any) =>
         onSuccess(response, {
+          onErrorCallback: (response, errors) => showError({
+            errors,
+            response,
+          }),
           callback: resp => {
             if (resp?.error) {
               showError({

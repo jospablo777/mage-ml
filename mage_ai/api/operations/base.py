@@ -230,6 +230,11 @@ class BaseOperation:
                 }
         except ApiError as err:
             if (
+                getattr(err, 'code', None) == 404
+                and getattr(err, 'message', None) == ApiError.RESOURCE_NOT_FOUND['message']
+            ):
+                err.message = self.__not_found_message()
+            if (
                 err.code == 403
                 and self.user
                 and self.user.project_access == 0
@@ -815,6 +820,18 @@ class BaseOperation:
                     return model
                 except DoesNotExistError:
                     raise ApiError(ApiError.RESOURCE_NOT_FOUND)
+
+    def __not_found_message(self) -> str:
+        """What was not found, for an error raised with the generic "Record not found."."""
+        def name(resource: str) -> str:
+            return inflection.humanize(inflection.singularize(resource or 'record'))
+
+        what = name(self.resource)
+        if self.pk is not None:
+            what = f'{what} {self.pk}'
+        if self.resource_parent and self.resource_parent_id is not None:
+            what = f'{what} of {name(self.resource_parent).lower()} {self.resource_parent_id}'
+        return f'{what} was not found.'
 
     def __combined_options(self):
         if not self.__combined_options_attr:
