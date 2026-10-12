@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="360" viewBox="0 0 760 360" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12">
+<rect width="100%" height="100%" fill="#0d1117"/>
+<text x="70" y="22" fill="#e6edf3" font-size="14" font-weight="600">Scoring block time, 1,000,000 rows, fused</text>
+<line x1="70" x2="740" y1="290.0" y2="290.0" stroke="#30363d"/>
+<text x="64" y="294.0" fill="#9198a1" text-anchor="end">0</text>
+<line x1="70" x2="740" y1="242.0" y2="242.0" stroke="#30363d"/>
+<text x="64" y="246.0" fill="#9198a1" text-anchor="end">0.4</text>
+<line x1="70" x2="740" y1="194.0" y2="194.0" stroke="#30363d"/>
+<text x="64" y="198.0" fill="#9198a1" text-anchor="end">0.8</text>
+<line x1="70" x2="740" y1="146.0" y2="146.0" stroke="#30363d"/>
+<text x="64" y="150.0" fill="#9198a1" text-anchor="end">1.2</text>
+<line x1="70" x2="740" y1="98.0" y2="98.0" stroke="#30363d"/>
+<text x="64" y="102.0" fill="#9198a1" text-anchor="end">1.6</text>
+<line x1="70" x2="740" y1="50.0" y2="50.0" stroke="#30363d"/>
+<text x="64" y="54.0" fill="#9198a1" text-anchor="end">2</text>
+<text transform="translate(16,170.0) rotate(-90)" fill="#9198a1" text-anchor="middle">seconds</text>
+<rect x="75.6" y="196.6" width="41.1" height="93.4" fill="#4c78a8"/>
+<line x1="96.1" x2="96.1" y1="197.3" y2="194.6" stroke="#e6edf3"/>
+<line x1="92.1" x2="100.1" y1="197.3" y2="197.3" stroke="#e6edf3"/>
+<line x1="92.1" x2="100.1" y1="194.6" y2="194.6" stroke="#e6edf3"/>
+<text x="97.9" y="308" fill="#e6edf3" text-anchor="middle">gbm_ort_cpu</text>
+<rect x="131.4" y="176.0" width="41.1" height="114.0" fill="#4c78a8"/>
+<line x1="152.0" x2="152.0" y1="176.6" y2="174.0" stroke="#e6edf3"/>
+<line x1="148.0" x2="156.0" y1="176.6" y2="176.6" stroke="#e6edf3"/>
+<line x1="148.0" x2="156.0" y1="174.0" y2="174.0" stroke="#e6edf3"/>
+<text x="153.8" y="308" fill="#e6edf3" text-anchor="middle">gbm_ort_cuda</text>
+<rect x="187.3" y="178.3" width="41.1" height="111.7" fill="#4c78a8"/>
+<line x1="207.8" x2="207.8" y1="180.4" y2="177.5" stroke="#e6edf3"/>
+<line x1="203.8" x2="211.8" y1="180.4" y2="180.4" stroke="#e6edf3"/>
+<line x1="203.8" x2="211.8" y1="177.5" y2="177.5" stroke="#e6edf3"/>
+<text x="209.6" y="308" fill="#e6edf3" text-anchor="middle">gbm_rust_onnx</text>
+<rect x="243.1" y="172.1" width="41.1" height="117.9" fill="#4c78a8"/>
+<line x1="263.6" x2="263.6" y1="173.3" y2="171.4" stroke="#e6edf3"/>
+<line x1="259.6" x2="267.6" y1="173.3" y2="173.3" stroke="#e6edf3"/>
+<line x1="259.6" x2="267.6" y1="171.4" y2="171.4" stroke="#e6edf3"/>
+<text x="265.4" y="308" fill="#e6edf3" text-anchor="middle">gbm_sklearn</text>
+<rect x="298.9" y="278.0" width="41.1" height="12.0" fill="#4c78a8"/>
+<line x1="319.5" x2="319.5" y1="278.7" y2="277.7" stroke="#e6edf3"/>
+<line x1="315.5" x2="323.5" y1="278.7" y2="278.7" stroke="#e6edf3"/>
+<line x1="315.5" x2="323.5" y1="277.7" y2="277.7" stroke="#e6edf3"/>
+<text x="321.3" y="308" fill="#e6edf3" text-anchor="middle">linear_pandas</text>
+<rect x="354.8" y="278.4" width="41.1" height="11.6" fill="#4c78a8"/>
+<line x1="375.3" x2="375.3" y1="279.1" y2="278.0" stroke="#e6edf3"/>
+<line x1="371.3" x2="379.3" y1="279.1" y2="279.1" stroke="#e6edf3"/>
+<line x1="371.3" x2="379.3" y1="278.0" y2="278.0" stroke="#e6edf3"/>
+<text x="377.1" y="308" fill="#e6edf3" text-anchor="middle">linear_polars</text>
+<rect x="410.6" y="191.9" width="41.1" height="98.1" fill="#4c78a8"/>
+<line x1="431.1" x2="431.1" y1="193.4" y2="189.6" stroke="#e6edf3"/>
+<line x1="427.1" x2="435.1" y1="193.4" y2="193.4" stroke="#e6edf3"/>
+<line x1="427.1" x2="435.1" y1="189.6" y2="189.6" stroke="#e6edf3"/>
+<text x="432.9" y="308" fill="#e6edf3" text-anchor="middle">linear_r</text>
+<rect x="466.4" y="268.4" width="41.1" height="21.6" fill="#4c78a8"/>
+<line x1="487.0" x2="487.0" y1="270.1" y2="268.0" stroke="#e6edf3"/>
+<line x1="483.0" x2="491.0" y1="270.1" y2="270.1" stroke="#e6edf3"/>
+<line x1="483.0" x2="491.0" y1="268.0" y2="268.0" stroke="#e6edf3"/>
+<text x="488.8" y="308" fill="#e6edf3" text-anchor="middle">linear_rust</text>
+<rect x="522.3" y="167.8" width="41.1" height="122.2" fill="#4c78a8"/>
+<line x1="542.8" x2="542.8" y1="169.5" y2="132.4" stroke="#e6edf3"/>
+<line x1="538.8" x2="546.8" y1="169.5" y2="169.5" stroke="#e6edf3"/>
+<line x1="538.8" x2="546.8" y1="132.4" y2="132.4" stroke="#e6edf3"/>
+<text x="544.6" y="308" fill="#e6edf3" text-anchor="middle">mlp_ort_cpu</text>
+<rect x="578.1" y="244.4" width="41.1" height="45.6" fill="#4c78a8"/>
+<line x1="598.6" x2="598.6" y1="245.2" y2="239.8" stroke="#e6edf3"/>
+<line x1="594.6" x2="602.6" y1="245.2" y2="245.2" stroke="#e6edf3"/>
+<line x1="594.6" x2="602.6" y1="239.8" y2="239.8" stroke="#e6edf3"/>
+<text x="600.4" y="308" fill="#e6edf3" text-anchor="middle">mlp_ort_cuda</text>
+<rect x="633.9" y="146.4" width="41.1" height="143.6" fill="#4c78a8"/>
+<line x1="654.5" x2="654.5" y1="151.4" y2="142.4" stroke="#e6edf3"/>
+<line x1="650.5" x2="658.5" y1="151.4" y2="151.4" stroke="#e6edf3"/>
+<line x1="650.5" x2="658.5" y1="142.4" y2="142.4" stroke="#e6edf3"/>
+<text x="656.2" y="308" fill="#e6edf3" text-anchor="middle">mlp_rust_onnx</text>
+<rect x="689.8" y="184.8" width="41.1" height="105.2" fill="#4c78a8"/>
+<line x1="710.3" x2="710.3" y1="188.7" y2="181.0" stroke="#e6edf3"/>
+<line x1="706.3" x2="714.3" y1="188.7" y2="188.7" stroke="#e6edf3"/>
+<line x1="706.3" x2="714.3" y1="181.0" y2="181.0" stroke="#e6edf3"/>
+<text x="712.1" y="308" fill="#e6edf3" text-anchor="middle">mlp_sklearn</text>
+<line x1="70" x2="740" y1="290" y2="290" stroke="#6e7681"/>
+<line x1="70" x2="82" y1="328" y2="328" stroke="#4c78a8" stroke-width="4"/>
+<text x="88" y="332" fill="#e6edf3">seconds</text>
+</svg>
