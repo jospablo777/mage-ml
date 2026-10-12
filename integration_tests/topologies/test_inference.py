@@ -242,10 +242,12 @@ fn transform(rows: DataFrame) -> Result<DataFrame> {{
 
 
 def enable_onnx(project: str):
-    """Turns on the onnx feature of the project's Rust workspace."""
-    path = Path(project) / 'rust' / 'Cargo.toml'
-    if not path.exists():
-        return
+    """Turns on the onnx feature of the project's Rust workspace, creating it if needed."""
+    from mage_ai.data_preparation.models.block.rust import workspace as ws
+
+    # The workspace appears with the first build; before it, there was nothing to change
+    # and the first ONNX block built without the feature.
+    path = ws.init(project).cargo_toml
     text = path.read_text()
     match = re.search(r'(mage-block = \{[^}]*features = \[)([^\]]*)\]', text)
     if match and '"onnx"' not in match.group(2):
