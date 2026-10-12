@@ -80,11 +80,13 @@ changes:
 - the schedules and after-run triggers, and loops between them;
 - notes, such as files included because a block names them.
 
-**Secrets and environment variables** lists what the pipelines read (marked secret or
-required) and what the service reads, such as `MAGE_SERVICE_TOKEN`, with where secrets can
-come from: the environment, files, a folder of files, or a secrets manager (IBM Cloud,
-AWS). **Copy .env** gives a `.env` template with all of them. Values never leave the app or
-go into the export.
+**Secrets and environment variables** lists what the pipelines read and what the service
+reads. Every variable of `io_config.yaml` is a secret, and those of the profiles the
+blocks use are required; the rest of what the pipelines read is marked secret when its
+name looks secret. Then come the service's own settings, such as `MAGE_SERVICE_TOKEN`, and
+where secrets can come from: the environment, files, a folder of files, or a secrets
+manager (IBM Cloud, AWS). **Copy .env** gives a `.env` template with all of them. Values
+never leave the app or go into the export.
 
 ### Keep run history, logs and metrics
 

@@ -231,8 +231,21 @@ and a service runs them for the pipelines it holds:
 ## Configuration and secrets
 
 The export lists the environment variables the code reads, in `io_config.yaml`
-(`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`), and marks those that look
-secret. `mage-service env` shows which are set:
+(`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`, `mage_secret_var`). Every
+variable of `io_config.yaml` is marked secret: hosts, users, databases and ports are
+connection settings as much as passwords are. Those of a profile the exported code names,
+such as `ConfigFileLoader(path, 'raw_source')` or a SQL block's profile, are required;
+those of profiles no exported block uses are listed as optional, with a note. Elsewhere,
+names that look secret (`PASSWORD`, `TOKEN`, `KEY`, `SECRET`) are marked secret, and
+`os.environ['X']` is required.
+
+`io_config.yaml` goes into the image as it is, with its `env_var` templates, and resolves
+at run time from the container's environment, as in Mage. A CI/CD pipeline that injects
+`POSTGRES_HOST_SOURCE` into the container gives a block that loads the `raw_source` profile
+its `POSTGRES_HOST`, with no change to the project. The generated `deploy/kubernetes.yaml`
+lists the variables the container needs and sets `MAGE_SERVICE_STRICT_ENV=on`, so a pod
+missing a required one stops at start with their names instead of failing on its first
+connection. `mage-service env` shows which are set:
 
 ```bash
 docker run --rm --env-file .env sales-service env

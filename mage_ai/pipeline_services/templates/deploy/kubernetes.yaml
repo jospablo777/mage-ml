@@ -1,6 +1,8 @@
 # $name on Kubernetes (IBM Cloud Kubernetes Service, OpenShift, EKS, GKE, AKS).
 #   kubectl create secret generic $name-env --from-env-file=.env
 #   kubectl apply -f deploy/kubernetes.yaml
+# The Secret $name-env, or your CI/CD pipeline, gives the container these variables:
+$environment
 # Replace the image with the one you pushed. One replica runs the schedules; more replicas
 # need a shared volume for the run history.
 apiVersion: v1
@@ -40,6 +42,9 @@ spec:
             - secretRef: {name: $name-env, optional: true}
           env:
             - {name: MAGE_SERVICE_SCHEDULES, value: "off"}
+            # Refuse to start while a required variable is missing, instead of failing on
+            # the first connection.
+            - {name: MAGE_SERVICE_STRICT_ENV, value: "on"}
           volumeMounts:
             - {name: data, mountPath: /var/lib/mage-service}
             - {name: tmp, mountPath: /tmp}

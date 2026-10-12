@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+import yaml
+
 from mage_ai.pipeline_services.secrets import secret_variable_name
 
 SCHEMA_VERSION = 1
@@ -844,27 +846,105 @@ def _uses_io_config(capture_: Capture) -> bool:
     return False
 
 
+PROFILE_LITERAL = re.compile(r"""['"]([A-Za-z0-9_][A-Za-z0-9_.\-]*)['"]""")
+PROFILE_SETTING = re.compile(r'^\s*data_provider_profile:\s*[\'"]?([^\s\'"#]+)', re.M)
+
+
+def _io_config_profiles(path: Path) -> Dict[str, Set[str]]:
+    """{profile: the environment variables its values read} from io_config.yaml."""
+    try:
+        content = yaml.safe_load(path.read_text(errors='replace')) or {}
+    except yaml.YAMLError:
+        return {}
+    def strings(value) -> Iterable[str]:
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    profiles = {}
+    for name, value in content.items() if isinstance(content, dict) else []:
+        if isinstance(value, dict):
+            profiles[str(name)] = {
+                found for text in strings(value) for found in ENV_VAR_TEMPLATE.findall(text)
+            }
+    return profiles
+
+
+def _profiles_used(capture_: Capture, profiles: Iterable[str]) -> Set[str]:
+    """
+    The io_config.yaml profiles the exported code names: as a string in a block or a module
+    (ConfigFileLoader(path, 'raw_source'), mage::postgres profiles, R helpers), or as a SQL
+    block's data_provider_profile in its pipeline's metadata.yaml.
+    """
+    profiles = set(profiles)
+    named: Set[str] = set()
+    for path in capture_.files:
+        if path.suffix in ('.py', '.r', '.R', '.rs', '.sql'):
+            named.update(PROFILE_LITERAL.findall(path.read_text(errors='replace')))
+    for pipeline in capture_.manifest.get('pipelines') or []:
+        metadata = capture_.project / 'pipelines' / pipeline['uuid'] / 'metadata.yaml'
+        if metadata.is_file():
+            text = metadata.read_text(errors='replace')
+            named.update(PROFILE_SETTING.findall(text))
+            if any(b['language'] == 'sql' for b in pipeline['blocks']) and \
+                    'data_provider_profile' not in text:
+                named.add('default')
+    return named & profiles
+
+
 def _environment(capture_: Capture) -> List[Dict]:
+    """
+    The environment variables the exported code reads. Those of io_config.yaml are
+    connection settings, all of them secret: hosts, users and databases as well as
+    passwords. Those of a profile the code names are required, since the blocks connect with
+    them; those of other profiles are listed as optional, with a note.
+    """
     variables: Dict[str, Dict] = {}
     io_config_used = _uses_io_config(capture_)
+
+    def add(name, required, secret, label):
+        if name.startswith('MAGE_SERVICE_'):
+            return
+        entry = variables.setdefault(name, dict(
+            name=name, secret=False, required=False, used_by=[],
+        ))
+        entry['required'] = entry['required'] or required
+        entry['secret'] = entry['secret'] or secret or any(
+            hint in name.upper() for hint in SECRET_HINTS
+        )
+        if label not in entry['used_by']:
+            entry['used_by'].append(label)
+
     for path in sorted(capture_.files):
         if path.suffix not in ('.py', '.yaml', '.yml'):
             continue
-        if path.name == 'io_config.yaml' and not io_config_used:
-            # Only the profiles' variables matter, and no exported code reads a profile.
+        if path.name == 'io_config.yaml' and path.parent == capture_.project:
+            if not io_config_used:
+                # Only the profiles' variables matter, and no exported code reads a profile.
+                continue
+            profiles = _io_config_profiles(path)
+            used = _profiles_used(capture_, profiles)
+            for profile in sorted(profiles):
+                for name in sorted(profiles[profile]):
+                    add(name, profile in used, True, f'io_config.yaml ({profile})')
+            unused = sorted(p for p in profiles if p not in used and profiles[p])
+            if unused:
+                capture_.notes.append(
+                    'io_config.yaml profiles no exported block names: '
+                    f'{", ".join(unused)}; their variables are listed as optional.'
+                )
+            # Secrets read with mage_secret_var in io_config.yaml stay required.
+            for name, required, secret, label in _environment_reads(path, capture_.project):
+                if secret:
+                    add(name, required, secret, label)
             continue
         for name, required, secret, label in _environment_reads(path, capture_.project):
-            if name.startswith('MAGE_SERVICE_'):
-                continue
-            entry = variables.setdefault(name, dict(
-                name=name, secret=False, required=False, used_by=[],
-            ))
-            entry['required'] = entry['required'] or required
-            entry['secret'] = entry['secret'] or secret or any(
-                hint in name.upper() for hint in SECRET_HINTS
-            )
-            if label not in entry['used_by']:
-                entry['used_by'].append(label)
+            add(name, required, secret, label)
     return [variables[name] for name in sorted(variables)]
 
 
@@ -1317,9 +1397,21 @@ DEPLOY_FILES = (
 )
 
 
+def _environment_comment(capture_: Capture) -> str:
+    """The variables the container needs, as comment lines for the deploy files."""
+    lines = []
+    for variable in capture_.manifest.get('environment') or []:
+        flags = [f for f, on in (('required', variable['required']),
+                                 ('secret', variable['secret'])) if on]
+        lines.append(f"#   {variable['name']}{f'  ({", ".join(flags)})' if flags else ''}")
+    return '\n'.join(lines) or '#   none: the blocks read no environment variable.'
+
+
 def _write_deploy_files(capture_: Capture, out_dir: Path) -> None:
+    environment = _environment_comment(capture_)
     for template, destination in DEPLOY_FILES:
         text = string.Template((TEMPLATES / template).read_text()).safe_substitute(
+            environment=environment,
             name=capture_.name,
             project=capture_.project.name,
         )

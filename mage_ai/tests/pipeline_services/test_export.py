@@ -363,6 +363,73 @@ class CaptureTest(ExportTestCase):
 
 @unittest.skipUnless(SERVICE_BINARY.is_file(), 'needs the mage-service binary (cargo build)')
 class ExportedRunTest(ExportTestCase):
+    def test_io_config_profiles_resolve_from_the_container_environment_like_mage(self):
+        """
+        A CI/CD pipeline injects POSTGRES_HOST_SOURCE into the container; a block that loads
+        the raw_source profile gets it as POSTGRES_HOST, as in Mage. The export copies
+        io_config.yaml with its templates and never resolves them.
+        """
+        (self.project / 'io_config.yaml').write_text(textwrap.dedent('''
+            # ===============================
+            # *DEVELOPMENT*
+            # ===============================
+            version: 0.1.1
+
+            raw_source:
+              POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_SOURCE') }}"  # pragma: allowlist secret
+              POSTGRES_PORT: "{{ env_var('POSTGRES_PORT_SOURCE') }}"  # pragma: allowlist secret
+
+            feature_store_db:
+              POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_FS') }}"  # pragma: allowlist secret
+        '''))
+        self.add('profiles', 'data_loader', '''
+            from os import path
+
+            from mage_ai.io.config import ConfigFileLoader
+            from mage_ai.settings.repo import get_repo_path
+
+            @data_loader
+            def profiles(*args, **kwargs):
+                config = path.join(get_repo_path(), 'io_config.yaml')
+                source = ConfigFileLoader(config, 'raw_source')
+                store = ConfigFileLoader(config, 'feature_store_db')
+                return {
+                    'source_host': source['POSTGRES_HOST'],
+                    'source_port': source['POSTGRES_PORT'],
+                    'store_host': store['POSTGRES_HOST'],
+                }
+        ''')
+
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(export.capture(self.repo_path, [self.pipeline.uuid]), str(out), force=True)
+        self.assertIn("env_var('POSTGRES_HOST_SOURCE')",
+                      (out / self.project.name / 'io_config.yaml').read_text())
+        env = dict(
+            os.environ,
+            MAGE_SERVICE_DIR=str(out),
+            MAGE_SERVICE_WORKER=str(WORKER),
+            MAGE_SERVICE_PYTHON=str(Path(os.sys.executable)),
+            PYTHONPATH=str(REPO),
+            POSTGRES_HOST_SOURCE='source-asdbHGFDOK937gsb.ibm.cloud',
+            POSTGRES_PORT_SOURCE='31337',
+            POSTGRES_HOST_FS='features.example.internal',
+        )
+        result = subprocess.run(
+            [str(SERVICE_BINARY), 'run', self.pipeline.uuid, '--json'],
+            capture_output=True, text=True, env=env, timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout[-3000:] + result.stderr[-3000:])
+        run = json.loads(result.stdout[result.stdout.index('{'):])
+        [output] = run['blocks'][0]['outputs']
+        self.assertEqual(json.loads(Path(output['path']).read_text()), {
+            'source_host': 'source-asdbHGFDOK937gsb.ibm.cloud',
+            'source_port': '31337',
+            'store_host': 'features.example.internal',
+        })
+        # The values are secrets: the run's log never shows them.
+        self.assertNotIn('asdbHGFDOK937gsb', result.stderr)
+
     def test_the_exported_pipeline_has_the_outputs_mage_gives(self):
         load, summary, exported = self.chain()
         self.pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
@@ -435,8 +502,10 @@ class EnvironmentTest(ExportTestCase):
         self.assertFalse(variables['AWS_REGION']['required'])
         self.assertTrue(variables['PGPASSWORD']['secret'])
         self.assertTrue(variables['MAGE_SECRET_PAYMENTS_API']['secret'])
-        self.assertFalse(variables['PGHOST']['secret'])
-        self.assertEqual(variables['PGHOST']['used_by'], ['io_config.yaml'])
+        # Connection settings in a profile the code names: required, and secret.
+        self.assertTrue(variables['PGHOST']['secret'])
+        self.assertTrue(variables['PGHOST']['required'])
+        self.assertEqual(variables['PGHOST']['used_by'], ['io_config.yaml (default)'])
 
         out = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, out, True)
@@ -444,7 +513,65 @@ class EnvironmentTest(ExportTestCase):
         example = (out / '.env.example').read_text()
         self.assertIn('BUCKET=\n', example)
         self.assertIn('# required', example)
-        self.assertIn('`PGPASSWORD` | no | yes', (out / 'README.md').read_text())
+        self.assertIn('`PGPASSWORD` | yes | yes', (out / 'README.md').read_text())
+
+    def test_each_profile_the_code_names_is_required_and_secret_and_others_optional(self):
+        (self.project / 'io_config.yaml').write_text(textwrap.dedent('''
+            # ===============================
+            # *DEVELOPMENT*
+            # ===============================
+            version: 0.1.1
+
+            raw_source:
+              POSTGRES_DBNAME: "{{ env_var('POSTGRES_DBNAME_SOURCE') }}"  # pragma: allowlist secret
+              POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_SOURCE') }}"
+              POSTGRES_PASSWORD: "{{ env_var('POSTGRES_PASSWORD_SOURCE') }}"
+
+            feature_store_db:
+              POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_FS') }}"
+              POSTGRES_PORT: "{{ env_var('POSTGRES_PORT_FS') }}"
+
+            staging:
+              POSTGRES_HOST: "{{ env_var('POSTGRES_HOST_STAGING') }}"
+        '''))
+        load = self.add('load', 'data_loader', '''
+            from mage_ai.io.config import ConfigFileLoader
+
+            @data_loader
+            def load(*args, **kwargs):
+                return ConfigFileLoader('io_config.yaml', 'raw_source')
+        ''')
+        self.add('save', 'data_exporter', '''
+            from mage_ai.io.config import ConfigFileLoader
+
+            @data_exporter
+            def save(data, *args, **kwargs):
+                ConfigFileLoader('io_config.yaml', "feature_store_db")
+        ''', upstream=[load])
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        variables = {v['name']: v for v in captured.manifest['environment']}
+        for name in ('POSTGRES_DBNAME_SOURCE', 'POSTGRES_HOST_SOURCE',
+                     'POSTGRES_PASSWORD_SOURCE', 'POSTGRES_HOST_FS', 'POSTGRES_PORT_FS'):
+            with self.subTest(name=name):
+                self.assertTrue(variables[name]['required'])
+                self.assertTrue(variables[name]['secret'])
+        self.assertFalse(variables['POSTGRES_HOST_STAGING']['required'])
+        self.assertTrue(variables['POSTGRES_HOST_STAGING']['secret'])
+        self.assertEqual(variables['POSTGRES_PORT_FS']['used_by'],
+                         ['io_config.yaml (feature_store_db)'])
+        self.assertIn('io_config.yaml profiles no exported block names: staging',
+                      '\n'.join(captured.notes))
+
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(captured, str(out), force=True)
+        manifest = (out / 'deploy' / 'kubernetes.yaml').read_text()
+        self.assertIn('#   POSTGRES_HOST_SOURCE  (required, secret)', manifest)
+        self.assertIn('#   POSTGRES_HOST_STAGING  (secret)', manifest)
+        self.assertIn('{name: MAGE_SERVICE_STRICT_ENV, value: "on"}', manifest)
+        self.assertEqual(len(list(yaml.safe_load_all(manifest))), 3)
 
     def test_io_config_variables_are_left_out_when_no_block_reads_a_profile(self):
         (self.project / 'io_config.yaml').write_text(
