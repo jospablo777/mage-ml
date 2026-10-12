@@ -109,6 +109,11 @@ LOADER_MODULES = {
     'mlflow': 'mlflow',
 }
 _artifacts: Dict[Any, Any] = {}
+CATBOOST_CLASSIFIER_LOSSES = {'Logloss', 'CrossEntropy', 'MultiClass', 'MultiClassOneVsAll'}
+CATBOOST_REGRESSOR_LOSSES = {
+    'RMSE', 'MAE', 'Quantile', 'MultiQuantile', 'LogLinQuantile', 'MAPE', 'Poisson', 'Tweedie',
+    'Huber', 'Expectile', 'Lq', 'LogCosh', 'RMSEWithUncertainty', 'MultiRMSE', 'SurvivalAft',
+}
 
 
 def _read(loader: str, path: str, options: Dict) -> Any:
@@ -121,7 +126,15 @@ def _read(loader: str, path: str, options: Dict) -> Any:
     if loader == 'catboost':
         import catboost
 
-        return catboost.CatBoost().load_model(path)
+        # The generic CatBoost returns raw scores from predict and has no predict_proba; a
+        # classifier or regressor loads as the class it was saved from.
+        model = catboost.CatBoost().load_model(path)
+        loss = str((model.get_all_params() or {}).get('loss_function') or '').split(':')[0]
+        if loss in CATBOOST_CLASSIFIER_LOSSES:
+            return catboost.CatBoostClassifier().load_model(path)
+        if loss in CATBOOST_REGRESSOR_LOSSES:
+            return catboost.CatBoostRegressor().load_model(path)
+        return model
     if loader == 'xgboost':
         import xgboost
 

@@ -76,6 +76,27 @@ class LoadArtifactTest(unittest.TestCase):
         weights = models.load_artifact('models/weights.safetensors')
         self.assertEqual(float(weights['weight'].sum()), 4.0)
 
+    @unittest.skipUnless(importlib.util.find_spec('catboost'), 'catboost is not installed')
+    def test_catboost_models_load_as_the_class_they_were_saved_from(self):
+        """
+        A classifier saved as .cbm loaded as the generic CatBoost, whose predict returned
+        raw scores where the classifier returned labels, and which had no predict_proba.
+        """
+        from catboost import CatBoostClassifier, CatBoostRegressor
+
+        X = np.array([[0.0, 1.0], [1.0, 0.0], [2.0, 1.0], [3.0, 0.0]] * 5)
+        y = np.array([0, 1, 0, 1] * 5)
+        classifier = CatBoostClassifier(iterations=5, verbose=0).fit(X, y)
+        classifier.save_model(self.path('cls.cbm'))
+        regressor = CatBoostRegressor(iterations=5, verbose=0).fit(X, X[:, 0])
+        regressor.save_model(self.path('reg.cbm'))
+
+        loaded = models.load_artifact('models/cls.cbm')
+        self.assertIsInstance(loaded, CatBoostClassifier)
+        self.assertEqual(loaded.predict(X).tolist(), classifier.predict(X).tolist())
+        self.assertEqual(loaded.predict_proba(X).shape, (20, 2))
+        self.assertIsInstance(models.load_artifact('models/reg.cbm'), CatBoostRegressor)
+
     def test_a_function_loads_formats_without_a_known_suffix(self):
         with open(self.path('forecaster.bin'), 'w') as file:
             file.write('state')
