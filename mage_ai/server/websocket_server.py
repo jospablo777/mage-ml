@@ -197,6 +197,12 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
 
     async def on_message(self, raw_message):
         message = json.loads(raw_message)
+        debug = os.getenv('MAGE_DEBUG_WEBSOCKET')
+        if debug:
+            logger.info(
+                f'[websocket] received {message.get("uuid")} '
+                f'pipeline={message.get("pipeline_uuid")} keys={sorted(message)}'
+            )
 
         api_key = message.get('api_key')
         token = message.get('token')
@@ -266,6 +272,8 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
 
         # Signed in, or no sign-in required: this client gets the kernel's outputs.
         WebSocketServer.clients.add(self)
+        if debug:
+            logger.info(f'[websocket] authorized {message.get("uuid")}')
 
         output = message.get('output')
         if output:
@@ -326,6 +334,8 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                 kernel_name,
                 global_vars,
             )
+            if debug:
+                logger.info(f'[websocket] sent {message.get("uuid")} to the kernel')
 
     @classmethod
     def send_message(cls, message: dict, to: 'WebSocketServer' = None) -> None:

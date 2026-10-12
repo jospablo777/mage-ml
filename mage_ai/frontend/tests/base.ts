@@ -16,6 +16,45 @@ export const test = base.extend<{
     page.addListener('pageerror', (error) => {
       pageErrors.push(error);
     });
+    // Temporary, CI only: what the editor sends and gets on its kernel WebSocket, to find
+    // why a block run stops reaching the kernel on CI.
+    if (process.env.CI) {
+      page.on('websocket', (socket) => {
+        if (!socket.url().endsWith('/websocket/')) {
+          return;
+        }
+        const name = `[ws ${new Date().toISOString().slice(11, 23)}]`;
+        console.log(`${name} open ${socket.url()}`);
+        socket.on('framesent', ({ payload }) => {
+          const text = String(payload);
+          let uuid = '';
+          try {
+            uuid = JSON.parse(text).uuid;
+          } catch {
+            // Not JSON.
+          }
+          console.log(`${new Date().toISOString().slice(11, 23)} ws sent ${uuid} ${text.length} bytes`);
+        });
+        socket.on('framereceived', ({ payload }) => {
+          const text = String(payload);
+          let summary = text.slice(0, 80);
+          try {
+            const message = JSON.parse(text);
+            summary = `${message.uuid} ${message.msg_type} ${message.execution_state}`;
+          } catch {
+            // Not JSON.
+          }
+          console.log(`${new Date().toISOString().slice(11, 23)} ws got ${summary}`);
+        });
+        socket.on('close', () => console.log(`${new Date().toISOString().slice(11, 23)} ws closed`));
+        socket.on('socketerror', (error) => console.log(`ws error ${error}`));
+      });
+      page.on('console', (message) => {
+        if (['error', 'warning'].includes(message.type())) {
+          console.log(`[browser ${message.type()}] ${message.text().slice(0, 300)}`);
+        }
+      });
+    }
 
     await page.goto('/sign-in');
     await page.getByPlaceholder('Email').click();

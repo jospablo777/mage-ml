@@ -340,6 +340,8 @@ jobs:
         working-directory: mage_ai/frontend/
         env:
           PYTHONPATH: ${{ env.pythonLocation }}:. # Playwright tests on CI depend on the Python web server
+          # Temporary: log each kernel WebSocket message the server handles.
+          MAGE_DEBUG_WEBSOCKET: "1"
         if: matrix.python-version == '3.12'
       - name: Python stacks sampled during the Playwright tests
         if: failure() && matrix.python-version == '3.12'
