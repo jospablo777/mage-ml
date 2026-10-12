@@ -31,6 +31,7 @@ import shutil
 import textwrap
 import time
 import uuid
+import warnings
 import zlib
 from pathlib import Path
 
@@ -155,12 +156,17 @@ def ml_project(mage_project):
         loss.backward()
         optimizer.step()
     scaled = mlp.eval()
-    traced = torch.jit.trace(scaled, torch.zeros(4, 16))
-    traced.save(str(root / 'models' / 'mlp.pt'))
-    torch.onnx.export(scaled, torch.zeros(4, 16), str(root / 'models' / 'mlp.onnx'),
-                      input_names=['input'], output_names=['score'],
-                      dynamic_axes={'input': {0: 'rows'}, 'score': {0: 'rows'}},
-                      opset_version=17, dynamo=False)
+    with warnings.catch_warnings():
+        # torch deprecates TorchScript and the TorchScript-based ONNX exporter; R's torch
+        # loads only TorchScript, and the exporter is the one that makes this opset.
+        warnings.simplefilter('ignore', FutureWarning)
+        warnings.simplefilter('ignore', DeprecationWarning)
+        traced = torch.jit.trace(scaled, torch.zeros(4, 16))
+        traced.save(str(root / 'models' / 'mlp.pt'))
+        torch.onnx.export(scaled, torch.zeros(4, 16), str(root / 'models' / 'mlp.onnx'),
+                          input_names=['input'], output_names=['score'],
+                          dynamic_axes={'input': {0: 'rows'}, 'score': {0: 'rows'}},
+                          opset_version=17, dynamo=False)
     return dict(base=base, xgb=xgb, cat=cat, mlp=traced, root=root,
                 faker_seconds=round(faker_seconds, 2))
 
