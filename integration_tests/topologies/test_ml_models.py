@@ -715,3 +715,287 @@ def test_training_in_r_and_python(mage_project, ml_project, r_ml, model):
     if model == 'glm':
         # One maximum likelihood answer: both must find it.
         assert relative.max() < 1e-4, summary
+
+
+# End to end in one language: make the features, scale them, score them with the same
+# ONNX model and aggregate, every step a block of the same language. Fused, Python runs
+# the four blocks in one process, R in one R session and Rust as one compiled program;
+# block by block, each block is a process and the data crosses through storage.
+PRIMES = [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59]
+
+E2E = {
+    'python': [
+        ('data_loader', '''
+import numpy as np
+import pandas as pd
+
+if 'data_loader' not in globals():
+    from mage_ai.data_preparation.decorators import data_loader
+
+
+@data_loader
+def load(*args, **kwargs):
+    ids = np.arange({rows}, dtype='int64')
+    frame = {{'id': ids}}
+    for j, p in enumerate({primes}):
+        frame[f'f{{j}}'] = ((ids * p) % 1000).astype('float32') / np.float32(10)
+    return pd.DataFrame(frame)
+'''),
+        ('transformer', '''
+import numpy as np
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+
+@transformer
+def scale(frame, *args, **kwargs):
+    features = [f'f{{j}}' for j in range(16)]
+    frame[features] = frame[features] * np.float32(0.5) + np.float32(1)
+    return frame
+'''),
+        ('transformer', '''
+import os
+
+import numpy as np
+import pandas as pd
+
+from mage_ai.settings.repo import get_repo_path
+
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+
+@transformer
+def score(frame, *args, **kwargs):
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = {threads}
+    session = ort.InferenceSession(os.path.join(get_repo_path(), 'models', '{model}.onnx'),
+                                   options, providers=['CPUExecutionProvider'])
+    x = frame[[f'f{{j}}' for j in range(16)]].to_numpy(dtype='float32')
+    names = [o.name for o in session.get_outputs()]
+    pick = next((i for i, n in enumerate(names) if 'prob' in n), 0)
+    parts = []
+    for i in range(0, len(x), {chunk}):
+        feed = {{session.get_inputs()[0].name: x[i:i + {chunk}]}}
+        out = np.asarray(session.run(None, feed)[pick])
+        parts.append(out[:, 1] if out.ndim == 2 and out.shape[1] == 2 else out.reshape(-1))
+    return pd.DataFrame({{'id': frame['id'], 'score': np.concatenate(parts).astype('float64')}})
+'''),
+        ('transformer', '''
+if 'transformer' not in globals():
+    from mage_ai.data_preparation.decorators import transformer
+
+
+@transformer
+def summarize(scores, *args, **kwargs):
+    scores = scores.assign(bucket=scores['id'] % 10, high=(scores['score'] > 0.5).astype('int64'))
+    return (scores.groupby('bucket', as_index=False)
+            .agg(mean_score=('score', 'mean'), high=('high', 'sum'), n=('id', 'count'))
+            .sort_values('bucket'))
+'''),
+    ],
+    'r': [
+        ('data_loader', '''
+#* @data_loader
+load <- function(...) {{
+  id <- seq(0, {rows} - 1)
+  frame <- data.frame(id = id)
+  primes <- c({primes_r})
+  for (j in seq_along(primes)) {{
+    frame[[paste0("f", j - 1)]] <- ((id * primes[[j]]) %% 1000) / 10
+  }}
+  frame
+}}
+'''),
+        ('transformer', '''
+#* @transformer
+scale <- function(frame, ...) {{
+  features <- paste0("f", 0:15)
+  frame[features] <- frame[features] * 0.5 + 1
+  frame
+}}
+'''),
+        ('transformer', '''
+#* @transformer
+score <- function(frame, ...) {{
+  model <- onnxr::onnx_model("models/{model}.onnx", backend = "cpu", threads = {threads}L)
+  x <- as.matrix(frame[paste0("f", 0:15)])
+  parts <- list()
+  for (i in seq(1, nrow(x), by = {chunk}L)) {{
+    rows <- i:min(i + {chunk}L - 1L, nrow(x))
+    out <- onnxr::onnx_run(model, x[rows, , drop = FALSE])
+    pick <- grep("prob", names(out))
+    out <- out[[if (length(pick)) pick[1] else 1]]
+    parts[[length(parts) + 1]] <- if (NCOL(out) == 2) out[, 2] else as.numeric(out)
+  }}
+  data.frame(id = frame$id, score = as.numeric(unlist(parts)))
+}}
+'''),
+        ('transformer', '''
+#* @transformer
+summarize <- function(scores, ...) {{
+  scores |>
+    dplyr::mutate(bucket = id %% 10, high = as.integer(score > 0.5)) |>
+    dplyr::group_by(bucket) |>
+    dplyr::summarise(mean_score = mean(score), high = sum(high), n = dplyr::n()) |>
+    dplyr::arrange(bucket)
+}}
+'''),
+    ],
+    'rust': [
+        ('data_loader', '''
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {{
+    let ids: Vec<i64> = (0..{rows}i64).collect();
+    let primes: [i64; 16] = [{primes}];
+    let mut columns = vec![Column::new("id".into(), ids.clone())];
+    for (j, p) in primes.iter().enumerate() {{
+        let values: Vec<f32> = ids.iter().map(|i| ((i * p) % 1000) as f32 / 10.0).collect();
+        columns.push(Column::new(format!("f{{j}}").into(), values));
+    }}
+    Ok(DataFrame::new(ids.len(), columns)?)
+}}
+'''),
+        ('transformer', '''
+use mage::prelude::*;
+
+fn transform(frame: LazyFrame) -> Result<LazyFrame> {{
+    let scaled: Vec<Expr> = (0..16)
+        .map(|j| {{
+            let name = format!("f{{j}}");
+            (col(name.as_str()) * lit(0.5f32) + lit(1.0f32)).alias(name)
+        }})
+        .collect();
+    Ok(frame.with_columns(scaled))
+}}
+'''),
+        ('transformer', '''
+use mage::prelude::*;
+
+fn transform(frame: DataFrame) -> Result<DataFrame> {{
+    let model = mage::onnx::model("models/{model}.onnx")?;
+    let names: Vec<String> = (0..16).map(|j| format!("f{{j}}")).collect();
+    let features: Vec<&str> = names.iter().map(|n| n.as_str()).collect();
+    let mut scores: Vec<f64> = Vec::with_capacity(frame.height());
+    let mut offset = 0usize;
+    while offset < frame.height() {{
+        let length = {chunk}usize.min(frame.height() - offset);
+        let out = model.predict(&frame.slice(offset as i64, length), &features)?;
+        let columns: Vec<String> = out.get_column_names().iter().map(|n| n.to_string()).collect();
+        let pick = columns
+            .iter()
+            .find(|n| n.as_str() == "probabilities_1")
+            .or_else(|| columns.iter().find(|n| n.starts_with("score")))
+            .or_else(|| columns.last())
+            .ok_or_else(|| anyhow!("no output"))?
+            .clone();
+        let column = out.column(pick.as_str())?.cast(&DataType::Float64)?;
+        for chunk in column.f64()?.downcast_iter() {{
+            scores.extend(chunk.values().iter());
+        }}
+        offset += length;
+    }}
+    Ok(DataFrame::new(frame.height(), vec![
+        frame.column("id")?.clone(),
+        Column::new("score".into(), scores),
+    ])?)
+}}
+'''),
+        ('transformer', '''
+use mage::prelude::*;
+
+fn transform(scores: LazyFrame) -> Result<LazyFrame> {{
+    Ok(scores
+        .with_columns([
+            (col("id") % lit(10i64)).alias("bucket"),
+            col("score").gt(lit(0.5)).cast(DataType::Int64).alias("high"),
+        ])
+        .group_by([col("bucket")])
+        .agg([
+            col("score").mean().alias("mean_score"),
+            col("high").sum().alias("high"),
+            col("id").count().cast(DataType::Int64).alias("n"),
+        ])
+        .sort(["bucket"], SortMultipleOptions::default()))
+}}
+'''),
+    ],
+}
+
+
+def build_end_to_end(project: str, language: str, model: str, rows: int):
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    from integration_tests.topologies.test_inference import enable_onnx
+
+    suffix = uuid.uuid4().hex[:8]
+    pipeline = Pipeline.create(f'e2e_{language}_{model}_{suffix}', repo_path=project)
+    if language == 'rust':
+        enable_onnx(project)
+    previous = None
+    uuids = []
+    for position, (block_type, template) in enumerate(E2E[language]):
+        name = ['features', 'scale', 'score', 'summarize'][position]
+        block = Block.create(f'{name}_{language}_{suffix}', block_type, project,
+                             language='python' if language == 'python' else language)
+        Path(block.file_path).write_text(template.format(
+            rows=rows, primes=', '.join(str(p) for p in PRIMES),
+            primes_r=', '.join(str(p) for p in PRIMES), model=model, threads=THREADS,
+            chunk=CHUNK).strip() + '\n')
+        pipeline.add_block(block, upstream_block_uuids=[previous] if previous else [])
+        previous = block.uuid
+        uuids.append(block.uuid)
+    return Pipeline.get(pipeline.uuid, repo_path=project), uuids
+
+
+@pytest.mark.parametrize('rows', SIZES)
+@pytest.mark.parametrize('model', ['xgb', 'mlp'])
+@pytest.mark.parametrize('language', ['python', 'r', 'rust'])
+def test_end_to_end_scoring(mage_project, ml_project, request, language, model, rows):
+    if language == 'r':
+        request.getfixturevalue('r_ml')
+    if language == 'rust' and shutil.which('cargo') is None:
+        pytest.skip('Rust is not installed')
+    pipeline, uuids = build_end_to_end(mage_project, language, model, rows)
+    energy = Energy()
+    idle = energy.idle_gpu_watts()
+    order = random.Random(zlib.crc32(f'e2e|{language}|{model}|{rows}'.encode()))
+    for repeat in range(REPEATS + 1):
+        modes = ['off', 'chains']
+        order.shuffle(modes)
+        for position, mode in enumerate(modes):
+            before = provenance.wait_quiet()
+            t0, gpu0, cpu0 = energy.read()
+            pipeline_run, seconds = lib.run(pipeline, mode)
+            t1, gpu1, cpu1 = energy.read()
+            states = lib.statuses(pipeline_run)
+            entry = dict(language=language, model=model, rows=rows, mode=mode, repeat=repeat,
+                         position=position, cold=repeat == 0, seconds=round(seconds, 4),
+                         pipeline=pipeline.uuid, block_seconds=lib.block_seconds(pipeline_run),
+                         statuses=states, gpu_idle_w=idle,
+                         gpu_j=None if gpu0 is None else round(gpu1 - gpu0, 3),
+                         cpu_j=None if cpu0 is None else round(cpu1 - cpu0, 3),
+                         chunk=CHUNK, threads=THREADS)
+            problem = None
+            if any(s != 'completed' for s in states.values()):
+                problem = f'statuses {states}'
+            else:
+                frame = lib.stored(pipeline, uuids[-1], pipeline_run)
+                if hasattr(frame, 'to_pandas') and not hasattr(frame, 'iloc'):
+                    frame = frame.to_pandas()
+                frame = frame.sort_values('bucket').reset_index(drop=True)
+                entry['summary'] = {
+                    'mean_score': [round(float(v), 6) for v in frame['mean_score']],
+                    'high': [int(v) for v in frame['high']],
+                    'n': [int(v) for v in frame['n']],
+                }
+                if sum(entry['summary']['n']) != rows:
+                    problem = f"{sum(entry['summary']['n'])} rows scored, expected {rows}"
+            entry['problems'] = {'end_to_end': problem} if problem else {}
+            provenance.record('ml_end_to_end', entry, before)
+            assert problem is None, problem
