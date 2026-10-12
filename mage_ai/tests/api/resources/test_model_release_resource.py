@@ -9,7 +9,7 @@ from mage_ai.api.operations.base import BaseOperation
 from mage_ai.api.operations.constants import OperationType
 from mage_ai.tests.base_test import AsyncDBTestCase
 from mage_ai.tests.factory import create_user
-from mage_ai.tests.shared.tracking import use_temporary_mlflow
+from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
 
 try:
     import mlflow

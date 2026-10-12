@@ -56,14 +56,14 @@ from mage_ai.orchestration.utils.distributed_lock import DistributedLock
 from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.blocks import ApiPipelineBlockAnalysisHandler
 from mage_ai.server.api.downloads import ApiDownloadHandler, ApiResourceDownloadHandler
-from mage_ai.server.api.pipeline_documentation import (
-    PipelineDocumentationImageHandler,
-    PipelineDocumentationRenderHandler,
-)
 from mage_ai.server.api.events import (
     ApiEventHandler,
     ApiEventMatcherDetailHandler,
     ApiEventMatcherListHandler,
+)
+from mage_ai.server.api.pipeline_documentation import (
+    PipelineDocumentationImageHandler,
+    PipelineDocumentationRenderHandler,
 )
 from mage_ai.server.api.runs import ApiRunHandler
 from mage_ai.server.api.triggers import ApiTriggerPipelineHandler

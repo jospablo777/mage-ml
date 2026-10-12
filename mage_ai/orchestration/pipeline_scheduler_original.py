@@ -8,7 +8,6 @@ import pytz
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import desc, func, update
 
-from mage_ai.orchestration.after_runs import start_followers
 from mage_ai.data_integrations.utils.scheduler import (
     clear_source_output_files,
     get_extra_variables,
@@ -28,6 +27,7 @@ from mage_ai.data_preparation.models.triggers import (
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.shared.retry import resolve_retry_config
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
+from mage_ai.orchestration.after_runs import start_followers
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.models.schedules import (

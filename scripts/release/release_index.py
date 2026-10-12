@@ -18,17 +18,16 @@ import io
 import itertools
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
 import sys
 import tempfile
+import zipfile
 from email.parser import BytesParser
 from email.policy import compat32
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote
-import zipfile
-
 
 PROJECTS = frozenset({'mage-ml', 'column-atlas-native', 'mage-integrations', 'singer-python'})
 VERSION = re.compile(

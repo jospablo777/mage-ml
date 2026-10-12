@@ -219,7 +219,7 @@ class ModelRegistryTest(AppExportBase):
         import mlflow
         from mlflow.tracking import MlflowClient
 
-        from mage_ai.tests.shared.tracking import use_temporary_mlflow
+        from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
 
         self.registry = use_temporary_mlflow(self, experiments=['scoring'])
         mlflow.set_experiment('scoring')

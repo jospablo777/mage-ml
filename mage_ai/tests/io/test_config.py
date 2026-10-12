@@ -1,11 +1,11 @@
 import contextlib
 import io
 import os
+from pathlib import Path
+from unittest import mock
 
 from mage_ai.io.config import ConfigFileLoader, ConfigKey, EnvironmentVariableLoader
 from mage_ai.tests.base_test import DBTestCase
-from pathlib import Path
-from unittest import mock
 
 
 class ConfigLoaderTests(DBTestCase):

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mage_ai.pipeline_services import model_export, models
-from mage_ai.tests.shared.tracking import use_temporary_mlflow
+from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
 
 
 class EmbeddedModelTest(unittest.TestCase):
@@ -73,7 +73,8 @@ class CatBoostFileTest(unittest.TestCase):
         use_temporary_mlflow(self, experiments=['churn'])
         mlflow.set_experiment('churn')
         self.features = np.array([[0.0], [1.0], [2.0], [3.0]] * 5)
-        classifier = catboost.CatBoostClassifier(iterations=5, verbose=False, allow_writing_files=False)
+        options = dict(iterations=5, verbose=False, allow_writing_files=False)
+        classifier = catboost.CatBoostClassifier(**options)
         classifier.fit(self.features, [0, 0, 1, 1] * 5)
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, folder, True)
@@ -117,7 +118,8 @@ class CatBoostFileTest(unittest.TestCase):
     def test_a_regressor_file_loads_as_a_regressor(self):
         import catboost
 
-        regressor = catboost.CatBoostRegressor(iterations=5, verbose=False, allow_writing_files=False)
+        regressor = catboost.CatBoostRegressor(
+            iterations=5, verbose=False, allow_writing_files=False)
         regressor.fit(self.features, [0.1, 0.2, 0.3, 0.4] * 5)
         path = self.models_dir / 'amount.cbm'
         regressor.save_model(str(path))

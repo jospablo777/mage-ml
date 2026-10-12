@@ -4,9 +4,6 @@ from typing import Any, Dict, Optional, Tuple
 
 import joblib
 
-from mage_ai.shared.xgboost import load_model as load_model_xgboost
-from mage_ai.shared.xgboost import save_model as save_model_xgboost
-
 # MATRIX_NPZ_FILE, MATRIX_SAMPLE_NPZ_FILE
 from mage_ai.data_preparation.models.variables.constants import (
     CONFIG_JSON_FILE,
@@ -17,6 +14,8 @@ from mage_ai.data_preparation.models.variables.constants import (
     VariableType,
 )
 from mage_ai.shared.parsers import object_to_dict
+from mage_ai.shared.xgboost import load_model as load_model_xgboost
+from mage_ai.shared.xgboost import save_model as save_model_xgboost
 
 # from scipy.sparse import load_npz, save_npz
 

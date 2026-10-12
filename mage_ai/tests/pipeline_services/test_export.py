@@ -20,7 +20,7 @@ from mage_ai.data_preparation.repo_manager import init_project_uuid
 from mage_ai.pipeline_services import export
 from mage_ai.settings.repo import set_repo_path
 from mage_ai.tests.base_test import DBTestCase
-from mage_ai.tests.shared.tracking import use_temporary_mlflow
+from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
 
 REPO = Path(__file__).resolve().parents[3]
 SERVICE_BINARY = Path(os.environ.get(

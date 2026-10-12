@@ -4,7 +4,6 @@ from mage_ai.io.config import ConfigFileLoader
 from mage_ai.io.postgres import Postgres
 from mage_ai.settings.repo import get_repo_path
 
-
 if 'data_exporter' not in globals():
     from mage_ai.data_preparation.decorators import data_exporter
 

@@ -1513,13 +1513,16 @@ DEPLOY_FILES = (
 
 
 def _environment_comment(capture_: Capture) -> str:
-    """The variables the container needs, as comment lines for the deploy files."""
+    """
+    The variables the container needs, as comment lines for the deploy files. The template's
+    line is #$environment, so the template is valid YAML before it is filled in.
+    """
     lines = []
     for variable in capture_.manifest.get('environment') or []:
         flags = [f for f, on in (('required', variable['required']),
                                  ('secret', variable['secret'])) if on]
-        lines.append(f"#   {variable['name']}{f'  ({", ".join(flags)})' if flags else ''}")
-    return '\n'.join(lines) or '#   none: the blocks read no environment variable.'
+        lines.append(f"   {variable['name']}{f'  ({", ".join(flags)})' if flags else ''}")
+    return '\n#'.join(lines) or '   none: the blocks read no environment variable.'
 
 
 def _write_deploy_files(capture_: Capture, out_dir: Path) -> None:

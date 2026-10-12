@@ -27,7 +27,6 @@ from mage_ai.settings.keys import (
     GITLAB_HOST,
 )
 
-
 # Strict RFC-952/1123 hostname (with optional :port). Refuses shell metacharacters.
 _SAFE_HOSTNAME_RE = re.compile(
     r'^[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?'

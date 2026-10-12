@@ -77,7 +77,10 @@ class DefinitionsTest(ExportTestCase):
             definitions.load_definition(self.repo_path, 'nope')
 
     def after_run(self, pipeline_uuid, after, status='completed'):
-        from mage_ai.data_preparation.models.triggers import ScheduleStatus, ScheduleType
+        from mage_ai.data_preparation.models.triggers import (
+            ScheduleStatus,
+            ScheduleType,
+        )
         from mage_ai.orchestration.db.models.schedules import PipelineSchedule
 
         schedule = PipelineSchedule.create(

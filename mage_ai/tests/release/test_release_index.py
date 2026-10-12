@@ -10,13 +10,12 @@ import importlib.util
 import io
 import itertools
 import json
-from pathlib import Path
 import stat
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
-
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location(

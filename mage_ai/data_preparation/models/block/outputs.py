@@ -6,7 +6,6 @@ import pandas as pd
 import polars as pl
 import simplejson
 
-from mage_ai.shared.xgboost import render_tree_visualization
 from mage_ai.data.constants import InputDataType
 from mage_ai.data.models.constants import CHUNKS_DIRECTORY_NAME
 from mage_ai.data.tabular.models import BatchSettings
@@ -43,6 +42,7 @@ from mage_ai.shared.parsers import (
     has_to_dict,
 )
 from mage_ai.shared.strings import is_json
+from mage_ai.shared.xgboost import render_tree_visualization
 
 
 def estimator_html_repr(estimator) -> str:

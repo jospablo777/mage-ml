@@ -14,7 +14,6 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import subprocess
@@ -25,9 +24,9 @@ import time
 import tomllib
 import unittest
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
-
 
 ROOT = Path(__file__).resolve().parents[3]
 BUILD = Path(tempfile.gettempdir()) / 'mageml-release-consumers'

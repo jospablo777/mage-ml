@@ -141,7 +141,9 @@ class RustBlockTest(DBTestCase):
 
     def test_the_onnx_template_scores_rows(self):
         # Its own project: the onnx feature links ONNX Runtime into every block it builds.
-        from mage_ai.data_preparation.models.block.rust import workspace as rust_workspace
+        from mage_ai.data_preparation.models.block.rust import (
+            workspace as rust_workspace,
+        )
 
         repo = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, repo, True)

@@ -1,15 +1,16 @@
+import numpy as np
+import pandas as pd
 from faker import Faker
+
 from mage_ai.data_cleaner.column_types.column_type_detector import (
     MAXIMUM_WORD_LENGTH_FOR_CATEGORY_FEATURES,
+    REGEX_NUMBER,
     find_syntax_errors,
     infer_column_types,
-    REGEX_NUMBER,
 )
 from mage_ai.data_cleaner.column_types.constants import ColumnType
 from mage_ai.shared.hash import merge_dict
 from mage_ai.tests.base_test import TestCase
-import pandas as pd
-import numpy as np
 
 
 class ColumnTypeDetectorTests(TestCase):

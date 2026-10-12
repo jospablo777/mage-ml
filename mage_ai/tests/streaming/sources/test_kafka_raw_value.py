@@ -1,6 +1,6 @@
+import json
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-import json
 
 from mage_ai.streaming.sources.kafka import KafkaSource
 from mage_ai.streaming.sources.shared import SerializationMethod

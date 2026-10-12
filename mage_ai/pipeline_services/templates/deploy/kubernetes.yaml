@@ -2,7 +2,7 @@
 #   kubectl create secret generic $name-env --from-env-file=.env
 #   kubectl apply -f deploy/kubernetes.yaml
 # The Secret $name-env, or your CI/CD pipeline, gives the container these variables:
-$environment
+#$environment
 # Replace the image with the one you pushed. One replica runs the schedules; more replicas
 # need a shared volume for the run history.
 apiVersion: v1

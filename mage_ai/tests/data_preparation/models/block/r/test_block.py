@@ -58,7 +58,10 @@ class RBlockTestsTest(TestCase):
 class RConditionalBlockTest(TestCase):
     def test_an_r_conditional_block_decides_with_the_r_condition(self):
         from mage_ai.data_preparation.models.block import Block
-        from mage_ai.data_preparation.models.block.r import RBlockError, RConditionalBlock
+        from mage_ai.data_preparation.models.block.r import (
+            RBlockError,
+            RConditionalBlock,
+        )
         from mage_ai.data_preparation.models.pipeline import Pipeline
 
         pipeline = Pipeline.create('r condition', repo_path=self.repo_path)

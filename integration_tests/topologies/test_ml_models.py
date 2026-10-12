@@ -416,10 +416,9 @@ def scorer_code(scorer: str) -> str:
 
 
 def build(project: str, scorer: str, rows: int):
+    from integration_tests.topologies.test_inference import enable_onnx
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.pipeline import Pipeline
-
-    from integration_tests.topologies.test_inference import enable_onnx
 
     language = SCORERS[scorer][0]
     suffix = uuid.uuid4().hex[:8]
@@ -928,10 +927,9 @@ fn transform(scores: LazyFrame) -> Result<LazyFrame> {{
 
 
 def build_end_to_end(project: str, language: str, model: str, rows: int):
+    from integration_tests.topologies.test_inference import enable_onnx
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.pipeline import Pipeline
-
-    from integration_tests.topologies.test_inference import enable_onnx
 
     suffix = uuid.uuid4().hex[:8]
     pipeline = Pipeline.create(f'e2e_{language}_{model}_{suffix}', repo_path=project)

@@ -111,7 +111,9 @@ service.
 The blocks and `io_config.yaml` read these environment variables. Values are never
 exported; give them to the container. `mage-service env` shows which are set.
 
-$environment
+```text
+#$environment
+```
 
 Every platform can put them in the container's environment, and the service also reads
 secrets mounted as files:

@@ -17,7 +17,7 @@ from mage_ai.orchestration.db.models.schedules import BlockRun
 from mage_ai.orchestration.fusion_verify import run_in_process
 from mage_ai.orchestration.triggers.api import trigger_pipeline
 from mage_ai.tests.base_test import DBTestCase, TestCase
-from mage_ai.tests.shared.tracking import use_temporary_mlflow
+from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
 
 try:
     import mlflow

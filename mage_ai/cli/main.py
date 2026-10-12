@@ -195,8 +195,8 @@ def run(
     import newrelic.agent
     import sentry_sdk
 
-    from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
     from mage_ai.data_preparation.contracts import ContractViolation
+    from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
     from mage_ai.data_preparation.models.block.r.runtime import REnvironmentError
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.data_preparation.sync.git_sync import get_sync_config
