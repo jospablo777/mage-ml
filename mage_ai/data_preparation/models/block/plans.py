@@ -140,6 +140,16 @@ def output_needed(block, has_tests: bool) -> bool:
 def mark_failed(block_uuid: str, message: str) -> None:
     """Marks the block run of a planned block that failed when a later block ran the
     chain; the block that ran it fails with an error that names this one."""
+    _mark(block_uuid, 'FAILED', message)
+
+
+def mark_cancelled(block_uuid: str, message: str) -> None:
+    """Marks the block run of a planned block after the one that failed in the chain: it
+    never ran, as block by block it would have been cancelled."""
+    _mark(block_uuid, 'CANCELLED', message)
+
+
+def _mark(block_uuid: str, status: str, message: str) -> None:
     pipeline_run_id = _pipeline_run_id.get()
     if pipeline_run_id is None:
         return
@@ -154,7 +164,7 @@ def mark_failed(block_uuid: str, message: str) -> None:
             metrics = dict(block_run.metrics or {}, error=dict(
                 error=message[:4000], errors=[message[:4000]], message=message[:4000],
             ))
-            block_run.update(status=BlockRun.BlockRunStatus.FAILED, metrics=metrics)
+            block_run.update(status=getattr(BlockRun.BlockRunStatus, status), metrics=metrics)
     except Exception:
         pass
 
@@ -247,6 +257,12 @@ def _chain_failure(block_uuid: Optional[str], message: str, steps: List[Dict]) -
     last = steps[-1]['block_uuid']
     if block_uuid and block_uuid != last:
         mark_failed(block_uuid, message)
+        # The planned blocks after it were marked completed when they planned; none ran.
+        uuids = [s['block_uuid'] for s in steps]
+        if block_uuid in uuids:
+            for later in uuids[uuids.index(block_uuid) + 1:-1]:
+                mark_cancelled(later, f'Not run: block {block_uuid} before it in the '
+                                      f'compiled chain failed.')
         chain = ', '.join(s['block_uuid'] for s in steps)
         message = (
             f'Block {block_uuid} failed when {last} ran the compiled chain {chain}:\n\n'
