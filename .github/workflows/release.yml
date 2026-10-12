@@ -262,6 +262,9 @@ jobs:
       - name: Draft the release, upload and verify the assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The repository this workflow runs in, by name: GitHub lists MageML as a fork of
+          # mage-ai/mage-ai, and gh must never pick the parent.
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.contract.outputs.version }}
           COMMIT: ${{ needs.contract.outputs.commit }}
@@ -275,6 +278,7 @@ jobs:
       - name: Publish the draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE" --latest=false

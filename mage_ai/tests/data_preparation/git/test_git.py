@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from unittest.mock import patch
 
 from mage_ai.data_preparation.git import Git
@@ -13,6 +15,12 @@ class GitTest(BaseAPIEndpointTest):
 
 class GitProjectPlatformTest(ProjectPlatformMixin):
     def test_repo_path(self):
+        # Git() creates its relative path in the working directory: run where that is a
+        # temporary folder, not the checkout.
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(folder)
         git_settings = dict(
             path='mage_custom_path',
         )
