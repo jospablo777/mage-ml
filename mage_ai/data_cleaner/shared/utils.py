@@ -1,3 +1,4 @@
+import ast
 import re
 from typing import Any, List, Union
 
@@ -91,7 +92,8 @@ def __parse_element(element: str) -> Any:
         return np.nan
     else:
         try:
-            return __resolve_type(eval(element))
+            # Literals only: the text comes from the data, and eval ran it as code.
+            return __resolve_type(ast.literal_eval(element))
         except Exception:
             return None
 
