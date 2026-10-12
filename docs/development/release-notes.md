@@ -122,6 +122,8 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Data integration connectors
 
+- **The API source reads `.xlsx` files again**: `openpyxl`, which it came with through a
+  removed package, is declared by mage-integrations.
 - **Records carry Python values.** Sources that read files (S3, GCS, Azure) and the API
   source read through Polars into pyarrow-backed pandas. Records hold Python `datetime`,
   `date` and `Decimal` values where they held pandas `Timestamp`, integers stay integers,
@@ -145,6 +147,9 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Databases
 
+- **PostgreSQL profiles without `POSTGRES_SCHEMA` use the connection's current schema.**
+  A SQL block reading `{{ df_1 }}` with such a profile failed from its second run on: the
+  upstream table was not found to replace, then not found by its name.
 - **MySQL new tables** get `DOUBLE`, sized `DECIMAL`, `BOOLEAN`, `DATETIME(6)`,
   `LONGTEXT`, `LONGBLOB`, `JSON` and `TIME(6)`. Floats used to be `DECIMAL(10,0)`, which
   rounded them to integers. Zoned timestamps are stored in UTC. Text values keep
@@ -388,8 +393,22 @@ Each item says what changed, which pipelines it affects, and what to do.
   `MAGE_UPDATE_CHECK_REPOSITORY`), not PyPI, where the name is not MageML's.
   `MAGE_UPDATE_CHECK_ENABLED=0` turns it off.
 
+#### Security
+
+- **Kernel outputs and terminals go only to signed-in WebSocket clients** when user
+  authentication is on. Any connection got every user's block outputs, and any connection
+  to the terminal socket started a shell.
+- **The event, event matcher and block analysis routes need sign-in** when authentication
+  is on.
+
 #### Production runs
 
+- **`POST /api/runs/<token>` works.** It failed on every call under SQLAlchemy 2, and an
+  unknown token answered with a database error instead of a 404.
+- **A trigger's `envs` holds for after-run triggers**: a trigger set to `prod` no longer
+  starts runs on a dev server.
+- **In a fused, compiled chain of Rust or R blocks, the blocks after a failed block are
+  cancelled**, as when blocks run one by one.
 - **Production runs fuse chains of blocks by default.** Triggers, schedules, backfills, the
   API and `mage run` run each chain of blocks in one process; block by block is for the
   editor. Turn it off per pipeline with `block_fusion: 'off'` ("Run chains of blocks
@@ -402,6 +421,12 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### Runtime
 
+- **The kernel cleanup no longer freezes the server** or stops kernels in use.
+- **`.cbm` files load as the CatBoost class they were saved from**, so a classifier has
+  `predict_proba`; the generic class returned raw scores.
+- **`mage verify-fusion` runs again a block whose process died.**
+- **pandas categoricals with missing values pass to Rust blocks.**
+- **`HIDE_ENV_VAR_VALUES` can be turned off.**
 - **Stopping the server stops the scheduler and every block run process.** SIGTERM, or
   killing the server, left the scheduler, its worker pool, block workers and
   multiprocessing managers running. A scheduler left behind kept running pipelines next
@@ -485,6 +510,16 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 #### R blocks
 
+- **The R environment is checked once** until `rproject.toml`, `rv.lock`, the library or
+  the executables change; a package from a URL or git no longer costs 10 to 40 seconds on
+  every R block run.
+- **Processes an R block starts see the project's packages** (`parallel`, `future`,
+  `callr` workers): the runner exports the library paths.
+- **An R block's log names the columns R changes**: uint64 above 2^63 - 1 becomes text,
+  and timestamps lose their nanoseconds.
+- **Without an R environment, R's own library is checked** for the packages MageML
+  exchanges data with (arrow, bit64, jsonlite, tibble), and a missing one is named with
+  the command that installs it. New R environments include tidymodels.
 - **R blocks run without Docker, with R 4.6 and an rv environment** that `mage r init`
   creates in `<project>/r`. They used to run only in the Docker image, with whatever
   packages its R library held. See `r-blocks.md`.
@@ -542,6 +577,55 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Services in the app.** **Export as service** in the pipelines list and the editor's
+  File menu exports one or more pipelines with a live preview and a progress bar. The
+  **Services** page in the left menu keeps services in `pipeline_services.yaml`, checks
+  each one as you edit (blocks, project files, packages, schedules, loops), lists the
+  secrets and variables the container needs (every `io_config.yaml` variable is a secret;
+  those of the profiles the blocks use are required), says how to keep run history, logs
+  and metrics, and builds and pushes the image for `linux/amd64` and `linux/arm64` to
+  Docker Hub, IBM Cloud Container Registry, GHCR, Amazon ECR, Google Artifact Registry,
+  Azure Container Registry or a local registry. The export is a folder you can keep as a
+  repository, with a GitHub Actions workflow that builds and pushes it. The CLI does the
+  same: `mage export service . --service <name> --platform linux/amd64,linux/arm64 --push`.
+- **After-run triggers.** A pipeline starts when a run of another pipeline completes,
+  fails or ends either way, in MageML and in exported services. The run gets
+  `upstream_pipeline`, `upstream_pipeline_run_id` and `upstream_status` as variables;
+  loops are refused when the trigger is saved and at export.
+- **Models in exported services.** A service names its models and the MLflow server they
+  come from: a registered model by alias (`champion`) or version, or any URI MLflow can
+  download. The Services page resolves each alias while you edit, with the version, its
+  tags and its Feast feature service; the export embeds each model and reports the version
+  it embedded or why it could not. `load_model(name, flavor='native')` returns the
+  framework's own model (a CatBoost classifier with `predict_proba`), model files logged as
+  they are, such as `.cbm`, load in their own format, and `feature_service(name)` reads the
+  `feast.feature_service` tag of Feast's MLflow integration. Registry errors name what is
+  wrong (a wrong name, a missing alias or version, refused credentials) and an unreachable
+  registry is reported in seconds instead of minutes.
+- **Conditional blocks in exported services.** A block whose Python conditions return
+  False is marked `condition_failed`, so are the blocks after it, and the run completes,
+  as in MageML. The Services page lists the blocks guarded by conditions.
+- **Exports find more of what blocks read**: SQL files a helper reads
+  (`read_sql('sql/orders.sql')`), `FEAST_URL` for `FeastClient`, packages MageML's modules
+  import inside functions, and the package that reads an embedded model file (`catboost`
+  for `.cbm`). MLflow goes into an image only when a model needs it, and the export's zip
+  streams its files.
+- **R and Rust setup is explained in the editor.** Creating an R or Rust block on a machine
+  where that language is not set up shows what is missing, the commands that fix it and
+  the setup guide; the block is still created. `GET /api/language_setups/<r|rust>` does the
+  check. A `rust` extra joins the `r` extra; both name the setup and install no packages.
+- **Docker build and push failures say why**: Docker not running, no disk space, a builder
+  that builds one platform, a step for another processor without QEMU, a base image that
+  cannot be pulled, a registry that refuses the push or cannot be reached.
+- **Pipeline shapes.** A guide to the seven shapes of a pipeline (Line, Parallel lines,
+  Diamond, Broadcast, Merge, Lattice, Thicket), what fuses in each, best practices and
+  anti-patterns, with diagrams; the compilation study behind it
+  (`docs/development/compilation-study.md`); and Diamond, Broadcast and Merge pipelines in
+  the playground.
+- **Clearer errors.** A 404 names what was not found ("Pipeline run 42 was not found.")
+  instead of "Record not found.", requests in the app that showed nothing when they failed
+  show the error, and invalid cron expressions, missing Google Sheets and blocks stopped by
+  a monitor say what to do.
 - **Faster Rust pipelines.** A cached Rust block's process starts in about 10 ms: Mage
   no longer hashes the SDK before every block, no longer makes macOS check each binary
   again, and adding a block no longer rebuilds the others. Every job process imports
