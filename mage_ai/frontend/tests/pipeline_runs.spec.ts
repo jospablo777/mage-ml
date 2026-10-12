@@ -15,7 +15,8 @@ test('ensure pipeline "example_pipeline" runs successfully', async ({ page }) =>
 
   // Go to trigger's detail page.
   await page.locator('#pipeline-triggers-row-0').getByRole('link').click();
-  await expect(page.getByRole('button', { name: 'Running' })).toBeVisible();
+  // The run can end before this page loads: then it shows Done without Running first.
+  await expect(page.getByRole('button', { name: /^(Running|Done)$/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Done' })).toBeVisible();
 
   // Go back to pipeline's trigger page.
