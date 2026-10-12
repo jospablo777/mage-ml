@@ -57,6 +57,7 @@ class RuntimeTestCase(TestCase):
         self.rig_versions = []
         runtime._rscripts.clear()
         self.install_fails = False
+        self.system_missing = []
         self.install = patch.object(runtime.subprocess, 'run', side_effect=self.fake_install)
         self.install.start()
 
@@ -83,6 +84,10 @@ class RuntimeTestCase(TestCase):
         return subprocess.CompletedProcess(args, 0, '', '')
 
     def fake_run(self, args, cwd=None, timeout=600, env=None):
+        if args[1] == '--vanilla' and args[3] == runtime.MISSING_PACKAGES:
+            self.calls.append('packages')
+            # In the order asked, as R prints them.
+            return '\n'.join(name for name in args[4:] if name in self.system_missing)
         self.calls.append(args[1] if args[1] != '--vanilla' else 'version')
         if args[1] == '--vanilla':
             return self.r_version
@@ -193,6 +198,26 @@ class PrepareTest(RuntimeTestCase):
 
         with self.assertRaisesRegex(runtime.REnvironmentError, '`rv add arrow`'):
             self.prepare()
+
+    def test_without_an_r_environment_r_needs_the_exchange_packages(self):
+        import shutil
+
+        shutil.rmtree(self.project)
+        self.system_missing = ['jsonlite', 'bit64']
+
+        with self.assertRaises(runtime.REnvironmentError) as raised:
+            self.prepare()
+
+        self.assertEqual(str(raised.exception), (
+            "R blocks need the R packages bit64, jsonlite, which R's library does not have. "
+            'Install them in R with install.packages(c("bit64", "jsonlite")), or give the '
+            'project its own R environment with `mage r init`, which installs them with the '
+            'tidyverse.'
+        ))
+        self.assertNotIn('install', self.calls)
+
+        self.system_missing = []
+        self.assertIsNone(self.prepare().rv)
 
     def test_r_version_must_match(self):
         self.r_version = '4.5.2'

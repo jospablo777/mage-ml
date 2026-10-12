@@ -415,6 +415,20 @@ def rscript_version(config: RConfig) -> str:
     return output.strip()
 
 
+# Prints the packages of the arguments that R's library does not have, one per line.
+MISSING_PACKAGES = """
+names <- commandArgs(trailingOnly = TRUE)
+cat(names[!nzchar(vapply(names, function(name) system.file(package = name), ""))], sep = "\\n")
+"""
+
+
+def missing_packages(config: RConfig, names: List[str]) -> List[str]:
+    """The packages of names that the R library of config's Rscript does not have."""
+    output = _run([_executable(config.rscript, 'Rscript'), '--vanilla', '-e', MISSING_PACKAGES,
+                   *names])
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
 def plan(config: RConfig) -> Dict:
     """What `rv sync` would install and remove."""
     output = _run(
@@ -579,6 +593,16 @@ def _prepare(config: RConfig) -> RLibraries:
             raise REnvironmentError(
                 f'R blocks need the R packages {", ".join(missing)}. Add them with '
                 f'`rv add {" ".join(missing)}` in {config.project_dir}.',
+            )
+    else:
+        missing = missing_packages(config, EXCHANGE_PACKAGES)
+        if missing:
+            quoted = ', '.join(f'"{name}"' for name in missing)
+            raise REnvironmentError(
+                f'R blocks need the R packages {", ".join(missing)}, which R\'s library '
+                'does not have. Install them in R with '
+                f'install.packages(c({quoted})), or give the project its own R environment '
+                'with `mage r init`, which installs them with the tidyverse.',
             )
     libraries = RLibraries(rv=rv_library, mageml=install_mageml(config, actual, rv_library))
     if config.uses_rv and config.sync != 'off':
