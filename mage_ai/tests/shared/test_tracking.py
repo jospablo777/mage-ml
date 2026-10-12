@@ -44,3 +44,20 @@ class TemporaryMlflowTest(unittest.TestCase):
 
         self.assertEqual(os.listdir(directory), [])
         self.assertNotEqual(mlflow.get_tracking_uri(), uri)
+
+    def test_an_experiment_another_test_set_does_not_follow_into_a_new_store(self):
+        import mlflow
+
+        class Earlier(unittest.TestCase):
+            def runTest(self):
+                pass
+
+        earlier = Earlier()
+        use_temporary_mlflow(earlier, experiments=['scoring'])
+        mlflow.set_experiment('scoring')
+        earlier.doCleanups()
+
+        use_temporary_mlflow(self)
+        with mlflow.start_run() as run:
+            mlflow.log_metric('auc', 0.9)
+        self.assertEqual(run.info.experiment_id, '0')

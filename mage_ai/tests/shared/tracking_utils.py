@@ -31,8 +31,21 @@ def use_temporary_mlflow(test_case, experiments=()) -> str:
         mlflow.set_tracking_uri(previous)
         if previous is None:
             os.environ.pop('MLFLOW_TRACKING_URI', None)
+        _forget_active_experiment()
 
     test_case.addCleanup(restore)
     os.environ['MLFLOW_TRACKING_URI'] = uri
     mlflow.set_tracking_uri(uri)
+    # An experiment another test set with mlflow.set_experiment stays active for the
+    # process; its id is not in this store, so start_run failed with "No Experiment
+    # with id=1 exists" in whichever test ran next in the same worker.
+    _forget_active_experiment()
     return uri
+
+
+def _forget_active_experiment() -> None:
+    from mlflow.tracking import fluent
+
+    fluent._active_experiment_id = None
+    os.environ.pop('MLFLOW_EXPERIMENT_ID', None)
+    os.environ.pop('MLFLOW_EXPERIMENT_NAME', None)
