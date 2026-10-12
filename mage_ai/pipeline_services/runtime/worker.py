@@ -525,13 +525,14 @@ def _passes_in_memory(value: Any) -> bool:
     fused stages decide). A Polars DataFrame, or a pandas DataFrame without object
     columns, attrs, an object or multi-level index, or labels that are not text.
     """
-    import numpy as np
-
     pandas = _module('pandas')
     polars = _module('polars')
     if polars is not None and type(value) is polars.DataFrame:
         return True
     if pandas is not None and type(value) is pandas.DataFrame:
+        # Here, not at the top: a worker whose blocks use no pandas may have no NumPy.
+        import numpy as np
+
         object_dtype = np.dtype('O')
         if value.attrs or value.index.dtype == object_dtype:
             return False
