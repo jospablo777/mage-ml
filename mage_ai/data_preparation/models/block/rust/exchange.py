@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Tuple
 import pandas as pd
 import polars as pl
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.ipc as ipc
 
 from mage_ai.data_preparation.models.block.rust.inputs import StoredTable
@@ -35,7 +36,39 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
+def _valid_dictionary_keys(table: pa.Table) -> pa.Table:
+    """
+    The table with every dictionary key in range. pandas keeps the code -1 under a missing
+    category, Arrow keeps it under the null, and Polars rejects a negative key even there.
+    Null slots get key 0; a column without categories becomes plain nulls.
+    """
+    if not any(pa.types.is_dictionary(field.type) for field in table.schema):
+        return table
+    columns = []
+    for field, column in zip(table.schema, table.columns):
+        if pa.types.is_dictionary(field.type) and column.null_count:
+            chunks = []
+            for chunk in column.chunks:
+                if not chunk.null_count:
+                    chunks.append(chunk)
+                elif len(chunk.dictionary) == 0:
+                    chunks.append(pa.DictionaryArray.from_arrays(
+                        pa.array([0] * len(chunk), type=chunk.indices.type),
+                        pa.array([None], type=chunk.dictionary.type),
+                    ))
+                else:
+                    missing = chunk.is_null().to_numpy(zero_copy_only=False)
+                    keys = pc.fill_null(chunk.indices, 0).to_numpy(zero_copy_only=False)
+                    keys = pa.array(keys, type=chunk.indices.type, mask=missing)
+                    chunks.append(pa.DictionaryArray.from_arrays(keys, chunk.dictionary))
+            column = pa.chunked_array(chunks, type=chunks[0].type if chunks else field.type)
+        columns.append(column)
+    fields = [f.with_type(c.type) for f, c in zip(table.schema, columns)]
+    return pa.Table.from_arrays(columns, schema=pa.schema(fields, table.schema.metadata))
+
+
 def _write_arrow(table: pa.Table, path: str) -> None:
+    table = _valid_dictionary_keys(table)
     with pa.OSFile(path, 'wb') as sink, ipc.new_file(sink, table.schema) as writer:
         writer.write_table(table)
 
