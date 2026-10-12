@@ -315,10 +315,13 @@ jobs:
         with:
           node-version: "24"
         if: matrix.python-version == '3.12'
+      # The app as users run it: ENV=test_mage is the unit tests' mode (their SQLite
+      # database in the working directory, data in the checkout), not a server's.
       - name: Create Mage test project
         run: |
           python mage_ai/cli/main.py init test_project
         env:
+          ENV: ""
           PYTHONPATH: ${{ env.pythonLocation }}:.
         if: matrix.python-version == '3.12'
       # Temporary: stacks of the server and the kernel every minute while the Playwright
@@ -340,6 +343,7 @@ jobs:
         working-directory: mage_ai/frontend/
         env:
           PYTHONPATH: ${{ env.pythonLocation }}:. # Playwright tests on CI depend on the Python web server
+          ENV: ""
           # Temporary: log each kernel WebSocket message the server handles.
           MAGE_DEBUG_WEBSOCKET: "1"
         if: matrix.python-version == '3.12'
