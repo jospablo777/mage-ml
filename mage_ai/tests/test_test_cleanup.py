@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -101,3 +102,29 @@ class CollectionTest(unittest.TestCase):
                 capture_output=True, timeout=300,
             )
             self.assertFalse(Path(directory, 'data_loaders').exists())
+
+
+class FileModeTest(unittest.TestCase):
+    @unittest.skipUnless(
+        shutil.which('git') and Path(__file__).resolve().parents[2].joinpath('.git').exists(),
+        'needs a git checkout',
+    )
+    def test_only_scripts_are_executable(self):
+        """
+        Python modules and the playground's project files were committed with the
+        executable bit, and an exported service copied the mode into its build context.
+        """
+        root = Path(__file__).resolve().parents[2]
+        listing = subprocess.run(
+            ['git', 'ls-files', '-s'], cwd=root, capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        executable = [line.split('\t', 1)[1] for line in listing if line.startswith('100755')]
+        wrong = []
+        for name in executable:
+            path = root / name
+            if not path.is_file() or name.endswith('.sh'):
+                continue
+            with open(path, 'rb') as file:
+                if file.read(2) != b'#!':
+                    wrong.append(name)
+        self.assertEqual(wrong, [])
