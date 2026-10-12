@@ -655,10 +655,17 @@ function Workbench({
   );
 
   // A refreshed list hands a new object for the same service: keep the export's result,
-  // and take the saved settings only when they changed.
+  // and take the saved settings only when they changed. The first save of a new service
+  // keeps it too: Save and export started the export before that save named the service.
+  const wasNew = useRef<boolean>(isNew);
   useEffect(() => {
+    if (wasNew.current) {
+      wasNew.current = isNew;
+      return;
+    }
     setExported(null);
     setJob(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved.name]);
   useEffect(() => {
     setDraft(saved);
@@ -1602,6 +1609,10 @@ function Services() {
   );
   const [selectedName, setSelectedName] = useState<string>(null);
   const [newDraft, setNewDraft] = useState<ServiceDefinitionType>(null);
+  // A new service keeps its editor when it is first saved, until another one is chosen: its
+  // Save and export goes on showing the export it started.
+  const [editorKey, setEditorKey] = useState<string>(null);
+  const [savedNow, setSavedNow] = useState<ServiceDefinitionType>(null);
 
   useEffect(() => {
     if (!selectedName && !newDraft && services.length) {
@@ -1609,7 +1620,9 @@ function Services() {
     }
   }, [newDraft, selectedName, services]);
 
-  const selected = newDraft || services.find(s => s.name === selectedName);
+  const selected = newDraft
+    || services.find(s => s.name === selectedName)
+    || (savedNow?.name === selectedName ? savedNow : null);
   const unsavedExports = exportsList.filter(e => !services.some(s => s.name === e.name));
 
   const startNew = () => {
@@ -1622,6 +1635,7 @@ function Services() {
     }
     setNewDraft(emptyDefinition(name));
     setSelectedName(null);
+    setEditorKey(`new-${Date.now()}`);
   };
 
   return (
@@ -1646,6 +1660,7 @@ function Services() {
               onClick={() => {
                 setNewDraft(null);
                 setSelectedName(service.name);
+                setEditorKey(null);
               }}
               selected={!newDraft && service.name === selectedName}
               type="button"
@@ -1687,6 +1702,7 @@ function Services() {
                         onClick={() => {
                           setNewDraft({ ...emptyDefinition(e.name), pipelines: e.pipelines });
                           setSelectedName(null);
+                          setEditorKey(`new-${Date.now()}`);
                         }}
                         type="button"
                       >
@@ -1745,9 +1761,10 @@ function Services() {
           <Workbench
             definition={selected}
             isNew={!!newDraft}
-            key={newDraft ? `new-${newDraft.name}` : selected.name}
+            key={editorKey || (newDraft ? `new-${newDraft.name}` : selected.name)}
             onDeleted={() => {
               setSelectedName(null);
+              setEditorKey(null);
               mutate();
             }}
             onExported={() => {
@@ -1756,6 +1773,7 @@ function Services() {
             }}
             onSaved={(result) => {
               setNewDraft(null);
+              setSavedNow(result);
               setSelectedName(result.name);
               mutate();
               mutateExports();

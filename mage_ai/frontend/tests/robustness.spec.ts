@@ -137,3 +137,20 @@ test('the trigger page shows its run settings at their width', async ({ page }) 
     expect(card.x + card.width, label).toBeLessThanOrEqual(panelLeft);
   }
 });
+
+test('Save and export on a new service shows the export it started', async ({ page }) => {
+  const name = `fresh-${Date.now().toString(36)}`;
+  await page.goto('/services');
+  await page.getByRole('button', { name: 'New service' }).first().click();
+  await page.getByLabel('Service name').fill(name);
+  await page.getByRole('button', { name: 'Add pipelines' }).last().click();
+  await page.getByPlaceholder('Search pipelines to add').fill('example_pipeline');
+  await page.getByText('example_pipeline', { exact: true }).last().click();
+  await expect(page.getByRole('button', { name: 'Save and export' }).last()).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Save and export' }).last().click();
+
+  // The first save remounted the page's editor, which dropped the export it had started:
+  // the export ran, but the page never showed its progress or its result.
+  await expect(page.getByText(`${name} is ready to build`)).toBeVisible({ timeout: 90000 });
+});
