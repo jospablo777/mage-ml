@@ -737,7 +737,7 @@ if 'data_loader' not in globals():
 def load(*args, **kwargs):
     ids = np.arange({rows}, dtype='int64')
     frame = {{'id': ids}}
-    for j, p in enumerate({primes}):
+    for j, p in enumerate([{primes}]):
         frame[f'f{{j}}'] = ((ids * p) % 1000).astype('float32') / np.float32(10)
     return pd.DataFrame(frame)
 '''),
