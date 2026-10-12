@@ -430,10 +430,8 @@ def zip_export(repo_path: str, name: str):
                 path = Path(root) / file
                 if path.is_symlink():
                     continue
-                arcname = str(Path(name) / path.relative_to(directory))
-                info = zipfile.ZipInfo.from_file(path, arcname)
-                with open(path, 'rb') as source:
-                    zipf.writestr(info, source.read(), zipfile.ZIP_DEFLATED)
+                # Streamed: an export holds its models, which can be large files.
+                zipf.write(path, str(Path(name) / path.relative_to(directory)))
     archive.seek(0)
     return archive
 
