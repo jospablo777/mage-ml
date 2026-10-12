@@ -334,20 +334,29 @@ class CaptureTest(ExportTestCase):
         self.assertIn('docker buildx build --platform', (out / 'README.md').read_text())
 
         with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'):
-            self.assertEqual(export.build_command(out, 'shop')[1:3], ['build', '-t'])
-            pushed = export.build_command(
+            [built] = export.build_commands(out, 'shop')
+            self.assertEqual(built[1:3], ['build', '-t'])
+            [pushed] = export.build_commands(
                 out, 'icr.io/team/shop:1', platforms=['linux/amd64', 'linux/arm64'], push=True,
             )
             self.assertEqual(pushed[1:], [
                 'buildx', 'build', '--tag', 'icr.io/team/shop:1',
                 '--platform', 'linux/amd64,linux/arm64', '--push', str(out),
             ])
-            self.assertIn('--load', export.build_command(out, 'shop', platforms=['linux/arm64']))
+            # One platform pushes with docker push, as the app shows: buildx --push on a
+            # docker-container builder could not reach a registry on localhost.
+            commands = export.build_commands(out, 'localhost:5000/shop:1', push=True)
+            self.assertEqual([c[1:] for c in commands], [
+                ['build', '-t', 'localhost:5000/shop:1', str(out)],
+                ['push', 'localhost:5000/shop:1'],
+            ])
+            [loaded] = export.build_commands(out, 'shop', platforms=['linux/arm64'])
+            self.assertIn('--load', loaded)
             with self.assertRaisesRegex(export.ExportError, 'Several platforms need --push'):
-                export.build_command(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
+                export.build_commands(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
         with patch.object(export.shutil, 'which', return_value=None):
             with self.assertRaisesRegex(export.ExportError, 'docker is not installed'):
-                export.build_command(out, 'shop')
+                export.build_commands(out, 'shop')
 
     def test_the_build_context_holds_everything_the_image_needs(self):
         self.chain()

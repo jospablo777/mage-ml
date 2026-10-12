@@ -308,14 +308,14 @@ def start_build(
     directory = export_directory(repo_path, name)
     if not (directory / 'service.json').is_file():
         raise FileNotFoundError(f'There is no export named {name}; export it first.')
-    command = export.build_command(directory, image, platforms=platforms, push=push)
+    commands = export.build_commands(directory, image, platforms=platforms, push=push)
     key = _key(repo_path, name)
     with _jobs_lock:
         running = _builds.get(key)
         if running and running['state'] == 'running':
             return dict(running, lines=list(running['lines']))
         job = dict(
-            command=' '.join(command[1:]),
+            command=' && '.join(' '.join(['docker'] + c[1:]) for c in commands),
             image=image,
             lines=[],
             name=name,
