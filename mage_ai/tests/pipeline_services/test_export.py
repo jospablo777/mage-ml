@@ -857,6 +857,38 @@ class ModelTest(ExportTestCase):
         frame = ipc.open_file(scored['outputs'][0]['path']).read_all().to_pandas()
         self.assertEqual(frame['score'].tolist(), [0.0, 3.0, 6.0])
 
+    def test_a_model_logged_as_a_plain_file_adds_no_mlflow(self):
+        import joblib
+        import mlflow
+
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        joblib.dump({'factor': 2}, folder / 'model.joblib')
+        with mlflow.start_run() as run:
+            mlflow.log_artifact(str(folder / 'model.joblib'), artifact_path='plain')
+        load = self.add('load', 'data_loader', LOAD.format(project=self.project.name))
+        self.add('score', 'transformer', f'''
+    import pandas as pd
+
+    from mage_ai.pipeline_services.models import load_model
+
+
+    @transformer
+    def score(frame, *args, **kwargs):
+        model = load_model('plain', uri='runs:/{run.info.run_id}/plain', flavor='native')
+        return frame.assign(score=frame['amount'] * model['factor'])
+''', upstream=[load])
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        export.write(captured, str(out), force=True)
+
+        self.assertTrue((out / 'models' / 'plain' / 'artifacts' / 'model.joblib').is_file())
+        requirements = (out / 'requirements.txt').read_text()
+        self.assertIn('joblib==', requirements)
+        self.assertNotIn('mlflow', requirements)
+
     def test_conflicting_and_invalid_model_options_are_explained(self):
         self.add('load', 'data_loader', LOAD.format(project=self.project.name))
         with self.assertRaises(export.ExportError) as caught:
