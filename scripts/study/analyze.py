@@ -235,19 +235,61 @@ def width():
     groups = defaultdict(list)
     for r in rows:
         groups[(r['language'], r['shape'], r['mode'], r['width'])].append(r['seconds'])
-    out = []
+    out, lines = [], {}
     for (language, shape, mode, w), values in sorted(groups.items()):
         med, low, high = median_ci(values)
-        out.append([language, shape, mode, w, f'{fmt(med)} [{fmt(low)}, {fmt(high)}]'])
-    print(table(['language', 'shape', 'mode', 'width', 'seconds [95% CI]'], out))
+        speedup = ''
+        if mode == 'chains' and groups.get((language, shape, 'off', w)):
+            ratio, r_low, r_high = ratio_ci(groups[(language, shape, 'off', w)], values)
+            speedup = f'{fmt(ratio)} [{fmt(r_low)}, {fmt(r_high)}]'
+        out.append([language, shape, mode, w, f'{fmt(med)} [{fmt(low)}, {fmt(high)}]',
+                    speedup])
+        name = {'fan_out': 'Broadcast', 'fan_in': 'Merge'}[shape]
+        lines.setdefault(f'{name} {language} {"fused" if mode == "chains" else "block by block"}',
+                         []).append((float(w), med, low, high))
+    print(table(['language', 'shape', 'mode', 'width', 'seconds [95% CI]',
+                 'block by block / fused [95% CI]'], out))
     print()
+    pandas_lines = {k: v for k, v in lines.items() if ' pandas ' in k}
+    if pandas_lines:
+        charts.lines(IMAGES / 'branching', 'Run time of Broadcast and Merge pipelines by width '
+                     '(pandas, 10,000 rows)', pandas_lines, xlabel='width (blocks)',
+                     ylabel='seconds per run')
+
+
+def string_dtype():
+    rows = warm(load('string_dtype'))
+    if not rows:
+        return
+    print('## pandas strings\n')
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r['strings'], r['mode'])].append(r['seconds'])
+    out = []
+    for (strings, mode), values in sorted(groups.items()):
+        med, low, high = median_ci(values)
+        out.append([strings, mode, f'{fmt(med)} [{fmt(low)}, {fmt(high)}]', len(values)])
+    print(table(['strings', 'mode', 'seconds [95% CI]', 'runs'], out))
+    print()
+    fused = {k[0]: v for k, v in groups.items() if k[1] == 'chains'}
+    if 'object' in fused and 'arrow' in fused:
+        ratio, low, high = ratio_ci(fused['object'], fused['arrow'])
+        print(f'Fused, object / string[pyarrow]: {fmt(ratio)} [{fmt(low)}, {fmt(high)}], '
+              f'Mann-Whitney p = {mann_whitney(fused["object"], fused["arrow"]):.3g}\n')
 
 
 def faults():
     rows = load('faults')
     if not rows:
         return
+    # The latest session: the statuses are behaviour, not timings, and an earlier session
+    # may predate a fix (1210d19d3 changed the status of a compiled chain's last block).
+    latest = max(r['session'] for r in rows)
+    earlier = sorted({r['session'] for r in rows} - {latest})
+    rows = [r for r in rows if r['session'] == latest]
     print('## Failures\n')
+    print(f'Session {latest}' + (f'; earlier sessions {", ".join(earlier)} not shown.'
+                                 if earlier else '.') + '\n')
     by = defaultdict(dict)
     for r in rows:
         by[(r['topology'], r['language'], r['fault'])][r['mode']] = r['statuses']
@@ -308,6 +350,18 @@ def inference():
     print(table(['scorer', 'mode', 'rows', 'run s [95% CI]', 'scoring block s',
                  'rows per second (block)'], out))
     print()
+    largest = max(k[2] for k in groups)
+    bars = {}
+    for (scorer, mode, size), values in sorted(groups.items()):
+        block = [v[1] for v in values if v[1] is not None]
+        if size == largest and mode == 'chains' and block:
+            bars[scorer] = median_ci(block)
+    if bars:
+        names = list(bars)
+        charts.bars(IMAGES / 'inference', f'Scoring block time, {largest:,} rows, fused',
+                    names, {'seconds': [bars[n][0] for n in names]},
+                    {'seconds': [(bars[n][1], bars[n][2]) for n in names]},
+                    ylabel='seconds', width=max(760, 60 * len(names)))
 
 
 def _score_seconds(row: Dict) -> float:
@@ -430,6 +484,7 @@ def excluded():
 
 if __name__ == '__main__':
     IMAGES.mkdir(parents=True, exist_ok=True)
-    for step in (correctness, types, chain_length, switches, data_size, width, faults,
+    for step in (correctness, types, chain_length, switches, data_size, width,
+                 string_dtype, faults,
                  inference, ml_scoring, ml_training, excluded):
         step()
