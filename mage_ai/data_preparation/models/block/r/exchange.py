@@ -20,6 +20,7 @@ where it would not, or where R has a better type:
   large_binary.
 - float16, which arrow reads as its raw bits, becomes float32.
 - uint64 becomes int64 when every value fits, and text otherwise; arrow reads it as double.
+  A warning names the columns that become text.
 - Columns holding structs or maps cross as JSON text, which R decodes into lists: arrow
   turns a NULL struct into a row of fields, with "" in text fields.
 - Values pyarrow cannot type, such as a column of mixed types, cross as JSON text.
@@ -29,7 +30,8 @@ In JSON, integers that a double cannot hold cross as {"$int64": "<digits>"}, whi
 mageml reads as bit64::integer64.
 
 Decimals become doubles in R, with 15 to 17 significant digits, and -2**63, which bit64
-uses as its NA, becomes NA. A warning names the columns where that happens.
+uses as its NA, becomes NA. R's times hold microseconds, so nanoseconds are dropped. A
+warning names the columns where any of this happens.
 """
 import json
 import math
@@ -140,6 +142,18 @@ def _r_type(data_type: pa.DataType) -> pa.DataType:
     return data_type
 
 
+def _has_nanoseconds(array: pa.ChunkedArray) -> bool:
+    """Whether a nanosecond timestamp, time or duration has values finer than a microsecond."""
+    data_type = array.type
+    if not (
+        pa.types.is_timestamp(data_type) or pa.types.is_time64(data_type)
+        or pa.types.is_duration(data_type)
+    ) or data_type.unit != 'ns':
+        return False
+    values = array.cast(pa.int64())
+    return pc.any(pc.not_equal(pc.remainder(values, 1000), 0)).as_py() or False
+
+
 def _r_column(
     name: str, array: pa.ChunkedArray, warnings: List[str],
 ) -> Tuple[pa.ChunkedArray, bool]:
@@ -157,7 +171,14 @@ def _r_column(
         largest = pc.max(array).as_py()
         if largest is None or largest < 2**63:
             return _r_column(name, array.cast(pa.int64()), warnings)
+        warnings.append(
+            f'Column {name} is uint64 with values over 2**63 - 1, which R gets as text.',
+        )
         return array.cast(pa.large_string()), False
+    if _has_nanoseconds(array):
+        warnings.append(
+            f'Column {name} holds nanoseconds, which R drops: it keeps microseconds.',
+        )
     if pa.types.is_decimal(data_type):
         if data_type.precision > DOUBLE_DIGITS:
             warnings.append(

@@ -134,6 +134,24 @@ class WriteInputsTest(ExchangeTestCase):
         self.assertIn('amount is decimal128(38, 9)', warnings[0])
         self.assertIn('n holds -2**63', warnings[1])
 
+    def test_warnings_for_values_r_changes(self):
+        table = pa.table({
+            'big': pa.array([2**64 - 1, 1], pa.uint64()),
+            'fits': pa.array([2**63 - 1, 1], pa.uint64()),
+            'at': pa.array([1_000_000_001, None], pa.timestamp('ns')),
+            'whole': pa.array([1_000_000_000, None], pa.timestamp('ns')),
+            'took': pa.array([1_500, 2_000], pa.duration('ns')),
+            'clock': pa.array([1_000_000_007, None], pa.time64('ns')),
+        })
+
+        _, _, warnings = self.write(table)
+
+        self.assertEqual(len(warnings), 4, warnings)
+        self.assertIn('big is uint64 with values over 2**63 - 1', warnings[0])
+        self.assertIn('at holds nanoseconds', warnings[1])
+        self.assertIn('took holds nanoseconds', warnings[2])
+        self.assertIn('clock holds nanoseconds', warnings[3])
+
     def test_uuids_cross_as_text(self):
         key = uuid.UUID('12345678-1234-5678-1234-567812345678')
         frame = pd.DataFrame({'key': [key, None], 'mixed': [key, 1]})
