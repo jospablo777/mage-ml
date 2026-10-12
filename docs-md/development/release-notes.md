@@ -577,6 +577,15 @@ Each item says what changed, which pipelines it affects, and what to do.
 
 ### New
 
+- **Package management with uv and rv.** `pyproject.toml` is the single source of
+  MageML's dependencies and `uv.lock` pins every package, so each install resolves the
+  same versions; `setup.py`, `poetry.lock` and the hand-kept `requirements.txt` are gone
+  (`make requirements` generates one from the lock when a tool needs it). Install with
+  `uv pip install mage-ml`, develop with `uv sync`. Pipeline environments are virtual
+  environments uv builds from a requirements file. R blocks use an rv project
+  (`rproject.toml`, `rv.lock`) that `mage r init` creates, and rig installs the R version
+  it names. See `docs/guides/blocks/r-setup.mdx` and
+  `docs/guides/pipelines/pipeline-environments.mdx`.
 - **Services in the app.** **Export as service** in the pipelines list and the editor's
   File menu exports one or more pipelines with a live preview and a progress bar. The
   **Services** page in the left menu keeps services in `pipeline_services.yaml`, checks
