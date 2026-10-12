@@ -17,6 +17,26 @@ from mage_ai.settings import OAUTH2_APPLICATION_CLIENT_ID, REQUIRE_USER_AUTHENTI
 from mage_ai.shared.requests import get_bearer_auth_token_from_headers
 
 
+def user_from_cookie(cookie_header: str):
+    """
+    The signed-in user of a request's oauth_token cookie, which the frontend sets on
+    sign-in and the browser sends with every request, WebSocket handshakes included; None
+    without a valid one.
+    """
+    cookies = parse_cookie_header(cookie_header or '')
+    if COOKIE_OAUTH_TOKEN not in cookies:
+        return None
+    try:
+        token = decode_token(cookies[COOKIE_OAUTH_TOKEN]).get('token')
+    except Exception:
+        return None
+    oauth_client = Oauth2Application.query_client(OAUTH2_APPLICATION_CLIENT_ID)
+    if not token or not oauth_client:
+        return None
+    oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
+    return oauth_token.user if oauth_token and valid else None
+
+
 class OAuthMiddleware(RequestHandler):
     def initialize(self, **kwargs) -> None:
         self.bypass_oauth_check = kwargs.get('bypass_oauth_check', False)

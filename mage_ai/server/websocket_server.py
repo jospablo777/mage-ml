@@ -169,10 +169,22 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
     running_executions_mapping = dict()
 
     def open(self):
-        WebSocketServer.clients.add(self)
+        # Every client gets the kernel's outputs, so with authentication on a client joins
+        # only once signed in: by the session cookie of its handshake, or by its first
+        # message with a valid token. Any connection used to get every user's outputs.
+        if not REQUIRE_USER_AUTHENTICATION or self.__signed_in_by_cookie():
+            WebSocketServer.clients.add(self)
 
     def on_close(self):
-        WebSocketServer.clients.remove(self)
+        WebSocketServer.clients.discard(self)
+
+    def __signed_in_by_cookie(self) -> bool:
+        from mage_ai.api.middleware import user_from_cookie
+
+        try:
+            return user_from_cookie(self.request.headers.get('Cookie', '')) is not None
+        except Exception:
+            return False
 
     def check_origin(self, origin):
         return True
@@ -240,8 +252,10 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                         valid = False
 
             if not valid or DISABLE_NOTEBOOK_EDIT_ACCESS == 1:
+                # To this client only: it may not be signed in, and the others need not know.
                 return self.send_message(
-                    dict(
+                    to=self,
+                    message=dict(
                         data=ApiError.UNAUTHORIZED_ACCESS['message'],
                         execution_metadata=dict(block_uuid=message.get('uuid')),
                         execution_state='idle',
@@ -249,6 +263,9 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                         type=DataType.TEXT_PLAIN,
                     ),
                 )
+
+        # Signed in, or no sign-in required: this client gets the kernel's outputs.
+        WebSocketServer.clients.add(self)
 
         output = message.get('output')
         if output:
@@ -311,7 +328,7 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             )
 
     @classmethod
-    def send_message(cls, message: dict) -> None:
+    def send_message(cls, message: dict, to: 'WebSocketServer' = None) -> None:
         def should_filter_message(message):
             if (
                 message.get('data') is None
@@ -396,7 +413,7 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                 f'{len(cls.clients)} client(s):\n{json.dumps(message_final, indent=2)}'
             )
 
-            for client in cls.clients:
+            for client in [to] if to is not None else list(cls.clients):
                 client.write_message(json.dumps(message_final))
 
     async def __execute_block(
