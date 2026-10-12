@@ -293,6 +293,13 @@ class CaptureTest(ExportTestCase):
         self.assertEqual(build['platforms'], 'linux/amd64,linux/arm64')
         self.assertIn("'shop'", build['tags'])
         self.assertIn('.github/', (out / '.dockerignore').read_text())
+        # GITHUB_TOKEN is issued for each run and cannot be saved as a secret, so pushes to
+        # ghcr.io log in with it when the repository sets no registry secrets.
+        login = workflow['jobs']['image']['steps'][4]['with']
+        self.assertEqual(login['username'], '${{ secrets.REGISTRY_USERNAME || github.actor }}')
+        self.assertEqual(
+            login['password'], '${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}',
+        )
         self.assertIn('docker buildx build --platform', (out / 'README.md').read_text())
 
         with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'):

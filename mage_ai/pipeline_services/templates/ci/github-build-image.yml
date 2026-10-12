@@ -4,7 +4,8 @@
 #                            ghcr.io/owner/$name
 #   secret REGISTRY_USERNAME and REGISTRY_PASSWORD
 #                            IBM Cloud: iamapikey and an API key; Docker Hub: your user and
-#                            an access token; GitHub: your user and GITHUB_TOKEN.
+#                            an access token. ghcr.io needs neither: without them the job
+#                            logs in with the workflow's GITHUB_TOKEN.
 # Pin the actions to commit SHAs if your organization requires it.
 name: Build $name
 
@@ -38,8 +39,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ steps.registry.outputs.host }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           context: .

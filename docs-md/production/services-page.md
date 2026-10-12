@@ -137,7 +137,7 @@ any CI:
 | `Dockerfile`, `compose.yaml`, `.dockerignore` | The image and a one-machine setup |
 | `<project>/`, `requirements.txt`, `rust/`, `r/` | The pipelines' code and what it needs |
 | `service.json`, `README.md`, `.env.example`, `report.txt` | The manifest, how to run it, the variables to set, what the export found |
-| `.github/workflows/build-image.yml` | GitHub Actions: builds amd64 and arm64 on every push to `main`, and pushes when the repository sets `REGISTRY_IMAGE` and the `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` secrets |
+| `.github/workflows/build-image.yml` | GitHub Actions: builds amd64 and arm64 on every push to `main`, and pushes when the repository sets `REGISTRY_IMAGE` and the `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` secrets (ghcr.io needs no secrets: the job logs in with `GITHUB_TOKEN`) |
 | `.tekton/`, `deploy/ibm/` | IBM Cloud Continuous Delivery and Code Engine |
 | `deploy/kubernetes.yaml` | A Deployment with probes and a volume claim |
 | `.gitignore` | Leaves out `.env`, local data and build output |
