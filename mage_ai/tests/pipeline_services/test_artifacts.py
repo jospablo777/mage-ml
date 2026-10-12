@@ -1,4 +1,5 @@
 """Model files in their frameworks' formats, loaded once per process by load_artifact."""
+import importlib.util
 import os
 import shutil
 import tempfile
@@ -57,6 +58,11 @@ class LoadArtifactTest(unittest.TestCase):
             # Newer skops trusts these types: then the file simply loads.
             pass
 
+    # No extra installs torch or safetensors; the test needs both.
+    @unittest.skipUnless(
+        all(importlib.util.find_spec(name) for name in ('torch', 'safetensors')),
+        'torch and safetensors are not installed',
+    )
     def test_torch_export_programs_and_safetensors(self):
         import torch
         from safetensors.torch import save_file
