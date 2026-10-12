@@ -79,15 +79,15 @@ Blocks load a model the same way in Mage and in this service:
 ```python
 from mage_ai.pipeline_services.models import load_model, model_metadata, model_path
 
-model = load_model('fraud', uri='models:/fraud/3')   # MLflow pyfunc
-path = model_path('fraud', uri='models:/fraud/3')    # the model's files
+model = load_model('churn', uri='models:/churn/3')   # MLflow pyfunc
+path = model_path('churn', uri='models:/churn/3')    # the model's files
 ```
 
 In Mage the model comes from MLflow; in the service it is the copy in the image, recorded
 at export with its version, run, flavors, signature, params and metrics
 (`GET /v1/models`). The service never calls MLflow, so it runs the exact version it was
 built with. Export again to ship a new version: `mage export service ... --model
-fraud=models:/fraud@champion`.
+churn=models:/churn@champion`.
 
 ## Watch it from a terminal
 

@@ -46,11 +46,27 @@ class DefinitionsTest(ExportTestCase):
         self.assertTrue(definitions.delete_definition(self.repo_path, 'renamed'))
         self.assertEqual(definitions.names(self.repo_path), ['second'])
 
+    def test_models_and_their_registry_are_saved_with_the_service(self):
+        definitions.save_definition(self.repo_path, 'scoring', dict(
+            pipelines=['a'],
+            model_registry='http://mlflow:5000',
+            models=[dict(name='churn', uri='models:/churn-scorer@champion')],
+        ))
+
+        saved = definitions.load_definition(self.repo_path, 'scoring')
+        self.assertEqual(saved['model_registry'], 'http://mlflow:5000')
+        self.assertEqual(saved['models'], [dict(name='churn', uri='models:/churn-scorer@champion')])
+        written = yaml.safe_load(self.file.read_text())['services']['scoring']
+        self.assertEqual(written['models'][0]['uri'], 'models:/churn-scorer@champion')
+
     def test_bad_settings_say_what_to_fix(self):
         for value, message in (
             (dict(pipelines='a'), 'pipelines must be a list'),
             (dict(pipelines=['a'], max_runs=0), 'max_runs must be'),
             (dict(pipelines=['a'], include='models'), 'include must be a list'),
+            (dict(pipelines=['a'], models=[dict(name='churn')]), 'models must be a list'),
+            (dict(pipelines=['a'], model_registry=5), 'model_registry must be the address'),
+            (dict(pipelines=['a'], model_registry='mlflow:5000'), 'such as http://mlflow:5000'),
         ):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(definitions.DefinitionError, message):

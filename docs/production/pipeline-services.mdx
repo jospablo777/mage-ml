@@ -234,14 +234,14 @@ The export lists the environment variables the code reads, in `io_config.yaml`
 (`env_var('X')`) and in the blocks (`os.getenv`, `os.environ`, `mage_secret_var`). Every
 variable of `io_config.yaml` is marked secret: hosts, users, databases and ports are
 connection settings as much as passwords are. Those of a profile the exported code names,
-such as `ConfigFileLoader(path, 'raw_source')` or a SQL block's profile, are required;
+such as `ConfigFileLoader(path, 'warehouse')` or a SQL block's profile, are required;
 those of profiles no exported block uses are listed as optional, with a note. Elsewhere,
 names that look secret (`PASSWORD`, `TOKEN`, `KEY`, `SECRET`) are marked secret, and
 `os.environ['X']` is required.
 
 `io_config.yaml` goes into the image as it is, with its `env_var` templates, and resolves
 at run time from the container's environment, as in Mage. A CI/CD pipeline that injects
-`POSTGRES_HOST_SOURCE` into the container gives a block that loads the `raw_source` profile
+`POSTGRES_HOST_WAREHOUSE` into the container gives a block that loads the `warehouse` profile
 its `POSTGRES_HOST`, with no change to the project. The generated `deploy/kubernetes.yaml`
 lists the variables the container needs and sets `MAGE_SERVICE_STRICT_ENV=on`, so a pod
 missing a required one stops at start with their names instead of failing on its first
@@ -317,8 +317,8 @@ from mage_ai.pipeline_services.models import load_model
 
 @transformer
 def score(orders, *args, **kwargs):
-    model = load_model('fraud', uri='models:/fraud@champion')
-    return orders.assign(fraud=model.predict(orders))
+    model = load_model('churn', uri='models:/churn@champion')
+    return orders.assign(churn=model.predict(orders))
 ```
 
 In Mage, `load_model` downloads the model from MLflow (`MLFLOW_TRACKING_URI`) once per
@@ -332,8 +332,82 @@ metadata, which `GET /v1/models` also serves.
 Models loaded another way can be embedded with `--model`:
 
 ```bash
-mage export service project scoring --out ./scoring --model fraud=models:/fraud/7
+mage export service project scoring --out ./scoring --model churn=models:/churn/7
 ```
+
+### Choose the models of a saved service
+
+A saved service names its models and the registry they come from, so every export embeds
+the same ones. The Services page sets them under **Models in the image**; the file holds:
+
+```yaml
+services:
+  churn-scoring:
+    pipelines: [daily_features, churn_scoring]
+    model_registry: http://mlflow.ml.svc:5000
+    models:
+      - name: churn                                   # the name blocks load it by
+        uri: models:/churn-classifier@champion
+```
+
+- `uri` is a registered model with an alias (`models:/name@champion`) or a version
+  (`models:/name/10`), or any URI MLflow can download: `runs:/<run id>/model`, `s3://`,
+  `gs://`, `https://`.
+- The check resolves each alias while you edit: the version it points to, its run, its
+  tags (such as `validated`) and its Feast feature service. A model the registry lacks
+  is named with the reason, and the export stays off.
+- The export downloads each model into the image and reports it: "The model churn was
+  embedded", with its version and size; or the reason it could not be downloaded.
+- `model_registry` applies to the export only. Without it, the server's
+  `MLFLOW_TRACKING_URI` is used. Credentials, such as `MLFLOW_TRACKING_TOKEN` or
+  `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD`, come from the server's
+  environment and never go in the image. From the CLI, `MLFLOW_TRACKING_URI` in the
+  environment wins over the saved one, so CI can reach the registry its own way.
+
+### Load a model in its own format
+
+`load_model(name)` gives MLflow's pyfunc model, which has `predict`. `flavor='native'`
+gives the framework's own object, such as a `CatBoostClassifier` with `predict_proba`:
+
+```python
+from mage_ai.pipeline_services.models import feature_service, load_model, model_metadata
+
+URI = 'models:/churn-classifier@champion'
+
+model = load_model('churn', uri=URI, flavor='native')
+info = model_metadata('churn', uri=URI)   # version, aliases, run, tags, params, metrics
+```
+
+A model logged as a plain file, such as `churn.cbm` with `mlflow.log_artifact`, has no
+MLflow flavor: `flavor='native'` reads the file by its suffix. A `.cbm` file loads as a
+`CatBoostClassifier`, `CatBoostRegressor` or `CatBoostRanker`, from its loss function.
+The same holds for `.onnx`, `.ubj`, `.skops`, `.joblib` and the other formats of
+`load_artifact`. `flavor='catboost'` or `'sklearn'` names a flavor yourself.
+
+Resolve the alias once per run and use the version for the model, the metadata and the
+provenance you write. The embedded copy does this by itself: an image holds one version,
+so a run cannot mix two.
+
+### Features that follow the model
+
+Feast's [MLflow integration](https://docs.feast.dev/reference/mlflow) tags a model version
+or its training run with `feast.feature_service`, the feature service it was trained on.
+`feature_service(name)` reads that tag from the embedded metadata, so a block asks Feast
+for the features the model expects:
+
+```python
+from mage_ai.feature_stores.feast import FeastClient
+from mage_ai.pipeline_services.models import feature_service
+
+features = FeastClient().get_online_features(
+    entities=customers[['customer_id']],
+    feature_service=feature_service('churn'),
+)
+```
+
+When the alias moves to a version trained on another feature service, the next export
+reads the new features with no code change. The Services page shows the feature service
+of each model.
 
 ## Feature stores and APIs
 

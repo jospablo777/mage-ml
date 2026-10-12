@@ -50,10 +50,26 @@ export type ServiceExportTrigger = {
   schedule?: string;
 };
 
+// A model the service embeds: from the check, the registry version it points to; from the
+// export, also its size.
+export type ServiceModelType = {
+  aliases?: string[];
+  feature_service?: string;
+  flavors?: string[];
+  name: string;
+  registered_name?: string;
+  run_id?: string;
+  size_bytes?: number;
+  tags?: { [key: string]: string };
+  uri: string;
+  version?: string;
+};
+
 export type ServiceExportType = {
   download_token?: string;
   environment?: { name: string; required: boolean; secret: boolean }[];
   files?: string[];
+  models?: ServiceModelType[];
   name: string;
   notes?: string[];
   packages?: { [name: string]: string };
@@ -292,12 +308,105 @@ export function languagesOf(blocks: { language?: string }[]): string[] {
     .map(language => LANGUAGE_NAMES[language] || language);
 }
 
+export function formatBytes(bytes: number): string {
+  if (!bytes && bytes !== 0) {
+    return null;
+  }
+  const units = ['bytes', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  return `${unit ? value.toFixed(1) : value} ${units[unit]}`;
+}
+
+// The registry version a model resolved to, as one line: churn-classifier version 10
+// (champion), run 3f2a91c0.
+export function describeModelVersion(model: ServiceModelType): string {
+  return [
+    [
+      model.registered_name || null,
+      model.version ? `version ${model.version}` : null,
+      model.aliases?.length ? `(${model.aliases.join(', ')})` : null,
+    ].filter(Boolean).join(' '),
+    model.run_id ? `run ${model.run_id.slice(0, 8)}` : null,
+  ].filter(Boolean).join(', ');
+}
+
+// "Model churn (models:/x@champion) could not be downloaded and embedded: reason", from the
+// export and the check, split so the app can name the model.
+export function modelProblem(problem: string): { action: string; model: string; reason: string } {
+  const match = problem.match(
+    /^Model (\S+) \((.+?)\) could not be (downloaded and embedded|read from the registry): ([\s\S]*)$/,
+  );
+
+  return match ? { action: match[3], model: match[1], reason: match[4] } : null;
+}
+
+export function ProblemLines({ problems }: { problems: string[] }) {
+  return (
+    <>
+      {(problems || []).map((problem) => {
+        const parsed = modelProblem(problem);
+
+        return (
+          <Spacing key={problem} mt={1}>
+            {parsed ? (
+              <>
+                <Text bold danger small>
+                  Error: the model {parsed.model} could not be {parsed.action}
+                </Text>
+                <Text muted small>{parsed.reason}</Text>
+              </>
+            ) : <Text small>{problem}</Text>}
+          </Spacing>
+        );
+      })}
+    </>
+  );
+}
+
+export function EmbeddedModels({ models }: { models: ServiceModelType[] }) {
+  if (!models?.length) {
+    return null;
+  }
+
+  return (
+    <Spacing mb={1}>
+      {models.map(model => (
+        <Spacing key={model.name} mt={1}>
+          <FlexContainer alignItems="flex-start">
+            <div style={{ paddingTop: 2 }}><Check size={UNIT * 2} success /></div>
+            <Spacing ml={1} />
+            <div>
+              <Text>
+                The model <Text bold inline monospace>{model.name}</Text> was embedded
+              </Text>
+              <Text muted small>
+                {[
+                  describeModelVersion(model),
+                  formatBytes(model.size_bytes),
+                  model.feature_service ? `Feast feature service ${model.feature_service}` : null,
+                ].filter(Boolean).join(' · ') || model.uri}
+              </Text>
+            </div>
+          </FlexContainer>
+        </Spacing>
+      ))}
+    </Spacing>
+  );
+}
+
 export function ExportedSteps({ service }: { service: ServiceExportType }) {
   const run = runCommands(service);
   const call = callCommand(service);
 
   return (
     <>
+      <EmbeddedModels models={service.models} />
       <StepStyle>
         <StepNumberStyle>1</StepNumberStyle>
         <div>
@@ -826,11 +935,7 @@ function PipelineServiceExport({
 
               {problems.length >= 1 && (
                 <Spacing mt={1}>
-                  {problems.map(problem => (
-                    <Spacing key={problem} mt={1}>
-                      <Text small>{problem}</Text>
-                    </Spacing>
-                  ))}
+                  <ProblemLines problems={problems} />
                 </Spacing>
               )}
             </CardStyle>
@@ -842,14 +947,22 @@ function PipelineServiceExport({
             </LinkButtonStyle>
             {showAdvanced && (
               <Spacing mt={1}>
-                <TextInput
-                  fullWidth
-                  label="Runs at once, per pipeline"
-                  monospace
-                  onChange={e => setMaxRuns(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="From each pipeline's settings"
-                  value={maxRuns}
-                />
+                <Text bold small>Runs of one pipeline at the same time</Text>
+                <Text muted small>
+                  A run that starts while that many are running waits in the queue. Keep 1
+                  for pipelines that must not overlap.
+                </Text>
+                <Spacing mt={1}>
+                  <TextInput
+                    aria-label="Runs of one pipeline at the same time"
+                    compact
+                    fullWidth
+                    monospace
+                    onChange={e => setMaxRuns(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="Empty: each pipeline's own limit, 1 when it sets none"
+                    value={maxRuns}
+                  />
+                </Spacing>
               </Spacing>
             )}
           </Spacing>
@@ -877,9 +990,7 @@ function PipelineServiceExport({
                   <Spacing ml={1} />
                   <Text bold danger>The export stopped</Text>
                 </FlexContainer>
-                {(job.problems || []).map(problem => (
-                  <Spacing key={problem} mt={1}><Text small>{problem}</Text></Spacing>
-                ))}
+                <ProblemLines problems={job.problems} />
               </>
             )}
           </Spacing>

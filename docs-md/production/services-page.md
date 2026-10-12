@@ -27,8 +27,10 @@ goes through them with the playground.
 - **Export** writes the build context with a progress bar, then shows the next steps:
   download it as a zip, build and ship the image, run it and deploy it.
 
-The service name names the image and the folder. Runs at once, under **Advanced options**,
-overrides each pipeline's setting.
+The service name names the image and the folder. **Runs of one pipeline at the same
+time**, under **Advanced options**, overrides each pipeline's limit: a run that starts while
+that many are running waits in the queue and starts when one finishes. Keep 1 for
+pipelines that must not overlap, such as an incremental load that moves a cursor.
 
 ## The Services page
 
@@ -42,6 +44,10 @@ services:
     description: Live shop traffic, then per-minute KPIs after each traffic run
     max_runs: 2           # optional: runs of each pipeline at once
     include: [models/churn.onnx]   # optional: files the blocks reach by a computed path
+    model_registry: http://mlflow.ml.svc:5000   # optional: where models come from
+    models:                                     # optional: models embedded in the image
+      - name: churn
+        uri: models:/churn-classifier@champion
 ```
 
 The CLI exports a saved service: `mage export service . --service shop-live --out ./shop-live`.
@@ -84,6 +90,27 @@ name looks secret. Then come the service's own settings, such as `MAGE_SERVICE_T
 where secrets can come from: the environment, files, a folder of files, or a secrets
 manager (IBM Cloud, AWS). **Copy .env** gives a `.env` template with all of them. Values
 never leave the app or go into the export.
+
+### Models in the image
+
+Add the models the blocks score with: each row is a registered model with an alias, such as
+`champion`, or a version, or any URI MLflow can download, and the name blocks load it by.
+**Add a model** adds another row. The MLflow tracking server is the registry; empty, the
+server's `MLFLOW_TRACKING_URI` is used.
+
+While you edit, the check resolves each row in the registry:
+
+| Row says | Meaning |
+| --- | --- |
+| champion is churn-classifier version 10 (champion), run 3f2a91c0 | The alias resolves; the version's tags follow, such as `validated=true` |
+| Trained on the Feast feature service churn_features_v1 | The version or its run has the `feast.feature_service` tag |
+| Not found in the registry | The registry answered with the reason; the export stays off |
+
+After **Export**, each model reports: "The model churn was embedded", with its version and
+size, or "Error: the model churn could not be downloaded and embedded" with the reason.
+Models the code loads with `load_model(name, uri=...)` and literal arguments are found and
+embedded without a row. See [Models](pipeline-services.md#models) for loading a
+model in its own format and reading its Feast feature service.
 
 ### Keep run history, logs and metrics
 

@@ -878,7 +878,7 @@ def _io_config_profiles(path: Path) -> Dict[str, Set[str]]:
 def _profiles_used(capture_: Capture, profiles: Iterable[str]) -> Set[str]:
     """
     The io_config.yaml profiles the exported code names: as a string in a block or a module
-    (ConfigFileLoader(path, 'raw_source'), mage::postgres profiles, R helpers), or as a SQL
+    (ConfigFileLoader(path, 'warehouse'), mage::postgres profiles, R helpers), or as a SQL
     block's data_provider_profile in its pipeline's metadata.yaml.
     """
     profiles = set(profiles)
@@ -1342,7 +1342,10 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
         try:
             metadata = model_export.download(name, uri, out_dir / 'models' / name)
         except Exception as error:
-            problems.append(f'Model {name} ({uri}) could not be downloaded: {error}')
+            problems.append(
+                f'Model {name} ({uri}) could not be downloaded and embedded: '
+                f'{model_export.explain(error, uri)}'
+            )
             continue
         capture_.manifest['models'].append(dict(
             name=name,

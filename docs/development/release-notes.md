@@ -671,7 +671,7 @@ Each item says what changed, which pipelines it affects, and what to do.
   providers are IBM Cloud Secrets Manager (API key or Code Engine trusted profile) and files.
   Each export includes deployment files for IBM Cloud Code Engine, a Tekton pipeline for IBM
   Cloud Continuous Delivery and a Kubernetes manifest. Blocks that load a model with
-  `load_model('fraud', uri='models:/fraud@champion')` run the same code in Mage, where the
+  `load_model('churn', uri='models:/churn@champion')` run the same code in Mage, where the
   model comes from MLflow, and in the service, where the export has embedded the model with
   its version, run, params, metrics and requirements (`GET /v1/models`). Guide:
   `docs/production/pipeline-services.mdx`; design: `docs/design/pipeline-services.md`.

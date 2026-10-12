@@ -7,6 +7,8 @@ class PipelineServicePresenter(BasePresenter):
         'exported_at',
         'include',
         'max_runs',
+        'model_registry',
+        'models',
         'name',
         'pipelines',
     ]

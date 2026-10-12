@@ -9,6 +9,10 @@ after-run triggers, which MageML and the service both run.
         pipelines: [live_traffic, live_minute_kpis]
         max_runs: 2              # optional: runs of each pipeline at once
         include: [models/churn.onnx]
+        model_registry: http://mlflow:5000   # optional: where models are pulled from
+        models:                  # optional: models embedded in the image
+          - name: churn
+            uri: models:/churn@champion
 """
 import os
 import re
@@ -57,6 +61,12 @@ def load_definition(repo_path: str, name: str) -> Dict:
     return definitions[name]
 
 
+# Addresses MLflow reads models from: a server, or a database or folder it opens itself.
+REGISTRY_URL = re.compile(
+    r'^(https?://[^\s/:]+|(databricks(-uc)?|uc|sqlite|postgresql|mysql|mssql|file):)\S*$', re.I,
+)
+
+
 def normalize(name: str, value: Dict) -> Dict:
     """A service's settings with every key, checked for types."""
     if not isinstance(value, dict):
@@ -64,16 +74,36 @@ def normalize(name: str, value: Dict) -> Dict:
     pipelines = value.get('pipelines') or []
     include = value.get('include') or []
     max_runs = value.get('max_runs')
+    models = value.get('models') or []
+    registry = value.get('model_registry') or None
     if not isinstance(pipelines, list) or not all(isinstance(p, str) for p in pipelines):
         raise DefinitionError(f'Service {name}: pipelines must be a list of pipeline names.')
     if not isinstance(include, list) or not all(isinstance(i, str) for i in include):
         raise DefinitionError(f'Service {name}: include must be a list of project paths.')
     if max_runs is not None and (not isinstance(max_runs, int) or max_runs < 1):
         raise DefinitionError(f'Service {name}: max_runs must be a whole number above 0.')
+    if not isinstance(models, list) or not all(
+        isinstance(m, dict) and isinstance(m.get('name'), str) and isinstance(m.get('uri'), str)
+        and m['name'] and m['uri']
+        for m in models
+    ):
+        raise DefinitionError(
+            f'Service {name}: models must be a list of {{name, uri}}, such as '
+            '{name: churn, uri: "models:/churn@champion"}.'
+        )
+    if registry is not None and (
+        not isinstance(registry, str) or not REGISTRY_URL.match(registry.strip())
+    ):
+        raise DefinitionError(
+            f'Service {name}: model_registry must be the address of an MLflow tracking '
+            f'server, such as http://mlflow:5000; got {registry!r}.'
+        )
     return dict(
         description=value.get('description') or '',
         include=list(include),
         max_runs=max_runs,
+        model_registry=registry.strip() if registry else None,
+        models=[dict(name=m['name'], uri=m['uri']) for m in models],
         pipelines=list(dict.fromkeys(pipelines)),
     )
 
@@ -117,6 +147,10 @@ def _compact(value: Dict) -> Dict:
         out['max_runs'] = value['max_runs']
     if value.get('include'):
         out['include'] = value['include']
+    if value.get('model_registry'):
+        out['model_registry'] = value['model_registry']
+    if value.get('models'):
+        out['models'] = value['models']
     return out
 
 

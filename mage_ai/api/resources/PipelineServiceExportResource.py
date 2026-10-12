@@ -81,13 +81,28 @@ class PipelineServiceExportResource(GenericResource):
         includes = payload.get('include') or []
         if not isinstance(includes, list) or not all(isinstance(i, str) for i in includes):
             raise ApiError(dict(code=400, message='include must be a list of project paths.'))
+        models = payload.get('models') or []
+        registry = payload.get('model_registry') or None
+        if not isinstance(models, list) or not all(
+            isinstance(m, dict) and m.get('name') and m.get('uri') for m in models
+        ):
+            raise ApiError(dict(code=400, message='models must be a list of {name, uri}.'))
+        from mage_ai.pipeline_services.definitions import REGISTRY_URL
+
+        if registry is not None and (
+            not isinstance(registry, str) or not REGISTRY_URL.match(registry.strip())
+        ):
+            raise ApiError(dict(code=400, message=(
+                'model_registry must be the address of an MLflow tracking server, such as '
+                'http://mlflow:5000.'
+            )))
 
         if payload.get('preview'):
             result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: preview_pipelines(
                     repo_path, pipeline_uuids, name=payload.get('name'), max_runs=max_runs,
-                    includes=includes,
+                    includes=includes, models=models, registry=registry,
                 ),
             )
             return cls(result, user, **kwargs)
@@ -95,7 +110,7 @@ class PipelineServiceExportResource(GenericResource):
         try:
             job = start_export(
                 repo_path, pipeline_uuids, name=payload.get('name'), max_runs=max_runs,
-                includes=includes,
+                includes=includes, models=models, registry=registry,
             )
         except ValueError as error:
             raise ApiError(dict(code=400, message=str(error)))

@@ -20,7 +20,7 @@ HELPERS = ('load_model', 'model_path', 'model_metadata')
 def parse_model_option(text: str) -> Tuple[str, str]:
     """`NAME=URI` from --model."""
     if '=' not in text:
-        raise ValueError(f'--model {text!r} is not NAME=URI, such as fraud=models:/fraud/3')
+        raise ValueError(f'--model {text!r} is not NAME=URI, such as churn=models:/churn/3')
     name, uri = (part.strip() for part in text.split('=', 1))
     if not NAME_PATTERN.match(name):
         raise ValueError(f'--model name {name!r} must use letters, digits, ".", "_" and "-".')
@@ -77,7 +77,7 @@ def _registry_details(uri: str) -> Dict:
     elif version and version.isdigit():
         model_version = client.get_model_version(name, version)
     else:
-        # A stage name, such as models:/fraud/Production.
+        # A stage name, such as models:/churn/Production.
         versions = client.get_latest_versions(name, stages=[version])
         if not versions:
             raise ValueError(f'The registry has no version of {name} in stage {version}.')
@@ -149,6 +149,100 @@ def requirements(directory: Path) -> List[str]:
     return lines
 
 
+def explain(error: Exception, uri: str, registry: Optional[str] = None) -> str:
+    """
+    What went wrong reaching a model and what to do, for people: MLflow's own messages name
+    its internals ("Registered model alias retired not found").
+    """
+    text = str(error).strip()
+    code = getattr(error, 'error_code', None) or ''
+    where = registry or _safe_tracking_uri() or 'the registry'
+    match = re.match(r'^models:/([^/@]+)(?:/([^/]+)|@(.+))$', uri)
+    name, version, alias = match.groups() if match else (None, None, None)
+    lowered = text.lower()
+
+    if type(error).__name__ == 'UnsupportedModelRegistryStoreURIException' or \
+            'unsupported uri' in lowered:
+        return (f'{where} is not a registry address. Use http:// or https:// with the host '
+                'and port, such as http://mlflow:5000.')
+    if 'max retries exceeded' in lowered or 'timed out' in lowered or \
+            'connection refused' in lowered or 'name or service not known' in lowered or \
+            'nodename nor servname' in lowered or type(error).__name__ in (
+                'ConnectionError', 'ConnectTimeout', 'ReadTimeout'):
+        return (f'The registry at {where} did not answer. Check the address, and that the '
+                'MageML server can reach it (VPN, firewall, cluster DNS).')
+    if code in ('UNAUTHENTICATED', 'PERMISSION_DENIED') or ' 401' in text or ' 403' in text \
+            or 'unauthorized' in lowered or 'forbidden' in lowered:
+        return (f'The registry at {where} refused the request. Set MLFLOW_TRACKING_TOKEN, or '
+                'MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD, where MageML runs, '
+                'with an account that can read the model.')
+    if name and 'registered model with name' in lowered and 'not found' in lowered:
+        known = _registered_names()
+        hint = f' The registry has: {", ".join(known)}.' if known else ''
+        return f'The registry has no model named {name}; names are case-sensitive.{hint}'
+    if name and alias and 'alias' in lowered and 'not found' in lowered:
+        aliases = _aliases(name)
+        hint = (' Its aliases: ' + ', '.join(f'{a} (version {v})' for a, v in aliases.items())
+                + '.') if aliases else ' It has no aliases; pick a version instead.'
+        return f'{name} has no alias {alias}.{hint}'
+    if name and version and 'not found' in lowered:
+        latest = _latest_version(name)
+        hint = f' Its latest version is {latest}.' if latest else ''
+        return f'{name} has no version {version}.{hint}'
+    if type(error).__name__ in ('NoCredentialsError', 'PartialCredentialsError') or \
+            'accessdenied' in lowered.replace(' ', '') or 'invalidaccesskeyid' in lowered:
+        return ('The model files are in object storage the MageML server cannot read. Give '
+                'it the storage credentials (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, '
+                'and MLFLOW_S3_ENDPOINT_URL for an S3-compatible store such as MinIO).')
+    if 'no space left' in lowered:
+        return 'The MageML server ran out of disk space while downloading the model.'
+    first = text.splitlines()[0][:300] if text else ''
+    return f'{type(error).__name__}: {first}' if first else type(error).__name__
+
+
+def _registered_names(limit: int = 12) -> List[str]:
+    try:
+        from mlflow.tracking import MlflowClient
+
+        return sorted(m.name for m in MlflowClient().search_registered_models(
+            max_results=limit))
+    except Exception:
+        return []
+
+
+def _aliases(name: str) -> Dict[str, str]:
+    try:
+        from mlflow.tracking import MlflowClient
+
+        return dict(MlflowClient().get_registered_model(name).aliases or {})
+    except Exception:
+        return {}
+
+
+def _latest_version(name: str) -> Optional[str]:
+    try:
+        from mlflow.tracking import MlflowClient
+
+        versions = MlflowClient().search_model_versions(
+            f"name='{name}'", max_results=1, order_by=['version_number DESC'],
+        )
+        return str(versions[0].version) if versions else None
+    except Exception:
+        return None
+
+
+def download_uri(uri: str) -> str:
+    """
+    What to download for a uri: a models:/ uri gives its version's source, since MLflow
+    downloads nothing for one whose source is a single file, such as a model.cbm logged as
+    an artifact.
+    """
+    if not uri.startswith('models:/'):
+        return uri
+    source = _registry_details(uri).get('source')
+    return source or uri
+
+
 def download(name: str, uri: str, target: Path) -> Dict:
     """Downloads the model into target/artifacts and writes its metadata; returns it."""
     import mlflow
@@ -158,7 +252,7 @@ def download(name: str, uri: str, target: Path) -> Dict:
     artifacts = target / 'artifacts'
     artifacts.parent.mkdir(parents=True, exist_ok=True)
     downloaded = Path(mlflow.artifacts.download_artifacts(
-        artifact_uri=uri, dst_path=str(target / '.download'),
+        artifact_uri=download_uri(uri), dst_path=str(target / '.download'),
     ))
     if downloaded.is_file():
         artifacts.mkdir()

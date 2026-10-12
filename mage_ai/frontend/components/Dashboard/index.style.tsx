@@ -35,6 +35,24 @@ const VerticalNavigationStyleComponent = styled.div<VerticalNavigationStyleProps
   visible?: boolean;
 }>`
   height: 100%;
+  // A short window scrolls the menu instead of hiding its last items, with a thin bar
+  // that leaves the collapsed menu's icons their room.
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+
+  ::-webkit-scrollbar {
+    width: ${UNIT * 0.5}px;
+  }
+
+  ${props => `
+    scrollbar-color: ${(props.theme.background || dark.background).scrollbarThumb} transparent;
+
+    ::-webkit-scrollbar-thumb {
+      background: ${(props.theme.background || dark.background).scrollbarThumb};
+      border-radius: ${UNIT * 0.25}px;
+    }
+  `}
 
   ${props => `
     background-color: ${(props.theme.background || dark.background).panel};
@@ -61,6 +79,7 @@ const VerticalNavigationStyleComponent = styled.div<VerticalNavigationStyleProps
   ${props => props.showMore && props.visible && `
     &:hover {
       animation: animate-in 100ms linear forwards;
+      height: calc(100vh - ${HEADER_HEIGHT}px);
       position: fixed;
       z-index: 100;
     }

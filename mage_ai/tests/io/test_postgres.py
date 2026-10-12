@@ -172,8 +172,8 @@ class ExportTest(unittest.TestCase):
                 patch.object(Postgres, '_table_column_types', return_value=TABLE_TYPES):
             self.loader.export(
                 self.df,
-                schema_name='feature_store',
-                table_name='case_features',
+                schema_name='analytics',
+                table_name='daily_orders',
                 if_exists='append',
                 verbose=False,
                 **kwargs,
@@ -242,7 +242,7 @@ class ExportTest(unittest.TestCase):
         self.export()
 
         query, contents = self.connection.copy_calls[0]
-        self.assertIn('COPY feature_store.case_features', query)
+        self.assertIn('COPY analytics.daily_orders', query)
         self.assertEqual(
             contents.splitlines()[1],
             '345039\t2026-07-20 18:15:34.258586+00:00\tfalse\t1\t\\N',
