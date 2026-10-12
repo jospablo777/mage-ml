@@ -189,7 +189,8 @@ class PipelineScheduleTests(DBTestCase):
                 pipeline_uuid='test_pipeline',
                 schedule_interval='random_str',
             )
-        self.assertTrue('Cron expression is invalid.' in str(context.exception))
+        self.assertTrue('Cron expression is invalid' in str(context.exception))
+        self.assertIn('such as "0 6 * * *"', str(context.exception))
 
     def test_active_schedules(self):
         create_pipeline_with_blocks(

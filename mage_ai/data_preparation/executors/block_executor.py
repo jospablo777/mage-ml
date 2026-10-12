@@ -1345,7 +1345,10 @@ class BlockExecutor:
             if record['result'] == 'fail' and record.get('fail_block'):
                 failed.append(f'monitor {record["monitor"]}')
         if failed:
-            raise Exception(f'Failed: {", ".join(failed)}.')
+            raise Exception(
+                f'The block stopped because {", ".join(failed)} failed; the warnings above '
+                'show the checks that did not pass.'
+            )
 
     def _execute_conditional(
         self,

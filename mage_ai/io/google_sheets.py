@@ -152,7 +152,15 @@ class GoogleSheets(BaseFile):
         )
 
         if sheet is None:
-            raise ValueError('Sheet not found!')
+            given = ', '.join(
+                f'{label} {value!r}' for label, value in (
+                    ('sheet_url', sheet_url), ('sheet_id', sheet_id), ('sheet_name', sheet_name),
+                ) if value
+            ) or 'no sheet_url, sheet_id or sheet_name'
+            raise ValueError(
+                f'Google Sheets found no spreadsheet for {given}. Check the value, and share '
+                'the spreadsheet with the service account of the credentials.'
+            )
 
         worksheet = None
 

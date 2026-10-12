@@ -28,14 +28,22 @@ class ApiRunHandler(BaseHandler):
         if token is None:
             token = get_bearer_auth_token_from_headers(self.request.headers)
         if not token:
-            raise UnauthenticatedRequestException('Invalid token.')
+            raise UnauthenticatedRequestException(
+                'The request has no token: call the trigger\'s URL, which ends with its token, '
+                'or send it as Authorization: Bearer <token>.'
+            )
 
+        # first(), not one(): an unknown token raised a database error instead of a 404.
         pipeline_schedule = PipelineSchedule.query.filter(
             PipelineSchedule.schedule_type == ScheduleType.API,
             PipelineSchedule.token == token,
-        ).options(load_only('id')).one()
+        ).options(load_only(PipelineSchedule.id)).first()
         if not pipeline_schedule:
-            raise ApiError(ApiError.RESOURCE_NOT_FOUND)
+            raise ApiError(dict(
+                ApiError.RESOURCE_NOT_FOUND,
+                message='No API trigger has this token. Copy the URL from the trigger\'s page; '
+                        'a trigger that was deleted or recreated has a new token.',
+            ))
 
         payload = self.get_payload().get('run', {})
         pipeline_uuid = payload.get('pipeline_uuid')
@@ -56,11 +64,19 @@ class ApiRunHandler(BaseHandler):
             use_repo_path=True if project else False,
         )
         if not pipeline:
-            raise ApiError(ApiError.RESOURCE_NOT_FOUND)
+            raise ApiError(dict(
+                ApiError.RESOURCE_NOT_FOUND,
+                message=f'There is no pipeline {pipeline_uuid!r}: send run.pipeline_uuid, '
+                        'and run.project in a project with several projects.',
+            ))
 
         block = pipeline.get_block(block_uuid)
         if not block:
-            raise ApiError(ApiError.RESOURCE_NOT_FOUND)
+            raise ApiError(dict(
+                ApiError.RESOURCE_NOT_FOUND,
+                message=f'Pipeline {pipeline_uuid} has no block {block_uuid!r}: send '
+                        'run.block_uuid.',
+            ))
 
         pipeline_run = None
         block_run = None

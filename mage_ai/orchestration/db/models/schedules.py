@@ -242,7 +242,12 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
     def validate_schedule_interval(self, key, schedule_interval):
         if schedule_interval and schedule_interval not in [e.value for e in ScheduleInterval]:
             if not croniter.is_valid(schedule_interval):
-                raise ValueError('Cron expression is invalid.')
+                names = ', '.join(e.value for e in ScheduleInterval)
+                raise ValueError(
+                    f'Cron expression is invalid: {schedule_interval!r}. Use five fields '
+                    '(minute hour day month weekday), such as "0 6 * * *" for 6:00 every day '
+                    f'or "*/15 * * * *" for every 15 minutes, or one of {names}.'
+                )
 
         return schedule_interval
 
