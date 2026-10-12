@@ -234,7 +234,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "block_broadcast_hourly_load_f2fc7c71"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "block_chain_8f578408e884"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "block_diamond_store_scorecard_1ab904d6"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -282,7 +306,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "block_peaceful_lake_4a66a30d"
+name = "block_merge_customer_signals_15827ee2"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mage-block",
+ "rayon",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "block_merge_order_stats_af668e6f"
 version = "0.0.0"
 dependencies = [
  "anyhow",

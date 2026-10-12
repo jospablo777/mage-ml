@@ -1,0 +1,31 @@
+blocks:
+- downstream_blocks: [broadcast_device_mix, broadcast_page_dwell, broadcast_hourly_load]
+  language: python
+  name: broadcast_web_events
+  type: data_loader
+  upstream_blocks: []
+  uuid: broadcast_web_events
+- downstream_blocks: []
+  language: python
+  name: broadcast_device_mix
+  type: transformer
+  upstream_blocks: [broadcast_web_events]
+  uuid: broadcast_device_mix
+- downstream_blocks: []
+  language: r
+  name: broadcast_page_dwell
+  type: transformer
+  upstream_blocks: [broadcast_web_events]
+  uuid: broadcast_page_dwell
+- downstream_blocks: []
+  language: rust
+  name: broadcast_hourly_load
+  type: transformer
+  upstream_blocks: [broadcast_web_events]
+  uuid: broadcast_hourly_load
+description: 'A Broadcast (docs/development/compilation-study.md): one table of web events,
+  read once, feeds three summaries in Polars, R and Rust. Each consumer is a stage of its
+  own and reads the stored table, so the three run side by side.'
+name: shape_broadcast_web_events
+type: python
+uuid: shape_broadcast_web_events

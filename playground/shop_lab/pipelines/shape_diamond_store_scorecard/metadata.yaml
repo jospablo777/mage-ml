@@ -1,0 +1,38 @@
+blocks:
+- downstream_blocks: [diamond_store_revenue, diamond_store_margin]
+  language: python
+  name: diamond_order_lines
+  type: data_loader
+  upstream_blocks: []
+  uuid: diamond_order_lines
+- downstream_blocks: [diamond_store_scorecard]
+  language: python
+  name: diamond_store_revenue
+  type: transformer
+  upstream_blocks: [diamond_order_lines]
+  uuid: diamond_store_revenue
+- downstream_blocks: [diamond_store_scorecard]
+  language: r
+  name: diamond_store_margin
+  type: transformer
+  upstream_blocks: [diamond_order_lines]
+  uuid: diamond_store_margin
+- downstream_blocks: [diamond_export_store_scorecard]
+  language: rust
+  name: diamond_store_scorecard
+  type: transformer
+  upstream_blocks: [diamond_store_revenue, diamond_store_margin]
+  uuid: diamond_store_scorecard
+- downstream_blocks: []
+  language: python
+  name: diamond_export_store_scorecard
+  type: data_exporter
+  upstream_blocks: [diamond_store_scorecard]
+  uuid: diamond_export_store_scorecard
+description: 'A Diamond (docs/development/compilation-study.md): pandas loads order lines,
+  Polars and R compute revenue and margin per store side by side, Rust joins the two
+  branches. The loader and the branches run as separate stages, side by side; only the
+  join and its exporter fuse into one stage.'
+name: shape_diamond_store_scorecard
+type: python
+uuid: shape_diamond_store_scorecard
