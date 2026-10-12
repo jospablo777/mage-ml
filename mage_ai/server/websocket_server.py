@@ -336,10 +336,11 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             if not message.get('data') or not HIDE_ENV_VAR_VALUES:
                 return message
             data = message['data']
-            if type(data) is str:
-                data = [data]
-            data = [filter_out_env_var_values(data_value) for data_value in data]
-            message['data'] = data
+            # A string stays a string: the notebook renders an image or HTML only from one.
+            if isinstance(data, str):
+                message['data'] = filter_out_env_var_values(data)
+            else:
+                message['data'] = [filter_out_env_var_values(data_value) for data_value in data]
             return message
 
         msg_id = message.get('msg_id')
