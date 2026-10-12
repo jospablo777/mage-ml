@@ -224,7 +224,7 @@ jobs:
       - name: Install the R test environment
         run: make -C integration_tests r-env
       - name: Run integration tests
-        run: make -C integration_tests ci PYTEST_ARGS='-n 4 --timeout=900 --durations=25'
+        run: make -C integration_tests ci PYTEST_ARGS='-n 4 -v --timeout=300 --durations=25'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
         run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'

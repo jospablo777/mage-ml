@@ -3,16 +3,20 @@ Run a streaming pipeline the two ways Mage does, until the test stops it:
 
 - trigger: the scheduler's run_pipeline for a pipeline run, in its own process, as a
   trigger's job runs it.
-- notebook: the websocket server's run_pipeline in a multiprocessing.Process, as the
+- notebook: the websocket server's run_pipeline in a spawned process, as the
   notebook's Execute pipeline button runs it, with the messages it sends to the notebook.
   Cancel terminates the process.
 """
-import multiprocessing
 import queue as queue_module
 import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+
+# Spawned, as Mage starts these processes (see mage_ai.shared.processes): on Linux the
+# default forks, and a process forked after its parent ran Polars can wait forever on its
+# first Polars call.
+from mage_ai.shared.processes import PROCESS_CONTEXT
 
 MODES = ['trigger', 'notebook']
 
@@ -62,7 +66,7 @@ def streaming_pipeline(pipeline_uuid, mode, **variables):
         from mage_ai.orchestration.triggers.api import trigger_pipeline
 
         pipeline_run = trigger_pipeline(pipeline_uuid, variables=variables)
-        process = multiprocessing.Process(
+        process = PROCESS_CONTEXT.Process(
             target=_run_trigger, args=(pipeline_run.id, pipeline_run.get_variables()),
         )
         run = Run(process, pipeline_run=pipeline_run)
@@ -76,8 +80,8 @@ def streaming_pipeline(pipeline_uuid, mode, **variables):
             interval_end_datetime=now + timedelta(days=1), interval_seconds=None,
             interval_start_datetime=now, interval_start_datetime_previous=None, event={},
         )
-        output = multiprocessing.Queue()
-        process = multiprocessing.Process(
+        output = PROCESS_CONTEXT.Queue()
+        process = PROCESS_CONTEXT.Process(
             target=run_pipeline,
             args=(Pipeline.get(pipeline_uuid), None, global_vars, output),
         )
