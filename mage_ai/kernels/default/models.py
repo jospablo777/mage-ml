@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
+
+import psutil
 
 from mage_ai.kernels.default.utils import (
     find_ipykernel_launchers_info,
@@ -12,6 +15,16 @@ from mage_ai.kernels.models import Kernel as KernelBase
 from mage_ai.kernels.models import KernelProcess as KernelProcessBase
 from mage_ai.kernels.models import request_usage
 from mage_ai.server.active_kernel import interrupt_kernel, restart_kernel, start_kernel
+
+
+def server_process_ids() -> set:
+    """This server's process and the processes it started, which start its kernels."""
+    ids = {os.getpid()}
+    try:
+        ids.update(child.pid for child in psutil.Process().children(recursive=True))
+    except psutil.Error:
+        pass
+    return ids
 
 
 @dataclass
@@ -36,8 +49,11 @@ class KernelProcess(KernelProcessBase):
         else:
             arr = cls.load_all(check_active_status=True)
         if len(arr) >= 2:
+            ours = server_process_ids()
             for kernel_process in arr:
-                if not kernel_process.active:
+                # Kernels of other programs, such as an editor's notebooks, are not ours to
+                # stop.
+                if not kernel_process.active and kernel_process.ppid in ours:
                     print(f'Terminating process {kernel_process.pid}...')
                     if kernel_process.terminate():
                         memory_usage.append(kernel_process.memory)

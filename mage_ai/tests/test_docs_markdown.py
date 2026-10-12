@@ -144,3 +144,34 @@ class CommittedExportTest(unittest.TestCase):
             cwd=ROOT, input='\n'.join(pages), capture_output=True, text=True,
         )
         self.assertEqual(ignored.stdout.split(), [])
+
+
+class TutorialInstallTest(unittest.TestCase):
+    def test_the_inference_tutorial_installs_what_its_blocks_import(self):
+        """
+        The tutorial said to install only skl2onnx, but train_model imports skops,
+        which a plain install of MageML does not have.
+        """
+        import re
+        import sys
+        import tomllib
+        from importlib.metadata import packages_distributions
+
+        text = (ROOT / 'docs' / 'getting-started' / 'inference-service.mdx').read_text()
+        project = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']
+        base = {re.split(r'[<>=!~;\[ ]', d)[0].lower() for d in project['dependencies']}
+        installed = {
+            name.lower()
+            for line in re.findall(r'uv pip install ([^`\n]+)', text)
+            for name in line.split()
+        }
+        dists = packages_distributions()
+        modules = set()
+        for body in re.findall(r'```python\n(.*?)```', text, re.S):
+            modules |= set(re.findall(r'^(?:from|import) (\w+)', body, re.M))
+        missing = [
+            module for module in sorted(modules)
+            if module not in sys.stdlib_module_names and module != 'mage_ai'
+            and not {d.lower() for d in dists.get(module, [module])} & (base | installed)
+        ]
+        self.assertEqual(missing, [])

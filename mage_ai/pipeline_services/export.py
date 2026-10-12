@@ -1760,6 +1760,10 @@ def _dockerfile(capture_: Capture) -> str:
     python_version = f'{sys.version_info.major}.{sys.version_info.minor}'
     if capture_.environment is not None:
         python_version = capture_.environment.python
+    # ONNX Runtime's static library needs GCC 14's C++ library, which Debian has from trixie
+    # on: the Rust programs build on trixie and run on it.
+    onnx = _uses_sdk_feature(capture_, 'onnx')
+    build_base = 'trixie' if onnx else 'bookworm'
     rust_blocks = ''
     copy_blocks = ''
     if capture_.rust_blocks:
@@ -1768,12 +1772,14 @@ def _dockerfile(capture_: Capture) -> str:
         cxx = (
             'RUN apt-get update && apt-get install -y --no-install-recommends g++ && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
-        ) if _uses_sdk_feature(capture_, 'onnx') else ''
+        ) if onnx else ''
+        # Each service has its own: the blocks crate has the same path in every export.
+        blocks_cache = f'mage-blocks-{capture_.name}-{build_base}-$TARGETARCH'
         rust_blocks = f'''
 # The Rust blocks, compiled once here into one binary that runs any of them.
 {cxx}COPY rust ./rust
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
-    --mount=type=cache,target=/build/rust/target \\
+    --mount=type=cache,id={blocks_cache},target=/build/rust/target \\
     cargo build --release {locked}--manifest-path rust/Cargo.toml -p {RUST_BUNDLE} && \\
     mkdir -p /out/bin && cp rust/target/release/{RUST_BUNDLE} /out/bin/{RUST_BUNDLE}
 '''
@@ -1821,10 +1827,6 @@ RUN --mount=type=cache,target=/root/.cache/rv cd /srv/mage-service/r && rv sync
 ENV MAGE_R_SYNC=off \\
     XDG_CACHE_HOME=/tmp/mage-service-cache
 '''
-    # ONNX Runtime's static library needs GCC 14's C++ library, which Debian has from trixie
-    # on: the Rust programs build on trixie and run on it.
-    onnx = _uses_sdk_feature(capture_, 'onnx')
-    build_base = 'trixie' if onnx else 'bookworm'
     if capture_.needs_python:
         base = 'trixie' if capture_.needs_r or onnx else 'bookworm'
         runtime = f'''FROM python:{python_version}-slim-{base}
@@ -1856,10 +1858,13 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
 # docker build -t {capture_.name} .
 
 FROM rust:{rust}-slim-{build_base} AS build
+# Cargo's target folder is cached for each Debian release and CPU: a binary from another
+# release can need a newer glibc, and the amd64 and arm64 builds run at the same time.
+ARG TARGETARCH
 WORKDIR /build
 COPY build/mage_service ./mage_service
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
-    --mount=type=cache,target=/build/mage_service/target \\
+    --mount=type=cache,id=mage-service-{build_base}-$TARGETARCH,target=/build/mage_service/target \\
     cargo build --release --locked --manifest-path mage_service/Cargo.toml \\
       -p mage-service -p mage-console && \\
     mkdir -p /out && \\
@@ -2031,33 +2036,36 @@ def report(capture_: Capture) -> str:
     return '\n'.join(lines) + '\n'
 
 
-def build_command(
+def build_commands(
     out_dir: Path,
     tag: str,
     platforms: Optional[List[str]] = None,
     push: bool = False,
-) -> List[str]:
+) -> List[List[str]]:
     """
-    The docker command that builds the image: docker build for this machine's platform, or
-    docker buildx for other platforms and for pushing to a registry. Several platforms need
-    push, since Docker keeps one platform of an image locally.
+    The docker commands that build the image and push it when asked. This machine's platform
+    builds with docker build, then docker push, as the app shows: docker's own network
+    reaches a registry on localhost, which a docker-container buildx builder does not. Other
+    platforms build with docker buildx; several need push, since Docker keeps one platform of
+    an image locally.
     """
     docker = shutil.which('docker')
     if not docker:
         raise ExportError(['docker is not installed; build the image with the Dockerfile.'])
     platforms = [p.strip() for p in (platforms or []) if p and p.strip()]
-    if not platforms and not push:
-        return [docker, 'build', '-t', tag, str(out_dir)]
+    if not platforms:
+        commands = [[docker, 'build', '-t', tag, str(out_dir)]]
+        if push:
+            commands.append([docker, 'push', tag])
+        return commands
     if len(platforms) > 1 and not push:
         raise ExportError([
             'Several platforms need --push: Docker keeps one platform of an image locally. '
             'Push to a registry, or build one platform.'
         ])
-    command = [docker, 'buildx', 'build', '--tag', tag]
-    if platforms:
-        command += ['--platform', ','.join(platforms)]
+    command = [docker, 'buildx', 'build', '--tag', tag, '--platform', ','.join(platforms)]
     command += ['--push' if push else '--load', str(out_dir)]
-    return command
+    return [command]
 
 
 def build_image(
@@ -2068,20 +2076,22 @@ def build_image(
     on_line=None,
 ) -> None:
     """Builds, and pushes when asked, printing docker's output or passing each line on."""
-    command = build_command(out_dir, tag, platforms=platforms, push=push)
-    if on_line is None:
-        result = subprocess.run(command)
-        code = result.returncode
-    else:
-        process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-        )
-        for line in process.stdout:
-            on_line(line.rstrip('\n'))
-        code = process.wait()
-    if code != 0:
-        what = 'docker buildx build' if command[1] == 'buildx' else 'docker build'
-        raise ExportError([
-            f'{what} failed with exit code {code}. '
-            + ('Check that you are logged in to the registry (docker login).' if push else '')
-        ])
+    for command in build_commands(out_dir, tag, platforms=platforms, push=push):
+        if on_line is None:
+            result = subprocess.run(command)
+            code = result.returncode
+        else:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            )
+            for line in process.stdout:
+                on_line(line.rstrip('\n'))
+            code = process.wait()
+        if code != 0:
+            what = 'docker buildx build' if command[1] == 'buildx' else f'docker {command[1]}'
+            pushing = command[1] == 'push' or '--push' in command
+            raise ExportError([
+                f'{what} failed with exit code {code}; its output says why. '
+                + ('If the push failed, check that you are logged in to the registry '
+                   '(docker login).' if pushing else '')
+            ])

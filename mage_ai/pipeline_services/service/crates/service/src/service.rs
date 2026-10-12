@@ -195,7 +195,12 @@ impl Service {
             // One run per upstream run and trigger, also when a restart replays this.
             let key = format!("after:{run_id}:{}:{}", follower.uuid, trigger.name);
             let source = format!("after:{pipeline}");
-            match self.submit(&follower.uuid, &source, &trigger.variables, Some(&key)) {
+            // As in MageML, the run gets the run that started it as variables.
+            let mut variables = trigger.variables.clone();
+            variables.insert("upstream_pipeline".into(), pipeline.into());
+            variables.insert("upstream_pipeline_run_id".into(), run_id.into());
+            variables.insert("upstream_status".into(), status.as_str().into());
+            match self.submit(&follower.uuid, &source, &variables, Some(&key)) {
                 Ok((started, _)) => crate::log::info(&format!(
                     "Run {run_id} of {pipeline} {}; trigger {} started run {started} of {}.",
                     status.as_str(),

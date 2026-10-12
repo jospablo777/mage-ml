@@ -137,3 +137,12 @@ test('the trigger page shows its run settings at their width', async ({ page }) 
     expect(card.x + card.width, label).toBeLessThanOrEqual(panelLeft);
   }
 });
+
+test('a new service without pipelines does not say it is checking them', async ({ page }) => {
+  await page.goto('/services');
+  await page.getByRole('button', { name: 'New service' }).first().click();
+  const reads = page.getByText('What the pipelines read').locator('xpath=following-sibling::*[1]');
+
+  await expect(page.getByText('Add pipelines to check the service.')).toBeVisible();
+  await expect(reads).toHaveText('Add pipelines to see the variables they read.');
+});

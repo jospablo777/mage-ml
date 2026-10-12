@@ -623,12 +623,30 @@ fn a_finished_run_starts_the_pipelines_that_follow_it() {
     assert_eq!(followed[0]["source"], "after:thing");
     let (_, detail) = service.get(&format!("/v1/runs/{}", followed[0]["id"].as_str().unwrap()));
     assert_eq!(detail["variables"]["n"], 2, "{detail}");
+    // As in MageML, the run knows which run started it.
+    assert_eq!(
+        detail["variables"]["upstream_pipeline"], "thing",
+        "{detail}"
+    );
+    assert_eq!(
+        detail["variables"]["upstream_pipeline_run_id"], run["id"],
+        "{detail}"
+    );
+    assert_eq!(
+        detail["variables"]["upstream_status"], "completed",
+        "{detail}"
+    );
 
     // A failed run starts only the pipeline that follows failures.
     let (_, failed) = service.post("/v1/pipelines/fails/runs?wait=60", json!({}));
     assert_eq!(failed["status"], "failed");
     let after_failure = wait_for_runs(&service, "pipeline=on_failure", 1);
     assert_eq!(after_failure[0]["source"], "after:fails");
+    let (_, detail) = service.get(&format!(
+        "/v1/runs/{}",
+        after_failure[0]["id"].as_str().unwrap()
+    ));
+    assert_eq!(detail["variables"]["upstream_status"], "failed", "{detail}");
     std::thread::sleep(Duration::from_secs(1));
     assert_eq!(
         runs_of(&service, "pipeline=follow").len(),

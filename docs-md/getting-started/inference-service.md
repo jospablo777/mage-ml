@@ -22,7 +22,7 @@ as one Docker image, and monitor it with its run history, logs and metrics.
 Every command, output and time below comes from a real run. The project is called
 `churn_lab`; create it with `mage init churn_lab` and give it an R environment with
 `mage r init churn_lab` (see [R setup](../guides/blocks/r-setup.md)). Training also needs
-skl2onnx: `uv pip install skl2onnx`.
+skl2onnx and skops: `uv pip install skl2onnx skops`.
 
 ## 1. Train the models
 

@@ -243,6 +243,37 @@ class CaptureTest(ExportTestCase):
         self.assertIn('FROM debian:trixie-slim', onnx)
         self.assertIn('install -y --no-install-recommends g++', onnx)
 
+    def test_each_base_platform_and_service_builds_in_its_own_cargo_target(self):
+        """
+        Every export cached cargo's target folder at the same place. A service on bookworm
+        built after one on trixie got trixie's mage-service, which needs a newer glibc, and
+        the amd64 and arm64 builds of one image shared one folder.
+        """
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        (project / 'rust').mkdir()
+        manifest = (
+            '[workspace.dependencies]\nmage-block = {{ path = ".mage/sdk", features = {} }}\n'
+        )
+        capture_ = export.Capture(
+            name='s', project=project,
+            manifest={'pipelines': [{'blocks': [{'language': 'rust'}]}]},
+            rust_blocks=[('score', 'block_score')],
+        )
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres"]'))
+        plain = export._dockerfile(capture_)
+        (project / 'rust' / 'Cargo.toml').write_text(manifest.format('["postgres", "onnx"]'))
+        onnx = export._dockerfile(capture_)
+
+        build_stage = plain.split('AS build', 1)[1]
+        self.assertLess(build_stage.index('ARG TARGETARCH'), build_stage.index('RUN '))
+        self.assertIn(
+            'id=mage-service-bookworm-$TARGETARCH,target=/build/mage_service/target', plain,
+        )
+        self.assertIn('id=mage-service-trixie-$TARGETARCH,target=/build/mage_service/target', onnx)
+        self.assertIn('id=mage-blocks-s-bookworm-$TARGETARCH,target=/build/rust/target', plain)
+        self.assertIn('id=mage-blocks-s-trixie-$TARGETARCH,target=/build/rust/target', onnx)
+
     def test_an_include_outside_the_project_or_missing_stops_the_export(self):
         self.chain()
         with self.assertRaises(export.ExportError) as caught:
@@ -293,23 +324,39 @@ class CaptureTest(ExportTestCase):
         self.assertEqual(build['platforms'], 'linux/amd64,linux/arm64')
         self.assertIn("'shop'", build['tags'])
         self.assertIn('.github/', (out / '.dockerignore').read_text())
+        # GITHUB_TOKEN is issued for each run and cannot be saved as a secret, so pushes to
+        # ghcr.io log in with it when the repository sets no registry secrets.
+        login = workflow['jobs']['image']['steps'][4]['with']
+        self.assertEqual(login['username'], '${{ secrets.REGISTRY_USERNAME || github.actor }}')
+        self.assertEqual(
+            login['password'], '${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}',
+        )
         self.assertIn('docker buildx build --platform', (out / 'README.md').read_text())
 
         with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'):
-            self.assertEqual(export.build_command(out, 'shop')[1:3], ['build', '-t'])
-            pushed = export.build_command(
+            [built] = export.build_commands(out, 'shop')
+            self.assertEqual(built[1:3], ['build', '-t'])
+            [pushed] = export.build_commands(
                 out, 'icr.io/team/shop:1', platforms=['linux/amd64', 'linux/arm64'], push=True,
             )
             self.assertEqual(pushed[1:], [
                 'buildx', 'build', '--tag', 'icr.io/team/shop:1',
                 '--platform', 'linux/amd64,linux/arm64', '--push', str(out),
             ])
-            self.assertIn('--load', export.build_command(out, 'shop', platforms=['linux/arm64']))
+            # One platform pushes with docker push, as the app shows: buildx --push on a
+            # docker-container builder could not reach a registry on localhost.
+            commands = export.build_commands(out, 'localhost:5000/shop:1', push=True)
+            self.assertEqual([c[1:] for c in commands], [
+                ['build', '-t', 'localhost:5000/shop:1', str(out)],
+                ['push', 'localhost:5000/shop:1'],
+            ])
+            [loaded] = export.build_commands(out, 'shop', platforms=['linux/arm64'])
+            self.assertIn('--load', loaded)
             with self.assertRaisesRegex(export.ExportError, 'Several platforms need --push'):
-                export.build_command(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
+                export.build_commands(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
         with patch.object(export.shutil, 'which', return_value=None):
             with self.assertRaisesRegex(export.ExportError, 'docker is not installed'):
-                export.build_command(out, 'shop')
+                export.build_commands(out, 'shop')
 
     def test_the_build_context_holds_everything_the_image_needs(self):
         self.chain()
