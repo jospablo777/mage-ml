@@ -49,10 +49,12 @@ R_PROJECT_DIRECTORY = 'r'
 EXCHANGE_PACKAGES = ['arrow', 'bit64', 'jsonlite', 'tibble']
 # The packages of a new environment: the tidyverse, and what the R block templates use to
 # read and write databases (DBI and its drivers), files and S3 (arrow, readr) and APIs
-# (httr2).
+# (httr2). For models, tidymodels (recipes, parsnip, workflows, tune, yardstick) with the
+# engines most models use (glmnet, ranger, xgboost), and bundle, which saves a fitted
+# model so that another R session, such as an exported service's, can load it.
 DEFAULT_PACKAGES = [
     'tidyverse', *EXCHANGE_PACKAGES, 'DBI', 'RPostgres', 'RMariaDB', 'duckdb', 'RSQLite',
-    'httr2',
+    'httr2', 'tidymodels', 'glmnet', 'ranger', 'xgboost', 'bundle',
 ]
 # Packages that Posit Package Manager has no binary of for macOS, unlike CRAN.
 MACOS_CRAN_PACKAGES = ['RMariaDB']

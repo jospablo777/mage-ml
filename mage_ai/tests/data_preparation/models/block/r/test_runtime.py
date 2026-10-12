@@ -132,6 +132,16 @@ class ConfigTest(RuntimeTestCase):
         with self.assertRaisesRegex(runtime.REnvironmentError, 'MAGE_R_SYNC must be one of'):
             runtime.r_config(str(self.repo))
 
+    def test_new_environments_can_fit_and_serve_models(self):
+        """
+        mage r init had no modeling packages: an R block could not fit a tidymodels
+        workflow, and a fitted model could not be saved for another session to load.
+        """
+        self.assertLessEqual(
+            {'tidymodels', 'glmnet', 'ranger', 'xgboost', 'bundle'},
+            set(runtime.DEFAULT_PACKAGES),
+        )
+
     def test_dependencies(self):
         self.assertEqual(
             runtime.project_dependencies(self.project),

@@ -116,8 +116,9 @@ mage r init path/to/project
 ```
 
 This creates `<project>/r` with `rproject.toml` and `rv.lock` and installs the tidyverse,
-the packages MageML exchanges data with (`arrow`, `bit64`, `jsonlite`, `tibble`) and the
-database drivers the templates use. Most packages come as prebuilt binaries, so this takes
+the packages MageML exchanges data with (`arrow`, `bit64`, `jsonlite`, `tibble`), the
+database drivers the templates use, and tidymodels with the `glmnet`, `ranger` and
+`xgboost` engines and `bundle`. Most packages come as prebuilt binaries, so this takes
 a minute or two.
 
 To start with fewer packages:
