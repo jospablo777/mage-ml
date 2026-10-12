@@ -174,6 +174,8 @@ jobs:
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
+    # A full run takes about 30 minutes; a hung one stops here instead of after six hours.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
@@ -222,7 +224,7 @@ jobs:
       - name: Install the R test environment
         run: make -C integration_tests r-env
       - name: Run integration tests
-        run: make -C integration_tests ci PYTEST_ARGS='-n 4'
+        run: make -C integration_tests ci PYTEST_ARGS='-n 4 --timeout=900 --durations=25'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
         run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
@@ -252,6 +254,7 @@ jobs:
 
   test_backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       matrix:
         python-version: ["3.12"]

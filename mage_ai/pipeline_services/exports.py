@@ -89,7 +89,8 @@ def model_registry(url: Optional[str], limits: Optional[Dict[str, str]] = None):
                 try:
                     import mlflow
 
-                    # None unsets it, so MLflow reads the environment again.
+                    # None also removes MLFLOW_TRACKING_URI from the environment; the
+                    # earlier value comes back below.
                     mlflow.set_tracking_uri(previous)
                 except ImportError:
                     pass

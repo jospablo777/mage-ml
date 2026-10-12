@@ -134,12 +134,14 @@ class GlobalDataProductTest(DBTestCase):
             status=PipelineRun.PipelineRunStatus.COMPLETED,
         )
 
+        pipeline_path = self.pipeline.dir_path
+
         def output_variables(self, execution_partition: str, **kwargs):
             if pipeline_run1.execution_partition == execution_partition:
                 return [
                     Variable(
                         'variable_uuid1',
-                        'test',
+                        pipeline_path,
                         self.uuid,
                         partition=execution_partition,
                     ).uuid,
@@ -148,7 +150,7 @@ class GlobalDataProductTest(DBTestCase):
                 return [
                     Variable(
                         'variable_uuid2',
-                        'test',
+                        pipeline_path,
                         self.uuid,
                         partition=execution_partition,
                     ).uuid,

@@ -1,13 +1,24 @@
 import os
 import re
+import shutil
+import tempfile
 
 import pytest
 
 os.environ['ENV'] = 'test_mage'
 
+# With no tracking URI, MLflow writes sqlite:///mlflow.db in the working directory, the
+# checkout in a test run. Tests that need MLflow point it at their own store and come back
+# to this one, so a reset or a block that runs after its test ends writes here instead.
+MLFLOW_FOLDER = tempfile.mkdtemp(prefix='mage-test-mlflow-')
+os.environ.setdefault('MLFLOW_TRACKING_URI', f'sqlite:///{MLFLOW_FOLDER}/mlflow.db')
+
 # What a test run itself keeps in the working directory: the test database (test.db, or
-# test<worker>.db with xdist) and pytest's and coverage's own files.
-_RUN_FILES = re.compile(r'^(test(gw\d+)?\.db(-journal|-wal|-shm)?|\.pytest_cache|\.coverage.*)$')
+# test<worker>.db with xdist), pytest's and coverage's own files, and the folder view
+# settings macOS Finder writes.
+_RUN_FILES = re.compile(
+    r'^(test(gw\d+)?\.db(-journal|-wal|-shm)?|\.pytest_cache|\.coverage.*|\.DS_Store)$'
+)
 _entries_at_start = set()
 
 
@@ -35,3 +46,4 @@ def pytest_sessionfinish(session, exitstatus):
                 red=True,
             )
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    shutil.rmtree(MLFLOW_FOLDER, ignore_errors=True)

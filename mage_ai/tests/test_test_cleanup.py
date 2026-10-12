@@ -104,6 +104,36 @@ class CollectionTest(unittest.TestCase):
             self.assertFalse(Path(directory, 'data_loaders').exists())
 
 
+class MlflowStoreTest(unittest.TestCase):
+    def test_mlflow_after_a_test_store_writes_in_the_session_folder(self):
+        """
+        MLflow with no tracking URI writes sqlite:///mlflow.db in the working directory.
+        The test store's cleanup unset the URI, and a CI run left mlflow.db in the checkout
+        when MLflow was used after it.
+        """
+        try:
+            import mlflow  # noqa: F401
+        except ImportError:
+            self.skipTest('MLflow is not installed')
+        from mlflow.tracking import MlflowClient
+
+        from mage_ai.tests.conftest import MLFLOW_FOLDER
+        from mage_ai.tests.shared.tracking_utils import use_temporary_mlflow
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            os.chdir(directory)
+            self.addCleanup(os.chdir, previous)
+
+            case = unittest.TestCase()
+            use_temporary_mlflow(case)
+            case.doCleanups()
+            MlflowClient().search_experiments()
+
+            self.assertEqual(os.listdir(directory), [])
+        self.assertTrue(Path(MLFLOW_FOLDER, 'mlflow.db').is_file())
+
+
 class FileModeTest(unittest.TestCase):
     @unittest.skipUnless(
         shutil.which('git') and Path(__file__).resolve().parents[2].joinpath('.git').exists(),
