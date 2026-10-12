@@ -346,6 +346,9 @@ def types():
                 cells[(column, key)] = (entry['dtype'][1][:14], 'good')
             elif entry.get('result') == 'missing':
                 cells[(column, key)] = ('missing', 'bad')
+            elif entry.get('result') == 'values':
+                # The values changed, not only the type's name.
+                cells[(column, key)] = (entry.get('dtype', ['', ''])[1][:14] or 'changed', 'bad')
             else:
                 cells[(column, key)] = (entry.get('dtype', ['', ''])[1][:14] or 'changed', 'warn')
     charts.grid(IMAGES / 'data-types', 'Column types after a block in another language',
@@ -436,7 +439,7 @@ def ml_scoring():
             f"{max(v.get('max_abs_diff', 0) for v in values):.1e}",
             'yes' if len(hashes[scorer, size]) == 1 else f'no ({len(hashes[scorer, size])})',
         ])
-        if size == largest and mode == 'off':
+        if size == largest and mode == 'chains':
             summary[(model, engine, language, device)] = (med, low, high)
     print(table(['model', 'engine', 'language', 'device', 'rows', 'mode',
                  'scoring s [95% CI]', 'rows per s', 'GPU J per 1k rows',
@@ -445,8 +448,8 @@ def ml_scoring():
     # ONNX in each language, and each language's native runtime, on the CPU.
     models = sorted({k[0] for k in summary})
     for engine, name, title in (
-        ('onnx', 'ml-onnx-languages', f'ONNX scoring on the CPU, {largest:,} rows'),
-        ('native', 'ml-native-languages', f'Native scoring on the CPU, {largest:,} rows'),
+        ('onnx', 'ml-onnx-languages', f'ONNX scoring on the CPU, {largest:,} rows, fused'),
+        ('native', 'ml-native-languages', f'Native scoring on the CPU, {largest:,} rows, fused'),
     ):
         series, errors = {}, {}
         for language in ('python', 'r', 'rust'):
