@@ -16,7 +16,8 @@ THEMES = {
     'dark': dict(background='#0d1117', text='#e6edf3', muted='#9198a1', grid='#30363d',
                  axis='#6e7681'),
 }
-PALETTE = ['#4c78a8', '#f58518', '#54a24b', '#e45756', '#72b7b2', '#b279a2', '#9d755d']
+PALETTE = ['#4c78a8', '#f58518', '#54a24b', '#e45756', '#72b7b2', '#b279a2', '#9d755d',
+           '#ff9da6']
 LEVELS = {
     'light': {'good': '#d1f0d7', 'warn': '#fff1c2', 'bad': '#ffd6d6', 'none': '#eef1f4'},
     'dark': {'good': '#1f4d2b', 'warn': '#5c4a12', 'bad': '#6b1f24', 'none': '#21262d'},
@@ -61,6 +62,41 @@ def _write(base: Path, render) -> List[Path]:
     return paths
 
 
+def _colors(names: Sequence[str]) -> List[str]:
+    """A color per series; "x fused" and "x block by block" share x's color."""
+    bases: List[str] = []
+    out = []
+    for name in names:
+        base = name.replace(' block by block', '').replace(' fused', '')
+        if base not in bases:
+            bases.append(base)
+        out.append(PALETTE[bases.index(base) % len(PALETTE)])
+    return out
+
+
+def _legend(names: Sequence[str], text_color: str, left: int, right_edge: int,
+            top: int) -> Tuple[List[str], int]:
+    """Legend items left to right, wrapping into rows; returns the SVG and the row count."""
+    out, lx, row = [], left, 0
+    colors = _colors(names)
+    for si, name in enumerate(names):
+        item = 30 + 7 * len(name)
+        if lx > left and lx + item > right_edge:
+            lx, row = left, row + 1
+        y0 = top + row * 18
+        dash = ' stroke-dasharray="4 2"' if 'block by block' in name else ''
+        out.append(f'<line x1="{lx}" x2="{lx + 12}" y1="{y0 + 6}" y2="{y0 + 6}" '
+                   f'stroke="{colors[si]}" stroke-width="4"{dash}/>')
+        out.append(f'<text x="{lx + 18}" y="{y0 + 10}" fill="{text_color}">'
+                   f'{escape(name)}</text>')
+        lx += item
+    return out, row + 1
+
+
+def _rows(names: Sequence[str], left: int, right_edge: int) -> int:
+    return _legend(names, '', left, right_edge, 0)[1]
+
+
 def bars(
     base: Path,
     title: str,
@@ -79,6 +115,7 @@ def bars(
     top = _nice_max(max(highs) if highs else 1)
     left, right, upper, lower = 70, 20, 50, 70
     plot_w, plot_h = width - left - right, height - upper - lower
+    height += 18 * (_rows(names, left, width - right) - 1)
     group_w = plot_w / max(len(categories), 1)
     bar_w = group_w * 0.8 / max(len(names), 1)
 
@@ -122,13 +159,7 @@ def bars(
                        f'text-anchor="middle">{escape(category)}</text>')
         out.append(f'<line x1="{left}" x2="{width - right}" y1="{upper + plot_h}" '
                    f'y2="{upper + plot_h}" stroke="{t["axis"]}"/>')
-        lx = left
-        for si, name in enumerate(names):
-            out.append(f'<rect x="{lx}" y="{height - 26}" width="12" height="12" '
-                       f'fill="{PALETTE[si % len(PALETTE)]}"/>')
-            out.append(f'<text x="{lx + 18}" y="{height - 16}" fill="{t["text"]}">'
-                       f'{escape(name)}</text>')
-            lx += 30 + 7 * len(name)
+        out += _legend(names, t['text'], left, width - right, upper + plot_h + 32)[0]
         out.append('</svg>')
         return '\n'.join(out) + '\n'
 
@@ -153,6 +184,7 @@ def lines(
     top = _nice_max(max([p[3] if p[3] is not None else p[1] for p in points] or [1]))
     left, right, upper, lower = 70, 20, 50, 80
     plot_w, plot_h = width - left - right, height - upper - lower
+    height += 18 * (_rows(list(series), left, width - right) - 1)
 
     def render(theme):
         t = THEMES[theme]
@@ -177,26 +209,23 @@ def lines(
         if ylabel:
             out.append(f'<text transform="translate(16,{upper + plot_h / 2}) rotate(-90)" '
                        f'fill="{t["muted"]}" text-anchor="middle">{escape(ylabel)}</text>')
+        colors = _colors(list(series))
         for si, pts in enumerate(series.values()):
-            color = PALETTE[si % len(PALETTE)]
+            color = colors[si]
             pts = sorted(pts)
             band = [p for p in pts if p[2] is not None and p[3] is not None]
             if len(band) >= 2:
                 path = ' '.join(f'{x(p[0]):.1f},{y(p[3]):.1f}' for p in band)
                 path += ' ' + ' '.join(f'{x(p[0]):.1f},{y(p[2]):.1f}' for p in reversed(band))
                 out.append(f'<polygon points="{path}" fill="{color}" fill-opacity="0.18"/>')
-            out.append('<polyline fill="none" stroke="{}" stroke-width="2" points="{}"/>'.format(
-                color, ' '.join(f'{x(p[0]):.1f},{y(p[1]):.1f}' for p in pts)))
+            dash = ' stroke-dasharray="6 4"' if 'block by block' in list(series)[si] else ''
+            out.append('<polyline fill="none" stroke="{}" stroke-width="2"{} points="{}"/>'.format(
+                color, dash, ' '.join(f'{x(p[0]):.1f},{y(p[1]):.1f}' for p in pts)))
             for p in pts:
                 out.append(f'<circle cx="{x(p[0]):.1f}" cy="{y(p[1]):.1f}" r="3" '
                            f'fill="{color}"/>')
-        lx = left
-        for si, name in enumerate(series):
-            out.append(f'<rect x="{lx}" y="{height - 22}" width="12" height="12" '
-                       f'fill="{PALETTE[si % len(PALETTE)]}"/>')
-            out.append(f'<text x="{lx + 18}" y="{height - 12}" fill="{t["text"]}">'
-                       f'{escape(name)}</text>')
-            lx += 30 + 7 * len(name)
+        out += _legend(list(series), t['text'], left, width - right,
+                       upper + plot_h + 48)[0]
         out.append('</svg>')
         return '\n'.join(out) + '\n'
 
