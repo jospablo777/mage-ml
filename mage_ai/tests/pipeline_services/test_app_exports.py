@@ -215,7 +215,9 @@ class ModelRegistryTest(AppExportBase):
         client = MlflowClient()
         client.set_registered_model_alias('churn-scorer', 'champion', '1')
         client.set_model_version_tag('churn-scorer', '1', 'validated', 'true')
-        client.set_model_version_tag('churn-scorer', '1', 'feast.feature_service', 'churn_features_v1')
+        client.set_model_version_tag(
+            'churn-scorer', '1', 'feast.feature_service', 'churn_features_v1',
+        )
 
         self.server_store = use_temporary_mlflow(self)
         self.chain()
