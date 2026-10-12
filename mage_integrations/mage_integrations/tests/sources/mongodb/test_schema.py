@@ -7,7 +7,11 @@ from bson import Binary, Decimal128, ObjectId, Timestamp
 from bson.int64 import Int64
 
 from mage_integrations.sources.mongodb import column_schema
-from mage_integrations.sources.mongodb.schema import extract_schema, infer_fields, type_name
+from mage_integrations.sources.mongodb.schema import (
+    extract_schema,
+    infer_fields,
+    type_name,
+)
 
 
 class TypeNameTest(unittest.TestCase):

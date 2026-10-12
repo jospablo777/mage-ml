@@ -15,11 +15,11 @@ from mage_integrations.destinations.sql.utils import (
     build_alter_table_command,
     build_create_table_command,
     build_insert_command,
-    latest_by_key,
 )
 from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
 )
+from mage_integrations.destinations.sql.utils import latest_by_key
 
 
 class PostgreSQL(Destination):

@@ -1,7 +1,8 @@
+import unittest
+from unittest.mock import MagicMock, patch
+
 from mage_integrations.sources.postgresql import PostgreSQL
 from mage_integrations.tests.sources.test_base import build_sample_streams_catalog
-from unittest.mock import MagicMock, patch
-import unittest
 
 
 class PostgreSQLSourceTests(unittest.TestCase):
