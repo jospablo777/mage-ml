@@ -1198,17 +1198,33 @@ function Workbench({
                 withCopyIcon
               />
             ) : null}
-            subtitle="Give these to the container. Values are never exported."
+            subtitle="Found in io_config.yaml (env_var) and in the blocks (os.getenv, os.environ, mage_secret_var). Give them to the container; values are never exported."
             title="Secrets and environment variables"
           >
             <Text bold small>What the pipelines read</Text>
             <Spacing mt={0.5}>
-              {!check?.environment?.length && (
+              {!draft.pipelines.length && (
+                <Text muted small>Add pipelines to see the variables they read.</Text>
+              )}
+              {draft.pipelines.length >= 1 && !check && checking && (
+                <FlexContainer alignItems="center">
+                  <Spinner inverted small />
+                  <Spacing ml={1} />
+                  <Text muted small>Checking the pipelines</Text>
+                </FlexContainer>
+              )}
+              {draft.pipelines.length >= 1 && problems.length >= 1 && (
                 <Text muted small>
-                  {check ? 'Nothing: the pipelines read no environment variable.' : 'Checking'}
+                  Fix the problems in the configuration check to see them.
                 </Text>
               )}
-              {check?.environment?.length >= 1 && (
+              {draft.pipelines.length >= 1 && check && !problems.length
+                && !check.environment?.length && (
+                <Text muted small>
+                  Nothing: the pipelines read no environment variable.
+                </Text>
+              )}
+              {!problems.length && check?.environment?.length >= 1 && (
                 <TableStyle>
                   <tbody>
                     {check.environment.map(v => (
