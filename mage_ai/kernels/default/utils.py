@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import os
-from queue import Empty
 from typing import Any, Dict, List, Optional
 
 import jupyter_client
@@ -153,17 +152,26 @@ def terminate_process(pid: int) -> bool:
 
 
 def is_kernel_process_active(pid: int, connection_file: Any) -> bool:
+    """
+    Whether the kernel answers a kernel_info_request on its control channel within a second.
+    The control channel answers while the kernel runs code, so a busy kernel is active.
+
+    The client is closed here. One left to the garbage collector froze the web server: the
+    collector runs on the server's thread, and Context.destroy() waited without end for a
+    message that a kernel which had exited never took.
+    """
+    from mage_ai.kernels.models import close_client
+
     if not connection_file:
         return False
 
-    km = jupyter_client.BlockingKernelClient()
-    km.load_connection_file(connection_file)
-
-    km.execute('1 + 1', connection_file)
+    client = jupyter_client.BlockingKernelClient()
     try:
-        km.get_shell_msg(timeout=1)
-        return False
-    except Empty:
+        client.load_connection_file(connection_file)
+        client.control_channel.send(client.session.msg('kernel_info_request'))
+        client.control_channel.get_msg(timeout=1)
         return True
-
-    return False
+    except Exception:
+        return False
+    finally:
+        close_client(client)
