@@ -41,7 +41,8 @@ def get_int_value(value: str) -> int:
 DEBUG = is_debug()
 DEBUG_MEMORY = str(os.getenv('DEBUG_MEMORY', 0) or 0) in ['1', 'true', 'True']
 DEBUG_FILE_IO = str(os.getenv('DEBUG_FILE_IO', 0) or 0) in ['1', 'true', 'True']
-HIDE_ENV_VAR_VALUES = int(os.getenv('HIDE_ENV_VAR_VALUES', 1) or 1) == 1
+# On unless set to 0 or false.
+HIDE_ENV_VAR_VALUES = get_bool_value(os.getenv('HIDE_ENV_VAR_VALUES') or '1')
 
 
 # -------------------------
