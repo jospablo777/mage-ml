@@ -111,3 +111,29 @@ test('the code keeps its width in the editor on an 820 px wide screen', async ({
   expect(box.width).toBeGreaterThanOrEqual(240);
   expect(box.x + box.width).toBeLessThanOrEqual(820);
 });
+
+test('the trigger page shows its run settings at their width', async ({ page }) => {
+  // The panel's width was set before the page knew it had a panel, and it stayed 200 px:
+  // labels broke mid-word.
+  const { pipeline_schedule: trigger } = await api.call(
+    'POST',
+    `pipelines/${pipelineUUID}/pipeline_schedules`,
+    { pipeline_schedule: { name: `robust_api_${SUFFIX}`, schedule_type: 'api' } },
+  );
+  await page.setViewportSize({ height: 900, width: 1440 });
+  await page.goto(`/pipelines/${pipelineUUID}/triggers/${trigger.id}/edit`);
+  const heading = page.getByText('Run settings');
+  await heading.waitFor();
+  await page.waitForTimeout(1500);
+
+  const width = await heading.evaluate(el => el.closest('aside').getBoundingClientRect().width);
+  expect(width).toBeGreaterThanOrEqual(380);
+
+  // The trigger type cards wrap beside the panel instead of running under it.
+  const panelLeft = await heading.evaluate(el => el.closest('aside').getBoundingClientRect().left);
+  for (const label of ['Schedule', 'API', 'After another pipeline']) {
+    const card = await page.getByText(label, { exact: true }).first()
+      .locator('xpath=ancestor::button[1]').boundingBox();
+    expect(card.x + card.width, label).toBeLessThanOrEqual(panelLeft);
+  }
+});

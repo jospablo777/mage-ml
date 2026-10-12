@@ -131,6 +131,25 @@ def schedule_problems(
     )
 
 
+def _runs_in_this_env(schedule) -> bool:
+    """
+    Whether the trigger's envs in triggers.yaml include this environment. The sync leaves out
+    a trigger of another environment, but one synced before its envs changed stays active in
+    the database. Triggers saved only in the database have no envs and run everywhere.
+    """
+    from mage_ai.data_preparation.models.triggers import get_triggers_by_pipeline
+    from mage_ai.shared.environments import get_env
+
+    try:
+        triggers = get_triggers_by_pipeline(schedule.pipeline_uuid, repo_path=schedule.repo_path)
+    except Exception:
+        return True
+    for trigger in triggers:
+        if trigger.name == schedule.name:
+            return not trigger.envs or get_env() in trigger.envs
+    return True
+
+
 def start_followers(pipeline_run, status: str) -> List:
     """
     Creates a run for each active after-run trigger that follows this run's pipeline and
@@ -158,6 +177,8 @@ def _start_followers(pipeline_run, status: str) -> List:
     schedules = _active_after_run_schedules()
     for schedule in schedules:
         if not follows(schedule.settings, pipeline_run.pipeline_uuid, status):
+            continue
+        if not _runs_in_this_env(schedule):
             continue
         # Triggers saved straight in triggers.yaml skip the API's checks; a loop must not
         # start runs without end.

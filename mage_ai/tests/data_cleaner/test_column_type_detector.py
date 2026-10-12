@@ -14,8 +14,9 @@ import numpy as np
 
 class ColumnTypeDetectorTests(TestCase):
     def setUp(self):
-        Faker.seed(42)
+        # This instance only: Faker.seed seeds the generator every Faker shares.
         self.fake = Faker()
+        self.fake.seed_instance(42)
         return super().setUp()
 
     def test_get_syntax_errors(self):
@@ -560,3 +561,17 @@ class ColumnTypeDetectorTests(TestCase):
             not_a_list=ColumnType.TEXT,
         )
         self.assertEqual(ctypes, expected_ctypes)
+
+
+class FakerSeedTests(TestCase):
+    def test_the_seed_stays_in_these_tests(self):
+        """
+        Faker.seed seeded the generator every Faker shares, and the names of later tests
+        repeated in a fixed order: two release tests got the same pipeline name.
+        """
+        from faker.generator import random as shared
+
+        state = shared.getstate()
+        ColumnTypeDetectorTests('test_get_syntax_errors').setUp()
+
+        self.assertEqual(shared.getstate(), state)

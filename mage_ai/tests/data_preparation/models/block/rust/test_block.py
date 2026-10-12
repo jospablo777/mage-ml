@@ -269,6 +269,41 @@ class RustBlockTest(DBTestCase):
         self.assertIn('mage::onnx needs the onnx feature', message)
         self.assertIn('features = ["postgres", "onnx"]', message)
 
+    def test_a_chain_of_rust_blocks_says_which_feature_to_turn_on(self):
+        """
+        The hint named the line to add only when one block compiled alone. Consecutive
+        Rust blocks compile as one chain, and the chain's error had no hint: the inference
+        tutorial's scoring pipeline showed only that mage::onnx is gated.
+        """
+        from mage_ai.data_preparation.models.block.rust import execute_rust_chain
+
+        load = (
+            'use mage::prelude::*;\n'
+            '\n'
+            'fn load_data(_vars: Vars) -> Result<DataFrame> {\n'
+            '    Ok(df!("id" => [1i64])?)\n'
+            '}\n'
+        )
+        score = (
+            'use mage::prelude::*;\n'
+            '\n'
+            'fn transform(data: DataFrame) -> Result<DataFrame> {\n'
+            '    let _ = mage::onnx::model("models/m.onnx")?;\n'
+            '    Ok(data)\n'
+            '}\n'
+        )
+        members = [
+            rust_build.ChainMember(code=load, block_type=BlockType.DATA_LOADER,
+                                   block_uuid='chain_load'),
+            rust_build.ChainMember(code=score, block_type=BlockType.TRANSFORMER,
+                                   block_uuid='chain_score'),
+        ]
+        with self.assertRaises(RustBlockError) as context:
+            execute_rust_chain(members, repo_path=self.rust_repo)
+        message = plain(str(context.exception))
+        self.assertIn('mage::onnx needs the onnx feature', message)
+        self.assertIn('features = ["postgres", "onnx"]', message)
+
     def test_a_wrong_signature_is_explained(self):
         code = (
             'use mage::prelude::*;\n'

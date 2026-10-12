@@ -37,6 +37,21 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    # The rows that reference the after_run triggers go first: PostgreSQL refused to delete
+    # a trigger that had a run.
+    schedules = "SELECT id FROM pipeline_schedule WHERE schedule_type = 'AFTER_RUN'"
+    backfills = f'SELECT id FROM backfill WHERE pipeline_schedule_id IN ({schedules})'
+    runs = (
+        f'SELECT id FROM pipeline_run WHERE pipeline_schedule_id IN ({schedules}) '
+        f'OR backfill_id IN ({backfills})'
+    )
+    op.execute(f'DELETE FROM block_run WHERE pipeline_run_id IN ({runs})')
+    op.execute(f'DELETE FROM pipeline_run WHERE id IN ({runs})')
+    op.execute(f'DELETE FROM backfill WHERE id IN ({backfills})')
+    op.execute(
+        'DELETE FROM pipeline_schedule_event_matcher_association '
+        f'WHERE pipeline_schedule_id IN ({schedules})'
+    )
     op.execute("DELETE FROM pipeline_schedule WHERE schedule_type = 'AFTER_RUN'")
     if bind.engine.name == 'postgresql':
         op.execute('ALTER TYPE scheduletype RENAME TO scheduletype_old')

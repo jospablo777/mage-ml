@@ -13,6 +13,7 @@ export const CardStyle = styled.div<CardProps>`
   border-style: solid;
   border-width: 2px;
   height: ${14 * UNIT}px;
+  margin-bottom: ${PADDING_UNITS * UNIT}px;
   margin-right: ${PADDING_UNITS * UNIT}px;
   padding: ${PADDING_UNITS * UNIT}px;
   width: ${40 * UNIT}px;

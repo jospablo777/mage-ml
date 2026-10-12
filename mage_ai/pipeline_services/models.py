@@ -242,30 +242,39 @@ def _read(loader: str, path: str, options: Dict) -> Any:
                      'pickle, or a function that takes the path.')
 
 
-# CatBoost losses of classifiers and of rankers; any other loss is a regressor's.
+# CatBoost losses by the class that trains with them; a model with another loss keeps the
+# generic CatBoost.
 CATBOOST_CLASSIFIER_LOSSES = frozenset((
     'Logloss', 'CrossEntropy', 'MultiClass', 'MultiClassOneVsAll', 'MultiLogloss',
     'MultiCrossEntropy',
 ))
-CATBOOST_RANKER_LOSSES = (
-    'YetiRank', 'PairLogit', 'QueryRMSE', 'QuerySoftMax', 'StochasticRank', 'LambdaMart',
-    'QueryCrossEntropy',
-)
+CATBOOST_REGRESSOR_LOSSES = frozenset((
+    'RMSE', 'MAE', 'Quantile', 'MultiQuantile', 'LogLinQuantile', 'MAPE', 'Poisson', 'Tweedie',
+    'Huber', 'Expectile', 'Lq', 'LogCosh', 'RMSEWithUncertainty', 'MultiRMSE', 'SurvivalAft',
+))
+CATBOOST_RANKER_LOSSES = frozenset((
+    'YetiRank', 'YetiRankPairwise', 'PairLogit', 'PairLogitPairwise', 'QueryRMSE',
+    'QuerySoftMax', 'StochasticRank', 'LambdaMart', 'QueryCrossEntropy',
+))
 
 
 def _read_catboost(path: str):
-    """A .cbm file as the class it was trained with, so a classifier has predict_proba."""
+    """
+    A .cbm file as the class it was saved from: the generic CatBoost returns raw scores from
+    predict and has no predict_proba.
+    """
     import catboost
 
     model = catboost.CatBoost().load_model(path)
-    loss = str(model.get_all_params().get('loss_function') or '').split(':')[0]
-    if loss in CATBOOST_CLASSIFIER_LOSSES:
-        model_class = catboost.CatBoostClassifier
-    elif loss.startswith(CATBOOST_RANKER_LOSSES):
-        model_class = catboost.CatBoostRanker
-    else:
-        model_class = catboost.CatBoostRegressor
-    return model_class().load_model(path)
+    loss = str((model.get_all_params() or {}).get('loss_function') or '').split(':')[0]
+    for losses, model_class in (
+        (CATBOOST_CLASSIFIER_LOSSES, catboost.CatBoostClassifier),
+        (CATBOOST_REGRESSOR_LOSSES, catboost.CatBoostRegressor),
+        (CATBOOST_RANKER_LOSSES, catboost.CatBoostRanker),
+    ):
+        if loss in losses:
+            return model_class().load_model(path)
+    return model
 
 
 def artifact_path(path: str) -> str:

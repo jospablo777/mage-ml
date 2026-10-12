@@ -124,6 +124,31 @@ class AfterRunSchedulerTest(DBTestCase):
         self.assertEqual(len(self.runs_of(on_failure)), 1)
         self.assertEqual(self.runs_of(inactive), [])
 
+    def test_a_trigger_of_another_environment_starts_no_run(self):
+        """
+        envs in triggers.yaml kept a trigger out of the sync, but a trigger synced before
+        its envs changed stayed active in the database and started runs everywhere.
+        """
+        import os
+
+        import yaml
+
+        schedule = self.after_run()
+        path = os.path.join(self.follower.dir_path, 'triggers.yaml')
+        with open(path, 'w') as file:
+            yaml.safe_dump(dict(triggers=[dict(
+                name=schedule.name,
+                schedule_type='after_run',
+                settings=dict(after_pipeline=self.upstream.uuid),
+                status='active',
+                envs=['prod'],
+            )]), file)
+        self.addCleanup(os.remove, path)
+
+        after_runs.start_followers(self.finished_run(), 'completed')
+
+        self.assertEqual(self.runs_of(schedule), [])
+
     def test_a_running_follower_is_skipped_when_asked(self):
         schedule = self.after_run(skip_if_previous_running=True)
         after_runs.start_followers(self.finished_run(), 'completed')
