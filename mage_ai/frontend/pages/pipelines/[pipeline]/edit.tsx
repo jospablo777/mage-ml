@@ -151,6 +151,10 @@ import { queryFromUrl } from '@utils/url';
 import { resetColumnScroller } from '@components/PipelineDetail/ColumnScroller/utils';
 import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils';
 import { useModal } from '@context/Modal';
+import LanguageSetupNotice, {
+  LanguageSetupType,
+  noticeHidden,
+} from '@components/LanguageSetupNotice';
 import { useWindowSize } from '@utils/sizes';
 
 type PipelineDetailPageProps = {
@@ -556,6 +560,27 @@ function PipelineDetailPage({
   const [pipelineLastSaved, setPipelineLastSaved] = useState<number>(null);
   const [pipelineContentTouched, setPipelineContentTouched] = useState<boolean>(false);
   const [multipleTabsOpen, setMultipleTabsOpen] = useState<boolean>(false);
+
+  // An R or Rust block whose language is not set up here: say what to install.
+  const [languageSetup, setLanguageSetup] = useState<LanguageSetupType>(null);
+  const [showLanguageSetup, hideLanguageSetup] = useModal(() => (
+    <LanguageSetupNotice
+      onClose={() => {
+        hideLanguageSetup();
+        setLanguageSetup(null);
+      }}
+      setup={languageSetup}
+    />
+  ), {}, [languageSetup], {
+    background: true,
+    uuid: 'language_setup_notice',
+  });
+  useEffect(() => {
+    if (languageSetup) {
+      showLanguageSetup();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [languageSetup]);
 
   const [showStalePipelineMessageModal, hideStalePipelineMessageModal] = useModal(() => (
     <PopupMenu
@@ -2003,6 +2028,20 @@ function PipelineDetailPage({
               },
             } = response;
             onCreateCallback?.(block);
+
+            const language = block?.language || blockLanguage;
+            if ((BlockLanguageEnum.R === language || BlockLanguageEnum.RUST === language)
+              && !noticeHidden(language)) {
+              api.language_setups.detailAsync(language)
+                .then((response) => {
+                  // detailAsync resolves to the HTTP response; the body is its data.
+                  const setup: LanguageSetupType = (response?.data || response)?.language_setup;
+                  if (setup && !setup.ready) {
+                    setLanguageSetup(setup);
+                  }
+                })
+                .catch(() => null);
+            }
 
             // TODO (tommy dang): there is a very difficult bug when you add a new block while the
             // split view is enabled and the 1st block is scrolled out of view, the notebook

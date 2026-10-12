@@ -19,6 +19,12 @@ You need:
 Installing MageML with uv also needs Rust, because it builds `column-atlas-native`, a Rust
 package of the repository. So set up Rust first.
 
+<Note>
+  MageML runs Python blocks with no setup. When you create a Rust block on a machine where
+  Rust is not ready, the editor says what is missing, with the commands below and a link
+  to this page.
+</Note>
+
 ## 1. Install the C toolchain
 
 <Tabs>
@@ -65,7 +71,9 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
 ```
 
-The install from GitHub compiles the Rust package and takes about three minutes.
+The install from GitHub compiles the Rust package and takes about three minutes. Add the
+extras of the databases your blocks use, such as `"mage-ml[r,rust,postgres] @ git+..."`;
+the `rust` extra adds no packages, since Rust comes from rustup.
 
 ## 4. Check the setup
 

@@ -62,6 +62,7 @@ export const FUSION_VERIFICATIONS: 'fusion_verifications' = 'fusion_verification
 export const PIPELINE_COMPILATIONS: 'pipeline_compilations' = 'pipeline_compilations';
 export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_documentations';
 export const PIPELINE_SERVICE_EXPORTS: 'pipeline_service_exports' = 'pipeline_service_exports';
+export const LANGUAGE_SETUPS: 'language_setups' = 'language_setups';
 export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
 export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_service_builds';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
@@ -170,6 +171,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_COMPILATIONS],
   [PIPELINE_DOCUMENTATIONS],
   [PIPELINE_SERVICE_EXPORTS],
+  [LANGUAGE_SETUPS],
   [PIPELINE_SERVICES],
   [PIPELINE_SERVICE_BUILDS],
   [FILE_CONTENTS],

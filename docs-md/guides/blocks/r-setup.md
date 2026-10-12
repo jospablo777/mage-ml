@@ -17,6 +17,11 @@ You need three things:
 MageML does not use your R library or RStudio settings: each project gets its own package
 library, so installing R for MageML does not change your other R work.
 
+> [!NOTE]
+> MageML runs Python blocks with no setup. When you create an R block on a machine where
+> R is not ready, the editor says what is missing, with the commands below and a link
+> to this page.
+
 ## 1. Install MageML with uv
 
 If MageML is not installed yet, install it with [uv](https://docs.astral.sh/uv/). From a
@@ -35,6 +40,10 @@ Or into a Python 3.12 environment you already use:
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
 ```
+
+Add the extras of the databases your blocks use, such as
+`"mage-ml[r,rust,postgres] @ git+https://github.com/jospablo777/mage-ml"`. The `r` and
+`rust` extras add no packages: R, rv and Rust are installed outside Python, as below.
 
 > [!NOTE]
 > Both routes build `column-atlas-native`, a Rust package of the repository, so they need

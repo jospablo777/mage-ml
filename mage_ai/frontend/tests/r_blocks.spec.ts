@@ -63,6 +63,46 @@ test.describe('R blocks', () => {
     }
   });
 
+  test('an R block on a machine without R says how to set R up', async (
+    { page, playwright }, testInfo,
+  ) => {
+    const context = await playwright.request.newContext({
+      baseURL: process.env.MAGE_E2E_API_URL || testInfo.project.use.baseURL,
+    });
+    const api = await MageApi.signIn(context);
+    const { language_setup: setup } = await api.call('GET', 'language_setups/r');
+    await context.dispose();
+    await page.evaluate(() => window.localStorage.removeItem(
+      'mage_language_setup_notice_hidden_r',
+    ));
+
+    await openRTemplates(page, 'Transformer');
+    await visible(page, 'Clean data').click();
+    await page.getByRole('button', { name: 'Save and add' }).click();
+    await expect(page.getByText('@transformer').first()).toBeVisible();
+
+    const notice = page.getByRole('dialog', { name: 'Set up R to run R blocks' });
+    if (setup.ready) {
+      // R is set up on this server: the block is made and nothing interrupts.
+      await page.waitForTimeout(2000);
+      await expect(notice).toHaveCount(0);
+      return;
+    }
+    await expect(notice).toBeVisible();
+    await expect(notice.getByText('mage r setup')).toBeVisible();
+    await expect(notice.getByRole('link', { name: 'R setup guide' }))
+      .toHaveAttribute('href', /guides\/blocks\/r-setup\.md$/);
+    await expect(notice.getByText(setup.problems[0])).toBeVisible();
+
+    // "Don't show this again" keeps the next R block quiet.
+    await notice.getByText("Don't show this again for R").click();
+    await notice.getByRole('button', { name: 'Got it' }).click();
+    await expect(notice).toHaveCount(0);
+    expect(await page.evaluate(() => window.localStorage.getItem(
+      'mage_language_setup_notice_hidden_r',
+    ))).toBe('1');
+  });
+
   test('a block made from an R template has its code', async ({ page }) => {
     await openRTemplates(page, 'Data loader');
     await visible(page, 'Local file').click();

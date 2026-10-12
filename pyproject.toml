@@ -209,6 +209,9 @@ streaming = [
 # R blocks need no Python packages beyond Mage's own: R, rv and rig are installed
 # outside Python. `mage r setup` checks them and prints the commands that install them.
 r = []
+# Rust blocks compile with cargo, installed with rustup outside Python; `mage rust init`
+# creates the project's workspace. The extra names the intent, as r does.
+rust = []
 # The client of mage_ai.io.trino and Trino SQL blocks.
 trino = [
   "trino~=0.326",
