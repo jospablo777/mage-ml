@@ -41,6 +41,8 @@ tables below, in the results (`topology` field) and in the guide.
 | **Lattice** | `lattice(l, w)` | l layers of w blocks, each reading the whole layer before | lattice3x2 |
 | **Thicket** | `random_dag(n, p, seed)` | random edges from earlier to later blocks | random8a, random8b |
 
+![The seven shapes, each block drawn with its language logo: a Line fuses end to end; Parallel lines fuse each line; a Diamond, a Broadcast and a Merge run their branches side by side; a Lattice fuses nothing; a Thicket fuses only its stretches that are lines](../../docs/images/diagrams/pipeline-shapes.light.svg)
+
 Only a Line fuses end to end. A Diamond, a Broadcast and a Merge have chains of one
 block; Parallel lines fuse each line; a Lattice and a Thicket fuse the parts where a block
 has one consumer that has one producer.
@@ -69,6 +71,8 @@ relative.
 A pattern assigns a language to each block: one language for all (`pandas`, `polars`,
 `r`, `rust`); `alternate:a,b` switches at every block; `islands:N:a,b` keeps runs of N
 blocks in one language; `random:seed` draws each block's language.
+
+![One Line of six blocks with four mixes of languages: one language makes one compiled chain; islands of three make two chains and one Arrow conversion; a random mix makes four chains; alternating pandas and R makes six chains and five conversions](../../docs/images/diagrams/language-mixes.light.svg)
 
 ### Factors and experiments
 

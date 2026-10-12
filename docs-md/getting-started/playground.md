@@ -64,6 +64,11 @@ Run a pipeline from its page (**Run @once**), or open it in the editor and run b
 one. The `shape_` pipelines show the shapes of [Pipeline shapes](../guides/pipelines/pipeline-shapes.md):
 which blocks run together and which side by side.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/images/diagrams/playground-shapes.dark.svg">
+  <img src="../../docs/images/diagrams/playground-shapes.light.svg" alt="The playground's Diamond, Broadcast and Merge pipelines block by block, with each block's language and the join and export that fuse into one stage" />
+</picture>
+
 ## What to try
 
 - **ColumnAtlas.** Run a block in the editor and explore its output: column profiles, sort,

@@ -25,9 +25,19 @@ which ran thousands of generated pipelines in pandas, Polars, R and Rust.
 | **Lattice** | layers where every block reads the whole layer before | almost nothing fuses | rarely needed; usually a sign to restructure |
 | **Thicket** | edges that skip around | only the stretches that are lines | grown pipelines; worth flattening |
 
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/pipeline-shapes.light.svg" alt="The seven shapes, each block drawn with its language logo: a Line fuses end to end; Parallel lines fuse each line; a Diamond, a Broadcast and a Merge run their branches side by side; a Lattice fuses nothing; a Thicket fuses only its stretches that are lines" />
+  <img className="hidden dark:block" src="/images/diagrams/pipeline-shapes.dark.svg" alt="The seven shapes, each block drawn with its language logo: a Line fuses end to end; Parallel lines fuse each line; a Diamond, a Broadcast and a Merge run their branches side by side; a Lattice fuses nothing; a Thicket fuses only its stretches that are lines" />
+</Frame>
+
 The playground has one pipeline per common shape: `shape_diamond_store_scorecard`,
 `shape_broadcast_web_events` and `shape_merge_customer_signals`, next to Lines such as
 `polars_customer_360`.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/playground-shapes.light.svg" alt="The playground's Diamond, Broadcast and Merge pipelines block by block, with each block's language and the join and export that fuse into one stage" />
+  <img className="hidden dark:block" src="/images/diagrams/playground-shapes.dark.svg" alt="The playground's Diamond, Broadcast and Merge pipelines block by block, with each block's language and the join and export that fuse into one stage" />
+</Frame>
 
 ## What a production run does with a shape
 
@@ -42,6 +52,11 @@ The playground has one pipeline per common shape: `shape_diamond_store_scorecard
 - **A join reads stored outputs.** A block with several inputs starts a new stage and
   reads its inputs from storage.
 - **A language switch converts.** Data crosses between languages through Apache Arrow.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/language-mixes.light.svg" alt="One Line of six blocks with four mixes of languages: one language makes one compiled chain; islands of three make two chains and one Arrow conversion; a random mix makes four chains; alternating pandas and R makes six chains and five conversions" />
+  <img className="hidden dark:block" src="/images/diagrams/language-mixes.dark.svg" alt="One Line of six blocks with four mixes of languages: one language makes one compiled chain; islands of three make two chains and one Arrow conversion; a random mix makes four chains; alternating pandas and R makes six chains and five conversions" />
+</Frame>
 
 <Frame>
   <img className="block dark:hidden" src="/images/study/chain-length.light.svg" alt="Run time of Lines of 1 to 16 blocks in pandas, Polars, R and Rust: block by block it grows by 2 to 6 seconds per block, fused it stays between 1.4 and 3 seconds" />

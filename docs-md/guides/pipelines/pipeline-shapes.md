@@ -22,9 +22,19 @@ which ran thousands of generated pipelines in pandas, Polars, R and Rust.
 | **Lattice** | layers where every block reads the whole layer before | almost nothing fuses | rarely needed; usually a sign to restructure |
 | **Thicket** | edges that skip around | only the stretches that are lines | grown pipelines; worth flattening |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/diagrams/pipeline-shapes.dark.svg">
+  <img src="../../../docs/images/diagrams/pipeline-shapes.light.svg" alt="The seven shapes, each block drawn with its language logo: a Line fuses end to end; Parallel lines fuse each line; a Diamond, a Broadcast and a Merge run their branches side by side; a Lattice fuses nothing; a Thicket fuses only its stretches that are lines" />
+</picture>
+
 The playground has one pipeline per common shape: `shape_diamond_store_scorecard`,
 `shape_broadcast_web_events` and `shape_merge_customer_signals`, next to Lines such as
 `polars_customer_360`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/diagrams/playground-shapes.dark.svg">
+  <img src="../../../docs/images/diagrams/playground-shapes.light.svg" alt="The playground's Diamond, Broadcast and Merge pipelines block by block, with each block's language and the join and export that fuse into one stage" />
+</picture>
 
 ## What a production run does with a shape
 
@@ -39,6 +49,11 @@ The playground has one pipeline per common shape: `shape_diamond_store_scorecard
 - **A join reads stored outputs.** A block with several inputs starts a new stage and
   reads its inputs from storage.
 - **A language switch converts.** Data crosses between languages through Apache Arrow.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/diagrams/language-mixes.dark.svg">
+  <img src="../../../docs/images/diagrams/language-mixes.light.svg" alt="One Line of six blocks with four mixes of languages: one language makes one compiled chain; islands of three make two chains and one Arrow conversion; a random mix makes four chains; alternating pandas and R makes six chains and five conversions" />
+</picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../../docs/images/study/chain-length.dark.svg">

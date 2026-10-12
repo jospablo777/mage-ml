@@ -83,6 +83,35 @@ class Diagram:
                           f'<text x="{x}" y="{y + 2}" font-size="10.5" text-anchor="middle" '
                           f'fill="{color}" font-weight="600">{html.escape(value)}</text>')
 
+    def curve(self, start: Tuple[float, float], end: Tuple[float, float]):
+        """An arrow that leaves start to the right and enters end from the left."""
+        (x1, y1), (x2, y2) = start, end
+        bend = max(18.0, (x2 - x1) / 2)
+        self.parts.append(
+            f'<path d="M{x1},{y1} C{x1 + bend},{y1} {x2 - bend},{y2} {x2},{y2}" fill="none" '
+            f'stroke="{{line}}" stroke-width="1.5" marker-end="url(#arrow)"/>'
+        )
+
+    def chip(self, x, y, slug: str, size: int = 40):
+        """A block drawn as its language's logo in a rounded square."""
+        self.parts.append(
+            f'<rect x="{x}" y="{y}" width="{size}" height="{size}" rx="10" fill="{{card}}" '
+            f'stroke="{COLORS[slug]}" stroke-width="1.8"/>'
+        )
+        inner = size * 0.55
+        self.parts.append(logo(slug, x + (size - inner) / 2, y + (size - inner) / 2, inner))
+
+    def stage(self, x, y, w, h, color: str = '#2DA44E', label: str = ''):
+        """The blocks that run together, as one fused stage."""
+        self.parts.append(
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="14" fill="{color}" '
+            f'fill-opacity="0.09" stroke="{color}" stroke-width="1.3" stroke-dasharray="5 4"/>'
+        )
+        if label:
+            self.parts.append(f'<text x="{x + w / 2}" y="{y + h + 14}" font-size="10.5" '
+                              f'text-anchor="middle" fill="{color}" font-weight="600">'
+                              f'{html.escape(label)}</text>')
+
     def svg(self, theme: str) -> str:
         colors = THEMES[theme]
         body = '\n'.join(self.parts)
@@ -332,7 +361,205 @@ def single_vs_polyglot() -> Diagram:
            anchor='middle')
     return d
 
+FUSED = '#2DA44E'
+CHIP = 40
+
+
+def dag(d: Diagram, ox: float, oy: float, nodes: dict, edges: List[Tuple[str, str]],
+        stages: List[List[str]] = ()):
+    """A small pipeline: nodes {id: (x, y, language)} relative to (ox, oy)."""
+    pad = 9
+    for members in stages:
+        xs = [nodes[m][0] for m in members]
+        ys = [nodes[m][1] for m in members]
+        d.stage(ox + min(xs) - pad, oy + min(ys) - pad, max(xs) - min(xs) + CHIP + 2 * pad,
+                max(ys) - min(ys) + CHIP + 2 * pad, FUSED)
+    for source, target in edges:
+        sx, sy, _ = nodes[source]
+        tx, ty, _ = nodes[target]
+        d.curve((ox + sx + CHIP, oy + sy + CHIP / 2), (ox + tx - 2, oy + ty + CHIP / 2))
+    for x, y, slug in nodes.values():
+        d.chip(ox + x, oy + y, slug, CHIP)
+
+
+def panel(d: Diagram, x, y, w, h, name: str, lines: List[str]):
+    d.parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="12" fill="{{group}}" '
+                   f'stroke="{{border}}" stroke-width="1.2"/>')
+    d.text(x + 16, y + 26, name, size=14.5, weight='700', muted=False)
+    for i, line in enumerate(lines):
+        d.text(x + 16, y + h - 34 + 16 * i, line, size=11.5)
+
+
+def legend(d: Diagram, x, y, slugs=('pandas', 'polars', 'r', 'rust')):
+    names = {'pandas': 'pandas', 'polars': 'Polars', 'r': 'R', 'rust': 'Rust',
+             'python': 'Python'}
+    for slug in slugs:
+        d.chip(x, y - 15, slug, 22)
+        d.text(x + 30, y + 1, names[slug], size=12, muted=False)
+        x += 40 + 7.5 * len(names[slug])
+    d.stage(x, y - 15, 30, 22, FUSED)
+    d.text(x + 38, y + 1, 'runs as one fused stage', size=12, muted=False)
+
+
+def pipeline_shapes() -> Diagram:
+    """The seven shapes of the compilation study, with what fuses in each."""
+    d = Diagram(1080, 752, 'The seven pipeline shapes and the stages a production run forms')
+    d.text(24, 34, 'Only a Line fuses end to end; branches and joins split a pipeline into '
+           'stages that run side by side', size=15, weight='600', muted=False)
+    top, w4, h = 56, 252, 300
+    gap = 12
+    x = [24 + i * (w4 + gap) for i in range(4)]
+    panel(d, x[0], top, w4, h, 'Line',
+          ['One path. Fuses end to end; each run', 'of one language compiles.'])
+    dag(d, x[0] + 22, top + 108, {
+        'a': (0, 0, 'pandas'), 'b': (56, 0, 'pandas'), 'c': (112, 0, 'polars'),
+        'd': (168, 0, 'polars'),
+    }, [('a', 'b'), ('b', 'c'), ('c', 'd')], [['a', 'b', 'c', 'd']])
+    panel(d, x[1], top, w4, h, 'Parallel lines',
+          ['Lines that share nothing: each line', 'fuses, and the lines run side by side.'])
+    dag(d, x[1] + 34, top + 66, {
+        'a': (0, 0, 'r'), 'b': (64, 0, 'r'), 'c': (128, 0, 'r'),
+        'd': (0, 96, 'rust'), 'e': (64, 96, 'rust'), 'f': (128, 96, 'rust'),
+    }, [('a', 'b'), ('b', 'c'), ('d', 'e'), ('e', 'f')], [['a', 'b', 'c'], ['d', 'e', 'f']])
+    panel(d, x[2], top, w4, h, 'Diamond',
+          ['One block feeds two that meet again:', 'the branches run side by side.'])
+    dag(d, x[2] + 22, top + 62, {
+        'a': (0, 52, 'pandas'), 'b': (84, 0, 'polars'), 'c': (84, 104, 'r'),
+        'd': (168, 52, 'rust'),
+    }, [('a', 'b'), ('a', 'c'), ('b', 'd'), ('c', 'd')])
+    panel(d, x[3], top, w4, h, 'Broadcast',
+          ['One block feeds several: each consumer', 'reads the stored table, side by side.'])
+    dag(d, x[3] + 40, top + 54, {
+        'a': (0, 64, 'polars'), 'b': (130, 0, 'pandas'), 'c': (130, 64, 'r'),
+        'd': (130, 128, 'rust'),
+    }, [('a', 'b'), ('a', 'c'), ('a', 'd')])
+
+    top2, w3 = top + h + gap, (1032 - 2 * gap) / 3
+    x = [24 + i * (w3 + gap) for i in range(3)]
+    panel(d, x[0], top2, w3, h, 'Merge',
+          ['Several roots feed one block: they load', 'side by side, then one join.'])
+    dag(d, x[0] + 70, top2 + 54, {
+        'a': (0, 0, 'pandas'), 'b': (0, 64, 'polars'), 'c': (0, 128, 'r'),
+        'd': (140, 64, 'rust'),
+    }, [('a', 'd'), ('b', 'd'), ('c', 'd')])
+    panel(d, x[1], top2, w3, h, 'Lattice',
+          ['Every block reads the whole layer before:', 'almost nothing fuses.'])
+    dag(d, x[1] + 46, top2 + 62, {
+        'a': (0, 0, 'polars'), 'b': (0, 104, 'pandas'), 'c': (110, 0, 'r'),
+        'd': (110, 104, 'rust'), 'e': (220, 0, 'rust'), 'f': (220, 104, 'polars'),
+    }, [('a', 'c'), ('a', 'd'), ('b', 'c'), ('b', 'd'), ('c', 'e'), ('c', 'f'), ('d', 'e'),
+        ('d', 'f')])
+    panel(d, x[2], top2, w3, h, 'Thicket',
+          ['Edges that skip around: only the', 'stretches that are lines fuse.'])
+    dag(d, x[2] + 24, top2 + 56, {
+        'a': (0, 0, 'pandas'), 'b': (0, 120, 'rust'), 'c': (72, 60, 'polars'),
+        'd': (144, 0, 'r'), 'e': (144, 120, 'rust'), 'f': (216, 120, 'rust'),
+        'g': (216, 0, 'pandas'),
+    }, [('a', 'c'), ('b', 'c'), ('a', 'd'), ('c', 'd'), ('c', 'e'), ('e', 'f'), ('d', 'g')],
+        [['d', 'g'], ['e', 'f']])
+    legend(d, 24, 732)
+    return d
+
+
+def language_mixes() -> Diagram:
+    """The same Line with its blocks' languages mixed four ways."""
+    d = Diagram(1080, 492, 'One Line of six blocks with four mixes of languages')
+    d.text(24, 34, 'Each language switch converts the data and starts a process: group the '
+           'blocks of each language', size=15, weight='600', muted=False)
+    rows = [
+        ('One language', ['rust'] * 6, '1 compiled chain, no switch'),
+        ('Islands of three', ['pandas'] * 3 + ['rust'] * 3, '2 chains, 1 switch'),
+        ('Random', ['polars', 'polars', 'r', 'rust', 'rust', 'pandas'], '4 chains, 3 switches'),
+        ('Alternate', ['pandas', 'r'] * 3, '6 chains, 5 switches'),
+    ]
+    step, x0 = 98, 230
+    for index, (label, languages, summary) in enumerate(rows):
+        y = 78 + index * 96
+        d.text(24, y + 26, label, size=14, weight='600', muted=False)
+        runs, start = [], 0
+        for i in range(1, len(languages) + 1):
+            if i == len(languages) or languages[i] != languages[start]:
+                runs.append((start, i - 1))
+                start = i
+        for first, last in runs:
+            d.stage(x0 + first * step - 9, y - 9, (last - first) * step + CHIP + 18,
+                    CHIP + 18, COLORS[languages[first]])
+        for i in range(len(languages) - 1):
+            d.arrow([(x0 + i * step + CHIP + 4, y + CHIP / 2),
+                     (x0 + (i + 1) * step - 4, y + CHIP / 2)])
+            if languages[i] != languages[i + 1]:
+                d.badge(x0 + i * step + CHIP + (step - CHIP) / 2, y + CHIP + 22, 'Arrow',
+                        COLORS['apachearrow'])
+        for i, slug in enumerate(languages):
+            d.chip(x0 + i * step, y, slug, CHIP)
+        d.text(x0 + 5 * step + CHIP + 34, y + 26, summary, size=13, weight='600',
+               muted=False)
+    d.text(24, 478, 'A colored frame is one chain: one process for pandas and Polars, one '
+           'R session, one compiled Rust program.', size=12)
+    return d
+
+
+def playground_shapes() -> Diagram:
+    """The playground's Diamond, Broadcast and Merge pipelines, block by block."""
+    d = Diagram(1080, 820, "The playground's shape pipelines and the stages their runs form")
+    d.text(24, 34, 'Three playground pipelines, one per branching shape', size=15,
+           weight='600', muted=False)
+    w, h = 230, 56
+
+    def box(x, y, name, slug, sub):
+        d.node(x, y, w, h, name, slug, sub)
+
+    def link(a, b):
+        d.curve((a[0] + w, a[1] + h / 2), (b[0] - 2, b[1] + h / 2))
+
+    d.text(24, 72, 'shape_diamond_store_scorecard: a Diamond', size=13.5, weight='600',
+           muted=False)
+    load, rev, mar = (24, 150), (290, 92), (290, 208)
+    join, out = (556, 150), (822, 150)
+    d.stage(join[0] - 12, join[1] - 14, out[0] - join[0] + w + 24, h + 28, FUSED,
+            'join and export fuse into one stage')
+    box(*load, 'diamond_order_lines', 'pandas', 'loads order lines')
+    box(*rev, 'diamond_store_revenue', 'polars', 'revenue per store')
+    box(*mar, 'diamond_store_margin', 'r', 'margin per store')
+    box(*join, 'diamond_store_scorecard', 'rust', 'joins the branches')
+    box(*out, 'diamond_export_store_…', 'pandas', 'writes the scorecard')
+    for a, b in ((load, rev), (load, mar), (rev, join), (mar, join), (join, out)):
+        link(a, b)
+
+    d.text(24, 318, 'shape_broadcast_web_events: a Broadcast', size=13.5, weight='600',
+           muted=False)
+    events = (24, 418)
+    mix, dwell, hourly = (330, 342), (330, 418), (330, 494)
+    box(*events, 'broadcast_web_events', 'pandas', 'one table, read once')
+    box(*mix, 'broadcast_device_mix', 'polars', 'device mix')
+    box(*dwell, 'broadcast_page_dwell', 'r', 'dwell time per page')
+    box(*hourly, 'broadcast_hourly_load', 'rust', 'load per hour')
+    for target in (mix, dwell, hourly):
+        link(events, target)
+    d.text(620, 438, 'Each summary is a stage of its own and', size=12)
+    d.text(620, 456, 'reads the stored table; the three run side by side.', size=12)
+
+    d.text(24, 588, 'shape_merge_customer_signals: a Merge', size=13.5, weight='600',
+           muted=False)
+    cust, orders, web = (24, 612), (24, 688), (24, 764 - 10)
+    join2, out2 = (330, 688), (620, 688)
+    d.stage(join2[0] - 12, join2[1] - 14, out2[0] - join2[0] + w + 24, h + 28, FUSED,
+            'join and export fuse into one stage')
+    box(*cust, 'merge_customers', 'pandas', 'customers')
+    box(*orders, 'merge_order_stats', 'rust', 'order stats, binary COPY')
+    box(*web, 'merge_web_stats', 'polars', 'web stats')
+    box(*join2, 'merge_customer_signals', 'rust', 'joins the three')
+    box(*out2, 'merge_export_customer_…', 'pandas', 'writes the signals')
+    for source in (cust, orders, web):
+        link(source, join2)
+    link(join2, out2)
+    return d
+
+
 DIAGRAMS = {
+    'pipeline-shapes': pipeline_shapes,
+    'language-mixes': language_mixes,
+    'playground-shapes': playground_shapes,
     'single-vs-polyglot': single_vs_polyglot,
     'tutorial-pipeline-python': tutorial_pipeline_python,
     'r-packages': r_packages,
