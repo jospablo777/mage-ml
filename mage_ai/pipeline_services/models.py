@@ -3,8 +3,10 @@ ML models in blocks, the same code in Mage and in an exported pipeline service.
 
     from mage_ai.pipeline_services.models import load_model, model_path
 
-    model = load_model('fraud', uri='models:/fraud/3')     # an MLflow pyfunc model
-    path = model_path('fraud', uri='models:/fraud/3')      # its local directory
+    model = load_model('churn', uri='models:/churn/3')     # an MLflow pyfunc model
+    model = load_model('churn', uri='models:/churn/3', flavor='native')  # CatBoost, sklearn
+    path = model_path('churn', uri='models:/churn/3')      # its local directory
+    service = feature_service('churn', uri='models:/churn/3')  # its Feast feature service
 
 In Mage, the model comes from MLflow (`MLFLOW_TRACKING_URI`) and is downloaded once per
 process. In a service, `mage export service` has put it in the image, with its metadata,
@@ -57,7 +59,11 @@ def model_path(name: str, uri: Optional[str] = None) -> str:
         if uri not in _downloaded:
             import mlflow
 
-            _downloaded[uri] = mlflow.artifacts.download_artifacts(artifact_uri=uri)
+            from mage_ai.pipeline_services.model_export import download_uri
+
+            _downloaded[uri] = mlflow.artifacts.download_artifacts(
+                artifact_uri=download_uri(uri),
+            )
         return _downloaded[uri]
 
 
@@ -73,19 +79,77 @@ def model_metadata(name: str, uri: Optional[str] = None) -> Dict:
     return describe(name, uri)
 
 
-def load_model(name: str, uri: Optional[str] = None):
-    """The model loaded with MLflow's pyfunc flavor; loaded once per process."""
-    key = f'{name}|{uri}'
+def load_model(name: str, uri: Optional[str] = None, flavor: Optional[str] = None):
+    """
+    The model, loaded once per process. flavor: None loads MLflow's pyfunc flavor, which
+    has predict; 'native' loads the framework's own object, such as a CatBoostClassifier
+    with predict_proba; or a flavor by name, such as 'catboost' or 'sklearn'.
+    """
+    key = f'{name}|{uri}|{flavor}'
     with _lock:
         if key in _loaded:
             return _loaded[key]
     path = model_path(name, uri)
-    import mlflow.pyfunc
+    if flavor == 'native' and not (Path(path) / 'MLmodel').is_file():
+        # A model file logged as is, such as model.cbm: read in its own format.
+        model = load_artifact(_model_file(path))
+    else:
+        chosen = _native_flavor(path) if flavor == 'native' else flavor
+        import importlib
 
-    model = mlflow.pyfunc.load_model(path)
+        module = importlib.import_module(f'mlflow.{chosen or "pyfunc"}')
+        model = module.load_model(path)
     with _lock:
         _loaded[key] = model
     return model
+
+
+def _model_file(path: str) -> str:
+    """The one file in a model's artifacts whose suffix names its format."""
+    root = Path(path)
+    files = [root] if root.is_file() else sorted(
+        p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ARTIFACT_LOADERS
+    )
+    if len(files) != 1:
+        found = ', '.join(str(p.relative_to(root)) for p in files) or 'none'
+        raise ModelNotFound(
+            f'The model at {path} has no MLmodel file and {len(files)} model files ({found}); '
+            'load one with load_artifact(model_path(name) + "/<file>").'
+        )
+    return str(files[0])
+
+
+def _native_flavor(path: str) -> str:
+    """The framework flavor the model was logged with, from its MLmodel file."""
+    import yaml
+
+    mlmodel = Path(path) / 'MLmodel'
+    flavors = []
+    if mlmodel.is_file():
+        flavors = list((yaml.safe_load(mlmodel.read_text()) or {}).get('flavors') or {})
+    native = [f for f in flavors if f != 'python_function']
+    if not native:
+        raise ModelNotFound(
+            f'The model at {path} has no framework flavor, only {flavors or "none"}; load it '
+            'without flavor= to use pyfunc.'
+        )
+    return native[0]
+
+
+# The tag Feast's MLflow integration puts on a model version and its training run.
+FEATURE_SERVICE_TAG = 'feast.feature_service'
+
+
+def feature_service(name: str, uri: Optional[str] = None) -> Optional[str]:
+    """
+    The Feast feature service the model was trained with, from its feast.feature_service
+    tag (the model version's, then its training run's), or None. Blocks pass it to
+    FeastClient.get_online_features, so the features follow the model when its alias
+    moves to a version trained on another feature service.
+    """
+    metadata = model_metadata(name, uri)
+    return (metadata.get('tags') or {}).get(FEATURE_SERVICE_TAG) or \
+        (metadata.get('run_tags') or {}).get(FEATURE_SERVICE_TAG)
 
 
 # Model files by suffix: the loader that reads them and the module it imports. A suffix
@@ -109,11 +173,6 @@ LOADER_MODULES = {
     'mlflow': 'mlflow',
 }
 _artifacts: Dict[Any, Any] = {}
-CATBOOST_CLASSIFIER_LOSSES = {'Logloss', 'CrossEntropy', 'MultiClass', 'MultiClassOneVsAll'}
-CATBOOST_REGRESSOR_LOSSES = {
-    'RMSE', 'MAE', 'Quantile', 'MultiQuantile', 'LogLinQuantile', 'MAPE', 'Poisson', 'Tweedie',
-    'Huber', 'Expectile', 'Lq', 'LogCosh', 'RMSEWithUncertainty', 'MultiRMSE', 'SurvivalAft',
-}
 
 
 def _read(loader: str, path: str, options: Dict) -> Any:
@@ -124,17 +183,7 @@ def _read(loader: str, path: str, options: Dict) -> Any:
             path, providers=options.get('providers') or ['CPUExecutionProvider'],
         )
     if loader == 'catboost':
-        import catboost
-
-        # The generic CatBoost returns raw scores from predict and has no predict_proba; a
-        # classifier or regressor loads as the class it was saved from.
-        model = catboost.CatBoost().load_model(path)
-        loss = str((model.get_all_params() or {}).get('loss_function') or '').split(':')[0]
-        if loss in CATBOOST_CLASSIFIER_LOSSES:
-            return catboost.CatBoostClassifier().load_model(path)
-        if loss in CATBOOST_REGRESSOR_LOSSES:
-            return catboost.CatBoostRegressor().load_model(path)
-        return model
+        return _read_catboost(path)
     if loader == 'xgboost':
         import xgboost
 
@@ -191,6 +240,41 @@ def _read(loader: str, path: str, options: Dict) -> Any:
             return pickle.load(file)
     raise ValueError(f'Unknown loader {loader!r}; use one of {", ".join(sorted(LOADER_MODULES))}, '
                      'pickle, or a function that takes the path.')
+
+
+# CatBoost losses by the class that trains with them; a model with another loss keeps the
+# generic CatBoost.
+CATBOOST_CLASSIFIER_LOSSES = frozenset((
+    'Logloss', 'CrossEntropy', 'MultiClass', 'MultiClassOneVsAll', 'MultiLogloss',
+    'MultiCrossEntropy',
+))
+CATBOOST_REGRESSOR_LOSSES = frozenset((
+    'RMSE', 'MAE', 'Quantile', 'MultiQuantile', 'LogLinQuantile', 'MAPE', 'Poisson', 'Tweedie',
+    'Huber', 'Expectile', 'Lq', 'LogCosh', 'RMSEWithUncertainty', 'MultiRMSE', 'SurvivalAft',
+))
+CATBOOST_RANKER_LOSSES = frozenset((
+    'YetiRank', 'YetiRankPairwise', 'PairLogit', 'PairLogitPairwise', 'QueryRMSE',
+    'QuerySoftMax', 'StochasticRank', 'LambdaMart', 'QueryCrossEntropy',
+))
+
+
+def _read_catboost(path: str):
+    """
+    A .cbm file as the class it was saved from: the generic CatBoost returns raw scores from
+    predict and has no predict_proba.
+    """
+    import catboost
+
+    model = catboost.CatBoost().load_model(path)
+    loss = str((model.get_all_params() or {}).get('loss_function') or '').split(':')[0]
+    for losses, model_class in (
+        (CATBOOST_CLASSIFIER_LOSSES, catboost.CatBoostClassifier),
+        (CATBOOST_REGRESSOR_LOSSES, catboost.CatBoostRegressor),
+        (CATBOOST_RANKER_LOSSES, catboost.CatBoostRanker),
+    ):
+        if loss in losses:
+            return model_class().load_model(path)
+    return model
 
 
 def artifact_path(path: str) -> str:

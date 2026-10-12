@@ -171,7 +171,27 @@ class Postgres(BaseSQL):
         return self.settings['dbname']
 
     def default_schema(self) -> str:
-        return self.settings.get('schema')
+        """
+        The profile's schema, or else the connection's current schema (the first of
+        search_path), where PostgreSQL creates a table named without one. Callers name
+        tables with it: None gave "database".table, which PostgreSQL reads as schema.table.
+        """
+        configured = self.settings.get('schema')
+        if configured:
+            return configured
+        if getattr(self, '_current_schema', None) is None:
+            current = None
+            if hasattr(self, '_ctx'):
+                try:
+                    with self._ctx.cursor() as cursor:
+                        cursor.execute('SELECT current_schema()')
+                        current = cursor.fetchone()[0]
+                except Exception:
+                    current = None
+            if not current:
+                return 'public'
+            self._current_schema = current
+        return self._current_schema
 
     def open(self) -> None:
         with self.printer.print_msg('Opening connection to PostgreSQL database'):
@@ -401,11 +421,22 @@ class Postgres(BaseSQL):
     def table_exists(self, schema_name: str, table_name: str) -> bool:
         # The stored names: a table configured as MyTable is mytable, which the exact
         # name never matched, so replacing it failed with "already exists".
+        # Without a schema the table is created in the connection's current schema, the
+        # first of search_path; looking it up under no schema never found it, so replacing
+        # failed with "already exists" from the second run on.
+        schema = schema_name or self.default_schema()
         with self.conn.cursor() as cur:
-            cur.execute(
-                'SELECT 1 FROM pg_tables WHERE schemaname = %s AND tablename = %s',
-                (stored_name(schema_name or self.default_schema()), stored_name(table_name)),
-            )
+            if schema:
+                cur.execute(
+                    'SELECT 1 FROM pg_tables WHERE schemaname = %s AND tablename = %s',
+                    (stored_name(schema), stored_name(table_name)),
+                )
+            else:
+                cur.execute(
+                    'SELECT 1 FROM pg_tables WHERE schemaname = current_schema() '
+                    'AND tablename = %s',
+                    (stored_name(table_name),),
+                )
             return bool(cur.rowcount)
 
     def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:

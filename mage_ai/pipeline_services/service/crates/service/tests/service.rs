@@ -61,6 +61,10 @@ const BLOCKS: &[(&str, &str)] = &[
         "@data_loader\ndef thing(*args, **kwargs):\n    return {1, 2}\n",
     ),
     (
+        "conditionals/gate.py",
+        "@condition\ndef evaluate_condition(data, *args, **kwargs):\n    return kwargs.get('gate') == 'open'\n",
+    ),
+    (
         "transformers/slow.py",
         "import os, time\n\n@transformer\ndef slow(data, *args, **kwargs):\n    open(os.path.join(kwargs['marker_dir'], 'pid'), 'w').write(str(os.getpid()))\n    time.sleep(float(kwargs.get('seconds', 30)))\n    return 1\n",
     ),
@@ -103,6 +107,13 @@ fn manifest(once_trigger: bool) -> Value {
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[])],
              "triggers": [{"name": "after_thing", "kind": "after_run", "active": true,
                            "after_pipeline": "thing", "variables": {"n": 2}}]},
+            {"uuid": "gated", "name": "gated", "max_concurrent_runs": 1,
+             "blocks": [block("load", "data_loader", "data_loaders/load.py", &[]),
+                        {"uuid": "rusty", "type": "transformer", "language": "rust",
+                         "file": "transformers/rusty.rs", "sha256": "0", "upstream": ["load"],
+                         "binary": "bin/always-fails", "conditions": ["gate"]},
+                        block("after", "transformer", "transformers/after_broken.py", &["rusty"])],
+             "conditionals": [{"uuid": "gate", "file": "conditionals/gate.py", "sha256": "0"}]},
             {"uuid": "on_failure", "name": "on_failure", "max_concurrent_runs": 1,
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[])],
              "triggers": [{"name": "after_fails", "kind": "after_run", "active": true,
@@ -122,6 +133,16 @@ impl Service {
         std::fs::write(
             dir.path().join("service.json"),
             manifest(once_trigger).to_string(),
+        )
+        .unwrap();
+        // A Rust block's program that fails whenever it starts: a skipped block never does.
+        std::fs::write(dir.path().join("proj/transformers/rusty.rs"), "").unwrap();
+        let program = dir.path().join("bin/always-fails");
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, "#!/bin/sh\necho 'the block ran' >&2\nexit 3\n").unwrap();
+        std::fs::set_permissions(
+            &program,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
         )
         .unwrap();
         Service {
@@ -526,6 +547,48 @@ fn sigterm_lets_a_short_run_finish_and_stops_a_long_one() {
     service.start(&[]);
     let (_, run) = service.get(&format!("/v1/runs/{id}"));
     assert_eq!(run["status"], "cancelled", "{run}");
+}
+
+#[test]
+fn a_condition_skips_its_block_and_the_blocks_after_it() {
+    let mut service = Service::create(false);
+    service.start(&[]);
+
+    let (_, run) = service.post(
+        "/v1/pipelines/gated/runs?wait=60",
+        json!({"variables": {"gate": "closed"}}),
+    );
+    assert_eq!(run["status"], "completed", "{run}");
+    let statuses: Vec<_> = run["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["block"].clone(), b["status"].clone(), b["error"].clone()))
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            (json!("load"), json!("completed"), Value::Null),
+            (
+                json!("rusty"),
+                json!("condition_failed"),
+                json!("Condition gate returned False.")
+            ),
+            (
+                json!("after"),
+                json!("condition_failed"),
+                json!("Upstream block rusty was skipped by a condition.")
+            ),
+        ]
+    );
+
+    // With the gate open the Rust block's program runs, and this one fails.
+    let (_, run) = service.post(
+        "/v1/pipelines/gated/runs?wait=60",
+        json!({"variables": {"gate": "open"}}),
+    );
+    assert_eq!(run["status"], "failed", "{run}");
+    assert_eq!(run["blocks"][1]["status"], "failed", "{run}");
 }
 
 fn runs_of(service: &Service, query: &str) -> Vec<Value> {

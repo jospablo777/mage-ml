@@ -7,6 +7,14 @@ import Checkbox from '@oracle/elements/Checkbox';
 import CopyToClipboard from '@oracle/components/CopyToClipboard';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
+import ModelsSection, {
+  ModelRowType,
+  modelsOf,
+  newModelRow,
+  registryProblem,
+  rowFromModel,
+  rowProblem,
+} from './ModelsSection';
 import PipelineType from '@interfaces/PipelineType';
 import ProgressBar from '@oracle/components/ProgressBar';
 import Spacing from '@oracle/elements/Spacing';
@@ -31,10 +39,12 @@ import {
   LinkButtonStyle,
   NumberStyle,
   PillStyle,
+  ProblemLines,
   ServiceExportType,
   TileStyle,
   TilesStyle,
   languagesOf,
+  modelProblem,
   plural,
   slugServiceName,
 } from '@components/PipelineServiceExport';
@@ -75,6 +85,8 @@ export type ServiceDefinitionType = {
   exported_at?: string;
   include: string[];
   max_runs?: number;
+  model_registry?: string;
+  models?: { name: string; uri: string }[];
   name: string;
   pipelines: string[];
 };
@@ -413,6 +425,8 @@ function emptyDefinition(name: string): ServiceDefinitionType {
     description: '',
     include: [],
     max_runs: null,
+    model_registry: null,
+    models: [],
     name,
     pipelines: [],
   };
@@ -426,11 +440,21 @@ function comparable(definition: ServiceDefinitionType) {
     description,
     include,
     max_runs: maxRuns,
+    model_registry: registry,
+    models,
     name,
     pipelines,
   } = definition;
 
-  return JSON.stringify([name, description || '', pipelines, maxRuns || null, include]);
+  return JSON.stringify([
+    name,
+    description || '',
+    pipelines,
+    maxRuns || null,
+    include,
+    (registry || '').trim() || null,
+    models || [],
+  ]);
 }
 
 function envTemplate(
@@ -498,7 +522,7 @@ function Section({
             <Spacing mt={0.5}><Text muted small>{subtitle}</Text></Spacing>
           )}
         </div>
-        {right}
+        {right && <div style={{ flexShrink: 0, marginLeft: UNIT * 2 }}>{right}</div>}
       </FlexContainer>
       <Spacing mt={2}>{children}</Spacing>
     </SectionStyle>
@@ -575,6 +599,10 @@ function Workbench({
   const [job, setJob] = useState<ServiceExportType>(null);
   const [shownProgress, setShownProgress] = useState<number>(0);
   const [exported, setExported] = useState<ServiceExportType>(null);
+  const [modelRows, setModelRows] = useState<ModelRowType[]>(
+    () => (saved.models || []).map(rowFromModel),
+  );
+  const [checkedFor, setCheckedFor] = useState<{ name: string; uri: string }[]>([]);
   const checkRequest = useRef<number>(0);
 
   // After-run triggers are the pipelines' own triggers: MageML runs them, and so does the
@@ -634,6 +662,10 @@ function Workbench({
   }, [saved.name]);
   useEffect(() => {
     setDraft(saved);
+    // Rows still being filled in are kept while they add nothing the saved service lacks.
+    setModelRows(prev => (JSON.stringify(modelsOf(prev)) === JSON.stringify(saved.models || [])
+      ? prev
+      : (saved.models || []).map(rowFromModel)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comparable(saved)]);
 
@@ -643,6 +675,10 @@ function Workbench({
     ...prev,
     ...values,
   }));
+  const setRows = (rows: ModelRowType[]) => {
+    setModelRows(rows);
+    update({ models: modelsOf(rows) });
+  };
 
   const [requestCheck] = useMutation(api.pipeline_service_exports.useCreate());
   useEffect(() => {
@@ -660,6 +696,8 @@ function Workbench({
         pipeline_service_export: {
           include: draft.include,
           max_runs: draft.max_runs || null,
+          model_registry: (draft.model_registry || '').trim() || null,
+          models: draft.models || [],
           name: slug,
           pipeline_uuids: draft.pipelines,
           preview: true,
@@ -669,6 +707,7 @@ function Workbench({
           return;
         }
         setChecking(false);
+        setCheckedFor(draft.models || []);
         const body = response?.data || response;
         if (body?.pipeline_service_export) {
           setCheck(body.pipeline_service_export);
@@ -693,6 +732,8 @@ function Workbench({
     description: draft.description,
     include: draft.include,
     max_runs: draft.max_runs || null,
+    model_registry: (draft.model_registry || '').trim() || null,
+    models: draft.models || [],
     name: slug,
     pipelines: draft.pipelines,
   };
@@ -787,6 +828,8 @@ function Workbench({
       pipeline_service_export: {
         include: draft.include,
         max_runs: draft.max_runs || null,
+        model_registry: (draft.model_registry || '').trim() || null,
+        models: draft.models || [],
         name: slug,
         pipeline_uuids: draft.pipelines,
       },
@@ -819,6 +862,7 @@ function Workbench({
     return Object.values(merged).filter(a => draft.pipelines.includes(a.run));
   }, [draft.pipelines, fromDatabase, lastGoodCheck]);
   const blocksTotal = checkPipelines.reduce((acc, p) => acc + p.blocks.length, 0);
+  const guarded = checkPipelines.flatMap(p => p.blocks.filter(b => b.conditions?.length));
   const schedules = checkPipelines.reduce(
     (acc, p) => acc + p.triggers.filter(t => t.kind === 'time' && t.active).length,
     0,
@@ -827,8 +871,15 @@ function Workbench({
   const paths = flowPaths(afterRuns);
 
   let tone: 'ok' | 'bad' | 'neutral' = 'neutral';
+  // Unfinished settings would be dropped on save: they hold saving and exporting.
+  const unfinished = registryProblem(draft.model_registry)
+    ? 'Fix the tracking server address'
+    : (modelRows.some(row => rowProblem(row, modelRows)) ? 'Finish or remove the model rows' : null);
   let statusText = 'Add pipelines';
-  if (draft.pipelines.length) {
+  if (unfinished) {
+    tone = 'bad';
+    statusText = unfinished;
+  } else if (draft.pipelines.length) {
     if (checking && !check) {
       statusText = 'Checking';
     } else if (problems.length) {
@@ -896,13 +947,18 @@ function Workbench({
               <Spacing ml={1} />
             </>
           )}
-          <Button disabled={!dirty || !slug} loading={isSaving} onClick={() => save()}>
+          <Button
+            disabled={!dirty || !slug || !!unfinished}
+            loading={isSaving}
+            onClick={() => save()}
+          >
             {dirty ? 'Save' : 'Saved'}
           </Button>
           <Spacing ml={1} />
           <Button
             beforeIcon={<CubeWithArrowDown />}
-            disabled={!draft.pipelines.length || !slug || problems.length > 0 || running}
+            disabled={!draft.pipelines.length || !slug || problems.length > 0 || running
+              || !!unfinished}
             loading={running || isStarting}
             onClick={exportNow}
             primary
@@ -926,7 +982,7 @@ function Workbench({
             )}
             {job?.state === 'failed' && (
               <CheckRow title="The export stopped" tone="bad">
-                {(job.problems || []).map(p => <Text key={p} small>{p}</Text>)}
+                <ProblemLines problems={job.problems} />
               </CheckRow>
             )}
             {exported && (
@@ -1125,9 +1181,18 @@ function Workbench({
                 <Text muted>Checking the pipelines</Text>
               </FlexContainer>
             )}
-            {problems.map(problem => (
-              <CheckRow key={problem} title={problem} tone="bad" />
-            ))}
+            {problems.map((problem) => {
+              const model = modelProblem(problem);
+
+              return model ? (
+                <CheckRow
+                  detail={model.reason}
+                  key={problem}
+                  title={`The model ${model.model} could not be ${model.action}`}
+                  tone="bad"
+                />
+              ) : <CheckRow key={problem} title={problem} tone="bad" />;
+            })}
             {check && !problems.length && (
               <>
                 <TilesStyle>
@@ -1149,6 +1214,22 @@ function Workbench({
                   title={`${plural(blocksTotal, 'block')} supported`}
                   tone="ok"
                 />
+                {guarded.length >= 1 && (
+                  <CheckRow
+                    detail={'When a condition returns False the block and the blocks after it '
+                      + 'are skipped, and the run still completes, as in MageML.'}
+                    title={`${plural(guarded.length, 'block')} ${guarded.length === 1 ? 'runs' : 'run'} only when ${guarded.length === 1 ? 'its condition holds' : 'their conditions hold'}`}
+                    tone="ok"
+                  >
+                    <Expandable label="Show conditions">
+                      {guarded.map(b => (
+                        <Text key={b.uuid} monospace xsmall>
+                          {b.uuid}: {b.conditions.join(', ')}
+                        </Text>
+                      ))}
+                    </Expandable>
+                  </CheckRow>
+                )}
                 <CheckRow
                   detail="Modules the blocks import and files they name, copied into the image."
                   title={plural(check.files?.length || 0, 'project file')}
@@ -1198,17 +1279,29 @@ function Workbench({
                 withCopyIcon
               />
             ) : null}
-            subtitle="Give these to the container. Values are never exported."
+            subtitle="Found in io_config.yaml (env_var) and in the blocks (os.getenv, os.environ, mage_secret_var). Give them to the container; values are never exported."
             title="Secrets and environment variables"
           >
             <Text bold small>What the pipelines read</Text>
             <Spacing mt={0.5}>
-              {!check?.environment?.length && (
+              {!draft.pipelines.length && (
+                <Text muted small>Add pipelines to see the variables they read.</Text>
+              )}
+              {draft.pipelines.length >= 1 && !check && checking && (
+                <FlexContainer alignItems="center">
+                  <Spinner inverted small />
+                  <Spacing ml={1} />
+                  <Text muted small>Checking the pipelines</Text>
+                </FlexContainer>
+              )}
+              {draft.pipelines.length >= 1 && problems.length >= 1 && !check?.environment && (
                 <Text muted small>
-                  {check && 'Nothing: the pipelines read no environment variable.'}
-                  {!check && (draft.pipelines.length >= 1
-                    ? 'Checking'
-                    : 'Add pipelines to see the variables they read.')}
+                  Fix the problems in the configuration check to see them.
+                </Text>
+              )}
+              {draft.pipelines.length >= 1 && check?.environment && !check.environment.length && (
+                <Text muted small>
+                  Nothing: the pipelines read no environment variable.
                 </Text>
               )}
               {check?.environment?.length >= 1 && (
@@ -1269,6 +1362,28 @@ function Workbench({
       </Spacing>
 
       <Spacing mt={2}>
+        <Section
+          right={(
+            <Button compact onClick={() => setRows([...modelRows, newModelRow()])}>
+              Add a model
+            </Button>
+          )}
+          subtitle="Pulled from the registry when you export and kept in the image: blocks load the embedded copy, so the service runs the exact version it was exported with and needs no registry at run time."
+          title="Models in the image"
+        >
+          <ModelsSection
+            check={check}
+            checkedFor={checkedFor}
+            checking={checking}
+            registry={draft.model_registry}
+            rows={modelRows}
+            setRegistry={value => update({ model_registry: value })}
+            setRows={setRows}
+          />
+        </Section>
+      </Spacing>
+
+      <Spacing mt={2}>
         <TwoColumnsStyle>
           <Section
             subtitle="The service keeps them in its data folder; give that folder a volume so they outlive the container."
@@ -1311,17 +1426,27 @@ function Workbench({
           </Section>
 
           <Section title="Settings">
-            <TextInput
-              fullWidth
-              label="Runs at once, per pipeline"
-              monospace
-              onChange={(e) => {
-                const value = e.target.value.replace(/[^0-9]/g, '');
-                update({ max_runs: value ? Number(value) : null });
-              }}
-              placeholder="From each pipeline's settings"
-              value={draft.max_runs ? String(draft.max_runs) : ''}
-            />
+            <Text bold small>Runs of one pipeline at the same time</Text>
+            <Text muted small>
+              The most runs of each pipeline the service runs together. A run that starts
+              while that many are running waits in the queue and starts when one finishes.
+              Raise it for pipelines called often through the API; keep 1 for pipelines that
+              must not overlap, such as an incremental load that moves a cursor.
+            </Text>
+            <Spacing mt={1}>
+              <TextInput
+                aria-label="Runs of one pipeline at the same time"
+                compact
+                fullWidth
+                monospace
+                onChange={(e) => {
+                  const value = e.target.value.replace(/[^0-9]/g, '');
+                  update({ max_runs: value ? Number(value) : null });
+                }}
+                placeholder="Empty: each pipeline's own limit, 1 when it sets none"
+                value={draft.max_runs ? String(draft.max_runs) : ''}
+              />
+            </Spacing>
             <Spacing mt={2}>
               <Text bold small>Extra files in the image</Text>
               <Text muted small>

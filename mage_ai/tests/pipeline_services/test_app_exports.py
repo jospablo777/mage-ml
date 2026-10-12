@@ -4,6 +4,8 @@ data folder, reports what it holds, refuses what cannot be exported, and the dow
 serves it as a zip under a folder named like the service.
 """
 import asyncio
+import json
+import os
 import shutil
 import tempfile
 import time
@@ -182,6 +184,183 @@ class AppExportTest(AppExportBase):
             exports.export_directory(self.repo_path, '../outside')
         with self.assertRaises(FileNotFoundError):
             exports.zip_export(self.repo_path, 'never-exported')
+
+
+class ModelRegistryTest(AppExportBase):
+    """
+    Models a service embeds, pulled from the registry the service names: the server's own
+    MLFLOW_TRACKING_URI points to another, empty store, as on a MageML server that tracks
+    its experiments apart from the production registry.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        from mage_ai.tests.shared.tracking import use_temporary_mlflow
+
+        self.registry = use_temporary_mlflow(self, experiments=['scoring'])
+        mlflow.set_experiment('scoring')
+
+        class Doubler(mlflow.pyfunc.PythonModel):
+            def predict(self, context, model_input, params=None):
+                return model_input['amount'] * 2
+
+        with mlflow.start_run():
+            mlflow.pyfunc.log_model(
+                name='model', python_model=Doubler(), registered_model_name='churn-scorer',
+                pip_requirements=['pandas'],
+            )
+        client = MlflowClient()
+        client.set_registered_model_alias('churn-scorer', 'champion', '1')
+        client.set_model_version_tag('churn-scorer', '1', 'validated', 'true')
+        client.set_model_version_tag('churn-scorer', '1', 'feast.feature_service', 'churn_features_v1')
+
+        self.server_store = use_temporary_mlflow(self)
+        self.chain()
+
+    def champion(self, alias='champion'):
+        return [dict(name='churn', uri=f'models:/churn-scorer@{alias}')]
+
+    def test_the_check_resolves_the_alias_in_the_services_registry(self):
+        preview = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True, models=self.champion(),
+            model_registry=self.registry,
+        )['pipeline_service_export']
+
+        self.assertEqual(preview['problems'], [])
+        [model] = preview['models']
+        self.assertEqual(
+            (model['name'], model['registered_name'], model['version'], model['aliases']),
+            ('churn', 'churn-scorer', '1', ['champion']),
+        )
+        self.assertEqual(
+            model['tags'], {'validated': 'true', 'feast.feature_service': 'churn_features_v1'})
+        self.assertEqual(model['feature_service'], 'churn_features_v1')
+        self.assertEqual(os.environ['MLFLOW_TRACKING_URI'], self.server_store)
+
+    def test_the_export_embeds_the_model_and_says_which_version(self):
+        result = self.create(
+            pipeline_uuids=[self.pipeline.uuid], name='scoring', models=self.champion(),
+            model_registry=self.registry,
+        )['pipeline_service_export']
+
+        self.assertEqual(result['state'], 'completed', result.get('problems'))
+        [model] = result['models']
+        self.assertEqual((model['name'], model['version']), ('churn', '1'))
+        self.assertEqual(model['aliases'], ['champion'])
+        self.assertEqual(model['feature_service'], 'churn_features_v1')
+        self.assertGreater(model['size_bytes'], 0)
+        self.assertTrue((self.root / 'scoring' / 'models' / 'churn' / 'artifacts' / 'MLmodel')
+                        .is_file())
+        self.assertEqual(os.environ['MLFLOW_TRACKING_URI'], self.server_store)
+
+    def test_a_model_the_registry_lacks_is_named_in_the_check_and_stops_the_export(self):
+        missing = self.champion(alias='retired')
+        preview = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True, models=missing,
+            model_registry=self.registry,
+        )['pipeline_service_export']
+        [problem] = preview['problems']
+        self.assertTrue(problem.startswith(
+            'Model churn (models:/churn-scorer@retired) could not be read from the registry: '
+        ), problem)
+        # The variables still show while the model is fixed.
+        self.assertIn('environment', preview)
+
+        result = self.create(
+            pipeline_uuids=[self.pipeline.uuid], name='scoring', models=missing,
+            model_registry=self.registry,
+        )['pipeline_service_export']
+        self.assertEqual(result['state'], 'failed')
+        self.assertTrue(result['problems'][0].startswith(
+            'Model churn (models:/churn-scorer@retired) could not be downloaded and embedded: '
+        ), result['problems'])
+
+    def test_the_cli_embeds_the_models_of_a_saved_service(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+        from mage_ai.pipeline_services import definitions
+
+        definitions.save_definition(self.repo_path, 'scoring', dict(
+            pipelines=[self.pipeline.uuid], models=self.champion(), model_registry=self.registry,
+        ))
+        self.addCleanup(lambda: (Path(self.repo_path) / definitions.FILE_NAME).unlink(
+            missing_ok=True))
+        out = self.root / 'cli'
+
+        with patch.dict(os.environ):
+            os.environ.pop('MLFLOW_TRACKING_URI', None)
+            result = CliRunner().invoke(app, [
+                'export', 'service', self.repo_path, '--service', 'scoring', '--out', str(out),
+            ])
+            self.assertNotIn('MLFLOW_TRACKING_URI', os.environ)
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        manifest = json.loads((out / 'service.json').read_text())
+        self.assertEqual([(m['name'], m['version']) for m in manifest['models']], [('churn', '1')])
+
+    def problem_for(self, uri, registry=None):
+        preview = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True,
+            models=[dict(name='churn', uri=uri)], model_registry=registry or self.registry,
+        )['pipeline_service_export']
+        [problem] = preview['problems']
+        prefix = f'Model churn ({uri}) could not be read from the registry: '
+        self.assertTrue(problem.startswith(prefix), problem)
+        return problem[len(prefix):]
+
+    def test_registry_problems_say_what_is_wrong_and_what_there_is(self):
+        self.assertEqual(
+            self.problem_for('models:/Churn-Scorer@champion'),
+            'The registry has no model named Churn-Scorer; names are case-sensitive. The '
+            'registry has: churn-scorer.',
+        )
+        self.assertEqual(
+            self.problem_for('models:/churn-scorer@retired'),
+            'churn-scorer has no alias retired. Its aliases: champion (version 1).',
+        )
+        self.assertEqual(
+            self.problem_for('models:/churn-scorer/7'),
+            'churn-scorer has no version 7. Its latest version is 1.',
+        )
+
+    def test_an_unreachable_registry_is_reported_within_seconds(self):
+        started = time.monotonic()
+
+        reason = self.problem_for('models:/churn-scorer@champion', 'http://127.0.0.1:9')
+
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertTrue(reason.startswith('The registry at http://127.0.0.1:9 did not answer.'))
+        self.assertNotIn('MLFLOW_HTTP_REQUEST_MAX_RETRIES', os.environ)
+
+    def test_a_registry_address_must_be_one(self):
+        response = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True, models=self.champion(),
+            model_registry='mlflow:5000',
+        )
+        self.assertEqual(response['error']['code'], 400)
+        self.assertIn('such as http://mlflow:5000', response['error']['message'])
+
+    def test_a_model_no_block_loads_is_noted(self):
+        preview = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True, models=self.champion(),
+            model_registry=self.registry,
+        )['pipeline_service_export']
+        self.assertIn(
+            "No block loads the model churn by that name; the image holds it, but blocks "
+            "reach it with load_model('churn', ...). Check the name in the code.",
+            preview['notes'],
+        )
+
+    def test_models_must_name_a_uri(self):
+        response = self.start(
+            pipeline_uuids=[self.pipeline.uuid], preview=True, models=[dict(name='churn')],
+        )
+        self.assertEqual(response['error']['code'], 400)
+        self.assertIn('models must be a list', response['error']['message'])
 
 
 class FileOwnersCacheTest(unittest.TestCase):

@@ -4,6 +4,7 @@ project's MageML data folder, not to the project: an export holds about 1,500 fi
 service's source among them, which would crowd the file browser and the git history.
 The app downloads an export as a zip.
 """
+import contextlib
 import datetime
 import json
 import os
@@ -13,7 +14,7 @@ import threading
 import time
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 EXPORTS_FOLDER = 'service_exports'
 _NAME = re.compile(r'^[a-z0-9][a-z0-9-]*$')
@@ -39,7 +40,115 @@ _jobs_lock = threading.Lock()
 
 STAGE_READING = 'Reading the pipelines and the code they import'
 STAGE_WRITING = 'Writing the Docker build context'
+STAGE_WRITING_MODELS = 'Downloading the models and writing the Docker build context'
 STAGE_DONE = 'Ready'
+
+
+# Feast's MLflow integration tags a model with the feature service it was trained on.
+FEATURE_SERVICE_TAG = 'feast.feature_service'
+
+# MLflow reads its server from the process environment; exports that name a registry set it
+# one at a time.
+_registry_lock = threading.Lock()
+
+
+# How long MLflow may take: the check waits for the registry while someone edits, so it
+# gives up fast; an export retries a little. Without limits MLflow retries an unreachable
+# server for about four minutes. Values set in the environment win.
+CHECK_LIMITS = dict(MLFLOW_HTTP_REQUEST_MAX_RETRIES='0', MLFLOW_HTTP_REQUEST_TIMEOUT='10')
+EXPORT_LIMITS = dict(MLFLOW_HTTP_REQUEST_MAX_RETRIES='2', MLFLOW_HTTP_REQUEST_TIMEOUT='60')
+
+
+@contextlib.contextmanager
+def model_registry(url: Optional[str], limits: Optional[Dict[str, str]] = None):
+    """
+    MLFLOW_TRACKING_URI set to url while the block runs, when url is given, and MLflow's
+    request limits, unless the environment sets them.
+    """
+    limits = {k: v for k, v in (limits or {}).items() if k not in os.environ}
+    if not url and not limits:
+        yield
+        return
+    with _registry_lock:
+        previous = os.environ.get('MLFLOW_TRACKING_URI')
+        os.environ.update(limits)
+        if url:
+            os.environ['MLFLOW_TRACKING_URI'] = url
+            try:
+                import mlflow
+
+                mlflow.set_tracking_uri(url)
+            except ImportError:
+                pass
+        try:
+            yield
+        finally:
+            for key in limits:
+                os.environ.pop(key, None)
+            if url:
+                try:
+                    import mlflow
+
+                    # None unsets it, so MLflow reads the environment again.
+                    mlflow.set_tracking_uri(previous)
+                except ImportError:
+                    pass
+                if previous is None:
+                    os.environ.pop('MLFLOW_TRACKING_URI', None)
+                else:
+                    os.environ['MLFLOW_TRACKING_URI'] = previous
+
+
+def model_options(models: Optional[List[Dict]]) -> List[str]:
+    """--model options, NAME=URI, for the models a service embeds."""
+    return [f"{m['name']}={m['uri']}" for m in models or []]
+
+
+def resolve_models(
+    models: List[Tuple[str, str]],
+    registry: Optional[str] = None,
+) -> Tuple[List[Dict], List[str]]:
+    """
+    The registry version each (name, uri) points to (an alias resolves to its version), with
+    the version's run and tags, and the problems reaching the registry.
+    """
+    from mage_ai.pipeline_services import model_export
+
+    resolved, problems = [], []
+    for name, uri in models:
+        model = dict(name=name, uri=uri)
+        try:
+            details = model_export._registry_details(uri)
+        except ImportError:
+            problems.append(
+                'Embedding a model from a registry needs mlflow: uv pip install mlflow.'
+            )
+            break
+        except Exception as error:
+            problems.append(
+                f"Model {model['name']} ({model['uri']}) could not be read from the registry: "
+                f'{model_export.explain(error, uri, registry)}'
+            )
+            continue
+        tags = details.get('tags') or {}
+        service = tags.get(FEATURE_SERVICE_TAG)
+        if not service and details.get('run_id'):
+            try:
+                service = model_export._run_details(details['run_id'])['run_tags'].get(
+                    FEATURE_SERVICE_TAG)
+            except Exception:
+                service = None
+        resolved.append(dict(
+            name=model['name'],
+            uri=model['uri'],
+            feature_service=service,
+            registered_name=details.get('registered_name'),
+            version=details.get('version'),
+            run_id=details.get('run_id'),
+            aliases=details.get('aliases') or [],
+            tags=details.get('tags') or {},
+        ))
+    return resolved, problems
 
 
 def _key(repo_path: str, name: str) -> tuple:
@@ -54,6 +163,8 @@ def start_export(
     name: Optional[str] = None,
     max_runs: Optional[int] = None,
     includes: Optional[List[str]] = None,
+    models: Optional[List[Dict]] = None,
+    registry: Optional[str] = None,
 ) -> Dict:
     """
     Starts exporting in a thread and returns its job: state (running, completed, failed),
@@ -87,7 +198,7 @@ def start_export(
         try:
             result = export_pipelines(
                 repo_path, pipeline_uuids, name=service, max_runs=max_runs,
-                includes=includes,
+                includes=includes, models=models, registry=registry,
                 on_stage=lambda stage, progress: update(stage=stage, progress=progress),
             )
             update(progress=1.0, result=result, stage=STAGE_DONE, state='completed')
@@ -121,6 +232,8 @@ def export_pipelines(
     max_runs: Optional[int] = None,
     on_stage=None,
     includes: Optional[List[str]] = None,
+    models: Optional[List[Dict]] = None,
+    registry: Optional[str] = None,
 ) -> Dict:
     """
     Exports the pipelines as one service, as `mage export service` does, replacing an earlier
@@ -131,15 +244,17 @@ def export_pipelines(
 
     if on_stage:
         on_stage(STAGE_READING, 0.05)
-    captured = export.capture(
-        repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
-        includes=includes,
-    )
-    out_dir = export_directory(repo_path, captured.name)
-    out_dir.parent.mkdir(parents=True, exist_ok=True)
-    if on_stage:
-        on_stage(STAGE_WRITING, 0.6)
-    export.write(captured, str(out_dir), force=True)
+    with model_registry(registry, EXPORT_LIMITS):
+        captured = export.capture(
+            repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
+            includes=includes, models=model_options(models),
+        )
+        out_dir = export_directory(repo_path, captured.name)
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        if on_stage:
+            on_stage(STAGE_WRITING_MODELS if captured.models else STAGE_WRITING, 0.6)
+        # Downloads the models from the registry into the build context.
+        export.write(captured, str(out_dir), force=True)
     (out_dir / 'report.txt').write_text(export.report(captured))
     return summary(captured, out_dir)
 
@@ -150,6 +265,8 @@ def preview_pipelines(
     name: Optional[str] = None,
     max_runs: Optional[int] = None,
     includes: Optional[List[str]] = None,
+    models: Optional[List[Dict]] = None,
+    registry: Optional[str] = None,
 ) -> Dict:
     """
     What exporting the pipelines would give, without writing anything: the app shows it while
@@ -157,17 +274,70 @@ def preview_pipelines(
     """
     from mage_ai.pipeline_services import export
 
-    try:
-        captured = export.capture(
-            repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
-            includes=includes,
-        )
-    except export.ExportError as error:
-        return dict(name=export._service_name(name, list(pipeline_uuids)),
-                    problems=list(error.problems))
+    with model_registry(registry, CHECK_LIMITS):
+        try:
+            captured = export.capture(
+                repo_path, list(pipeline_uuids), name=name or None,
+                max_concurrent_runs=max_runs, includes=includes, models=model_options(models),
+            )
+        except export.ExportError as error:
+            return dict(name=export._service_name(name, list(pipeline_uuids)),
+                        problems=list(error.problems))
+        resolved, problems = resolve_models(captured.models, registry)
     result = summary(captured, None)
-    result['problems'] = []
+    result['models'] = resolved
+    result['notes'] = result['notes'] + unused_models(captured, models)
+    result['problems'] = problems
     return result
+
+
+# Calls that name a model: load_model('churn', ...), model_path, model_metadata,
+# feature_service.
+_MODEL_CALL = re.compile(
+    r'\b(?:load_model|model_path|model_metadata|feature_service)\(\s*[\'"]([^\'"]+)[\'"]'
+)
+
+
+def unused_models(captured, models: Optional[List[Dict]]) -> List[str]:
+    """Notes for chosen models no block names, which usually means a typo in one of them."""
+    if not models:
+        return []
+    named = set()
+    for path in captured.files:
+        if path.suffix == '.py':
+            try:
+                named.update(_MODEL_CALL.findall(path.read_text()))
+            except (OSError, UnicodeDecodeError):
+                continue
+    return [
+        f"No block loads the model {m['name']} by that name; the image holds it, but blocks "
+        f"reach it with load_model('{m['name']}', ...). Check the name in the code."
+        for m in models if m['name'] not in named
+    ]
+
+
+def _embedded_model(model: Dict, out_dir: Optional[Path]) -> Dict:
+    """An embedded model as the app shows it, with the registry details of its metadata."""
+    metadata = {}
+    path = out_dir / model['path'] / 'mage-model.json' if out_dir and model.get('path') else None
+    if path and path.is_file():
+        try:
+            metadata = json.loads(path.read_text())
+        except ValueError:
+            pass
+    return dict(
+        name=model.get('name'),
+        uri=model.get('uri'),
+        feature_service=(metadata.get('tags') or {}).get(FEATURE_SERVICE_TAG)
+        or (metadata.get('run_tags') or {}).get(FEATURE_SERVICE_TAG),
+        version=model.get('version'),
+        run_id=model.get('run_id'),
+        registered_name=metadata.get('registered_name'),
+        aliases=metadata.get('aliases') or [],
+        tags=metadata.get('tags') or {},
+        flavors=model.get('flavors') or [],
+        size_bytes=model.get('size_bytes'),
+    )
 
 
 def summary(captured, out_dir: Optional[Path]) -> Dict:
@@ -175,7 +345,8 @@ def summary(captured, out_dir: Optional[Path]) -> Dict:
     for pipeline in captured.manifest['pipelines']:
         pipelines.append(dict(
             blocks=[
-                dict(language=b['language'], type=b['type'], uuid=b['uuid'])
+                dict(conditions=b.get('conditions') or [], language=b['language'],
+                     type=b['type'], uuid=b['uuid'])
                 for b in pipeline['blocks']
             ],
             max_concurrent_runs=pipeline['max_concurrent_runs'],
@@ -201,6 +372,7 @@ def summary(captured, out_dir: Optional[Path]) -> Dict:
         name=captured.name,
         notes=list(captured.notes),
         packages=dict(captured.requirements),
+        models=[_embedded_model(m, out_dir) for m in captured.manifest.get('models') or []],
         path=str(out_dir) if out_dir else None,
         pipelines=pipelines,
     )

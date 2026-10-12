@@ -998,7 +998,9 @@ def export_service(
     README that shows how to run and call it.
     """
     from mage_ai.pipeline_services import definitions, export
+    from mage_ai.pipeline_services.exports import EXPORT_LIMITS, model_registry
 
+    registry = None
     if service:
         try:
             saved = definitions.load_definition(project_path, service)
@@ -1009,15 +1011,20 @@ def export_service(
         name = name or service
         max_runs = max_runs or saved['max_runs']
         include = [*saved['include'], *include]
+        model = [*[f"{m['name']}={m['uri']}" for m in saved['models']], *model]
+        # MLFLOW_TRACKING_URI in the environment wins, so CI can reach the registry its way.
+        if not os.environ.get('MLFLOW_TRACKING_URI'):
+            registry = saved['model_registry']
     if not pipelines:
         typer.echo('Name the pipelines to export, or a saved service with --service.', err=True)
         raise typer.Exit(code=1)
     try:
-        captured = export.capture(
-            project_path, pipelines, name=name, max_concurrent_runs=max_runs, models=model,
-            includes=include,
-        )
-        out_dir = export.write(captured, out, force=force)
+        with model_registry(registry, EXPORT_LIMITS):
+            captured = export.capture(
+                project_path, pipelines, name=name, max_concurrent_runs=max_runs,
+                models=model, includes=include,
+            )
+            out_dir = export.write(captured, out, force=force)
     except export.ExportError as error:
         typer.echo('The pipelines cannot be exported:', err=True)
         for problem in error.problems:

@@ -60,3 +60,19 @@ trino:
   TRINO_PORT: "{{ env_var('MAGE_TEST_TRINO_PORT') }}"
   TRINO_SCHEMA: "{{ env_var('MAGE_TEST_TRINO_SCHEMA') }}"
   TRINO_USER: mage
+# The driver pipelines' two databases, both the test database here: the warehouse they read
+# new drivers from, and the analytics database that keeps their features.
+warehouse:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+  POSTGRES_USER: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+  POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+  POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+analytics:
+  POSTGRES_CONNECT_TIMEOUT: 10
+  POSTGRES_DBNAME: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+  POSTGRES_USER: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+  POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+  POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"

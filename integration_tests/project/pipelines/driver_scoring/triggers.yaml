@@ -1,0 +1,7 @@
+triggers:
+- name: after_features
+  schedule_type: after_run
+  status: active
+  settings:
+    after_pipeline: driver_features
+    after_status: completed

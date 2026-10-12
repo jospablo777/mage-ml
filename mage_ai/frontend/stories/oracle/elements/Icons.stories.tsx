@@ -187,6 +187,7 @@ import {
   VersionControlFetch,
 } from '@oracle/icons';
 import EmptyCharts from '@oracle/icons/custom/EmptyCharts';
+import FerrisMage8Bit from '@oracle/icons/custom/FerrisMage8Bit';
 import Mage8Bit from '@oracle/icons/custom/Mage8Bit';
 
 const ICONS = [
@@ -292,6 +293,7 @@ const ICONS = [
   List,
   Locked,
   Logs,
+  FerrisMage8Bit,
   Mage8Bit,
   MageMLogo,
   MapPin,

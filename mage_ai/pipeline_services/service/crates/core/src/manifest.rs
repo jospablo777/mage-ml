@@ -88,6 +88,19 @@ pub struct Pipeline {
     pub blocks: Vec<Block>,
     #[serde(default)]
     pub triggers: Vec<Trigger>,
+    /// Conditional blocks: Python files whose @condition functions decide whether the
+    /// blocks they are attached to run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditionals: Vec<Conditional>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Conditional {
+    pub uuid: String,
+    /// Relative to the project directory.
+    pub file: String,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -152,6 +165,10 @@ pub struct Block {
     /// A Rust block's io_config profile; see `io_config`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub io_config: Option<Value>,
+    /// The conditional blocks that decide whether this block runs: it runs when every
+    /// one returns True.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -536,6 +553,15 @@ impl Pipeline {
                     block.uuid
                 ));
             }
+            for condition in &block.conditions {
+                if !self.conditionals.iter().any(|c| &c.uuid == condition) {
+                    problems.push(format!(
+                        "Pipeline {name}: block {} has condition {condition}, which is not \
+                         among the pipeline's conditional blocks.",
+                        block.uuid
+                    ));
+                }
+            }
             let mut upstream_seen = BTreeSet::new();
             for upstream in &block.upstream {
                 if !upstream_seen.insert(upstream.as_str()) {
@@ -551,6 +577,23 @@ impl Pipeline {
                         block.uuid
                     ));
                 }
+            }
+        }
+        for conditional in &self.conditionals {
+            if !safe_relative(&conditional.file) {
+                problems.push(format!(
+                    "Pipeline {name}: conditional block {} has file {:?}, which is not a path \
+                     inside the project.",
+                    conditional.uuid, conditional.file
+                ));
+            } else if let Some(dir) = project_dir
+                && !dir.join(&conditional.file).is_file()
+            {
+                problems.push(format!(
+                    "Pipeline {name}: conditional block {} needs {}, which is not in the \
+                     service.",
+                    conditional.uuid, conditional.file
+                ));
             }
         }
         if problems.is_empty() && self.topological_order().is_none() {
@@ -653,6 +696,30 @@ mod tests {
         assert!(problems.contains("block a appears twice"), "{problems}");
         assert!(
             problems.contains("not a path inside the project"),
+            "{problems}"
+        );
+    }
+
+    #[test]
+    fn conditions_name_conditional_blocks_with_files_in_the_project() {
+        let mut guarded = block("b", &["a"]);
+        guarded["conditions"] = json!(["has_rows", "missing"]);
+        let mut m = manifest(json!([block("a", &[]), guarded]));
+        m.pipelines[0].conditionals = vec![Conditional {
+            uuid: "has_rows".into(),
+            file: "../has_rows.py".into(),
+            sha256: "00".into(),
+        }];
+        let problems = m.validate(None).join("\n");
+        assert!(
+            problems.contains(
+                "block b has condition missing, which is not among the pipeline's \
+                 conditional blocks"
+            ),
+            "{problems}"
+        );
+        assert!(
+            problems.contains("conditional block has_rows has file \"../has_rows.py\""),
             "{problems}"
         );
     }

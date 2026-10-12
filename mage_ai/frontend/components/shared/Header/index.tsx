@@ -18,7 +18,7 @@ import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButt
 import LaunchKeyboardShortcutText from '@components/CommandCenter/LaunchKeyboardShortcutText';
 import Loading, { LoadingStyleEnum } from '@oracle/components/Loading';
 import Link from '@oracle/elements/Link';
-import Mage8Bit from '@oracle/icons/custom/Mage8Bit';
+import FerrisMage8Bit from '@oracle/icons/custom/FerrisMage8Bit';
 import PopupMenu from '@oracle/components/PopupMenu';
 import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import ServerTimeDropdown from '@components/ServerTimeDropdown';
@@ -370,7 +370,7 @@ function Header({
 
   const avatarMemo = useMemo(() => {
     if (!userFromLocalStorage || !userFromLocalStorage?.avatar) {
-      return <Mage8Bit />;
+      return <FerrisMage8Bit size={22} />;
     }
 
     const styleProps: {
