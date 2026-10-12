@@ -14,6 +14,9 @@ models):
 - cat: CatBoost, 200 iterations of depth 6, saved as .cbm (Python, R) and ONNX;
 - mlp: a torch MLP 16-512-512-1, saved as TorchScript (Python, R) and ONNX.
 
+ONNX runs in all three languages: ONNX Runtime in Python (CPU and CUDA), onnxr in R (CPU)
+and the ort crate in Rust blocks (CPU), so the same graph is compared across runtimes.
+
 Every scorer works in chunks of 65,536 rows and uses 8 threads, so memory stays bounded
 and the languages get the same share of the machine.
 
@@ -323,6 +326,20 @@ R_BODIES = {
   })''',
 }
 
+# ONNX in R through onnxr, which calls ONNX Runtime's C++ API (its runtime comes from
+# onnxr::onnx_install()). Its "cuda" backend fails with onnxr 0.1.2 and ONNX Runtime 1.25.1
+# ("Unknown provider name 'CUDA'"), so R scores ONNX on the CPU only.
+for _model in ('xgb', 'cat', 'mlp'):
+    R_BODIES[f'{_model}_r_onnx'] = f'''
+  model <- onnxr::onnx_model("models/{_model}.onnx", backend = "cpu", threads = threads)
+  for (i in seq(1, nrow(x), by = chunk)) {{
+    rows <- i:min(i + chunk - 1, nrow(x))
+    out <- onnxr::onnx_run(model, x[rows, , drop = FALSE])
+    pick <- grep("prob", names(out))
+    out <- out[[if (length(pick)) pick[1] else 1]]
+    parts[[length(parts) + 1]] <- if (NCOL(out) == 2) out[, 2] else as.numeric(out)
+  }}'''
+
 R_TEMPLATE = '''
 #* @transformer
 score <- function(df_1, ...) {{
@@ -373,6 +390,11 @@ fn transform(rows: DataFrame) -> Result<DataFrame> {{
 SCORERS = {name: ('python', name.split('_')[0]) for name in PY_BODIES}
 SCORERS.update({name: ('r', name.split('_')[0]) for name in R_BODIES})
 SCORERS.update({f'{m}_rust_onnx': ('rust', m) for m in ('xgb', 'cat', 'mlp')})
+
+
+def engine(scorer: str) -> str:
+    """onnx for ONNX Runtime in any language (Python's ort, R's onnxr, Rust's ort crate)."""
+    return 'onnx' if ('onnx' in scorer or '_ort_' in scorer) else 'native'
 
 
 def scorer_code(scorer: str) -> str:
@@ -486,6 +508,8 @@ def test_model_scoring(mage_project, ml_project, request, scorer, rows):
             t1, gpu1, cpu1 = energy.read()
             states = lib.statuses(pipeline_run)
             entry = dict(scorer=scorer, language=language, model=model, rows=rows, mode=mode,
+                         engine=engine(scorer),
+                         device='cuda' if scorer.endswith('_cuda') else 'cpu',
                          repeat=repeat, position=position, cold=repeat == 0,
                          seconds=round(seconds, 4), pipeline=pipeline.uuid,
                          block_seconds=lib.block_seconds(pipeline_run), statuses=states,

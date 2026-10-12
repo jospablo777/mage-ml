@@ -20,6 +20,7 @@ repositories = [
 # libraries of the models the study scores in Python, R and Rust. CatBoost is not on CRAN;
 # its R package comes from the release, pinned by its checksum in rv.lock. torch downloads
 # libtorch into TORCH_HOME, which must be the rv library (test_ml_models.py sets it).
+# onnxr needs ONNX Runtime once: Rscript -e 'onnxr::onnx_install(cuda = FALSE)'.
 dependencies = [
     "arrow",
     "bit64",
@@ -29,5 +30,6 @@ dependencies = [
     "xgboost",
     "torch",
     "bundle",
+    "onnxr",
     {name = "catboost", url = "https://github.com/catboost/catboost/releases/download/v1.2.10/catboost-R-linux-x86_64-1.2.10.tgz"},
 ]

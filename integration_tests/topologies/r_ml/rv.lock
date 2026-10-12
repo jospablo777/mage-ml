@@ -749,6 +749,15 @@ force_source = false
 dependencies = []
 
 [[packages]]
+name = "onnxr"
+version = "0.1.2"
+source = { repository = "https://packagemanager.posit.co/cran/latest" }
+force_source = false
+dependencies = [
+    "cpp11",
+]
+
+[[packages]]
 name = "otel"
 version = "0.2.0"
 source = { repository = "https://packagemanager.posit.co/cran/latest" }
