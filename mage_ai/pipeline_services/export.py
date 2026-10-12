@@ -2085,22 +2085,71 @@ def build_image(
     on_line=None,
 ) -> None:
     """Builds, and pushes when asked, printing docker's output or passing each line on."""
+    import collections
+
     for command in build_commands(out_dir, tag, platforms=platforms, push=push):
-        if on_line is None:
-            result = subprocess.run(command)
-            code = result.returncode
-        else:
-            process = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-            )
-            for line in process.stdout:
-                on_line(line.rstrip('\n'))
-            code = process.wait()
+        # The last lines, to say why a build failed; every line is printed or passed on.
+        tail = collections.deque(maxlen=400)
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        for line in process.stdout:
+            line = line.rstrip('\n')
+            tail.append(line)
+            if on_line is None:
+                print(line, flush=True)
+            else:
+                on_line(line)
+        code = process.wait()
         if code != 0:
             what = 'docker buildx build' if command[1] == 'buildx' else f'docker {command[1]}'
-            pushing = command[1] == 'push' or '--push' in command
             raise ExportError([
-                f'{what} failed with exit code {code}; its output says why. '
-                + ('If the push failed, check that you are logged in to the registry '
-                   '(docker login).' if pushing else '')
+                f'{what} failed with exit code {code}. '
+                + explain_build_failure(list(tail), command, tag)
             ])
+
+
+# What docker prints when a build or push fails for a common reason, and what to do.
+BUILD_FAILURES = (
+    (('cannot connect to the docker daemon', 'is the docker daemon running',
+      'docker desktop is not running', 'error during connect'),
+     'Docker is not running on this machine: start Docker Desktop, Rancher Desktop or the '
+     'docker service, then build again.'),
+    (('no space left on device',),
+     'Docker ran out of disk space. Free some with `docker builder prune` and `docker image '
+     'prune`, or give Docker\'s disk more room.'),
+    (('multiple platforms feature is currently not supported',
+      'multi-platform build is not supported for the docker driver'),
+     'This buildx builder builds one platform at a time. Create one that builds several: '
+     '`docker buildx create --use --driver docker-container`.'),
+    (('exec format error',),
+     'A step ran for another processor without emulation. Install QEMU for Docker: '
+     '`docker run --privileged --rm tonistiigi/binfmt --install all`.'),
+    # Before the push: a base image that cannot be pulled also says unauthorized.
+    (('failed to resolve source metadata', 'pull access denied', 'manifest unknown'),
+     'Docker could not pull a base image. Check the network, or log in if the base image is in '
+     'a private registry.'),
+    (('denied: requested access to the resource is denied', 'unauthorized:',
+      'authentication required', 'insufficient_scope', 'access forbidden', '401 unauthorized',
+      '403 forbidden'),
+     'The registry refused the push. Log in to {registry} on this machine (`docker login '
+     '{registry}`) with an account that may push {image}; the image name must include the '
+     'registry and your namespace, such as icr.io/<namespace>/<name>:<tag>.'),
+    (('connection refused', 'no such host', 'i/o timeout', 'dial tcp'),
+     'Docker could not reach {registry}. Check the address and the network; a local registry '
+     'must be running, such as `docker run -d -p 5000:5000 registry:2` for localhost:5000.'),
+)
+
+
+def explain_build_failure(lines: List[str], command: List[str], tag: str) -> str:
+    """Why a docker build or push failed and what to do, from the lines it printed."""
+    text = '\n'.join(lines).lower()
+    first = tag.split('/')[0]
+    registry = first if '/' in tag and ('.' in first or ':' in first or
+                                        first == 'localhost') else 'docker.io'
+    for needles, advice in BUILD_FAILURES:
+        if any(needle in text for needle in needles):
+            return advice.format(image=tag, registry=registry)
+    pushing = command[1] == 'push' or '--push' in command
+    return ('The lines above say why. ' + ('If the push failed, check that this machine is '
+            f'logged in to {registry} (`docker login {registry}`).' if pushing else ''))
