@@ -1,0 +1,13 @@
+[package]
+name = "mage-stream-core"
+description = "Stream delivery for Mage pipeline services: identifiers, the acknowledgement tracker and the runner state machine, with no I/O"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Layer 1 (ADR-0002, ADR-0028): no tokio, no Arrow, no I/O.
+[dependencies]
+
+[dev-dependencies]
+proptest = "1.12"
