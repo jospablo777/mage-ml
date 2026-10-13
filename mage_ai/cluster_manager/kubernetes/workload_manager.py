@@ -36,6 +36,7 @@ from mage_ai.orchestration.constants import (
     PG_DB_PASS,
     PG_DB_USER,
 )
+from mage_ai.services.k8s import safe_diagnostics
 from mage_ai.services.k8s.constants import (
     DEFAULT_NAMESPACE,
     DEFAULT_SERVICE_ACCOUNT_NAME,
@@ -45,6 +46,9 @@ from mage_ai.services.k8s.constants import (
 from mage_ai.settings import MAGE_SETTINGS_ENVIRONMENT_VARIABLES
 from mage_ai.shared.array import find
 from mage_ai.shared.hash import merge_dict, safe_dig
+
+# A workload's body holds its environment: keep it out of logs and error messages.
+safe_diagnostics.protect()
 
 
 class WorkloadManager:

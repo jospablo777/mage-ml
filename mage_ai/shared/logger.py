@@ -106,6 +106,12 @@ def set_logging_format(logging_format: str = None, level: str = None) -> None:
         except (TypeError, ValueError):
             root_logger.exception('Invalid logging level %s', level)
 
+    # DEBUG on the root logger made the Kubernetes client log response bodies, which hold
+    # the environment of Jobs and workloads.
+    from mage_ai.services.k8s.safe_diagnostics import protect
+
+    protect()
+
 
 class LoggingLevel(StrEnum):
     DEBUG = 'DEBUG'

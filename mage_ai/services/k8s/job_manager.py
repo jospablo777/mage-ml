@@ -6,6 +6,7 @@ from kubernetes import client, config
 from kubernetes.client import V1Container, V1PodSpec
 from kubernetes.client.rest import ApiException
 
+from mage_ai.services.k8s import safe_diagnostics
 from mage_ai.services.k8s.config import K8sExecutorConfig
 from mage_ai.services.k8s.constants import (
     DEFAULT_NAMESPACE,
@@ -14,6 +15,9 @@ from mage_ai.services.k8s.constants import (
     KUBE_POD_NAMESPACE_ENV_VAR,
 )
 from mage_ai.shared.hash import merge_dict
+
+# A Job's body holds its environment: keep it out of logs and error messages.
+safe_diagnostics.protect()
 
 
 class JobManager():
