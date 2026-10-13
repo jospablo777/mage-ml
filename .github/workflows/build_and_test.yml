@@ -6,6 +6,7 @@ on:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
+      - "integration_tests/**"
       - "vendor/**"
       - "runtimes/**"
       - "rust/**"
@@ -17,6 +18,7 @@ on:
     paths:
       - "mage_ai/**"
       - "mage_integrations/**"
+      - "integration_tests/**"
       - "vendor/**"
       - "runtimes/**"
       - "rust/**"
