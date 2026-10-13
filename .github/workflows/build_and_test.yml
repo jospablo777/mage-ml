@@ -233,7 +233,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/mage/rust/target
-          key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'mage_ai/data_preparation/models/block/rust/sdk/Cargo.lock') }}
+          key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'mage_ai/data_preparation/models/block/rust/sdk/Cargo.lock', 'mage_ai/data_preparation/models/block/rust/workspace.py', 'integration_tests/Makefile') }}
           restore-keys: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-
       - name: Build Polars and the Rust block SDK
         run: make -C integration_tests warm-rust

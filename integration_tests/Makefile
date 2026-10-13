@@ -147,10 +147,12 @@ test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
 
 # Builds Polars and the Rust block SDK into the shared target directory once, so no
-# test pays for the cold build within its time limit.
+# test pays for the cold build within its time limit: the blocks Mage compiles, and the
+# bundle an exported service compiles, whose features differ. Needs the services (up).
 warm-rust:
 	cd .. && $(PYTHON) -m pytest -p no:cacheprovider -q \
-		'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block'
+		'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' \
+		'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up r-env
