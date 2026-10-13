@@ -1,4 +1,5 @@
 import os
+import threading
 
 
 class SecretsManager:
@@ -13,8 +14,19 @@ class SecretsManager:
         self.client = SecretClient(vault_url=key_vault_url, credential=cred)
 
 
-secrets_manager = SecretsManager()
+# Made on first use, so a project without a key vault does not try to make one each time it
+# renders a config file, and azure_secret_var says what is missing when it is used.
+_secrets_manager = None
+_lock = threading.Lock()
+
+
+def _manager() -> SecretsManager:
+    global _secrets_manager
+    with _lock:
+        if _secrets_manager is None:
+            _secrets_manager = SecretsManager()
+        return _secrets_manager
 
 
 def get_secret(secret_name: str) -> str:
-    return secrets_manager.client.get_secret(secret_name).value
+    return _manager().client.get_secret(secret_name).value

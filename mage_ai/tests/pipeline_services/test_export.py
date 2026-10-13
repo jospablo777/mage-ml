@@ -1039,7 +1039,6 @@ class RExportTest(ExportTestCase):
             export.capture(str(self.project), [self.pipeline.uuid], name='r-service')
         self.assertIn('rv.lock', str(caught.exception))
 
-@unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
 class FakeDistribution:
     """A distribution that counts how often its metadata is parsed."""
 
@@ -1096,6 +1095,75 @@ class FileOwnersTest(unittest.TestCase):
         self.assertEqual(len(owners), 60)
 
 
+    def test_files_come_from_record_without_a_stat_each(self):
+        """
+        dist.files checked every file of every package exists, and each path was resolved:
+        6.5 seconds on a fresh server, minutes when previews read it at the same time.
+        """
+        from unittest.mock import patch
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        dist = FakeDistribution(root, 'polars', '2.0.1', files=0)
+        dist.read_text = lambda name: (
+            'polars/__init__.py,sha256=x,10\n"polars/a,b.py",sha256=y,20\n'
+            'polars-2.0.1.dist-info/METADATA,,\n../../bin/polars,,\n'
+        ) if name == 'RECORD' else None
+
+        with patch.object(export.importlib.metadata, 'distributions', return_value=[dist]), \
+                patch.object(export.os.path, 'exists', side_effect=AssertionError('stat')):
+            owners = export._read_file_owners()
+
+        base = os.path.realpath(root)
+        self.assertEqual(owners, {
+            os.path.join(base, 'polars', '__init__.py'): ('polars', '2.0.1'),
+            os.path.join(base, 'polars', 'a,b.py'): ('polars', '2.0.1'),
+        })
+
+    def test_a_file_installed_as_a_link_keeps_its_owner(self):
+        """uv's symlink mode links each file to its cache; the owner is found by its folder."""
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / 'cache').mkdir()
+        (root / 'cache' / 'module.py').write_text('')
+        (root / 'site' / 'pkg').mkdir(parents=True)
+        (root / 'site' / 'pkg' / 'module.py').symlink_to(root / 'cache' / 'module.py')
+        dist = FakeDistribution(root / 'site', 'pkg', '1.0', files=0)
+        dist.read_text = lambda name: 'pkg/module.py,,\n' if name == 'RECORD' else None
+
+        from unittest.mock import patch
+        with patch.object(export.importlib.metadata, 'distributions', return_value=[dist]):
+            owners = export._read_file_owners()
+
+        loaded = str(root / 'site' / 'pkg' / 'module.py')
+        self.assertEqual(owners.get(export.owner_key(loaded)), ('pkg', '1.0'))
+
+    def test_concurrent_reads_wait_for_one(self):
+        import threading
+        import time
+        from unittest.mock import patch
+
+        export._owners_cache.clear()
+        self.addCleanup(export._owners_cache.clear)
+        reads = []
+
+        def slow_read():
+            reads.append(1)
+            time.sleep(0.2)
+            return {}
+
+        with patch.object(export, '_read_file_owners', side_effect=slow_read), \
+                patch.object(export, '_environment_fingerprint', return_value=('a',)):
+            threads = [threading.Thread(target=export._file_owners) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(len(reads), 1)
+
+
+@unittest.skipUnless(shutil.which('cargo'), 'needs cargo')
 class CargoLockTest(unittest.TestCase):
     def setUp(self):
         self.workspace = Path(tempfile.mkdtemp())

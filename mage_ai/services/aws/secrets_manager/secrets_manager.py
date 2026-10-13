@@ -1,3 +1,5 @@
+import threading
+
 from mage_ai.services.aws import get_aws_boto3_client
 
 
@@ -11,12 +13,23 @@ class SecretsManager:
         self.cache = SecretCache(config=cache_config, client=client)
 
 
-secrets_manager = SecretsManager()
+# Made on first use: making the client off AWS asks the instance metadata address for a
+# region and waits 2 seconds, which every process that renders a config file paid.
+_secrets_manager = None
+_lock = threading.Lock()
+
+
+def _manager() -> SecretsManager:
+    global _secrets_manager
+    with _lock:
+        if _secrets_manager is None:
+            _secrets_manager = SecretsManager()
+        return _secrets_manager
 
 
 def get_secret(secret_id: str, cached=True) -> str:
     if cached:
-        return secrets_manager.cache.get_secret_string(secret_id)
+        return _manager().cache.get_secret_string(secret_id)
     else:
         return get_secret_force(secret_id)
 

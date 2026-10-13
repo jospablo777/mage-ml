@@ -17,6 +17,7 @@ block or setting the service does not support stops the export with a reason; no
 dropped silently.
 """
 import ast
+import csv
 import hashlib
 import importlib.metadata
 import json
@@ -27,6 +28,7 @@ import string
 import subprocess
 import sys
 import textwrap
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1160,7 +1162,9 @@ def _local_install(dist) -> bool:
 
 # The map of installed files to their distributions, with the state of sys.path it was read
 # from. Reading it takes seconds; the app previews an export each time a pipeline is chosen.
+# The lock makes those previews and an export wait for one read instead of each reading it.
 _owners_cache: Dict[str, Any] = {}
+_owners_lock = threading.Lock()
 
 
 def _environment_fingerprint() -> Tuple:
@@ -1182,10 +1186,32 @@ def _environment_fingerprint() -> Tuple:
 
 def _file_owners() -> Dict[str, Tuple[str, str]]:
     fingerprint = _environment_fingerprint()
-    if _owners_cache.get('fingerprint') != fingerprint:
-        _owners_cache['owners'] = _read_file_owners()
-        _owners_cache['fingerprint'] = fingerprint
-    return _owners_cache['owners']
+    with _owners_lock:
+        if _owners_cache.get('fingerprint') != fingerprint:
+            _owners_cache['owners'] = _read_file_owners()
+            _owners_cache['fingerprint'] = fingerprint
+        return _owners_cache['owners']
+
+
+def owner_key(path: str) -> str:
+    """
+    A file's key in the owners map: its folder resolved, its name kept. Resolving every file
+    took seconds; a package installed as links to a cache (uv's symlink mode) links files,
+    so the file itself stays unresolved on both sides.
+    """
+    folder, name = os.path.split(os.path.abspath(path))
+    return os.path.join(os.path.realpath(folder), name)
+
+
+def _installed_files(dist) -> List[str]:
+    """
+    The paths a distribution installed, relative to its folder, read from RECORD as text.
+    dist.files checks each file exists, one stat per file of every package.
+    """
+    record = dist.read_text('RECORD')
+    if record is None:
+        return [str(file) for file in dist.files or []]
+    return [row[0] for row in csv.reader(record.splitlines()) if row]
 
 
 def _read_file_owners() -> Dict[str, Tuple[str, str]]:
@@ -1203,15 +1229,20 @@ def _read_file_owners() -> Dict[str, Tuple[str, str]]:
         if _local_install(dist):
             continue
         version = metadata['Version']
-        for file in dist.files or []:
-            text = str(file)
+        try:
+            base = os.path.realpath(dist.locate_file(''))
+        except (OSError, ValueError):
+            continue
+        folders: Dict[str, str] = {}
+        for text in _installed_files(dist):
             # Editable installs load a finder module at start-up; it is not a dependency.
             if not text.endswith(('.py', '.so', '.pyd', '.pyc')) or '__editable__' in text:
                 continue
-            try:
-                owners[os.path.realpath(dist.locate_file(file))] = (name, version)
-            except (OSError, ValueError):
-                continue
+            folder, file_name = os.path.split(text)
+            # Folders resolved once each: RECORD can climb out of site-packages with `..`.
+            if folder not in folders:
+                folders[folder] = os.path.realpath(os.path.join(base, folder))
+            owners[os.path.join(folders[folder], file_name)] = (name, version)
     return owners
 
 
@@ -1276,7 +1307,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             except Exception as error:
                 failed.append([name, f"{type(error).__name__}: {error}"])
         files = sorted({
-            os.path.realpath(module.__file__)
+            os.path.abspath(module.__file__)
             for module in list(sys.modules.values())
             if getattr(module, '__file__', None)
         })
@@ -1303,7 +1334,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
     owners = _file_owners()
     pinned: Dict[str, str] = {}
     for path in report['files']:
-        owner = owners.get(path)
+        owner = owners.get(owner_key(path))
         if owner is None:
             continue
         name, version = owner
