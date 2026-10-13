@@ -142,16 +142,17 @@ variables, as runtime variables do in MageML (`kwargs['rows']` in the block).
 ## 4. Serve it
 
 ```bash
+export TOKEN=$(openssl rand -hex 32)   # keep it: every API call needs it
 docker run -d --name shop -p 127.0.0.1:8080:8080 \
-  -e MAGE_SERVICE_TOKEN=change-me \
+  -e MAGE_SERVICE_TOKEN="$TOKEN" \
   -v shop-data:/var/lib/mage-service \
   shop
 ```
 
 Or `docker compose up --build` in the folder, which does the same with `compose.yaml`.
 
-- `MAGE_SERVICE_TOKEN` protects the API. Set your own; without it the service makes one
-  and prints it in its log.
+- `MAGE_SERVICE_TOKEN` protects the API. The service does not start without it when other
+  hosts can reach it; `compose.yaml` reads it from `.env` or the shell.
 - The volume keeps the run history and logs across restarts.
 - Time triggers do not run until you add `-e MAGE_SERVICE_SCHEDULES=on`, so a service built
   next to a running MageML does not run the same schedule twice.
@@ -159,7 +160,7 @@ Or `docker compose up --build` in the folder, which does the same with `compose.
 ## 5. Start runs through the API
 
 ```bash
-curl -X POST -H "Authorization: Bearer change-me" -H 'Content-Type: application/json' \
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   "http://localhost:8080/v1/pipelines/load_orders/runs?wait=60" \
   -d '{"variables": {"rows": 50000}}'
 ```

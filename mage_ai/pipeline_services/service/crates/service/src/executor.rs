@@ -759,6 +759,8 @@ async fn run_rust_binary(
         .stderr(Stdio::piped())
         .process_group(0)
         .kill_on_drop(true)
+        // Only the block environment: the service's own credentials are not inherited.
+        .env_clear()
         .envs(service.extra_env.iter().cloned())
         .envs(env);
     if let Some(profile) = io_config_profile {

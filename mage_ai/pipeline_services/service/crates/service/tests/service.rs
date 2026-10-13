@@ -57,6 +57,14 @@ const BLOCKS: &[(&str, &str)] = &[
         "@transformer\ndef after(data, *args, **kwargs):\n    return data\n",
     ),
     (
+        "data_loaders/environ.py",
+        "import os\n\n@data_loader\ndef environ(*args, **kwargs):\n    return {'names': sorted(os.environ)}\n",
+    ),
+    (
+        "data_loaders/probe.py",
+        "import os\n\n@data_loader\ndef probe(*args, **kwargs):\n    try:\n        input()\n        stdin = 'read'\n    except EOFError:\n        stdin = 'eof'\n    status = os.system('test -e /dev/fd/3 && exit 3; test -e /dev/fd/4 && exit 4; exit 0')\n    return {'stdin': stdin, 'child': os.waitstatus_to_exitcode(status)}\n",
+    ),
+    (
         "data_loaders/thing.py",
         "@data_loader\ndef thing(*args, **kwargs):\n    return {1, 2}\n",
     ),
@@ -98,6 +106,10 @@ fn manifest(once_trigger: bool) -> Value {
              "blocks": [block("load", "data_loader", "data_loaders/load.py", &[]),
                         block("broken", "transformer", "transformers/broken.py", &["load"]),
                         block("after", "transformer", "transformers/after_broken.py", &["broken"])]},
+            {"uuid": "environ", "name": "environ", "max_concurrent_runs": 1,
+             "blocks": [block("environ", "data_loader", "data_loaders/environ.py", &[])]},
+            {"uuid": "probe", "name": "probe", "max_concurrent_runs": 1,
+             "blocks": [block("probe", "data_loader", "data_loaders/probe.py", &[])]},
             {"uuid": "thing", "name": "thing", "max_concurrent_runs": 1,
              "blocks": [block("thing", "data_loader", "data_loaders/thing.py", &[])]},
             {"uuid": "slow", "name": "slow", "max_concurrent_runs": 1,
@@ -699,4 +711,84 @@ fn a_once_trigger_runs_once_when_schedules_are_on() {
         1,
         "a once trigger ran twice"
     );
+}
+
+fn block_environment(service: &Service) -> Vec<String> {
+    let (status, run) = service.post(
+        "/v1/pipelines/environ/runs?wait=60&output=environ",
+        json!({}),
+    );
+    assert_eq!(status, 201, "{run}");
+    serde_json::from_value(run["output"]["names"].clone()).expect("a list of names")
+}
+
+#[test]
+fn block_code_never_sees_the_services_credentials() {
+    let mut service = Service::create(false);
+    service.start(&[
+        ("IBM_CLOUD_API_KEY", "ibm-secret"),
+        ("USER_SETTING", "kept"),
+    ]);
+
+    let names = block_environment(&service);
+
+    for hidden in [
+        "MAGE_SERVICE_TOKEN",
+        "MAGE_SERVICE_READ_TOKEN",
+        "IBM_CLOUD_API_KEY",
+        "MAGE_SERVICE_DIR",
+    ] {
+        assert!(
+            !names.iter().any(|n| n == hidden),
+            "{hidden} reached the block: {names:?}"
+        );
+    }
+    for kept in [
+        "USER_SETTING",
+        "PATH",
+        "MAGE_SERVICE_MODELS_DIR",
+        "MAGE_REPO_PATH",
+    ] {
+        assert!(
+            names.iter().any(|n| n == kept),
+            "{kept} is missing: {names:?}"
+        );
+    }
+}
+
+#[test]
+fn strict_mode_passes_only_system_declared_and_listed_variables() {
+    let mut service = Service::create(false);
+    service.start(&[
+        ("MAGE_SERVICE_WORKER_ENV", "strict"),
+        ("MAGE_SERVICE_PASS_ENV", "USER_*"),
+        ("USER_SETTING", "kept"),
+        ("UNLISTED_SETTING", "dropped"),
+    ]);
+
+    let names = block_environment(&service);
+
+    assert!(names.iter().any(|n| n == "USER_SETTING"), "{names:?}");
+    assert!(names.iter().any(|n| n == "PATH"), "{names:?}");
+    assert!(!names.iter().any(|n| n == "UNLISTED_SETTING"), "{names:?}");
+    assert!(
+        !names.iter().any(|n| n == "MAGE_SERVICE_TOKEN"),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn a_block_cannot_read_or_reach_the_worker_protocol() {
+    // Requests came on stdin, so a block calling input() read the next request; the reply
+    // descriptor reached programs the block started.
+    let mut service = Service::create(false);
+    service.start(&[]);
+
+    let (status, run) = service.post("/v1/pipelines/probe/runs?wait=60&output=probe", json!({}));
+
+    assert_eq!(status, 201, "{run}");
+    assert_eq!(run["output"], json!({"stdin": "eof", "child": 0}), "{run}");
+    // The worker still serves the next run.
+    let (status, run) = service.post("/v1/pipelines/sum/runs?wait=60&output=total", json!({}));
+    assert_eq!(status, 201, "{run}");
 }

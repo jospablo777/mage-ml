@@ -310,3 +310,120 @@ class ChainTest(WorkerTestCase):
                     assert output > 5, 'too small'
             ''', self.SECOND])
         self.assertEqual((caught.exception.phase, caught.exception.block_uuid), ('test', 'b0'))
+
+
+class StreamBatchTest(WorkerTestCase):
+    """A stream's transformers run on each batch of messages in a resident worker."""
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+
+    def stream(self, chain, messages, kwargs=None):
+        return worker.run_stream_batch(dict(chain=chain, messages=messages, kwargs=kwargs or {}))
+
+    def test_each_block_gets_the_previous_blocks_messages(self):
+        double = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return [dict(m, n=m['n'] * 2) for m in messages]
+        ''', name='double')
+        keep_big = self.block('''
+            import pandas as pd
+
+            @transformer
+            def f(messages, **kwargs):
+                frame = pd.DataFrame(messages)
+                return frame[frame['n'] > kwargs['minimum']]
+        ''', name='keep_big')
+
+        result = self.stream([double, keep_big], [{'n': 1}, {'n': 5}], dict(minimum=4))
+
+        self.assertEqual(result['messages'], [{'n': 10}])
+        self.assertEqual([b['block_uuid'] for b in result['blocks']], ['double', 'keep_big'])
+
+    def test_top_level_code_runs_once_per_worker(self):
+        """Loading a model at the top of a block ran for every batch."""
+        counter = os.path.join(self.directory, 'loads')
+        block = self.block(f'''
+            with open({counter!r}, 'a') as file:
+                file.write('x')
+
+            @transformer
+            def f(messages):
+                return messages
+        ''', name='model')
+
+        for _ in range(3):
+            self.stream([block], [{'n': 1}])
+
+        with open(counter) as file:
+            self.assertEqual(file.read(), 'x')
+
+    def test_polars_none_and_one_message_results(self):
+        to_polars = self.block('''
+            import polars as pl
+
+            @transformer
+            def f(messages):
+                return pl.DataFrame(messages).with_columns(m=pl.col('n') + 1)
+        ''', name='to_polars')
+        one = self.block('''
+            @transformer
+            def f(messages):
+                return {'count': len(messages)}
+        ''', name='one')
+        nothing = self.block('''
+            @transformer
+            def f(messages):
+                return None
+        ''', name='nothing')
+
+        self.assertEqual(self.stream([to_polars], [{'n': 1}])['messages'], [{'n': 1, 'm': 2}])
+        self.assertEqual(self.stream([one], [{}, {}])['messages'], [{'count': 2}])
+        self.assertEqual(self.stream([nothing, one], [{}])['messages'], [])
+
+    def test_nan_fails_the_block_with_the_field(self):
+        """NaN and infinity have no JSON form; they became null without a word."""
+        block = self.block('''
+            @transformer
+            def f(messages):
+                return [{'ok': 1.5, 'score': float('nan')}]
+        ''', name='nan')
+
+        with self.assertRaises(worker.BlockError) as raised:
+            self.stream([block], [{}])
+
+        self.assertIn('messages[0].score', str(raised.exception))
+        self.assertEqual(raised.exception.block_uuid, 'nan')
+
+    def test_a_failing_block_is_named(self):
+        fails = self.block('''
+            @transformer
+            def f(messages):
+                raise ValueError('bad message')
+        ''', name='fails')
+
+        with self.assertRaises(worker.BlockError) as raised:
+            self.stream([fails], [{}])
+
+        self.assertEqual(raised.exception.block_uuid, 'fails')
+        self.assertEqual(raised.exception.phase, 'run')
+        self.assertIn('bad message', str(raised.exception))
+
+    def test_the_serve_loop_routes_stream_requests(self):
+        block = self.block('''
+            @transformer
+            def f(messages):
+                return [{'seen': len(messages)}]
+        ''', name='seen')
+        requests = io.StringIO(json.dumps(dict(
+            id='1', op='stream', chain=[block], messages=[1, 2, 3],
+        )) + '\n')
+        channel = io.StringIO()
+
+        worker.serve(requests, channel)
+
+        replies = [json.loads(line) for line in channel.getvalue().splitlines()]
+        self.assertEqual(replies[-1]['messages'], [{'seen': 3}])
+        self.assertTrue(replies[-1]['ok'])

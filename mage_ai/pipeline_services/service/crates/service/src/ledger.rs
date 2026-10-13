@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS leases (
 );
 "#;
 
+/// Columns added after the first release: existing ledgers get them in place.
+fn migrate(connection: &Connection) -> rusqlite::Result<()> {
+    let has_retry_of: bool = connection
+        .prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'retry_of'")?
+        .exists([])?;
+    if !has_retry_of {
+        connection.execute_batch("ALTER TABLE runs ADD COLUMN retry_of TEXT")?;
+    }
+    Ok(())
+}
+
 pub fn now() -> DateTime<Utc> {
     Utc::now()
 }
@@ -128,6 +139,7 @@ impl Ledger {
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.busy_timeout(std::time::Duration::from_secs(10))?;
         connection.execute_batch(SCHEMA)?;
+        migrate(&connection)?;
         connection.pragma_update(None, "wal_autocheckpoint", 0)?;
         let checkpoints = Connection::open(path)?;
         checkpoints.busy_timeout(std::time::Duration::from_secs(10))?;
@@ -143,6 +155,7 @@ impl Ledger {
         let connection = Connection::open_in_memory()?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(SCHEMA)?;
+        migrate(&connection)?;
         Ok(Ledger {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -154,21 +167,32 @@ impl Ledger {
         self.connection.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Creates a queued run with its block runs; with an idempotency key already used, it
-    /// returns the earlier run and false.
+    /// Creates a queued run with its block runs. With an idempotency key already used, it
+    /// returns the earlier run and false, unless that run failed or was cancelled: then the
+    /// new run takes the key and records the earlier one in `retry_of`. A key used to return
+    /// a failed run forever, so a caller's retry could never run the pipeline again.
     pub fn create_run(&self, new: NewRun) -> Result<(String, bool)> {
         let mut connection = self.lock();
         let transaction = connection.transaction()?;
+        let mut retry_of: Option<String> = None;
         if let Some(key) = new.idempotency_key {
-            let existing: Option<String> = transaction
+            let existing: Option<(String, String)> = transaction
                 .query_row(
-                    "SELECT id FROM runs WHERE pipeline = ?1 AND idempotency_key = ?2",
+                    "SELECT id, status FROM runs WHERE pipeline = ?1 AND idempotency_key = ?2",
                     params![new.pipeline, key],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            if let Some(id) = existing {
-                return Ok((id, false));
+            match existing {
+                Some((id, status)) if status == "failed" || status == "cancelled" => {
+                    transaction.execute(
+                        "UPDATE runs SET idempotency_key = NULL WHERE id = ?1",
+                        params![id],
+                    )?;
+                    retry_of = Some(id);
+                }
+                Some((id, _)) => return Ok((id, false)),
+                None => {}
             }
         }
         let id = uuid::Uuid::now_v7().to_string();
@@ -176,14 +200,15 @@ impl Ledger {
             serde_json::to_string(new.variables).map_err(|e| LedgerError::Data(e.to_string()))?;
         transaction.execute(
             "INSERT INTO runs (id, pipeline, status, source, idempotency_key, variables, \
-             created_at) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6)",
+             created_at, retry_of) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7)",
             params![
                 id,
                 new.pipeline,
                 new.source,
                 new.idempotency_key,
                 variables,
-                timestamp(now())
+                timestamp(now()),
+                retry_of
             ],
         )?;
         for (position, block) in new.blocks.iter().enumerate() {
@@ -430,8 +455,8 @@ impl Ledger {
     ) -> Result<Vec<RunSummary>> {
         let connection = self.lock();
         let mut statement = connection.prepare(
-            "SELECT id, pipeline, status, source, created_at, started_at, finished_at, error \
-             FROM runs WHERE (?1 IS NULL OR pipeline = ?1) AND (?2 IS NULL OR status = ?2) \
+            "SELECT id, pipeline, status, source, created_at, started_at, finished_at, error, \
+             retry_of FROM runs WHERE (?1 IS NULL OR pipeline = ?1) AND (?2 IS NULL OR status = ?2) \
              ORDER BY created_at DESC, id DESC LIMIT ?3",
         )?;
         let rows = statement.query_map(
@@ -446,9 +471,9 @@ impl Ledger {
         let found = connection
             .query_row(
                 "SELECT id, pipeline, status, source, created_at, started_at, finished_at, \
-                 error, variables FROM runs WHERE id = ?1",
+                 error, retry_of, variables FROM runs WHERE id = ?1",
                 params![id],
-                |row| Ok((run_summary(row)?, row.get::<_, String>(8)?)),
+                |row| Ok((run_summary(row)?, row.get::<_, String>(9)?)),
             )
             .optional()?;
         let Some((run, variables)) = found else {
@@ -594,6 +619,7 @@ fn run_summary(row: &rusqlite::Row) -> rusqlite::Result<RunSummary> {
         started_at,
         finished_at,
         error: row.get(7)?,
+        retry_of: row.get(8)?,
     })
 }
 
@@ -673,6 +699,75 @@ mod tests {
         assert_eq!(first, second);
         let (third, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
         assert_ne!(first, third);
+    }
+
+    #[test]
+    fn a_key_whose_run_failed_or_was_cancelled_runs_again() {
+        let ledger = Ledger::in_memory().unwrap();
+        let vars = Map::new();
+        let blocks = vec!["a".to_string()];
+        for status in [RunStatus::Failed, RunStatus::Cancelled] {
+            let key = format!("key-{}", status.as_str());
+            let (first, _) = ledger
+                .create_run(new_run(&vars, Some(&key), &blocks))
+                .unwrap();
+            ledger.finish_run(&first, status, Some("boom")).unwrap();
+
+            let (retry, created) = ledger
+                .create_run(new_run(&vars, Some(&key), &blocks))
+                .unwrap();
+
+            assert!(created, "{status:?}");
+            assert_ne!(retry, first);
+            assert_eq!(
+                ledger.run(&retry).unwrap().unwrap().run.retry_of,
+                Some(first.clone())
+            );
+            // The key now names the retry.
+            let (again, created) = ledger
+                .create_run(new_run(&vars, Some(&key), &blocks))
+                .unwrap();
+            assert!(!created);
+            assert_eq!(again, retry);
+        }
+    }
+
+    #[test]
+    fn a_key_whose_run_completed_returns_that_run() {
+        let ledger = Ledger::in_memory().unwrap();
+        let vars = Map::new();
+        let blocks = vec!["a".to_string()];
+        let (first, _) = ledger
+            .create_run(new_run(&vars, Some("k"), &blocks))
+            .unwrap();
+        ledger
+            .finish_run(&first, RunStatus::Completed, None)
+            .unwrap();
+
+        let (second, created) = ledger
+            .create_run(new_run(&vars, Some("k"), &blocks))
+            .unwrap();
+
+        assert!(!created);
+        assert_eq!(second, first);
+        assert_eq!(ledger.run(&first).unwrap().unwrap().run.retry_of, None);
+    }
+
+    #[test]
+    fn a_ledger_from_an_earlier_release_gets_the_new_column() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("runs.db");
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(SCHEMA).unwrap();
+            old.execute_batch("ALTER TABLE runs DROP COLUMN retry_of")
+                .ok();
+        }
+        let ledger = Ledger::open(&path).unwrap();
+        let vars = Map::new();
+        let blocks = vec!["a".to_string()];
+        let (id, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
+        assert_eq!(ledger.run(&id).unwrap().unwrap().run.retry_of, None);
     }
 
     #[test]

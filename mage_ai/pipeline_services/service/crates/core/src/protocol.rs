@@ -110,6 +110,9 @@ pub struct RunSummary {
     pub finished_at: Option<String>,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
+    /// The failed or cancelled run this one retries under the same idempotency key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_of: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

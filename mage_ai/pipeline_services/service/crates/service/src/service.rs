@@ -42,7 +42,8 @@ pub struct Service {
     pub environment: String,
     pub started_at: chrono::DateTime<Utc>,
     pub retention_days: u32,
-    /// Variables read from secret files, for block processes.
+    /// The whole environment of block processes: the service's variables without its own
+    /// credentials (see `environment`), and the values read from secret files.
     pub extra_env: Vec<(String, String)>,
     max_total_runs: usize,
     wake: Notify,

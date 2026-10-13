@@ -10,7 +10,10 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// The version the exporter writes. Version 2 adds streams; the service reads 1 and 2, so
+/// services exported before keep working (principle 8: read the previous shape).
+pub const SCHEMA_VERSION: u32 = 2;
+pub const OLDEST_SCHEMA_VERSION: u32 = 1;
 pub const MANIFEST_FILE: &str = "service.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,6 +95,114 @@ pub struct Pipeline {
     /// blocks they are attached to run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditionals: Vec<Conditional>,
+    /// A streaming pipeline: it reads its source without end and its blocks, transformers,
+    /// run on each batch of messages. It has no triggers; the service runs it from start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<Stream>,
+}
+
+/// The source, the sinks and the policies of a streaming pipeline. Connector settings
+/// hold secrets as `$parts` environment references, as io_config profiles do.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Stream {
+    pub source: Connector,
+    pub sinks: Vec<Connector>,
+    #[serde(default)]
+    pub batch: BatchPolicy,
+    #[serde(default)]
+    pub errors: ErrorPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Connector {
+    /// The source or sink block's uuid in the Mage pipeline.
+    pub name: String,
+    pub kind: ConnectorKind,
+    /// For a sink: the block whose output it writes. Mage streams branch, and sinks attach
+    /// after different transformers. A stream without blocks writes the source's messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    #[serde(default)]
+    pub config: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorKind {
+    /// Source: `POST /v1/streams/{pipeline}/messages`. Sink: an HTTP endpoint.
+    Http,
+    /// Sink: one JSON line per message on the service's output, for development.
+    Stdout,
+    Kafka,
+}
+
+impl ConnectorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConnectorKind::Http => "http",
+            ConnectorKind::Stdout => "stdout",
+            ConnectorKind::Kafka => "kafka",
+        }
+    }
+
+    pub fn can_read(self) -> bool {
+        matches!(self, ConnectorKind::Http | ConnectorKind::Kafka)
+    }
+
+    pub fn can_write(self) -> bool {
+        matches!(
+            self,
+            ConnectorKind::Http | ConnectorKind::Stdout | ConnectorKind::Kafka
+        )
+    }
+}
+
+/// How many messages a batch holds before the blocks run on it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct BatchPolicy {
+    pub max_records: usize,
+    /// A batch with fewer records runs after this long, so a quiet stream has no delay
+    /// beyond it.
+    pub max_wait_ms: u64,
+    /// The source waits when a batch reaches this size, whatever its record count.
+    pub max_bytes: usize,
+}
+
+impl Default for BatchPolicy {
+    fn default() -> Self {
+        // Mage's streaming defaults: 100 messages, 500 ms.
+        BatchPolicy {
+            max_records: 100,
+            max_wait_ms: 500,
+            max_bytes: 8 * 1024 * 1024,
+        }
+    }
+}
+
+/// What happens to a batch whose blocks or sinks fail.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ErrorPolicy {
+    pub retries: u32,
+    pub delay_seconds: f64,
+    pub max_delay_seconds: f64,
+    /// Where the records of a batch go after its last retry. Without one the stream stops
+    /// with the error, so no message is dropped quietly.
+    pub dead_letter: Option<Connector>,
+}
+
+impl Default for ErrorPolicy {
+    fn default() -> Self {
+        ErrorPolicy {
+            retries: 3,
+            delay_seconds: 1.0,
+            max_delay_seconds: 30.0,
+            dead_letter: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -298,11 +409,21 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
         let manifest: Manifest = serde_json::from_str(text)
             .map_err(|error| ManifestError(format!("service.json is invalid: {error}")))?;
-        if manifest.schema_version != SCHEMA_VERSION {
+        if !(OLDEST_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&manifest.schema_version) {
             return Err(ManifestError(format!(
-                "service.json has schema version {}; this service reads version {SCHEMA_VERSION}. \
-                 Export the pipelines again with the matching Mage version.",
+                "service.json has schema version {}; this service reads versions \
+                 {OLDEST_SCHEMA_VERSION} to {SCHEMA_VERSION}. Export the pipelines again with \
+                 the matching MageML version.",
                 manifest.schema_version
+            )));
+        }
+        if manifest.schema_version < 2
+            && let Some(pipeline) = manifest.pipelines.iter().find(|p| p.stream.is_some())
+        {
+            return Err(ManifestError(format!(
+                "service.json has schema version {} but pipeline {} is a stream, which needs \
+                 version 2.",
+                manifest.schema_version, pipeline.uuid
             )));
         }
         Ok(manifest)
@@ -447,6 +568,101 @@ fn safe_relative(path: &str) -> bool {
 }
 
 impl Pipeline {
+    fn validate_stream(&self, stream: &Stream) -> Vec<String> {
+        let name = &self.uuid;
+        let mut problems = Vec::new();
+        if !self.triggers.is_empty() {
+            problems.push(format!(
+                "Pipeline {name} is a stream, which runs from the service's start; it cannot \
+                 have triggers."
+            ));
+        }
+        if !stream.source.kind.can_read() {
+            problems.push(format!(
+                "Pipeline {name}: {} cannot be a stream source.",
+                stream.source.kind.as_str()
+            ));
+        }
+        if stream.sinks.is_empty() {
+            problems.push(format!("Pipeline {name} is a stream with no sink."));
+        }
+        let mut names = BTreeSet::from([stream.source.name.as_str()]);
+        let sinks = stream.sinks.iter().chain(stream.errors.dead_letter.iter());
+        for sink in sinks {
+            if !sink.kind.can_write() {
+                problems.push(format!(
+                    "Pipeline {name}: {} cannot be a stream sink.",
+                    sink.kind.as_str()
+                ));
+            }
+            if !names.insert(sink.name.as_str()) {
+                problems.push(format!(
+                    "Pipeline {name}: connector {} appears twice.",
+                    sink.name
+                ));
+            }
+        }
+        // The blocks form a DAG whose roots read the source (ADR-0032); each sink names the
+        // block it writes. The generic checks cover unknown upstreams and cycles.
+        for block in &self.blocks {
+            if block.block_type != BlockType::Transformer {
+                problems.push(format!(
+                    "Pipeline {name}: block {} is a {:?}; a stream's blocks are transformers.",
+                    block.uuid, block.block_type
+                ));
+            }
+            if !matches!(block.language, Language::Python | Language::Rust) {
+                problems.push(format!(
+                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python or Rust.",
+                    block.uuid, block.language
+                ));
+            }
+        }
+        if stream.source.after.is_some() {
+            problems.push(format!(
+                "Pipeline {name}: the source {} cannot follow a block.",
+                stream.source.name
+            ));
+        }
+        for sink in &stream.sinks {
+            match (&sink.after, self.blocks.is_empty()) {
+                (Some(after), _) if self.block(after).is_none() => problems.push(format!(
+                    "Pipeline {name}: sink {} follows {after}, which is not a block of the \
+                     stream.",
+                    sink.name
+                )),
+                (None, false) => problems.push(format!(
+                    "Pipeline {name}: sink {} must name the block whose output it writes.",
+                    sink.name
+                )),
+                _ => {}
+            }
+        }
+        if let Some(dead_letter) = &stream.errors.dead_letter
+            && dead_letter.after.is_some()
+        {
+            problems.push(format!(
+                "Pipeline {name}: the dead-letter sink {} receives failed messages of any \
+                 block; it cannot follow one.",
+                dead_letter.name
+            ));
+        }
+        let batch = &stream.batch;
+        if batch.max_records == 0 || batch.max_bytes < 1024 {
+            problems.push(format!(
+                "Pipeline {name}: a batch needs at least 1 record and 1024 bytes."
+            ));
+        }
+        let errors = &stream.errors;
+        let delays = [errors.delay_seconds, errors.max_delay_seconds];
+        if delays.iter().any(|d| !d.is_finite() || *d < 0.0) {
+            problems.push(format!(
+                "Pipeline {name}: the stream's retry delays must be numbers of 0 or more."
+            ));
+        }
+        problems
+    }
+
     pub fn block(&self, uuid: &str) -> Option<&Block> {
         self.blocks.iter().find(|b| b.uuid == uuid)
     }
@@ -508,8 +724,12 @@ impl Pipeline {
     fn validate(&self, project_dir: Option<&Path>) -> Vec<String> {
         let mut problems = Vec::new();
         let name = &self.uuid;
-        if self.blocks.is_empty() {
+        // A stream may send its source's messages to its sinks with no block between.
+        if self.blocks.is_empty() && self.stream.is_none() {
             problems.push(format!("Pipeline {name} has no blocks."));
+        }
+        if let Some(stream) = &self.stream {
+            problems.extend(self.validate_stream(stream));
         }
         let mut seen = BTreeSet::new();
         for block in &self.blocks {
@@ -742,8 +962,8 @@ mod tests {
                 .0
                 .contains("surprise")
         );
-        let newer = text.replacen("\"schema_version\":1", "\"schema_version\":2", 1);
-        assert!(Manifest::parse(&newer).unwrap_err().0.contains("version 2"));
+        let newer = text.replacen("\"schema_version\":1", "\"schema_version\":3", 1);
+        assert!(Manifest::parse(&newer).unwrap_err().0.contains("version 3"));
     }
 
     #[test]
@@ -841,5 +1061,168 @@ mod tests {
             problems.contains("names no pipeline to follow"),
             "{problems}"
         );
+    }
+
+    fn stream_manifest(blocks: Value, stream: Value) -> Manifest {
+        let mut manifest = manifest(blocks);
+        manifest.pipelines[0].stream = Some(serde_json::from_value(stream).unwrap());
+        manifest
+    }
+
+    fn kafka_to_http() -> Value {
+        json!({
+            "source": {"name": "orders", "kind": "kafka", "config": {
+                "bootstrap_server": "kafka:9092", "topic": "orders",
+                "sasl_password": {"$parts": [{"env": "KAFKA_PASSWORD"}]}
+            }},
+            "sinks": [{"name": "scores", "kind": "http", "after": "score",
+                       "config": {"url": "http://x/y"}}]
+        })
+    }
+
+    #[test]
+    fn a_stream_parses_with_its_defaults_and_secret_references() {
+        let blocks = json!([block("clean", &[]), block("score", &["clean"])]);
+        let manifest = stream_manifest(blocks, kafka_to_http());
+
+        assert!(
+            manifest.validate(None).is_empty(),
+            "{:?}",
+            manifest.validate(None)
+        );
+        let stream = manifest.pipelines[0].stream.as_ref().unwrap();
+        assert_eq!(stream.batch, BatchPolicy::default());
+        assert_eq!(stream.batch.max_records, 100);
+        assert_eq!(stream.errors.retries, 3);
+        assert!(stream.errors.dead_letter.is_none());
+        let password = &stream.source.config["sasl_password"];
+        assert_eq!(
+            crate::io_config::variables(password),
+            vec!["KAFKA_PASSWORD"]
+        );
+    }
+
+    #[test]
+    fn a_stream_may_have_no_blocks_but_needs_a_sink() {
+        let mut stream = kafka_to_http();
+        stream["sinks"][0].as_object_mut().unwrap().remove("after");
+        assert!(
+            stream_manifest(json!([]), stream.clone())
+                .validate(None)
+                .is_empty()
+        );
+
+        stream["sinks"] = json!([]);
+        let problems = stream_manifest(json!([]), stream).validate(None).join("\n");
+        assert!(problems.contains("is a stream with no sink"), "{problems}");
+    }
+
+    #[test]
+    fn a_stream_branches_and_sinks_follow_any_block() {
+        let blocks = json!([
+            block("clean", &[]),
+            block("score", &["clean"]),
+            block("audit", &["clean"])
+        ]);
+        let mut stream = kafka_to_http();
+        stream["sinks"] = json!([
+            {"name": "scores", "kind": "kafka", "after": "score"},
+            {"name": "audit_log", "kind": "stdout", "after": "audit"}
+        ]);
+
+        let manifest = stream_manifest(blocks, stream);
+
+        assert!(
+            manifest.validate(None).is_empty(),
+            "{:?}",
+            manifest.validate(None)
+        );
+    }
+
+    #[test]
+    fn stream_blocks_are_transformers_and_sinks_name_a_block() {
+        let mut loader = block("load", &[]);
+        loader["type"] = json!("data_loader");
+        let mut stream = kafka_to_http();
+        stream["sinks"] = json!([
+            {"name": "a", "kind": "kafka", "after": "missing"},
+            {"name": "b", "kind": "kafka"}
+        ]);
+        stream["errors"] = json!({"dead_letter": {"name": "dl", "kind": "kafka", "after": "load"}});
+
+        let problems = stream_manifest(json!([loader]), stream)
+            .validate(None)
+            .join("\n");
+
+        assert!(
+            problems.contains("a stream's blocks are transformers"),
+            "{problems}"
+        );
+        assert!(problems.contains("sink a follows missing"), "{problems}");
+        assert!(
+            problems.contains("sink b must name the block"),
+            "{problems}"
+        );
+        assert!(problems.contains("dead-letter sink dl"), "{problems}");
+    }
+
+    #[test]
+    fn a_stream_has_no_triggers_and_connectors_in_their_roles() {
+        let mut manifest = stream_manifest(
+            json!([]),
+            json!({
+                "source": {"name": "out", "kind": "stdout"},
+                "sinks": [{"name": "out", "kind": "kafka"}],
+                "batch": {"max_records": 0}
+            }),
+        );
+        manifest.pipelines[0].triggers = serde_json::from_value(json!([
+            {"name": "daily", "kind": "time", "schedule": "@daily", "active": true}
+        ]))
+        .unwrap();
+
+        let problems = manifest.validate(None).join("\n");
+
+        assert!(problems.contains("cannot have triggers"), "{problems}");
+        assert!(
+            problems.contains("stdout cannot be a stream source"),
+            "{problems}"
+        );
+        assert!(
+            problems.contains("connector out appears twice"),
+            "{problems}"
+        );
+        assert!(problems.contains("at least 1 record"), "{problems}");
+    }
+
+    #[test]
+    fn an_unknown_connector_kind_is_an_error() {
+        let stream = json!({"source": {"name": "s", "kind": "carrier_pigeon"}, "sinks": []});
+        assert!(serde_json::from_value::<Stream>(stream).is_err());
+    }
+
+    #[test]
+    fn versions_1_and_2_are_read_and_streams_need_2() {
+        let mut value = serde_json::to_value(manifest(json!([block("a", &[])]))).unwrap();
+        for version in [1, 2] {
+            value["schema_version"] = json!(version);
+            assert!(
+                Manifest::parse(&value.to_string()).is_ok(),
+                "version {version}"
+            );
+        }
+        value["schema_version"] = json!(3);
+        let error = Manifest::parse(&value.to_string()).unwrap_err().0;
+        assert!(error.contains("reads versions 1 to 2"), "{error}");
+
+        let mut stream = serde_json::to_value(stream_manifest(json!([]), kafka_to_http())).unwrap();
+        stream["schema_version"] = json!(1);
+        let error = Manifest::parse(&stream.to_string()).unwrap_err().0;
+        assert!(
+            error.contains("is a stream, which needs version 2"),
+            "{error}"
+        );
+        stream["schema_version"] = json!(2);
+        assert!(Manifest::parse(&stream.to_string()).is_ok());
     }
 }

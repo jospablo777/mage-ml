@@ -2,6 +2,7 @@
 
 mod api;
 mod aws;
+mod environment;
 mod executor;
 mod ibm;
 mod ledger;
@@ -125,7 +126,8 @@ struct ServeArgs {
     /// Mage does not run the same schedule twice.
     #[arg(long, env = "MAGE_SERVICE_SCHEDULES", value_enum, default_value_t = Switch::Off)]
     schedules: Switch,
-    /// The token for every API call. Without one, the service makes one and prints it.
+    /// The token for every API call. Without one, a service listening on loopback makes one
+    /// and writes it to `service-token` in its data directory; any other address needs one.
     #[arg(long, env = "MAGE_SERVICE_TOKEN", hide_env_values = true)]
     token: Option<String>,
     /// A token that can only read runs, logs and the snapshot.
@@ -412,11 +414,28 @@ async fn start_service(
             missing_optional.join(", ")
         ));
     }
-    let extra_env: Vec<(String, String)> = secrets
-        .additions
+    // Block processes start from an empty environment: the service's variables without its
+    // own credentials, then the values read from secret files.
+    let declared: std::collections::BTreeSet<String> = manifest
+        .environment
         .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
+        .map(|v| v.name.clone())
         .collect();
+    let extra_env: Vec<(String, String)> = environment::block_environment(
+        std::env::vars(),
+        &declared,
+        &environment::pass_list(),
+        environment::Mode::from_env(),
+    )
+    .into_iter()
+    .filter(|(name, _)| !secrets.additions.contains_key(name))
+    .chain(
+        secrets
+            .additions
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    )
+    .collect();
     let data = data_dir(common);
     service::ensure_dir(&data.join("runs"))
         .map_err(|e| format!("Could not create {}: {e}", data.display()))?;
@@ -536,17 +555,7 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
             None
         }
         (Switch::On, Some(token)) => Some(token),
-        (Switch::On, None) => {
-            let token = format!(
-                "{}{}",
-                uuid::Uuid::new_v4().simple(),
-                uuid::Uuid::new_v4().simple()
-            );
-            log::info(&format!(
-                "No MAGE_SERVICE_TOKEN is set; this run of the service accepts the token {token}"
-            ));
-            Some(token)
-        }
+        (Switch::On, None) => Some(generated_token(&args.host, &service.data_dir)?),
     };
     let state = api::AppState {
         service: service.clone(),
@@ -615,6 +624,61 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
     log::info("Stopped.");
     Ok(ExitCode::SUCCESS)
+}
+
+/// Without a configured token, a service that only listens on loopback makes one and keeps
+/// it in a file only its user can read. The token used to be printed in the log, where
+/// anyone with access to the logs could take it; a service other hosts can reach must be
+/// given a token.
+fn generated_token(host: &str, data_dir: &Path) -> Result<String, String> {
+    if !is_loopback(host) {
+        return Err(format!(
+            "No MAGE_SERVICE_TOKEN is set and the service listens on {host}, which other hosts \
+             can reach. Set MAGE_SERVICE_TOKEN (or MAGE_SERVICE_TOKEN_FILE), or \
+             MAGE_SERVICE_AUTH=off for a service no one else can reach."
+        ));
+    }
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let path = data_dir.join(TOKEN_FILE);
+    write_private(&path, &token).map_err(|e| {
+        format!(
+            "Could not write the service token to {}: {e}",
+            path.display()
+        )
+    })?;
+    log::info(&format!(
+        "No MAGE_SERVICE_TOKEN is set; this run of the service made a token, in {}",
+        path.display()
+    ));
+    Ok(token)
+}
+
+pub const TOKEN_FILE: &str = "service-token";
+
+fn is_loopback(host: &str) -> bool {
+    host == "localhost"
+        || host
+            .trim_matches(|c| c == '[' || c == ']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    // An existing file keeps its mode; make it private before writing.
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    file.write_all(text.as_bytes())
 }
 
 async fn shutdown_signal() {
@@ -820,5 +884,46 @@ fn format_ms(ms: u64) -> String {
         format!("{:.2} s", ms as f64 / 1000.0)
     } else {
         format!("{}m {:02}s", ms / 60_000, (ms % 60_000) / 1000)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn loopback_addresses() {
+        for host in ["127.0.0.1", "::1", "[::1]", "localhost", "127.0.0.2"] {
+            assert!(is_loopback(host), "{host}");
+        }
+        for host in ["0.0.0.0", "::", "10.0.0.5", "example.com"] {
+            assert!(!is_loopback(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_reachable_service_needs_a_token() {
+        let folder = tempfile::tempdir().unwrap();
+
+        let error = generated_token("0.0.0.0", folder.path()).unwrap_err();
+
+        assert!(error.contains("Set MAGE_SERVICE_TOKEN"), "{error}");
+        assert!(!folder.path().join(TOKEN_FILE).exists());
+    }
+
+    #[test]
+    fn a_loopback_service_keeps_its_token_in_a_private_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join(TOKEN_FILE);
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let token = generated_token("127.0.0.1", folder.path()).unwrap();
+
+        assert_eq!(token.len(), 64);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), token);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

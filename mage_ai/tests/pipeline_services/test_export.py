@@ -374,14 +374,19 @@ class CaptureTest(ExportTestCase):
         self.assertFalse((out / 'build/mage_service/target').exists())
         self.assertFalse((out / 'python/mage_ai/frontend').exists())
         self.assertTrue((out / self.project.name / 'utils' / 'rates.py').is_file())
+        # compose stops without a token; it defaulted to change-me, a token everyone knew.
+        compose = (out / 'compose.yaml').read_text()
+        self.assertIn('MAGE_SERVICE_TOKEN: ${MAGE_SERVICE_TOKEN:?', compose)
+        self.assertNotIn('change-me', compose)
         dockerfile = (out / 'Dockerfile').read_text()
         self.assertIn('USER mage', dockerfile)
         self.assertIn('RUN mage-service validate', dockerfile)
         # Placeholders are all filled; the shell variables stay.
         self.assertNotIn('$', (out / 'README.md').read_text().split('## Call it')[0]
-                         .replace('$TOKEN', '').replace('$IBM_CLOUD_API_KEY', ''))
+                         .replace('$(openssl', '').replace('$TOKEN', '')
+                         .replace('$IBM_CLOUD_API_KEY', ''))
         manifest = json.loads((out / 'service.json').read_text())
-        self.assertEqual(manifest['schema_version'], 1)
+        self.assertEqual(manifest['schema_version'], 2)
 
         # Deployment files for IBM Cloud and Kubernetes, named after the service.
         import yaml

@@ -12,7 +12,8 @@ $rows
 
 ```bash
 docker build -t $name .
-docker run --rm -p 8080:8080 -e MAGE_SERVICE_TOKEN=change-me -v $name-data:/var/lib/mage-service $name
+export TOKEN=$$(openssl rand -hex 32)   # keep it: every API call needs it
+docker run --rm -p 8080:8080 -e MAGE_SERVICE_TOKEN="$$TOKEN" -v $name-data:/var/lib/mage-service $name
 ```
 
 Or `docker compose up --build`. Variables the blocks read with `env_var(...)`, such as
@@ -51,7 +52,7 @@ again into the same folder and commit the diff: the export keeps `.git`, `.env` 
 ## Call it
 
 ```bash
-export TOKEN=change-me
+# The token you started the service with.
 # Start a run and wait for it, up to 10 minutes:
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   "http://localhost:8080/v1/pipelines/$first/runs?wait=600" -d '{"variables": {}}'

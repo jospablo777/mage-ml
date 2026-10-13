@@ -36,7 +36,7 @@ import yaml
 
 from mage_ai.pipeline_services.secrets import secret_variable_name
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = MAGE_ROOT.parent
 # The service's Rust workspace ships inside the package, as the Rust block SDK does.
@@ -1912,8 +1912,9 @@ services:
     ports:
       - "127.0.0.1:${{PORT:-8080}}:8080"
     environment:
-      # Every API call needs this token; set your own.
-      MAGE_SERVICE_TOKEN: ${{MAGE_SERVICE_TOKEN:-change-me}}
+      # Every API call needs this token. compose stops when it is not set (in .env or the
+      # shell): a default would be a token everyone knows.
+      MAGE_SERVICE_TOKEN: ${{MAGE_SERVICE_TOKEN:?Set MAGE_SERVICE_TOKEN in .env or the shell}}
       # on: this service runs the active time triggers. Keep it off while Mage runs them.
       MAGE_SERVICE_SCHEDULES: ${{MAGE_SERVICE_SCHEDULES:-off}}
     env_file:

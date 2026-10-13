@@ -699,6 +699,99 @@ def _user_traceback() -> str:
     return ''.join(lines)
 
 
+# ---- streams ------------------------------------------------------------------------
+
+# A stream's blocks are compiled once per worker: their top-level code, such as loading a
+# model, runs once instead of for every batch. A changed file has another sha256.
+_STREAM_FUNCTIONS: Dict[Tuple[str, str], Callable] = {}
+
+
+def _stream_function(block: Dict) -> Callable:
+    key = (block['file'], block.get('sha256') or '')
+    function = _STREAM_FUNCTIONS.get(key)
+    if function is not None:
+        return function
+    functions: List[Callable] = []
+    namespace = {
+        '__name__': f"mage_block_{block['uuid']}",
+        '__file__': block['file'],
+        'transformer': _decorator(functions),
+        'test': _decorator([]),
+        'preprocesser': _decorator([]),
+    }
+    try:
+        with open(block['file']) as file:
+            exec(compile(file.read(), block['file'], 'exec'), namespace)
+    except Exception as error:
+        raise BlockError('load', f'{type(error).__name__}: {error}', traceback.format_exc(),
+                         block_uuid=block['uuid'])
+    if not functions:
+        raise BlockError('load', f"Block {block['uuid']} has no function decorated with "
+                         '@transformer.', block_uuid=block['uuid'])
+    _STREAM_FUNCTIONS[key] = functions[0]
+    return functions[0]
+
+
+def _check_finite(value: Any, block_uuid: str, path: str = 'messages') -> None:
+    """
+    Messages travel as JSON, which has no NaN or infinity. They used to become null without a
+    word; the block now fails with the field, so the user decides (None, a string, a filter).
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        raise BlockError('run', f'Block {block_uuid} returned {value} at {path}; stream messages '
+                         'are JSON, which has no NaN or infinity. Return None or a string.',
+                         block_uuid=block_uuid)
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _check_finite(item, block_uuid, f'{path}.{key}')
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _check_finite(item, block_uuid, f'{path}[{index}]')
+
+
+def _stream_messages(value: Any, block_uuid: str) -> List:
+    """A stream transformer returns a list of messages, a DataFrame, one message or None."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    if hasattr(value, 'to_dicts'):  # Polars
+        return value.to_dicts()
+    if hasattr(value, 'to_dict') and hasattr(value, 'columns'):  # pandas
+        return value.to_dict('records')
+    raise BlockError('run', f'Block {block_uuid} returned {type(value).__name__}; a stream '
+                     'transformer returns a list of messages or a DataFrame.',
+                     block_uuid=block_uuid)
+
+
+def run_stream_batch(request: Dict) -> Dict:
+    """
+    Runs a stream's blocks, in order, on one batch of messages, as Mage's streaming
+    transformers do: each gets the list of messages and returns the list for the next.
+    """
+    messages = request['messages']
+    timings = []
+    for block in request['chain']:
+        function = _stream_function(block)
+        kwargs = _kwargs(request, block)
+        print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
+        started = time.monotonic()
+        try:
+            result = _call(function, [messages], kwargs)
+        except Exception as error:
+            raise BlockError('run', f'{type(error).__name__}: {error}', _user_traceback(),
+                             block_uuid=block['uuid'])
+        messages = _stream_messages(result, block['uuid'])
+        _check_finite(messages, block['uuid'])
+        timings.append(dict(block_uuid=block['uuid'],
+                            seconds=round(time.monotonic() - started, 6)))
+        if not messages:
+            break
+    return dict(messages=messages, blocks=timings)
+
+
 # ---- protocol -----------------------------------------------------------------------
 
 
@@ -707,13 +800,26 @@ def _reply(channel, message: Dict) -> None:
     channel.flush()
 
 
+def _protocol_fd(variable: str, default: Optional[int]) -> Optional[int]:
+    """A protocol descriptor, made non-inheritable so programs a block starts cannot use it."""
+    value = os.environ.get(variable)
+    fd = int(value) if value else default
+    if fd is not None:
+        os.set_inheritable(fd, False)
+    return fd
+
+
 def serve(requests=None, channel=None) -> None:
-    requests = requests or sys.stdin
+    # Requests come on the descriptor MAGE_WORKER_REQUEST_FD names (the service uses 4 and
+    # gives the worker /dev/null as stdin), or on stdin when it is not set.
+    if requests is None:
+        request_fd = _protocol_fd('MAGE_WORKER_REQUEST_FD', None)
+        requests = (os.fdopen(request_fd, 'r', encoding='utf-8')
+                    if request_fd is not None else sys.stdin)
     # Replies go to file descriptor 3, or the one MAGE_WORKER_REPLY_FD names.
-    reply_fd = int(os.environ.get('MAGE_WORKER_REPLY_FD') or 3)
-    channel = channel or io.TextIOWrapper(
-        os.fdopen(reply_fd, 'wb', buffering=0), encoding='utf-8',
-    )
+    if channel is None:
+        reply_fd = _protocol_fd('MAGE_WORKER_REPLY_FD', 3)
+        channel = io.TextIOWrapper(os.fdopen(reply_fd, 'wb', buffering=0), encoding='utf-8')
     _reply(channel, dict(type='ready', protocol=PROTOCOL_VERSION, pid=os.getpid(),
                          python=sys.version.split()[0]))
     for line in requests:
@@ -726,7 +832,10 @@ def serve(requests=None, channel=None) -> None:
             _reply(channel, dict(type='bye', id=request_id))
             return
         try:
-            result = run_block(request)
+            if request.get('op') == 'stream':
+                result = run_stream_batch(request)
+            else:
+                result = run_block(request)
             message = dict(type='result', id=request_id, ok=True, **result)
         except BlockError as error:
             message = dict(type='result', id=request_id, ok=False, error=dict(

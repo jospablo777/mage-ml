@@ -1,13 +1,15 @@
 //! Python blocks run in long-lived worker processes (`mage_ai/pipeline_services/runtime/worker.py`).
 //!
-//! A worker serves one block at a time: the request goes to its stdin as one JSON line and
-//! the reply comes back on file descriptor 3, so whatever the block prints on stdout and
-//! stderr stays a log line of that block. Idle workers wait in a pool, so a block pays no
+//! A worker serves one block at a time: the request goes to file descriptor 4 as one JSON
+//! line and the reply comes back on file descriptor 3, so whatever the block prints on
+//! stdout and stderr stays a log line of that block. Its stdin is /dev/null: a block that
+//! read stdin used to read the next requests. The worker marks both descriptors
+//! non-inheritable, so programs a block starts cannot reach them. Idle workers wait in a pool, so a block pays no
 //! interpreter start-up or imports. A worker that times out, crashes or served its quota of
 //! blocks is killed with its process group and replaced.
 
 use std::io::{BufRead, BufReader};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt as _;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -16,7 +18,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as AsyncBufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{Child, Command};
 use tokio::sync::{Semaphore, mpsc};
 
 use crate::log::RunLog;
@@ -38,7 +40,7 @@ type LogTarget = Arc<Mutex<Option<(RunLog, String)>>>;
 struct Worker {
     child: Child,
     pid: u32,
-    stdin: ChildStdin,
+    requests: tokio::fs::File,
     replies: mpsc::Receiver<String>,
     log_target: LogTarget,
     blocks_served: u32,
@@ -107,28 +109,25 @@ impl PythonPool {
     }
 
     async fn spawn(&self) -> Result<Worker, WorkerError> {
-        let mut fds = [0; 2];
-        // SAFETY: pipe writes two new descriptors into the array.
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(WorkerError::Start(format!(
-                "could not create the reply pipe: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        // SAFETY: both descriptors were just created and are owned here.
-        let (read_end, write_end) =
-            unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-        let write_raw = fds[1];
-        let read_raw = fds[0];
+        let (read_end, write_end) = pipe("reply")?;
+        let (request_read, request_write) = pipe("request")?;
+        let write_raw = write_end.as_raw_fd();
+        let read_raw = read_end.as_raw_fd();
+        let request_read_raw = request_read.as_raw_fd();
+        let request_write_raw = request_write.as_raw_fd();
 
         let mut command = std::process::Command::new(&self.config.executable);
+        // `config.env` is the worker's whole environment; nothing else is inherited, so the
+        // service's own credentials never reach block code.
         command
+            .env_clear()
             .arg("-u")
             .arg(&self.config.worker_script)
             .current_dir(&self.config.project_dir)
             .env("MAGE_REPO_PATH", &self.config.project_dir)
             .env("PYTHONUNBUFFERED", "1")
-            .stdin(Stdio::piped())
+            .env("MAGE_WORKER_REQUEST_FD", "4")
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             // Its own process group: a timeout kills the block's child processes too.
@@ -139,12 +138,27 @@ impl PythonPool {
         // SAFETY: only async-signal-safe calls between fork and exec.
         unsafe {
             command.pre_exec(move || {
-                if libc::dup2(write_raw, 3) < 0 {
+                // Move both ends above 9 first, so placing one on 3 or 4 cannot overwrite the
+                // other whatever numbers the pipes got.
+                let reply = libc::fcntl(write_raw, libc::F_DUPFD, 10);
+                let request = libc::fcntl(request_read_raw, libc::F_DUPFD, 10);
+                if reply < 0 || request < 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                libc::close(read_raw);
-                if write_raw != 3 {
-                    libc::close(write_raw);
+                if libc::dup2(reply, 3) < 0 || libc::dup2(request, 4) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                for fd in [
+                    reply,
+                    request,
+                    write_raw,
+                    read_raw,
+                    request_read_raw,
+                    request_write_raw,
+                ] {
+                    if fd != 3 && fd != 4 {
+                        libc::close(fd);
+                    }
                 }
                 Ok(())
             });
@@ -159,6 +173,8 @@ impl PythonPool {
                 ))
             })?;
         drop(write_end);
+        drop(request_read);
+        let requests = tokio::fs::File::from_std(std::fs::File::from(request_write));
         let pid = child.id().unwrap_or(0);
 
         let (reply_tx, mut replies) = mpsc::channel::<String>(4);
@@ -188,10 +204,6 @@ impl PythonPool {
                 Some(stderr_tail.clone()),
             );
         }
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| WorkerError::Start("the worker has no stdin".into()))?;
 
         let ready = tokio::time::timeout(Duration::from_secs(120), replies.recv()).await;
         match ready {
@@ -222,7 +234,7 @@ impl PythonPool {
         Ok(Worker {
             child,
             pid,
-            stdin,
+            requests,
             replies,
             log_target,
             blocks_served: 0,
@@ -267,10 +279,10 @@ impl PythonPool {
             let mut line = serde_json::to_string(&request)
                 .map_err(|e| WorkerError::Protocol(e.to_string()))?;
             line.push('\n');
-            if worker.stdin.write_all(line.as_bytes()).await.is_err() {
+            if worker.requests.write_all(line.as_bytes()).await.is_err() {
                 return Err(WorkerError::Crashed(String::new()));
             }
-            let _ = worker.stdin.flush().await;
+            let _ = worker.requests.flush().await;
             match worker.replies.recv().await {
                 Some(reply) => serde_json::from_str::<Value>(&reply)
                     .map_err(|e| WorkerError::Protocol(e.to_string())),
@@ -352,8 +364,8 @@ impl PythonPool {
 }
 
 async fn retire(mut worker: Worker) {
-    let _ = worker.stdin.write_all(b"{\"op\":\"shutdown\"}\n").await;
-    let _ = worker.stdin.flush().await;
+    let _ = worker.requests.write_all(b"{\"op\":\"shutdown\"}\n").await;
+    let _ = worker.requests.flush().await;
     if tokio::time::timeout(Duration::from_secs(5), worker.child.wait())
         .await
         .is_err()
@@ -361,6 +373,25 @@ async fn retire(mut worker: Worker) {
         kill_group(worker.pid);
         let _ = worker.child.wait().await;
     }
+}
+
+/// A pipe whose descriptors close on exec in the service: only the worker's copies, placed
+/// on 3 and 4 before exec, survive.
+fn pipe(name: &str) -> Result<(OwnedFd, OwnedFd), WorkerError> {
+    let mut fds = [0; 2];
+    // SAFETY: pipe writes two new descriptors into the array.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(WorkerError::Start(format!(
+            "could not create the {name} pipe: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    for fd in fds {
+        // SAFETY: fd was just created and is valid.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    // SAFETY: both descriptors were just created and are owned here.
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
 pub fn kill_group(pid: u32) {

@@ -137,11 +137,14 @@ the logs go to stderr, so the output can be piped.
 
 ## 3. Call it
 
-Every call needs the token: `Authorization: Bearer <token>`. Without
-`MAGE_SERVICE_TOKEN`, the service makes a token at start and prints it in its log.
+Every call needs the token: `Authorization: Bearer <token>`. A service that other hosts can
+reach does not start without `MAGE_SERVICE_TOKEN`; one listening only on 127.0.0.1 makes a
+token and writes it to `service-token` in its data directory, readable only by its user. The
+token never appears in the log.
 
 ```bash
-export TOKEN=change-me
+# The token you started the service with, such as one from: openssl rand -hex 32
+export TOKEN=...
 # Start a run and wait up to 10 minutes for its outcome:
 curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   "http://localhost:8080/v1/pipelines/sales_pipeline/runs?wait=600" \
@@ -451,7 +454,7 @@ On serverless platforms without a volume, the run history lasts as long as the i
 
 | Variable | Default | |
 | --- | --- | --- |
-| `MAGE_SERVICE_TOKEN` | made at start | Token for every API call (`_FILE` works) |
+| `MAGE_SERVICE_TOKEN` | required unless on 127.0.0.1 | Token for every API call (`_FILE` works); on 127.0.0.1 a made token goes to `service-token` in the data directory |
 | `MAGE_SERVICE_READ_TOKEN` | none | Read-only token |
 | `MAGE_SERVICE_SCHEDULES` | `off` | `on` runs the time triggers |
 | `MAGE_SERVICE_MAX_RUNS` | `8` | Runs of all pipelines at once |
@@ -465,6 +468,18 @@ On serverless platforms without a volume, the run history lasts as long as the i
 | `MAGE_SERVICE_CHAINS` | `on` | `off` runs every block on its own |
 | `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
+| `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |
+| `MAGE_SERVICE_PASS_ENV` | none | In strict mode, more variables for blocks: names or `PREFIX_*` patterns, separated by commas |
+
+### What block code can read
+
+Blocks run in processes that start from an empty environment. They get every variable of the
+service except the service's own: the API tokens, `MAGE_SERVICE_SECRETS`, the IBM Cloud key the
+service reads secrets with, and the other `MAGE_SERVICE_` settings (`MAGE_SERVICE_ENV` and
+`MAGE_SERVICE_LOG_LEVEL` pass). Values read from secret files and managers reach the blocks.
+Libraries that read their own variables, such as `MLFLOW_TRACKING_URI` or cloud credentials,
+keep working. `MAGE_SERVICE_WORKER_ENV=strict` narrows the rest to system variables, the
+variables the export lists and `MAGE_SERVICE_PASS_ENV`.
 
 ## How it runs your blocks
 
