@@ -185,6 +185,20 @@ class StreamManifestTest(StreamExportTestCase):
         manifest = json.loads((out / 'service.json').read_text())
         self.assertEqual(manifest['pipelines'][0]['stream']['source']['kind'], 'kafka')
 
+    def test_a_stream_service_installs_only_what_its_blocks_import(self):
+        """
+        Stream blocks pass JSON messages: pandas, pyarrow and NumPy (about 300 MB of the image)
+        go in only when a block imports them.
+        """
+        self.stream()
+        plain = export.capture(self.repo_path, [self.pipeline.uuid]).requirements
+        self.assertFalse({'pandas', 'pyarrow', 'numpy'} & set(plain), plain)
+
+        clean = Path(self.pipeline.get_block(f'{self.pipeline.uuid}_clean').file_path)
+        clean.write_text('import pandas as pd\n' + clean.read_text())
+        with_pandas = export.capture(self.repo_path, [self.pipeline.uuid]).requirements
+        self.assertIn('pandas', with_pandas)
+
     def test_the_engine_accepts_the_exported_stream(self):
         if not SERVICE_BINARY.is_file():
             self.skipTest('needs the mage-service binary (cargo build)')

@@ -208,6 +208,10 @@ jobs:
           docker run --rm --entrypoint sh stream-export -c \
             'ldd /usr/local/bin/mage-service; ! ldd /usr/local/bin/mage-service | grep -q "not found"'
           docker run --rm stream-export validate
+      - name: The stream blocks run with the packages the image holds
+        run: >-
+          docker run --rm -v "$PWD/scripts/ci:/check:ro" --entrypoint python3 stream-export
+          /check/stream_worker_check.py
 
   # Integration tests in parallel jobs, one per group: each starts only its services.
   # "Integration" groups test external tools; "MageML" groups test MageML's own pipelines.

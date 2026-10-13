@@ -1627,7 +1627,11 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
         m for m in modules
         if m.split('.')[0] not in local_tops and m.split('.')[0] not in sys.stdlib_module_names
     )
-    candidates += ['pyarrow', 'pandas']
+    # Batch blocks pass tables as Arrow and the worker reads them with pandas; stream blocks
+    # pass JSON messages, so a stream-only service gets them only when its blocks import them.
+    batch = any(not p.get('stream') for p in capture_.manifest['pipelines'])
+    if batch:
+        candidates += ['pyarrow', 'pandas']
     candidates += sorted(capture_.artifact_modules)
     # MageML modules that import a package inside a function, which the import below misses.
     for module, packages in LAZY_IMPORTS.items():
@@ -1700,7 +1704,7 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
         name, version = owner
         if name not in EXCLUDED_DISTRIBUTIONS:
             pinned[name] = version
-    for name in BASE_PACKAGES:
+    for name in BASE_PACKAGES if batch else ():
         pinned.setdefault(name, importlib.metadata.version(name))
     # Dependencies of the pinned distributions, so pip resolves nothing differently.
     pending = list(pinned)
