@@ -10,7 +10,7 @@ with their causes, and how to run the same checks on your machine before pushing
 | --- | --- | --- | --- | --- |
 | Unit tests | `mage_ai/tests`, `mage_integrations/mage_integrations/tests`, `vendor/singer-python/tests` (about 6,400) | pytest | Python only; Rust and R tests skip without `cargo` or `Rscript` | test_backend |
 | Integration tests | `integration_tests/<service>` (about 930) | pytest with xdist | The Docker services of `integration_tests/compose.yaml`, R with rv, Rust | Integration tests |
-| Scheduler soak tests | `integration_tests/soak` | pytest | PostgreSQL | Integration tests |
+| Scheduler soak tests | `integration_tests/soak` | pytest | PostgreSQL, Redis | Integration tests |
 | mageml R package | `mage_ai/data_preparation/models/block/r/mageml/tests`, run by `integration_tests/r/test_mageml_package.py` (testthat, lintr, roxygen, `R CMD check`) | pytest | R and the rv environment | Integration tests |
 | Rust | ColumnAtlas (`rust/column_atlas`), the block SDK, the pipeline service crates | cargo test | Rust | Rust extension |
 | Frontend unit tests | `mage_ai/frontend/tests/unit/*.unit.mjs` | `node --test` | Node | test_backend |
@@ -126,7 +126,7 @@ services, and fails when one of its tests is skipped.
 | Integration: ML and HTTP services | `feast`, `mlflow`, `api` | Feast (with PostgreSQL and Redis), MLflow, the test HTTP API | No | No |
 | MageML: compiled and polyglot pipelines | `chains`, `tutorials`, `benchmark`, `r` | PostgreSQL | Yes | Yes |
 | MageML: pipeline shape study | `topologies` | PostgreSQL, for the warm-up | Yes | Yes |
-| MageML: scheduler soak | `soak`, plain and with block fusion | PostgreSQL | No | No |
+| MageML: scheduler soak | `soak`, plain and with block fusion | PostgreSQL, Redis | No | No |
 
 A new test folder goes into one group in `.github/workflows/build_and_test.yml`, with the
 services it needs. The Rust groups share one build cache (the repository's caches are

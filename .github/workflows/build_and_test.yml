@@ -222,7 +222,7 @@ jobs:
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
           - id: soak
             name: "MageML: scheduler soak"
-            services: postgres
+            services: postgres redis
             tests: ""
             r: false
             warm: ""
@@ -310,11 +310,11 @@ jobs:
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
         if: matrix.id == 'soak'
-        run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
+        run: make -C integration_tests test-soak SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
       # The same with block fusion: chains run as stages, through crashes and retries.
       - name: Run the scheduler soak test with block fusion
         if: matrix.id == 'soak'
-        run: make -C integration_tests test-soak-fusion PYTEST_ARGS='--junitxml=integration_tests/soak-fusion-results.xml'
+        run: make -C integration_tests test-soak-fusion SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-fusion-results.xml'
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml

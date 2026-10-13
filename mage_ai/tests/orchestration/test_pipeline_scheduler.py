@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytz
 import yaml
 from freezegun import freeze_time
+from sqlalchemy import update
 
 from mage_ai.data_preparation.models.constants import PipelineType
 from mage_ai.data_preparation.models.triggers import (
@@ -853,6 +854,40 @@ class PipelineSchedulerTests(DBTestCase):
         block_run.refresh()
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('3 times', block_run.metrics['error']['message'])
+
+    def test_a_block_run_completed_during_the_crash_check_is_not_run_again(self):
+        """
+        The scheduler read a block run as RUNNING, its process completed it and exited, and
+        the scheduler found no job and set it back to INITIAL: the block ran a second time,
+        and in the soak test an exporter wrote its rows twice.
+        """
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        block_run.update(status=BlockRun.BlockRunStatus.RUNNING)
+        fetch = scheduler._PipelineScheduler__fetch_crashed_block_runs
+        job_manager = pipeline_scheduler_original.get_job_manager()
+
+        def completed_and_exited(block_run_id, **kwargs):
+            from mage_ai.orchestration.db import db_connection
+
+            session = db_connection.session
+            session.execute(
+                update(BlockRun)
+                .where(BlockRun.id == block_run_id)
+                .values(status=BlockRun.BlockRunStatus.COMPLETED)
+                .execution_options(synchronize_session=False)
+            )
+            session.commit()
+            return False
+
+        with patch.object(job_manager, 'has_block_run_job', side_effect=completed_and_exited):
+            self.assertEqual(fetch(), [])
+
+        block_run.refresh()
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.COMPLETED)
+        self.assertNotIn('crashes', block_run.metrics or {})
 
     def test_a_block_run_a_stage_claimed_meanwhile_is_not_queued(self):
         """

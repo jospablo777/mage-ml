@@ -808,15 +808,21 @@ class PipelineScheduler:
         used to take the block run back from the stage, which then discarded the block's
         result after the block had run, and the block ran a second time.
         """
+        return self.__update_while(
+            block_run,
+            BlockRun.BlockRunStatus.INITIAL,
+            metrics=metrics,
+            status=BlockRun.BlockRunStatus.QUEUED,
+        )
+
+    def __update_while(self, block_run: BlockRun, expected, **values) -> bool:
+        """Updates the block run only while its status is still expected, in one statement."""
         session = db_connection.session
         try:
             result = session.execute(
                 update(BlockRun)
-                .where(
-                    BlockRun.id == block_run.id,
-                    BlockRun.status == BlockRun.BlockRunStatus.INITIAL,
-                )
-                .values(metrics=metrics, status=BlockRun.BlockRunStatus.QUEUED)
+                .where(BlockRun.id == block_run.id, BlockRun.status == expected)
+                .values(**values)
                 .execution_options(synchronize_session=False)
             )
             session.commit()
@@ -1068,6 +1074,9 @@ class PipelineScheduler:
         launcher = _launcher(job_manager)
         crashed_runs = []
         for br in running_or_queued_block_runs:
+            # Read before the job check: the block's process can complete the block run and
+            # exit in between, and a reload would see that.
+            expected = br.status
             if job_manager.has_block_run_job(
                 br.id,
                 logger=self.logger,
@@ -1104,20 +1113,27 @@ class PipelineScheduler:
                     'It may run out of memory or crash in native code; its logs show how '
                     'far it got.'
                 )
+            # Conditional: a plain update set a block run completed meanwhile back to INITIAL
+            # and the block ran a second time; in the soak test an exporter wrote its rows
+            # twice.
             if message is not None:
                 metrics['error'] = dict(error=message, message=message)
-                br.update(
+                if self.__update_while(
+                    br,
+                    expected,
                     completed_at=datetime.now(tz=pytz.UTC),
                     metrics=metrics,
                     status=BlockRun.BlockRunStatus.FAILED,
-                )
-                self.logger.error(
-                    f'BlockRun {br.id} (block_uuid: {br.block_uuid}) failed: {message}',
-                    **self.build_tags(block_run_id=br.id, block_uuid=br.block_uuid),
-                )
+                ):
+                    self.logger.error(
+                        f'BlockRun {br.id} (block_uuid: {br.block_uuid}) failed: {message}',
+                        **self.build_tags(block_run_id=br.id, block_uuid=br.block_uuid),
+                    )
                 continue
-            br.update(metrics=metrics, status=BlockRun.BlockRunStatus.INITIAL)
-            crashed_runs.append(br)
+            if self.__update_while(
+                br, expected, metrics=metrics, status=BlockRun.BlockRunStatus.INITIAL,
+            ):
+                crashed_runs.append(br)
 
         return crashed_runs
 
