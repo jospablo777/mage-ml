@@ -52,6 +52,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs/{id}/cancel", post(cancel))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/models", get(models))
+        .route("/v1/streams", get(streams))
+        .route("/v1/streams/{pipeline}", get(stream_detail))
         .route("/v1/control", post(control))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(state)
@@ -595,6 +597,53 @@ async fn cancel(
 
 /// The embedded models with the metadata recorded at export: version, run, flavors,
 /// signature, params and metrics.
+/// `GET /v1/streams`: each stream's state, counts, acknowledged positions and last error.
+async fn streams(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let streams = state
+        .service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let list: Vec<Value> = streams
+        .iter()
+        .map(|(pipeline, status)| {
+            let status = status.lock().map(|s| s.clone()).unwrap_or_default();
+            let mut value = json!(status);
+            value["pipeline"] = json!(pipeline);
+            value
+        })
+        .collect();
+    Ok(Json(json!({ "streams": list })))
+}
+
+async fn stream_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(pipeline): Path<String>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let streams = state
+        .service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let status = streams
+        .get(&pipeline)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                format!("The service has no stream {pipeline}."),
+            )
+        })?
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let mut value = json!(status);
+    value["pipeline"] = json!(pipeline);
+    Ok(Json(value))
+}
+
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     authorize(&state, &headers, Access::Read)?;
     let mut models = Vec::new();
@@ -706,6 +755,69 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                 "mage_service_runs{{pipeline=\"{}\",status=\"{}\"}} {count}",
                 escape(&pipeline.uuid),
                 status.as_str()
+            );
+        }
+    }
+    let streams: Vec<(String, crate::stream::StreamStatus)> = service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .map(|(k, v)| (k.clone(), v.lock().map(|s| s.clone()).unwrap_or_default()))
+        .collect();
+    if !streams.is_empty() {
+        for (name, help) in [
+            (
+                "messages_in",
+                "Messages a stream read since the service started.",
+            ),
+            (
+                "messages_out",
+                "Messages a stream's blocks produced since the service started.",
+            ),
+            (
+                "batches",
+                "Batches a stream read since the service started.",
+            ),
+            (
+                "retries",
+                "Retried transforms and writes since the service started.",
+            ),
+            (
+                "dead_lettered_batches",
+                "Batches sent to the dead-letter sink.",
+            ),
+            (
+                "alerts",
+                "Alerts a stream raised, such as a sink failing repeatedly.",
+            ),
+        ] {
+            let _ = writeln!(out, "# HELP mage_service_stream_{name}_total {help}");
+            let _ = writeln!(out, "# TYPE mage_service_stream_{name}_total counter");
+            for (pipeline, s) in &streams {
+                let value = match name {
+                    "messages_in" => s.messages_in,
+                    "messages_out" => s.messages_out,
+                    "batches" => s.batches,
+                    "retries" => s.retries,
+                    "dead_lettered_batches" => s.dead_lettered_batches,
+                    _ => s.alerts,
+                };
+                let _ = writeln!(
+                    out,
+                    "mage_service_stream_{name}_total{{pipeline=\"{}\"}} {value}",
+                    escape(pipeline)
+                );
+            }
+        }
+        let _ = writeln!(out, "# HELP mage_service_stream_up 1 while a stream runs.");
+        let _ = writeln!(out, "# TYPE mage_service_stream_up gauge");
+        for (pipeline, s) in &streams {
+            let up = matches!(s.state, crate::stream::StreamState::Running) as u8;
+            let _ = writeln!(
+                out,
+                "mage_service_stream_up{{pipeline=\"{}\"}} {up}",
+                escape(pipeline)
             );
         }
     }

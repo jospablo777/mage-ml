@@ -11,6 +11,9 @@ mod python;
 mod scheduler;
 mod secrets;
 mod service;
+mod stream;
+mod stream_python;
+mod streams;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -421,6 +424,8 @@ async fn start_service(
         .iter()
         .map(|v| v.name.clone())
         .collect();
+    // Variables only stream connectors read stay with the service (ADR-0033).
+    let connector_only = streams::connector_variables(&manifest);
     let extra_env: Vec<(String, String)> = environment::block_environment(
         std::env::vars(),
         &declared,
@@ -428,6 +433,7 @@ async fn start_service(
         environment::Mode::from_env(),
     )
     .into_iter()
+    .filter(|(name, _)| !connector_only.contains(name))
     .filter(|(name, _)| !secrets.additions.contains_key(name))
     .chain(
         secrets
@@ -599,6 +605,7 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     }
 
     let dispatcher = tokio::spawn(service.clone().dispatch());
+    let streams = streams::start(&service);
     if schedules_enabled {
         let owner = format!("{}-{}", hostname(), std::process::id());
         tokio::spawn(scheduler::run(service.clone(), owner));
@@ -616,12 +623,17 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     let server = axum::serve(listener, api::router(state)).with_graceful_shutdown(async move {
         shutdown_signal().await;
         log::info("Stopping: no new runs are accepted.");
+        // Streams stop reading and finish the batches in flight.
+        shutdown_service.stream_stop.cancel();
         shutdown_service.shutdown(deadline).await;
     });
     server
         .await
         .map_err(|e| format!("The server failed: {e}"))?;
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
+    for stream in streams {
+        let _ = tokio::time::timeout(Duration::from_secs(25), stream).await;
+    }
     log::info("Stopped.");
     Ok(ExitCode::SUCCESS)
 }

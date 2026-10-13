@@ -1,0 +1,15 @@
+[package]
+name = "mage-connector-kafka"
+description = "Kafka source and sink for Mage pipeline service streams, through librdkafka"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mage-stream-core = { path = "../stream-core" }
+mage-stream-ports = { path = "../stream-ports" }
+serde_json.workspace = true
+# ADR-0021: librdkafka, the reference client. TLS is vendored so SASL_SSL works everywhere.
+rdkafka = { version = "0.39", features = ["cmake-build", "ssl-vendored"] }
+tokio = { version = "1.47", features = ["rt", "time", "sync"] }

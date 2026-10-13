@@ -144,10 +144,11 @@ jobs:
         run: cargo fmt --all --check
       - name: Pipeline service clippy
         working-directory: mage_ai/pipeline_services/service
-        run: cargo clippy --locked --all-targets -- -D warnings
+        # --all-features includes the Kafka connector (librdkafka, built with cmake).
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Pipeline service tests
         working-directory: mage_ai/pipeline_services/service
-        run: cargo test --locked
+        run: cargo test --locked --all-features
 
   packaging:
     name: Packaging

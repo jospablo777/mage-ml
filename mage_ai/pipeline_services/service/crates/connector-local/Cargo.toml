@@ -1,0 +1,12 @@
+[package]
+name = "mage-connector-local"
+description = "Local stream connectors: an in-memory replayable source and sink for tests and replays, and a stdout sink"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mage-stream-ports = { path = "../stream-ports" }
+mage-stream-core = { path = "../stream-core" }
+serde_json.workspace = true

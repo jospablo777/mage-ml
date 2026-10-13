@@ -45,6 +45,10 @@ pub struct Service {
     /// The whole environment of block processes: the service's variables without its own
     /// credentials (see `environment`), and the values read from secret files.
     pub extra_env: Vec<(String, String)>,
+    /// Each stream's status, by pipeline; filled by `streams::start`.
+    pub streams: Mutex<BTreeMap<String, crate::stream::SharedStatus>>,
+    /// Cancelled at shutdown: streams stop reading and drain.
+    pub stream_stop: CancellationToken,
     max_total_runs: usize,
     wake: Notify,
     shutting_down: AtomicBool,
@@ -99,6 +103,8 @@ impl Service {
             started_at: Utc::now(),
             retention_days: config.retention_days,
             extra_env: config.extra_env,
+            streams: Mutex::new(BTreeMap::new()),
+            stream_stop: CancellationToken::new(),
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
             shutting_down: AtomicBool::new(false),

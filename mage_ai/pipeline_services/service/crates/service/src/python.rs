@@ -266,7 +266,10 @@ impl PythonPool {
         };
         let id = uuid::Uuid::new_v4().to_string();
         request["id"] = json!(id);
-        request["op"] = json!("run");
+        // A batch run by default; streams send "stream".
+        if request.get("op").is_none() {
+            request["op"] = json!("run");
+        }
         *worker.log_target.lock().unwrap_or_else(|p| p.into_inner()) =
             Some((log, block.to_string()));
         worker

@@ -427,3 +427,58 @@ class StreamBatchTest(WorkerTestCase):
         replies = [json.loads(line) for line in channel.getvalue().splitlines()]
         self.assertEqual(replies[-1]['messages'], [{'seen': 3}])
         self.assertTrue(replies[-1]['ok'])
+
+
+class StreamBranchesTest(WorkerTestCase):
+    """Streams branch: sinks follow different blocks, each fed its upstream's messages."""
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+
+    def test_each_branch_gets_its_upstreams_messages(self):
+        clean = dict(self.block('''
+            @transformer
+            def f(messages):
+                return [m for m in messages if m['n'] >= 0]
+        ''', name='clean'), upstream=[])
+        double = dict(self.block('''
+            @transformer
+            def f(messages):
+                return [dict(m, n=m['n'] * 2) for m in messages]
+        ''', name='double'), upstream=['clean'])
+        count = dict(self.block('''
+            @transformer
+            def f(messages):
+                return {'count': len(messages)}
+        ''', name='count'), upstream=['clean'])
+
+        result = worker.run_stream_batch(dict(
+            chain=[clean, double, count], messages=[{'n': -1}, {'n': 2}, {'n': 3}],
+            outputs=['double', 'count'], kwargs={},
+        ))
+
+        self.assertEqual(result['outputs'], {
+            'double': [{'n': 4}, {'n': 6}],
+            'count': [{'count': 2}],
+        })
+
+    def test_a_block_after_an_empty_output_does_not_run_and_joins_are_refused(self):
+        nothing = dict(self.block('''
+            @transformer
+            def f(messages):
+                return []
+        ''', name='nothing'), upstream=[])
+        boom = dict(self.block('''
+            @transformer
+            def f(messages):
+                raise RuntimeError('should not run')
+        ''', name='boom'), upstream=['nothing'])
+        result = worker.run_stream_batch(dict(
+            chain=[nothing, boom], messages=[{}], outputs=['boom'], kwargs={},
+        ))
+        self.assertEqual(result['outputs'], {'boom': []})
+
+        join = dict(boom, upstream=['nothing', 'other'])
+        with self.assertRaisesRegex(worker.BlockError, 'reads 2 blocks'):
+            worker.run_stream_batch(dict(chain=[nothing, join], messages=[{}], kwargs={}))

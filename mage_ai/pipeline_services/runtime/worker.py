@@ -768,12 +768,29 @@ def _stream_messages(value: Any, block_uuid: str) -> List:
 
 def run_stream_batch(request: Dict) -> Dict:
     """
-    Runs a stream's blocks, in order, on one batch of messages, as Mage's streaming
-    transformers do: each gets the list of messages and returns the list for the next.
+    Runs a stream's blocks on one batch of messages, as Mage's streaming transformers do:
+    each gets the list of messages of the block before it (the source's for a block without
+    an upstream) and returns a list. Streams branch, so the blocks come in topological order
+    with their `upstream`, and `outputs` names the blocks whose messages the sinks write.
     """
-    messages = request['messages']
+    blocks = request['chain']
+    results: Dict[str, List] = {}
     timings = []
-    for block in request['chain']:
+    # Blocks without any `upstream` key form one chain, each after the one before.
+    linear = not any('upstream' in b for b in blocks)
+    for position, block in enumerate(blocks):
+        if linear:
+            upstream = [blocks[position - 1]['uuid']] if position else []
+        else:
+            upstream = block.get('upstream') or []
+        if len(upstream) > 1:
+            raise BlockError('load', f"Block {block['uuid']} reads {len(upstream)} blocks; a "
+                             'stream block reads one.', block_uuid=block['uuid'])
+        messages = results.get(upstream[0], []) if upstream else request['messages']
+        if upstream and not messages:
+            # The block before it kept nothing of this batch.
+            results[block['uuid']] = []
+            continue
         function = _stream_function(block)
         kwargs = _kwargs(request, block)
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
@@ -783,13 +800,18 @@ def run_stream_batch(request: Dict) -> Dict:
         except Exception as error:
             raise BlockError('run', f'{type(error).__name__}: {error}', _user_traceback(),
                              block_uuid=block['uuid'])
-        messages = _stream_messages(result, block['uuid'])
-        _check_finite(messages, block['uuid'])
+        output = _stream_messages(result, block['uuid'])
+        _check_finite(output, block['uuid'])
+        results[block['uuid']] = output
         timings.append(dict(block_uuid=block['uuid'],
                             seconds=round(time.monotonic() - started, 6)))
-        if not messages:
-            break
-    return dict(messages=messages, blocks=timings)
+    last = blocks[-1]['uuid'] if blocks else None
+    wanted = request.get('outputs') or ([last] if last else [])
+    return dict(
+        outputs={uuid: results.get(uuid, []) for uuid in wanted},
+        messages=results.get(last, []) if last else request['messages'],
+        blocks=timings,
+    )
 
 
 # ---- protocol -----------------------------------------------------------------------
