@@ -1,6 +1,9 @@
 
+import asyncio
+import os
 import time
 
+from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.data_preparation.models.project import Project
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
@@ -13,6 +16,9 @@ from mage_ai.server.active_kernel import switch_active_kernel
 from mage_ai.server.kernels import DEFAULT_KERNEL_NAME, KernelName, kernel_managers
 from mage_ai.services.ssh.aws.emr.utils import tunnel
 from mage_ai.settings.server import KERNEL_MAGIC, MEMORY_MANAGER_V2
+
+# Seconds a kernel switch, interrupt or restart may take before the request fails.
+KERNEL_ACTION_TIMEOUT = float(os.getenv('MAGE_KERNEL_ACTION_TIMEOUT', '120'))
 
 
 class KernelResource(GenericResource):
@@ -93,22 +99,40 @@ class KernelResource(GenericResource):
                     await KernelManager.terminate_kernel_async(uuid)
                 return self
 
-        switch_active_kernel(self.model.kernel_name)
+        def _act():
+            switch_active_kernel(self.model.kernel_name)
 
-        if MEMORY_MANAGER_V2:
-            from mage_ai.shared.singletons.memory import get_memory_manager_controller
+            if MEMORY_MANAGER_V2:
+                from mage_ai.shared.singletons.memory import (
+                    get_memory_manager_controller,
+                )
 
-            get_memory_manager_controller().stop_all_events()
+                get_memory_manager_controller().stop_all_events()
 
-        if KernelOperation.INTERRUPT == action_type:
-            self.model.interrupt()
-        elif KernelOperation.RESTART == action_type:
-            try:
-                self.model.restart()
-            except RuntimeError as e:
-                # RuntimeError: Cannot restart the kernel. No previous call to 'start_kernel'.
-                if 'start_kernel' in str(e):
-                    self.model.start()
+            if KernelOperation.INTERRUPT == action_type:
+                self.model.interrupt()
+            elif KernelOperation.RESTART == action_type:
+                try:
+                    self.model.restart()
+                except RuntimeError as e:
+                    # RuntimeError: Cannot restart the kernel. No previous call to
+                    # 'start_kernel'.
+                    if 'start_kernel' in str(e):
+                        self.model.start()
+
+        # The Jupyter calls block, and a restart could hang in closing the kernel's ZeroMQ
+        # sockets; on the server's event loop that stopped every request. In a thread, with
+        # a time limit, a stuck restart fails this request and the server keeps serving.
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_act), timeout=KERNEL_ACTION_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise ApiError({
+                **ApiError.RESOURCE_ERROR,
+                **dict(message=(
+                    f'The kernel did not {action_type.value if action_type else "switch"} within '
+                    f'{KERNEL_ACTION_TIMEOUT:g} seconds. Try again, or restart MageML.'
+                )),
+            })
 
         def _callback(*args, **kwargs):
             tunnel(

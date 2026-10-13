@@ -9,7 +9,11 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   fullyParallel: false,
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  reporter: 'html',
+  // A server that stops answering once failed every later test after its full timeout,
+  // and the job ran into its 90 minute limit; the whole run gets 40 minutes, and the list
+  // reporter shows in the job log which test was running.
+  globalTimeout: 40 * 60 * 1000,
+  reporter: [['list'], ['html', { open: 'never' }]],
   retries: process.env.CI ? 2 : 0,
   testDir: './tests',
   timeout: 100000,
