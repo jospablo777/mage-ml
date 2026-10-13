@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import urllib.parse
 from typing import Dict
@@ -7,9 +8,25 @@ from typing import Dict
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.api.result_set import ResultSet
+from mage_ai.data_preparation.models.errors import FileNotInProjectError
+from mage_ai.data_preparation.models.file import ensure_path_is_in_directory
 from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.files import get_absolute_paths_from_all_files
 from mage_ai.system.browser.models import Item
+
+
+def ensure_in_project(path: str) -> str:
+    """
+    Every path this resource reads, writes, moves or deletes must be in the project. Without
+    the check a viewer could read any file the server can read, and an editor write any file.
+    """
+    try:
+        return ensure_path_is_in_directory(path, base_repo_path())
+    except FileNotInProjectError as err:
+        raise ApiError({
+            **ApiError.UNAUTHORIZED_ACCESS,
+            **dict(message=str(err)),
+        })
 
 
 class BrowserItemResource(GenericResource):
@@ -26,6 +43,8 @@ class BrowserItemResource(GenericResource):
             directory = directory[0]
         if not directory:
             directory = base_repo_path()
+        directory = ensure_in_project(directory)
+        paths = [ensure_in_project(path) for path in (paths or []) if path]
 
         include_pattern = query.get('include_pattern', [None])
         if include_pattern:
@@ -47,7 +66,7 @@ class BrowserItemResource(GenericResource):
 
         items = []
 
-        for dir_path in [directory] + (paths or []):
+        for dir_path in [directory] + paths:
             items += get_absolute_paths_from_all_files(
                 starting_full_path_directory=dir_path,
                 comparator=lambda path: (
@@ -65,7 +84,7 @@ class BrowserItemResource(GenericResource):
 
     @classmethod
     def get_model(cls, pk, **kwargs) -> Item:
-        return Item.load(path=urllib.parse.unquote(pk))
+        return Item.load(path=ensure_in_project(urllib.parse.unquote(pk)))
 
     @classmethod
     async def member(cls, pk, user, **kwargs) -> BrowserItemResource:
@@ -81,16 +100,27 @@ class BrowserItemResource(GenericResource):
 
     @classmethod
     async def create(cls, payload: Dict, user, **kwargs) -> BrowserItemResource:
-        model = Item.load(**payload)
+        if not payload.get('path'):
+            raise ApiError({
+                **ApiError.RESOURCE_INVALID,
+                **dict(message='A path is required.'),
+            })
+        model = Item.load(**{**payload, 'path': ensure_in_project(payload['path'])})
         await model.create()
         return cls(model, user, **kwargs)
 
     async def delete(self, **kwargs):
+        ensure_in_project(self.model.path)
         await self.model.delete()
 
     async def update(self, payload, **kwargs):
+        ensure_in_project(self.model.path)
         if 'path' not in payload:
             payload['path'] = self.model.path
+        payload['path'] = ensure_in_project(payload['path'])
+        # A rename joins the new name to the folder, so a name such as ../../x moves the file.
+        if payload.get('name'):
+            ensure_in_project(os.path.join(os.path.dirname(payload['path']), payload['name']))
 
         try:
             await self.model.synchronize(Item.load(**payload))

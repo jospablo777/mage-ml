@@ -227,12 +227,14 @@ class FileProjectPlatformTest(ProjectPlatformMixin, AsyncDBTestCase):
                     error = True
                 self.assertTrue(error)
 
+            # With the project platform the check was skipped, so any path passed. A file
+            # must now be under the platform's root.
             with patch(
                 'mage_ai.data_preparation.models.file.project_platform_activated',
                 lambda: True,
             ):
-                with patch(
-                    'mage_ai.data_preparation.models.file.project_platform_activated',
-                    lambda: True,
-                ):
-                    ensure_file_is_in_project('mage_data/demo/file.txt')
+                ensure_file_is_in_project(os.path.join(base_repo_path(), 'demo', 'file.txt'))
+                with self.assertRaises(FileNotInProjectError):
+                    ensure_file_is_in_project(os.path.join(base_repo_path(), '..', 'file.txt'))
+                with self.assertRaises(FileNotInProjectError):
+                    ensure_file_is_in_project('/etc/hosts')

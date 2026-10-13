@@ -92,7 +92,10 @@ class Item(BaseDataClass):
                 raise Exception(f'Failed to move file from {self.path} to {new_path}')
         elif item.name is not None and self.name != item.name:
             new_name = item.name
-            if await self.rename(new_name):
+            # rename takes a path: the bare name moved the file into the server's folder.
+            new_path = os.path.join(os.path.dirname(self.path), new_name)
+            if await self.rename(new_path):
+                self.path = new_path
                 self.name = new_name
             else:
                 raise Exception(f'Failed to rename file from {self.name} to {new_name}')

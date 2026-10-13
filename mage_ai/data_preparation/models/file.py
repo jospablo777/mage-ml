@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -15,8 +16,9 @@ from mage_ai.data_preparation.models.project import Project
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
+from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.environments import is_debug
-from mage_ai.shared.files import exists_async, rename_async, write_async
+from mage_ai.shared.files import exists_async, rename_async
 from mage_ai.shared.path_fixer import remove_base_repo_path_or_name
 from mage_ai.shared.utils import get_absolute_path
 
@@ -147,8 +149,11 @@ class File:
                 new_dir_path,
                 new_filename,
             )
-            raise Exception(old_file_path_versions_dir, new_file_path_versions_dir)
-            await write_async(new_file_path_versions_dir)
+            # The saved versions follow the file. A debugging raise left here failed every
+            # rename of a file that had versions.
+            if not os.path.exists(new_file_path_versions_dir):
+                os.makedirs(os.path.dirname(new_file_path_versions_dir), exist_ok=True)
+                shutil.move(old_file_path_versions_dir, new_file_path_versions_dir)
 
         return result
 
@@ -497,14 +502,25 @@ class File:
         return data
 
 
-def ensure_file_is_in_project(file_path: str) -> None:
-    if project_platform_activated():
-        return
+def ensure_path_is_in_directory(path: str, directory: str) -> str:
+    """
+    Returns the absolute path, symlinks resolved, or raises FileNotInProjectError when it is
+    outside the directory.
+    """
+    full_path = get_absolute_path(path)
+    full_directory = get_absolute_path(directory)
+    if full_directory != os.path.commonpath([full_path, full_directory]):
+        raise FileNotInProjectError(f'File at path: {path} is not in the project directory.')
+    return full_path
 
-    full_file_path = get_absolute_path(file_path)
-    full_repo_path = get_absolute_path(get_repo_path(file_path=file_path))
-    if full_repo_path != os.path.commonpath([full_file_path, full_repo_path]):
-        raise FileNotInProjectError(f'File at path: {file_path} is not in the project directory.')
+
+def ensure_file_is_in_project(file_path: str) -> None:
+    # With the project platform the check used to be skipped, so any path passed. Projects
+    # of the platform live under its root, so a file must be in the root at least.
+    directory = (
+        base_repo_path() if project_platform_activated() else get_repo_path(file_path=file_path)
+    )
+    ensure_path_is_in_directory(file_path, directory)
 
 
 def traverse(

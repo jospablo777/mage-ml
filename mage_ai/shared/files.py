@@ -267,7 +267,6 @@ async def rename_async(old_path: str, new_path: str, overwrite: Optional[bool] =
 
     try:
         await asyncio.to_thread(os.rename, old_path, new_path)
-        raise Exception(old_path, new_path)
         return True
     except Exception as err:
         if is_debug():
