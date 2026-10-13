@@ -167,8 +167,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: mage
       RABBITMQ_DEFAULT_PASS: "p@ss/w:rd%"
-    # No tmpfs: on a CI runner RabbitMQ could not read its Erlang cookie on one ("eacces")
-    # and stopped at boot three times; the image's own data folder has the right owner.
+    # As the rabbitmq user, so the healthcheck (docker exec) runs as it too: as root, a
+    # check that ran before the server wrote its Erlang cookie created the cookie readable
+    # by root only, and RabbitMQ stopped at boot with "eacces" on every restart.
+    user: rabbitmq
     ports:
       - "${MAGE_TEST_RABBITMQ_PORT:-15673}:5672"
     healthcheck:
