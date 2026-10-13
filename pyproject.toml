@@ -260,6 +260,8 @@ all = [
 [dependency-groups]
 dev = [
   "black",
+  # The integration tests export a CatBoost .cbm model (integration_tests/feast).
+  "catboost",
   "commitizen",
   "interrogate",
   "isort",

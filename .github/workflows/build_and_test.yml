@@ -223,8 +223,16 @@ jobs:
         run: make -C integration_tests up
       - name: Install the R test environment
         run: make -C integration_tests r-env
+      # Rust blocks compile into one cargo target directory; keep it between runs so the
+      # tests do not build Polars cold every time.
+      - name: Cache the Rust blocks' build directory
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mage/rust/target
+          key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'integration_tests/project/rust/Cargo.lock') }}
+          restore-keys: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-
       - name: Run integration tests
-        run: make -C integration_tests ci PYTEST_ARGS='-n 4 -v --timeout=300 --durations=25'
+        run: make -C integration_tests ci PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900 --durations=25'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
         run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'

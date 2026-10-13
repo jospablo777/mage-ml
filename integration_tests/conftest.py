@@ -546,3 +546,20 @@ def activemq_port():
     if not port:
         pytest.skip('ActiveMQ is not configured: MAGE_TEST_ACTIVEMQ_PORT unset')
     return int(port)
+
+
+# Tests that compile Rust blocks share one cargo target directory, which cargo locks for
+# a build: in parallel they waited on each other past their time limits. With
+# --dist loadgroup they run one after another on one worker, on a warm build.
+RUST_BUILD_TESTS = (
+    'integration_tests/benchmark/test_rust_pipeline_benchmark.py',
+    'integration_tests/chains/test_compiled_chains.py',
+    'integration_tests/postgres/test_rust_pipelines.py',
+    'integration_tests/topologies/',
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.nodeid.startswith(RUST_BUILD_TESTS):
+            item.add_marker(pytest.mark.xdist_group('rust_builds'))

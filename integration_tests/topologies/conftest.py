@@ -90,8 +90,13 @@ def machine_guard(monkeypatch):
     for name in THREAD_VARIABLES:
         if name not in os.environ:
             monkeypatch.setenv(name, THREADS)
-    deadline = time.monotonic() + COOL_WAIT_S
     state = machine_state()
+    if os.getenv('MAGE_STUDY_FULL') != '1':
+        # A smoke run checks outputs, not timings: it needs no quiet machine. Waiting for one
+        # held every test for ten minutes on CI, where the services share 16 GB.
+        yield state
+        return
+    deadline = time.monotonic() + COOL_WAIT_S
     while (too_hot(state) or state['free_gb'] < MIN_FREE_GB) and time.monotonic() < deadline:
         time.sleep(10)
         state = machine_state()
