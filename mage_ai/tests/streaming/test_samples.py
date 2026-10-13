@@ -67,6 +67,12 @@ class SampleFilesTest(StreamSampleTestCase):
         self.assertEqual(samples.message_value(b'{"a": 1}'), {'a': 1})
         self.assertEqual(samples.message_value(b'plain'), 'plain')
 
+    def test_the_newest_messages_are_shared_by_what_each_partition_holds(self):
+        self.assertEqual(samples._shares(5, {'a': 40, 'b': 0}), {'a': 5, 'b': 0})
+        self.assertEqual(samples._shares(6, {'a': 40, 'b': 40, 'c': 1}),
+                         {'c': 1, 'a': 3, 'b': 2})
+        self.assertEqual(samples._shares(100, {'a': 3, 'b': 4}), {'a': 3, 'b': 4})
+
     def test_captured_samples_can_stay_out_of_git(self):
         samples.ignore_in_git(self.repo_path, self.pipeline.uuid)
         ignore = samples.samples_dir(self.repo_path, self.pipeline.uuid) / '.gitignore'

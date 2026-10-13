@@ -184,6 +184,21 @@ def capture_sample(
     return summary
 
 
+def _shares(count: int, available: Dict[Any, int]) -> Dict[Any, int]:
+    """
+    How many of the newest messages to read from each partition: as even as the partitions
+    allow, a partition with fewer messages leaving the rest to the others.
+    """
+    shares: Dict[Any, int] = {}
+    remaining = count
+    ordered = sorted(available, key=lambda p: available[p])
+    for index, partition in enumerate(ordered):
+        share = min(available[partition], math.ceil(remaining / (len(ordered) - index)))
+        shares[partition] = max(share, 0)
+        remaining -= shares[partition]
+    return shares
+
+
 def _capture_kafka(config: Dict, count: int, start: str, timeout_seconds: float):
     from kafka import KafkaConsumer, TopicPartition
 
@@ -211,10 +226,10 @@ def _capture_kafka(config: Dict, count: int, start: str, timeout_seconds: float)
         consumer.assign(assigned)
         ends = consumer.end_offsets(assigned)
         beginnings = consumer.beginning_offsets(assigned)
-        share = math.ceil(count / len(assigned))
+        shares = _shares(count, {p: ends[p] - beginnings[p] for p in assigned})
         for partition in assigned:
             if start == 'latest':
-                consumer.seek(partition, max(beginnings[partition], ends[partition] - share))
+                consumer.seek(partition, ends[partition] - shares[partition])
             else:
                 consumer.seek(partition, beginnings[partition])
         messages = []
