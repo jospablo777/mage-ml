@@ -76,7 +76,8 @@ def session_metadata() -> Dict:
         cpus=os.cpu_count(),
         memory_gb=round(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1e9, 1),
         gpu=_run(['nvidia-smi', '--query-gpu=name,driver_version,memory.total',
-                  '--format=csv,noheader']) if shutil.which('nvidia-smi') else None,
+                  '--format=csv,noheader'])
+        if os.getenv('MAGE_STUDY_GPU') == '1' and shutil.which('nvidia-smi') else None,
         governor=_read('/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'),
         ptrace_scope=_read('/proc/sys/kernel/yama/ptrace_scope'),
         cgroup=_cgroup_limits(),
@@ -106,7 +107,12 @@ def machine_snapshot() -> Dict:
 
 
 def wait_quiet(max_load_per_cpu: float = None, timeout: float = 300) -> Dict:
-    """Waits until the 1-minute load per CPU is below the limit; returns the snapshot."""
+    """
+    Waits until the 1-minute load per CPU is below the limit; returns the snapshot. Only full
+    study runs wait: a smoke run checks outputs, and on CI it waited 300 s before every run.
+    """
+    if os.getenv('MAGE_STUDY_FULL') != '1':
+        timeout = 0
     limit = max_load_per_cpu if max_load_per_cpu is not None else float(
         os.getenv('MAGE_STUDY_MAX_LOAD', '0.25'))
     deadline = time.monotonic() + timeout
