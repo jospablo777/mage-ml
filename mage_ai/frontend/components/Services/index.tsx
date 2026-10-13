@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { useMutation } from 'react-query';
 import styled from 'styled-components';
 
@@ -1631,18 +1632,38 @@ function Services() {
     || (savedNow?.name === selectedName ? savedNow : null);
   const unsavedExports = exportsList.filter(e => !services.some(s => s.name === e.name));
 
-  const startNew = () => {
+  const startNew = (pipelines: string[] = [], base: string = 'new-service') => {
     const taken = new Set(services.map(s => s.name));
-    let name = 'new-service';
+    let name = base;
     let index = 2;
     while (taken.has(name)) {
-      name = `new-service-${index}`;
+      name = `${base}-${index}`;
       index += 1;
     }
-    setNewDraft(emptyDefinition(name));
+    setNewDraft({ ...emptyDefinition(name), pipelines });
     setSelectedName(null);
     setEditorKey(`new-${Date.now()}`);
   };
+
+  // /services?service=<name> opens a service; /services?new=<pipeline> starts one with that
+  // pipeline, from the pipeline's settings ("Make it a service").
+  const router = useRouter();
+  const fromUrl = useRef(false);
+  useEffect(() => {
+    if (fromUrl.current || !data) {
+      return;
+    }
+    fromUrl.current = true;
+    const { new: newPipeline, service } = router?.query || {};
+    if (typeof service === 'string' && services.some(s => s.name === service)) {
+      setSelectedName(service);
+    } else if (typeof newPipeline === 'string' && newPipeline) {
+      const base = newPipeline.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'new-service';
+      startNew([newPipeline], base);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   return (
     <PageStyle>
@@ -1651,7 +1672,7 @@ function Services() {
           <Spacing p={1.5}>
             <FlexContainer alignItems="center" justifyContent="space-between">
               <Text bold>Services</Text>
-              <Button compact onClick={startNew} primary>New service</Button>
+              <Button compact onClick={() => startNew()} primary>New service</Button>
             </FlexContainer>
           </Spacing>
           {newDraft && (
@@ -1759,7 +1780,7 @@ function Services() {
               </StepsStyle>
             </Spacing>
             <Spacing mt={3}>
-              <Button onClick={startNew} primary>New service</Button>
+              <Button onClick={() => startNew()} primary>New service</Button>
             </Spacing>
           </EmptyStyle>
         )}

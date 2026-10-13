@@ -58,6 +58,16 @@ function PipelineSettings({
 
   const pipelineUUID = pipeline?.uuid;
   const blocks = useMemo(() => pipeline?.blocks || [], [pipeline]);
+  // The services that run this pipeline: an edit here changes them.
+  const { data: dataServices } = api.pipeline_services.list(
+    { pipeline: pipelineUUID },
+    { revalidateOnFocus: false },
+    { pauseFetch: !pipelineUUID },
+  );
+  const services: { name: string; path?: string }[] = useMemo(
+    () => dataServices?.pipeline_services || [],
+    [dataServices],
+  );
 
   const [pipelineAttributesTouched, setPipelineAttributesTouched] = useState<boolean>(false);
 
@@ -182,6 +192,39 @@ function PipelineSettings({
 
   return (
     <Spacing p={PADDING_UNITS}>
+      <SetupSection
+        description={services.length
+          ? 'Changes to this pipeline change these services when they are built again.'
+          : 'Run this pipeline without MageML: as an HTTP API, on a schedule or as a stream.'}
+        title="Services"
+      >
+        <Spacing p={PADDING_UNITS}>
+          {services.length > 0 && (
+            <FlexContainer alignItems="center" flexWrap="wrap">
+              <Text muted>Used by</Text>
+              {services.map(({ name, path }) => (
+                <Spacing key={name} ml={1}>
+                  <Link
+                    href={`/services?service=${encodeURIComponent(name)}`}
+                    monospace
+                    title={path}
+                  >
+                    {name}
+                  </Link>
+                </Spacing>
+              ))}
+            </FlexContainer>
+          )}
+          {dataServices && services.length === 0 && (
+            <Link href={`/services?new=${encodeURIComponent(pipelineUUID)}`}>
+              Make it a service
+            </Link>
+          )}
+        </Spacing>
+      </SetupSection>
+
+      <Spacing mt={UNITS_BETWEEN_SECTIONS} />
+
       <SetupSection title="Details">
         <SetupSectionRow
           invalid={pipelineAttributesTouched && !pipelineAttributes?.name}

@@ -47,6 +47,10 @@ class PipelineServiceResource(GenericResource):
             saved = definitions.load_definitions(repo_path)
         except definitions.DefinitionError as error:
             raise ApiError(dict(code=400, message=str(error)))
+        # ?pipeline=<uuid>: the services that run that pipeline, for its pages.
+        pipeline = (query.get('pipeline') or [None])[0]
+        if pipeline:
+            saved = {n: v for n, v in saved.items() if pipeline in v['pipelines']}
         exports_by_name = {e['name']: e for e in list_exports(repo_path)}
         return cls.build_result_set(
             [_with_export(repo_path, n, v, exports_by_name) for n, v in sorted(saved.items())],

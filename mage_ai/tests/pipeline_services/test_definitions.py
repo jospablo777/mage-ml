@@ -262,6 +262,12 @@ class ServicesApiTest(ExportTestCase):
 
         listed = self.call(OperationType.LIST)['pipeline_services']
         self.assertEqual([s['name'] for s in listed], ['shop-live'])
+        self.assertEqual(listed[0]['path'], 'services/shop-live/service.yaml')
+        # The services that run a pipeline, for its pages.
+        using = self.call(OperationType.LIST, query=dict(pipeline=[self.pipeline.uuid]))
+        self.assertEqual([s['name'] for s in using['pipeline_services']], ['shop-live'])
+        other = self.call(OperationType.LIST, query=dict(pipeline=['another']))
+        self.assertEqual(other['pipeline_services'], [])
 
         denied = self.call(OperationType.DELETE, pk='shop-live', user=create_user())
         self.assertEqual(denied['error']['code'], 403)
