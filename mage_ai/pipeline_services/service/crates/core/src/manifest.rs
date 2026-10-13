@@ -58,9 +58,14 @@ pub struct EnvironmentVariable {
     /// The code fails without it (`os.environ["X"]`); others are read with a default.
     #[serde(default)]
     pub required: bool,
-    /// Where it is read: io_config.yaml or block and module files.
+    /// Where it is read: io_config.yaml or block and module files. A variable read here
+    /// reaches block processes.
     #[serde(default)]
     pub used_by: Vec<String>,
+    /// The stream connectors whose settings read it. Only the engine reads those; a
+    /// variable no block reads never reaches block processes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

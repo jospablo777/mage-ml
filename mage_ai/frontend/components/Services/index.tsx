@@ -42,6 +42,7 @@ import {
   PillStyle,
   ProblemLines,
   ServiceExportType,
+  ServiceStreamConnector,
   TileStyle,
   TilesStyle,
   languagesOf,
@@ -480,6 +481,11 @@ function envTemplate(
   return lines.join('\n');
 }
 
+// "kafka orders" or "stdout": what a stream reads or writes.
+function connectorLabel(connector: ServiceStreamConnector): string {
+  return [connector.kind, connector.topics?.join(', ')].filter(Boolean).join(' ');
+}
+
 // Chains of after-run triggers as paths, for the run flow: a -> b -> c.
 function flowPaths(afterRuns: AfterRunType[]): { node: string; when?: string }[][] {
   const next: { [uuid: string]: AfterRunType[] } = {};
@@ -855,6 +861,11 @@ function Workbench({
     }),
     {},
   ), [lastGoodCheck]);
+  // Streams run from the service's start: no triggers, and no pipeline starts after them.
+  const streamsByPipeline = useMemo(() => (lastGoodCheck?.pipelines || []).reduce(
+    (acc, p) => (p.stream ? { ...acc, [p.uuid]: p.stream } : acc),
+    {} as { [uuid: string]: { sinks: ServiceStreamConnector[]; source: ServiceStreamConnector } },
+  ), [lastGoodCheck]);
   // The check lists what the service will run, triggers.yaml included; the database lists
   // the triggers that can be removed here.
   const afterRuns: AfterRunType[] = useMemo(() => {
@@ -1078,7 +1089,10 @@ function Workbench({
             const pipeline = pipelinesByUUID[uuid];
             const ownTriggers = triggersByPipeline[uuid] || [];
             const startsAfter = afterRuns.filter(a => a.run === uuid);
-            const others = draft.pipelines.filter(p => p !== uuid);
+            const stream = streamsByPipeline[uuid];
+            const others = stream
+              ? []
+              : draft.pipelines.filter(p => p !== uuid && !streamsByPipeline[p]);
 
             return (
               <PipelineRowStyle key={uuid}>
@@ -1100,7 +1114,12 @@ function Workbench({
                       {t.active ? '' : ' (inactive)'}
                     </StartChipStyle>
                   ))}
-                  {!ownTriggers.length && !startsAfter.length && lastGoodCheck && (
+                  {stream && (
+                    <StartChipStyle title={`Writes to ${stream.sinks.map(connectorLabel).join(', ')}`}>
+                      Stream from {connectorLabel(stream.source)}
+                    </StartChipStyle>
+                  )}
+                  {!stream && !ownTriggers.length && !startsAfter.length && lastGoodCheck && (
                     <StartChipStyle>API calls only</StartChipStyle>
                   )}
                   {startsAfter.map(a => (
@@ -1273,6 +1292,16 @@ function Workbench({
                     : 'Runs start from the API'}
                   tone="ok"
                 />
+                {checkPipelines.some(p => p.stream) && (
+                  <CheckRow
+                    detail={checkPipelines.filter(p => p.stream).map(p => (
+                      `${p.uuid}: ${connectorLabel(p.stream.source)} to `
+                        + p.stream.sinks.map(connectorLabel).join(', ')
+                    )).join('; ')}
+                    title={`${plural(checkPipelines.filter(p => p.stream).length, 'stream')} run from the service's start`}
+                    tone="ok"
+                  />
+                )}
                 {(check.notes || []).map(note => (
                   <CheckRow key={note} title={note} tone="note" />
                 ))}

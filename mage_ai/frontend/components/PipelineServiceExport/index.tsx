@@ -45,6 +45,14 @@ export type ServiceExportBlock = {
   uuid: string;
 };
 
+// A stream's source or sink: the block it is, its kind and its topics (Kafka).
+export type ServiceStreamConnector = {
+  after?: string;
+  kind: string;
+  name: string;
+  topics: string[];
+};
+
 export type ServiceExportTrigger = {
   active: boolean;
   kind: string;
@@ -79,6 +87,7 @@ export type ServiceExportType = {
   pipelines?: {
     blocks: ServiceExportBlock[];
     max_concurrent_runs: number;
+    stream?: { sinks: ServiceStreamConnector[]; source: ServiceStreamConnector };
     triggers: ServiceExportTrigger[];
     uuid: string;
   }[];

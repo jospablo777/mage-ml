@@ -203,6 +203,42 @@ concurrency setting from MageML. Put pipelines together when they share code, da
 release schedule. Export them as separate services when they need to scale apart, read
 different secrets, or ship at different times.
 
+## Streaming pipelines
+
+A streaming pipeline exports the same way. The service runs it from its start, with no
+trigger: it reads its source without end and runs the transformers on each batch.
+
+| Part | What services run now |
+| --- | --- |
+| Source | Kafka, set up in YAML |
+| Transformers | Python |
+| Sinks | Kafka; `dummy` prints each message to the service's output |
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders
+consumer_group: orders-clean
+batch_size: 250    # messages per batch
+timeout_ms: 200    # a smaller batch runs after this long
+security_protocol: SASL_SSL
+sasl_config:
+  mechanism: PLAIN
+  username: "{{ env_var('KAFKA_USER') }}"
+  password: "{{ env_var('KAFKA_PASSWORD') }}"
+```
+
+- The settings go into the service's manifest with `env_var()` kept as a reference. The
+  service reads those variables itself; the blocks never get them.
+- A position moves on only after every sink took the batch. A batch that still fails
+  after its retries (the pipeline's retry settings, 3 by default) stops the stream, and
+  the position stays where it was, so no message is lost.
+- The export stops, with the reason, on what services can't run the same way as MageML
+  yet: Python sources and sinks, other connectors, `include_metadata`, Avro, Protobuf and
+  raw messages, a start `offset`, and passwords written in the file.
+- The image builds the engine with Kafka support (librdkafka), so the first build takes a
+  few minutes longer.
+
 ## Update the service
 
 After you change the pipelines in MageML, export again over the same folder and rebuild:

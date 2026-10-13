@@ -95,6 +95,21 @@ class Capture:
     environment: Optional[Any] = None
     # Modules that read the included model files (.cbm: catboost), for the requirements.
     artifact_modules: Set[str] = field(default_factory=set)
+    # Stream source and sink YAML files: their settings are in the manifest and only the
+    # engine reads them, so they count in the source digest but are not copied.
+    stream_files: Set[Path] = field(default_factory=set)
+
+    @property
+    def streams(self) -> List[Dict]:
+        return [p['stream'] for p in self.manifest['pipelines'] if p.get('stream')]
+
+    @property
+    def needs_kafka(self) -> bool:
+        return any(
+            connector['kind'] == 'kafka'
+            for stream in self.streams
+            for connector in [stream['source'], *stream['sinks']]
+        )
 
     @property
     def needs_r(self) -> bool:
@@ -181,7 +196,7 @@ def capture(
         raise ExportError(problems)
 
     digest = hashlib.sha256()
-    for path in sorted(capture_.files):
+    for path in sorted(capture_.files | capture_.stream_files):
         digest.update(str(path.relative_to(project_path)).encode())
         digest.update(_digest(path).encode())
     capture_.manifest = dict(
@@ -448,106 +463,21 @@ def _mage_version() -> str:
 
 def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
                     problems: List[str], max_runs: Optional[int]) -> Optional[Dict]:
-    from mage_ai.data_preparation.models.block.dynamic.utils import (
-        is_dynamic_block,
-        is_dynamic_block_child,
-        is_replicated_block,
-    )
-    from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
-
     prefix = f'Pipeline {pipeline.uuid}'
+    if str(pipeline.type) in ('streaming', 'PipelineType.STREAMING'):
+        return _stream_pipeline_entry(pipeline, project, repo_config, capture_, problems)
     if str(pipeline.type) not in ('python', 'PipelineType.PYTHON'):
         problems.append(
-            f'{prefix} is a {pipeline.type} pipeline; services run standard batch pipelines.'
+            f'{prefix} is a {pipeline.type} pipeline; services run batch and streaming pipelines.'
         )
         return None
     blocks = []
     conditionals: Dict[str, Dict] = {}
     for block in pipeline.blocks_by_uuid.values():
-        block_type = str(getattr(block.type, 'value', block.type))
-        language = str(getattr(block.language, 'value', block.language))
-        where = f'{prefix}, block {block.uuid}'
-        if block_type in NOTEBOOK_TYPES:
-            capture_.notes.append(
-                f'{where}: a {block_type} block; it is notebook only and left out.',
-            )
-            continue
-        if block_type not in SUPPORTED_TYPES:
-            problems.append(f'{where} is a {block_type} block, which services do not run yet.')
-            continue
-        if language not in ('python', 'rust', 'r', 'sql'):
-            problems.append(
-                f'{where} is written in {language}; services run Python, R, Rust and SQL '
-                'blocks.',
-            )
-            continue
-        if language == 'sql':
-            reason = _sql_unsupported(block)
-            if reason:
-                problems.append(f'{where}: {reason}')
-                continue
-        if is_dynamic_block(block) or is_dynamic_block_child(block) or is_replicated_block(block):
-            problems.append(f'{where} is dynamic or replicated, which services do not run yet.')
-            continue
-        if getattr(block, 'callback_blocks', None):
-            problems.append(f'{where} has callbacks, which services do not run yet.')
-            continue
-        conditions = []
-        for conditional in getattr(block, 'conditional_blocks', None) or []:
-            entry_ = _conditional_entry(conditional, project, prefix, problems)
-            if entry_ is not None:
-                conditions.append(conditional.uuid)
-                conditionals.setdefault(conditional.uuid, entry_)
-                capture_.files.add(Path(conditional.file_path).resolve())
-        if (block.configuration or {}).get('variables'):
-            problems.append(
-                f'{where} reads its upstream with chunk or batch settings, which services do not '
-                'support yet.'
-            )
-            continue
-        _note_unchecked_guards(pipeline, block, project, where, capture_.notes)
-        path = Path(block.file_path).resolve()
-        if not path.is_file():
-            problems.append(f'{where}: its file {path} is missing.')
-            continue
-        retry = RetryConfig.load(config=resolve_retry_config(
-            getattr(repo_config, 'retry_config', None),
-            getattr(pipeline, 'retry_config', None),
-            block.retry_config,
-        ))
-        entry = dict(
-            uuid=block.uuid,
-            type=block_type,
-            language=language,
-            file=str(path.relative_to(project)),
-            sha256=_digest(path),
-            upstream=list(block.upstream_block_uuids or []),
-            retry=dict(
-                retries=int(retry.retries or 0),
-                delay_seconds=float(retry.delay or 0),
-                max_delay_seconds=float(retry.max_delay or 0),
-                exponential_backoff=bool(retry.exponential_backoff),
-            ),
-            configuration=_json_safe(block.configuration or {}),
-        )
-        if conditions:
-            entry['conditions'] = conditions
-        timeout = getattr(block, 'timeout', None)
-        if timeout:
-            entry['timeout_seconds'] = int(timeout)
-        if language == 'sql':
-            entry['sql'] = _sql_details(pipeline, block)
-        if language == 'rust':
-            crate = _prepare_rust_block(block, project, problems, where)
-            if crate:
-                entry['binary'] = f'bin/{RUST_BUNDLE}'
-                entry['entry'] = crate
-                capture_.rust_blocks.append((block.uuid, crate))
-            profile = _rust_io_config(block, path, project, problems, where)
-            if profile is not None:
-                entry['io_config'] = profile
-        capture_.files.add(path)
-        blocks.append(entry)
+        entry = _block_entry(pipeline, block, project, repo_config, capture_, problems,
+                             conditionals)
+        if entry is not None:
+            blocks.append(entry)
     # Upstream blocks that were left out (notebook blocks) are not dependencies.
     kept = {b['uuid'] for b in blocks}
     for entry in blocks:
@@ -567,6 +497,368 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
     if conditionals:
         pipeline_entry['conditionals'] = list(conditionals.values())
     return pipeline_entry
+
+
+# Stream connectors services run, by Mage's connector_type: the manifest kind.
+STREAM_SOURCES = {'kafka': 'kafka'}
+STREAM_SINKS = {'kafka': 'kafka', 'dummy': 'stdout'}
+# What comes next, for the message that names an unsupported connector.
+STREAM_PLANNED = 'HTTP, RabbitMQ, NATS and PostgreSQL change capture come next'
+# Mage's Kafka settings the engine's connector reads; others stop the export, as Mage's own
+# settings class refuses unknown keys.
+KAFKA_SETTINGS = {
+    'bootstrap_server', 'bootstrap_servers', 'security_protocol', 'sasl_config', 'ssl_config',
+    'api_version', 'librdkafka',
+}
+KAFKA_SOURCE_SETTINGS = KAFKA_SETTINGS | {
+    'topic', 'topics', 'consumer_group', 'auto_offset_reset', 'batch_size', 'timeout_ms',
+    'include_metadata', 'serde_config', 'offset', 'max_partition_fetch_bytes',
+}
+KAFKA_SINK_SETTINGS = KAFKA_SETTINGS | {'topic', 'batch_size', 'timeout_ms'}
+SASL_SETTINGS = {'mechanism', 'username', 'password'}
+SSL_SETTINGS = {'cafile', 'certfile', 'keyfile', 'password', 'check_hostname'}
+# Settings that hold secrets: written as env_var() references, never as values.
+SECRET_SETTINGS = {('sasl_config', 'password'), ('ssl_config', 'password')}
+
+
+def compile_stream_config(text: str, variables: Dict) -> Dict:
+    """
+    A stream block's YAML settings with env_var() and mage_secret_var() kept as references
+    the engine fills in at run time. variables() reads the pipeline's variables, as Mage does.
+    Raises ValueError for templates a service can't fill in.
+    """
+    import jinja2
+    import yaml
+
+    def unsupported(name):
+        def function(*args, **kwargs):
+            raise ValueError(
+                f'it uses {name}(), which services can\'t fill in for stream connectors; read '
+                'the value with env_var() and set it in the service\'s environment.'
+            )
+        return function
+
+    environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+    try:
+        rendered = environment.from_string(text).render(
+            env_var=_variable_mark,
+            mage_secret_var=lambda name: _variable_mark(secret_variable_name(name)),
+            variables=lambda name: (variables or {}).get(name),
+            json_value=unsupported('json_value'),
+            aws_secret_var=unsupported('aws_secret_var'),
+            azure_secret_var=unsupported('azure_secret_var'),
+        )
+    except jinja2.TemplateError as error:
+        raise ValueError(f'it has a template services can\'t fill in: {error}')
+    try:
+        config = yaml.safe_load(rendered)
+    except yaml.YAMLError as error:
+        raise ValueError(f'its YAML is not valid: {error}')
+    if not isinstance(config, dict):
+        raise ValueError('its settings are not a YAML mapping.')
+    return _io_config_parts(config)
+
+
+def _literal(value) -> bool:
+    """A setting written as a value, not as a reference to the environment."""
+    return value not in (None, '') and not (isinstance(value, dict) and '$parts' in value)
+
+
+def _kafka_settings(config: Dict, allowed: Set[str], where: str,
+                    problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown Kafka settings {", ".join(unknown)}.')
+    for section, keys in (('sasl_config', SASL_SETTINGS), ('ssl_config', SSL_SETTINGS)):
+        value = config.get(section)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            problems.append(f'{where}: {section} must be a mapping.')
+            continue
+        extra = sorted(set(value) - keys)
+        if extra:
+            problems.append(
+                f'{where}: {section} settings {", ".join(extra)} are not supported by services '
+                'yet (OAuth sign-in comes later).'
+            )
+    for section, key in SECRET_SETTINGS:
+        if _literal((config.get(section) or {}).get(key)):
+            problems.append(
+                f"{where}: {section}.{key} is written in the file; use "
+                f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+            )
+    settings = {k: v for k, v in config.items() if k not in ('batch_size', 'timeout_ms')}
+    if 'max_partition_fetch_bytes' in settings:
+        extra = dict(settings.get('librdkafka') or {})
+        extra['max.partition.fetch.bytes'] = settings.pop('max_partition_fetch_bytes')
+        settings['librdkafka'] = extra
+    # librdkafka finds the broker's protocol version itself.
+    settings.pop('api_version', None)
+    return settings
+
+
+def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture_: Capture,
+                      problems: List[str]) -> Optional[Dict]:
+    where = f'Pipeline {pipeline.uuid}, {role} {block.uuid}'
+    language = str(getattr(block.language, 'value', block.language))
+    if language != 'yaml':
+        problems.append(
+            f'{where} is written in {language}; services run stream {role}s set up in YAML '
+            f'({", ".join(sorted(kinds))}). Custom Python {role}s come later.'
+        )
+        return None
+    path = Path(block.file_path).resolve()
+    if not path.is_file():
+        problems.append(f'{where}: its file {path} is missing.')
+        return None
+    capture_.stream_files.add(path)
+    try:
+        config = compile_stream_config(path.read_text(), getattr(pipeline, 'variables', None))
+    except ValueError as error:
+        problems.append(f'{where}: {error}')
+        return None
+    connector_type = config.pop('connector_type', None)
+    if connector_type not in kinds:
+        problems.append(
+            f'{where} uses the {connector_type or "unnamed"} connector; services run '
+            f'{", ".join(sorted(kinds))} {role}s now, and {STREAM_PLANNED}.'
+        )
+        return None
+    kind = kinds[connector_type]
+    if kind == 'stdout':
+        return dict(name=block.uuid, kind=kind, config={})
+    if role == 'source':
+        if config.get('include_metadata'):
+            problems.append(
+                f'{where}: include_metadata is not supported by services yet; the blocks get '
+                'the message values.'
+            )
+        method = ((config.get('serde_config') or {}).get('serialization_method') or 'JSON')
+        if str(method).upper() != 'JSON':
+            problems.append(
+                f'{where}: {method} messages are not supported by services yet; services read '
+                'JSON messages (and text).'
+            )
+        config.pop('serde_config', None)
+        if config.get('offset'):
+            problems.append(
+                f'{where}: offset (a start position) is not supported by services yet; the '
+                'consumer group\'s committed position, or auto_offset_reset, decides where the '
+                'stream starts.'
+            )
+        config.pop('offset', None)
+        config.pop('include_metadata', None)
+        allowed = KAFKA_SOURCE_SETTINGS
+    else:
+        allowed = KAFKA_SINK_SETTINGS
+    return dict(
+        name=block.uuid, kind=kind, config=_kafka_settings(config, allowed, where, problems),
+        batch_size=config.get('batch_size'), timeout_ms=config.get('timeout_ms'),
+    )
+
+
+def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
+                           problems: List[str]) -> Optional[Dict]:
+    """
+    A streaming pipeline for the manifest: its YAML source and sinks become the stream's
+    connectors, and its Python transformers run on each batch of messages.
+    """
+    prefix = f'Pipeline {pipeline.uuid}'
+    sources, sinks, transformers = [], [], []
+    for block in pipeline.blocks_by_uuid.values():
+        block_type = str(getattr(block.type, 'value', block.type))
+        if block_type in NOTEBOOK_TYPES:
+            capture_.notes.append(
+                f'{prefix}, block {block.uuid}: a {block_type} block; it is notebook only and '
+                'left out.'
+            )
+        elif block_type == 'data_loader':
+            sources.append(block)
+        elif block_type == 'data_exporter':
+            sinks.append(block)
+        elif block_type == 'transformer':
+            transformers.append(block)
+        else:
+            problems.append(
+                f'{prefix}, block {block.uuid} is a {block_type} block; a stream has a source, '
+                'transformers and sinks.'
+            )
+    if len(sources) != 1:
+        problems.append(f'{prefix} is a stream with {len(sources)} sources; it needs one.')
+        return None
+    if not sinks:
+        problems.append(f'{prefix} is a stream with no sink.')
+        return None
+    source_block = sources[0]
+    source = _stream_connector(source_block, STREAM_SOURCES, 'source', pipeline, capture_,
+                               problems)
+    blocks = []
+    for block in transformers:
+        language = str(getattr(block.language, 'value', block.language))
+        if language != 'python':
+            problems.append(
+                f'{prefix}, block {block.uuid} is written in {language}; services run Python '
+                'stream transformers now, and Rust ones come next.'
+            )
+            continue
+        entry = _block_entry(pipeline, block, project, repo_config, capture_, problems, {})
+        if entry is None:
+            continue
+        if entry.pop('conditions', None):
+            problems.append(
+                f'{prefix}, block {block.uuid} has conditions, which stream transformers do not '
+                'run.'
+            )
+        # The source is not a block of the stream: transformers after it are its roots.
+        entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
+        blocks.append(entry)
+    sink_entries = []
+    for block in sinks:
+        sink = _stream_connector(block, STREAM_SINKS, 'sink', pipeline, capture_, problems)
+        if sink is None:
+            continue
+        upstream = list(block.upstream_block_uuids or [])
+        if len(upstream) != 1:
+            problems.append(f'{prefix}, sink {block.uuid} needs one upstream block.')
+            continue
+        if upstream[0] == source_block.uuid:
+            if blocks:
+                problems.append(
+                    f'{prefix}, sink {block.uuid} writes the source\'s messages next to '
+                    'transformers; services do not run that yet. Put a transformer that '
+                    'returns its messages before it.'
+                )
+                continue
+        else:
+            sink['after'] = upstream[0]
+        sink.pop('batch_size', None)
+        sink.pop('timeout_ms', None)
+        sink_entries.append(sink)
+    if source is None:
+        return None
+    batch = dict(
+        max_records=int(source.pop('batch_size', None) or 100),
+        max_wait_ms=int(source.pop('timeout_ms', None) or 500),
+    )
+    retry = getattr(pipeline, 'retry_config', None) or {}
+    errors = dict(
+        retries=int(retry.get('retries', 3)),
+        delay_seconds=float(retry.get('delay', 1)),
+        max_delay_seconds=float(retry.get('max_delay', 30)),
+    )
+    capture_.notes.append(
+        f'{prefix} runs from the service\'s start, with no trigger. A batch that still fails '
+        f'after {errors["retries"]} retries stops the stream, so no message is dropped; its '
+        'position stays where it was.'
+    )
+    return dict(
+        uuid=pipeline.uuid,
+        name=pipeline.name or pipeline.uuid,
+        description=pipeline.description or None,
+        max_concurrent_runs=1,
+        variables=_json_safe(getattr(pipeline, 'variables', None) or {}),
+        blocks=blocks,
+        triggers=[],
+        stream=dict(source=source, sinks=sink_entries, batch=batch, errors=errors),
+    )
+
+
+def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
+                 problems: List[str], conditionals: Dict[str, Dict]) -> Optional[Dict]:
+    """A block for the manifest, or None when it is left out (with a note or a problem)."""
+    from mage_ai.data_preparation.models.block.dynamic.utils import (
+        is_dynamic_block,
+        is_dynamic_block_child,
+        is_replicated_block,
+    )
+    from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
+
+    prefix = f'Pipeline {pipeline.uuid}'
+    block_type = str(getattr(block.type, 'value', block.type))
+    language = str(getattr(block.language, 'value', block.language))
+    where = f'{prefix}, block {block.uuid}'
+    if block_type in NOTEBOOK_TYPES:
+        capture_.notes.append(
+            f'{where}: a {block_type} block; it is notebook only and left out.',
+        )
+        return None
+    if block_type not in SUPPORTED_TYPES:
+        problems.append(f'{where} is a {block_type} block, which services do not run yet.')
+        return None
+    if language not in ('python', 'rust', 'r', 'sql'):
+        problems.append(
+            f'{where} is written in {language}; services run Python, R, Rust and SQL '
+            'blocks.',
+        )
+        return None
+    if language == 'sql':
+        reason = _sql_unsupported(block)
+        if reason:
+            problems.append(f'{where}: {reason}')
+            return None
+    if is_dynamic_block(block) or is_dynamic_block_child(block) or is_replicated_block(block):
+        problems.append(f'{where} is dynamic or replicated, which services do not run yet.')
+        return None
+    if getattr(block, 'callback_blocks', None):
+        problems.append(f'{where} has callbacks, which services do not run yet.')
+        return None
+    conditions = []
+    for conditional in getattr(block, 'conditional_blocks', None) or []:
+        entry_ = _conditional_entry(conditional, project, prefix, problems)
+        if entry_ is not None:
+            conditions.append(conditional.uuid)
+            conditionals.setdefault(conditional.uuid, entry_)
+            capture_.files.add(Path(conditional.file_path).resolve())
+    if (block.configuration or {}).get('variables'):
+        problems.append(
+            f'{where} reads its upstream with chunk or batch settings, which services do not '
+            'support yet.'
+        )
+        return None
+    _note_unchecked_guards(pipeline, block, project, where, capture_.notes)
+    path = Path(block.file_path).resolve()
+    if not path.is_file():
+        problems.append(f'{where}: its file {path} is missing.')
+        return None
+    retry = RetryConfig.load(config=resolve_retry_config(
+        getattr(repo_config, 'retry_config', None),
+        getattr(pipeline, 'retry_config', None),
+        block.retry_config,
+    ))
+    entry = dict(
+        uuid=block.uuid,
+        type=block_type,
+        language=language,
+        file=str(path.relative_to(project)),
+        sha256=_digest(path),
+        upstream=list(block.upstream_block_uuids or []),
+        retry=dict(
+            retries=int(retry.retries or 0),
+            delay_seconds=float(retry.delay or 0),
+            max_delay_seconds=float(retry.max_delay or 0),
+            exponential_backoff=bool(retry.exponential_backoff),
+        ),
+        configuration=_json_safe(block.configuration or {}),
+    )
+    if conditions:
+        entry['conditions'] = conditions
+    timeout = getattr(block, 'timeout', None)
+    if timeout:
+        entry['timeout_seconds'] = int(timeout)
+    if language == 'sql':
+        entry['sql'] = _sql_details(pipeline, block)
+    if language == 'rust':
+        crate = _prepare_rust_block(block, project, problems, where)
+        if crate:
+            entry['binary'] = f'bin/{RUST_BUNDLE}'
+            entry['entry'] = crate
+            capture_.rust_blocks.append((block.uuid, crate))
+        profile = _rust_io_config(block, path, project, problems, where)
+        if profile is not None:
+            entry['io_config'] = profile
+    capture_.files.add(path)
+    return entry
 
 
 def _conditional_entry(conditional, project: Path, prefix: str,
@@ -979,7 +1271,41 @@ def _environment(capture_: Capture) -> List[Dict]:
         if path.suffix == '.py':
             for name, required, secret, label in _client_reads(path, capture_.project):
                 add(name, required, secret, label)
+    # Stream connector settings: only the engine reads them, so they are not in used_by,
+    # which decides what reaches block processes.
+    for stream in capture_.streams:
+        for connector in [stream['source'], *stream['sinks']]:
+            for name, secret, required in _references(connector['config']):
+                if name.startswith('MAGE_SERVICE_'):
+                    continue
+                entry = variables.setdefault(name, dict(
+                    name=name, secret=False, required=False, used_by=[],
+                ))
+                entry['required'] = entry['required'] or required
+                entry['secret'] = entry['secret'] or secret or any(
+                    hint in name.upper() for hint in SECRET_HINTS
+                )
+                entry.setdefault('connectors', [])
+                if connector['name'] not in entry['connectors']:
+                    entry['connectors'].append(connector['name'])
     return [variables[name] for name in sorted(variables)]
+
+
+def _references(value, path: Tuple[str, ...] = ()) -> List[Tuple[str, bool, bool]]:
+    """(variable, secret, required) for each environment reference in connector settings."""
+    found: List[Tuple[str, bool, bool]] = []
+    if isinstance(value, dict) and '$parts' in value:
+        secret = tuple(path[-2:]) in SECRET_SETTINGS
+        for part in value['$parts']:
+            if isinstance(part, dict) and part.get('env'):
+                found.append((part['env'], secret, 'default' not in part))
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            found.extend(_references(item, path + (str(key),)))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(_references(item, path))
+    return found
 
 
 # Variables MageML's own clients read when a block does not pass the value: (module, class,
@@ -1887,6 +2213,25 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
         runtime = f'FROM debian:{build_base}-slim\n'
         python_env = ''
         copy_python = ''
+    engine_features = ''
+    kafka_build = ''
+    kafka_runtime = ''
+    if capture_.needs_kafka:
+        engine_features = ' --features mage-service/kafka'
+        # librdkafka builds with CMake, OpenSSL from source (make, perl), and includes curl's
+        # header (I-40).
+        kafka_build = (
+            '# The Kafka connector builds librdkafka and OpenSSL from source.\n'
+            'RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make \\\n'
+            '      perl libcurl4-openssl-dev && \\\n'
+            '    rm -rf /var/lib/apt/lists/*\n'
+        )
+        runtime_base = base if capture_.needs_python else build_base
+        libcurl = 'libcurl4t64' if runtime_base == 'trixie' else 'libcurl4'
+        kafka_runtime = (
+            f'RUN apt-get update && apt-get install -y --no-install-recommends {libcurl} && \\\n'
+            '    rm -rf /var/lib/apt/lists/*\n'
+        )
     if capture_.models:
         copy_models = 'COPY --chown=mage:mage models ./models\n'
         models_env = ' \\\n    MAGE_SERVICE_MODELS_DIR=/srv/mage-service/models'
@@ -1902,15 +2247,15 @@ FROM rust:{rust}-slim-{build_base} AS build
 # release can need a newer glibc, and the amd64 and arm64 builds run at the same time.
 ARG TARGETARCH
 WORKDIR /build
-COPY build/mage_service ./mage_service
+{kafka_build}COPY build/mage_service ./mage_service
 RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     --mount=type=cache,id=mage-service-{build_base}-$TARGETARCH,target=/build/mage_service/target \\
     cargo build --release --locked --manifest-path mage_service/Cargo.toml \\
-      -p mage-service -p mage-console && \\
+      -p mage-service -p mage-console{engine_features} && \\
     mkdir -p /out && \\
     cp mage_service/target/release/mage-service mage_service/target/release/mage-console /out/
 {rust_blocks}
-{runtime}RUN groupadd --system --gid 10001 mage && \\
+{runtime}{kafka_runtime}RUN groupadd --system --gid 10001 mage && \\
     useradd --system --uid 10001 --gid mage --home-dir /srv/mage-service --no-create-home mage && \\
     mkdir -p /srv/mage-service /var/lib/mage-service && \\
     chown mage:mage /var/lib/mage-service

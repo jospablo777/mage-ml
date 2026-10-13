@@ -364,6 +364,12 @@ def summary(captured, out_dir: Optional[Path]) -> Dict:
             ],
             uuid=pipeline['uuid'],
         ))
+        if pipeline.get('stream'):
+            stream = pipeline['stream']
+            pipelines[-1]['stream'] = dict(
+                sinks=[_stream_connector(c) for c in stream['sinks']],
+                source=_stream_connector(stream['source']),
+            )
     return dict(
         environment=[
             dict(name=v['name'], required=v['required'], secret=v['secret'])
@@ -376,6 +382,18 @@ def summary(captured, out_dir: Optional[Path]) -> Dict:
         models=[_embedded_model(m, out_dir) for m in captured.manifest.get('models') or []],
         path=str(out_dir) if out_dir else None,
         pipelines=pipelines,
+    )
+
+
+def _stream_connector(connector: Dict) -> Dict:
+    """What the app shows of a stream connector: its kind, block and topics, no settings."""
+    config = connector.get('config') or {}
+    topics = config.get('topics') or ([config['topic']] if config.get('topic') else [])
+    return dict(
+        after=connector.get('after'),
+        kind=connector['kind'],
+        name=connector['name'],
+        topics=[t for t in topics if isinstance(t, str)],
     )
 
 

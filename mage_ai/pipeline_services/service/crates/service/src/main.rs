@@ -357,7 +357,13 @@ fn env_report(common: &Common) -> Result<ExitCode, String> {
             } else {
                 "no"
             },
-            variable.used_by.join(", ")
+            variable
+                .used_by
+                .iter()
+                .cloned()
+                .chain(variable.connectors.iter().map(|c| format!("connector {c}")))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     for problem in &secrets.problems {
