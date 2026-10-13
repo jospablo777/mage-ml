@@ -332,13 +332,6 @@ jobs:
           ENV: ""
           PYTHONPATH: ${{ env.pythonLocation }}:.
         if: matrix.python-version == '3.12'
-      # Temporary: stacks of the server and the kernel every minute while the Playwright
-      # tests run, to find where the kernel stops answering on CI.
-      - name: Sample Python stacks during the Playwright tests
-        if: matrix.python-version == '3.12'
-        run: |
-          pip install py-spy
-          nohup bash -c 'for i in $(seq 1 40); do sleep 60; { echo "=== $(date -u +%T)"; for p in $(pgrep -f "cli/main.py start|ipykernel_launcher"); do echo "--- pid $p: $(tr "\0" " " < /proc/$p/cmdline | cut -c1-160)"; sudo env "PATH=$PATH" py-spy dump --pid $p 2>&1; done; } >> "$RUNNER_TEMP/stacks.txt"; done' > /dev/null 2>&1 &
       - name: Build frontend, start server, and run Playwright tests
         run: |
           yarn install --frozen-lockfile --non-interactive &&
@@ -352,12 +345,7 @@ jobs:
         env:
           PYTHONPATH: ${{ env.pythonLocation }}:. # Playwright tests on CI depend on the Python web server
           ENV: ""
-          # Temporary: log each kernel WebSocket message the server handles.
-          MAGE_DEBUG_WEBSOCKET: "1"
         if: matrix.python-version == '3.12'
-      - name: Python stacks sampled during the Playwright tests
-        if: failure() && matrix.python-version == '3.12'
-        run: cat "$RUNNER_TEMP/stacks.txt" || echo "No stacks were sampled."
       - uses: actions/upload-artifact@v4
         if: always()
         with:
