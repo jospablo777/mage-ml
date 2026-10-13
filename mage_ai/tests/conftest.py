@@ -10,8 +10,14 @@ os.environ['ENV'] = 'test_mage'
 # With no tracking URI, MLflow writes sqlite:///mlflow.db in the working directory, the
 # checkout in a test run. Tests that need MLflow point it at their own store and come back
 # to this one, so a reset or a block that runs after its test ends writes here instead.
+# With pytest-xdist the workers inherit the store the main process set, and each one makes
+# its own: the tests check that MLflow wrote in this process's folder.
 MLFLOW_FOLDER = tempfile.mkdtemp(prefix='mage-test-mlflow-')
-os.environ.setdefault('MLFLOW_TRACKING_URI', f'sqlite:///{MLFLOW_FOLDER}/mlflow.db')
+if os.environ.get('MLFLOW_TRACKING_URI') == os.environ.get('MAGE_TEST_MLFLOW_TRACKING_URI'):
+    os.environ.pop('MLFLOW_TRACKING_URI', None)
+if 'MLFLOW_TRACKING_URI' not in os.environ:
+    os.environ['MLFLOW_TRACKING_URI'] = f'sqlite:///{MLFLOW_FOLDER}/mlflow.db'
+    os.environ['MAGE_TEST_MLFLOW_TRACKING_URI'] = os.environ['MLFLOW_TRACKING_URI']
 
 # What a test run itself keeps in the working directory: the test database (test.db, or
 # test<worker>.db with xdist), pytest's and coverage's own files, and the folder view
