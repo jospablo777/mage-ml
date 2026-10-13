@@ -24,32 +24,19 @@ library, so installing R for MageML does not change your other R work.
 
 ## 1. Install MageML with uv
 
-If MageML is not installed yet, install it with [uv](https://docs.astral.sh/uv/). From a
-clone of the repository:
+If MageML is not installed yet, install it with [uv](https://docs.astral.sh/uv/) in a
+project folder:
 
 ```bash
-git clone https://github.com/jospablo777/mage-ml.git
-cd mage-ml
-uv sync --locked --no-default-groups
-uv run --no-sync mage --help
+uv init --python 3.12 my-pipelines
+cd my-pipelines
+uv add "mage-ml[r,postgres]" --index mageml=https://jospablo777.github.io/mage-ml/simple/
+uv run mage --help
 ```
 
-Or into a Python 3.12 environment you already use:
-
-```bash
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
-```
-
-Add the extras of the databases your blocks use, such as
-`"mage-ml[r,rust,postgres] @ git+https://github.com/jospablo777/mage-ml"`. The `r` and
-`rust` extras add no packages: R, rv and Rust are installed outside Python, as below.
-
-> [!NOTE]
-> Both routes build `column-atlas-native`, a Rust package of the repository, so they need
-> Rust: install it with [rustup](https://rustup.rs) first (see [Rust setup](rust-setup.md)).
-> The install from GitHub takes about three minutes. Plain `pip install` does not work yet,
-> because `column-atlas-native` is not on PyPI.
+Add the extras of the databases your blocks use, such as `postgres`. The `r` and `rust`
+extras add no packages: R, rv and Rust are installed outside Python, as below. Other ways
+to install MageML, with pip among them, are in the [Quickstart](../../getting-started/setup.md).
 
 ## 2. Install R
 

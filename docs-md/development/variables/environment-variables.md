@@ -4,7 +4,7 @@
 
 ## Setting environment variables
 
-Environment variables may be set in your Docker container to configure MageML settings. If you’re running MageML from source (`uv run mage start`), your local machine’s environment variables
+Environment variables may be set in your Docker container to configure MageML settings. If you’re running MageML without Docker (`uv run mage start` or `mage start`), your local machine’s environment variables
 are accessible within the running app.
 
 Environment variables are different from [runtime variables](../../getting-started/runtime-variable.md) or [secrets](secrets.md).

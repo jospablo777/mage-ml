@@ -12,7 +12,7 @@ ask in [GitHub issues](https://github.com/jospablo777/mage-ml/issues).
 ---
 
 We support running the pipeline in Airflow DAGs.
-* First install MageML in the Airflow environment by adding `mage-ml @ git+https://github.com/jospablo777/mage-ml.git` to your requirements.txt file (MageML has no PyPI package, and it needs Python 3.12).
+* First install MageML in the Airflow environment by adding `-r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt` to your requirements.txt file (MageML needs Python 3.12).
 * Then download the MageML project code into your Airflow directory, for example with a git submodule.
 * In your MageML project's metadata.yaml file, please specify a variables_dir that you want to store the output of each block execution (You need to have write permission to the variables_dir). Example: `variables_dir: /tmp`.
 

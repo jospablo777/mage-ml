@@ -34,7 +34,7 @@ http://localhost:3333.
 
 | Start here | |
 | --- | --- |
-| [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv or Docker and create a project |
+| [Quickstart](docs-md/getting-started/setup.md) | Install MageML with uv, pip or Docker and create a project |
 | [Tutorial: a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md) | Build, compile, schedule and document a pipeline, and the same pipeline in Python only |
 | [Tutorial: from pipeline to production](docs-md/getting-started/pipeline-to-production.md) | A data contract, a monitor, run records and an export as a service |
 | [Tutorial: an ML inference service](docs-md/getting-started/inference-service.md) | Train a model, score in Python, Rust and R, and serve predictions over HTTP |
@@ -92,27 +92,51 @@ http://localhost:3333.
 Every change from Mage 0.9.79 is in the [release notes](docs/development/release-notes.md),
 including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.
 
-## Quick start
+## Install
+
+MageML installs from its own package index, with prebuilt packages for Python 3.12 on
+Linux (x86_64, arm64) and macOS on Apple silicon; on Windows, use WSL 2. No Rust or
+compiler is needed to install. We recommend [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/jospablo777/mage-ml.git
-cd mage-ml
-uv sync --locked --no-default-groups --extra postgres
-uv run --no-sync mage init my_project
-uv run --no-sync mage start my_project
+uv init --python 3.12 my-pipelines
+cd my-pipelines
+uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/
+uv run mage start my_project
 ```
 
-The install builds a Rust package, so it needs Rust ([rustup](https://rustup.rs)). Open
-http://localhost:6789, sign in with `admin@admin.com` and `admin`, and follow the tutorial
-[a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md). Other
-ways to install, such as into your own environment or with Docker, are in the
-[Quickstart](docs-md/getting-started/setup.md).
+Open http://localhost:6789, sign in with `admin@admin.com` and `admin`, and follow the
+tutorial [a pipeline in Python, Rust and R](docs-md/getting-started/polyglot-pipeline.md).
+Add connectors as extras, such as `uv add "mage-ml[postgres,duckdb]"`, and the packages your
+blocks use with `uv add scikit-learn`.
 
-Select more integrations with `--extra`, for example `--extra s3` or `--extra dbt`. A later
-`uv sync` removes extras that are not selected, so use `uv run --no-sync` in an environment
-already synchronized. The `all` extra selects the container profile; the `integrations`
-extra supplies connector dependencies, and the `mage_integrations` package installs
-separately.
+Or write MageML in your `pyproject.toml` and run `uv sync`:
+
+```toml
+[project]
+requires-python = ">=3.12,<3.13"
+dependencies = ["mage-ml[postgres]==0.1.0"]
+
+[[tool.uv.index]]
+name = "mageml"
+url = "https://jospablo777.github.io/mage-ml/simple/"
+```
+
+Other ways:
+
+| How | Command |
+| --- | --- |
+| A `mage` command for your user (uv tool) | `uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/` |
+| Try it without installing (uvx) | `uvx --from mage-ml --index https://jospablo777.github.io/mage-ml/simple/ mage start my_project` |
+| Into an environment you already use (uv pip) | `uv pip install mage-ml --index https://jospablo777.github.io/mage-ml/simple/` |
+| pip | `python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt` |
+
+With pip, use the release's requirements file, which pins MageML's packages by hash, and not
+`--extra-index-url`: pip takes the highest version across indexes, so a package of the same
+name on PyPI would replace MageML's. Docker, Kubernetes and installing from source (for
+Rust and R development of MageML itself, or macOS on Intel) are in the
+[Quickstart](docs-md/getting-started/setup.md). `pip install mage-ai` installs upstream
+Mage, not MageML.
 
 ## Editing the documentation
 

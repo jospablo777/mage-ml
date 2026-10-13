@@ -10,10 +10,16 @@
 
 ## Requirements
 
-Data integration sources and destinations need the connector dependencies. The Docker image built
-from the MageML repository's Dockerfile includes them. In a source install, add the `integrations`
-extra:
+Data integration sources and destinations need the `integrations` extra, which installs the
+`mage-integrations` package and its connectors. The Docker image built from the MageML
+repository's Dockerfile includes it. Otherwise add it:
 
+```bash
+uv add "mage-ml[integrations,postgres]"
+```
+```bash
+python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/integrations.txt
+```
 ```bash
 uv sync --locked --no-default-groups --extra postgres --extra integrations
 ```

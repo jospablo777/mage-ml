@@ -467,11 +467,12 @@ This will allow your locally running MageML to remotely access AWS EMR.
 
 ### 6. Sample pipeline with PySpark code
 
-If you aren’t using Docker and you installed MageML from source, you must run the
-following commands in your terminal to use the `pyspark` kernel:
+If you aren’t using Docker, you must run the following commands in your terminal to use
+the `pyspark` kernel. Install `sparkmagic` into MageML's environment: `uv add sparkmagic`
+in a uv project, or `uv pip install sparkmagic` in your own environment.
 
 ```bash
-pip install sparkmagic
+uv add sparkmagic
 mkdir ~/.sparkmagic
 wget https://raw.githubusercontent.com/jupyter-incubator/sparkmagic/master/sparkmagic/example_config.json
 mv example_config.json ~/.sparkmagic/config.json

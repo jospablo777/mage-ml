@@ -16,8 +16,8 @@ You need:
 | [rustup](https://rustup.rs) | Installs Rust; reads the version each project pins |
 | A C toolchain | Links the programs (Xcode Command Line Tools on macOS, `build-essential` on Debian and Ubuntu) |
 
-Installing MageML with uv also needs Rust, because it builds `column-atlas-native`, a Rust
-package of the repository. So set up Rust first.
+MageML itself installs without Rust, from prebuilt packages. Rust is needed to build and
+run Rust blocks, and to install MageML from source.
 
 <Note>
   MageML runs Python blocks with no setup. When you create a Rust block on a machine where
@@ -58,22 +58,18 @@ hand.
 
 ## 3. Install MageML with uv
 
-```bash
-git clone https://github.com/jospablo777/mage-ml.git
-cd mage-ml
-uv sync --locked --no-default-groups
-```
-
-Or into a Python 3.12 environment you already use:
+In a project folder:
 
 ```bash
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
+uv init --python 3.12 my-pipelines
+cd my-pipelines
+uv add "mage-ml[rust,postgres]" --index mageml=https://jospablo777.github.io/mage-ml/simple/
 ```
 
-The install from GitHub compiles the Rust package and takes about three minutes. Add the
-extras of the databases your blocks use, such as `"mage-ml[r,rust,postgres] @ git+..."`;
-the `rust` extra adds no packages, since Rust comes from rustup.
+Add the extras of the databases your blocks use, such as `postgres`; the `rust` extra adds
+no packages, since Rust comes from rustup. Run the `mage` commands below with `uv run`, as
+in `uv run mage rust status path/to/project`. Other ways to install MageML, with pip among
+them, are in the [Quickstart](/getting-started/setup).
 
 ## 4. Check the setup
 

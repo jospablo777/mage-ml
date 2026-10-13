@@ -5,7 +5,7 @@
 > [!NOTE]
 > These tutorials were written for upstream Mage. Most of the pipeline concepts apply to MageML,
 > but their installation steps (`docker pull mageai/mageai`, `pip install mage-ai`) install upstream
-> Mage. Install MageML from source instead; see the [quickstart](../getting-started/setup.md).
+> Mage. Install MageML with uv or pip instead; see the [Quickstart](../getting-started/setup.md).
 
 ## Written Tutorials
 

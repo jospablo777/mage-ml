@@ -4,66 +4,184 @@
 
 ## Get MageML
 
-There is no published MageML package or Docker image yet. `pip install mage-ai`,
-`conda install mage-ai` and the `mageai/mageai` image install upstream Mage, not MageML.
-Install MageML from source with [uv](https://docs.astral.sh/uv/), or build the image from
-the repository's Dockerfile.
+MageML installs from its own package index,
+`https://jospablo777.github.io/mage-ml/simple/`, with prebuilt packages for Python 3.12 on
+Linux (x86_64 and arm64) and macOS on Apple silicon. On Windows, use WSL 2. The install
+needs no Rust or compiler; Rust and R are needed only to run Rust or R blocks (see
+[Rust setup](../guides/blocks/rust-setup.md) and [R setup](../guides/blocks/r-setup.md)).
 
-<details><summary>From source (uv)</summary>
+We recommend [uv](https://docs.astral.sh/uv/getting-started/installation/). It installs
+Python 3.12 if it is missing, and it takes each package from the first index that has it,
+so MageML's packages always come from MageML's index and the rest from PyPI.
 
-**1. Install the requirements**
+> [!NOTE]
+> `pip install mage-ai`, `conda install mage-ai` and the `mageai/mageai` image install
+> upstream Mage, not MageML.
 
-Install [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git),
-[uv](https://docs.astral.sh/uv/getting-started/installation/) and Rust with
-[rustup](https://rustup.rs) (see [Rust setup](../guides/blocks/rust-setup.md)). MageML
-runs on Python 3.12; uv installs it if it is missing. Rust builds
-`column-atlas-native`, a package of the repository, and runs Rust blocks.
+<details><summary>In a uv project (recommended)</summary>
 
-**2. Install MageML**
-
-```bash
-git clone https://github.com/jospablo777/mage-ml.git
-cd mage-ml
-uv sync --locked --no-default-groups --extra postgres
-```
-
-**3. Create a project and start the server**
+**1. Create a project folder and add MageML**
 
 ```bash
-uv run --no-sync mage init my_project
-uv run --no-sync mage start my_project
+uv init --python 3.12 my-pipelines
+cd my-pipelines
+uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/
 ```
+`uv add` records MageML and its index in `pyproject.toml` and locks every version
+in `uv.lock`, so the environment is the same on every machine that runs
+`uv sync`.
 
-**4. Open MageML**
+**2. Start the server**
+
+```bash
+uv run mage start my_project
+```
+The first start creates the MageML project `my_project`.
+
+**3. Open MageML**
 
 Open http://localhost:6789 in your browser.
 
+Add the packages your blocks use with `uv add`, for example `uv add scikit-learn`, and
+connectors as extras: `uv add "mage-ml[postgres,duckdb]"`. To update MageML:
+
+```bash
+uv lock --upgrade-package mage-ml
+uv sync
+```
+
 </details>
 
-<details><summary>Into your own environment (uv)</summary>
+<details><summary>In pyproject.toml</summary>
+
+To add MageML to a project you already manage with uv, write it in `pyproject.toml`:
+
+```toml
+[project]
+name = "my-pipelines"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mage-ml[postgres]==0.1.0",
+]
+
+[[tool.uv.index]]
+name = "mageml"
+url = "https://jospablo777.github.io/mage-ml/simple/"
+```
+
+Then install and start:
+
+```bash
+uv sync
+uv run mage start my_project
+```
+
+`mage-ml`, `column-atlas-native`, `mage-integrations` and MageML's `singer-python`
+come from the `mageml` index, and the other packages from PyPI. `uv add` writes the
+same index, plus `mage-ml = { index = "mageml" }` under `[tool.uv.sources]`, which
+pins `mage-ml` to it.
+
+</details>
+
+<details><summary>As a command (uv tool)</summary>
+
+To have the `mage` command available everywhere, in an environment of its own:
+
+```bash
+uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/
+mage start my_project
+```
+
+Add the packages your blocks use with `--with`, for example
+`uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/ --with scikit-learn`,
+and update with `uv tool upgrade mage-ml`. For projects with many block packages, a uv
+project keeps them in one locked list.
+
+</details>
+
+<details><summary>Without installing (uvx)</summary>
+
+To try MageML once, without installing it:
+
+```bash
+uvx --from mage-ml --index https://jospablo777.github.io/mage-ml/simple/ mage start my_project
+```
+
+uv keeps the packages in its cache, so the next run starts quickly.
+
+</details>
+
+<details><summary>Into an existing environment (uv pip)</summary>
 
 To add MageML to a Python 3.12 environment you already use:
 
 ```bash
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python "mage-ml @ git+https://github.com/jospablo777/mage-ml"
-.venv/bin/mage init my_project
+uv venv --python 3.12
+uv pip install mage-ml --index https://jospablo777.github.io/mage-ml/simple/
 .venv/bin/mage start my_project
 ```
 
-The install compiles the repository's Rust package, so it needs Rust and takes about
-three minutes. Plain `pip install` does not work yet: `column-atlas-native` is not on
-PyPI. Add packages for your blocks to the same environment with
-`uv pip install --python .venv/bin/python <package>`.
+Add the packages your blocks use with `uv pip install <package>`.
+
+</details>
+
+<details><summary>With pip</summary>
+
+pip installs MageML from the requirements file of a release, which pins MageML's
+packages to the release's files and their SHA-256 hashes:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install \
+  -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt
+.venv/bin/mage start my_project
+```
+
+For data integration pipelines, use `integrations.txt` in place of `base.txt`. Add
+extras next to the file: `-r .../base.txt "mage-ml[postgres]"`.
+
+> [!WARNING]
+> Do not install MageML with `pip install --extra-index-url`. pip merges the indexes and
+> takes the highest version it finds, so a package with the same name published on PyPI,
+> such as `singer-python`, replaces MageML's.
 
 </details>
 
 <details><summary>Docker</summary>
 
-### Build the image
+MageML has no published image. Build one in either of two ways.
 
-Be sure [Docker](https://docs.docker.com/engine/install/) is installed, then build the
-image from the repository:
+### A small image from the package index
+
+This image has MageML and Python only, about 1.3 GB. Write this `Dockerfile` in an
+empty folder:
+
+```dockerfile
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+RUN uv pip install --system --no-cache "mage-ml==0.1.0" \
+      --index https://jospablo777.github.io/mage-ml/simple/
+WORKDIR /home/src
+EXPOSE 6789
+CMD ["mage", "start", "my_project"]
+```
+
+Then build it and start a project in the current folder:
+
+```bash
+docker build -t mageml .
+docker run -it -p 6789:6789 -v "$(pwd)":/home/src mageml
+```
+
+Add extras or block packages to the `uv pip install` line, for example
+`"mage-ml[postgres]==0.1.0" scikit-learn`.
+
+### The full image from the repository
+
+The repository's Dockerfile adds R, rv and the Rust toolchain for R and Rust blocks,
+and the `all` and `integrations` extras. Be sure
+[Docker](https://docs.docker.com/engine/install/) is installed, then build it:
 
 ```bash
 git clone https://github.com/jospablo777/mage-ml.git
@@ -71,9 +189,8 @@ cd mage-ml
 docker build -t mageml .
 ```
 
-### Start a project
-
-Create a folder for your project, change directory into it, and run:
+Start a project with the full image: create a folder for your project, change
+directory into it, and run:
 
 ```bash
 docker run -it -p 6789:6789 -v $(pwd):/home/src mageml /app/run_app.sh mage start [project_name]
@@ -94,6 +211,29 @@ VM, use its external IP address with the port, such as `123.456.78:6789`.
 `docker run` starts a container from the `mageml` image. The `-v` option mounts the
 current folder at `/home/src` in the container, so the project files stay on your
 machine. `/app/run_app.sh` runs the command that follows it.
+
+</details>
+
+<details><summary>From source</summary>
+
+To change MageML itself, install it from a clone of the repository. Install
+[Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git),
+[uv](https://docs.astral.sh/uv/getting-started/installation/) and Rust with
+[rustup](https://rustup.rs): the install compiles `column-atlas-native`, a package of
+the repository. This is also the way to install on platforms without a prebuilt
+package, such as macOS on Intel.
+
+```bash
+git clone https://github.com/jospablo777/mage-ml.git
+cd mage-ml
+uv sync --locked --no-default-groups --extra postgres
+uv run --no-sync mage start my_project
+```
+
+Select more extras with `--extra`. A later `uv sync` removes the extras you leave out,
+so list them all, or use `uv run --no-sync` in an environment already synchronized.
+See [the development guide](https://github.com/jospablo777/mage-ml/blob/master/README_dev.md)
+for tests and frontend development.
 
 </details>
 
@@ -162,22 +302,33 @@ Do the same for the following blocks in the pipeline to transform and export the
 
 ## Install optional dependencies
 
-MageML's connectors and add-ons are extras in `pyproject.toml`. Select them with `--extra`
-when you install from source:
+MageML's connectors and add-ons are extras of the `mage-ml` package. Put them in brackets:
 
+```bash
+uv add "mage-ml[postgres,s3,dbt]"
+```
+```toml
+dependencies = [
+    "mage-ml[postgres,s3,dbt]==0.1.0",
+]
+```
+```bash
+uv tool install "mage-ml[postgres,s3,dbt]" --index https://jospablo777.github.io/mage-ml/simple/
+```
+```bash
+uv pip install "mage-ml[postgres,s3,dbt]" --index https://jospablo777.github.io/mage-ml/simple/
+```
+```bash
+python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt "mage-ml[postgres,s3,dbt]"
+```
 ```bash
 uv sync --locked --no-default-groups --extra postgres --extra s3 --extra dbt
 ```
 
-A later `uv sync` removes extras you leave out, so list all the extras you need, or use
-`uv run --no-sync` in an environment already synchronized. For an install into your own
-environment, put the extras in brackets:
-`uv pip install "mage-ml[postgres,s3] @ git+https://github.com/jospablo777/mage-ml"`.
-
 | Extra                  | Description                                          |
 | ---------------------- | ---------------------------------------------------- |
 | `all`                  | the dependency profile of the container image        |
-| `integrations`         | the `mage-integrations` package for data integration pipelines |
+| `integrations`         | the `mage-integrations` package and its connectors, for data integration pipelines |
 | `airtable`             | Airtable                                             |
 | `azure`                | Azure packages                                       |
 | `bigquery`             | BigQuery                                             |

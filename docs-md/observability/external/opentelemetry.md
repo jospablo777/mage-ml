@@ -9,7 +9,7 @@ This guide details how to send traces from a MageML server to an OpenTelemetry C
 Ensure the following prerequisites are in place before proceeding:
 - An OpenTelemetry Collector is set up and configured to receive OTLP data over gRPC.
 - The OpenTelemetry packages are installed. They are part of the `all` extra
-  (`uv sync --locked --extra all`), which the image built from the repository's Dockerfile includes.
+  (`uv add "mage-ml[all]"`), which the image built from the repository's Dockerfile includes.
 
 ## Configuring OpenTelemetry
 

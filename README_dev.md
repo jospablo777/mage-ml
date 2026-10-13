@@ -1,5 +1,8 @@
 # Setting up a Development Environment
 
+This guide is for changing MageML itself. To use MageML, install the released package; see
+[Install](README.md#install).
+
 Run these commands from the repository root unless a different directory is specified.
 
 MageML requires Python 3.12, as declared in `pyproject.toml`, and the Docker images [use it](./Dockerfile). Support for Python 3.14 is planned.

@@ -7,7 +7,7 @@ blocks and Python and SQL blocks pass data frames to each other in any order.
 ## Setup
 
 ```bash
-pip install mage-ml               # Mage; R, rv and rig are installed outside Python
+uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/  # R, rv and rig are installed outside Python
 mage r setup path/to/project      # checks R, rv and rig, and prints how to install them
 mage r init path/to/project       # creates the project's R environment
 mage r status path/to/project     # checks that R blocks can run

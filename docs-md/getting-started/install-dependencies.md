@@ -18,6 +18,39 @@ the project.
 
 ## Install them
 
+Install them into the environment MageML runs in. How depends on how you installed MageML
+(see the [Quickstart](setup.md)).
+
+### In a uv project
+
+Add them to the project, which records them in `pyproject.toml` and `uv.lock`:
+
+```bash
+uv add --requirements my_project/requirements.txt
+uv add scikit-learn   # or one package
+```
+
+### With uv tool
+
+Reinstall the tool with the packages:
+
+```bash
+uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/ \
+  --with-requirements my_project/requirements.txt --reinstall
+```
+
+### In your own environment
+
+When MageML is installed in an environment of yours, with uv pip or pip, install into the
+same one:
+
+```bash
+uv pip install --python .venv/bin/python --requirement my_project/requirements.txt
+```
+```bash
+.venv/bin/python -m pip install --requirement my_project/requirements.txt
+```
+
 ### In the container image
 
 The image built from the repository's Dockerfile installs `requirements.txt` when the
@@ -33,7 +66,8 @@ uv pip install --python "$(command -v python3)" \
   --constraint "$MAGE_RUNTIME_CONSTRAINTS" --requirement requirements.txt
 ```
 
-The image has no `pip`; use `uv pip`.
+The image has no `pip`; use `uv pip`. In the small image built from the package index, add
+the packages to the `uv pip install` line of its Dockerfile and rebuild it.
 
 ### From a source checkout
 
@@ -46,15 +80,6 @@ uv pip install --requirement my_project/requirements.txt
 `uv sync` makes the environment match the lock file exactly, so a later `uv sync` removes
 these packages. Run MageML with `uv run --no-sync`, or sync with
 `uv sync --inexact` to keep them.
-
-### In your own environment
-
-When MageML is installed in an environment of yours, install into the same one:
-
-```bash
-uv pip install --python .venv/bin/python --requirement my_project/requirements.txt
-uv pip install --python .venv/bin/python scikit-learn   # or one package
-```
 
 ## Packages for one pipeline
 

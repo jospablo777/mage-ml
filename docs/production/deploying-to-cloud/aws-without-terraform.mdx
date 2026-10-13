@@ -47,15 +47,17 @@ An example SSH command could look like this:
 ssh -i ~/.ssh/aws-ec2.pem ubuntu@ec2-55-186-46-136.us-west-2.compute.amazonaws.com
 ```
 
-Once you SSH into the instance, install uv and MageML from source:
+Once you SSH into the instance, install uv and MageML:
 
 ```bash
-sudo apt update && sudo apt install -y git curl
+sudo apt update && sudo apt install -y curl
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
-git clone https://github.com/jospablo777/mage-ml.git && cd mage-ml
-uv sync --locked --no-default-groups --extra postgres
+uv init --python 3.12 mage-ml && cd mage-ml
+uv add "mage-ml[postgres]" --index mageml=https://jospablo777.github.io/mage-ml/simple/
 ```
+
+Prebuilt packages exist for x86_64 and arm64 (Graviton) instances.
 
 <Note>
 `pip install mage-ai` installs upstream Mage from PyPI, not MageML.
@@ -75,8 +77,7 @@ your security group to expose the port that MageML runs on.
 3. Start MageML on your EC2 instance from the `mage-ml` folder:
 
    ```bash
-   uv run --no-sync mage init <your_repo_name>
-   uv run --no-sync mage start <your_repo_name>
+   uv run mage start <your_repo_name>
    ```
 
 4. Then from your browser, access `<ec2-instance-public-ip>:6789` to access the
@@ -106,7 +107,7 @@ instance over SSH. This process involves opening two separate SSH connections:
    You can change the project name as you prefer.
 
    ```bash
-   uv run --no-sync mage init default_repo
+   uv run mage init default_repo
    ```
 
    Then start the MageML app. This will start the app at
@@ -114,7 +115,7 @@ instance over SSH. This process involves opening two separate SSH connections:
    as it runs on the EC2 instance.
 
    ```bash
-   uv run --no-sync mage start default_repo
+   uv run mage start default_repo
    ```
 
 2. Forward all requests sent to [localhost:6789](http://localhost:6789) on

@@ -3,13 +3,15 @@
 ## Prerequisites
 
 Backblaze B2 uses MageML's S3-compatible client, which depends on `boto3`. The
-image built from the repository's Dockerfile already includes it. In a source
-checkout, add the `s3` extra to the `uv sync` command you installed with
-(`uv sync` removes extras you leave out):
+image built from the repository's Dockerfile already includes it. Otherwise add the `s3`
+extra:
 
 ```bash
-uv sync --locked --no-default-groups --extra postgres --extra s3
+uv add "mage-ml[s3]"
 ```
+
+In a source checkout, add `--extra s3` to the `uv sync` command you installed with
+(`uv sync` removes extras you leave out).
 
 ## Add credentials
 

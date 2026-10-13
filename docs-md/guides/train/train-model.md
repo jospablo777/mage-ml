@@ -260,7 +260,7 @@ docker exec [container_name] mage run demo_project titanic_survivors
 ```
 
 ```bash
-uv run --no-sync mage run demo_project titanic_survivors
+uv run mage run demo_project titanic_survivors
 ```
 
 `mage run` is a production run: the chain of blocks runs as one stage, with each block

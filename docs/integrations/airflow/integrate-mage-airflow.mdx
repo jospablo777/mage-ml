@@ -19,39 +19,37 @@ description:
 <Steps titleSize="h2">
 <Step title="Add MageML as a dependency in Airflow">
 
-MageML has no PyPI package; `mage-ai` on PyPI is upstream Mage. Open the `requirements.txt`
-file in the root directory of your Airflow project, and add MageML from its repository:
+Open the `requirements.txt` file in the root directory of your Airflow project, and add
+the requirements file of a MageML release, with the extras your blocks use on a line of
+their own:
 
 ```
-mage-ml @ git+https://github.com/jospablo777/mage-ml.git
+-r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt
+mage-ml[postgres]
 ```
 
-MageML runs on Python 3.12 only, so Airflow must run on Python 3.12 too.
+The release file pins MageML's packages to the release's files and their hashes, so pip
+installs them from there and not from PyPI (`mage-ai` on PyPI is upstream Mage). MageML
+runs on Python 3.12 only, so Airflow must run on Python 3.12 too. If your Airflow project
+uses uv, `uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/`
+works as well.
 </Step>
 <Step title="Install MageML">
 
-You can run MageML using Docker or from source.
+To create the project and edit its pipelines, run MageML next to Airflow, installed with uv
+(see the [Quickstart](/getting-started/setup)):
 
-### Using Docker
+```bash
+uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/
+```
 
-Build the image from the repository:
+Or build the Docker image from the repository:
 
 ```bash
 git clone https://github.com/jospablo777/mage-ml.git
 cd mage-ml
 docker build -t mageml .
 ```
-
-### From source
-
-```bash
-git clone https://github.com/jospablo777/mage-ml.git
-cd mage-ml
-uv sync --locked --no-default-groups --extra postgres
-```
-
-Run the `mage` commands below with `uv run --no-sync mage` from that folder, passing the
-full path of the project.
 </Step>
 <Step title="Initialize MageML project">
 
@@ -72,8 +70,7 @@ docker run -it -p 6789:6789 -v $(pwd):/home/src \
 
 ```
 
-If you installed MageML from source, run the following command in the `dags/`
-folder:
+If you installed MageML with uv, run the following command in the `dags/` folder:
 
 ```bash
 mage init demo_project
@@ -133,8 +130,7 @@ docker run -it -p 6789:6789 -v $(pwd):/home/src \
 
 ```
 
-If you installed MageML from source, run the following command in the `dags/`
-folder:
+If you installed MageML with uv, run the following command in the `dags/` folder:
 
 ```bash
 mage start demo_project

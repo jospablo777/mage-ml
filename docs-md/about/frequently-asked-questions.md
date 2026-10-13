@@ -23,10 +23,14 @@ MageML is built for ML engineers, data engineers and data scientists, but is not
 
 <details><summary>true</summary>
 
-MageML has no published Docker image or PyPI package; `pip install mage-ai` and the
-`mageai/mageai` image install upstream Mage. Install from source with uv, or build the image
-from the repository's Dockerfile (`docker build -t mageml .`). See the
-[setup guide](../getting-started/setup.md) for details.
+Install it from MageML's package index with uv:
+
+```bash
+uv add mage-ml --index mageml=https://jospablo777.github.io/mage-ml/simple/
+```
+
+pip, `uv tool`, `uvx` and Docker work too; see the [Quickstart](../getting-started/setup.md).
+`pip install mage-ai` and the `mageai/mageai` image install upstream Mage, not MageML.
 
 </details>
 

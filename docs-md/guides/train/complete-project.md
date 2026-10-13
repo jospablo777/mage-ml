@@ -22,13 +22,16 @@ Dockerfile (`docker build -t mageml .`):
 docker run -it -p 6789:6789 -v $(pwd):/home/src mageml /app/run_app.sh mage start demo_project
 ```
 
-<b>Source checkout</b>
+<b>Installed with uv or pip</b>
 
-From your MageML checkout, after `uv sync`, pass the path to the project:
+From the folder that contains `demo_project`, in a uv project (see the
+[Quickstart](../../getting-started/setup.md)):
 
 ```bash
-uv run --no-sync mage start /path/to/demo_project
+uv run mage start demo_project
 ```
+
+After `uv tool install` or with an activated environment, run `mage start demo_project`.
 
 Open [http://localhost:6789](http://localhost:6789) in your browser.
 

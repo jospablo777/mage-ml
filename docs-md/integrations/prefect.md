@@ -2,10 +2,15 @@
 
 *Run pipelines in Prefect flows.*
 
-First install MageML in the environment that runs Prefect. There is no published MageML
-package yet (`pip install mage-ai` installs upstream Mage), so install it from source:
-clone https://github.com/jospablo777/mage-ml, run `uv sync --locked --no-default-groups`
-in it, and add Prefect to that environment. Then download the project code into your
+First install MageML in the environment that runs Prefect, on Python 3.12:
+
+```bash
+uv add mage-ml prefect --index mageml=https://jospablo777.github.io/mage-ml/simple/
+```
+
+With pip, install the release's requirements file:
+`python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt prefect`
+(`pip install mage-ai` installs upstream Mage). Then download the project code into your
 Prefect directory, for example as a git submodule.
 
 The examples below use the Prefect 1 API (`Flow`, `ShellTask`).
