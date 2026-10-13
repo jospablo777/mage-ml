@@ -128,6 +128,12 @@ def create_ssh_keys(
                 pass
         else:
             private_key_file = custom_private_key_file
+            # ssh refuses a private key that others can read. A key file that already
+            # existed, such as one mounted with a group's permissions, was used as it was.
+            try:
+                os.chmod(private_key_file, 0o600)
+            except OSError:
+                pass
 
     url = git_config.remote_repo_link
     if url:
@@ -185,16 +191,20 @@ def add_host_to_known_hosts(remote_repo_link: str) -> bool:
     if known_hosts_dir:
         os.makedirs(known_hosts_dir, exist_ok=True)
 
-    # Use list-form subprocess + Python-managed file handle: shell metacharacters
-    # in `hostname` cannot reach a shell. Defense in depth on top of the regex
-    # check above.
+    # Use list-form subprocess: shell metacharacters in `hostname` cannot reach a
+    # shell. Defense in depth on top of the regex check above. The keys are read
+    # first: a failed scan returned True and later SSH calls failed without a reason.
+    result = subprocess.run(
+        ['ssh-keyscan', '-t', 'rsa', hostname],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+
     with open(DEFAULT_KNOWN_HOSTS_FILE, 'ab') as known_hosts:
-        subprocess.run(
-            ['ssh-keyscan', '-t', 'rsa', hostname],
-            stdout=known_hosts,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        known_hosts.write(result.stdout)
     return True
 
 
