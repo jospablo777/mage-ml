@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List
 
 from kafka import KafkaConsumer, TopicPartition
+
 from mage_ai.shared.config import BaseConfig
 from mage_ai.shared.enum import StrEnum
 from mage_ai.streaming.constants import DEFAULT_BATCH_SIZE, DEFAULT_TIMEOUT_MS
@@ -79,6 +80,86 @@ class KafkaConfig(BaseConfig):
         return config
 
 
+def consumer_settings(config: KafkaConfig, print_message=print) -> Dict:
+    """
+    kafka-python consumer settings from a Kafka source's config: servers, group, offsets and
+    security. Sample capture uses them too, with the group removed.
+    """
+    consumer_kwargs = dict(
+        group_id=config.consumer_group,
+        bootstrap_servers=config.bootstrap_server,
+        api_version=config.api_version,
+        auto_offset_reset=config.auto_offset_reset,
+        max_partition_fetch_bytes=config.max_partition_fetch_bytes,
+        enable_auto_commit=False,
+    )
+    if config.security_protocol == SecurityProtocol.SSL:
+        if not config.ssl_config:
+            raise Exception('ssl_config is required when security_protocol is SSL')
+        consumer_kwargs['security_protocol'] = SecurityProtocol.SSL
+        consumer_kwargs['ssl_cafile'] = config.ssl_config.cafile
+        consumer_kwargs['ssl_certfile'] = config.ssl_config.certfile
+        consumer_kwargs['ssl_keyfile'] = config.ssl_config.keyfile
+        consumer_kwargs['ssl_password'] = config.ssl_config.password
+        consumer_kwargs[
+            'ssl_check_hostname'
+        ] = config.ssl_config.check_hostname
+    elif config.security_protocol == SecurityProtocol.SASL_SSL:
+        if not config.sasl_config:
+            raise Exception('sasl_config is required when security_protocol is SASL_SSL')
+        consumer_kwargs['security_protocol'] = SecurityProtocol.SASL_SSL
+        consumer_kwargs['sasl_mechanism'] = config.sasl_config.mechanism
+
+        # Handle OAUTHBEARER mechanism
+        if config.sasl_config.mechanism == 'OAUTHBEARER':
+            from mage_ai.streaming.sources.kafka_oauth import (
+                create_oauth_token_provider,
+            )
+
+            token_provider = create_oauth_token_provider(config.sasl_config)
+            consumer_kwargs['sasl_oauth_token_provider'] = token_provider
+        else:
+            # Handle PLAIN, SCRAM mechanisms
+            consumer_kwargs['sasl_plain_username'] = config.sasl_config.username
+            consumer_kwargs['sasl_plain_password'] = config.sasl_config.password
+
+        if config.ssl_config:
+            consumer_kwargs[
+                'ssl_check_hostname'] = config.ssl_config.check_hostname
+            if config.ssl_config.cafile:
+                consumer_kwargs['ssl_cafile'] = config.ssl_config.cafile
+            if config.ssl_config.certfile:
+                consumer_kwargs['ssl_certfile'] = config.ssl_config.certfile
+            if config.ssl_config.keyfile:
+                consumer_kwargs['ssl_keyfile'] = config.ssl_config.keyfile
+            if config.ssl_config.password:
+                consumer_kwargs['ssl_password'] = config.ssl_config.password
+
+    elif config.security_protocol == SecurityProtocol.SASL_PLAINTEXT:
+        if not config.sasl_config:
+            raise Exception('sasl_config is required when security_protocol is SASL_PLAINTEXT')
+        consumer_kwargs['security_protocol'] = SecurityProtocol.SASL_PLAINTEXT
+        consumer_kwargs['sasl_mechanism'] = config.sasl_config.mechanism
+
+        # Handle OAUTHBEARER mechanism
+        if config.sasl_config.mechanism == 'OAUTHBEARER':
+            print_message(
+                'WARNING: Using OAUTHBEARER with SASL_PLAINTEXT is not recommended. '
+                'OAuth tokens should be used with SASL_SSL for secure transmission.'
+            )
+            from mage_ai.streaming.sources.kafka_oauth import (
+                create_oauth_token_provider,
+            )
+
+            token_provider = create_oauth_token_provider(config.sasl_config)
+            consumer_kwargs['sasl_oauth_token_provider'] = token_provider
+        else:
+            # Handle PLAIN, SCRAM mechanisms
+            consumer_kwargs['sasl_plain_username'] = config.sasl_config.username
+            consumer_kwargs['sasl_plain_password'] = config.sasl_config.password
+    return consumer_kwargs
+
+
 class KafkaSource(BaseSource):
     config_class = KafkaConfig
 
@@ -90,80 +171,7 @@ class KafkaSource(BaseSource):
             raise Exception('Please specify topic partitions')
 
         self._print('Start initializing consumer.')
-        # Initialize kafka consumer
-        consumer_kwargs = dict(
-            group_id=self.config.consumer_group,
-            bootstrap_servers=self.config.bootstrap_server,
-            api_version=self.config.api_version,
-            auto_offset_reset=self.config.auto_offset_reset,
-            max_partition_fetch_bytes=self.config.max_partition_fetch_bytes,
-            enable_auto_commit=False,
-        )
-        if self.config.security_protocol == SecurityProtocol.SSL:
-            if not self.config.ssl_config:
-                raise Exception('ssl_config is required when security_protocol is SSL')
-            consumer_kwargs['security_protocol'] = SecurityProtocol.SSL
-            consumer_kwargs['ssl_cafile'] = self.config.ssl_config.cafile
-            consumer_kwargs['ssl_certfile'] = self.config.ssl_config.certfile
-            consumer_kwargs['ssl_keyfile'] = self.config.ssl_config.keyfile
-            consumer_kwargs['ssl_password'] = self.config.ssl_config.password
-            consumer_kwargs[
-                'ssl_check_hostname'
-            ] = self.config.ssl_config.check_hostname
-        elif self.config.security_protocol == SecurityProtocol.SASL_SSL:
-            if not self.config.sasl_config:
-                raise Exception('sasl_config is required when security_protocol is SASL_SSL')
-            consumer_kwargs['security_protocol'] = SecurityProtocol.SASL_SSL
-            consumer_kwargs['sasl_mechanism'] = self.config.sasl_config.mechanism
-
-            # Handle OAUTHBEARER mechanism
-            if self.config.sasl_config.mechanism == 'OAUTHBEARER':
-                from mage_ai.streaming.sources.kafka_oauth import (
-                    create_oauth_token_provider,
-                )
-
-                token_provider = create_oauth_token_provider(self.config.sasl_config)
-                consumer_kwargs['sasl_oauth_token_provider'] = token_provider
-            else:
-                # Handle PLAIN, SCRAM mechanisms
-                consumer_kwargs['sasl_plain_username'] = self.config.sasl_config.username
-                consumer_kwargs['sasl_plain_password'] = self.config.sasl_config.password
-
-            if self.config.ssl_config:
-                consumer_kwargs[
-                    'ssl_check_hostname'] = self.config.ssl_config.check_hostname
-                if self.config.ssl_config.cafile:
-                    consumer_kwargs['ssl_cafile'] = self.config.ssl_config.cafile
-                if self.config.ssl_config.certfile:
-                    consumer_kwargs['ssl_certfile'] = self.config.ssl_config.certfile
-                if self.config.ssl_config.keyfile:
-                    consumer_kwargs['ssl_keyfile'] = self.config.ssl_config.keyfile
-                if self.config.ssl_config.password:
-                    consumer_kwargs['ssl_password'] = self.config.ssl_config.password
-
-        elif self.config.security_protocol == SecurityProtocol.SASL_PLAINTEXT:
-            if not self.config.sasl_config:
-                raise Exception('sasl_config is required when security_protocol is SASL_PLAINTEXT')
-            consumer_kwargs['security_protocol'] = SecurityProtocol.SASL_PLAINTEXT
-            consumer_kwargs['sasl_mechanism'] = self.config.sasl_config.mechanism
-
-            # Handle OAUTHBEARER mechanism
-            if self.config.sasl_config.mechanism == 'OAUTHBEARER':
-                self._print(
-                    'WARNING: Using OAUTHBEARER with SASL_PLAINTEXT is not recommended. '
-                    'OAuth tokens should be used with SASL_SSL for secure transmission.'
-                )
-                from mage_ai.streaming.sources.kafka_oauth import (
-                    create_oauth_token_provider,
-                )
-
-                token_provider = create_oauth_token_provider(self.config.sasl_config)
-                consumer_kwargs['sasl_oauth_token_provider'] = token_provider
-            else:
-                # Handle PLAIN, SCRAM mechanisms
-                consumer_kwargs['sasl_plain_username'] = self.config.sasl_config.username
-                consumer_kwargs['sasl_plain_password'] = self.config.sasl_config.password
-
+        consumer_kwargs = consumer_settings(self.config, self._print)
         if self.config.topic:
             topics = [self.config.topic]
         else:

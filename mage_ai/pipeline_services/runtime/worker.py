@@ -702,15 +702,16 @@ def _user_traceback() -> str:
 # ---- streams ------------------------------------------------------------------------
 
 # A stream's blocks are compiled once per worker: their top-level code, such as loading a
-# model, runs once instead of for every batch. A changed file has another sha256.
-_STREAM_FUNCTIONS: Dict[Tuple[str, str], Callable] = {}
+# model, runs once instead of for every batch. A changed file (another sha256) replaces its
+# entry, so a worker the editor keeps through many edits holds one function per file.
+_STREAM_FUNCTIONS: Dict[str, Tuple[str, Callable]] = {}
 
 
 def _stream_function(block: Dict) -> Callable:
-    key = (block['file'], block.get('sha256') or '')
-    function = _STREAM_FUNCTIONS.get(key)
-    if function is not None:
-        return function
+    digest = block.get('sha256') or ''
+    cached = _STREAM_FUNCTIONS.get(block['file'])
+    if cached is not None and cached[0] == digest:
+        return cached[1]
     functions: List[Callable] = []
     namespace = {
         '__name__': f"mage_block_{block['uuid']}",
@@ -728,7 +729,7 @@ def _stream_function(block: Dict) -> Callable:
     if not functions:
         raise BlockError('load', f"Block {block['uuid']} has no function decorated with "
                          '@transformer.', block_uuid=block['uuid'])
-    _STREAM_FUNCTIONS[key] = functions[0]
+    _STREAM_FUNCTIONS[block['file']] = (digest, functions[0])
     return functions[0]
 
 
