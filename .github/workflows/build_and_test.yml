@@ -223,14 +223,24 @@ jobs:
         run: make -C integration_tests up
       - name: Install the R test environment
         run: make -C integration_tests r-env
-      # Rust blocks compile into one cargo target directory; keep it between runs so the
-      # tests do not build Polars cold every time.
-      - name: Cache the Rust blocks' build directory
-        uses: actions/cache@v4
+      # Rust blocks compile into one cargo target directory. Restore it, build Polars and the
+      # block SDK into it before the tests, and save it at once, so no test pays for a cold
+      # build within its time limit and a failing test run still keeps the cache.
+      - name: Restore the Rust blocks' build directory
+        id: rust-blocks
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/mage/rust/target
-          key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'integration_tests/project/rust/Cargo.lock') }}
+          key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'mage_ai/data_preparation/models/block/rust/sdk/Cargo.lock') }}
           restore-keys: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-
+      - name: Build Polars and the Rust block SDK
+        run: make -C integration_tests warm-rust
+      - name: Save the Rust blocks' build directory
+        if: steps.rust-blocks.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/mage/rust/target
+          key: ${{ steps.rust-blocks.outputs.cache-primary-key }}
       - name: Run integration tests
         run: make -C integration_tests ci PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900 --durations=25'
       # The scheduler process with many concurrent pipelines, for 150 seconds.

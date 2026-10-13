@@ -559,6 +559,8 @@ RUST_BUILD_TESTS = (
 )
 
 
+# Before xdist's own hook, which reads the xdist_group markers to schedule the tests.
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.nodeid.startswith(RUST_BUILD_TESTS):

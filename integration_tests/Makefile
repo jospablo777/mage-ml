@@ -57,7 +57,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -145,6 +145,12 @@ test-soak-fusion: up
 # DuckDB runs in process; these tests need no service.
 test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
+
+# Builds Polars and the Rust block SDK into the shared target directory once, so no
+# test pays for the cold build within its time limit.
+warm-rust:
+	cd .. && $(PYTHON) -m pytest -p no:cacheprovider -q \
+		'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block'
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
 ci: up r-env
