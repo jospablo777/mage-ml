@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mage-ml"
-version = "0.1.0"
+version = "0.1.1"
 description = "Data and ML pipelines in Python, R, Rust and SQL, built for ML engineers. Based on Mage."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -20,7 +20,7 @@ dependencies = [
   "cachetools",
   "click>=8.3.3",
   # ColumnAtlas, the block output explorer: a Rust extension built from rust/column_atlas.
-  "column-atlas-native==0.1.0",
+  "column-atlas-native==0.1.1",
   "Faker>=40.41",
   "GitPython>=3.2,<4",
   "Jinja2>=3.1.6",
@@ -216,7 +216,7 @@ rust = []
 trino = [
   "trino~=0.326",
 ]
-integrations = ["mage-integrations==0.1.0"]
+integrations = ["mage-integrations==0.1.1"]
 # Dependency profile used by the container image.
 all = [
   "mage-ml[airtable]",

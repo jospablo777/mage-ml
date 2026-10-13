@@ -974,7 +974,7 @@ wheels = [
 
 [[package]]
 name = "column-atlas-native"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "rust/column_atlas" }
 
 [[package]]
@@ -3400,7 +3400,7 @@ wheels = [
 
 [[package]]
 name = "mage-integrations"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "mage_integrations" }
 dependencies = [
     { name = "async-timeout" },
@@ -3512,7 +3512,7 @@ requires-dist = [
 
 [[package]]
 name = "mage-ml"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -6724,7 +6724,7 @@ wheels = [
 
 [[package]]
 name = "singer-python"
-version = "5.13.0+mage.1"
+version = "5.13.0+mage.2"
 source = { editable = "vendor/singer-python" }
 dependencies = [
     { name = "backoff" },

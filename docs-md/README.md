@@ -551,6 +551,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [R blocks](development/r-blocks.md)
 - [Release notes](development/release-notes.md)
 - [v0.1.0](development/releases/v0.1.0.md)
+- [v0.1.1](development/releases/v0.1.1.md)
 - [Releasing MageML](development/releasing.md)
 - [Resource-aware scheduling](development/resource-scheduling.md)
 - [Run records](development/run-records.md)

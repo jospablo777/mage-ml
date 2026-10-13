@@ -1,5 +1,31 @@
 # Release notes
 
+## MageML 0.1.1 (2026-10-13)
+
+A security release; the GitHub release text is in `releases/v0.1.1.md`.
+
+### Security
+
+- `/api/browser_items` read, wrote, moved and deleted any path the server could reach, for
+  viewers too (reads) and editors (writes). Every path, move and rename targets included,
+  must now be in the project, with symlinks resolved.
+- `ensure_file_is_in_project` no longer skips the check when the project platform is on.
+- The Kubernetes client's response logger stays at INFO, and `ApiException` prints its
+  status, reason and the paths of rejected fields, never headers, bodies or values.
+- An existing Git SSH private key is set to mode 600, and `add_host_to_known_hosts` returns
+  False and adds nothing when `ssh-keyscan` fails.
+
+### Fixes
+
+- The play and pause button on the Pipelines page sends only the status; it wrote the
+  defaults of block fusion, retries, environment, concurrency and other settings.
+- The scheduler resets a crashed block run only while it still has the status it read; a
+  block completed in between ran a second time.
+- File browser renames: two debugging `raise` statements failed them, a rename by name
+  moved the file into the working folder, and a file's saved versions now follow it.
+- Integration CI groups start the services their tests use (Redis for the soak tests;
+  MySQL, MinIO and the HTTP API for the R templates).
+
 ## MageML 0.1.0 (2026-10-13)
 
 The first release under MageML's own versions, which start at 0.1.0. Earlier builds of this

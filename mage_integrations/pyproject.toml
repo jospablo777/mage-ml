@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mage-integrations"
-version = "0.1.0"
+version = "0.1.1"
 description = "Data source and destination connectors for MageML, based on Mage."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -57,7 +57,7 @@ dependencies = [
   "xlsx2csv>=0.8.6",
   "xmltodict>=1.0",
   "zenpy>=2.0.57",
-  "singer-python==5.13.0+mage.1",
+  "singer-python==5.13.0+mage.2",
   "lxml>=6.1,<7",
   "async-timeout>=4,<6",
 ]
