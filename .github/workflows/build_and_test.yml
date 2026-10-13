@@ -281,6 +281,16 @@ jobs:
       - name: Install the R test environment
         if: matrix.r
         run: make -C integration_tests r-env
+      # The exported Kafka stream test runs mage-service built with Kafka: librdkafka builds
+      # with CMake and includes curl's header. Built before the tests, so the test's time
+      # limit does not pay for librdkafka and OpenSSL.
+      - name: Build the engine with Kafka
+        if: matrix.id == 'streaming'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake libcurl4-openssl-dev
+          cd mage_ai/pipeline_services/service
+          CARGO_TARGET_DIR=target/kafka cargo build -q -p mage-service --features kafka
       - name: Start the group's services
         if: matrix.services != ''
         run: make -C integration_tests up SERVICES="${{ matrix.services }}"
