@@ -32,6 +32,7 @@ export enum ViewKeyEnum {
   GRAPHS = 'graphs',
   INTERACTIONS = 'interactions',
   REPORTS = 'reports',
+  SAMPLES = 'samples',
   SECRETS = 'secrets',
   SETTINGS = 'settings',
   TERMINAL = 'terminal',
@@ -154,6 +155,13 @@ export function SIDEKICK_VIEWS(opts?: {
     ]);
   }
 
+  if (PipelineTypeEnum.STREAMING === opts?.pipeline?.type) {
+    arr.unshift({
+      key: ViewKeyEnum.SAMPLES,
+      label: 'Samples',
+    });
+  }
+
   arr.push(...[
     {
       key: ViewKeyEnum.DATA,
@@ -192,6 +200,7 @@ export const NAV_ICON_MAPPING = {
   [ViewKeyEnum.CALLBACKS]: Callback,
   [ViewKeyEnum.CHARTS]: Charts,
   [ViewKeyEnum.DATA]: Table,
+  [ViewKeyEnum.SAMPLES]: NavReport,
   [ViewKeyEnum.EXTENSIONS]: Lightning,
   [ViewKeyEnum.INTERACTIONS]: Interactions,
   [ViewKeyEnum.SECRETS]: Secrets,

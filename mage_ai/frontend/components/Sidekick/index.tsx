@@ -38,6 +38,7 @@ import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Secrets from './GlobalVariables/Secrets';
 import SecretType from '@interfaces/SecretType';
 import Spacing from '@oracle/elements/Spacing';
+import StreamSamples from '@components/StreamSamples';
 import Text from '@oracle/elements/Text';
 import Terminal from '@components/Terminal';
 import { ALL_HEADERS_HEIGHT, ASIDE_SUBHEADER_HEIGHT } from '@components/TripleLayout/index.style';
@@ -660,6 +661,10 @@ function Sidekick({
         }
 
         {activeView === ViewKeyEnum.DATA && dataMemo}
+
+        {ViewKeyEnum.SAMPLES === activeView && pipeline?.uuid && (
+          <StreamSamples pipelineUUID={pipeline.uuid} />
+        )}
 
         {ViewKeyEnum.SECRETS === activeView && secretsMemo}
 

@@ -50,6 +50,7 @@ import Markdown from '@oracle/components/Markdown';
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Select from '@oracle/elements/Inputs/Select';
+import SampleRunResult from '@components/StreamSamples/SampleRunResult';
 import Spacing from '@oracle/elements/Spacing';
 import SparkJobs from './SparkJobs';
 import SparkProgress from './SparkProgress';
@@ -149,6 +150,8 @@ import { PADDING_UNITS, UNIT } from '@oracle/styles/units/spacing';
 import { RunBlockAndTrackProps } from '@components/CodeBlockV2/constants';
 import { SCROLLBAR_WIDTH } from '@oracle/styles/scrollbars';
 import { ViewKeyEnum } from '@components/Sidekick/constants';
+import { StreamSampleRunType } from '@interfaces/StreamSampleType';
+import { useStreamSample } from '@utils/streamSamples';
 import { addScratchpadNote, addSqlBlockNote } from '@components/PipelineDetail/AddNewBlocks/utils';
 import { buildBlockRefKey } from '@components/PipelineDetail/utils';
 import {
@@ -641,6 +644,40 @@ function CodeBlock(
     () => PipelineTypeEnum.STREAMING === pipelineType,
     [pipelineType],
   );
+  // A stream's Python transformers run on a sample of messages, with the service engine's
+  // worker, instead of in the kernel.
+  const isStreamingTransformer = isStreamingPipeline
+    && BlockTypeEnum.TRANSFORMER === blockType
+    && BlockLanguageEnum.PYTHON === blockLanguage;
+  const [selectedSample] = useStreamSample(isStreamingTransformer ? pipelineUUID : null);
+  const [sampleRun, setSampleRun] = useState<StreamSampleRunType>(null);
+  const [sampleRunning, setSampleRunning] = useState<boolean>(false);
+  const [sampleRunError, setSampleRunError] = useState<string>(null);
+  const runOnSample = useCallback(async () => {
+    if (!selectedSample) {
+      setSampleRunError('Choose a sample first: capture or paste messages in the Samples panel.');
+      openSidekickView?.(ViewKeyEnum.SAMPLES);
+      return;
+    }
+    setSampleRunning(true);
+    setSampleRunError(null);
+    try {
+      // The worker runs the block's file: save what is in the editor first.
+      await savePipelineContent?.();
+      const response: any = await api.stream_sample_runs.pipelines.useCreate(pipelineUUID)({
+        stream_sample_run: { block_uuid: blockUUID, sample: selectedSample },
+      });
+      const result = response?.data || response;
+      if (result?.error) {
+        setSampleRun(null);
+        setSampleRunError(result.error.message);
+      } else {
+        setSampleRun(result?.stream_sample_run);
+      }
+    } finally {
+      setSampleRunning(false);
+    }
+  }, [blockUUID, openSidekickView, pipelineUUID, savePipelineContent, selectedSample]);
   const isDBT = useMemo(() => BlockTypeEnum.DBT === blockType, [blockType]);
   const isSQLBlock = BlockLanguageEnum.SQL === blockLanguage;
   const isRBlock = BlockLanguageEnum.R === blockLanguage;
@@ -1380,12 +1417,18 @@ function CodeBlock(
       }
 
       if (!codeBlockV2 || !codeBlockComponentHeader) {
-        if (selected && !hideRunButton) {
+        // A stream transformer has no kernel run, but ⌘↵ runs it on the sample.
+        if (selected && (!hideRunButton || isStreamingTransformer)) {
           if (
             onlyKeysPresent([KEY_CODE_META, KEY_CODE_ENTER], keyMapping) ||
             onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_ENTER], keyMapping)
           ) {
-            runBlockAndTrack({ block });
+            if (isStreamingTransformer) {
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              runOnSample();
+            } else {
+              runBlockAndTrack({ block });
+            }
           } else if (onlyKeysPresent([KEY_CODE_SHIFT, KEY_CODE_ENTER], keyMapping) && addNewBlock) {
             event.preventDefault();
             addNewBlock({
@@ -1404,7 +1447,9 @@ function CodeBlock(
       codeBlockComponentHeader,
       codeBlockV2,
       hideRunButton,
+      isStreamingTransformer,
       runBlockAndTrack,
+      runOnSample,
       selected,
       updateBlock,
     ],
@@ -2566,6 +2611,8 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                         pipeline={pipeline}
                         project={project}
                         runBlock={hideRunButton ? null : runBlockAndTrack}
+                        runOnSample={isStreamingTransformer ? runOnSample : null}
+                        sampleRunning={sampleRunning}
                         savePipelineContent={savePipelineContent}
                         setErrors={setErrors}
                         setIsEditingBlock={setIsEditingBlock}
@@ -3617,6 +3664,16 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
               </CodeContainerStyle>
 
               {!sideBySideEnabled && codeOutputEl}
+
+              {isStreamingTransformer && (sampleRun || sampleRunning || sampleRunError) && (
+                <Spacing px={PADDING_UNITS} pb={PADDING_UNITS}>
+                  {sampleRunning && (
+                    <Text muted small>Running on sample {selectedSample}...</Text>
+                  )}
+                  {sampleRunError && !sampleRunning && <Text danger small>{sampleRunError}</Text>}
+                  {sampleRun && !sampleRunning && <SampleRunResult result={sampleRun} />}
+                </Spacing>
+              )}
             </>
           </ContainerStyle>
         </div>

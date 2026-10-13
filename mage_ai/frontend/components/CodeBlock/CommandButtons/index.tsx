@@ -89,6 +89,9 @@ type CommandButtonsProps = {
     runUpstream?: boolean;
     runTests?: boolean;
   }) => void;
+  // A stream's Python transformer runs on the chosen sample instead of in the kernel.
+  runOnSample?: () => void;
+  sampleRunning?: boolean;
   savePipelineContent: (payload?: {
     block?: BlockType;
     pipeline?: PipelineType;
@@ -114,6 +117,8 @@ function CommandButtons({
   pipeline,
   project,
   runBlock,
+  runOnSample,
+  sampleRunning,
   setIsEditingBlock,
   savePipelineContent,
   setErrors,
@@ -207,7 +212,42 @@ function CommandButtons({
         />
       )}
 
-      {runBlock && (!isInProgress && (!isStreaming || isStreamingConnector)) && (
+      {runOnSample && (
+        <Tooltip
+          appearBefore
+          default
+          label={(
+            <Text>
+              Run on sample
+              &nbsp;
+              &nbsp;
+              <KeyboardTextGroup
+                inline
+                keyTextGroups={[[
+                  isMac() ? KEY_SYMBOL_META : KEY_SYMBOL_CONTROL,
+                  KEY_SYMBOL_ENTER,
+                ]]}
+                monospace
+                uuidForKey={uuid}
+              />
+            </Text>
+          )}
+          size={UNIT * 3}
+          widthFitContent
+        >
+          {sampleRunning ? (
+            <Spinner color={(themeContext || dark).content.active} />
+          ) : (
+            <Button noBackground noBorder noPadding onClick={() => runOnSample()}>
+              <Circle color={color} size={UNIT * 3}>
+                <PlayButtonFilled black size={UNIT * 1.5} />
+              </Circle>
+            </Button>
+          )}
+        </Tooltip>
+      )}
+
+      {runBlock && !runOnSample && (!isInProgress && (!isStreaming || isStreamingConnector)) && (
         <>
           {!isDBT && (
             <Tooltip

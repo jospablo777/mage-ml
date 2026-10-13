@@ -65,6 +65,8 @@ export const PIPELINE_SERVICE_EXPORTS: 'pipeline_service_exports' = 'pipeline_se
 export const LANGUAGE_SETUPS: 'language_setups' = 'language_setups';
 export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
 export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_service_builds';
+export const STREAM_SAMPLES: 'stream_samples' = 'stream_samples';
+export const STREAM_SAMPLE_RUNS: 'stream_sample_runs' = 'stream_sample_runs';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
 export const FOLDERS: 'folders' = 'folders';
@@ -174,6 +176,8 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [LANGUAGE_SETUPS],
   [PIPELINE_SERVICES],
   [PIPELINE_SERVICE_BUILDS],
+  [STREAM_SAMPLES, PIPELINES],
+  [STREAM_SAMPLE_RUNS, PIPELINES],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
   [FILE_VERSIONS, FILES],
