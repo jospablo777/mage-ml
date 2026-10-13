@@ -527,6 +527,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [1. Use uv for Python package management](decisions/0001-use-uv-for-python-package-management.md)
 - [Pipeline services: pipelines exported as standalone Docker services](design/pipeline-services.md)
 - [Block fusion: blocks that run together without losing their boundaries](development/block-fusion.md)
+- [CI and tests](development/ci.md)
 - [ColumnAtlas](development/column-atlas.md)
 - [Compilation study: how pipeline shapes, languages and failures behave](development/compilation-study.md)
 - [Data contracts](development/data-contracts.md)

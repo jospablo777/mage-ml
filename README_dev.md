@@ -93,7 +93,7 @@ Commit `pyproject.toml` and `uv.lock` together. CI checks that the lockfile matc
 
 ### Running the tests
 
-pytest runs the Python tests, including the `unittest` classes. Synchronize the required extras before running it; `--no-sync` preserves that environment.
+[CI and tests](docs/development/ci.md) covers every suite, the integration services, the browser tests and what makes CI fail. pytest runs the Python tests, including the `unittest` classes. Synchronize the required extras before running it; `--no-sync` preserves that environment.
 
 ```bash
 make test

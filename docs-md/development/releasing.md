@@ -12,6 +12,9 @@ published to PyPI and no container image is published. The workflow is
    for approval.
 3. Settings > General > Releases: turn on release immutability.
 
+CI must be green on the commit you tag; [CI and tests](ci.md) lists what makes it fail and
+how to reproduce each check locally.
+
 ## Each release
 
 1. Set the version in `pyproject.toml` (and in `mage_integrations/pyproject.toml` or

@@ -129,6 +129,8 @@ make test
 
 See [the development guide](README_dev.md) for extras, frontend development and dependency
 changes.
+[CI and tests](docs/development/ci.md) describes every test suite, every CI check, what makes
+CI fail and how to run the same checks locally.
 
 ## License
 
