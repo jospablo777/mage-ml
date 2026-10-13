@@ -251,3 +251,13 @@ class StreamRefusalTest(StreamExportTestCase):
     def test_invalid_yaml_is_a_problem_not_a_crash(self):
         self.stream(source='connector_type: kafka\ntopic: [orders\n')
         self.assertIn('its YAML is not valid', self.problems())
+
+    def test_variables_too_large_for_64_bits_are_refused(self):
+        self.stream()
+        self.pipeline.variables = dict(customer=123456789012345678901234567890, fine=2**63)
+        self.pipeline.save()
+
+        problems = self.problems()
+
+        self.assertIn('variable customer: 123456789012345678901234567890 is too large', problems)
+        self.assertNotIn('variable fine', problems)

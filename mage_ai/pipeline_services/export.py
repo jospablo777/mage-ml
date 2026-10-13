@@ -181,6 +181,8 @@ def capture(
             pipelines.append(entry)
         environments[uuid] = _pipeline_environment(pipeline, problems)
     _check_after_runs(pipelines, notes, problems)
+    for entry in pipelines:
+        _check_integers(entry, problems)
     if problems:
         raise ExportError(problems)
     capture_.environment = _shared_environment(environments, problems)
@@ -219,6 +221,38 @@ def capture(
         if capture_.environment is not None:
             _apply_environment(capture_)
     return capture_
+
+
+def _oversized(value, path: str):
+    """(path, integer) for each integer that does not fit in 64 bits."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int) and not -2**63 <= value <= 2**64 - 1:
+        yield path, value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _oversized(item, f'{path}.{key}' if path else str(key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _oversized(item, f'{path}[{index}]')
+
+
+def _check_integers(entry: Dict, problems: List[str]) -> None:
+    """
+    The service holds variables as JSON numbers of 64 bits: a larger integer would lose
+    digits, so it stops the export with the variable's name.
+    """
+    sources = [('variable', entry.get('variables') or {})]
+    sources += [
+        (f"trigger {t.get('name')} variable", t.get('variables') or {})
+        for t in entry.get('triggers') or []
+    ]
+    for what, variables in sources:
+        for path, value in _oversized(variables, ''):
+            problems.append(
+                f"Pipeline {entry['uuid']}, {what} {path}: {value} is too large for a 64-bit "
+                'integer and the service would lose digits; write it as a string.'
+            )
 
 
 def _check_after_runs(entries: List[Dict], notes: List[str], problems: List[str]) -> None:

@@ -188,15 +188,38 @@ struct WaitQuery {
     output: Option<String>,
 }
 
+/// The run request in a body; empty is a run with the pipeline's own variables. Integers too
+/// large for 64 bits are refused rather than rounded.
+fn run_request(body: &[u8]) -> ApiResult<RunRequest> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(RunRequest::default());
+    }
+    let text = std::str::from_utf8(body).map_err(|_| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            "the body is not UTF-8 JSON.".into(),
+        )
+    })?;
+    if let Some(message) = mage_service_core::json::check_integers(text, "The request") {
+        return Err(ApiError(StatusCode::BAD_REQUEST, message));
+    }
+    serde_json::from_str(text).map_err(|error| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("the body is not a valid run request: {error}"),
+        )
+    })
+}
+
 async fn create_run(
     State(state): State<AppState>,
     Path(pipeline): Path<String>,
     Query(query): Query<WaitQuery>,
     headers: HeaderMap,
-    body: Option<Json<RunRequest>>,
+    body: axum::body::Bytes,
 ) -> ApiResult<Response> {
     authorize(&state, &headers, Access::Write)?;
-    let request = body.map(|Json(r)| r).unwrap_or_default();
+    let request = run_request(&body)?;
     if let Some(key) = &request.idempotency_key
         && (key.is_empty() || key.len() > 200)
     {

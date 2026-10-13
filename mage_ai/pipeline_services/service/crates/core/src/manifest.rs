@@ -412,6 +412,9 @@ pub struct ManifestError(pub String);
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
+        if let Some(message) = crate::json::check_integers(text, "service.json") {
+            return Err(ManifestError(message));
+        }
         let manifest: Manifest = serde_json::from_str(text)
             .map_err(|error| ManifestError(format!("service.json is invalid: {error}")))?;
         if !(OLDEST_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&manifest.schema_version) {

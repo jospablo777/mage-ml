@@ -2,5 +2,6 @@
 //! Mage project that run as standalone Docker services.
 
 pub mod io_config;
+pub mod json;
 pub mod manifest;
 pub mod protocol;

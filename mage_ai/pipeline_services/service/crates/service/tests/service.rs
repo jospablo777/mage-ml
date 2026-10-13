@@ -213,9 +213,24 @@ impl Service {
         token: Option<&str>,
         body: Option<&Value>,
     ) -> std::io::Result<(u16, Value)> {
+        self.request_text(
+            method,
+            path,
+            token,
+            &body.map(Value::to_string).unwrap_or_default(),
+        )
+    }
+
+    /// A request with the body as written, for JSON a `Value` cannot hold.
+    fn request_text(
+        &self,
+        method: &str,
+        path: &str,
+        token: Option<&str>,
+        body: &str,
+    ) -> std::io::Result<(u16, Value)> {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port))?;
         stream.set_read_timeout(Some(Duration::from_secs(120)))?;
-        let body = body.map(Value::to_string).unwrap_or_default();
         let auth = token
             .map(|t| format!("Authorization: Bearer {t}\r\n"))
             .unwrap_or_default();
@@ -342,6 +357,37 @@ fn runs_complete_and_return_their_blocks_when_waited_for() {
 
     let (status, _) = service.post("/v1/pipelines/missing/runs", json!({}));
     assert_eq!(status, 404);
+}
+
+#[test]
+fn integers_too_large_for_64_bits_are_refused_not_rounded() {
+    let mut service = Service::create(false);
+    service.start(&[]);
+
+    let (status, body) = service
+        .request_text(
+            "POST",
+            "/v1/pipelines/sum/runs",
+            Some(TOKEN),
+            r#"{"variables": {"customer": 123456789012345678901234567890}}"#,
+        )
+        .unwrap();
+
+    assert_eq!(status, 400, "{body}");
+    assert!(
+        body.to_string().contains("123456789012345678901234567890"),
+        "{body}"
+    );
+    // The largest 64-bit integers pass.
+    let (status, _) = service
+        .request_text(
+            "POST",
+            "/v1/pipelines/sum/runs",
+            Some(TOKEN),
+            r#"{"variables": {"customer": 18446744073709551615}}"#,
+        )
+        .unwrap();
+    assert_eq!(status, 201);
 }
 
 #[test]
