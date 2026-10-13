@@ -131,6 +131,22 @@ struct StreamReply {
     outputs: BTreeMap<String, Vec<Box<RawValue>>>,
 }
 
+impl PythonStreamSession {
+    /// Loads the stream's blocks (their top-level code, such as a model) into a worker in the
+    /// background, after the one serving the stream was replaced, so the next batch does not
+    /// wait for it.
+    fn preload(&self) {
+        let pool = self.pool.clone();
+        let chain = self.chain.clone();
+        let log = self.log.clone();
+        let cancel = self.cancel.clone();
+        tokio::spawn(async move {
+            let request = json!({"op": "stream_load", "chain": chain});
+            let _ = pool.run(request, log, "stream", None, &cancel).await;
+        });
+    }
+}
+
 impl TransformSession for PythonStreamSession {
     fn transform(
         &mut self,
@@ -155,9 +171,9 @@ impl TransformSession for PythonStreamSession {
                     kwargs,
                 })
             };
-            let reply = self
+            let (reply, replaced) = self
                 .pool
-                .run_raw(line, self.log.clone(), "stream", self.timeout, &self.cancel)
+                .run_stream(line, self.log.clone(), self.timeout, &self.cancel)
                 .await
                 .map_err(|error| match error {
                     WorkerError::Timeout(_) => TransformError::Timeout(error.to_string()),
@@ -166,6 +182,9 @@ impl TransformSession for PythonStreamSession {
                     }
                     WorkerError::Protocol(_) => TransformError::Protocol(error.to_string()),
                 })?;
+            if replaced {
+                self.preload();
+            }
             let reply: StreamReply = serde_json::from_str(&reply)
                 .map_err(|e| TransformError::Protocol(format!("the worker's reply: {e}")))?;
             if !reply.ok {

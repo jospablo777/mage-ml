@@ -429,6 +429,43 @@ class StreamBatchTest(WorkerTestCase):
         self.assertTrue(replies[-1]['ok'])
 
 
+class StreamLoadTest(WorkerTestCase):
+    """
+    A replaced worker gets a stream's blocks loaded before the stream's next batch, so a model
+    loaded at the top of a block does not hold that batch up; every reply carries the worker's
+    memory, which the service replaces stream workers on.
+    """
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+
+    def test_stream_load_runs_top_level_code_once_without_a_batch(self):
+        marker = os.path.join(self.directory, 'loads')
+        block = self.block(f'''
+            with open({marker!r}, 'a') as file:
+                file.write('x')
+
+            @transformer
+            def f(messages):
+                return messages
+        ''', name='model')
+        requests = io.StringIO('\n'.join(json.dumps(r) for r in [
+            dict(id='1', op='stream_load', chain=[block]),
+            dict(id='2', op='stream', chain=[block], messages=[1]),
+        ]) + '\n')
+        channel = io.StringIO()
+
+        worker.serve(requests, channel)
+
+        replies = [json.loads(line) for line in channel.getvalue().splitlines()][1:]
+        self.assertEqual(replies[0]['loaded'], ['model'])
+        self.assertEqual(replies[1]['messages'], [1])
+        with open(marker) as file:
+            self.assertEqual(file.read(), 'x')
+        self.assertTrue(all(r['rss_bytes'] > 0 for r in replies))
+
+
 class StreamBranchesTest(WorkerTestCase):
     """Streams branch: sinks follow different blocks, each fed its upstream's messages."""
 

@@ -823,6 +823,23 @@ def _reply(channel, message: Dict) -> None:
     channel.flush()
 
 
+def _rss_bytes() -> Optional[int]:
+    """The worker's resident memory now (Linux), or its peak where only that is known."""
+    try:
+        with open('/proc/self/statm') as file:
+            return int(file.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Bytes on macOS, kilobytes on other systems.
+        return peak if sys.platform == 'darwin' else peak * 1024
+    except (ImportError, OSError):
+        return None
+
+
 def _protocol_fd(variable: str, default: Optional[int]) -> Optional[int]:
     """A protocol descriptor, made non-inheritable so programs a block starts cannot use it."""
     value = os.environ.get(variable)
@@ -857,6 +874,11 @@ def serve(requests=None, channel=None) -> None:
         try:
             if request.get('op') == 'stream':
                 result = run_stream_batch(request)
+            elif request.get('op') == 'stream_load':
+                # Compiles a stream's blocks (their top-level code runs) without a batch.
+                for block in request['chain']:
+                    _stream_function(block)
+                result = dict(loaded=[b['uuid'] for b in request['chain']])
             else:
                 result = run_block(request)
             message = dict(type='result', id=request_id, ok=True, **result)
@@ -873,6 +895,7 @@ def serve(requests=None, channel=None) -> None:
         finally:
             sys.stdout.flush()
             sys.stderr.flush()
+        message['rss_bytes'] = _rss_bytes()
         _reply(channel, message)
 
 

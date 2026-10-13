@@ -31,8 +31,24 @@ pub struct PythonConfig {
     pub max_workers: usize,
     /// Blocks a worker serves before it is replaced, to bound leaked memory and state.
     pub max_blocks_per_worker: u32,
+    /// Stream batches do not count toward `max_blocks_per_worker` (a stream would reload its
+    /// blocks and models every few seconds); a worker that serves streams is replaced when
+    /// its memory passes this many bytes, or, when 0, when it doubled since its first stream
+    /// batch plus 256 MB.
+    pub max_rss_bytes: u64,
     pub env: Vec<(String, String)>,
 }
+
+/// How a request counts toward replacing its worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recycle {
+    /// A block run: one of `max_blocks_per_worker`.
+    AfterBlocks,
+    /// A stream batch: only memory growth replaces the worker.
+    OnMemory,
+}
+
+const RSS_HEADROOM: u64 = 256 * 1024 * 1024;
 
 /// Who receives the lines a worker prints: the run log of its current block.
 type LogTarget = Arc<Mutex<Option<(RunLog, String)>>>;
@@ -44,6 +60,8 @@ struct Worker {
     replies: mpsc::Receiver<String>,
     log_target: LogTarget,
     blocks_served: u32,
+    /// Its memory after its first stream batch, which holds the blocks' models.
+    baseline_rss: Option<u64>,
     stderr_tail: Arc<Mutex<Vec<String>>>,
 }
 
@@ -238,6 +256,7 @@ impl PythonPool {
             replies,
             log_target,
             blocks_served: 0,
+            baseline_rss: None,
             stderr_tail,
         })
     }
@@ -274,6 +293,40 @@ impl PythonPool {
         timeout: Option<Duration>,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<String, WorkerError>
+    where
+        F: FnOnce(&str) -> Result<String, serde_json::Error>,
+    {
+        self.exchange(line, log, block, timeout, cancel, Recycle::AfterBlocks)
+            .await
+            .map(|(reply, _)| reply)
+    }
+
+    /// A stream batch: like `run_raw`, but only memory growth replaces the worker. Also
+    /// returns whether the worker was replaced, so the stream can load its blocks into the
+    /// next one before its next batch.
+    pub async fn run_stream<F>(
+        &self,
+        line: F,
+        log: RunLog,
+        timeout: Option<Duration>,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<(String, bool), WorkerError>
+    where
+        F: FnOnce(&str) -> Result<String, serde_json::Error>,
+    {
+        self.exchange(line, log, "stream", timeout, cancel, Recycle::OnMemory)
+            .await
+    }
+
+    async fn exchange<F>(
+        &self,
+        line: F,
+        log: RunLog,
+        block: &str,
+        timeout: Option<Duration>,
+        cancel: &tokio_util::sync::CancellationToken,
+        recycle: Recycle,
+    ) -> Result<(String, bool), WorkerError>
     where
         F: FnOnce(&str) -> Result<String, serde_json::Error>,
     {
@@ -331,8 +384,33 @@ impl PythonPool {
 
         match result {
             Ok(reply) if reply_id(&reply).as_deref() == Some(id.as_str()) => {
-                worker.blocks_served += 1;
-                if worker.blocks_served >= self.config.max_blocks_per_worker {
+                let replace = match recycle {
+                    Recycle::AfterBlocks => {
+                        worker.blocks_served += 1;
+                        worker.blocks_served >= self.config.max_blocks_per_worker
+                    }
+                    Recycle::OnMemory => match reply_rss(&reply) {
+                        Some(rss) => {
+                            let baseline = *worker.baseline_rss.get_or_insert(rss);
+                            let limit = if self.config.max_rss_bytes > 0 {
+                                self.config.max_rss_bytes
+                            } else {
+                                baseline.saturating_mul(2).saturating_add(RSS_HEADROOM)
+                            };
+                            if rss > limit {
+                                crate::log::info(&format!(
+                                    "A Python worker serving a stream uses {} MB, above its \
+                                     limit of {} MB; it is replaced.",
+                                    rss / 1_048_576,
+                                    limit / 1_048_576
+                                ));
+                            }
+                            rss > limit
+                        }
+                        None => false,
+                    },
+                };
+                if replace {
                     retire(worker).await;
                 } else {
                     self.idle
@@ -340,7 +418,7 @@ impl PythonPool {
                         .unwrap_or_else(|p| p.into_inner())
                         .push(worker);
                 }
-                Ok(reply)
+                Ok((reply, replace))
             }
             Ok(reply) => {
                 retire(worker).await;
@@ -476,17 +554,72 @@ fn forward(
     });
 }
 
+#[derive(serde::Deserialize)]
+struct ReplyHead {
+    id: Option<String>,
+    rss_bytes: Option<u64>,
+}
+
 /// The `id` of a worker reply, read without parsing the rest of it into values.
 fn reply_id(reply: &str) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct Id {
-        id: Option<String>,
-    }
-    serde_json::from_str::<Id>(reply).ok()?.id
+    serde_json::from_str::<ReplyHead>(reply).ok()?.id
+}
+
+/// The worker's memory when it replied.
+fn reply_rss(reply: &str) -> Option<u64> {
+    serde_json::from_str::<ReplyHead>(reply).ok()?.rss_bytes
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn pool(
+        max_blocks_per_worker: u32,
+        max_rss_bytes: u64,
+    ) -> (Arc<PythonPool>, tempfile::TempDir) {
+        let folder = tempfile::tempdir().unwrap();
+        let worker = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../runtime/worker.py");
+        let pool = PythonPool::new(PythonConfig {
+            executable: std::env::var("MAGE_SERVICE_TEST_PYTHON")
+                .unwrap_or_else(|_| "python3".into()),
+            worker_script: worker,
+            project_dir: folder.path().to_path_buf(),
+            max_workers: 1,
+            max_blocks_per_worker,
+            max_rss_bytes,
+            env: Vec::new(),
+        });
+        (pool, folder)
+    }
+
+    async fn batch(pool: &PythonPool, folder: &std::path::Path) -> bool {
+        let log = RunLog::create(&folder.join("log"), "stream").unwrap();
+        let line = |id: &str| {
+            serde_json::to_string(&json!({"id": id, "op": "stream", "chain": [], "messages": []}))
+        };
+        let (_, replaced) = pool
+            .run_stream(line, log, None, &tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
+        replaced
+    }
+
+    #[tokio::test]
+    async fn stream_batches_replace_a_worker_on_memory_not_on_count() {
+        // One block per worker, but stream batches do not count.
+        let (counting, folder) = pool(1, u64::MAX);
+        for _ in 0..3 {
+            assert!(!batch(&counting, folder.path()).await);
+        }
+        // Past its memory limit, the worker is replaced.
+        let (limited, folder) = pool(200, 1);
+        assert!(batch(&limited, folder.path()).await);
+    }
+}
+
+#[cfg(test)]
+mod exit_tests {
     use super::describe_exit;
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;

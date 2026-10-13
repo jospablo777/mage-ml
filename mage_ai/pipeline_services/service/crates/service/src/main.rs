@@ -98,6 +98,15 @@ struct Common {
         default_value_t = 200
     )]
     python_max_blocks: u32,
+    /// Memory in MB above which a Python worker serving streams is replaced; 0 replaces it
+    /// when its memory doubled since its first stream batch plus 256 MB.
+    #[arg(
+        long,
+        global = true,
+        env = "MAGE_SERVICE_PYTHON_MAX_RSS_MB",
+        default_value_t = 0
+    )]
+    python_max_rss_mb: u64,
     /// Runs of all pipelines at the same time.
     #[arg(
         long,
@@ -486,6 +495,7 @@ async fn start_service(
             project_dir: common.dir.join(&manifest.service.project),
             max_workers: common.python_workers.unwrap_or(cpus.min(8)),
             max_blocks_per_worker: common.python_max_blocks.max(1),
+            max_rss_bytes: common.python_max_rss_mb.saturating_mul(1_048_576),
             env: [
                 ("MAGE_SERVICE".to_string(), "1".to_string()),
                 ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
