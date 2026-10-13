@@ -269,7 +269,9 @@ jobs:
           VERSION: ${{ needs.contract.outputs.version }}
           COMMIT: ${{ needs.contract.outputs.commit }}
         run: |
-          test "$(git rev-parse "refs/tags/$TAG" 2>/dev/null || git rev-list -n1 HEAD)" = "$COMMIT"
+          # ^{commit}: an annotated tag's own ref names the tag object, not the commit.
+          tagged="$(git rev-parse "refs/tags/$TAG^{commit}" 2>/dev/null || git rev-list -n1 HEAD)"
+          test "$tagged" = "$COMMIT" || { echo "$TAG points to $tagged, not to the qualified commit $COMMIT"; exit 1; }
           cp "docs/development/releases/$TAG.md" release-notes.md
           gh release create "$TAG" --verify-tag --draft --title "MageML $VERSION" --notes-file release-notes.md
           gh release upload "$TAG" release-assets/*
