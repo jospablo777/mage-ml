@@ -485,8 +485,12 @@ def r_ml(monkeypatch, tmp_path):
     monkeypatch.setenv('TORCH_HOME', str(library))
 
 
+# GPU scorers only when asked for: they need CUDA and an NVIDIA GPU.
+GPU = os.getenv('MAGE_STUDY_GPU') == '1'
+
+
 @pytest.mark.parametrize('rows', SIZES)
-@pytest.mark.parametrize('scorer', list(SCORERS))
+@pytest.mark.parametrize('scorer', [s for s in SCORERS if GPU or not s.endswith('_cuda')])
 def test_model_scoring(mage_project, ml_project, request, scorer, rows):
     language, model = SCORERS[scorer]
     if language == 'r':

@@ -302,6 +302,9 @@ def scorer_ready(monkeypatch, tmp_path):
 # By default only the scorers the dev environment always has, so make ci never skips: the
 # ONNX scorers need skl2onnx and onnxruntime (or onnxruntime-gpu for CUDA).
 RUN = list(SCORERS) if FULL else [s for s in SCORERS if '_ort_' not in s and 'onnx' not in s]
+# GPU scorers only when asked for: they need CUDA and an NVIDIA GPU.
+GPU = os.getenv('MAGE_STUDY_GPU') == '1'
+RUN = [s for s in RUN if GPU or not s.endswith('_cuda')]
 
 
 @pytest.mark.parametrize('rows', SIZES)

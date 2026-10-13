@@ -604,6 +604,8 @@ Not changed, with the reason:
 ```bash
 # The guards and the provenance apply to every command (scripts/study/run.sh).
 export MAGE_STUDY_FULL=1 MAGE_STUDY_RESULTS_DIR=$PWD/integration_tests/topologies/results
+# The CUDA scorers and the GPU readings need an NVIDIA GPU; without this they are left out.
+export MAGE_STUDY_GPU=1
 scripts/study/run.sh integration_tests/topologies/test_correctness.py
 scripts/study/run.sh integration_tests/topologies/test_types.py
 scripts/study/run.sh integration_tests/topologies/test_faults.py
@@ -619,5 +621,6 @@ uv run python scripts/study/analyze.py
 
 Without `MAGE_STUDY_FULL`, the topology tests run a small grid as part of the integration
 suite (`make -C integration_tests ci`), and the model and journal experiments are skipped.
+Without `MAGE_STUDY_GPU=1`, no test uses or reads a GPU.
 The machine of these results: Intel Core i9-14900KF (32 threads, governor `performance`),
 62 GiB, NVIDIA RTX 4080, Ubuntu 24.04, kernel 6.8; each session's `meta.json` has the rest.

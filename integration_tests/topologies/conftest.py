@@ -8,8 +8,8 @@ scripts/study/run.sh runs the study in a systemd scope with a memory and CPU lim
 runaway case is killed in its own cgroup.
 
 MAGE_STUDY_MIN_FREE_GB (8), MAGE_STUDY_MIN_DISK_GB (10), MAGE_STUDY_CPU_MAX_C (85),
-MAGE_STUDY_GPU_MAX_C (80), MAGE_STUDY_COOL_WAIT_S (600) and MAGE_STUDY_THREADS (8) change
-the limits.
+MAGE_STUDY_GPU_MAX_C (80, read only with MAGE_STUDY_GPU=1), MAGE_STUDY_COOL_WAIT_S (600)
+and MAGE_STUDY_THREADS (8) change the limits. GPU tests run only with MAGE_STUDY_GPU=1.
 """
 import os
 import shutil
@@ -53,7 +53,8 @@ def cpu_temperature() -> Optional[float]:
 
 
 def gpu_temperature() -> Optional[float]:
-    if not shutil.which('nvidia-smi'):
+    # The GPU is read only for runs that use it (MAGE_STUDY_GPU=1).
+    if os.getenv('MAGE_STUDY_GPU') != '1' or not shutil.which('nvidia-smi'):
         return None
     try:
         out = subprocess.run(
