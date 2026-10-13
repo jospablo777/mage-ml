@@ -468,6 +468,8 @@ On serverless platforms without a volume, the run history lasts as long as the i
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |
 | `MAGE_SERVICE_PASS_ENV` | none | In strict mode, more variables for blocks: names or `PREFIX_*` patterns, separated by commas |
+| `MAGE_SERVICE_STREAM_LOG_MB` | 64 | A stream's log (`<data>/streams/<pipeline>/stream.log`) moves to `stream.log.1` past this size; every line also goes to the service's output |
+| `MAGE_SERVICE_STREAM_LOG_FILES` | 4 | Rotated stream logs kept |
 | `MAGE_SERVICE_INSTANCE_ID` | none | A stable name for this replica, such as a Kubernetes StatefulSet pod's name. Kafka streams then join their group as static members (`group.instance.id`), so a restart within the session timeout keeps the replica's partitions instead of moving the group's partitions twice |
 
 ### What block code can read

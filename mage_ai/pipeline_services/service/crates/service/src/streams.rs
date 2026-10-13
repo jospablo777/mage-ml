@@ -260,7 +260,8 @@ pub fn start(service: &Arc<Service>) -> Vec<JoinHandle<()>> {
             .join("streams")
             .join(crate::executor::sanitize(&pipeline.uuid))
             .join("stream.log");
-        let log = match RunLog::create(&log_path, &pipeline.uuid) {
+        let (max_bytes, keep) = crate::log::stream_log_limits();
+        let log = match RunLog::rotating(&log_path, &pipeline.uuid, max_bytes, keep) {
             Ok(log) => log,
             Err(error) => {
                 fail(

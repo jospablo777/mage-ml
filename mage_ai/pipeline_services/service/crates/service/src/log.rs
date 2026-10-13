@@ -6,7 +6,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
@@ -94,18 +94,104 @@ pub fn error(message: &str) {
 #[derive(Clone)]
 pub struct RunLog {
     run_id: Arc<str>,
-    file: Arc<Mutex<File>>,
+    file: Arc<Mutex<LogFile>>,
 }
 
-impl RunLog {
-    pub fn create(path: &Path, run_id: &str) -> std::io::Result<RunLog> {
+/// A log file that, past `max_bytes`, moves to `<name>.1` (older ones to `.2` and on, up to
+/// `keep`) and starts again: a stream runs without end, and its log must not fill the disk.
+/// Every line also goes to stdout, where the platform keeps its own history.
+struct LogFile {
+    file: File,
+    path: PathBuf,
+    written: u64,
+    max_bytes: u64,
+    keep: u32,
+}
+
+impl LogFile {
+    fn open(path: &Path, max_bytes: u64, keep: u32) -> std::io::Result<LogFile> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let written = file.metadata()?.len();
+        Ok(LogFile {
+            file,
+            path: path.to_path_buf(),
+            written,
+            max_bytes,
+            keep,
+        })
+    }
+
+    fn write_line(&mut self, line: &str) {
+        if self.written > 0 && self.written + line.len() as u64 + 1 > self.max_bytes {
+            // A failed rotation keeps writing to the current file rather than losing lines.
+            let _ = self.rotate();
+        }
+        if writeln!(self.file, "{line}").is_ok() {
+            self.written += line.len() as u64 + 1;
+        }
+    }
+
+    fn rotate(&mut self) -> std::io::Result<()> {
+        let numbered = |n: u32| {
+            let mut name = self.path.as_os_str().to_owned();
+            name.push(format!(".{n}"));
+            PathBuf::from(name)
+        };
+        let _ = std::fs::remove_file(numbered(self.keep));
+        for n in (1..self.keep).rev() {
+            let from = numbered(n);
+            if from.exists() {
+                std::fs::rename(&from, numbered(n + 1))?;
+            }
+        }
+        if self.keep > 0 {
+            std::fs::rename(&self.path, numbered(1))?;
+        } else {
+            std::fs::remove_file(&self.path)?;
+        }
+        self.file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.written = 0;
+        Ok(())
+    }
+}
+
+/// A stream log's size before it rotates, and how many rotated files stay:
+/// `MAGE_SERVICE_STREAM_LOG_MB` (64) and `MAGE_SERVICE_STREAM_LOG_FILES` (4).
+pub fn stream_log_limits() -> (u64, u32) {
+    let number = |name: &str, default: u64| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(default)
+    };
+    (
+        number("MAGE_SERVICE_STREAM_LOG_MB", 64) * 1024 * 1024,
+        number("MAGE_SERVICE_STREAM_LOG_FILES", 4) as u32,
+    )
+}
+
+impl RunLog {
+    pub fn create(path: &Path, run_id: &str) -> std::io::Result<RunLog> {
+        Self::rotating(path, run_id, u64::MAX, 0)
+    }
+
+    /// A log that rotates past `max_bytes`, keeping `keep` older files.
+    pub fn rotating(
+        path: &Path,
+        run_id: &str,
+        max_bytes: u64,
+        keep: u32,
+    ) -> std::io::Result<RunLog> {
         Ok(RunLog {
             run_id: run_id.into(),
-            file: Arc::new(Mutex::new(file)),
+            file: Arc::new(Mutex::new(LogFile::open(path, max_bytes, keep)?)),
         })
     }
 
@@ -120,7 +206,7 @@ impl RunLog {
             "message": message,
         });
         let mut file = self.file.lock().unwrap_or_else(|p| p.into_inner());
-        let _ = writeln!(file, "{line}");
+        file.write_line(&line.to_string());
     }
 
     pub fn info(&self, block: Option<&str>, message: &str) {
@@ -129,5 +215,54 @@ impl RunLog {
 
     pub fn error(&self, block: Option<&str>, message: &str) {
         self.write("error", block, None, message);
+    }
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+
+    #[test]
+    fn a_stream_log_rotates_past_its_size_and_keeps_its_last_files() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("stream.log");
+        let log = RunLog::rotating(&path, "s", 2_000, 2).unwrap();
+
+        for n in 0..100 {
+            log.info(None, &format!("message {n:03} {}", "x".repeat(50)));
+        }
+
+        let read = |p: &Path| std::fs::read_to_string(p).unwrap_or_default();
+        let current = read(&path);
+        let first = read(&folder.path().join("stream.log.1"));
+        let second = read(&folder.path().join("stream.log.2"));
+        assert!(!folder.path().join("stream.log.3").exists());
+        for text in [&current, &first, &second] {
+            assert!(!text.is_empty());
+            assert!(text.len() as u64 <= 2_000, "{} bytes", text.len());
+        }
+        // The newest lines are in the current file, in order, none cut.
+        let last: serde_json::Value =
+            serde_json::from_str(current.lines().last().unwrap()).unwrap();
+        assert_eq!(last["message"], format!("message 099 {}", "x".repeat(50)));
+        assert!(
+            second
+                .lines()
+                .chain(first.lines())
+                .chain(current.lines())
+                .all(|l| { serde_json::from_str::<serde_json::Value>(l).is_ok() })
+        );
+    }
+
+    #[test]
+    fn a_run_log_never_rotates() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("run.log");
+        let log = RunLog::create(&path, "r").unwrap();
+        for n in 0..50 {
+            log.info(None, &format!("line {n} {}", "y".repeat(100)));
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 50);
+        assert!(!folder.path().join("run.log.1").exists());
     }
 }
