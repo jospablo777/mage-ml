@@ -556,6 +556,50 @@ def playground_shapes() -> Diagram:
     return d
 
 
+# The retail tutorial in each language: (suffix, logo, library, group label).
+RETAIL = {
+    'python': ('py', 'python', 'pandas',
+               'Python with pandas: a production run fuses each chain into one process'),
+    'r': ('r', 'r', 'dplyr', 'R with dplyr: consecutive R blocks share one R session'),
+    'rust': ('rs', 'rust', 'Polars',
+             'Rust with Polars: consecutive Rust blocks compile into one program'),
+    'sql': ('sql', 'duckdb', 'DuckDB SQL',
+            'SQL on DuckDB: each block\'s result is a table in the database'),
+}
+
+
+def retail_pipeline(language: str) -> Diagram:
+    """The retail tutorial's pipeline: two loaders, a cleaning step, two branches, two exports."""
+    suffix, slug, library, label = RETAIL[language]
+    d = Diagram(1240, 300, f'The retail tutorial pipeline in {library}')
+    d.group(14, 30, 1212, 240, label, COLORS[slug])
+    w, h, top, bottom = 222, 58, 70, 180
+    columns = [30 + i * 240 for i in range(5)]
+
+    def box(column, y, name, kind):
+        d.node(columns[column], y, w, h, f'{name}_{suffix}', slug, f'{kind} · {library}')
+
+    box(0, top, 'load_orders', 'data loader')
+    box(1, top, 'clean_orders', 'transformer')
+    box(2, top, 'customer_features', 'transformer')
+    box(3, top, 'churn_score', 'transformer')
+    box(4, top, 'export_scores', 'data exporter')
+    box(0, bottom, 'load_customers', 'data loader')
+    box(2, bottom, 'monthly_revenue', 'transformer')
+    box(3, bottom, 'export_revenue', 'data exporter')
+    middle_top, middle_bottom = top + h / 2, bottom + h / 2
+    for column in range(4):
+        d.arrow([(columns[column] + w, middle_top), (columns[column + 1], middle_top)])
+    # clean_orders feeds monthly_revenue too; load_customers is its second parent.
+    turn = columns[1] + w - 30
+    d.arrow([(turn, top + h), (turn, middle_bottom - 8), (columns[2], middle_bottom - 8)])
+    d.arrow([(columns[0] + w, middle_bottom + 8), (columns[2], middle_bottom + 8)])
+    d.arrow([(columns[2] + w, middle_bottom), (columns[3], middle_bottom)])
+    d.text(620, 290, 'Same data, same steps, same results in Python, R, Rust and SQL.',
+           anchor='middle', size=12.5, muted=False)
+    return d
+
+
 DIAGRAMS = {
     'pipeline-shapes': pipeline_shapes,
     'language-mixes': language_mixes,
@@ -570,6 +614,8 @@ DIAGRAMS = {
     'pipeline-service': pipeline_service,
     'feast-flow': feast_flow,
     'documentation': documentation,
+    **{f'retail-pipeline-{language}': (lambda language=language: retail_pipeline(language))
+       for language in RETAIL},
 }
 
 

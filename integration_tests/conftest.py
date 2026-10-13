@@ -556,6 +556,7 @@ RUST_BUILD_TESTS = (
     'integration_tests/chains/test_compiled_chains.py',
     'integration_tests/postgres/test_rust_pipelines.py',
     'integration_tests/topologies/',
+    'integration_tests/tutorials/',
 )
 
 

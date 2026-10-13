@@ -13,7 +13,7 @@ name = "mage"
 [dependencies]
 anyhow = "1"
 polars = { version = "=0.55.2", default-features = false, features = [
-  "lazy", "parquet", "ipc", "json", "csv", "strings", "temporal", "timezones", "dtype-full",
+  "lazy", "parquet", "ipc", "json", "csv", "strings", "temporal", "timezones", "dtype-full", "log",
   "streaming", "performant", "is_in", "round_series", "cum_agg", "abs", "rank", "regex",
   "concat_str", "pivot", "fmt",
 ] }

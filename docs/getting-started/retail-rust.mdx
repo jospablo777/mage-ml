@@ -1,0 +1,285 @@
+---
+title: "Tutorial: retail orders in Rust"
+sidebarTitle: "Rust"
+icon: "rust"
+description: "Clean a shop's orders, compute revenue by region and month, build customer features and score churn risk, in Rust with Polars."
+---
+
+Same tutorial in: [Python](/getting-started/retail-python) · [R](/getting-started/retail-r) · **Rust** · [SQL (DuckDB)](/getting-started/retail-sql)
+
+A shop exports its orders every night. The export has the problems real exports have:
+some rows appear twice, some orders were cancelled or returned, some amounts are missing,
+and the amounts are in three currencies. In this tutorial you build the pipeline that turns
+that export into two tables the business uses:
+
+- **monthly revenue** by region, in USD, with orders and customers;
+- **customer scores**: recency, frequency and money spent per customer (RFM), and a churn
+  risk score from a simple logistic model.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/retail-pipeline-rust.light.svg" alt="load_orders and load_customers, clean_orders, monthly_revenue and customer_features, churn_score, export_revenue and export_scores, all in Rust" />
+  <img className="hidden dark:block" src="/images/diagrams/retail-pipeline-rust.dark.svg" alt="load_orders and load_customers, clean_orders, monthly_revenue and customer_features, churn_score, export_revenue and export_scores, all in Rust" />
+</Frame>
+
+The same pipeline is written in Python, R and SQL on DuckDB, with the same data and the
+same results, so you can compare the languages block by block. It takes about 15 minutes,
+plus a few minutes the first time Rust compiles Polars.
+
+<Note>
+You need MageML running ([setup](/getting-started/setup)) and Rust installed
+([Rust setup](/guides/blocks/rust-setup)). Rust blocks use Polars through MageML's `mage`
+crate; you add nothing to the project.
+</Note>
+
+## 1. Get the data
+
+From a terminal, write the shop's data into your project:
+
+```bash
+mage examples retail path/to/project
+```
+
+It writes two Parquet files into `data/shop/`: 2,000 customers and 30,300 order rows from
+July 2024 to June 2025.
+
+| File | Columns |
+| --- | --- |
+| `customers.parquet` | `customer_id`, `region`, `segment`, `signed_up_on` |
+| `orders.parquet` | `order_id`, `customer_id`, `ordered_at` (UTC), `status`, `currency`, `amount`, `units` |
+
+The data is random but the same on every machine, so your numbers match the ones below.
+
+## 2. Create the pipeline
+
+1. Open **Pipelines** and click **New** > **Standard (batch)**.
+2. Name it `retail_rust`.
+
+## 3. Load the orders and the customers
+
+Add a **Data loader** block, choose **Rust**, name it `load_orders_rs`, and replace its
+code. Relative paths start at the project, the working directory of Rust blocks:
+
+```rust load_orders_rs.rs
+use mage::prelude::*;
+
+fn load_data() -> Result<LazyFrame> {
+    let path = PlRefPath::try_from_path(std::path::Path::new("data/shop/orders.parquet"))?;
+    Ok(LazyFrame::scan_parquet(path, Default::default())?)
+}
+```
+
+Add a second **Data loader** in Rust, not connected to the first, named `load_customers_rs`:
+
+```rust load_customers_rs.rs
+use mage::prelude::*;
+
+fn load_data() -> Result<LazyFrame> {
+    let path = PlRefPath::try_from_path(std::path::Path::new("data/shop/customers.parquet"))?;
+    Ok(LazyFrame::scan_parquet(path, Default::default())?)
+}
+```
+
+Run both (**Run** or Cmd+Enter / Ctrl+Enter). The first Rust build of a project compiles
+Polars and takes a few minutes; after that a block builds in about a second. **ColumnAtlas**
+under each block profiles every column over the whole table: `amount` shows its missing
+values, and `status` and `currency` their categories.
+
+## 4. Clean the orders
+
+Add a **Transformer** in Rust below `load_orders_rs`, named `clean_orders_rs`. It removes
+the duplicated rows, keeps the completed orders that have an amount, and converts the
+amounts to USD:
+
+```rust clean_orders_rs.rs
+use mage::prelude::*;
+
+/// What one unit of the row's currency is worth in USD.
+fn rate_to_usd() -> Expr {
+    when(col("currency").eq(lit("USD")))
+        .then(lit(1.0))
+        .when(col("currency").eq(lit("EUR")))
+        .then(lit(1.08))
+        .when(col("currency").eq(lit("CRC")))
+        .then(lit(0.0019))
+        .otherwise(lit(NULL))
+}
+
+fn transform(orders: LazyFrame) -> Result<LazyFrame> {
+    Ok(orders
+        .unique_stable(None, UniqueKeepStrategy::First)
+        .filter(col("status").eq(lit("completed")).and(col("amount").is_not_null()))
+        .with_column((col("amount") * rate_to_usd()).alias("amount_usd"))
+        .select([
+            col("order_id"),
+            col("customer_id"),
+            col("ordered_at"),
+            col("amount_usd"),
+            col("units"),
+        ]))
+}
+
+fn test_one_row_per_order(output: &DataFrame) -> Result<()> {
+    let orders = output.column("order_id")?;
+    ensure!(orders.n_unique()? == output.height(), "an order appears more than once");
+    ensure!(output.column("amount_usd")?.null_count() == 0, "an amount is missing");
+    Ok(())
+}
+```
+
+A `test_` function runs after the block: if an order appeared twice, the run would stop here
+instead of counting it twice downstream. 27,349 orders remain.
+
+## 5. Revenue by region and month
+
+Add a **Transformer** in Rust named `monthly_revenue_rs` with two parents: `clean_orders_rs`
+first, then `load_customers_rs` (drag a connection from `load_customers_rs` to it in the
+graph). Each table parameter takes the next parent's output:
+
+```rust monthly_revenue_rs.rs
+use mage::prelude::*;
+
+fn transform(orders: LazyFrame, customers: LazyFrame) -> Result<LazyFrame> {
+    let regions = customers.select([col("customer_id"), col("region")]);
+    Ok(orders
+        .inner_join(regions, col("customer_id"), col("customer_id"))
+        .with_column(col("ordered_at").dt().strftime("%Y-%m").alias("month"))
+        .group_by([col("region"), col("month")])
+        .agg([
+            col("amount_usd").sum().alias("revenue_usd"),
+            len().alias("orders"),
+            col("customer_id").n_unique().alias("customers"),
+        ])
+        .sort(["region", "month"], SortMultipleOptions::default()))
+}
+```
+
+It returns 48 rows: 4 regions times 12 months.
+
+## 6. Customer features
+
+Add a **Transformer** in Rust below `clean_orders_rs` named `customer_features_rs`. For each
+customer it computes the three RFM features as of July 1, 2025: days since the last order
+(recency), number of orders (frequency) and money spent (monetary value):
+
+```rust customer_features_rs.rs
+use mage::prelude::*;
+
+/// July 1, 2025, as days since January 1, 1970: how Polars stores a date.
+const AS_OF_DAY: i32 = 20_270;
+
+fn transform(orders: LazyFrame) -> Result<LazyFrame> {
+    Ok(orders
+        .group_by([col("customer_id")])
+        .agg([
+            col("ordered_at").dt().date().max().alias("last_order_day"),
+            len().alias("frequency"),
+            col("amount_usd").sum().alias("monetary_usd"),
+        ])
+        .with_column(
+            (lit(AS_OF_DAY) - col("last_order_day").cast(DataType::Int32)).alias("recency_days"),
+        )
+        .select([
+            col("customer_id"),
+            col("recency_days"),
+            col("frequency"),
+            col("monetary_usd"),
+        ]))
+}
+```
+
+## 7. Score churn risk
+
+Add a **Transformer** in Rust below `customer_features_rs` named `churn_score_rs`. The score
+comes from a logistic model whose coefficients were fitted earlier; the block applies it:
+
+```rust churn_score_rs.rs
+use mage::prelude::*;
+
+// Logistic model: more days since the last order raise the risk, more orders and more
+// money spent lower it.
+const INTERCEPT: f64 = -1.0;
+const RECENCY: f64 = 0.04;
+const FREQUENCY: f64 = -0.35;
+const MONETARY: f64 = -0.15;
+
+fn transform(features: LazyFrame) -> Result<LazyFrame> {
+    let z = lit(INTERCEPT)
+        + lit(RECENCY) * col("recency_days").cast(DataType::Float64)
+        + lit(FREQUENCY) * col("frequency").cast(DataType::Float64)
+        + lit(MONETARY) * col("monetary_usd").log1p();
+    let score = lit(1.0) / (lit(1.0) + (lit(0.0) - z).exp());
+    Ok(features
+        .with_column(score.alias("churn_score"))
+        .with_column(
+            when(col("churn_score").gt_eq(lit(0.5)))
+                .then(lit("high"))
+                .otherwise(lit("low"))
+                .alias("risk"),
+        )
+        .sort(["customer_id"], SortMultipleOptions::default()))
+}
+```
+
+1,693 customers have at least one completed order; 390 of them are at high risk.
+
+## 8. Save the results
+
+Add a **Data exporter** in Rust below `monthly_revenue_rs` named `export_revenue_rs`:
+
+```rust export_revenue_rs.rs
+use mage::prelude::*;
+
+fn export_data(mut revenue: DataFrame) -> Result<()> {
+    std::fs::create_dir_all("output/rust")?;
+    let path = "output/rust/monthly_revenue.parquet";
+    ParquetWriter::new(std::fs::File::create(path)?).finish(&mut revenue)?;
+    println!("Wrote {} rows to {path}", revenue.height());
+    Ok(())
+}
+```
+
+And one below `churn_score_rs` named `export_scores_rs`:
+
+```rust export_scores_rs.rs
+use mage::prelude::*;
+
+fn export_data(mut scores: DataFrame) -> Result<()> {
+    std::fs::create_dir_all("output/rust")?;
+    let path = "output/rust/customer_scores.parquet";
+    ParquetWriter::new(std::fs::File::create(path)?).finish(&mut scores)?;
+    println!("Wrote {} rows to {path}", scores.height());
+    Ok(())
+}
+```
+
+## 9. Run the whole pipeline
+
+Run it from the terminal, as a trigger would:
+
+```bash
+mage run path/to/project retail_rust
+```
+
+Every block completes, and `output/rust/` holds `monthly_revenue.parquet` (48 rows) and
+`customer_scores.parquet` (1,693 rows). In a production run, consecutive Rust blocks compile
+into one program and Polars plans their queries together.
+
+## What you built
+
+| Block | Input | Output |
+| --- | --- | --- |
+| `load_orders_rs`, `load_customers_rs` | Parquet files | 30,300 order rows, 2,000 customers |
+| `clean_orders_rs` | orders | 27,349 completed orders in USD, each once |
+| `monthly_revenue_rs` | orders, customers | revenue, orders and customers per region and month |
+| `customer_features_rs` | orders | recency, frequency and money spent per customer |
+| `churn_score_rs` | features | a churn risk score and label per customer |
+| `export_revenue_rs`, `export_scores_rs` | the two tables | Parquet files in `output/rust/` |
+
+## Next steps
+
+- The same pipeline in [Python](/getting-started/retail-python), [R](/getting-started/retail-r)
+  and [SQL on DuckDB](/getting-started/retail-sql): the same blocks, the same results.
+- [Rust blocks](/guides/blocks/rust-blocks): parameters, variables, tests and how blocks
+  compile together.
+
+Same tutorial in: [Python](/getting-started/retail-python) · [R](/getting-started/retail-r) · **Rust** · [SQL (DuckDB)](/getting-started/retail-sql)

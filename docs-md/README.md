@@ -9,6 +9,11 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [MageML](introduction/overview.md)
 - [Quickstart](getting-started/setup.md)
 - [Tutorial: a pipeline in Python, Rust and R](getting-started/polyglot-pipeline.md)
+- **Retail orders, in four languages**
+  - [Tutorial: retail orders in Python](getting-started/retail-python.md)
+  - [Tutorial: retail orders in R](getting-started/retail-r.md)
+  - [Tutorial: retail orders in Rust](getting-started/retail-rust.md)
+  - [Tutorial: retail orders in SQL on DuckDB](getting-started/retail-sql.md)
 - [From pipeline to production](getting-started/pipeline-to-production.md)
 - [Build an ML inference service](getting-started/inference-service.md)
 - [Tutorial: ship a live service from the playground](getting-started/service-tutorial.md)

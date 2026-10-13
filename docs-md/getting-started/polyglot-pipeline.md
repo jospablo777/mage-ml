@@ -15,6 +15,10 @@ In this tutorial you build one pipeline with three languages, each doing what it
 
 It takes about 15 minutes, plus a few minutes the first time Rust compiles Polars.
 
+> [!TIP]
+> One language at a time: the retail orders tutorial builds the same pipeline in each
+> language, with the same data and results. Same tutorial in: [Python](retail-python.md) · [R](retail-r.md) · [Rust](retail-rust.md) · [SQL (DuckDB)](retail-sql.md)
+
 > [!NOTE]
 > You need MageML running ([setup](setup.md)). In Docker, Rust and R are
 > installed. Locally, see [Rust setup](../guides/blocks/rust-setup.md) and
@@ -265,3 +269,4 @@ behind it.
   contract, a monitor and run records to `regional_revenue_python`, then export it as a
   service.
 - Track a model trained on the output with [experiments](../guides/pipelines/experiments.md).
+- One language at a time, the same pipeline four times: [Python](retail-python.md) · [R](retail-r.md) · [Rust](retail-rust.md) · [SQL (DuckDB)](retail-sql.md).

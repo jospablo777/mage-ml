@@ -304,6 +304,7 @@ start-up. To serve it with its API and trigger, and to watch it from the termina
 
 ## Next steps
 
+- The retail orders tutorial, the same pipeline in each language: [Python](retail-python.md) · [R](retail-r.md) · [Rust](retail-rust.md) · [SQL (DuckDB)](retail-sql.md).
 - [Model releases](../guides/pipelines/model-releases.md): promote a model trained by the
   pipeline only when it beats the current one.
 - [Pipeline documentation](../guides/pipelines/documentation.md): a README for the pipeline,

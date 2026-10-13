@@ -933,6 +933,35 @@ def rust_status(project_path: str = RUST_PROJECT_PATH_DEFAULT):
     print('Rust blocks can build.')
 
 
+examples_app = typer.Typer(
+    cls=OrderCommands,
+    help='Write the example datasets of the tutorials into a project.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(examples_app, name='examples')
+
+
+@examples_app.command('retail')
+def examples_retail(
+    project_path: str = typer.Argument('.', help='path of the MageML project.'),
+):
+    """
+    Write a shop's customers and a year of orders into <project>/data/shop as Parquet, for
+    the retail tutorials in Python, R, Rust and SQL.
+    """
+    from mage_ai.examples import retail
+
+    try:
+        written = retail.write(os.path.abspath(project_path))
+    except FileNotFoundError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    print(
+        f'Wrote {written.customers:,} customers and {written.orders:,} order rows '
+        f'({written.duplicates:,} of them duplicated) to {_e(written.folder)}.'
+    )
+
+
 export_app = typer.Typer(
     cls=OrderCommands,
     help='Export pipelines to run without MageML.',

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 300" role="img" aria-label="The retail tutorial pipeline in DuckDB SQL" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8C959F"/></marker></defs>
+<rect x="14" y="30" width="1212" height="240" rx="12" fill="#F6F8FA" stroke="#D4C400" stroke-width="1.5" stroke-dasharray=""/><text x="28" y="52" font-size="12.5" font-weight="600" fill="#D4C400">SQL on DuckDB: each block&#x27;s result is a table in the database</text>
+<rect x="30" y="70" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(42.0 88.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="74" y="99.0" font-size="14" font-weight="600" fill="#1F2328">load_orders_sql</text>
+<text x="74" y="116.0" font-size="11.5" fill="#59636E">data loader · DuckDB SQL</text>
+<rect x="270" y="70" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(282.0 88.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="314" y="99.0" font-size="14" font-weight="600" fill="#1F2328">clean_orders_sql</text>
+<text x="314" y="116.0" font-size="11.5" fill="#59636E">transformer · DuckDB SQL</text>
+<rect x="510" y="70" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(522.0 88.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="554" y="99.0" font-size="14" font-weight="600" fill="#1F2328">customer_features_sql</text>
+<text x="554" y="116.0" font-size="11.5" fill="#59636E">transformer · DuckDB SQL</text>
+<rect x="750" y="70" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(762.0 88.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="794" y="99.0" font-size="14" font-weight="600" fill="#1F2328">churn_score_sql</text>
+<text x="794" y="116.0" font-size="11.5" fill="#59636E">transformer · DuckDB SQL</text>
+<rect x="990" y="70" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(1002.0 88.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="1034" y="99.0" font-size="14" font-weight="600" fill="#1F2328">export_scores_sql</text>
+<text x="1034" y="116.0" font-size="11.5" fill="#59636E">data exporter · DuckDB SQL</text>
+<rect x="30" y="180" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(42.0 198.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="74" y="209.0" font-size="14" font-weight="600" fill="#1F2328">load_customers_sql</text>
+<text x="74" y="226.0" font-size="11.5" fill="#59636E">data loader · DuckDB SQL</text>
+<rect x="510" y="180" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(522.0 198.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="554" y="209.0" font-size="14" font-weight="600" fill="#1F2328">monthly_revenue_sql</text>
+<text x="554" y="226.0" font-size="11.5" fill="#59636E">transformer · DuckDB SQL</text>
+<rect x="750" y="180" width="222" height="58" rx="9" fill="#FFFFFF" stroke="#D4C400" stroke-width="1.6"/>
+<g transform="translate(762.0 198.0) scale(0.9167)"><path d="M12 0C5.363 0 0 5.363 0 12s5.363 12 12 12 12-5.363 12-12S18.637 0 12 0zM9.502 7.03a4.974 4.974 0 0 1 4.97 4.97 4.974 4.974 0 0 1-4.97 4.97A4.974 4.974 0 0 1 4.532 12a4.974 4.974 0 0 1 4.97-4.97zm6.563 3.183h2.351c.98 0 1.787.782 1.787 1.762s-.807 1.789-1.787 1.789h-2.351v-3.551z" fill="#D4C400"/></g>
+<text x="794" y="209.0" font-size="14" font-weight="600" fill="#1F2328">export_revenue_sql</text>
+<text x="794" y="226.0" font-size="11.5" fill="#59636E">data exporter · DuckDB SQL</text>
+<path d="M252,99.0 L270,99.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M492,99.0 L510,99.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M732,99.0 L750,99.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M972,99.0 L990,99.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M462,128 L462,201.0 L510,201.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M252,217.0 L510,217.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M732,209.0 L750,209.0" fill="none" stroke="#8C959F" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="620" y="290" font-size="12.5" text-anchor="middle" font-weight="400" fill="#1F2328">Same data, same steps, same results in Python, R, Rust and SQL.</text>
+</svg>

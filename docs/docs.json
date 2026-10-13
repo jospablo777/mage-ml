@@ -19,6 +19,16 @@
               "introduction/overview",
               "getting-started/setup",
               "getting-started/polyglot-pipeline",
+              {
+                "group": "Retail orders, in four languages",
+                "icon": "cart-shopping",
+                "pages": [
+                  "getting-started/retail-python",
+                  "getting-started/retail-r",
+                  "getting-started/retail-rust",
+                  "getting-started/retail-sql"
+                ]
+              },
               "getting-started/pipeline-to-production",
               "getting-started/inference-service",
               "getting-started/service-tutorial",

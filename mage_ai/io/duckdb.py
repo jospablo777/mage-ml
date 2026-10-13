@@ -2,6 +2,8 @@
 import functools
 import json
 import logging
+import os
+import time
 import uuid
 from typing import IO, Any, Dict, List, Tuple, Union
 
@@ -24,6 +26,38 @@ from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.utils import clean_name
 
 logger = logging.getLogger(__name__)
+
+# How long a connection waits for a database file that another process has open for
+# writing: DuckDB allows one writing process per file, and blocks of one pipeline that run
+# in parallel run in separate processes.
+LOCK_TIMEOUT_SECONDS = float(os.getenv('MAGE_DUCKDB_LOCK_TIMEOUT', '300'))
+
+
+def connect_waiting_for_lock(database: str, timeout: float = None, **kwargs):
+    """
+    duckdb.connect, waiting while another process holds the database file's write lock.
+    Parallel blocks of a pipeline used to fail at once with "Could not set lock on file".
+    """
+    timeout = LOCK_TIMEOUT_SECONDS if timeout is None else timeout
+    deadline = time.monotonic() + timeout
+    delay = 0.05
+    while True:
+        try:
+            return duckdb.connect(database, **kwargs)
+        except duckdb.IOException as error:
+            if 'lock' not in str(error).lower():
+                raise
+            if time.monotonic() >= deadline:
+                raise duckdb.IOException(
+                    f'The DuckDB database {database} is open for writing in another process, '
+                    f'and MageML waited {timeout:.0f} s for it. DuckDB allows one writing '
+                    'process per database file: close the other connection (a notebook, '
+                    'another run, a DuckDB shell), or give blocks that run at the same time '
+                    'separate databases. MAGE_DUCKDB_LOCK_TIMEOUT sets the wait in seconds. '
+                    f'DuckDB said: {error}'
+                ) from error
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
 
 
 class DuckDB(BaseSQL):
@@ -61,9 +95,15 @@ class DuckDB(BaseSQL):
         """
         Close the underlying connection to the SQL data source if open. Else will do nothing.
         """
-        self._ctx.close()
+        connection = getattr(self, '_ctx', None)
+        if connection is not None:
+            connection.close()
+            self._ctx = None
 
     def open(self) -> None:
+        """Opens the connection unless it is open: `with DuckDB(...)` opened it twice."""
+        if getattr(self, '_ctx', None) is not None:
+            return
         with self.printer.print_msg('Opening connection to DuckDB'):
             conn_kwargs = dict(
                 read_only=False,
@@ -77,10 +117,7 @@ class DuckDB(BaseSQL):
                 if self.settings.get('motherduck_token'):
                     config['motherduck_token'] = self.settings.get('motherduck_token')
                 conn_kwargs['config'] = config
-            self._ctx = duckdb.connect(
-                database_url,
-                **conn_kwargs,
-            )
+            self._ctx = connect_waiting_for_lock(database_url, **conn_kwargs)
 
     def _append_query(self, cursor, full_table_name: str, query_string: str) -> str:
         """

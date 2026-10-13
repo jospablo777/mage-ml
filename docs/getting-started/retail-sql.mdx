@@ -1,0 +1,234 @@
+---
+title: "Tutorial: retail orders in SQL on DuckDB"
+sidebarTitle: "SQL (DuckDB)"
+icon: "database"
+description: "Clean a shop's orders, compute revenue by region and month, build customer features and score churn risk, in SQL blocks on DuckDB."
+---
+
+Same tutorial in: [Python](/getting-started/retail-python) · [R](/getting-started/retail-r) · [Rust](/getting-started/retail-rust) · **SQL (DuckDB)**
+
+A shop exports its orders every night. The export has the problems real exports have:
+some rows appear twice, some orders were cancelled or returned, some amounts are missing,
+and the amounts are in three currencies. In this tutorial you build the pipeline that turns
+that export into two tables the business uses:
+
+- **monthly revenue** by region, in USD, with orders and customers;
+- **customer scores**: recency, frequency and money spent per customer (RFM), and a churn
+  risk score from a simple logistic model.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/diagrams/retail-pipeline-sql.light.svg" alt="load_orders and load_customers, clean_orders, monthly_revenue and customer_features, churn_score, export_revenue and export_scores, all in SQL on DuckDB" />
+  <img className="hidden dark:block" src="/images/diagrams/retail-pipeline-sql.dark.svg" alt="load_orders and load_customers, clean_orders, monthly_revenue and customer_features, churn_score, export_revenue and export_scores, all in SQL on DuckDB" />
+</Frame>
+
+The same pipeline is written in Python, R and Rust, with the same data and the same
+results, so you can compare the languages block by block. It takes about 15 minutes.
+
+<Note>
+You need MageML running ([setup](/getting-started/setup)). DuckDB runs inside MageML: a new
+project's `io_config.yaml` has `DUCKDB_DATABASE` in its `default` profile, the database file
+the blocks write their tables to.
+</Note>
+
+## 1. Get the data
+
+From a terminal, write the shop's data into your project:
+
+```bash
+mage examples retail path/to/project
+```
+
+It writes two Parquet files into `data/shop/`: 2,000 customers and 30,300 order rows from
+July 2024 to June 2025.
+
+| File | Columns |
+| --- | --- |
+| `customers.parquet` | `customer_id`, `region`, `segment`, `signed_up_on` |
+| `orders.parquet` | `order_id`, `customer_id`, `ordered_at` (UTC), `status`, `currency`, `amount`, `units` |
+
+The data is random but the same on every machine, so your numbers match the ones below.
+
+## 2. Create the pipeline
+
+1. Open **Pipelines** and click **New** > **Standard (batch)**.
+2. Name it `retail_sql`.
+
+Every block below is a SQL block: choose **SQL**, then **DuckDB** as the connection and
+`default` as the profile. Each block's result becomes a table in the DuckDB database, and
+the next block reads it as `{{ df_1 }}`, `{{ df_2 }}`.
+
+## 3. Load the orders and the customers
+
+Add a **Data loader** block in SQL, name it `load_orders_sql`, and write its query. DuckDB
+reads Parquet files directly; `env_var('MAGE_REPO_PATH')` is the project's folder:
+
+```sql load_orders_sql.sql
+SELECT *
+FROM read_parquet('{{ env_var("MAGE_REPO_PATH") }}/data/shop/orders.parquet')
+```
+
+Add a second **Data loader** in SQL, not connected to the first, named `load_customers_sql`:
+
+```sql load_customers_sql.sql
+SELECT *
+FROM read_parquet('{{ env_var("MAGE_REPO_PATH") }}/data/shop/customers.parquet')
+```
+
+Run both (**Run** or Cmd+Enter / Ctrl+Enter). **ColumnAtlas** under each block profiles
+every column over the whole table: `amount` shows its missing values, and `status` and
+`currency` their categories.
+
+## 4. Clean the orders
+
+Add a **Transformer** in SQL below `load_orders_sql`, named `clean_orders_sql`. It removes
+the duplicated rows, keeps the completed orders that have an amount, and converts the
+amounts to USD with a table of rates:
+
+```sql clean_orders_sql.sql
+-- What one unit of each currency is worth in USD
+WITH rates (currency, rate_to_usd) AS (
+    VALUES ('USD', 1.0), ('EUR', 1.08), ('CRC', 0.0019)
+),
+
+orders AS (
+    SELECT DISTINCT *
+    FROM {{ df_1 }}
+)
+
+SELECT
+    orders.order_id,
+    orders.customer_id,
+    orders.ordered_at,
+    orders.amount * rates.rate_to_usd AS amount_usd,
+    orders.units
+FROM orders
+INNER JOIN rates USING (currency)
+WHERE orders.status = 'completed'
+    AND orders.amount IS NOT NULL
+```
+
+27,349 orders remain.
+
+## 5. Revenue by region and month
+
+Add a **Transformer** in SQL named `monthly_revenue_sql` with two parents:
+`clean_orders_sql` first, then `load_customers_sql` (drag a connection from
+`load_customers_sql` to it in the graph). The query reads them as `{{ df_1 }}` and
+`{{ df_2 }}`:
+
+```sql monthly_revenue_sql.sql
+SELECT
+    customers.region,
+    strftime(timezone('UTC', orders.ordered_at), '%Y-%m') AS month,
+    sum(orders.amount_usd) AS revenue_usd,
+    count(*) AS orders,
+    count(DISTINCT orders.customer_id) AS customers
+FROM {{ df_1 }} AS orders
+INNER JOIN {{ df_2 }} AS customers USING (customer_id)
+GROUP BY ALL
+ORDER BY region, month
+```
+
+`timezone('UTC', ...)` reads the order time in UTC, whatever the server's time zone. The
+query returns 48 rows: 4 regions times 12 months.
+
+## 6. Customer features
+
+Add a **Transformer** in SQL below `clean_orders_sql` named `customer_features_sql`. For each
+customer it computes the three RFM features as of July 1, 2025: days since the last order
+(recency), number of orders (frequency) and money spent (monetary value):
+
+```sql customer_features_sql.sql
+SELECT
+    customer_id,
+    DATE '2025-07-01' - max(CAST(timezone('UTC', ordered_at) AS DATE)) AS recency_days,
+    count(*) AS frequency,
+    sum(amount_usd) AS monetary_usd
+FROM {{ df_1 }}
+GROUP BY customer_id
+```
+
+## 7. Score churn risk
+
+Add a **Transformer** in SQL below `customer_features_sql` named `churn_score_sql`. The score
+comes from a logistic model whose coefficients were fitted earlier; the block applies it:
+
+```sql churn_score_sql.sql
+-- Logistic model: more days since the last order raise the risk, more orders and
+-- more money spent lower it
+WITH model (intercept, recency, frequency, monetary) AS (
+    VALUES (-1.0, 0.04, -0.35, -0.15)
+),
+
+scored AS (
+    SELECT
+        features.*,
+        1 / (1 + exp(-(
+            model.intercept
+            + model.recency * features.recency_days
+            + model.frequency * features.frequency
+            + model.monetary * ln(1 + features.monetary_usd)
+        ))) AS churn_score
+    FROM {{ df_1 }} AS features
+    CROSS JOIN model
+)
+
+SELECT
+    *,
+    CASE WHEN churn_score >= 0.5 THEN 'high' ELSE 'low' END AS risk
+FROM scored
+ORDER BY customer_id
+```
+
+1,693 customers have at least one completed order; 390 of them are at high risk.
+
+## 8. Save the results
+
+Add a **Data exporter** in SQL below `monthly_revenue_sql` named `export_revenue_sql`. In the
+block's settings, set the table name to `monthly_revenue` and the write policy to
+**Replace**, so each run writes the table again:
+
+```sql export_revenue_sql.sql
+SELECT *
+FROM {{ df_1 }}
+```
+
+And one below `churn_score_sql` named `export_scores_sql`, with the table name
+`customer_scores` and the write policy **Replace**:
+
+```sql export_scores_sql.sql
+SELECT *
+FROM {{ df_1 }}
+```
+
+## 9. Run the whole pipeline
+
+Run it from the terminal, as a trigger would:
+
+```bash
+mage run path/to/project retail_sql
+```
+
+Every block completes, and the DuckDB database holds `monthly_revenue` (48 rows) and
+`customer_scores` (1,693 rows). To share them as Parquet, a block can end with DuckDB's
+`COPY (SELECT ...) TO 'file.parquet' (FORMAT parquet)`.
+
+## What you built
+
+| Block | Input | Output |
+| --- | --- | --- |
+| `load_orders_sql`, `load_customers_sql` | Parquet files | 30,300 order rows, 2,000 customers |
+| `clean_orders_sql` | orders | 27,349 completed orders in USD, each once |
+| `monthly_revenue_sql` | orders, customers | revenue, orders and customers per region and month |
+| `customer_features_sql` | orders | recency, frequency and money spent per customer |
+| `churn_score_sql` | features | a churn risk score and label per customer |
+| `export_revenue_sql`, `export_scores_sql` | the two tables | tables `monthly_revenue` and `customer_scores` in DuckDB |
+
+## Next steps
+
+- The same pipeline in [Python](/getting-started/retail-python), [R](/getting-started/retail-r)
+  and [Rust](/getting-started/retail-rust): the same blocks, the same results.
+- [SQL blocks](/guides/blocks/sql-blocks): connections, write policies and how upstream
+  tables reach a query.
+
+Same tutorial in: [Python](/getting-started/retail-python) · [R](/getting-started/retail-r) · [Rust](/getting-started/retail-rust) · **SQL (DuckDB)**
