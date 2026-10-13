@@ -58,7 +58,8 @@ def native_target(item: dict) -> str:
     targets = set()
     for tag in item['tags']:
         match = re.fullmatch(
-            r'cp311-abi3-(manylinux_2_28_(x86_64|aarch64)|macosx_[0-9]+_[0-9]+_(x86_64|arm64))', tag
+            # The native wheel targets the stable ABI from Python 3.12 (pyo3 abi3-py312).
+            r'cp312-abi3-(manylinux_2_28_(x86_64|aarch64)|macosx_[0-9]+_[0-9]+_(x86_64|arm64))', tag
         )
         require(match is not None, f'unsupported native wheel tag for installer generation: {tag}')
         assert match is not None

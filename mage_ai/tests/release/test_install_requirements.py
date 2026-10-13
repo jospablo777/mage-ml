@@ -47,7 +47,7 @@ def records() -> list[dict]:
         'macosx_12_0_arm64',
         'macosx_12_0_x86_64',
     ):
-        result.append(artifact('column-atlas-native', '0.2.0', 'cp311-abi3-' + platform))
+        result.append(artifact('column-atlas-native', '0.2.0', 'cp312-abi3-' + platform))
     return result
 
 
@@ -147,6 +147,8 @@ class InstallerTests(unittest.TestCase):
             'py3-none-any',
             'cp312-cp312-manylinux_2_28_x86_64',
             'cp311-abi3-macosx_12_0_universal2',
+            # An older stable ABI than the 3.12 one MageML builds.
+            'cp311-abi3-manylinux_2_28_x86_64',
         ):
             modified = records()
             modified[3] = artifact('column-atlas-native', '0.2.0', tag)

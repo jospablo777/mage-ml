@@ -232,13 +232,13 @@ class ReleaseIndexTests(unittest.TestCase):
             self.generate()
 
     def test_distinct_targets_and_new_versions_remain_allowed(self) -> None:
-        wheel(self.wheels, project='column-atlas-native', tag='cp311-abi3-manylinux_2_28_x86_64')
-        wheel(self.wheels, project='column-atlas-native', tag='cp311-abi3-manylinux_2_28_aarch64')
+        wheel(self.wheels, project='column-atlas-native', tag='cp312-abi3-manylinux_2_28_x86_64')
+        wheel(self.wheels, project='column-atlas-native', tag='cp312-abi3-manylinux_2_28_aarch64')
         wheel(
             self.wheels,
             project='column-atlas-native',
             version='1.0.1',
-            tag='cp311-abi3-manylinux_2_28_x86_64',
+            tag='cp312-abi3-manylinux_2_28_x86_64',
         )
         self.assertEqual(len(self.generate()['artifacts']), 3)
 
