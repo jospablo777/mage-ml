@@ -167,8 +167,8 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: mage
       RABBITMQ_DEFAULT_PASS: "p@ss/w:rd%"
-    tmpfs:
-      - /var/lib/rabbitmq
+    # No tmpfs: on a CI runner RabbitMQ could not read its Erlang cookie on one ("eacces")
+    # and stopped at boot three times; the image's own data folder has the right owner.
     ports:
       - "${MAGE_TEST_RABBITMQ_PORT:-15673}:5672"
     healthcheck:
