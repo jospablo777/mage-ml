@@ -23,6 +23,20 @@ class ActiveKernel:
 active_kernel = ActiveKernel()
 
 
+def _replace_client(client: KernelClient) -> None:
+    """
+    Makes client the active one and closes the one it replaces. A replaced client left to the
+    garbage collector froze the web server: the collector runs on the server's thread, and the
+    client's zmq context waited without end for messages a restarted kernel never took.
+    """
+    from mage_ai.kernels.models import close_client
+
+    previous = active_kernel.kernel_client
+    active_kernel.kernel_client = client
+    if previous is not None and previous is not client:
+        close_client(previous)
+
+
 def switch_active_kernel(
     kernel_name: KernelName,
     emr_config: Dict = None,
@@ -68,7 +82,7 @@ def switch_active_kernel(
         new_kernel = kernel_managers[kernel_name]
         new_kernel.start_kernel()
         active_kernel.kernel = new_kernel
-        active_kernel.kernel_client = new_kernel.client()
+        _replace_client(new_kernel.client())
         if kernel_name == KernelName.PYSPARK:
             from mage_ai.cluster_manager.aws.emr_cluster_manager import (
                 emr_cluster_manager,
@@ -135,9 +149,9 @@ def interrupt_kernel() -> None:
 
 def restart_kernel() -> None:
     active_kernel.kernel.restart_kernel()
-    active_kernel.kernel_client = active_kernel.kernel.client()
+    _replace_client(active_kernel.kernel.client())
 
 
 def start_kernel() -> None:
     active_kernel.kernel.start_kernel()
-    active_kernel.kernel_client = active_kernel.kernel.client()
+    _replace_client(active_kernel.kernel.client())
