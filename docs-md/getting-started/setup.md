@@ -62,7 +62,7 @@ name = "my-pipelines"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "mage-ml[postgres]==0.1.0",
+    "mage-ml[postgres]==0.1.1",
 ]
 
 [[tool.uv.index]]
@@ -134,7 +134,7 @@ packages to the release's files and their SHA-256 hashes:
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install \
-  -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt
+  -r https://jospablo777.github.io/mage-ml/install/v0.1.1/base.txt
 .venv/bin/mage start my_project
 ```
 
@@ -160,7 +160,7 @@ empty folder:
 ```dockerfile
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
-RUN uv pip install --system --no-cache "mage-ml==0.1.0" \
+RUN uv pip install --system --no-cache "mage-ml==0.1.1" \
       --index https://jospablo777.github.io/mage-ml/simple/
 WORKDIR /home/src
 EXPOSE 6789
@@ -175,7 +175,7 @@ docker run -it -p 6789:6789 -v "$(pwd)":/home/src mageml
 ```
 
 Add extras or block packages to the `uv pip install` line, for example
-`"mage-ml[postgres]==0.1.0" scikit-learn`.
+`"mage-ml[postgres]==0.1.1" scikit-learn`.
 
 ### The full image from the repository
 
@@ -309,7 +309,7 @@ uv add "mage-ml[postgres,s3,dbt]"
 ```
 ```toml
 dependencies = [
-    "mage-ml[postgres,s3,dbt]==0.1.0",
+    "mage-ml[postgres,s3,dbt]==0.1.1",
 ]
 ```
 ```bash
@@ -319,7 +319,7 @@ uv tool install "mage-ml[postgres,s3,dbt]" --index https://jospablo777.github.io
 uv pip install "mage-ml[postgres,s3,dbt]" --index https://jospablo777.github.io/mage-ml/simple/
 ```
 ```bash
-python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt "mage-ml[postgres,s3,dbt]"
+python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.1/base.txt "mage-ml[postgres,s3,dbt]"
 ```
 ```bash
 uv sync --locked --no-default-groups --extra postgres --extra s3 --extra dbt

@@ -9,7 +9,7 @@ uv add mage-ml prefect --index mageml=https://jospablo777.github.io/mage-ml/simp
 ```
 
 With pip, install the release's requirements file:
-`python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt prefect`
+`python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.1/base.txt prefect`
 (`pip install mage-ai` installs upstream Mage). Then download the project code into your
 Prefect directory, for example as a git submodule.
 

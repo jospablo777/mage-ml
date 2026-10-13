@@ -115,7 +115,7 @@ Or write MageML in your `pyproject.toml` and run `uv sync`:
 ```toml
 [project]
 requires-python = ">=3.12,<3.13"
-dependencies = ["mage-ml[postgres]==0.1.0"]
+dependencies = ["mage-ml[postgres]==0.1.1"]
 
 [[tool.uv.index]]
 name = "mageml"
@@ -129,7 +129,7 @@ Other ways:
 | A `mage` command for your user (uv tool) | `uv tool install mage-ml --index https://jospablo777.github.io/mage-ml/simple/` |
 | Try it without installing (uvx) | `uvx --from mage-ml --index https://jospablo777.github.io/mage-ml/simple/ mage start my_project` |
 | Into an environment you already use (uv pip) | `uv pip install mage-ml --index https://jospablo777.github.io/mage-ml/simple/` |
-| pip | `python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.0/base.txt` |
+| pip | `python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.1/base.txt` |
 
 With pip, use the release's requirements file, which pins MageML's packages by hash, and not
 `--extra-index-url`: pip takes the highest version across indexes, so a package of the same

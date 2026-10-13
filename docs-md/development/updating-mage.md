@@ -14,7 +14,7 @@ uv lock --upgrade-package mage-ml
 uv sync
 ```
 
-With an exact version in `pyproject.toml`, such as `mage-ml==0.1.0`, change the
+With an exact version in `pyproject.toml`, such as `mage-ml==0.1.1`, change the
 version first. Then restart MageML with `uv run mage start my_project`.
 
 </details>
@@ -37,7 +37,7 @@ uv pip install --upgrade mage-ml --index https://jospablo777.github.io/mage-ml/s
   -r https://jospablo777.github.io/mage-ml/install/<version>/base.txt
 ```
 
-With pip, use the requirements file of the new release, such as `v0.1.0`.
+With pip, use the requirements file of the new release, such as `v0.1.1`.
 
 </details>
 
