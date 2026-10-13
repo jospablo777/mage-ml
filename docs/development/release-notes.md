@@ -400,6 +400,10 @@ Each item says what changed, which pipelines it affects, and what to do.
   to the terminal socket started a shell.
 - **The event, event matcher and block analysis routes need sign-in** when authentication
   is on.
+- **Error messages no longer change after a failed sign-in.** The sign-in check edited
+  Mage's shared "Record not found." error, so after one wrong password every later missing
+  record in the process reported "Email/username and/or password invalid.". The shared
+  errors are read-only now.
 
 #### Production runs
 
