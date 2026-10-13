@@ -57,6 +57,12 @@ test.beforeAll(async ({ playwright }, testInfo) => {
   await api.addBlock(targetUUID, { content: IMAGE_CODE, name: IMAGE, type: 'data_loader' });
 });
 
+// A fresh kernel for each test: on CI the kernel sometimes stopped running code after a
+// few runs, and every later test of the server failed with it.
+test.beforeEach(async () => {
+  await api.restartKernel();
+});
+
 test.afterAll(async () => {
   await api.deletePipeline(targetUUID);
   await api.deletePipeline(sourceUUID);

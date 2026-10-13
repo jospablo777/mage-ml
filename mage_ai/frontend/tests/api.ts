@@ -99,6 +99,11 @@ export class MageApi {
     });
   }
 
+  // Restarts the notebook kernel, as the editor's Restart kernel action does.
+  async restartKernel() {
+    await this.call('PUT', 'kernels/__auto_detect', { kernel: { action_type: 'restart' } });
+  }
+
   async deletePipeline(pipelineUUID: string) {
     await this.call('DELETE', `pipelines/${pipelineUUID}`);
   }
