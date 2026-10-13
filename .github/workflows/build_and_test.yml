@@ -142,6 +142,9 @@ jobs:
       - name: Pipeline service format
         working-directory: mage_ai/pipeline_services/service
         run: cargo fmt --all --check
+      # librdkafka (the kafka feature) includes curl's header for its OAuth support.
+      - name: Libraries the Kafka connector builds against
+        run: sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
       - name: Pipeline service clippy
         working-directory: mage_ai/pipeline_services/service
         # --all-features includes the Kafka connector (librdkafka, built with cmake).
