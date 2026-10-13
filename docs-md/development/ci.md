@@ -109,8 +109,28 @@ Changes to `docs/` alone start no workflow.
 | Lint changed files | pre-commit (ruff, isort, YAML, JSON, test names) on the changed files | 1 min | `uv run pre-commit run --files <files>` |
 | Rust extension | `cargo fmt --check`, `clippy -D warnings` and `cargo test` for ColumnAtlas, the block SDK and the pipeline service | 2 min | the same cargo commands in `rust/column_atlas`, `mage_ai/data_preparation/models/block/rust/sdk` and `mage_ai/pipeline_services/service` |
 | Packaging | `uv lock --check`, `uv build --all-packages` | 8 min | the same commands |
-| Integration tests | Docker services, R environment, a Rust warm-up build, then `make -C integration_tests ci`, then two scheduler soak tests | 45 to 75 min (2 h limit) | `make -C integration_tests ci PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900'` |
+| Integration and MageML pipeline groups | Seven parallel jobs, each with only its services: see [Integration groups](#integration-groups) | 15 to 30 min each (90 min limit) | `make -C integration_tests ci-tests TESTS=... SERVICES=...`, below |
 | test_backend | Git tests, the unit tests, frontend unit tests, the frontend build, the Playwright tests, Storybook | 35 to 45 min (90 min limit) | see [Unit tests](#unit-tests) and [Browser tests](#browser-tests) |
+
+## Integration groups
+
+The integration tests run as seven jobs in parallel. "Integration" groups test MageML with
+external tools; "MageML" groups test MageML's own pipelines. Each job starts only its
+services, and fails when one of its tests is skipped.
+
+| Job | Tests | Services | R | Rust warm-up |
+| --- | --- | --- | --- | --- |
+| Integration: SQL databases | `postgres`, `mysql`, `clickhouse`, `trino`, `duckdb` | PostgreSQL, MySQL, ClickHouse, Trino (with MinIO) | No | Yes |
+| Integration: document stores and caches | `mongodb`, `redis` | MongoDB, Redis | No | No |
+| Integration: streaming and storage | `kafka`, `rabbitmq`, `nats`, `activemq`, `streaming`, `s3` | The brokers, MinIO, and the sinks the streaming tests write to | No | No |
+| Integration: ML and HTTP services | `feast`, `mlflow`, `api` | Feast (with PostgreSQL and Redis), MLflow, the test HTTP API | No | No |
+| MageML: compiled and polyglot pipelines | `chains`, `tutorials`, `benchmark`, `r` | PostgreSQL | Yes | Yes |
+| MageML: pipeline shape study | `topologies` | PostgreSQL, for the warm-up | Yes | Yes |
+| MageML: scheduler soak | `soak`, plain and with block fusion | PostgreSQL | No | No |
+
+A new test folder goes into one group in `.github/workflows/build_and_test.yml`, with the
+services it needs. The Rust groups share one build cache (the repository's caches are
+limited to 10 GB), saved by the pipelines group.
 
 ## Failures and their causes
 
@@ -182,6 +202,11 @@ make -C integration_tests up          # the Docker services
 make -C integration_tests warm-rust   # optional: build Polars and the Rust SDK once
 make -C integration_tests ci PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900'
 make -C integration_tests down        # stops the services and removes their volumes
+
+# One CI group, as its job runs it:
+make -C integration_tests up SERVICES="mongodb redis"
+make -C integration_tests ci-tests TESTS="integration_tests/mongodb integration_tests/redis" \
+  REPORT=results-documents.xml PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900'
 ```
 
 `make -C integration_tests test-<service>` runs one service's tests, for example

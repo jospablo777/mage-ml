@@ -11,6 +11,10 @@
 COMPOSE ?= docker compose -f compose.yaml
 PYTHON ?= uv run --no-sync python
 PYTEST_ARGS ?=
+# One CI job's group: the services to start (empty: all), the tests and the report.
+SERVICES ?=
+TESTS ?= integration_tests --ignore=integration_tests/soak
+REPORT ?= results.xml
 
 export MAGE_TEST_POSTGRES_HOST ?= 127.0.0.1
 export MAGE_TEST_POSTGRES_PORT ?= 15432
@@ -57,11 +61,11 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
-	$(COMPOSE) up -d --build --wait
+	$(COMPOSE) up -d --build --wait $(SERVICES)
 
 down:
 	$(COMPOSE) down --volumes --remove-orphans
@@ -149,13 +153,17 @@ test-duckdb:
 # Builds Polars and the Rust block SDK into the shared target directory once, so no
 # test pays for the cold build within its time limit: the blocks Mage compiles, and the
 # bundle an exported service compiles, whose features differ. Needs the services (up).
+WARM_TESTS ?= \
+	'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' \
+	'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'
 warm-rust:
-	cd .. && $(PYTHON) -m pytest -p no:cacheprovider -q \
-		'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' \
-		'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'
+	cd .. && $(PYTHON) -m pytest -p no:cacheprovider -q $(WARM_TESTS)
 
 # CI fails on any skipped test, so a service that is not configured cannot pass silently.
-ci: up r-env
-	cd .. && $(PYTHON) -m pytest integration_tests --ignore=integration_tests/soak -rs \
-		--junitxml=integration_tests/results.xml $(PYTEST_ARGS)
-	$(PYTHON) check_no_skips.py results.xml
+ci: up r-env ci-tests
+
+# The tests of TESTS against services already started (CI starts each job's own).
+ci-tests:
+	cd .. && $(PYTHON) -m pytest $(TESTS) -rs \
+		--junitxml=integration_tests/$(REPORT) $(PYTEST_ARGS)
+	$(PYTHON) check_no_skips.py $(REPORT)

@@ -173,19 +173,73 @@ jobs:
       - name: Build sdist and wheel
         run: uv build --all-packages
 
+  # Integration tests in parallel jobs, one per group: each starts only its services.
+  # "Integration" groups test external tools; "MageML" groups test MageML's own pipelines.
   integration:
-    name: Integration tests
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    # A full run takes about 30 minutes; a hung one stops here instead of after six hours.
-    timeout-minutes: 120
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: sql
+            name: "Integration: SQL databases"
+            services: postgres mysql clickhouse trino
+            tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb
+            r: false
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+          - id: documents
+            name: "Integration: document stores and caches"
+            services: mongodb redis
+            tests: integration_tests/mongodb integration_tests/redis
+            r: false
+            warm: ""
+          - id: streaming
+            name: "Integration: streaming and storage"
+            services: kafka rabbitmq nats activemq minio postgres mongodb mysql clickhouse
+            tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/nats integration_tests/activemq integration_tests/streaming integration_tests/s3
+            r: false
+            warm: ""
+          - id: ml
+            name: "Integration: ML and HTTP services"
+            services: feast mlflow api
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api
+            r: false
+            warm: ""
+          - id: pipelines
+            name: "MageML: compiled and polyglot pipelines"
+            services: postgres
+            tests: integration_tests/chains integration_tests/tutorials integration_tests/benchmark integration_tests/r
+            r: true
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+          - id: study
+            name: "MageML: pipeline shape study"
+            # PostgreSQL only for the Rust warm-up's exported-service build.
+            services: postgres
+            tests: integration_tests/topologies
+            r: true
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+          - id: soak
+            name: "MageML: scheduler soak"
+            services: postgres
+            tests: ""
+            r: false
+            warm: ""
     steps:
       - uses: actions/checkout@v5
-      # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
+      # uv sync compiles the ColumnAtlas extension in rust/column_atlas; exported-service
+      # tests build the pipeline service engine.
       - name: Set up Rust
         run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      # One cache for the groups (the repository's caches have 10 GB), saved by one group.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/column_atlas -> target
+          shared-key: integration
+          save-if: ${{ matrix.id == 'pipelines' }}
+          workspaces: |
+            rust/column_atlas -> target
+            mage_ai/pipeline_services/service -> target
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -196,14 +250,16 @@ jobs:
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
         run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra integrations
-      # R 4.6 and rv for the R block tests, which run with the rv environment in
+      # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R
+        if: matrix.r
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: "4.6"
           use-public-rspm: true
       - name: Install rv and the system libraries of the R environment
+        if: matrix.r
         run: |
           curl -fsSL "https://github.com/A2-ai/rv/releases/download/v${RV_VERSION}/rv-v${RV_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
             | sudo tar -xz -C /usr/local/bin rv
@@ -218,17 +274,17 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y $(cat /tmp/r-sysdeps)
           fi
-      # Same target as a local run. It starts the services in integration_tests/compose.yaml
-      # and fails when any test is skipped.
-      # Separate steps so a failure names its stage in the run's summary.
-      - name: Start the integration services
-        run: make -C integration_tests up
       - name: Install the R test environment
+        if: matrix.r
         run: make -C integration_tests r-env
+      - name: Start the group's services
+        if: matrix.services != ''
+        run: make -C integration_tests up SERVICES="${{ matrix.services }}"
       # Rust blocks compile into one cargo target directory. Restore it, build Polars and the
       # block SDK into it before the tests, and save it at once, so no test pays for a cold
       # build within its time limit and a failing test run still keeps the cache.
       - name: Restore the Rust blocks' build directory
+        if: matrix.warm != ''
         id: rust-blocks
         uses: actions/cache/restore@v4
         with:
@@ -236,40 +292,46 @@ jobs:
           key: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml', 'mage_ai/data_preparation/models/block/rust/sdk/Cargo.lock', 'mage_ai/data_preparation/models/block/rust/workspace.py', 'integration_tests/Makefile') }}
           restore-keys: rust-blocks-${{ runner.os }}-${{ env.RUST_VERSION }}-
       - name: Build Polars and the Rust block SDK
-        run: make -C integration_tests warm-rust
+        if: matrix.warm != ''
+        run: make -C integration_tests warm-rust WARM_TESTS="${{ matrix.warm }}"
+      # The groups warm the same builds; one of them saves the shared cache.
       - name: Save the Rust blocks' build directory
-        if: steps.rust-blocks.outputs.cache-hit != 'true'
+        if: matrix.id == 'pipelines' && steps.rust-blocks.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/mage/rust/target
           key: ${{ steps.rust-blocks.outputs.cache-primary-key }}
-      - name: Run integration tests
-        run: make -C integration_tests ci PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900 --durations=25'
+      - name: Run the group's tests
+        if: matrix.tests != ''
+        run: >-
+          make -C integration_tests ci-tests TESTS="${{ matrix.tests }}"
+          REPORT=results-${{ matrix.id }}.xml
+          PYTEST_ARGS='-n 4 --dist loadgroup -v --timeout=900 --durations=25'
       # The scheduler process with many concurrent pipelines, for 150 seconds.
       - name: Run the scheduler soak test
+        if: matrix.id == 'soak'
         run: make -C integration_tests test-soak PYTEST_ARGS='--junitxml=integration_tests/soak-results.xml'
       # The same with block fusion: chains run as stages, through crashes and retries.
       - name: Run the scheduler soak test with block fusion
+        if: matrix.id == 'soak'
         run: make -C integration_tests test-soak-fusion PYTEST_ARGS='--junitxml=integration_tests/soak-fusion-results.xml'
       - name: Failed tests
         if: failure()
-        run: >-
-          python3 scripts/junit_annotations.py integration_tests/results.xml
-          integration_tests/soak-results.xml integration_tests/soak-fusion-results.xml
+        run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml
       - name: Service states
-        if: failure()
+        if: failure() && matrix.services != ''
         run: python3 scripts/compose_states.py integration_tests/compose.yaml
       - name: Service logs
-        if: failure()
+        if: failure() && matrix.services != ''
         run: docker compose -f integration_tests/compose.yaml logs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-test-results
+          name: integration-test-results-${{ matrix.id }}
           path: |
-            integration_tests/results.xml
-            integration_tests/soak-results.xml
-            integration_tests/soak-fusion-results.xml
+            integration_tests/results-*.xml
+            integration_tests/soak*-results.xml
+          if-no-files-found: ignore
           retention-days: 7
 
   test_backend:
