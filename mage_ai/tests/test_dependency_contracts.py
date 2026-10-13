@@ -82,7 +82,8 @@ class CliContractTest(unittest.TestCase):
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
              'create-spark-cluster', 'contract-draft', 'contract-check', 'run-diff',
              'reproduce', 'reproduce-run', 'release-status', 'release-promote',
-             'release-rollback', 'monitor-status', 'verify-fusion', 'r', 'rust', 'export'],
+             'release-rollback', 'monitor-status', 'verify-fusion', 'r', 'rust', 'examples',
+             'export'],
         )
 
     def test_rust_commands(self):
