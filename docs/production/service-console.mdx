@@ -62,13 +62,27 @@ never holds the full token, and falls back to `MAGE_SERVICE_TOKEN`.
 When the data is more than 5 seconds old, or the connection drops, the header says so and
 the controls turn off until fresh data arrives.
 
+### Streams
+
+A streaming pipeline shows the stream instead of runs: what it reads and writes, messages in
+and out per second over the last minute, the total lag and the lag of each partition this
+instance reads, dead letters, retries, alerts and the last error. The pipeline list shows each
+stream's rate and lag. `p` pauses a stream: it stops reading new messages, finishes and
+acknowledges the batches in flight, and keeps its position; a paused stream stays paused after
+a restart until it is resumed.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/services/console-stream.light.svg" alt="mage-console showing a Kafka stream: messages in and out per second, lag per partition, dead letters and health" />
+  <img className="hidden dark:block" src="/images/services/console-stream.dark.svg" alt="mage-console showing a Kafka stream: messages in and out per second, lag per partition, dead letters and health" />
+</Frame>
+
 ## Keys
 
 | Key | |
 | --- | --- |
 | `↑` `↓` or `j` `k` | Select a pipeline |
 | `p` | Review pausing or resuming the selected pipeline |
-| `+` `-` | Review raising or lowering its runs at once (1 to 16) |
+| `+` `-` | Review raising or lowering its runs at once (1 to 16); streams have no run limit |
 | `Enter` | Submit the reviewed request |
 | `Esc` | Dismiss it without submitting |
 | `r` | Review retrying a request whose delivery is unknown |

@@ -748,6 +748,16 @@ async fn control(
             "The pipeline's settings changed since they were read; review them again.".into(),
         ));
     }
+    if let Some(paused) = paused
+        && let Some(switch) = state
+            .service
+            .stream_pause
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&pipeline.uuid)
+    {
+        switch.send_replace(paused);
+    }
     state.service.wake();
     Ok(Json(ControlReceipt {
         request_id: request.request_id,

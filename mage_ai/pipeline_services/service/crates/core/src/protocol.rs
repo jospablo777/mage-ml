@@ -185,6 +185,40 @@ pub struct PipelineSnapshot {
     pub triggers: Vec<TriggerSnapshot>,
     #[serde(default)]
     pub blocks: Vec<String>,
+    /// A streaming pipeline's live state; batch pipelines have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamSnapshot>,
+}
+
+/// A stream as the service runs it: counters since the service started, lag per partition
+/// this instance reads, and what it reads from and writes to.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct StreamSnapshot {
+    /// `starting`, `running`, `paused`, `draining`, `failed` or `finished`.
+    pub state: String,
+    pub batches: u64,
+    pub messages_in: u64,
+    pub messages_out: u64,
+    pub retries: u64,
+    pub dead_lettered_batches: u64,
+    pub alerts: u64,
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub lag: std::collections::BTreeMap<u32, i64>,
+    #[serde(default)]
+    pub assigned: usize,
+    /// "kafka orders", for example.
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub sinks: Vec<String>,
+    /// The last minute, one value per second, oldest first.
+    #[serde(default)]
+    pub rate_in: Vec<u64>,
+    #[serde(default)]
+    pub rate_out: Vec<u64>,
+    #[serde(default)]
+    pub lag_history: Vec<i64>,
 }
 
 fn default_window() -> u64 {

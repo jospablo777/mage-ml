@@ -236,6 +236,7 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         transform,
         config: runner_config(stream),
         shutdown_deadline: Duration::from_secs(20),
+        pause: None,
     })
 }
 
@@ -273,7 +274,20 @@ pub fn start(service: &Arc<Service>) -> Vec<JoinHandle<()>> {
             }
         };
         match parts(service, pipeline, log) {
-            Ok(parts) => {
+            Ok(mut parts) => {
+                // A stream paused before the service stopped starts paused.
+                let paused = service
+                    .ledger
+                    .settings(&pipeline.uuid, pipeline.max_concurrent_runs)
+                    .map(|s| s.paused)
+                    .unwrap_or(false);
+                let (switch, receiver) = tokio::sync::watch::channel(paused);
+                service
+                    .stream_pause
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(pipeline.uuid.clone(), switch);
+                parts.pause = Some(receiver);
                 log::info(&format!("Stream {} starts.", pipeline.uuid));
                 let stop = service.stream_stop.clone();
                 handles.push(tokio::spawn(stream::run(parts, status, stop)));

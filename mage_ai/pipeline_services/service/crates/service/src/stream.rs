@@ -7,7 +7,7 @@
 //! says so. Every outcome goes back to the machine as an event; the driver only performs
 //! effects.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,6 +40,21 @@ pub struct StreamStatus {
     pub lag: BTreeMap<u32, i64>,
     /// Partitions this instance reads now.
     pub assigned: usize,
+    /// The last minute, one value per second, oldest first: messages read, messages the
+    /// blocks made, and the total lag.
+    pub rate_in: VecDeque<u64>,
+    pub rate_out: VecDeque<u64>,
+    pub lag_history: VecDeque<i64>,
+}
+
+/// Seconds of history a stream's status keeps.
+pub const HISTORY_SECONDS: usize = 60;
+
+fn push_bounded<T>(series: &mut VecDeque<T>, value: T) {
+    if series.len() == HISTORY_SECONDS {
+        series.pop_front();
+    }
+    series.push_back(value);
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -48,6 +63,8 @@ pub enum StreamState {
     #[default]
     Starting,
     Running,
+    /// Paused from the API or the console: nothing new is read, work in flight finishes.
+    Paused,
     Draining,
     /// Stopped by an error that needs a person: a poison batch or a rejecting sink.
     Failed,
@@ -66,6 +83,9 @@ pub struct StreamParts {
     pub transform: Option<Box<dyn TransformSession>>,
     pub config: RunnerConfig,
     pub shutdown_deadline: Duration,
+    /// Paused from the API or the console: the source stops fetching while batches in flight
+    /// finish and commit. None for a stream nobody pauses.
+    pub pause: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 enum Internal {
@@ -212,10 +232,20 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let mut reading = true;
     let mut assigned: std::collections::BTreeSet<PartitionId> = Default::default();
     let mut idle_warned = false;
+    let (mut last_in, mut last_out) = (0u64, 0u64);
     let started = std::time::Instant::now();
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    set_state(&status, StreamState::Running);
+    let mut pause = parts.pause.take();
+    let mut user_paused = pause.as_ref().is_some_and(|p| *p.borrow());
+    set_state(
+        &status,
+        if user_paused {
+            StreamState::Paused
+        } else {
+            StreamState::Running
+        },
+    );
 
     loop {
         let mut events: Vec<Event> = Vec::new();
@@ -268,6 +298,64 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     }
                 }
             },
+            // Before the source: a source that answers at once (Idle) must not starve the
+            // pause switch or the ticker.
+            changed = async {
+                match pause.as_mut() {
+                    Some(receiver) => receiver.changed().await.map(|_| *receiver.borrow()),
+                    None => std::future::pending().await,
+                }
+            } => match changed {
+                Ok(now) if now != user_paused && reading => {
+                    user_paused = now;
+                    for partition in &assigned {
+                        if now {
+                            parts.source.pause(*partition);
+                        } else if !machine.is_paused(*partition) {
+                            parts.source.resume(*partition);
+                        }
+                    }
+                    set_state(&status, if now { StreamState::Paused } else { StreamState::Running });
+                    crate::log::info(&format!(
+                        "Stream {} {}.",
+                        parts.name,
+                        if now { "paused: nothing new is read" } else { "resumed" }
+                    ));
+                }
+                Ok(_) => {}
+                Err(_) => pause = None,
+            },
+            _ = ticker.tick() => {
+                events.push(Event::Tick);
+                let lag = parts.source.lag();
+                count(&status, |s| {
+                    let total_lag: i64 = lag.values().sum();
+                    push_bounded(&mut s.rate_in, s.messages_in.saturating_sub(last_in));
+                    push_bounded(&mut s.rate_out, s.messages_out.saturating_sub(last_out));
+                    push_bounded(&mut s.lag_history, total_lag);
+                    last_in = s.messages_in;
+                    last_out = s.messages_out;
+                    s.lag = lag;
+                    s.assigned = assigned.len();
+                });
+                // More instances than partitions leave some idle: say so once (I-38).
+                if assigned.is_empty()
+                    && !idle_warned
+                    && reading
+                    && started.elapsed() >= IDLE_WARNING_AFTER
+                    && parts.source.capabilities().ack_kind == AckKind::Offset
+                {
+                    idle_warned = true;
+                    count(&status, |s| s.alerts += 1);
+                    crate::log::warn(&format!(
+                        "Stream {}: this instance has read no partition for {} seconds. When \
+                         the stream runs more instances than its topic has partitions, the \
+                         extra ones stay idle until a partition is free.",
+                        parts.name,
+                        IDLE_WARNING_AFTER.as_secs()
+                    ));
+                }
+            }
             event = parts.source.next_event(), if reading => match event {
                 Ok(SourceEvent::Batch { batch, meta }) => {
                     count(&status, |s| {
@@ -279,6 +367,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 }
                 Ok(SourceEvent::Assigned { partition, epoch }) => {
                     assigned.insert(partition);
+                    if user_paused {
+                        parts.source.pause(partition);
+                    }
                     events.push(Event::Assigned { partition, epoch });
                 }
                 Ok(SourceEvent::Revoking { partition, epoch, within }) => {
@@ -302,31 +393,6 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
             },
-            _ = ticker.tick() => {
-                events.push(Event::Tick);
-                let lag = parts.source.lag();
-                count(&status, |s| {
-                    s.lag = lag;
-                    s.assigned = assigned.len();
-                });
-                // More instances than partitions leave some idle: say so once (I-38).
-                if assigned.is_empty()
-                    && !idle_warned
-                    && reading
-                    && started.elapsed() >= IDLE_WARNING_AFTER
-                    && parts.source.capabilities().ack_kind == AckKind::Offset
-                {
-                    idle_warned = true;
-                    count(&status, |s| s.alerts += 1);
-                    crate::log::warn(&format!(
-                        "Stream {}: this instance has read no partition for {} seconds. When \
-                         the stream runs more instances than its topic has partitions, the \
-                         extra ones stay idle until a partition is free.",
-                        parts.name,
-                        IDLE_WARNING_AFTER.as_secs()
-                    ));
-                }
-            }
         }
 
         for event in events {
@@ -418,6 +484,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     }
                     Effect::Revoked { partition, epoch } => parts.source.revoked(partition, epoch),
                     Effect::Pause(partition) => parts.source.pause(partition),
+                    // A paused stream stays paused when backpressure lifts.
+                    Effect::Resume(_) if user_paused => {}
                     Effect::Resume(partition) => parts.source.resume(partition),
                     Effect::Cancel(ids) => {
                         for id in ids {
@@ -569,6 +637,7 @@ mod tests {
             transform: None,
             config: config(2, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
+            pause: None,
         })
         .await;
 
@@ -589,6 +658,44 @@ mod tests {
         }
         assert_eq!(status.messages_in, 32);
         assert!(status.retries >= 3);
+    }
+
+    #[tokio::test]
+    async fn a_paused_stream_reads_nothing_new_until_it_resumes() {
+        let source = MemorySource::new(vec![messages(20)], 4, true);
+        let handle = source.handle();
+        let sink = MemorySink::new();
+        let (switch, receiver) = tokio::sync::watch::channel(true);
+        let status = SharedStatus::default();
+        let running = tokio::spawn(run(
+            StreamParts {
+                name: "orders".into(),
+                source: Box::new(source),
+                sinks: vec![(Arc::new(sink.clone()), None)],
+                dead_letter: None,
+                transform: None,
+                config: config(1, false, PoisonPolicy::Stop),
+                shutdown_deadline: Duration::from_secs(5),
+                pause: Some(receiver),
+            },
+            status.clone(),
+            CancellationToken::new(),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(status.lock().unwrap().state, StreamState::Paused);
+        assert!(sink.received().is_empty(), "a paused stream wrote messages");
+        assert_eq!(handle.paused(), vec![0]);
+
+        switch.send_replace(false);
+        tokio::time::timeout(Duration::from_secs(20), running)
+            .await
+            .expect("the stream finishes")
+            .unwrap();
+
+        assert_eq!(sink.received().len(), 20);
+        assert_eq!(handle.committed(), vec![20]);
+        assert_eq!(status.lock().unwrap().state, StreamState::Finished);
     }
 
     struct Failing(usize);
@@ -635,6 +742,7 @@ mod tests {
             transform: Some(Box::new(Failing(4))),
             config: config(1, true, PoisonPolicy::DeadLetter),
             shutdown_deadline: Duration::from_secs(5),
+            pause: None,
         })
         .await;
 
@@ -664,6 +772,7 @@ mod tests {
             transform: Some(Box::new(Failing(4))),
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
+            pause: None,
         })
         .await;
 
@@ -687,6 +796,7 @@ mod tests {
             transform: None,
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
+            pause: None,
         })
         .await;
 
@@ -717,6 +827,7 @@ mod tests {
                 transform: None,
                 config: config(1, false, PoisonPolicy::Stop),
                 shutdown_deadline: Duration::from_millis(50),
+                pause: None,
             },
             status.clone(),
             shutdown.clone(),
@@ -744,6 +855,7 @@ mod tests {
                 transform: None,
                 config: config(1, false, PoisonPolicy::Stop),
                 shutdown_deadline: Duration::from_secs(5),
+                pause: None,
             },
             SharedStatus::default(),
             shutdown,

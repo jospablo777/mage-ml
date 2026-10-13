@@ -139,6 +139,27 @@ class Service:
         with urllib.request.urlopen(request, timeout=5) as response:
             return json.loads(response.read())['streams']
 
+    def control(self, kind):
+        snapshot = self.get('/v1/snapshot')
+        pipeline = snapshot['pipelines'][0]
+        body = json.dumps(dict(
+            pipeline_id=pipeline['id'], request_id=uuid.uuid4().hex,
+            expected_config_revision=pipeline['config_revision'], command=dict(kind=kind),
+        )).encode()
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}/v1/control', data=body, method='POST',
+            headers={'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+
+    def get(self, path):
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}{path}', headers={'Authorization': f'Bearer {TOKEN}'},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read())
+
     def wait_running(self, timeout=120):
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -394,3 +415,37 @@ def test_a_binary_message_stops_the_stream_without_being_rewritten(
     assert status['state'] == 'failed', status
     assert 'neither JSON nor UTF-8 text' in status['last_error']
     assert committed(kafka_bootstrap, group, topics[0]) == 0
+
+
+def test_a_paused_stream_reads_nothing_until_it_resumes_and_loses_nothing(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    Pausing from the control API (the console's p) stops reading while the consumer stays in
+    its group; resuming reads everything that arrived meanwhile.
+    """
+    pipeline, _ = stream_pipeline
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    output = KafkaConsumer(
+        topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    service.start()
+    try:
+        service.wait_running()
+        time.sleep(3)  # the group assigns the partitions
+        service.control('pause')
+        produce(kafka_bootstrap, topics[0], range(100))
+        time.sleep(5)
+        while_paused = consume(output, 1, timeout=2)
+        snapshot = service.get('/v1/snapshot')['pipelines'][0]
+        service.control('resume')
+        after = consume(output, 90)
+    finally:
+        service.stop()
+
+    assert while_paused == []
+    assert snapshot['status'] == 'paused'
+    assert snapshot['stream']['state'] == 'paused'
+    assert sorted(m['id'] for m in after) == [i for i in range(100) if i % 10]

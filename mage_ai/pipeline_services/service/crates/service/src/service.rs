@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use mage_service_core::manifest::{Manifest, Pipeline, TriggerKind};
 use mage_service_core::protocol::{
-    API_VERSION, ModelSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot, TriggerSnapshot,
+    API_VERSION, ModelSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot, StreamSnapshot,
+    TriggerSnapshot,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -47,6 +48,8 @@ pub struct Service {
     pub extra_env: Vec<(String, String)>,
     /// Each stream's status, by pipeline; filled by `streams::start`.
     pub streams: Mutex<BTreeMap<String, crate::stream::SharedStatus>>,
+    /// Each running stream's pause switch, set by the control API.
+    pub stream_pause: Mutex<BTreeMap<String, tokio::sync::watch::Sender<bool>>>,
     /// Cancelled at shutdown: streams stop reading and drain.
     pub stream_stop: CancellationToken,
     max_total_runs: usize,
@@ -104,6 +107,7 @@ impl Service {
             retention_days: config.retention_days,
             extra_env: config.extra_env,
             streams: Mutex::new(BTreeMap::new()),
+            stream_pause: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
@@ -445,9 +449,15 @@ impl Service {
                 }
             })
             .collect();
+        let stream = self.stream_snapshot(pipeline);
+        // A stream's status is the stream's state; a pause set from the API shows first.
+        let status = match &stream {
+            Some(stream) if !settings.paused => stream.state.clone(),
+            _ => status.to_string(),
+        };
         Ok(PipelineSnapshot {
             id: pipeline.uuid.clone(),
-            status: status.into(),
+            status,
             runs_succeeded: self.ledger.count(&pipeline.uuid, RunStatus::Completed)?,
             runs_failed: self.ledger.count(&pipeline.uuid, RunStatus::Failed)?,
             in_flight,
@@ -461,6 +471,54 @@ impl Service {
             recent_runs: self.ledger.list_runs(Some(&pipeline.uuid), None, 20)?,
             triggers,
             blocks: pipeline.blocks.iter().map(|b| b.uuid.clone()).collect(),
+            stream,
+        })
+    }
+
+    fn stream_snapshot(&self, pipeline: &Pipeline) -> Option<StreamSnapshot> {
+        let stream = pipeline.stream.as_ref()?;
+        let status = self
+            .streams
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&pipeline.uuid)
+            .map(|s| s.lock().map(|s| s.clone()).unwrap_or_default())
+            .unwrap_or_default();
+        let describe = |c: &mage_service_core::manifest::Connector| {
+            let topics = match (c.config.get("topics"), c.config.get("topic")) {
+                (Some(serde_json::Value::Array(list)), _) => list
+                    .iter()
+                    .filter_map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                (_, Some(serde_json::Value::String(topic))) => topic.clone(),
+                _ => String::new(),
+            };
+            [c.kind.as_str().to_string(), topics]
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        Some(StreamSnapshot {
+            state: serde_json::to_value(status.state)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default(),
+            batches: status.batches,
+            messages_in: status.messages_in,
+            messages_out: status.messages_out,
+            retries: status.retries,
+            dead_lettered_batches: status.dead_lettered_batches,
+            alerts: status.alerts,
+            last_error: status.last_error.clone(),
+            lag: status.lag.clone(),
+            assigned: status.assigned,
+            source: describe(&stream.source),
+            sinks: stream.sinks.iter().map(describe).collect(),
+            rate_in: status.rate_in.iter().copied().collect(),
+            rate_out: status.rate_out.iter().copied().collect(),
+            lag_history: status.lag_history.iter().copied().collect(),
         })
     }
 

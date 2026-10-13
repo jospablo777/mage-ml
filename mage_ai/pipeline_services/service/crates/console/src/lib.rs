@@ -4,7 +4,9 @@ pub mod ui;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::KeyCode;
-use mage_service_core::protocol::{ControlCommand, ControlRequest, PipelineSnapshot, Snapshot};
+use mage_service_core::protocol::{
+    ControlCommand, ControlRequest, PipelineSnapshot, Snapshot, StreamSnapshot,
+};
 
 pub const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 pub const STALE_AFTER: Duration = Duration::from_secs(5);
@@ -84,10 +86,11 @@ impl App {
                 Mode::Demo => true,
                 Mode::Snapshot => false,
             }
-            && self
-                .snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.pipelines.iter().any(|p| p.in_flight > 0))
+            && self.snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.pipelines.iter().any(|p| {
+                    p.in_flight > 0 || p.stream.as_ref().is_some_and(|s| s.state == "running")
+                })
+            })
     }
 
     pub fn advance_animation(&mut self, now: Instant) -> bool {
@@ -191,6 +194,11 @@ impl App {
                 self.message =
                     "Resolve the previous request first; r reviews delivery retry".into();
             }
+            KeyCode::Char('+' | '-')
+                if self.selected_pipeline().is_some_and(|p| p.stream.is_some()) =>
+            {
+                self.message = "A stream reads without a run limit; p pauses and resumes it".into();
+            }
             KeyCode::Char(command @ ('p' | '+' | '-')) => {
                 let pipeline = self.selected_pipeline()?;
                 let command = match command {
@@ -281,6 +289,19 @@ pub fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
         {
             return Err("Error detail exceeds 16 KiB".into());
         }
+        if let Some(stream) = &pipeline.stream {
+            if stream.rate_in.len() > 120
+                || stream.rate_out.len() > 120
+                || stream.lag_history.len() > 120
+                || stream.lag.len() > 4_096
+                || stream.sinks.len() > 64
+            {
+                return Err("A stream series exceeds its bounds".into());
+            }
+            if stream.last_error.as_ref().is_some_and(|s| s.len() > 16_384) {
+                return Err("Error detail exceeds 16 KiB".into());
+            }
+        }
     }
     Ok(())
 }
@@ -342,6 +363,37 @@ pub fn demo_snapshot() -> Snapshot {
                 max_in_flight: 1,
                 ..Default::default()
             },
+            PipelineSnapshot {
+                id: "orders_stream".into(),
+                status: "running".into(),
+                blocks: vec!["parse_orders".into(), "score_orders".into()],
+                stream: Some(StreamSnapshot {
+                    state: "running".into(),
+                    batches: 18_402,
+                    messages_in: 1_840_200,
+                    messages_out: 1_796_730,
+                    retries: 3,
+                    dead_lettered_batches: 0,
+                    alerts: 0,
+                    last_error: None,
+                    lag: [(0, 120), (1, 86), (2, 1_204), (3, 40)]
+                        .into_iter()
+                        .collect(),
+                    assigned: 4,
+                    source: "kafka orders".into(),
+                    sinks: vec!["kafka orders_scored".into(), "postgres orders".into()],
+                    rate_in: vec![
+                        2_410, 2_388, 2_502, 2_620, 2_575, 2_490, 2_710, 2_830, 2_760, 2_690,
+                        2_805, 2_940, 3_010, 2_955, 2_880, 2_920,
+                    ],
+                    rate_out: vec![
+                        2_350, 2_330, 2_440, 2_560, 2_520, 2_430, 2_650, 2_760, 2_700, 2_630,
+                        2_740, 2_870, 2_940, 2_890, 2_810, 2_850,
+                    ],
+                    lag_history: vec![2_100, 1_900, 1_700, 1_650, 1_500, 1_450],
+                }),
+                ..Default::default()
+            },
         ],
         ..Default::default()
     }
@@ -361,7 +413,7 @@ mod tests {
         next.pipelines.reverse();
         app.update(next).unwrap();
         assert_eq!(app.selected_pipeline().unwrap().id, "warehouse_export");
-        assert_eq!(app.selected, 0);
+        assert_eq!(app.selected, 1);
     }
 
     #[test]
@@ -418,6 +470,65 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_pauses_with_p_and_has_no_run_limit() {
+        let mut app = App::new(Mode::Live, true);
+        let mut snapshot = demo_snapshot();
+        snapshot.sampled_at_unix_ms = unix_ms();
+        app.update(snapshot).unwrap();
+        app.selected = app
+            .snapshot
+            .as_ref()
+            .unwrap()
+            .pipelines
+            .iter()
+            .position(|p| p.stream.is_some())
+            .unwrap();
+
+        assert!(app.handle_key(KeyCode::Char('+')).is_none());
+        assert!(app.pending.is_none());
+        assert!(app.message.contains("p pauses"), "{}", app.message);
+        app.handle_key(KeyCode::Char('p'));
+        assert_eq!(
+            app.pending.as_ref().map(|r| &r.command),
+            Some(&ControlCommand::Pause {})
+        );
+    }
+
+    #[test]
+    fn oversized_stream_series_are_rejected() {
+        let mut snapshot = demo_snapshot();
+        let stream = snapshot
+            .pipelines
+            .iter_mut()
+            .find_map(|p| p.stream.as_mut())
+            .unwrap();
+        stream.rate_in = vec![1; 121];
+        assert!(validate_snapshot(&snapshot).is_err());
+    }
+
+    #[test]
+    fn the_stream_view_renders_in_wide_and_small_terminals() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut app = App::new(Mode::Demo, false);
+        app.update(demo_snapshot()).unwrap();
+        app.selected = 3;
+        for (width, height) in [(150, 44), (80, 24)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui::draw(frame, &app)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect();
+            assert!(text.contains("Messages in"), "{width}x{height}");
+            assert!(text.contains("kafka orders"), "{width}x{height}");
+        }
+    }
+
+    #[test]
     fn duplicate_pipeline_ids_are_rejected() {
         let mut snapshot = demo_snapshot();
         snapshot.pipelines.push(snapshot.pipelines[0].clone());
@@ -463,6 +574,9 @@ mod tests {
         let mut snapshot = demo_snapshot();
         for pipeline in &mut snapshot.pipelines {
             pipeline.in_flight = 0;
+            if let Some(stream) = pipeline.stream.as_mut() {
+                stream.state = "paused".into();
+            }
         }
         demo.update(snapshot).unwrap();
         assert!(!demo.motion_active());

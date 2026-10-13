@@ -1,4 +1,4 @@
-use mage_service_core::protocol::{ControlCommand, PipelineSnapshot};
+use mage_service_core::protocol::{ControlCommand, PipelineSnapshot, StreamSnapshot};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -533,11 +533,18 @@ fn draw_pipelines(frame: &mut Frame, area: Rect, app: &App) {
                     Span::styled(clean(&p.status, 24), status_style(&p.status)),
                 ]),
                 Line::from(Span::styled(
-                    format!(
-                        "{} active · {} queued",
-                        number_text(u128::from(p.in_flight), 5),
-                        number_text(u128::from(p.queued), 5)
-                    ),
+                    match &p.stream {
+                        Some(stream) => format!(
+                            "{}/s · lag {}",
+                            short_number(stream.rate_in.last().copied().unwrap_or(0)),
+                            short_number(total_lag(stream))
+                        ),
+                        None => format!(
+                            "{} active · {} queued",
+                            number_text(u128::from(p.in_flight), 5),
+                            number_text(u128::from(p.queued), 5)
+                        ),
+                    },
                     style(palette().muted),
                 )),
             ];
@@ -581,6 +588,20 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(5),
     ])
     .split(area);
+    if let Some(stream) = &p.stream {
+        draw_selected(frame, rows[0], app);
+        draw_stream_metrics(frame, rows[1], stream);
+        draw_stream_charts(frame, rows[2], stream);
+        let columns = Layout::horizontal([
+            Constraint::Percentage(59),
+            Constraint::Length(1),
+            Constraint::Min(24),
+        ])
+        .split(rows[3]);
+        draw_partitions(frame, columns[0], p, stream);
+        draw_stream_health(frame, columns[2], stream);
+        return;
+    }
     draw_selected(frame, rows[0], app);
     draw_metrics(frame, rows[1], p);
     draw_charts(frame, rows[2], p);
@@ -772,6 +793,22 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(0),
     ])
     .split(columns[1]);
+    if let Some(stream) = &p.stream {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("Reads  ", style(palette().muted)),
+                    Span::styled(clean(&stream.source, 60), style(palette().text)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Writes ", style(palette().muted)),
+                    Span::styled(clean(&stream.sinks.join(", "), 80), style(palette().text)),
+                ]),
+            ]),
+            columns[1],
+        );
+        return;
+    }
     frame.render_widget(
         Paragraph::new(format!(
             "Active / limit   {} / {}",
@@ -893,6 +930,7 @@ fn metric(frame: &mut Frame, area: Rect, label: &str, value: String, caption: &s
                         "service lifetime" => "lifetime",
                         "active runs" => "active",
                         "waiting runs" => "waiting",
+                        "messages behind" => "behind",
                         _ => caption,
                     }
                     .to_owned(),
@@ -1145,6 +1183,213 @@ fn draw_failure(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
     );
 }
 
+fn total_lag(stream: &StreamSnapshot) -> u64 {
+    stream.lag.values().map(|v| (*v).max(0) as u64).sum()
+}
+
+fn draw_stream_metrics(frame: &mut Frame, area: Rect, stream: &StreamSnapshot) {
+    let cards = Layout::horizontal([Constraint::Ratio(1, 4); 4])
+        .spacing(1)
+        .split(area);
+    let last = |series: &[u64]| series.last().copied().unwrap_or(0);
+    metric(
+        frame,
+        cards[0],
+        "In",
+        last(&stream.rate_in).to_string(),
+        "messages/s",
+        palette().ice,
+    );
+    metric(
+        frame,
+        cards[1],
+        "Out",
+        last(&stream.rate_out).to_string(),
+        "messages/s",
+        palette().lavender,
+    );
+    let lag = total_lag(stream);
+    metric(
+        frame,
+        cards[2],
+        "Lag",
+        lag.to_string(),
+        "messages behind",
+        if lag > 10_000 {
+            palette().warning
+        } else {
+            palette().text
+        },
+    );
+    metric(
+        frame,
+        cards[3],
+        "Dead letters",
+        stream.dead_lettered_batches.to_string(),
+        "batches",
+        if stream.dead_lettered_batches > 0 {
+            palette().error
+        } else {
+            palette().muted
+        },
+    );
+}
+
+fn draw_stream_charts(frame: &mut Frame, area: Rect, stream: &StreamSnapshot) {
+    let columns = Layout::horizontal([Constraint::Ratio(1, 2); 2])
+        .spacing(1)
+        .split(area);
+    let per_second = |series: &[u64], width: u16| {
+        series.last().map_or("n/a".into(), |v| {
+            format!(
+                "{}/s",
+                number_text(u128::from(*v), width.saturating_sub(24))
+            )
+        })
+    };
+    series(
+        frame,
+        columns[0],
+        &stream.rate_in,
+        format!(
+            " Messages in / {} ",
+            per_second(&stream.rate_in, columns[0].width)
+        ),
+        format!("{} s →", stream.rate_in.len()),
+        palette().ice,
+    );
+    series(
+        frame,
+        columns[1],
+        &stream.rate_out,
+        format!(
+            " Messages out / {} ",
+            per_second(&stream.rate_out, columns[1].width)
+        ),
+        format!("{} s →", stream.rate_out.len()),
+        palette().lavender,
+    );
+}
+
+fn draw_partitions(frame: &mut Frame, area: Rect, p: &PipelineSnapshot, stream: &StreamSnapshot) {
+    let lag = total_lag(stream);
+    let block = panel(format!(
+        " Partitions ({}) / lag {} ",
+        stream.assigned,
+        short_number(lag)
+    ))
+    .title_bottom(
+        Line::from(Span::styled(
+            format!(" {} batches since start ", short_number(stream.batches)),
+            style(palette().muted),
+        ))
+        .right_aligned(),
+    )
+    .padding(Padding::new(1, 1, 1, 0));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(clean(&stream.source, 40), style(palette().ice)),
+        Span::styled(
+            format!("  →  {} blocks  →  ", p.blocks.len()),
+            style(palette().muted),
+        ),
+        Span::styled(
+            clean(&stream.sinks.join(", "), 60),
+            style(palette().lavender),
+        ),
+    ])];
+    lines.push(Line::from(""));
+    if stream.assigned == 0 && stream.state == "running" {
+        lines.push(Line::from(Span::styled(
+            "This instance reads no partition yet. With more instances than partitions, the \
+             extra ones wait.",
+            style(palette().warning),
+        )));
+    } else if stream.lag.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No lag reported yet",
+            style(palette().muted),
+        )));
+    } else {
+        let peak = stream.lag.values().copied().max().unwrap_or(0).max(1);
+        let width = usize::from(inner.width.saturating_sub(18)).max(4);
+        for (partition, value) in stream.lag.iter().take(usize::from(inner.height)) {
+            let filled = (value.max(&0) * width as i64 / peak) as usize;
+            lines.push(Line::from(vec![
+                Span::styled(format!("p{partition:<4}"), style(palette().muted)),
+                Span::styled("█".repeat(filled), style(palette().purple)),
+                Span::styled(
+                    "·".repeat(width.saturating_sub(filled)),
+                    style(palette().border),
+                ),
+                Span::styled(
+                    format!(" {:>8}", short_number((*value).max(0) as u64)),
+                    style(palette().text),
+                ),
+            ]));
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn draw_stream_health(frame: &mut Frame, area: Rect, stream: &StreamSnapshot) {
+    let row = |label: &str, value: String, color: Color| {
+        Line::from(vec![
+            Span::styled(format!("{label:<14}"), style(palette().muted)),
+            Span::styled(value, strong(color)),
+        ])
+    };
+    let mut lines = vec![
+        row(
+            "State",
+            stream.state.clone(),
+            status_style(&stream.state).fg.unwrap_or(palette().text),
+        ),
+        row(
+            "Retries",
+            short_number(stream.retries),
+            if stream.retries > 0 {
+                palette().warning
+            } else {
+                palette().text
+            },
+        ),
+        row(
+            "Alerts",
+            short_number(stream.alerts),
+            if stream.alerts > 0 {
+                palette().warning
+            } else {
+                palette().text
+            },
+        ),
+        Line::from(""),
+    ];
+    match &stream.last_error {
+        Some(error) => {
+            lines.push(Line::from(Span::styled(
+                "!  Last error",
+                strong(palette().error),
+            )));
+            lines.push(Line::from(Span::styled(
+                clean(error, 1_024),
+                style(palette().text),
+            )));
+        }
+        None => lines.push(Line::from(Span::styled(
+            "No errors",
+            style(palette().muted),
+        ))),
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(panel(" Health ").padding(Padding::new(1, 1, 1, 0))),
+        area,
+    );
+}
+
 fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
     let Some(p) = app.selected_pipeline() else {
         frame.render_widget(
@@ -1191,14 +1436,40 @@ fn draw_compact(frame: &mut Frame, area: Rect, app: &App) {
         .right_aligned(),
         top[1],
     );
-    frame.render_widget(
-        Paragraph::new(format!(
+    let detail = match &p.stream {
+        Some(stream) => format!(
+            " ↑↓ select   {} → {}",
+            clean(&stream.source, 40),
+            clean(&stream.sinks.join(", "), 60)
+        ),
+        None => format!(
             " ↑↓ select   Active / limit {}/{}   config {}",
             p.in_flight, p.max_in_flight, p.config_revision
-        ))
-        .style(style(palette().muted)),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(fit_text(&detail, rows[0].width)).style(style(palette().muted)),
         Rect::new(rows[0].x, rows[0].y + 1, rows[0].width, 1),
     );
+    if let Some(stream) = &p.stream {
+        draw_stream_metrics(frame, rows[1], stream);
+        if charts_height > 0 {
+            draw_stream_charts(frame, rows[2], stream);
+        }
+        let (title, text, color) = match &stream.last_error {
+            Some(error) => ("Last error", clean(error, 1_024), palette().error),
+            None => ("No errors", String::new(), palette().muted),
+        };
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(title, strong(color))),
+                Line::from(text),
+            ])
+            .wrap(Wrap { trim: false }),
+            rows[3],
+        );
+        return;
+    }
     draw_metrics(frame, rows[1], p);
     if charts_height > 0 {
         draw_charts(frame, rows[2], p);
@@ -1288,7 +1559,7 @@ fn status_style(status: &str) -> Style {
     strong(match status {
         "running" | "ready" | "succeeded" => palette().green,
         "failed" | "degraded" => palette().error,
-        "paused" | "draining" => palette().warning,
+        "paused" | "draining" | "starting" => palette().warning,
         _ => palette().muted,
     })
 }
@@ -1433,7 +1704,7 @@ mod tests {
         let mut app = App::new(Mode::Demo, false);
         app.update(demo_snapshot()).unwrap();
         let output = render(&app, 132, 32);
-        assert!(output.contains("Service overview (3)"));
+        assert!(output.contains("Service overview (4)"));
         let score_row = output
             .lines()
             .find(|line| line.contains("model_scores") && line.contains("962"))

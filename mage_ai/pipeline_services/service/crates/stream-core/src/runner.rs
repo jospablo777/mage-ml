@@ -208,6 +208,11 @@ impl RunnerMachine {
         &self.tracker
     }
 
+    /// Whether the runner paused the partition for backpressure.
+    pub fn is_paused(&self, partition: PartitionId) -> bool {
+        self.paused.contains(&partition)
+    }
+
     pub fn is_finished(&self) -> bool {
         self.finished
     }
