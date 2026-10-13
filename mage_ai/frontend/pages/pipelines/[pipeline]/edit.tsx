@@ -298,7 +298,35 @@ function PipelineDetailPage({
   const [messages, setMessages] = useState<{
     [uuid: string]: KernelOutputType[];
   }>({});
-  const [pipelineMessages, setPipelineMessages] = useState<KernelOutputType[]>([]);
+  const [pipelineMessages, setPipelineMessagesState] = useState<KernelOutputType[]>([]);
+  // A stream can send thousands of messages a second: they are added once per frame, not with
+  // one state update (and one copy of the whole output) per message.
+  const pipelineMessagesPending = useRef<KernelOutputType[]>([]);
+  const pipelineMessagesFrame = useRef<number>(null);
+  const appendPipelineMessage = useCallback((message: KernelOutputType) => {
+    pipelineMessagesPending.current.push(message);
+    if (pipelineMessagesFrame.current === null) {
+      pipelineMessagesFrame.current = requestAnimationFrame(() => {
+        pipelineMessagesFrame.current = null;
+        const pending = pipelineMessagesPending.current;
+        pipelineMessagesPending.current = [];
+        setPipelineMessagesState(previous => previous.concat(pending));
+      });
+    }
+  }, []);
+  const setPipelineMessages = useCallback((value: KernelOutputType[]) => {
+    if (pipelineMessagesFrame.current !== null) {
+      cancelAnimationFrame(pipelineMessagesFrame.current);
+      pipelineMessagesFrame.current = null;
+    }
+    pipelineMessagesPending.current = [];
+    setPipelineMessagesState(value);
+  }, []);
+  useEffect(() => () => {
+    if (pipelineMessagesFrame.current !== null) {
+      cancelAnimationFrame(pipelineMessagesFrame.current);
+    }
+  }, []);
 
   // Pipeline
   // eslint-disable-next-line prefer-const
@@ -2281,6 +2309,7 @@ function PipelineDetailPage({
   }, [
     pipelineUUID,
     pipelineUUIDPrev,
+    setPipelineMessages,
   ]);
 
   useEffect(() => {
@@ -2458,10 +2487,7 @@ function PipelineDetailPage({
             };
           });
         } else {
-          setPipelineMessages((pipelineMessagesPrevious) => [
-            ...pipelineMessagesPrevious,
-            message,
-          ]);
+          appendPipelineMessage(message);
           if (ExecutionStateEnum.IDLE === executionState) {
             setRunningBlocks([]);
             fetchPipeline();
@@ -2518,6 +2544,7 @@ function PipelineDetailPage({
     pipelineUUID,
     savePipelineContent,
     sendMessage,
+    setPipelineMessages,
     sharedWebsocketData,
   ]);
 
