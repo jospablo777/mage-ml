@@ -37,23 +37,48 @@ pipelines that must not overlap, such as an incremental load that moves a cursor
 
 ## The Services page
 
-**Services** keeps services in the project, in `pipeline_services.yaml`, so they go to git
-with the pipelines:
+**Services** keeps each service in the project, in its own folder, so services go to Git with
+the pipelines they run and a pull request shows what changed:
 
-```yaml
-services:
-  shop-live:
-    pipelines: [live_traffic, live_minute_kpis, live_device_revenue]
-    description: Live shop traffic, then per-minute KPIs after each traffic run
-    max_runs: 2           # optional: runs of each pipeline at once
-    include: [models/churn.onnx]   # optional: files the blocks reach by a computed path
-    model_registry: http://mlflow.ml.svc:5000   # optional: where models come from
-    models:                                     # optional: models embedded in the image
-      - name: churn
-        uri: models:/churn-classifier@champion
+```
+services/
+  shop-live/
+    service.yaml            # the service: pipelines and settings
+    environments/dev.yaml   # where and how it runs
+    service.lock            # written by mage service build; commit it
 ```
 
-The CLI exports a saved service: `mage export service . --service shop-live --out ./shop-live`.
+`service.yaml`:
+
+```yaml
+name: shop-live
+pipelines: [live_traffic, live_minute_kpis, live_device_revenue]
+description: Live shop traffic, then per-minute KPIs after each traffic run
+max_runs: 2           # optional: runs of each pipeline at once
+include: [models/churn.onnx]   # optional: files the blocks reach by a computed path
+model_registry: http://mlflow.ml.svc:5000   # optional: where models come from
+models:                                     # optional: models embedded in the image
+  - name: churn
+    uri: models:/churn-classifier@champion
+```
+
+The same services from the command line, in the project folder:
+
+| Command | What it does |
+| --- | --- |
+| `mage service new shop-live --pipelines live_traffic,live_minute_kpis` | Creates the folder with `service.yaml` and a `dev` environment |
+| `mage service list` | The services, their pipelines and where each is saved |
+| `mage service check shop-live` | What would stop the service from building, and what to know |
+| `mage service build shop-live [--image]` | Writes the build to `.mage/build/shop-live/` (kept out of Git) and updates `service.lock` |
+| `mage service export shop-live --out ./shop-live` | The build context in a folder, for a team that builds elsewhere |
+| `mage service migrate` | Moves the services of the earlier `pipeline_services.yaml` to their folders |
+
+`service.lock` pins what a build used: the manifest, the project files, the requirements, the
+models' versions and the engine. It has no timestamps, so it changes only when one of them
+changed, and its diff in a pull request says what moved.
+
+Projects that still have `pipeline_services.yaml` keep working: its services are read, and
+saving one on the Services page moves it to its folder.
 
 ### Pipelines and how they start
 
@@ -156,8 +181,8 @@ registry you choose:
   pushing uses the registries that machine is logged in to. MageML in a container usually
   has no Docker: run the commands where Docker is.
 
-The CLI does the same: `mage export service . --service shop-live --out ./shop-live --build
---platform linux/amd64,linux/arm64 --push --tag icr.io/ml-team/shop-live:1.0`.
+The CLI does the same: `mage service build shop-live --image --platform
+linux/amd64,linux/arm64 --push --tag icr.io/ml-team/shop-live:1.0`.
 
 ## The export as a repository
 

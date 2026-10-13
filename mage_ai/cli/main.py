@@ -992,7 +992,7 @@ EXPORT_PUSH = typer.Option(
 )
 EXPORT_SERVICE = typer.Option(
     None, '--service', '-s',
-    help='a service saved in the project\'s pipeline_services.yaml (the Services page): '
+    help='a service saved in the project (services/<name>/service.yaml, the Services page): '
          'its pipelines, settings and included files.',
 )
 EXPORT_MODELS = typer.Option(
@@ -1079,6 +1079,141 @@ def export_service(
         typer.echo(f'  docker run --rm -p 8080:8080 -e MAGE_SERVICE_TOKEN=change-me {image}')
     else:
         typer.echo(f'Build the image with: docker build -t {captured.name} {out_dir}')
+
+
+service_app = typer.Typer(
+    cls=OrderCommands,
+    help='Services saved in the project (services/<name>/): create, check, build, export.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(service_app, name='service')
+
+SERVICE_PROJECT = typer.Option('.', '--project', '-p', help='path of the MageML project.')
+
+
+def _service_error(error: Exception) -> None:
+    problems = getattr(error, 'problems', None) or [str(error)]
+    for problem in problems:
+        typer.echo(f'  - {problem}' if len(problems) > 1 else problem, err=True)
+    raise typer.Exit(code=1)
+
+
+@service_app.command('list')
+def service_list(project: str = SERVICE_PROJECT):
+    """The project's services, their pipelines and where each is saved."""
+    from mage_ai.pipeline_services import definitions
+
+    try:
+        saved = definitions.load_definitions(project)
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    if not saved:
+        typer.echo(
+            'No services yet. Create one with: mage service new <name> --pipelines <uuid>',
+        )
+        return
+    for name, value in saved.items():
+        where = definitions.location(project, name)
+        typer.echo(f'{name}  {", ".join(value["pipelines"])}  ({where})')
+
+
+@service_app.command('new')
+def service_new(
+    name: str = typer.Argument(..., help='service name: lowercase letters, digits and -.'),
+    pipelines: str = typer.Option(..., '--pipelines', help='pipeline uuids, separated by commas.'),
+    description: str = typer.Option('', help='what the service does.'),
+    project: str = SERVICE_PROJECT,
+):
+    """Creates services/<name>/ with service.yaml and a dev environment."""
+    from mage_ai.pipeline_services import definitions, lifecycle
+
+    try:
+        written = lifecycle.new(
+            project, name, [p.strip() for p in pipelines.split(',') if p.strip()], description,
+        )
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    for path in written:
+        typer.echo(f'Wrote {os.path.relpath(path, project)}')
+    typer.echo(f'Next: mage service check {name}')
+
+
+@service_app.command('check')
+def service_check(name: str = typer.Argument(...), project: str = SERVICE_PROJECT):
+    """What would stop the service from building, and what to know about it."""
+    from mage_ai.pipeline_services import lifecycle
+
+    result = lifecycle.check(project, name)
+    if not result.ok:
+        typer.echo(f'{name} cannot be built:', err=True)
+        for problem in result.problems:
+            typer.echo(f'  - {problem}', err=True)
+        raise typer.Exit(code=1)
+    typer.echo(result.report)
+    typer.echo(f'{name} is ready to build: mage service build {name}')
+
+
+@service_app.command('build')
+def service_build(
+    name: str = typer.Argument(...),
+    project: str = SERVICE_PROJECT,
+    image: bool = typer.Option(False, '--image', help='also build the Docker image.'),
+    tag: Union[str, None] = typer.Option(None, help='image tag; defaults to the service name.'),
+    platform: Union[str, None] = EXPORT_PLATFORM,
+    push: bool = EXPORT_PUSH,
+):
+    """Writes the build to .mage/build/<name>/ and updates services/<name>/service.lock."""
+    from mage_ai.pipeline_services import definitions, export, lifecycle
+
+    try:
+        box = lifecycle.build(project, name)
+    except (definitions.DefinitionError, export.ExportError) as error:
+        _service_error(error)
+    typer.echo(f'Build: {os.path.relpath(box, project)}')
+    typer.echo(f'Lock: {os.path.relpath(lifecycle.lock_path(project, name), project)} '
+               '(commit it)')
+    if push and not image:
+        typer.echo('--push needs --image.', err=True)
+        raise typer.Exit(code=1)
+    if image:
+        platforms = platform.split(',') if platform else None
+        try:
+            export.build_image(box, tag or name, platforms=platforms, push=push)
+        except export.ExportError as error:
+            _service_error(error)
+        typer.echo(f'Image {tag or name} is {"pushed" if push else "built"}.')
+
+
+@service_app.command('export')
+def service_export(
+    name: str = typer.Argument(...),
+    out: str = typer.Option(..., '--out', '-o', help='folder for the build context.'),
+    force: bool = typer.Option(False, help='replace a non-empty folder.'),
+    project: str = SERVICE_PROJECT,
+):
+    """Writes the build context to a folder, for a team that builds elsewhere."""
+    from mage_ai.pipeline_services import definitions, export, lifecycle
+
+    try:
+        out_dir = lifecycle.export_to(project, name, out, force=force)
+    except (definitions.DefinitionError, export.ExportError) as error:
+        _service_error(error)
+    typer.echo(f'Build context: {out_dir}')
+
+
+@service_app.command('migrate')
+def service_migrate(project: str = SERVICE_PROJECT):
+    """Moves the services of pipeline_services.yaml to their own folders."""
+    from mage_ai.pipeline_services import definitions
+
+    try:
+        moved = definitions.migrate(project)
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    if not moved:
+        typer.echo('Nothing to move: every service already has its folder.')
+    for name in moved:
+        typer.echo(f'Moved {name} to services/{name}/service.yaml')
 
 if __name__ == '__main__':
     app()

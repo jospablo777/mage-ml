@@ -88,6 +88,8 @@ export type ServiceDefinitionType = {
   model_registry?: string;
   models?: { name: string; uri: string }[];
   name: string;
+  // Where it is saved: services/<name>/service.yaml, or the earlier pipeline_services.yaml.
+  path?: string;
   pipelines: string[];
 };
 
@@ -1506,12 +1508,16 @@ function Workbench({
             </Spacing>
             <Spacing mt={2}>
               <Text muted small>
-                Saved in pipeline_services.yaml in the project, so it goes with your code. The
-                CLI exports it too:
+                Saved in {saved.path || `services/${slug || 'name'}/service.yaml`} in the
+                project, so it goes to Git with your pipelines.
+                {saved.path === 'pipeline_services.yaml'
+                  && ' Saving it moves it to its own folder, services/'
+                  + `${slug || 'name'}/.`}
+                {' '}The same from the command line:
               </Text>
               <Spacing mt={1}>
                 <CommandStyle>
-                  {`mage export service . --service ${slug || 'name'} --out ./${slug || 'name'}`}
+                  {`mage service check ${slug || 'name'}\nmage service build ${slug || 'name'}`}
                 </CommandStyle>
               </Spacing>
             </Spacing>

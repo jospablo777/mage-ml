@@ -21,8 +21,17 @@ from mage_ai.tests.pipeline_services.test_export import ExportTestCase
 class DefinitionsTest(ExportTestCase):
     def setUp(self):
         super().setUp()
-        self.file = Path(self.repo_path) / definitions.FILE_NAME
+        self.file = Path(self.repo_path) / definitions.LEGACY_FILE
+        self.services = Path(self.repo_path) / definitions.SERVICES_DIR
         self.addCleanup(lambda: self.file.unlink(missing_ok=True))
+        self.addCleanup(shutil.rmtree, self.services, True)
+        gitignore = Path(self.repo_path) / '.gitignore'
+        before = gitignore.read_text() if gitignore.exists() else None
+        self.addCleanup(lambda: gitignore.write_text(before) if before is not None
+                        else gitignore.unlink(missing_ok=True))
+
+    def service_yaml(self, name: str) -> dict:
+        return yaml.safe_load((self.services / name / 'service.yaml').read_text())
 
     def test_services_are_saved_renamed_and_deleted_keeping_the_others(self):
         definitions.save_definition(self.repo_path, 'first', dict(pipelines=['a', 'b']))
@@ -34,17 +43,70 @@ class DefinitionsTest(ExportTestCase):
         saved = definitions.load_definitions(self.repo_path)
         self.assertEqual(saved['second']['pipelines'], ['b', 'c'])
         self.assertEqual(saved['second']['max_runs'], 2)
-        written = self.file.read_text()
-        self.assertTrue(written.startswith('# Services exported from this project'))
-        self.assertNotIn('include', yaml.safe_load(written)['services']['first'])
+        written = (self.services / 'first' / 'service.yaml').read_text()
+        self.assertTrue(written.startswith('# A MageML service.'))
+        self.assertEqual(self.service_yaml('first'), dict(name='first', pipelines=['a', 'b']))
+        self.assertEqual(definitions.location(self.repo_path, 'first'),
+                         'services/first/service.yaml')
 
+        definitions.scaffold(self.repo_path, 'first')
         definitions.save_definition(
             self.repo_path, 'renamed', saved['first'], previous_name='first',
         )
         self.assertEqual(sorted(definitions.load_definitions(self.repo_path)),
                          ['renamed', 'second'])
+        # The folder moved with its environments.
+        self.assertFalse((self.services / 'first').exists())
+        self.assertTrue((self.services / 'renamed' / 'environments' / 'dev.yaml').is_file())
+        self.assertEqual(self.service_yaml('renamed')['name'], 'renamed')
+
         self.assertTrue(definitions.delete_definition(self.repo_path, 'renamed'))
         self.assertEqual(definitions.names(self.repo_path), ['second'])
+        self.assertFalse((self.services / 'renamed').exists())
+
+    def test_the_earlier_file_is_read_and_a_saved_service_moves_to_its_folder(self):
+        self.file.write_text(yaml.safe_dump(dict(services=dict(
+            old=dict(pipelines=['a']), other=dict(pipelines=['b']),
+        ))))
+
+        self.assertEqual(definitions.names(self.repo_path), ['old', 'other'])
+        self.assertEqual(definitions.location(self.repo_path, 'old'), 'pipeline_services.yaml')
+
+        definitions.save_definition(self.repo_path, 'old', dict(pipelines=['a', 'c']))
+
+        self.assertEqual(self.service_yaml('old')['pipelines'], ['a', 'c'])
+        self.assertEqual(list(yaml.safe_load(self.file.read_text())['services']), ['other'])
+
+        self.assertEqual(definitions.migrate(self.repo_path), ['other'])
+        self.assertFalse(self.file.exists())
+        self.assertEqual(definitions.names(self.repo_path), ['old', 'other'])
+
+    def test_a_folder_and_its_name_must_match(self):
+        folder = self.services / 'shop'
+        folder.mkdir(parents=True)
+        (folder / 'service.yaml').write_text('name: store\npipelines: [a]\n')
+
+        with self.assertRaisesRegex(definitions.DefinitionError,
+                                    'says name: store, but its folder is shop'):
+            definitions.load_definitions(self.repo_path)
+
+    def test_generated_builds_and_local_secrets_stay_out_of_git(self):
+        definitions.save_definition(self.repo_path, 'first', dict(pipelines=['a']))
+        definitions.save_definition(self.repo_path, 'second', dict(pipelines=['a']))
+
+        lines = (Path(self.repo_path) / '.gitignore').read_text().splitlines()
+        self.assertEqual(lines.count('.mage/build/'), 1)
+        self.assertEqual(lines.count('services/*/.env*'), 1)
+
+    def test_a_delete_keeps_files_the_user_added(self):
+        definitions.save_definition(self.repo_path, 'keep', dict(pipelines=['a']))
+        definitions.scaffold(self.repo_path, 'keep')
+        (self.services / 'keep' / 'README.md').write_text('notes')
+
+        definitions.delete_definition(self.repo_path, 'keep')
+
+        self.assertEqual(sorted(p.name for p in (self.services / 'keep').iterdir()),
+                         ['README.md'])
 
     def test_models_and_their_registry_are_saved_with_the_service(self):
         definitions.save_definition(self.repo_path, 'scoring', dict(
@@ -56,7 +118,7 @@ class DefinitionsTest(ExportTestCase):
         saved = definitions.load_definition(self.repo_path, 'scoring')
         self.assertEqual(saved['model_registry'], 'http://mlflow:5000')
         self.assertEqual(saved['models'], [dict(name='churn', uri='models:/churn-scorer@champion')])
-        written = yaml.safe_load(self.file.read_text())['services']['scoring']
+        written = self.service_yaml('scoring')
         self.assertEqual(written['models'][0]['uri'], 'models:/churn-scorer@champion')
 
     def test_bad_settings_say_what_to_fix(self):

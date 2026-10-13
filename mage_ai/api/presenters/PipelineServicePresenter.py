@@ -10,5 +10,6 @@ class PipelineServicePresenter(BasePresenter):
         'model_registry',
         'models',
         'name',
+        'path',
         'pipelines',
     ]

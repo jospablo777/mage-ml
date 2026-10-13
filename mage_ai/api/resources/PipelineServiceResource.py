@@ -18,6 +18,7 @@ def _with_export(repo_path: str, name: str, value: Dict, exports_by_name: Dict =
         name=name,
         **value,
         exported_at=latest['exported_at'] if latest else None,
+        path=_definitions().location(repo_path, name),
     )
 
 
@@ -29,7 +30,8 @@ def _definitions():
 
 class PipelineServiceResource(GenericResource):
     """
-    Services saved in the project (pipeline_services.yaml, pipeline_services/definitions.py):
+    Services saved in the project (services/<name>/service.yaml, or the earlier
+    pipeline_services.yaml; pipeline_services/definitions.py):
     GET /api/pipeline_services lists them with their latest export; POST saves a new one;
     PUT /api/pipeline_services/<name> changes or renames one; DELETE removes it. Their
     exports go through /api/pipeline_service_exports.

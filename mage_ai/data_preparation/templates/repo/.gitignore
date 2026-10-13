@@ -12,3 +12,7 @@ logs/
 mage-ai.db
 mage_data/
 secrets/
+
+# MageML services: generated builds and local secrets
+.mage/build/
+services/*/.env*
