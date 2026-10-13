@@ -1198,11 +1198,13 @@ function PipelineListPage() {
                     ...prev,
                     [uuid]: true,
                   }));
+                  // Only the status: the list's pipelines hold a few of their settings,
+                  // and sending one back wrote defaults over the others in metadata.yaml.
                   updatePipeline({
-                    ...pipeline,
                     status: isActive
                       ? ScheduleStatusEnum.INACTIVE
                       : ScheduleStatusEnum.ACTIVE,
+                    uuid,
                   });
                 }}
               >

@@ -14,7 +14,7 @@ with their causes, and how to run the same checks on your machine before pushing
 | mageml R package | `mage_ai/data_preparation/models/block/r/mageml/tests`, run by `integration_tests/r/test_mageml_package.py` (testthat, lintr, roxygen, `R CMD check`) | pytest | R and the rv environment | Integration tests |
 | Rust | ColumnAtlas (`rust/column_atlas`), the block SDK, the pipeline service crates | cargo test | Rust | Rust extension |
 | Frontend unit tests | `mage_ai/frontend/tests/unit/*.unit.mjs` | `node --test` | Node | test_backend |
-| Browser tests | `mage_ai/frontend/tests/*.spec.ts` (11 specs) | Playwright | A running MageML server | test_backend |
+| Browser tests | `mage_ai/frontend/tests/*.spec.ts` (12 specs) | Playwright | A running MageML server | test_backend |
 | Storybook tests | `mage_ai/frontend` stories | Playwright | The Storybook build | test_backend |
 | Compilation study | `integration_tests/topologies` | pytest | Small grid by default; full grid with `MAGE_STUDY_FULL=1` | The small grid, in Integration tests |
 | Benchmarks | `integration_tests/benchmark` (fusion and Rust pipelines) | pytest | Rust; `make -C integration_tests test-benchmark` keeps results under `integration_tests/benchmark/results` | Both, as smoke tests that also compare outputs, in Integration tests |
