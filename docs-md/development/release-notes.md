@@ -1,6 +1,6 @@
 # Release notes
 
-## MageML 0.1.0 (unreleased)
+## MageML 0.1.0 (2026-10-13)
 
 The first release under MageML's own versions, which start at 0.1.0. Earlier builds of this
 fork were versioned after Mage (`0.9.79+ml.1` to `0.9.79+ml.4`); MageML is based on Mage
