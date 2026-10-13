@@ -45,6 +45,8 @@ from typing import Dict, List
 def double(messages: List[Dict], *args, **kwargs):
     # Slow enough that batches are in flight when partitions move between instances.
     time.sleep(float(kwargs.get('delay', 0)))
+    if kwargs.get('identity'):
+        return messages
     return [dict(m, doubled=m['amount'] * 2) for m in messages if m['id'] % 10 != 0]
 '''
 SINK = '''
@@ -266,3 +268,129 @@ def test_partitions_move_between_instances_without_losing_or_repeating_messages(
     repeated = sorted({i for i in ids if ids.count(i) > 1})
     assert repeated == [], f'{len(repeated)} messages written twice: {repeated[:20]}'
     assert sorted(ids) == expected
+
+
+def test_a_killed_service_loses_nothing_and_repeats_at_most_its_batches_in_flight(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    kill -9 in the middle of a stream: no shutdown, no last commit. At the restart the
+    stream reads again from the last committed positions, so every message is written, and
+    only what was in flight at the kill (a batch per partition at most here, 50 messages
+    each) is written twice.
+    """
+    pipeline, _ = stream_pipeline
+    pipeline.variables = dict(delay=0.2)
+    pipeline.save()
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    output = KafkaConsumer(
+        topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    expected = [i for i in range(600) if i % 10]
+    produce(kafka_bootstrap, topics[0], range(600))
+    service.start()
+    try:
+        service.wait_running()
+        received = consume(output, 100)
+        service.process.kill()
+        service.process.wait(timeout=30)
+        service.start()
+        service.wait_running()
+        received += consume(output, len(expected) - len(received), timeout=180)
+        time.sleep(3)
+        received += consume(output, 1, timeout=3)
+    finally:
+        if service.process.poll() is None:
+            service.stop()
+
+    ids = [m['id'] for m in received]
+    assert sorted(set(ids)) == expected
+    # In flight at the kill: at most a batch of 50 messages per partition, 45 kept each.
+    assert len(ids) - len(set(ids)) <= 2 * 45, f'{len(ids) - len(set(ids))} repeated'
+
+
+# Values a JSON round trip through 64-bit numbers or lossy text would change.
+EXACT = [
+    b'{"id": 1, "big": 123456789012345678901234567890, "neg": -9223372036854775809}',
+    b'{"id": 2, "money": 0.1, "tiny": 5e-324, "huge": 1.7976931348623157e308}',
+    '{"id": 3, "text": "\u00f1and\u00fa \u6f22\u5b57 \U0001f680", "nested": {"a": [1, null, true]}}'
+    .encode(),
+    'plain text, not JSON: \u00e9t\u00e9'.encode(),
+]
+
+
+def raw_producer(bootstrap):
+    return KafkaProducer(bootstrap_servers=bootstrap)
+
+
+def test_message_values_pass_through_exactly(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    Integers past 64 bits, the extremes of floats, Unicode and text that is not JSON come
+    out of a stream whose block returns its messages as they are: the engine passes values
+    to Python unparsed and writes what Python returns byte for byte.
+    """
+    pipeline, _ = stream_pipeline
+    pipeline.variables = dict(identity=True)
+    pipeline.save()
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    output = KafkaConsumer(
+        topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    producer = raw_producer(kafka_bootstrap)
+    for value in EXACT:
+        producer.send(topics[0], value=value, partition=0)
+    producer.flush()
+    service.start()
+    try:
+        service.wait_running()
+        received = []
+        deadline = time.time() + 120
+        while len(received) < len(EXACT) and time.time() < deadline:
+            for records in output.poll(timeout_ms=500).values():
+                received.extend(r.value for r in records)
+    finally:
+        service.stop()
+
+    expected = [json.loads(v) for v in EXACT[:3]] + [EXACT[3].decode()]
+    assert [json.loads(v) for v in received] == expected
+    assert json.loads(received[0])['big'] == 123456789012345678901234567890
+
+
+def test_a_binary_message_stops_the_stream_without_being_rewritten(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    A value that is neither JSON nor UTF-8 text is not turned into replacement characters:
+    the batch fails, and with no dead-letter sink the stream stops with the reason and keeps
+    its position, so nothing after it is skipped.
+    """
+    pipeline, group = stream_pipeline
+    pipeline.variables = dict(identity=True)
+    pipeline.save()
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    producer = raw_producer(kafka_bootstrap)
+    producer.send(topics[0], value=b'\xff\xfe\x00binary', partition=0)
+    producer.flush()
+    service.start()
+    try:
+        service.wait_running()
+        deadline = time.time() + 120
+        status = None
+        while time.time() < deadline:
+            status = service.streams()[0]
+            if status['state'] == 'failed':
+                break
+            time.sleep(0.5)
+    finally:
+        service.stop()
+
+    assert status['state'] == 'failed', status
+    assert 'neither JSON nor UTF-8 text' in status['last_error']
+    assert committed(kafka_bootstrap, group, topics[0]) == 0

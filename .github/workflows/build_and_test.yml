@@ -177,6 +177,38 @@ jobs:
       - name: Build sdist and wheel
         run: uv build --all-packages
 
+  # An exported streaming service's image: the engine builds with librdkafka in Docker and
+  # every library it links is in the runtime image.
+  stream_export_image:
+    name: Exported stream image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/column_atlas -> target
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          pip install "uv==${{ env.UV_VERSION }}"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Export a Kafka stream
+        run: uv run python scripts/ci/export_stream.py "$RUNNER_TEMP/project" "$RUNNER_TEMP/export"
+      - name: Build its image
+        run: docker build -t stream-export "$RUNNER_TEMP/export"
+      - name: Every linked library is present, and the service accepts its manifest
+        run: |
+          docker run --rm --entrypoint sh stream-export -c \
+            'ldd /usr/local/bin/mage-service; ! ldd /usr/local/bin/mage-service | grep -q "not found"'
+          docker run --rm stream-export validate
+
   # Integration tests in parallel jobs, one per group: each starts only its services.
   # "Integration" groups test external tools; "MageML" groups test MageML's own pipelines.
   integration:

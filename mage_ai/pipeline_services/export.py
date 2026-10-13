@@ -2215,21 +2215,14 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
         copy_python = ''
     engine_features = ''
     kafka_build = ''
-    kafka_runtime = ''
     if capture_.needs_kafka:
         engine_features = ' --features mage-service/kafka'
         # librdkafka builds with CMake, OpenSSL from source (make, perl), and includes curl's
-        # header (I-40).
+        # header (I-40). All of it links statically: the runtime image needs nothing more.
         kafka_build = (
             '# The Kafka connector builds librdkafka and OpenSSL from source.\n'
             'RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make \\\n'
             '      perl libcurl4-openssl-dev && \\\n'
-            '    rm -rf /var/lib/apt/lists/*\n'
-        )
-        runtime_base = base if capture_.needs_python else build_base
-        libcurl = 'libcurl4t64' if runtime_base == 'trixie' else 'libcurl4'
-        kafka_runtime = (
-            f'RUN apt-get update && apt-get install -y --no-install-recommends {libcurl} && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
         )
     if capture_.models:
@@ -2255,7 +2248,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \\
     mkdir -p /out && \\
     cp mage_service/target/release/mage-service mage_service/target/release/mage-console /out/
 {rust_blocks}
-{runtime}{kafka_runtime}RUN groupadd --system --gid 10001 mage && \\
+{runtime}RUN groupadd --system --gid 10001 mage && \\
     useradd --system --uid 10001 --gid mage --home-dir /srv/mage-service --no-create-home mage && \\
     mkdir -p /srv/mage-service /var/lib/mage-service && \\
     chown mage:mage /var/lib/mage-service

@@ -179,7 +179,9 @@ class StreamManifestTest(StreamExportTestCase):
         dockerfile = (out / 'Dockerfile').read_text()
         self.assertIn('--features mage-service/kafka', dockerfile)
         self.assertIn('cmake g++ make', dockerfile)
-        self.assertIn('libcurl4', dockerfile)
+        # librdkafka links statically: the runtime stage installs no library for it.
+        runtime = dockerfile.split('AS build', 1)[1].split('\nFROM ', 1)[1]
+        self.assertNotIn('libcurl', runtime)
         manifest = json.loads((out / 'service.json').read_text())
         self.assertEqual(manifest['pipelines'][0]['stream']['source']['kind'], 'kafka')
 

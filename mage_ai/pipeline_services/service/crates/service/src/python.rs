@@ -251,6 +251,32 @@ impl PythonPool {
         timeout: Option<Duration>,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<Value, WorkerError> {
+        let line = move |id: &str| {
+            request["id"] = json!(id);
+            // A batch run by default; streams send "stream".
+            if request.get("op").is_none() {
+                request["op"] = json!("run");
+            }
+            serde_json::to_string(&request)
+        };
+        let reply = self.run_raw(line, log, block, timeout, cancel).await?;
+        serde_json::from_str(&reply).map_err(|e| WorkerError::Protocol(e.to_string()))
+    }
+
+    /// Runs one request whose JSON `line` builds for the given request id, and returns the
+    /// reply as the worker wrote it. Streams use it to pass message values through without
+    /// parsing them into `Value`, which would round integers past 64 bits.
+    pub async fn run_raw<F>(
+        &self,
+        line: F,
+        log: RunLog,
+        block: &str,
+        timeout: Option<Duration>,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<String, WorkerError>
+    where
+        F: FnOnce(&str) -> Result<String, serde_json::Error>,
+    {
         let _slot = self
             .slots
             .acquire()
@@ -265,11 +291,7 @@ impl PythonPool {
             },
         };
         let id = uuid::Uuid::new_v4().to_string();
-        request["id"] = json!(id);
-        // A batch run by default; streams send "stream".
-        if request.get("op").is_none() {
-            request["op"] = json!("run");
-        }
+        let request = line(&id).map_err(|e| WorkerError::Protocol(e.to_string()));
         *worker.log_target.lock().unwrap_or_else(|p| p.into_inner()) =
             Some((log, block.to_string()));
         worker
@@ -279,16 +301,14 @@ impl PythonPool {
             .clear();
 
         let outcome = async {
-            let mut line = serde_json::to_string(&request)
-                .map_err(|e| WorkerError::Protocol(e.to_string()))?;
+            let mut line = request?;
             line.push('\n');
             if worker.requests.write_all(line.as_bytes()).await.is_err() {
                 return Err(WorkerError::Crashed(String::new()));
             }
             let _ = worker.requests.flush().await;
             match worker.replies.recv().await {
-                Some(reply) => serde_json::from_str::<Value>(&reply)
-                    .map_err(|e| WorkerError::Protocol(e.to_string())),
+                Some(reply) => Ok(reply),
                 None => Err(WorkerError::Crashed(String::new())),
             }
         };
@@ -310,7 +330,7 @@ impl PythonPool {
         // A worker runs one block at a time, so they are still that block's.
 
         match result {
-            Ok(reply) if reply.get("id").and_then(Value::as_str) == Some(id.as_str()) => {
+            Ok(reply) if reply_id(&reply).as_deref() == Some(id.as_str()) => {
                 worker.blocks_served += 1;
                 if worker.blocks_served >= self.config.max_blocks_per_worker {
                     retire(worker).await;
@@ -324,8 +344,9 @@ impl PythonPool {
             }
             Ok(reply) => {
                 retire(worker).await;
+                let shown: String = reply.chars().take(500).collect();
                 Err(WorkerError::Protocol(format!(
-                    "a reply to another request: {reply}"
+                    "a reply to another request: {shown}"
                 )))
             }
             Err(WorkerError::Crashed(_)) => {
@@ -453,6 +474,15 @@ fn forward(
             }
         }
     });
+}
+
+/// The `id` of a worker reply, read without parsing the rest of it into values.
+fn reply_id(reply: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Id {
+        id: Option<String>,
+    }
+    serde_json::from_str::<Id>(reply).ok()?.id
 }
 
 #[cfg(test)]
