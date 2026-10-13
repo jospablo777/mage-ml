@@ -37,11 +37,14 @@ batch_size: 50
 timeout_ms: 200
 '''
 TRANSFORM = '''
+import time
 from typing import Dict, List
 
 
 @transformer
 def double(messages: List[Dict], *args, **kwargs):
+    # Slow enough that batches are in flight when partitions move between instances.
+    time.sleep(float(kwargs.get('delay', 0)))
     return [dict(m, doubled=m['amount'] * 2) for m in messages if m['id'] % 10 != 0]
 '''
 SINK = '''
@@ -100,7 +103,7 @@ def stream_pipeline(mage_project, topics):
 
 
 class Service:
-    def __init__(self, binary: Path, directory: Path, data: Path, bootstrap: str):
+    def __init__(self, binary: Path, directory: Path, data: Path, bootstrap: str, **env):
         self.port = free_port()
         self.log = data.parent / f'service-{self.port}.log'
         self.env = dict(
@@ -115,6 +118,7 @@ class Service:
             MAGE_SERVICE_PYTHON=sys.executable,
             PYTHONPATH=os.pathsep.join([str(directory / 'python'), str(REPO)]),
             KAFKA_BOOTSTRAP=bootstrap,
+            **env,
         )
         self.binary = binary
         self.process = None
@@ -215,3 +219,50 @@ def test_an_exported_kafka_stream_transforms_each_message_once_across_a_restart(
     assert status['last_error'] is None
     assert sorted(m['id'] for m in second) == [i for i in range(200, 250) if i % 10]
     assert committed(kafka_bootstrap, group, topics[0]) == 250
+
+
+def test_partitions_move_between_instances_without_losing_or_repeating_messages(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    A second instance joins the group, then the first leaves, while messages arrive and
+    batches are in flight: no message is lost or written twice. A revoke lets the partition's
+    batches finish and commits them before the partition moves (I-34), so the next owner
+    neither repeats a batch whose write was under way nor redoes finished work.
+    """
+    pipeline, _ = stream_pipeline
+    pipeline.variables = dict(delay=0.2)
+    pipeline.save()
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    binary = kafka_service_binary()
+    first = Service(binary, directory, tmp_path / 'data-a', kafka_bootstrap)
+    second = Service(binary, directory, tmp_path / 'data-b', kafka_bootstrap)
+    output = KafkaConsumer(
+        topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    received = []
+    first.start()
+    try:
+        first.wait_running()
+        produce(kafka_bootstrap, topics[0], range(0, 300))
+        received += consume(output, 50)
+        second.start()
+        second.wait_running()
+        produce(kafka_bootstrap, topics[0], range(300, 600))
+        received += consume(output, 100)
+        first.stop()
+        produce(kafka_bootstrap, topics[0], range(600, 800))
+        expected = [i for i in range(800) if i % 10]
+        received += consume(output, len(expected) - len(received), timeout=180)
+        time.sleep(3)
+        received += consume(output, 1, timeout=3)
+    finally:
+        for service in (first, second):
+            if service.process and service.process.poll() is None:
+                service.stop()
+
+    ids = [m['id'] for m in received]
+    repeated = sorted({i for i in ids if ids.count(i) > 1})
+    assert repeated == [], f'{len(repeated)} messages written twice: {repeated[:20]}'
+    assert sorted(ids) == expected

@@ -109,6 +109,14 @@ pub trait Source: Send {
     fn commit<'a>(&'a mut self, commits: &'a [Commit]) -> BoxFuture<'a, CommitOutcome>;
     fn pause(&mut self, partition: PartitionId);
     fn resume(&mut self, partition: PartitionId);
+    /// The stream finished with a partition it was revoking ([`SourceEvent::Revoking`]):
+    /// what was done is acknowledged, and the source may hand the partition over.
+    fn revoked(&mut self, _partition: PartitionId, _epoch: AssignmentEpoch) {}
+    /// Messages behind the end of each partition this instance reads, where the source
+    /// knows it.
+    fn lag(&self) -> std::collections::BTreeMap<u32, i64> {
+        std::collections::BTreeMap::new()
+    }
     fn capabilities(&self) -> SourceCapabilities;
     fn close(&mut self) -> BoxFuture<'_, ()>;
 }

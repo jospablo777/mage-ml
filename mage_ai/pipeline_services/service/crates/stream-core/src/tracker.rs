@@ -270,6 +270,13 @@ impl AckTracker {
             .collect()
     }
 
+    /// Whether the partition has batches that are not done yet.
+    pub fn has_unfinished(&self, partition: PartitionId) -> bool {
+        self.partitions
+            .get(&partition)
+            .is_some_and(|s| s.in_flight.iter().any(|b| !b.done()))
+    }
+
     pub fn in_flight_bytes(&self, partition: PartitionId) -> u64 {
         self.partitions.get(&partition).map_or(0, |s| s.bytes)
     }

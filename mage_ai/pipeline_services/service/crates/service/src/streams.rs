@@ -77,7 +77,7 @@ fn source(
                 max_wait: Duration::from_millis(batch.max_wait_ms),
             };
             Ok(Box::new(mage_connector_kafka::KafkaSource::new(
-                &_config,
+                &static_membership(_config, &pipeline.uuid),
                 limits,
                 in_flight_bytes(stream),
             )?))
@@ -88,6 +88,31 @@ fn source(
             unavailable(kind)
         ))),
     }
+}
+
+/// With `MAGE_SERVICE_INSTANCE_ID` (a stable name per replica, such as a StatefulSet pod's),
+/// the consumer is a static group member (I-39): a restart within the session timeout keeps
+/// its partitions instead of moving every partition of the group twice.
+#[cfg(feature = "kafka")]
+fn static_membership(mut config: Value, pipeline: &str) -> Value {
+    let Ok(instance) = std::env::var("MAGE_SERVICE_INSTANCE_ID") else {
+        return config;
+    };
+    let instance = instance.trim();
+    if instance.is_empty() {
+        return config;
+    }
+    if let Some(settings) = config.as_object_mut() {
+        let extra = settings
+            .entry("librdkafka")
+            .or_insert_with(|| Value::Object(Default::default()));
+        if let Some(extra) = extra.as_object_mut() {
+            extra
+                .entry("group.instance.id")
+                .or_insert_with(|| Value::String(format!("{instance}-{pipeline}")));
+        }
+    }
+    config
 }
 
 fn sink(service: &Service, connector: &Connector) -> Result<Arc<dyn Sink>, ConnectorError> {

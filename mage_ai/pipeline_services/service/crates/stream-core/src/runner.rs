@@ -80,7 +80,14 @@ pub enum Event {
         partition: PartitionId,
         epoch: AssignmentEpoch,
     },
+    /// The source is giving the partition up: finish its batches in flight, acknowledge
+    /// them, then report [`Effect::Revoked`], so the next owner does not repeat them.
     Revoking {
+        partition: PartitionId,
+        epoch: AssignmentEpoch,
+    },
+    /// The time the source allows for a revoke passed: what is not done is dropped.
+    RevokeDeadline {
         partition: PartitionId,
         epoch: AssignmentEpoch,
     },
@@ -148,6 +155,12 @@ pub enum Effect {
     Resume(PartitionId),
     /// Work for these batches is stale (their partition was revoked or reassigned): stop it.
     Cancel(Vec<BatchId>),
+    /// The partition's revoke is complete: what was done is acknowledged (the commit comes
+    /// before this effect); the source may hand the partition over.
+    Revoked {
+        partition: PartitionId,
+        epoch: AssignmentEpoch,
+    },
     StopReading,
     Alert(String),
     Stop(StopReason),
@@ -167,6 +180,8 @@ pub struct RunnerMachine {
     dead_letter_attempts: BTreeMap<BatchId, u32>,
     best_effort_pending: BTreeSet<(BatchId, SinkId)>,
     paused: BTreeSet<PartitionId>,
+    /// Partitions being revoked, waiting for their batches in flight.
+    draining: BTreeMap<PartitionId, AssignmentEpoch>,
     stopping: bool,
     finished: bool,
     stopped: bool,
@@ -182,6 +197,7 @@ impl RunnerMachine {
             dead_letter_attempts: BTreeMap::new(),
             best_effort_pending: BTreeSet::new(),
             paused: BTreeSet::new(),
+            draining: BTreeMap::new(),
             stopping: false,
             finished: false,
             stopped: false,
@@ -204,6 +220,13 @@ impl RunnerMachine {
         match event {
             Event::Assigned { partition, epoch } => match self.tracker.assign(partition, epoch) {
                 Ok(dropped) => {
+                    // Assigned again before the revoke finished: that revoke is over.
+                    if let Some(old) = self.draining.remove(&partition) {
+                        effects.push(Effect::Revoked {
+                            partition,
+                            epoch: old,
+                        });
+                    }
                     self.paused.remove(&partition);
                     self.forget(&dropped);
                     if !dropped.is_empty() {
@@ -217,26 +240,24 @@ impl RunnerMachine {
                 ))),
             },
             Event::Revoking { partition, epoch } => {
-                // Acknowledge what is done before the partition goes, so the next owner does
-                // not repeat it.
-                let commits: Vec<Commit> = self
-                    .tracker
-                    .committable()
-                    .into_iter()
-                    .filter(|c| c.partition == partition && c.epoch == epoch)
-                    .collect();
-                if !commits.is_empty() {
-                    effects.push(Effect::Commit(commits));
+                if self.tracker.epoch(partition) == Some(epoch) {
+                    // Finished below once nothing of the partition is in flight.
+                    self.draining.insert(partition, epoch);
+                } else {
+                    effects.push(Effect::Revoked { partition, epoch });
                 }
-                let dropped = self.tracker.revoke(partition, epoch);
-                self.paused.remove(&partition);
-                self.forget(&dropped);
-                if !dropped.is_empty() {
-                    effects.push(Effect::Cancel(dropped));
+            }
+            Event::RevokeDeadline { partition, epoch } => {
+                if self.draining.get(&partition) == Some(&epoch) {
+                    self.release(partition, epoch, &mut effects);
                 }
             }
             Event::BatchRead(meta) => {
                 let id = meta.id;
+                if self.draining.get(&id.partition) == Some(&id.epoch) {
+                    effects.push(Effect::Cancel(vec![id]));
+                    return effects;
+                }
                 match self.tracker.admit(meta) {
                     Admission::Stale => effects.push(Effect::Cancel(vec![id])),
                     Admission::Admitted { pause } => {
@@ -366,6 +387,15 @@ impl RunnerMachine {
                 return effects;
             }
         }
+        let drained: Vec<(PartitionId, AssignmentEpoch)> = self
+            .draining
+            .iter()
+            .filter(|(p, _)| !self.tracker.has_unfinished(**p))
+            .map(|(p, e)| (*p, *e))
+            .collect();
+        for (partition, epoch) in drained {
+            self.release(partition, epoch, &mut effects);
+        }
         if self.stopping && !self.stopped && self.tracker.is_settled() {
             self.finished = true;
             effects.push(Effect::Finished {
@@ -390,6 +420,32 @@ impl RunnerMachine {
             self.paused.remove(&partition);
             effects.push(Effect::Resume(partition));
         }
+    }
+
+    /// Ends a revoke: acknowledges what is done, drops the rest, and reports it.
+    fn release(
+        &mut self,
+        partition: PartitionId,
+        epoch: AssignmentEpoch,
+        effects: &mut Vec<Effect>,
+    ) {
+        self.draining.remove(&partition);
+        let commits: Vec<Commit> = self
+            .tracker
+            .committable()
+            .into_iter()
+            .filter(|c| c.partition == partition && c.epoch == epoch)
+            .collect();
+        if !commits.is_empty() {
+            effects.push(Effect::Commit(commits));
+        }
+        let dropped = self.tracker.revoke(partition, epoch);
+        self.paused.remove(&partition);
+        self.forget(&dropped);
+        if !dropped.is_empty() {
+            effects.push(Effect::Cancel(dropped));
+        }
+        effects.push(Effect::Revoked { partition, epoch });
     }
 
     fn forget(&mut self, ids: &[BatchId]) {
@@ -591,26 +647,110 @@ mod tests {
     }
 
     #[test]
-    fn a_revoke_commits_what_is_done_and_cancels_the_rest() {
+    fn a_revoke_waits_for_work_in_flight_then_commits_and_hands_over() {
         let mut m = started(PoisonPolicy::Stop, false);
         m.step(Event::BatchRead(meta(0)));
         m.step(Event::BatchRead(meta(1)));
         m.step(Event::TransformDone(meta(0).id));
-        // A receipt the source's commit has not confirmed yet.
         m.step(Event::SinkReceipt {
             id: meta(0).id,
             sink: REQUIRED,
         });
 
-        let effects = m.step(Event::Revoking {
+        // Batch 1 is still in flight: the partition stays until it is done.
+        assert!(
+            m.step(Event::Revoking {
+                partition: P,
+                epoch: E
+            })
+            .is_empty()
+        );
+        // The source read more before it stopped; that is not started.
+        assert_eq!(
+            m.step(Event::BatchRead(meta(2))),
+            [Effect::Cancel(vec![meta(2).id])]
+        );
+        m.step(Event::TransformDone(meta(1).id));
+        let effects = m.step(Event::SinkReceipt {
+            id: meta(1).id,
+            sink: REQUIRED,
+        });
+
+        assert!(matches!(&effects[0], Effect::Commit(c) if c[0].position == Position::Offset(19)));
+        assert_eq!(
+            effects.last(),
+            Some(&Effect::Revoked {
+                partition: P,
+                epoch: E
+            })
+        );
+        // Late work of the revoked epoch changes nothing.
+        assert!(m.step(Event::TransformDone(meta(2).id)).is_empty());
+    }
+
+    #[test]
+    fn a_revoke_deadline_commits_what_is_done_and_drops_the_rest() {
+        let mut m = started(PoisonPolicy::Stop, false);
+        m.step(Event::BatchRead(meta(0)));
+        m.step(Event::BatchRead(meta(1)));
+        m.step(Event::TransformDone(meta(0).id));
+        m.step(Event::SinkReceipt {
+            id: meta(0).id,
+            sink: REQUIRED,
+        });
+        m.step(Event::Revoking {
+            partition: P,
+            epoch: E,
+        });
+
+        let effects = m.step(Event::RevokeDeadline {
             partition: P,
             epoch: E,
         });
 
         assert!(matches!(&effects[0], Effect::Commit(c) if c[0].position == Position::Offset(9)));
         assert_eq!(effects[1], Effect::Cancel(vec![meta(1).id]));
-        // Late work of the revoked epoch changes nothing.
-        assert!(m.step(Event::TransformDone(meta(1).id)).is_empty());
+        assert_eq!(
+            effects[2],
+            Effect::Revoked {
+                partition: P,
+                epoch: E
+            }
+        );
+        // A deadline after the revoke finished changes nothing.
+        assert!(
+            m.step(Event::RevokeDeadline {
+                partition: P,
+                epoch: E
+            })
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_revoke_with_nothing_in_flight_or_of_an_old_epoch_hands_over_at_once() {
+        let mut m = started(PoisonPolicy::Stop, false);
+        assert_eq!(
+            m.step(Event::Revoking {
+                partition: P,
+                epoch: E
+            }),
+            [Effect::Revoked {
+                partition: P,
+                epoch: E
+            }]
+        );
+        // The partition is gone now: a second revoke of the same epoch is stale.
+        assert_eq!(
+            m.step(Event::Revoking {
+                partition: P,
+                epoch: E
+            }),
+            [Effect::Revoked {
+                partition: P,
+                epoch: E
+            }]
+        );
     }
 
     #[test]
@@ -702,9 +842,11 @@ mod tests {
             let mut done: BTreeSet<BatchId> = BTreeSet::new();
             let mut last_commit: BTreeMap<u64, i64> = BTreeMap::new();
             let mut stopped = false;
+            let mut revoking: Option<u64> = None;
+            let mut revoked: BTreeSet<u64> = BTreeSet::new();
             for c in &choices {
                 let mut events = Vec::new();
-                if c.outcome < 15 && !stopped {
+                if c.outcome < 15 && !stopped && revoking.is_none() {
                     let id = BatchId { partition: P, epoch: AssignmentEpoch(epoch), seq };
                     read.insert(id);
                     events.push(Event::BatchRead(BatchMeta {
@@ -712,8 +854,16 @@ mod tests {
                         last: Position::Offset(seq as i64 * 10 + 9), records: 10, bytes: 100,
                     }));
                     seq += 1;
-                } else if c.outcome < 17 {
+                } else if c.outcome < 17 && revoking.is_none() {
+                    // A revoke stays open while work completes, until a deadline or a new
+                    // assignment.
+                    revoking = Some(epoch);
                     events.push(Event::Revoking { partition: P, epoch: AssignmentEpoch(epoch) });
+                } else if c.outcome < 20 && revoking.is_some() {
+                    let old = revoking.take().unwrap();
+                    if c.outcome % 2 == 0 {
+                        events.push(Event::RevokeDeadline { partition: P, epoch: AssignmentEpoch(old) });
+                    }
                     events.push(Event::Assigned { partition: P, epoch: AssignmentEpoch(epoch + 1) });
                 } else if !queue.is_empty() {
                     let effect = queue.remove(c.pick % queue.len());
@@ -756,6 +906,8 @@ mod tests {
                         if let Effect::Commit(commits) = &effect {
                             for commit in commits {
                                 prop_assert_eq!(commit.epoch.0, epoch, "stale commit");
+                                prop_assert!(!revoked.contains(&commit.epoch.0),
+                                    "commit of epoch {} after it was handed over", commit.epoch.0);
                                 let Position::Offset(offset) = commit.position else { unreachable!() };
                                 let through = (offset as u64 - 9) / 10;
                                 for id in read.iter().filter(|id| id.epoch == commit.epoch && id.seq <= through) {
@@ -769,6 +921,9 @@ mod tests {
                             }
                         }
                         if matches!(effect, Effect::Stop(_)) { stopped = true; }
+                        if let Effect::Revoked { epoch: e, .. } = &effect {
+                            revoked.insert(e.0);
+                        }
                         queue.push(effect);
                     }
                 }

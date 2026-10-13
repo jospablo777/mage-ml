@@ -169,7 +169,8 @@ service answers [inference requests](../guides/pipelines/model-inference.md).
 | `GET /v1/models` | Embedded models and their MLflow metadata |
 | `GET /v1/snapshot` | Counts, durations and triggers per pipeline |
 | `POST /v1/control` | Pause, resume, change a pipeline's concurrency |
-| `GET /metrics` | Prometheus metrics; no token needed |
+| `GET /v1/streams` | Each stream's state, message counts, acknowledged positions, lag per partition and last error |
+| `GET /metrics` | Prometheus metrics, including `mage_service_stream_lag_messages` per stream and partition (scale on it); no token needed |
 | `GET /healthz` | Health; no token needed |
 
 `MAGE_SERVICE_READ_TOKEN` sets a second token that can read runs, logs and the snapshot but
@@ -467,6 +468,7 @@ On serverless platforms without a volume, the run history lasts as long as the i
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |
 | `MAGE_SERVICE_PASS_ENV` | none | In strict mode, more variables for blocks: names or `PREFIX_*` patterns, separated by commas |
+| `MAGE_SERVICE_INSTANCE_ID` | none | A stable name for this replica, such as a Kubernetes StatefulSet pod's name. Kafka streams then join their group as static members (`group.instance.id`), so a restart within the session timeout keeps the replica's partitions instead of moving the group's partitions twice |
 
 ### What block code can read
 

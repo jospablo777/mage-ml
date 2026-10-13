@@ -15,6 +15,7 @@
 //! `password`, `check_hostname`), and `librdkafka` for any other client property.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,9 +27,7 @@ use mage_stream_ports::{
 };
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{
-    BaseConsumer, CommitMode, Consumer, ConsumerContext, Rebalance, StreamConsumer,
-};
+use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, ConsumerContext, Rebalance};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header as KafkaHeader, Headers, Message, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -123,6 +122,16 @@ fn connector_error(error: KafkaError) -> ConnectorError {
     }
 }
 
+/// How long a revoke waits for the stream to finish the partition's batches in flight and
+/// acknowledge them, before the partition goes to its next owner anyway. Well under the
+/// group's `max.poll.interval.ms` (5 minutes), which the wait counts against.
+const REVOKE_WITHIN: Duration = Duration::from_secs(20);
+/// How often the poll thread updates the lag.
+const LAG_EVERY: Duration = Duration::from_secs(5);
+/// Messages between the poll thread and the stream; librdkafka's own queue, sized from the
+/// stream's byte budget, holds the rest.
+const CHANNEL: usize = 256;
+
 /// (topic, partition) to the stream's partition ids, and each one's current epoch.
 #[derive(Debug, Default)]
 struct Table {
@@ -130,6 +139,10 @@ struct Table {
     names: Vec<(String, i32)>,
     epochs: BTreeMap<u32, AssignmentEpoch>,
     next_epoch: u64,
+    /// Revokes waiting for the stream: partition to the waiting rebalance callback.
+    waiters: HashMap<u32, std::sync::mpsc::Sender<u32>>,
+    /// Messages behind the end of each assigned partition.
+    lag: BTreeMap<u32, i64>,
 }
 
 impl Table {
@@ -152,43 +165,186 @@ impl Table {
     }
 }
 
+/// What the poll thread hands to the stream, in the order librdkafka delivered it: an
+/// assignment change is never reordered with the messages around it.
+enum Polled {
+    Message(rdkafka::message::OwnedMessage),
+    Event(SourceEvent),
+    Error(KafkaError),
+}
+
 struct RebalanceContext {
     table: Arc<Mutex<Table>>,
-    events: mpsc::UnboundedSender<SourceEvent>,
+    polled: mpsc::Sender<Polled>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl ClientContext for RebalanceContext {}
 
+impl RebalanceContext {
+    /// Whether a callback may wait: only on the poll thread while the source runs. librdkafka
+    /// also calls the callbacks when the consumer closes, on whatever thread drops it, which
+    /// can be one of the runtime's.
+    fn may_wait(&self) -> bool {
+        !self.stopped.load(Ordering::Relaxed) && tokio::runtime::Handle::try_current().is_err()
+    }
+
+    /// Hands an item to the stream; false when the stream no longer reads.
+    fn send(&self, item: Polled) -> bool {
+        if self.may_wait() {
+            self.polled.blocking_send(item).is_ok()
+        } else {
+            self.polled.try_send(item).is_ok()
+        }
+    }
+}
+
 impl ConsumerContext for RebalanceContext {
+    /// Runs on the poll thread before partitions go. The partitions keep their epochs while
+    /// the stream finishes their batches in flight and commits them (I-34), so the next owner
+    /// starts after them; after REVOKE_WITHIN they go anyway, and what was not done is read
+    /// again by the next owner.
     fn pre_rebalance(&self, _consumer: &BaseConsumer<Self>, rebalance: &Rebalance<'_>) {
-        if let Rebalance::Revoke(list) = rebalance {
+        let Rebalance::Revoke(list) = rebalance else {
+            return;
+        };
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let mut waiting = BTreeSet::new();
+        let mut revoked = Vec::new();
+        {
             let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
             for element in list.elements() {
                 let id = table.id(element.topic(), element.partition());
-                if let Some(epoch) = table.epochs.remove(&id) {
-                    let _ = self.events.send(SourceEvent::Revoking {
-                        partition: PartitionId(id),
-                        epoch,
-                        within: Duration::from_secs(10),
-                    });
+                if let Some(epoch) = table.epochs.get(&id).copied() {
+                    table.waiters.insert(id, done_tx.clone());
+                    waiting.insert(id);
+                    revoked.push((id, epoch));
                 }
             }
+        }
+        for (id, epoch) in &revoked {
+            let event = SourceEvent::Revoking {
+                partition: PartitionId(*id),
+                epoch: *epoch,
+                within: REVOKE_WITHIN,
+            };
+            // The stream has stopped reading: nothing to wait for.
+            if !self.send(Polled::Event(event)) {
+                waiting.clear();
+            }
+        }
+        if !self.may_wait() {
+            waiting.clear();
+        }
+        let deadline = Instant::now() + REVOKE_WITHIN;
+        while !waiting.is_empty() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match done_rx.recv_timeout(left) {
+                Ok(id) => {
+                    waiting.remove(&id);
+                }
+                Err(_) => break,
+            }
+        }
+        let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        for (id, _) in revoked {
+            table.waiters.remove(&id);
+            table.epochs.remove(&id);
+            table.lag.remove(&id);
         }
     }
 
     fn post_rebalance(&self, _consumer: &BaseConsumer<Self>, rebalance: &Rebalance<'_>) {
         if let Rebalance::Assign(list) = rebalance {
-            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
-            for element in list.elements() {
-                let id = table.id(element.topic(), element.partition());
-                let epoch = table.assign(id);
-                let _ = self.events.send(SourceEvent::Assigned {
+            let mut assigned = Vec::new();
+            {
+                let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                for element in list.elements() {
+                    let id = table.id(element.topic(), element.partition());
+                    assigned.push((id, table.assign(id)));
+                }
+            }
+            for (id, epoch) in assigned {
+                let _ = self.send(Polled::Event(SourceEvent::Assigned {
                     partition: PartitionId(id),
                     epoch,
-                });
+                }));
             }
         }
     }
+}
+
+type KafkaConsumer = BaseConsumer<RebalanceContext>;
+
+/// Polls the consumer until stopped. Rebalance callbacks run here, so a revoke can wait for
+/// the stream without holding up the stream's own task.
+fn poll_loop(consumer: Arc<KafkaConsumer>, table: Arc<Mutex<Table>>, stop: Arc<AtomicBool>) {
+    let polled = consumer.context().polled.clone();
+    let mut lag_at = Instant::now();
+    while !stop.load(Ordering::Relaxed) {
+        let item = match consumer.poll(Duration::from_millis(100)) {
+            Some(Ok(message)) => Some(Polled::Message(message.detach())),
+            Some(Err(error)) => Some(Polled::Error(error)),
+            None => None,
+        };
+        if let Some(item) = item
+            && polled.blocking_send(item).is_err()
+        {
+            break;
+        }
+        if lag_at.elapsed() >= LAG_EVERY {
+            lag_at = Instant::now();
+            update_lag(&consumer, &table);
+        }
+    }
+}
+
+/// Lag per partition from the high watermarks librdkafka keeps from its fetches (no request
+/// to the broker) and the consumer's position.
+fn update_lag(consumer: &KafkaConsumer, table: &Mutex<Table>) {
+    let Ok(positions) = consumer.position() else {
+        return;
+    };
+    let mut lag = BTreeMap::new();
+    let mut table = table.lock().unwrap_or_else(|p| p.into_inner());
+    for element in positions.elements() {
+        let Some(high) = cached_high_watermark(consumer, element.topic(), element.partition())
+        else {
+            continue;
+        };
+        let id = table.id(element.topic(), element.partition());
+        if !table.epochs.contains_key(&id) || high < 0 {
+            continue;
+        }
+        let position = match element.offset() {
+            Offset::Offset(offset) => offset,
+            // Nothing read yet: everything up to the end is behind.
+            _ => continue,
+        };
+        lag.insert(id, (high - position).max(0));
+    }
+    table.lag = lag;
+}
+
+/// The partition's high watermark as librdkafka last saw it in a fetch. rdkafka has no
+/// wrapper for it; `fetch_watermarks` asks the broker, which the poll thread must not wait on.
+fn cached_high_watermark(consumer: &KafkaConsumer, topic: &str, partition: i32) -> Option<i64> {
+    use rdkafka::bindings::{rd_kafka_get_watermark_offsets, rd_kafka_resp_err_t};
+
+    let topic = std::ffi::CString::new(topic).ok()?;
+    let (mut low, mut high) = (0i64, 0i64);
+    // SAFETY: the client handle lives as long as `consumer`, the topic is a valid C string
+    // for the call, and the function only reads librdkafka's cached offsets (thread safe).
+    let code = unsafe {
+        rd_kafka_get_watermark_offsets(
+            consumer.client().native_ptr(),
+            topic.as_ptr(),
+            partition,
+            &mut low,
+            &mut high,
+        )
+    };
+    (code == rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR).then_some(high)
 }
 
 struct Pending {
@@ -200,9 +356,13 @@ struct Pending {
 }
 
 pub struct KafkaSource {
-    consumer: Arc<StreamConsumer<RebalanceContext>>,
+    consumer: Arc<KafkaConsumer>,
     table: Arc<Mutex<Table>>,
-    events: mpsc::UnboundedReceiver<SourceEvent>,
+    polled: mpsc::Receiver<Polled>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    /// Partitions being revoked: their messages still in the channel are not delivered.
+    revoking: BTreeSet<u32>,
     pending: BTreeMap<u32, Pending>,
     seq: BTreeMap<u32, u64>,
     paused: BTreeSet<u32>,
@@ -245,19 +405,32 @@ impl KafkaSource {
                 text(config, "auto_offset_reset").unwrap_or_else(|| "latest".into()),
             );
         let table = Arc::new(Mutex::new(Table::default()));
-        let (tx, events) = mpsc::unbounded_channel();
-        let consumer: StreamConsumer<RebalanceContext> = client
+        let (tx, polled) = mpsc::channel(CHANNEL);
+        let stop = Arc::new(AtomicBool::new(false));
+        let consumer: KafkaConsumer = client
             .create_with_context(RebalanceContext {
                 table: table.clone(),
-                events: tx,
+                polled: tx,
+                stopped: stop.clone(),
             })
             .map_err(connector_error)?;
         let names: Vec<&str> = topics.iter().map(String::as_str).collect();
         consumer.subscribe(&names).map_err(connector_error)?;
+        let consumer = Arc::new(consumer);
+        let thread = std::thread::Builder::new()
+            .name("kafka-source".into())
+            .spawn({
+                let (consumer, table, stop) = (consumer.clone(), table.clone(), stop.clone());
+                move || poll_loop(consumer, table, stop)
+            })
+            .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))?;
         Ok(KafkaSource {
-            consumer: Arc::new(consumer),
+            consumer,
             table,
-            events,
+            polled,
+            stop,
+            thread: Some(thread),
+            revoking: BTreeSet::new(),
             pending: BTreeMap::new(),
             seq: BTreeMap::new(),
             paused: BTreeSet::new(),
@@ -268,11 +441,14 @@ impl KafkaSource {
     fn handle(&mut self, event: SourceEvent) -> SourceEvent {
         match &event {
             SourceEvent::Revoking { partition, .. } => {
-                // Messages read in the revoked epoch are not delivered.
+                // Messages read but not yet in a batch stay with the partition: the next
+                // owner reads them.
                 self.pending.remove(&partition.0);
                 self.paused.remove(&partition.0);
+                self.revoking.insert(partition.0);
             }
             SourceEvent::Assigned { partition, .. } => {
+                self.revoking.remove(&partition.0);
                 self.seq.insert(partition.0, 0);
                 if self.paused.contains(&partition.0) {
                     self.pause(*partition);
@@ -348,62 +524,64 @@ impl KafkaSource {
         list.add_partition(&topic, partition);
         Some(list)
     }
+
+    fn add(&mut self, message: rdkafka::message::OwnedMessage) {
+        let (id, epoch) = {
+            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            let id = table.id(message.topic(), message.partition());
+            (id, table.epochs.get(&id).copied())
+        };
+        // A message of a partition no longer assigned, or being revoked, is not delivered;
+        // the next owner reads it.
+        let Some(epoch) = epoch else { return };
+        if self.revoking.contains(&id) {
+            return;
+        }
+        let headers = message
+            .headers()
+            .map(|h| {
+                h.iter()
+                    .map(|header| Header {
+                        key: header.key.to_string(),
+                        value: header.value.map(<[u8]>::to_vec).unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let offset = message.offset();
+        let envelope = Envelope {
+            key: message.key().map(<[u8]>::to_vec),
+            value: message.payload().map(<[u8]>::to_vec).unwrap_or_default(),
+            headers,
+            partition: id,
+            position: Some(offset),
+            timestamp: message.timestamp().to_millis(),
+        };
+        let pending = self.pending.entry(id).or_insert_with(|| Pending {
+            builder: EnvelopeBuilder::new(),
+            epoch,
+            first: offset,
+            last: offset,
+            started: Instant::now(),
+        });
+        pending.builder.push(&envelope);
+        pending.last = offset;
+    }
 }
 
 impl Source for KafkaSource {
     fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
         Box::pin(async move {
             loop {
-                if let Ok(event) = self.events.try_recv() {
-                    return Ok(self.handle(event));
-                }
                 if let Some(batch) = self.ready(false)? {
                     return Ok(batch);
                 }
                 let wait = self.wait();
-                let consumer = self.consumer.clone();
-                match tokio::time::timeout(wait, consumer.recv()).await {
-                    Ok(Ok(message)) => {
-                        let (topic, partition) = (message.topic().to_string(), message.partition());
-                        let (id, epoch) = {
-                            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
-                            let id = table.id(&topic, partition);
-                            (id, table.epochs.get(&id).copied())
-                        };
-                        // A message of a partition no longer assigned is dropped; the next
-                        // owner reads it.
-                        let Some(epoch) = epoch else { continue };
-                        let headers = message
-                            .headers()
-                            .map(|h| {
-                                h.iter()
-                                    .map(|header| Header {
-                                        key: header.key.to_string(),
-                                        value: header.value.map(<[u8]>::to_vec).unwrap_or_default(),
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let envelope = Envelope {
-                            key: message.key().map(<[u8]>::to_vec),
-                            value: message.payload().map(<[u8]>::to_vec).unwrap_or_default(),
-                            headers,
-                            partition: id,
-                            position: Some(message.offset()),
-                            timestamp: message.timestamp().to_millis(),
-                        };
-                        let offset = message.offset();
-                        let pending = self.pending.entry(id).or_insert_with(|| Pending {
-                            builder: EnvelopeBuilder::new(),
-                            epoch,
-                            first: offset,
-                            last: offset,
-                            started: Instant::now(),
-                        });
-                        pending.builder.push(&envelope);
-                        pending.last = offset;
-                    }
-                    Ok(Err(error)) => return Err(connector_error(error)),
+                match tokio::time::timeout(wait, self.polled.recv()).await {
+                    Ok(Some(Polled::Message(message))) => self.add(message),
+                    Ok(Some(Polled::Event(event))) => return Ok(self.handle(event)),
+                    Ok(Some(Polled::Error(error))) => return Err(connector_error(error)),
+                    Ok(None) => return Ok(SourceEvent::End),
                     Err(_) => {
                         return Ok(self.ready(true)?.unwrap_or(SourceEvent::Idle));
                     }
@@ -469,6 +647,24 @@ impl Source for KafkaSource {
         }
     }
 
+    fn revoked(&mut self, partition: PartitionId, _epoch: AssignmentEpoch) {
+        let waiter = {
+            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            table.waiters.remove(&partition.0)
+        };
+        if let Some(waiter) = waiter {
+            let _ = waiter.send(partition.0);
+        }
+    }
+
+    fn lag(&self) -> BTreeMap<u32, i64> {
+        self.table
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .lag
+            .clone()
+    }
+
     fn capabilities(&self) -> SourceCapabilities {
         SourceCapabilities {
             replayable: true,
@@ -481,8 +677,31 @@ impl Source for KafkaSource {
 
     fn close(&mut self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
-            self.consumer.unsubscribe();
+            self.stop.store(true, Ordering::Relaxed);
+            // A blocked send in the poll thread or a rebalance callback fails now.
+            self.polled.close();
+            // Unblock waiting revokes: the stream will not finish them.
+            let waiters: Vec<_> = {
+                let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                table.waiters.drain().collect()
+            };
+            for (id, waiter) in waiters {
+                let _ = waiter.send(id);
+            }
+            if let Some(thread) = self.thread.take() {
+                let _ = tokio::task::spawn_blocking(move || thread.join()).await;
+            }
+            let consumer = self.consumer.clone();
+            let _ = tokio::task::spawn_blocking(move || consumer.unsubscribe()).await;
         })
+    }
+}
+
+impl Drop for KafkaSource {
+    fn drop(&mut self) {
+        // Also when the stream ends without close: the poll thread must not outlive it.
+        self.stop.store(true, Ordering::Relaxed);
+        self.polled.close();
     }
 }
 

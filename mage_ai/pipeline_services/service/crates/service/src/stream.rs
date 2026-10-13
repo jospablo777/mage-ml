@@ -16,8 +16,8 @@ use mage_stream_core::{
     StopReason,
 };
 use mage_stream_ports::{
-    CommitOutcome, ConnectorError, EnvelopeBuilder, Header, RecordBatch, Sink, Source, SourceEvent,
-    TransformError, TransformSession, read_envelope,
+    AckKind, CommitOutcome, ConnectorError, EnvelopeBuilder, Header, PartitionId, RecordBatch,
+    Sink, Source, SourceEvent, TransformError, TransformSession, read_envelope,
 };
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -36,6 +36,10 @@ pub struct StreamStatus {
     pub last_error: Option<String>,
     /// Per partition: the last acknowledged position, as text.
     pub acknowledged: BTreeMap<u32, String>,
+    /// Per partition this instance reads: messages behind the end, where the source knows.
+    pub lag: BTreeMap<u32, i64>,
+    /// Partitions this instance reads now.
+    pub assigned: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -159,6 +163,9 @@ fn dead_letter_batch(
         .map_err(|e| ConnectorError::fatal(e.to_string()))
 }
 
+/// How long an instance may read no partition before it says so.
+const IDLE_WARNING_AFTER: Duration = Duration::from_secs(60);
+
 /// Runs the stream until it finishes (a finite source, a shutdown) or stops on an error.
 pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: CancellationToken) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Internal>();
@@ -203,6 +210,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let mut outputs: HashMap<BatchId, std::collections::BTreeMap<String, RecordBatch>> =
         HashMap::new();
     let mut reading = true;
+    let mut assigned: std::collections::BTreeSet<PartitionId> = Default::default();
+    let mut idle_warned = false;
+    let started = std::time::Instant::now();
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     set_state(&status, StreamState::Running);
@@ -268,10 +278,17 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     events.push(Event::BatchRead(meta));
                 }
                 Ok(SourceEvent::Assigned { partition, epoch }) => {
+                    assigned.insert(partition);
                     events.push(Event::Assigned { partition, epoch });
                 }
-                Ok(SourceEvent::Revoking { partition, epoch, .. }) => {
+                Ok(SourceEvent::Revoking { partition, epoch, within }) => {
+                    assigned.remove(&partition);
                     events.push(Event::Revoking { partition, epoch });
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(within).await;
+                        let _ = tx.send(Internal::Event(Event::RevokeDeadline { partition, epoch }));
+                    });
                 }
                 Ok(SourceEvent::Idle) => {
                     events.push(Event::Tick);
@@ -285,7 +302,31 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
             },
-            _ = ticker.tick() => events.push(Event::Tick),
+            _ = ticker.tick() => {
+                events.push(Event::Tick);
+                let lag = parts.source.lag();
+                count(&status, |s| {
+                    s.lag = lag;
+                    s.assigned = assigned.len();
+                });
+                // More instances than partitions leave some idle: say so once (I-38).
+                if assigned.is_empty()
+                    && !idle_warned
+                    && reading
+                    && started.elapsed() >= IDLE_WARNING_AFTER
+                    && parts.source.capabilities().ack_kind == AckKind::Offset
+                {
+                    idle_warned = true;
+                    count(&status, |s| s.alerts += 1);
+                    crate::log::warn(&format!(
+                        "Stream {}: this instance has read no partition for {} seconds. When \
+                         the stream runs more instances than its topic has partitions, the \
+                         extra ones stay idle until a partition is free.",
+                        parts.name,
+                        IDLE_WARNING_AFTER.as_secs()
+                    ));
+                }
+            }
         }
 
         for event in events {
@@ -375,6 +416,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             }
                         }
                     }
+                    Effect::Revoked { partition, epoch } => parts.source.revoked(partition, epoch),
                     Effect::Pause(partition) => parts.source.pause(partition),
                     Effect::Resume(partition) => parts.source.resume(partition),
                     Effect::Cancel(ids) => {

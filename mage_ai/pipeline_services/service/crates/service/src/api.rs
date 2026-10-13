@@ -810,6 +810,21 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                 );
             }
         }
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_stream_lag_messages Messages behind the end of each partition \
+             this instance reads."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_stream_lag_messages gauge");
+        for (pipeline, s) in &streams {
+            for (partition, lag) in &s.lag {
+                let _ = writeln!(
+                    out,
+                    "mage_service_stream_lag_messages{{pipeline=\"{}\",partition=\"{partition}\"}} {lag}",
+                    escape(pipeline)
+                );
+            }
+        }
         let _ = writeln!(out, "# HELP mage_service_stream_up 1 while a stream runs.");
         let _ = writeln!(out, "# TYPE mage_service_stream_up gauge");
         for (pipeline, s) in &streams {
