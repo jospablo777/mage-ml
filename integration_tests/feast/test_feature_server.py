@@ -127,18 +127,18 @@ def test_feature_service_and_full_feature_names(feast_url):
 
 
 def test_results_follow_the_response_names_not_the_request_order(feast_url):
-    """Clients must map values through metadata.feature_names."""
-    response = requests.post(
-        f'{feast_url}/get-online-features',
-        json=dict(
-            features=[f'driver_hourly_stats:{f}' for f in FEATURES],
-            entities=dict(driver_id=[1001]),
-        ),
-        timeout=30,
-    ).json()
+    """
+    Clients must map values through metadata.feature_names: the server's order is not the
+    request's on every run (it matched it on one CI run and differed on others).
+    """
+    forward = online(feast_url, [1001])
+    backward = online(feast_url, [1001], features=[
+        f'driver_hourly_stats:{f}' for f in reversed(FEATURES)
+    ])
 
-    assert response['metadata']['feature_names'][0] == 'driver_id'
-    assert response['metadata']['feature_names'][1:] != FEATURES
+    assert set(forward) == set(backward) == {'driver_id', *FEATURES}
+    for name in FEATURES:
+        assert forward[name]['values'] == backward[name]['values'], name
 
 
 def test_unknown_entities_are_not_found(feast_url):
