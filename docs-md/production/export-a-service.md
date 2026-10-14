@@ -210,7 +210,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, MongoDB change streams, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
 | Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
@@ -325,6 +325,7 @@ Read from other sources into Kafka through a Python block:
 | Source | Messages a second |
 | --- | --- |
 | NATS JetStream (one pull consumer) | 242,000 |
+| PostgreSQL changes (one slot, through Docker's network) | 205,000 |
 | RabbitMQ (one queue) | 16,000 to 27,000 |
 | IBM MQ, one connection (emulated amd64 server) | 1,900 |
 | IBM MQ, four connections | 4,600 |
@@ -333,7 +334,9 @@ The engine's own path from Kafka to Kafka carries about a million messages a sec
 Python block's JSON round trip, or parsing each message into a `Value` in Rust, costs the
 rest. A Rust block that takes `Vec<Vec<u8>>` or a `DataFrame` avoids most of it. RabbitMQ and IBM MQ are limited by their brokers. IBM MQ
 reads one message per round trip under syncpoint, so `connections` (at the cost of queue
-order) is what raises it. Larger `batch_size` values raise these.
+order) is what raises it. Larger `batch_size` values raise these. PostgreSQL sends each change in its own message;
+the server alone decodes about 1.3 million a second and streams about 370,000 inside its
+container, so on a laptop Docker's network is the limit.
 `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
 
 ### Webhooks
@@ -457,6 +460,46 @@ An `ibm_mq` source reads under syncpoint and commits after the sinks; an `ibm_mq
 under syncpoint and commits as the receipt. The image includes IBM's MQ client, which IBM
 publishes for Linux x86-64 only: build with `--platform linux/amd64`. Settings, TLS and
 gotchas: [IBM MQ](../integrations/ibm-cloud.md#ibm-mq).
+
+### PostgreSQL changes
+
+MageML's `postgres` source reads changes by logical replication (pgoutput), with its
+settings:
+
+```yaml
+connector_type: postgres
+host: db.example.com
+database: shop
+user: replicator              # a role with REPLICATION
+password: "{{ env_var('PG_PASSWORD') }}"
+replication_slot: orders_slot # mage_slot by default
+publication_name: orders_pub  # mage_pub by default
+tables: [public.orders]       # without it, every table of the publication
+batch_size: 500
+batch_timeout: 0.5
+sslmode: verify-full
+```
+
+- The server needs `wal_level = logical`. The slot and the publication are made when missing
+  (`create_slot: false` stops that); a publication without `tables` is `FOR ALL TABLES`,
+  which needs a superuser, and would also capture a PostgreSQL sink's own table in the same
+  database.
+- Each changed row reaches the blocks as a JSON object of its columns and `_mage_operation`
+  (`insert`, `update` or `delete`), `_mage_schema`, `_mage_table`, `_mage_lsn`,
+  `_mage_commit_time` and, for deletes, `_mage_deleted_at`, as MageML's source gives them.
+  Integers and numerics are JSON numbers with every digit (a Python block reads a numeric
+  with a fraction as a float), booleans, `json` and `jsonb` are JSON, arrays are JSON arrays,
+  timestamps ISO 8601 text in UTC, `bytea` base64, and other types their PostgreSQL text.
+- A delete has the key columns only, unless the table has `REPLICA IDENTITY FULL`. An update
+  that changes the primary key is a delete of the old key, then the update. A large value an
+  update did not change is not in the log; it is read from the table by key.
+- The slot holds the position: once every sink took a batch, the end of the last
+  transaction whose changes are all in it is confirmed to the server, so a restarted service
+  continues after it, on any machine, and a transaction that was partly handled comes again.
+  While the stream reads nothing of interest, the slot follows the server's log, so the
+  server does not keep the log of other tables' changes for it.
+- One slot is read by one connection, so the stream runs one instance. `start_lsn` sets
+  where a new slot starts. `TRUNCATE` is not replicated; the service says so once.
 
 ### PostgreSQL
 

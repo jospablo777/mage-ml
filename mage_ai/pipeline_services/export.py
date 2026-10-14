@@ -560,6 +560,8 @@ STREAM_SOURCES = {
     # Read through Event Hubs' Kafka endpoint.
     'azure_event_hub': 'kafka',
     'nats_js': 'nats', 'mongodb': 'mongodb',
+    # Changes by logical replication.
+    'postgres': 'postgres',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
@@ -583,6 +585,12 @@ POSTGRES_SINK_SETTINGS = {
     'host', 'port', 'database', 'username', 'password', 'schema', 'table',
     'unique_constraints', 'unique_conflict_method', 'auto_clean_name', 'case_sensitive',
     'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout',
+}
+# MageML's PostgreSQL change capture source, and the root certificate services also take.
+POSTGRES_SOURCE_SETTINGS = {
+    'host', 'port', 'database', 'user', 'password', 'replication_slot', 'publication_name',
+    'tables', 'create_slot', 'batch_size', 'batch_timeout', 'start_lsn', 'connect_timeout',
+    'sslmode', 'sslrootcert',
 }
 # Object storage sinks: the generic one, and Mage's S3 and GCS sinks, which name a bucket.
 OBJECT_STORAGE_SETTINGS = {
@@ -622,7 +630,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'Kinesis, Pub/Sub, SQS, Pulsar and PostgreSQL change capture come next'
+STREAM_PLANNED = 'Kinesis, Pub/Sub, SQS and Pulsar come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -993,6 +1001,32 @@ def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Di
     return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
 
 
+def _postgres_source_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MageML's change capture source: the slot and the publication, and its batches."""
+    unknown = sorted(set(config) - POSTGRES_SOURCE_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown PostgreSQL source settings {", ".join(unknown)}.')
+    for key in ('host', 'database', 'user'):
+        if not config.get(key):
+            problems.append(f'{where}: PostgreSQL source settings need {key}.')
+    if _literal(config.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    start = config.get('start_lsn')
+    if _literal(start) and start and not re.fullmatch(r'[0-9A-Fa-f]+/[0-9A-Fa-f]+', str(start)):
+        problems.append(f'{where}: start_lsn {start} is not a log position such as 0/16B3748.')
+    settings = {k: v for k, v in config.items()
+                if k in POSTGRES_SOURCE_SETTINGS and k not in ('batch_size', 'batch_timeout')}
+    connector = dict(name=block.uuid, kind='postgres', config=settings)
+    if config.get('batch_size'):
+        connector['batch_size'] = config['batch_size']
+    if config.get('batch_timeout'):
+        connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
 def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
                               problems: List[str]) -> Dict:
     """
@@ -1163,6 +1197,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'postgres' and role == 'source':
+        return _postgres_source_connector(block, config, where, problems)
     if kind == 'postgres':
         return dict(name=block.uuid, kind='postgres',
                     config=_postgres_sink_settings(config, where, problems))

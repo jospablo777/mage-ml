@@ -156,7 +156,8 @@ pub enum ConnectorKind {
     Mongodb,
     /// Sink: one object per batch, Parquet or JSON lines, on S3, GCS, Azure Blob or disk.
     ObjectStorage,
-    /// Sink: a PostgreSQL table, one transaction per batch.
+    /// Source: changes by logical replication (pgoutput), confirmed in the slot. Sink: a
+    /// PostgreSQL table, one transaction per batch.
     Postgres,
     /// Sink: a ClickHouse table, one deduplicated insert per batch.
     Clickhouse,
@@ -188,6 +189,7 @@ impl ConnectorKind {
                 | ConnectorKind::IbmMq
                 | ConnectorKind::Nats
                 | ConnectorKind::Mongodb
+                | ConnectorKind::Postgres
         )
     }
 

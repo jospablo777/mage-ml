@@ -109,6 +109,19 @@ fn source(
                 &pipeline.uuid,
             )?))
         }
+        #[cfg(feature = "postgres")]
+        ConnectorKind::Postgres => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_postgres::cdc::PgCdcSource::new(
+                &_config,
+                mage_connector_postgres::cdc::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => {
             let stream = pipeline.stream.as_ref().expect("a stream");

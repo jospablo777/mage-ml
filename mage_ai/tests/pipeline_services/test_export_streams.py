@@ -535,6 +535,49 @@ class PostgresSinkExportTest(StreamExportTestCase):
         self.assertIn('unique_conflict_method is IGNORE or UPDATE', problems)
 
 
+class PostgresSourceExportTest(StreamExportTestCase):
+    def test_change_capture_sources_export_to_the_engines_source(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: postgres
+            host: db.example.com
+            database: shop
+            user: replicator
+            password: "{{ env_var('PG_PASSWORD') }}"
+            replication_slot: orders_slot
+            publication_name: orders_pub
+            tables: [public.orders]
+            batch_size: 500
+            batch_timeout: 2
+            start_lsn: 0/16B3748
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        source = stream['source']
+        self.assertEqual(source['kind'], 'postgres')
+        self.assertEqual(source['config']['replication_slot'], 'orders_slot')
+        self.assertEqual(source['config']['tables'], ['public.orders'])
+        self.assertEqual(source['config']['password'], {'$parts': [{'env': 'PG_PASSWORD'}]})
+        self.assertNotIn('batch_size', source['config'])
+        self.assertEqual(stream['batch']['max_records'], 500)
+        self.assertEqual(stream['batch']['max_wait_ms'], 2000)
+        self.assertIn('postgres', captured.engine_features)
+
+    def test_a_written_password_and_a_bad_start_position_are_refused(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: postgres
+            host: db
+            database: shop
+            password: hunter2
+            start_lsn: yesterday
+            slot: x
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('password is written in the file', problems)
+        self.assertIn('start_lsn yesterday is not a log position', problems)
+        self.assertIn('PostgreSQL source settings need user', problems)
+        self.assertIn('unknown PostgreSQL source settings slot', problems)
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
@@ -577,7 +620,7 @@ class StreamRefusalTest(StreamExportTestCase):
         problems = self.problems()
         self.assertIn(
             'uses the kinesis connector; services run azure_event_hub, ibm_mq, kafka, mongodb, '
-            'nats_js, rabbitmq, webhook sources now',
+            'nats_js, postgres, rabbitmq, webhook sources now',
             problems,
         )
 

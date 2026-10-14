@@ -1,4 +1,4 @@
-//! PostgreSQL sink for streams.
+//! PostgreSQL sink for streams; the change capture source is in [`cdc`].
 //!
 //! A batch is one transaction, committed before the batch is confirmed. Its messages, JSON
 //! objects, go to PostgreSQL with COPY, each value as its text (numbers as the blocks wrote
@@ -20,6 +20,8 @@
 //! `auto_clean_name`, `case_sensitive`, `allow_reserved_words`; and `sslmode`, `sslrootcert`
 //! (a file, PEM, or base64 PEM), `connect_timeout`.
 
+pub mod cdc;
+mod replication;
 mod tls;
 
 use std::collections::BTreeMap;
@@ -678,12 +680,24 @@ fn tls_for(
     ),
     ConnectorError,
 > {
+    let (mode, check, root) =
+        tls_mode(settings.sslmode.as_deref(), settings.sslrootcert.as_deref())?;
+    let connector = tls::connector(check, root.as_deref())
+        .map_err(|e| ConnectorError::fatal(format!("PostgreSQL TLS: {e}")))?;
+    Ok((mode, connector))
+}
+
+/// What `sslmode` asks of the connection and of the server's certificate, and the root
+/// certificate file.
+fn tls_mode(
+    sslmode: Option<&str>,
+    sslrootcert: Option<&str>,
+) -> Result<(tokio_postgres::config::SslMode, tls::Check, Option<String>), ConnectorError> {
     use tls::Check;
     use tokio_postgres::config::SslMode;
 
-    let root = settings.sslrootcert.as_deref().map(root_file).transpose()?;
-    let mode = settings.sslmode.as_deref().unwrap_or("prefer");
-    let (mode, check) = match mode {
+    let root = sslrootcert.map(root_file).transpose()?;
+    let (mode, check) = match sslmode.unwrap_or("prefer") {
         "disable" => (SslMode::Disable, Check::None),
         "allow" | "prefer" => (SslMode::Prefer, Check::None),
         "require" if root.is_some() => (SslMode::Require, Check::Chain),
@@ -697,9 +711,7 @@ fn tls_for(
             )));
         }
     };
-    let connector = tls::connector(check, root.as_deref())
-        .map_err(|e| ConnectorError::fatal(format!("PostgreSQL TLS: {e}")))?;
-    Ok((mode, connector))
+    Ok((mode, check, root))
 }
 
 impl Sink for PgSink {

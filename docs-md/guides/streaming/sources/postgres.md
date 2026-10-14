@@ -79,3 +79,10 @@ publication exist.
 A transformer that runs longer than the server's `wal_sender_timeout` (60 seconds by
 default) loses the replication connection; the pipeline fails and resumes from the saved
 position when restarted.
+
+## In an exported service
+
+[Exported services](../../../production/export-a-service.md#postgresql-changes) run this source in the
+Rust engine, with the same settings and messages. The slot holds the position there, so a
+service on another machine continues where the last one stopped, and the connection stays
+alive while the blocks run, whatever they take.

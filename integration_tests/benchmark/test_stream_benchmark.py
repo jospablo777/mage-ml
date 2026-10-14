@@ -8,8 +8,9 @@ for messages already waiting in the topic, so the service's own speed is measure
 
 test_sink_throughput measures the sinks after the identity block: PostgreSQL, ClickHouse,
 Parquet files, RabbitMQ and IBM MQ, each with its services' settings; it skips those not
-running. test_source_throughput measures the RabbitMQ and IBM MQ sources, into Kafka, from
-a queue their sink filled.
+running. test_source_throughput measures the RabbitMQ, IBM MQ and NATS sources, into Kafka,
+from a queue their sink filled; test_postgres_change_throughput, PostgreSQL changes read by
+logical replication.
 
 MAGE_BENCHMARK_MESSAGES sets the messages (200,000 by default); MAGE_BENCHMARK_RESULTS names
 a JSON file for the results.
@@ -427,6 +428,75 @@ def test_source_throughput(source, connections, request, mage_project, kafka_boo
     assert written >= MESSAGES, status
     result = dict(source=source, connections=connections, messages=MESSAGES,
                   seconds=round(seconds, 2),
+                  messages_per_second=round(MESSAGES / seconds))
+    print(f'\nsource benchmark: {json.dumps(result)}')
+    _record(result)
+
+
+def test_postgres_change_throughput(request, mage_project, kafka_bootstrap, binary, tmp_path):
+    """
+    PostgreSQL changes read by logical replication into Kafka: rows inserted in transactions
+    of 10,000 into a table whose slot was made first, then read by the stream, so the reading
+    is measured, not the inserts.
+    """
+    import psycopg2
+    from kafka import KafkaConsumer, TopicPartition
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    settings = request.getfixturevalue('postgres_settings')
+    schema = f'bench_{uuid.uuid4().hex[:8]}'
+    slot = f'bench_{uuid.uuid4().hex[:8]}'
+    pg = psycopg2.connect(**settings)
+    pg.autocommit = True
+    with pg.cursor() as cursor:
+        cursor.execute(f'CREATE SCHEMA {schema}; CREATE TABLE {schema}.orders ('
+                       'order_id bigint PRIMARY KEY, customer text, region text, '
+                       'price numeric(10, 2), units integer, at timestamptz)')
+        cursor.execute(f'CREATE PUBLICATION {slot} FOR TABLE {schema}.orders')
+        cursor.execute("SELECT pg_create_logical_replication_slot(%s, 'pgoutput')", (slot,))
+        for start in range(0, MESSAGES, 10_000):
+            cursor.execute(
+                f"INSERT INTO {schema}.orders SELECT i, 'c' || i % 5000, 'north', "
+                "12.5 + i % 100, i % 9, '2026-10-14T10:00:00Z' "
+                f'FROM generate_series({start}, {min(start + 10_000, MESSAGES) - 1}) i'
+            )
+    topic = f'bench_out_{uuid.uuid4().hex[:8]}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
+    source = (f'connector_type: postgres\nhost: "{settings["host"]}"\n'
+              f'port: {settings["port"]}\ndatabase: {settings["dbname"]}\n'
+              f'user: {settings["user"]}\npassword: "{{{{ env_var(\'PG_PASSWORD\') }}}}"\n'
+              f'sslmode: disable\nreplication_slot: {slot}\npublication_name: {slot}\n'
+              f'tables: [{schema}.orders]\nbatch_size: 5000\nbatch_timeout: 0.1\n')
+    pipeline = _stream(mage_project, f'bench_cdc_{uuid.uuid4().hex[:6]}', source, f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {topic}
+    ''')
+    consumer = KafkaConsumer(bootstrap_servers=kafka_bootstrap)
+    directory = export_service(mage_project, pipeline.uuid, tmp_path / pipeline.uuid)
+    service = RunningService(binary, directory, tmp_path / pipeline.uuid / 'data',
+                             PG_PASSWORD=settings['password'], KAFKA_BOOTSTRAP=kafka_bootstrap)
+    try:
+        service.start()
+        written, seconds = _timed(
+            lambda: sum(consumer.end_offsets([TopicPartition(topic, 0)]).values()), MESSAGES,
+            900, lambda: service.streams()[0]['state'] == 'failed', every=0.1,
+        )
+        status = service.streams()[0]
+    finally:
+        service.stop()
+        consumer.close()
+        pipeline.delete()
+        admin.delete_topics([topic])
+        with pg.cursor() as cursor:
+            cursor.execute('SELECT pg_drop_replication_slot(slot_name) FROM '
+                           'pg_replication_slots WHERE slot_name = %s', (slot,))
+            cursor.execute(f'DROP PUBLICATION IF EXISTS {slot}; DROP SCHEMA {schema} CASCADE')
+        pg.close()
+
+    assert written >= MESSAGES, status
+    result = dict(source='postgres_changes', messages=MESSAGES, seconds=round(seconds, 2),
                   messages_per_second=round(MESSAGES / seconds))
     print(f'\nsource benchmark: {json.dumps(result)}')
     _record(result)

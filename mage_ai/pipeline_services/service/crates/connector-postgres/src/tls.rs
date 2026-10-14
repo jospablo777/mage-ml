@@ -25,6 +25,17 @@ pub fn connector(
     check: Check,
     root_file: Option<&str>,
 ) -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(
+        client_config(check, root_file)?,
+    ))
+}
+
+/// The rustls settings of a check, for connections tokio-postgres does not make (logical
+/// replication).
+pub fn client_config(
+    check: Check,
+    root_file: Option<&str>,
+) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut roots = RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
@@ -58,7 +69,7 @@ pub fn connector(
             }))
             .with_no_client_auth()
     };
-    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+    Ok(config)
 }
 
 /// `require` and `verify-ca`: the handshake's signatures are always verified, the

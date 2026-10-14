@@ -2830,15 +2830,20 @@ dependencies = [
 name = "mage-connector-postgres"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
+ "chrono",
  "futures-util",
  "mage-stream-core",
  "mage-stream-ports",
+ "postgres-protocol",
+ "ring",
  "rustls",
  "serde_json",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
+ "tokio-rustls",
  "webpki-roots 1.0.9",
 ]
 

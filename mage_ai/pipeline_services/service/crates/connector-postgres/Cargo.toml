@@ -1,6 +1,6 @@
 [package]
 name = "mage-connector-postgres"
-description = "PostgreSQL sink for Mage pipeline service streams: exact values through jsonb, upserts, tables made and extended from the messages"
+description = "PostgreSQL change capture source and sink for Mage pipeline service streams: logical replication with pgoutput; exact values, upserts, tables made and extended from the messages"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,12 @@ mage-stream-ports = { path = "../stream-ports" }
 serde_json = { workspace = true }
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
+tokio = { version = "1.47", features = ["rt", "time", "sync", "macros", "net", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false }
+postgres-protocol = "0.6"
+ring = "0.17"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 tokio-postgres-rustls = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
