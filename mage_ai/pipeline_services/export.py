@@ -632,6 +632,8 @@ SIGNATURE_SETTINGS = {'header', 'prefix', 'secret'}
 KAFKA_SETTINGS = {
     'bootstrap_server', 'bootstrap_servers', 'security_protocol', 'sasl_config', 'ssl_config',
     'api_version', 'librdkafka',
+    # IBM Event Streams' service credentials JSON, which stands for the brokers and sign-in.
+    'event_streams_credentials',
 }
 KAFKA_SOURCE_SETTINGS = KAFKA_SETTINGS | {
     'topic', 'topics', 'consumer_group', 'auto_offset_reset', 'batch_size', 'timeout_ms',
@@ -709,6 +711,12 @@ def _kafka_settings(config: Dict, allowed: Set[str], where: str,
                 f'{where}: {section} settings {", ".join(extra)} are not supported by services '
                 'yet (OAuth sign-in comes later).'
             )
+    if _literal(config.get('event_streams_credentials')):
+        problems.append(
+            f"{where}: event_streams_credentials is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME to the service credentials JSON in the "
+            "service's environment."
+        )
     for section, key in SECRET_SETTINGS:
         if _literal((config.get(section) or {}).get(key)):
             problems.append(

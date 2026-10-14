@@ -57,6 +57,10 @@ class KafkaConfig(BaseConfig):
 
     @classmethod
     def parse_config(self, config: Dict) -> Dict:
+        from mage_ai.services.ibm.event_streams import expand
+
+        # IBM Event Streams' service credentials stand for the brokers and sign-in.
+        config = expand(config)
         ssl_config = config.get('ssl_config')
         sasl_config = config.get('sasl_config')
         if ssl_config and type(ssl_config) is dict:

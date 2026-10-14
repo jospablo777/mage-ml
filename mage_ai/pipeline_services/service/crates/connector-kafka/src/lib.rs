@@ -74,6 +74,53 @@ fn event_hubs(client: &mut ClientConfig, connection: &str) -> Result<(), Connect
     Ok(())
 }
 
+/// IBM Event Streams from its service credentials JSON (a string, as the environment holds
+/// it, or an object): the brokers of `kafka_brokers_sasl`, SASL_SSL, and PLAIN sign-in as
+/// `token` with the API key.
+fn event_streams(client: &mut ClientConfig, credentials: &Value) -> Result<(), ConnectorError> {
+    let parsed;
+    let credentials = match credentials {
+        Value::String(text) => {
+            parsed = serde_json::from_str::<Value>(text).map_err(|e| {
+                ConnectorError::fatal(format!(
+                    "IBM Event Streams: event_streams_credentials is not the service \
+                     credentials JSON: {e}"
+                ))
+            })?;
+            &parsed
+        }
+        other => other,
+    };
+    let brokers: Vec<String> = match &credentials["kafka_brokers_sasl"] {
+        Value::Array(list) => list
+            .iter()
+            .filter_map(|b| b.as_str().map(String::from))
+            .collect(),
+        Value::String(text) => text.split(',').map(String::from).collect(),
+        _ => Vec::new(),
+    };
+    if brokers.is_empty() {
+        return Err(ConnectorError::fatal(
+            "IBM Event Streams: the credentials have no kafka_brokers_sasl.",
+        ));
+    }
+    let password = text(credentials, "password")
+        .or_else(|| text(credentials, "api_key"))
+        .ok_or_else(|| {
+            ConnectorError::fatal("IBM Event Streams: the credentials have no api_key.")
+        })?;
+    client
+        .set("bootstrap.servers", brokers.join(","))
+        .set("security.protocol", "SASL_SSL")
+        .set("sasl.mechanism", "PLAIN")
+        .set(
+            "sasl.username",
+            text(credentials, "user").unwrap_or_else(|| "token".into()),
+        )
+        .set("sasl.password", password);
+    Ok(())
+}
+
 /// Mage's serde_config: JSON (and text) as they are, or Avro decoded with the schemas of a
 /// schema registry.
 fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, ConnectorError> {
@@ -116,6 +163,11 @@ fn client_config(config: &Value) -> Result<ClientConfig, ConnectorError> {
         event_hubs(&mut client, &connection)?;
         return Ok(client);
     }
+    if let Some(credentials) = config.get("event_streams_credentials") {
+        event_streams(&mut client, credentials)?;
+        apply_librdkafka(&mut client, config);
+        return Ok(client);
+    }
     let servers = text(config, "bootstrap_server")
         .or_else(|| text(config, "bootstrap_servers"))
         .ok_or_else(|| ConnectorError::fatal("Kafka settings need bootstrap_server."))?;
@@ -152,6 +204,12 @@ fn client_config(config: &Value) -> Result<ClientConfig, ConnectorError> {
             );
         }
     }
+    apply_librdkafka(&mut client, config);
+    Ok(client)
+}
+
+/// librdkafka properties set as they are (`librdkafka:` in the settings).
+fn apply_librdkafka(client: &mut ClientConfig, config: &Value) {
     if let Some(extra) = config.get("librdkafka").and_then(Value::as_object) {
         for (key, value) in extra {
             let value = match value {
@@ -161,7 +219,6 @@ fn client_config(config: &Value) -> Result<ClientConfig, ConnectorError> {
             client.set(key, value);
         }
     }
-    Ok(client)
 }
 
 fn connector_error(error: KafkaError) -> ConnectorError {
@@ -1117,6 +1174,27 @@ impl Sink for KafkaSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_streams_credentials_become_brokers_and_sign_in() {
+        let credentials = r#"{"api_key": "k3y", "kafka_brokers_sasl":
+            ["broker-0.eventstreams.cloud.ibm.com:9093", "broker-1.eventstreams.cloud.ibm.com:9093"],
+            "user": "token"}"#;
+        let client = client_config(&serde_json::json!({
+            "event_streams_credentials": credentials,
+        }))
+        .unwrap();
+        assert_eq!(
+            client.get("bootstrap.servers"),
+            Some(
+                "broker-0.eventstreams.cloud.ibm.com:9093,broker-1.eventstreams.cloud.ibm.com:9093"
+            )
+        );
+        assert_eq!(client.get("sasl.username"), Some("token"));
+        assert_eq!(client.get("sasl.password"), Some("k3y"));
+        assert_eq!(client.get("sasl.mechanism"), Some("PLAIN"));
+        assert!(client_config(&serde_json::json!({"event_streams_credentials": "{}"})).is_err());
+    }
 
     #[test]
     fn event_hubs_connection_strings_become_the_kafka_endpoint() {

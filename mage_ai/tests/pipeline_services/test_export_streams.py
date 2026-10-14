@@ -693,6 +693,26 @@ class StreamRefusalTest(StreamExportTestCase):
         self.assertIn('pull consumer', problems)
         self.assertIn('NATS password or seed is written in the file', problems)
 
+    def test_event_streams_credentials_stay_a_reference(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: kafka
+            event_streams_credentials: "{{ env_var('EVENT_STREAMS_CREDENTIALS') }}"
+            topic: orders
+            consumer_group: scorer
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        config = captured.manifest['pipelines'][0]['stream']['source']['config']
+        self.assertIn('EVENT_STREAMS_CREDENTIALS', json.dumps(config['event_streams_credentials']))
+
+    def test_event_streams_credentials_written_in_the_file_are_refused(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: kafka
+            event_streams_credentials: '{"api_key": "k", "kafka_brokers_sasl": ["b:9093"]}'
+            topic: orders
+            consumer_group: scorer
+        '''))  # pragma: allowlist secret
+        self.assertIn('event_streams_credentials is written in the file', self.problems())
+
     def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
         self.stream(source=textwrap.dedent(SOURCE)
                     + 'serde_config:\n  serialization_method: RAW_VALUE\n')

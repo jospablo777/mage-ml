@@ -182,8 +182,21 @@ later.
 
 ## Event Streams
 
-Event Streams is Kafka. A streaming pipeline's Kafka source and sink connect with the API key
-of a service credential, user `token`:
+Event Streams is Kafka. A streaming pipeline's Kafka source and sink take the service
+credentials JSON (the service key IBM Cloud makes) as one setting, which stands for the
+brokers and the sign-in:
+
+```yaml
+connector_type: kafka
+event_streams_credentials: "{{ env_var('EVENT_STREAMS_CREDENTIALS') }}"
+topic: orders
+consumer_group: orders-clean
+```
+
+Set `EVENT_STREAMS_CREDENTIALS` to the JSON, for example
+`ibmcloud resource service-key orders-key --output JSON | jq -c '.[0].credentials'`. The
+brokers come from `kafka_brokers_sasl`, and the sign-in is SASL PLAIN as `token` with the
+`api_key`. The same settings written out:
 
 ```yaml
 connector_type: kafka
@@ -197,7 +210,7 @@ sasl_config:
   password: "{{ env_var('EVENT_STREAMS_API_KEY') }}"
 ```
 
-- The brokers are `kafka_brokers_sasl` in the service credentials. Join them with commas.
+- Credentials written in the file are refused by `mage export service`.
 - Exported services run the same settings in their Rust Kafka connector; the key stays an
   `env_var()` reference that the service reads, never written into the image.
 - Create topics in the console, CLI or Terraform, with the partitions you need: each plan
