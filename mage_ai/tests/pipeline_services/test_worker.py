@@ -397,6 +397,34 @@ class StreamBatchTest(WorkerTestCase):
         self.assertIn('messages[0].score', str(raised.exception))
         self.assertEqual(raised.exception.block_uuid, 'nan')
 
+    def test_nan_between_blocks_is_allowed_and_numpy_nan_is_named(self):
+        """Only messages leaving the worker are JSON; a block may hand NaN to the next."""
+        scores = self.block('''
+            @transformer
+            def f(messages):
+                return [{'score': float('nan')}, {'score': 2.0}]
+        ''', name='scores')
+        keep = self.block('''
+            import math
+
+            @transformer
+            def f(messages):
+                return [m for m in messages if not math.isnan(m['score'])]
+        ''', name='keep')
+        numpy_nan = self.block('''
+            import numpy as np
+
+            @transformer
+            def f(messages):
+                return [{'score': np.float32('nan')}]
+        ''', name='numpy_nan')
+
+        self.assertEqual(self.stream([scores, keep], [{}])['outputs'], {'keep': [{'score': 2.0}]})
+        with self.assertRaises(worker.BlockError) as raised:
+            self.stream([numpy_nan], [{}])
+        self.assertEqual((raised.exception.phase, raised.exception.block_uuid),
+                         ('run', 'numpy_nan'))
+
     def test_a_failing_block_is_named(self):
         fails = self.block('''
             @transformer
@@ -425,8 +453,10 @@ class StreamBatchTest(WorkerTestCase):
         worker.serve(requests, channel)
 
         replies = [json.loads(line) for line in channel.getvalue().splitlines()]
-        self.assertEqual(replies[-1]['messages'], [{'seen': 3}])
+        self.assertEqual(replies[-1]['outputs'], {'seen': [{'seen': 3}]})
+        self.assertNotIn('messages', replies[-1])
         self.assertTrue(replies[-1]['ok'])
+        self.assertIsInstance(replies[-1]['rss_bytes'], int)
 
 
 class StreamIsolationTest(WorkerTestCase):
@@ -530,7 +560,7 @@ class StreamLoadTest(WorkerTestCase):
 
         replies = [json.loads(line) for line in channel.getvalue().splitlines()][1:]
         self.assertEqual(replies[0]['loaded'], ['model'])
-        self.assertEqual(replies[1]['messages'], [1])
+        self.assertEqual(replies[1]['outputs'], {'model': [1]})
         with open(marker) as file:
             self.assertEqual(file.read(), 'x')
         self.assertTrue(all(r['rss_bytes'] > 0 for r in replies))

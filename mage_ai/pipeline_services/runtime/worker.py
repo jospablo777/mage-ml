@@ -737,6 +737,7 @@ def _check_finite(value: Any, block_uuid: str, path: str = 'messages') -> None:
     """
     Messages travel as JSON, which has no NaN or infinity. They used to become null without a
     word; the block now fails with the field, so the user decides (None, a string, a filter).
+    Called once json.dumps refused a block's messages, to name the field.
     """
     if isinstance(value, float) and not math.isfinite(value):
         raise BlockError('run', f'Block {block_uuid} returned {value} at {path}; stream messages '
@@ -795,6 +796,7 @@ def run_stream_batch(request: Dict) -> Dict:
             messages=outputs.get(last, []) if last else messages,
             blocks=[],
             failures=failures,
+            outputs_json={uuid: _messages_json(o, uuid) for uuid, o in outputs.items()},
         )
 
 
@@ -878,26 +880,53 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
         except Exception as error:
             raise BlockError('run', f'{type(error).__name__}: {error}', _user_traceback(),
                              block_uuid=block['uuid'])
-        output = _stream_messages(result, block['uuid'])
-        _check_finite(output, block['uuid'])
-        results[block['uuid']] = output
+        results[block['uuid']] = _stream_messages(result, block['uuid'])
         timings.append(dict(block_uuid=block['uuid'],
                             seconds=round(time.monotonic() - started, 6)))
     last = blocks[-1]['uuid'] if blocks else None
     wanted = request.get('outputs') or ([last] if last else [])
+    outputs = {uuid: results.get(uuid, []) for uuid in wanted}
     return dict(
-        outputs={uuid: results.get(uuid, []) for uuid in wanted},
+        outputs=outputs,
         messages=results.get(last, []) if last else messages,
         blocks=timings,
+        # The outputs as JSON, made once: the reply reuses it. Only what leaves the worker
+        # must be JSON; messages passed between blocks in the worker may hold anything.
+        outputs_json={uuid: _messages_json(output, uuid) for uuid, output in outputs.items()},
     )
+
+
+def _messages_json(messages: List, block_uuid: str) -> str:
+    try:
+        return json.dumps(messages, allow_nan=False, default=_json_default)
+    except ValueError as error:
+        _check_finite(messages, block_uuid)
+        raise BlockError('run', f'Block {block_uuid} returned messages that are not JSON: '
+                         f'{error}.', block_uuid=block_uuid)
 
 
 # ---- protocol -----------------------------------------------------------------------
 
 
 def _reply(channel, message: Dict) -> None:
-    channel.write(json.dumps(message, default=_json_default) + '\n')
+    channel.write(_reply_line(message) + '\n')
     channel.flush()
+
+
+def _reply_line(message: Dict) -> str:
+    """
+    A stream batch's reply holds its outputs as the JSON made when they were checked, not
+    serialized again; `messages` (the last block's, for callers in this process) is left out.
+    """
+    outputs = message.pop('outputs_json', None)
+    if outputs is None:
+        return json.dumps(message, default=_json_default)
+    message.pop('messages', None)
+    message.pop('outputs', None)
+    head = json.dumps(message, default=_json_default)
+    body = ','.join(f'{json.dumps(uuid)}:{text}' for uuid, text in outputs.items())
+    return f'{head[:-1]},"outputs":{{{body}}}}}'
+
 
 
 def _rss_bytes() -> Optional[int]:
