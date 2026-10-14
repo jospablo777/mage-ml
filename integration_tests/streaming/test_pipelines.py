@@ -4,6 +4,7 @@ notebook: a source, a Python transformer and several sinks, with messages of sev
 value types, checked in every sink.
 """
 import json
+import time
 import uuid
 
 import pytest
@@ -173,6 +174,12 @@ def test_rabbitmq_to_rabbitmq_mysql_and_clickhouse(
                 return rows if len(rows) >= COUNT else None
 
             clickhouse = wait_until(clickhouse_rows, run, message='ClickHouse')
+            # The source acknowledges a batch after its sinks wrote it; stopping the run in
+            # between returns that batch to the queue, as at-least-once delivery does. Let
+            # the last acknowledgement go out first.
+            for _ in range(6):
+                run.check_alive()
+                time.sleep(0.5)
 
         out = []
         while True:
