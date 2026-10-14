@@ -210,7 +210,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, or [Rust](../guides/blocks/rust-blocks.md#stream-transformers) |
 | Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
@@ -251,6 +251,11 @@ sasl_config:
 - The export stops, with the reason, on what services can't run the same way as MageML
   yet: Python sources and sinks, other connectors, `include_metadata`, Protobuf messages, a
   start `offset`, and passwords written in the file.
+- An Azure Event Hubs source (Mage's `azure_event_hub`) is read through the namespace's
+  Kafka endpoint, which needs the Standard tier or above: the event hub is the topic, the
+  consumer group is Kafka's, and the connection string, set as an environment variable, is
+  the password. Blocks get `{'data': <the body as text>}`, as from Mage's source. The
+  mapping is tested against the endpoint's settings, not against a live namespace.
 - With `serialization_method: RAW_VALUE`, blocks get each message's bytes, as in Mage (a
   Rust block takes them as `Vec<Vec<u8>>`).
 - Avro messages in Confluent's format (Mage's `serialization_method: AVRO`) are decoded by

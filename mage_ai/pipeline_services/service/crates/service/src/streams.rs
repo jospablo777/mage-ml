@@ -436,6 +436,8 @@ fn source_shape(source: &Connector) -> MessageShape {
         .is_some_and(|method| method.eq_ignore_ascii_case("RAW_VALUE"));
     if source.kind == ConnectorKind::Rabbitmq {
         MessageShape::RabbitmqPayload
+    } else if source.config.contains_key("event_hubs_connection_string") {
+        MessageShape::EventHubsData
     } else if raw {
         MessageShape::RawBytes
     } else {
@@ -577,5 +579,10 @@ mod tests {
         assert_eq!(source_shape(&raw), MessageShape::RawBytes);
         let rabbit = connector(ConnectorKind::Rabbitmq, serde_json::json!({}));
         assert_eq!(source_shape(&rabbit), MessageShape::RabbitmqPayload);
+        let hubs = connector(
+            ConnectorKind::Kafka,
+            serde_json::json!({"event_hubs_connection_string": {"$parts": ["x"]}}),
+        );
+        assert_eq!(source_shape(&hubs), MessageShape::EventHubsData);
     }
 }

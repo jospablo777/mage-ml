@@ -63,6 +63,8 @@ pub enum MessageShape {
     RabbitmqPayload,
     /// Mage's RAW_VALUE: blocks get each message's bytes (sent as base64).
     RawBytes,
+    /// Mage's Azure Event Hubs source: blocks get `{"data": <the body as text>}`.
+    EventHubsData,
 }
 
 impl PythonStreamSession {
@@ -221,6 +223,12 @@ fn rabbitmq_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError
     serde_json::value::to_raw_value(&message).map_err(|e| TransformError::Protocol(e.to_string()))
 }
 
+/// A message's body as text, unparsed (Mage's Event Hubs source hands blocks the text).
+fn text_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
+    serde_json::value::to_raw_value(&String::from_utf8_lossy(&envelope.value))
+        .map_err(|e| TransformError::Protocol(e.to_string()))
+}
+
 /// A message's bytes as base64 text, which the worker turns back into bytes.
 fn raw_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
     use base64::Engine as _;
@@ -323,6 +331,7 @@ impl TransformSession for PythonStreamSession {
                     MessageShape::Values => message_value(envelope)?,
                     MessageShape::RabbitmqPayload => rabbitmq_message(envelope)?,
                     MessageShape::RawBytes => raw_message(envelope)?,
+                    MessageShape::EventHubsData => text_message(envelope)?,
                 });
             }
             if self.frames.is_none() {
@@ -362,6 +371,7 @@ impl TransformSession for PythonStreamSession {
                         MessageShape::Values => None,
                         MessageShape::RabbitmqPayload => Some("rabbitmq"),
                         MessageShape::RawBytes => Some("raw"),
+                        MessageShape::EventHubsData => Some("event_hub"),
                     },
                 })
             };

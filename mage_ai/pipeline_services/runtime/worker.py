@@ -853,6 +853,9 @@ def _stream_batch(request: Dict) -> Dict:
         request = dict(request, messages=_read_messages_file(request))
     if request.get('message_shape') == 'rabbitmq':
         request = dict(request, messages=[_rabbitmq_payload(m) for m in request['messages']])
+    elif request.get('message_shape') == 'event_hub':
+        # Mage's Azure Event Hubs source hands blocks each body as text, under `data`.
+        request = dict(request, messages=[dict(data=m) for m in request['messages']])
     elif request.get('message_shape') == 'raw':
         # Mage's RAW_VALUE: each message's bytes, sent as base64.
         import base64

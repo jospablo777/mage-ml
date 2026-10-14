@@ -628,6 +628,29 @@ class StreamRefusalTest(StreamExportTestCase):
         self.assertNotIn('schema_classpath', serde)
         self.assertIn('REGISTRY_PASSWORD', json.dumps(serde['schema_registry_password']))
 
+    def test_azure_event_hubs_is_read_through_its_kafka_endpoint(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: azure_event_hub
+            connection_str: "{{ env_var('EVENT_HUBS_CONNECTION') }}"
+            eventhub_name: orders
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        source = captured.manifest['pipelines'][0]['stream']['source']
+        self.assertEqual(source['kind'], 'kafka')
+        self.assertEqual(source['config']['topic'], 'orders')
+        self.assertEqual(source['config']['consumer_group'], '$Default')
+        self.assertIn('EVENT_HUBS_CONNECTION',
+                      json.dumps(source['config']['event_hubs_connection_string']))
+
+    def test_an_event_hubs_connection_string_written_in_the_file_is_refused(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: azure_event_hub
+            connection_str: Endpoint=sb://x.servicebus.windows.net/;SharedAccessKey=k
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('connection_str is written in the file', problems)
+        self.assertIn('Azure Event Hubs needs eventhub_name', problems)
+
     def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
         self.stream(source=textwrap.dedent(SOURCE)
                     + 'serde_config:\n  serialization_method: RAW_VALUE\n')

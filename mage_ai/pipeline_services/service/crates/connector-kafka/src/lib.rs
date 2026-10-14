@@ -45,6 +45,35 @@ pub struct BatchLimits {
     pub max_wait: Duration,
 }
 
+/// Azure Event Hubs through its Kafka endpoint: the namespace's host on port 9093, signed
+/// in with SASL PLAIN as `$ConnectionString` and the connection string as the password.
+/// The connection string is read at run time: in the manifest it is an environment
+/// reference, so its namespace is not known before.
+fn event_hubs(client: &mut ClientConfig, connection: &str) -> Result<(), ConnectorError> {
+    let endpoint = connection
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("Endpoint="))
+        .ok_or_else(|| {
+            ConnectorError::fatal(
+                "Azure Event Hubs: the connection string has no Endpoint=sb://<namespace>... part.",
+            )
+        })?;
+    let host = endpoint
+        .trim_start_matches("sb://")
+        .trim_end_matches('/')
+        .split('/')
+        .next()
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| ConnectorError::fatal("Azure Event Hubs: the Endpoint has no host."))?;
+    client
+        .set("bootstrap.servers", format!("{host}:9093"))
+        .set("security.protocol", "SASL_SSL")
+        .set("sasl.mechanism", "PLAIN")
+        .set("sasl.username", "$ConnectionString")
+        .set("sasl.password", connection);
+    Ok(())
+}
+
 /// Mage's serde_config: JSON (and text) as they are, or Avro decoded with the schemas of a
 /// schema registry.
 fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, ConnectorError> {
@@ -83,6 +112,10 @@ fn text(config: &Value, key: &str) -> Option<String> {
 /// The client properties shared by the source and the sink.
 fn client_config(config: &Value) -> Result<ClientConfig, ConnectorError> {
     let mut client = ClientConfig::new();
+    if let Some(connection) = text(config, "event_hubs_connection_string") {
+        event_hubs(&mut client, &connection)?;
+        return Ok(client);
+    }
     let servers = text(config, "bootstrap_server")
         .or_else(|| text(config, "bootstrap_servers"))
         .ok_or_else(|| ConnectorError::fatal("Kafka settings need bootstrap_server."))?;
@@ -1078,5 +1111,33 @@ impl Sink for KafkaSink {
             idempotent: true,
             transactional: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_hubs_connection_strings_become_the_kafka_endpoint() {
+        let connection = "Endpoint=sb://shop.servicebus.windows.net/;SharedAccessKeyName=read;\
+                          SharedAccessKey=abc=;EntityPath=orders";
+        let client = client_config(&serde_json::json!({
+            "event_hubs_connection_string": connection,
+        }))
+        .unwrap();
+        assert_eq!(
+            client.get("bootstrap.servers"),
+            Some("shop.servicebus.windows.net:9093")
+        );
+        assert_eq!(client.get("sasl.username"), Some("$ConnectionString"));
+        assert_eq!(client.get("sasl.password"), Some(connection));
+        assert_eq!(client.get("security.protocol"), Some("SASL_SSL"));
+        let error = client_config(&serde_json::json!({
+            "event_hubs_connection_string": "SharedAccessKey=abc",
+        }))
+        .err()
+        .unwrap();
+        assert!(error.message.contains("Endpoint"), "{}", error.message);
     }
 }

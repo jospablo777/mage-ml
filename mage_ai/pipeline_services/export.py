@@ -557,6 +557,8 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
 STREAM_SOURCES = {
     'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
+    # Read through Event Hubs' Kafka endpoint.
+    'azure_event_hub': 'kafka',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
@@ -979,6 +981,41 @@ def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture
     return connector
 
 
+EVENT_HUBS_SETTINGS = {'connection_str', 'eventhub_name', 'consumer_group', 'batch_size',
+                       'timeout_ms'}
+
+
+def _event_hubs_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """
+    Mage's Azure Event Hubs source, read through the namespace's Kafka endpoint (Standard
+    tier and above): the event hub is the topic, the connection string the password. Blocks
+    get {'data': <body text>}, as Mage's source hands them over.
+    """
+    unknown = sorted(set(config) - EVENT_HUBS_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown Azure Event Hubs settings {", ".join(unknown)}.')
+    connection = config.get('connection_str')
+    if not connection:
+        problems.append(f'{where}: Azure Event Hubs needs connection_str.')
+    elif _literal(connection):
+        problems.append(
+            f"{where}: connection_str is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    if not config.get('eventhub_name'):
+        problems.append(f'{where}: Azure Event Hubs needs eventhub_name.')
+    settings = dict(
+        event_hubs_connection_string=connection,
+        topic=config.get('eventhub_name'),
+        consumer_group=config.get('consumer_group') or '$Default',
+        # Mage's source starts at the beginning of each partition.
+        auto_offset_reset='earliest',
+    )
+    return dict(name=block.uuid, kind='kafka', config=settings,
+                batch_size=config.get('batch_size') or 100,
+                timeout_ms=config.get('timeout_ms'))
+
+
 def _marked_dead_letter(block, pipeline) -> bool:
     """Whether a YAML sink sets `dead_letter: true`."""
     try:
@@ -1030,6 +1067,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     if kind == 'feast':
         return dict(name=block.uuid, kind=kind,
                     config=_feast_sink_settings(config, where, problems))
+    if connector_type == 'azure_event_hub':
+        return _event_hubs_connector(block, config, where, problems)
     if kind == 'rabbitmq':
         return _rabbitmq_connector(block, role, config, where, problems)
     if kind == 'ibm_mq':
