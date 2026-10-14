@@ -319,14 +319,16 @@ jobs:
         run: make -C integration_tests r-env
       # The exported Kafka stream test runs mage-service built with Kafka: librdkafka builds
       # with CMake and includes curl's header. Built before the tests, so the test's time
-      # limit does not pay for librdkafka and OpenSSL.
+      # limit does not pay for librdkafka and OpenSSL. A release build, as services ship and
+      # as the timing tests need; MAGE_TEST_STREAM_RELEASE makes every test use it.
       - name: Build the engine with its stream connectors
         if: matrix.id == 'streaming' || matrix.id == 'sql'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse
+          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse
+          echo "MAGE_TEST_STREAM_RELEASE=1" >> "$GITHUB_ENV"
       # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
       # the version and checksum exported images pin.
       - name: Download the IBM MQ client

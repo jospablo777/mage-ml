@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from kafka import KafkaConsumer, KafkaProducer
+from kafka import KafkaConsumer, KafkaProducer, TopicPartition
 from kafka.admin import KafkaAdminClient, NewTopic
 
 from integration_tests.exported_services import (
@@ -375,6 +375,75 @@ def test_a_paused_stream_reads_nothing_until_it_resumes_and_loses_nothing(
     assert snapshot['status'] == 'paused'
     assert snapshot['stream']['state'] == 'paused'
     assert sorted(m['id'] for m in after) == [i for i in range(100) if i % 10]
+
+
+def test_backpressure_does_not_stall_the_stream(mage_project, kafka_bootstrap, tmp_path):
+    """
+    A stream that reads faster than it writes is paused and resumed every few batches. It
+    used to pause in librdkafka, which fetched again up to 0.8 seconds after each resume, so
+    the stream stood still most of the time (I-78); now it writes without such gaps.
+    """
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'kafka_pressure_{uuid.uuid4().hex[:8]}'
+    topics = [f'{name}_in', f'{name}_out']
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(t, num_partitions=1, replication_factor=1) for t in topics])
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+    try:
+        blocks = [
+            ('source', 'data_loader', 'yaml', (SOURCE % dict(topic=topics[0], group=name))
+             .replace('batch_size: 50', 'batch_size: 5000')),
+            ('pass', 'transformer', 'python',
+             '@transformer\ndef identity(messages, *args, **kwargs):\n    return messages\n'),
+            ('sink', 'data_exporter', 'yaml', SINK % dict(topic=topics[1])),
+        ]
+        upstream = []
+        for suffix, kind, language, code in blocks:
+            block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                                 pipeline=pipeline)
+            Path(block.file_path).write_text(code)
+            pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+            upstream = [block]
+        # Large enough that librdkafka's queue, sized from the stream's byte budget, fills.
+        count = 200_000
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap, linger_ms=20,
+                                 batch_size=1 << 20)
+        for i in range(count):
+            producer.send(topics[0], json.dumps(dict(id=i, note='x' * 100)).encode())
+        producer.flush()
+        producer.close()
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        # A release build: a debug engine reads too slowly to run ahead of its sink.
+        service = RunningService(stream_service_binary(release=True), directory,
+                                 tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap)
+        consumer = KafkaConsumer(bootstrap_servers=kafka_bootstrap)
+        partitions = [TopicPartition(topics[1], 0)]
+        service.start()
+        try:
+            # The longest time without a new message written, from the first one: a pause
+            # that stalls the stream shows here, whatever the machine's speed.
+            written, stalled, last, deadline = 0, 0.0, None, time.time() + 120
+            while written < count and time.time() < deadline:
+                now = sum(consumer.end_offsets(partitions).values())
+                at = time.perf_counter()
+                if now > written:
+                    if last is not None:
+                        stalled = max(stalled, at - last)
+                    written, last = now, at
+                time.sleep(0.01)
+            consumer.close()
+        finally:
+            service.stop()
+    finally:
+        pipeline.delete()
+        admin.delete_topics(topics)
+
+    assert written == count
+    assert stalled < 0.4, f'the stream wrote nothing for {stalled:.2f} seconds'
 
 
 def test_messages_that_fail_on_their_own_go_to_the_dead_letter_topic(

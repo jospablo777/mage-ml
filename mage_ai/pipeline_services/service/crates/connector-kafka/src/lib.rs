@@ -131,6 +131,9 @@ const LAG_EVERY: Duration = Duration::from_secs(5);
 /// Messages between the poll thread and the stream; librdkafka's own queue, sized from the
 /// stream's byte budget, holds the rest.
 const CHANNEL: usize = 256;
+/// How long a pause only holds a partition's batches back before it becomes librdkafka's
+/// pause (see [`KafkaSource::pause`]).
+const HOLD: Duration = Duration::from_secs(5);
 
 /// (topic, partition) to the stream's partition ids, and each one's current epoch.
 #[derive(Debug, Default)]
@@ -366,6 +369,9 @@ pub struct KafkaSource {
     pending: BTreeMap<u32, Pending>,
     seq: BTreeMap<u32, u64>,
     paused: BTreeSet<u32>,
+    /// Paused partitions only held back, since when; the others are paused in librdkafka.
+    held: BTreeMap<u32, Instant>,
+    stopped: BTreeSet<u32>,
     limits: BatchLimits,
 }
 
@@ -400,6 +406,10 @@ impl KafkaSource {
             .set("enable.partition.eof", "false")
             .set("partition.assignment.strategy", "cooperative-sticky")
             .set("queued.max.messages.kbytes", queue_kb.to_string())
+            // The queue is kept small (the stream's byte budget), so it is often full; after
+            // that librdkafka waits fetch.queue.backoff.ms (1 second by default) before it
+            // fetches again, and a stream sat idle most of the time (I-78).
+            .set("fetch.queue.backoff.ms", "20")
             .set(
                 "auto.offset.reset",
                 text(config, "auto_offset_reset").unwrap_or_else(|| "latest".into()),
@@ -434,6 +444,8 @@ impl KafkaSource {
             pending: BTreeMap::new(),
             seq: BTreeMap::new(),
             paused: BTreeSet::new(),
+            held: BTreeMap::new(),
+            stopped: BTreeSet::new(),
             limits,
         })
     }
@@ -445,13 +457,17 @@ impl KafkaSource {
                 // owner reads them.
                 self.pending.remove(&partition.0);
                 self.paused.remove(&partition.0);
+                self.held.remove(&partition.0);
+                self.stopped.remove(&partition.0);
                 self.revoking.insert(partition.0);
             }
             SourceEvent::Assigned { partition, .. } => {
                 self.revoking.remove(&partition.0);
                 self.seq.insert(partition.0, 0);
+                // A new assignment fetches in librdkafka: a pause holds it again.
+                self.stopped.remove(&partition.0);
                 if self.paused.contains(&partition.0) {
-                    self.pause(*partition);
+                    self.held.insert(partition.0, Instant::now());
                 }
             }
             _ => {}
@@ -485,11 +501,18 @@ impl KafkaSource {
         Ok(Some(SourceEvent::Batch { batch, meta }))
     }
 
-    /// A batch that is full, or (when `due`) the oldest one past its wait.
+    fn full(&self, pending: &Pending) -> bool {
+        pending.builder.len() >= self.limits.max_records
+            || pending.builder.bytes() >= self.limits.max_bytes
+    }
+
+    /// A batch of a partition not paused that is full, or (when `due`) the oldest one past
+    /// its wait.
     fn ready(&mut self, due: bool) -> Result<Option<SourceEvent>, ConnectorError> {
-        let full = self.pending.iter().find(|(_, p)| {
-            p.builder.len() >= self.limits.max_records || p.builder.bytes() >= self.limits.max_bytes
-        });
+        let full = self
+            .pending
+            .iter()
+            .find(|(id, p)| !self.paused.contains(id) && self.full(p));
         if let Some((id, _)) = full {
             let id = *id;
             return self.take(id);
@@ -498,6 +521,7 @@ impl KafkaSource {
         let oldest = self
             .pending
             .iter()
+            .filter(|(id, _)| !self.paused.contains(id))
             .min_by_key(|(_, p)| p.started)
             .filter(|(_, p)| due || now.duration_since(p.started) >= self.limits.max_wait)
             .map(|(id, _)| *id);
@@ -510,8 +534,9 @@ impl KafkaSource {
     fn wait(&self) -> Duration {
         let now = Instant::now();
         self.pending
-            .values()
-            .map(|p| (p.started + self.limits.max_wait).saturating_duration_since(now))
+            .iter()
+            .filter(|(id, _)| !self.paused.contains(id))
+            .map(|(_, p)| (p.started + self.limits.max_wait).saturating_duration_since(now))
             .min()
             .unwrap_or(self.limits.max_wait)
             .max(Duration::from_millis(1))
@@ -569,12 +594,55 @@ impl KafkaSource {
     }
 }
 
+impl KafkaSource {
+    /// Pauses in librdkafka the held partitions that need it: held for [`HOLD`] (the poll
+    /// thread must go on polling, for rebalances and max.poll.interval.ms), or with a full
+    /// batch waiting while other partitions are read.
+    fn stop_held(&mut self) {
+        let now = Instant::now();
+        let due: Vec<u32> = self
+            .held
+            .iter()
+            .filter(|(id, since)| {
+                now.duration_since(**since) >= HOLD
+                    || self.pending.get(id).is_some_and(|p| self.full(p))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in due {
+            self.held.remove(&id);
+            if self.stopped.insert(id)
+                && let Some(list) = self.tpl(id)
+            {
+                let _ = self.consumer.pause(&list);
+            }
+        }
+    }
+
+    /// When every assigned partition is paused and one is only held: until when to stop
+    /// reading the channel, so the poll thread and librdkafka's queue stop the fetching.
+    fn holding_until(&self) -> Option<Instant> {
+        let since = self.held.values().min()?;
+        let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        table
+            .epochs
+            .keys()
+            .all(|id| self.paused.contains(id))
+            .then(|| *since + HOLD)
+    }
+}
+
 impl Source for KafkaSource {
     fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
         Box::pin(async move {
             loop {
                 if let Some(batch) = self.ready(false)? {
                     return Ok(batch);
+                }
+                self.stop_held();
+                if let Some(until) = self.holding_until() {
+                    tokio::time::sleep_until(until.into()).await;
+                    continue;
                 }
                 let wait = self.wait();
                 match tokio::time::timeout(wait, self.polled.recv()).await {
@@ -633,16 +701,24 @@ impl Source for KafkaSource {
         })
     }
 
+    /// Holds the partition's batches back. librdkafka's pause drops what it fetched, and
+    /// it fetched again about 0.8 seconds after a resume: a stream under backpressure,
+    /// paused and resumed every few batches, stood still most of the time (I-78). Held, the
+    /// partition is not read while every partition is paused, so the bounded channel and
+    /// librdkafka's queue stop the fetching; [`KafkaSource::stop_held`] pauses it in
+    /// librdkafka when that cannot last.
     fn pause(&mut self, partition: PartitionId) {
-        self.paused.insert(partition.0);
-        if let Some(list) = self.tpl(partition.0) {
-            let _ = self.consumer.pause(&list);
+        if self.paused.insert(partition.0) && !self.stopped.contains(&partition.0) {
+            self.held.insert(partition.0, Instant::now());
         }
     }
 
     fn resume(&mut self, partition: PartitionId) {
         self.paused.remove(&partition.0);
-        if let Some(list) = self.tpl(partition.0) {
+        self.held.remove(&partition.0);
+        if self.stopped.remove(&partition.0)
+            && let Some(list) = self.tpl(partition.0)
+        {
             let _ = self.consumer.resume(&list);
         }
     }
