@@ -152,6 +152,8 @@ pub enum ConnectorKind {
     IbmMq,
     /// NATS JetStream: a durable pull consumer, and publishes JetStream acknowledges.
     Nats,
+    /// MongoDB: a change stream with saved resume tokens, and a collection.
+    Mongodb,
     /// Sink: one object per batch, Parquet or JSON lines, on S3, GCS, Azure Blob or disk.
     ObjectStorage,
     /// Sink: a PostgreSQL table, one transaction per batch.
@@ -170,6 +172,7 @@ impl ConnectorKind {
             ConnectorKind::Rabbitmq => "rabbitmq",
             ConnectorKind::IbmMq => "ibm_mq",
             ConnectorKind::Nats => "nats",
+            ConnectorKind::Mongodb => "mongodb",
             ConnectorKind::ObjectStorage => "object_storage",
             ConnectorKind::Postgres => "postgres",
             ConnectorKind::Clickhouse => "clickhouse",
@@ -184,6 +187,7 @@ impl ConnectorKind {
                 | ConnectorKind::Rabbitmq
                 | ConnectorKind::IbmMq
                 | ConnectorKind::Nats
+                | ConnectorKind::Mongodb
         )
     }
 
@@ -197,6 +201,7 @@ impl ConnectorKind {
                 | ConnectorKind::Rabbitmq
                 | ConnectorKind::IbmMq
                 | ConnectorKind::Nats
+                | ConnectorKind::Mongodb
                 | ConnectorKind::ObjectStorage
                 | ConnectorKind::Postgres
                 | ConnectorKind::Clickhouse

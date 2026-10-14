@@ -210,9 +210,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, MongoDB change streams, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -381,6 +381,33 @@ user_credentials: [reader, "{{ env_var('NATS_PASSWORD') }}"]   # or a .creds fil
   duplicate window, and confirms a batch once JetStream acknowledged all of it. Without
   `stream_name` it publishes to the stream that takes the subject, as MageML's does. A
   `{"data": ..., "metadata": {...}}` message publishes its data with the metadata as headers.
+
+### MongoDB
+
+MageML's `mongodb` source (a change stream) and sink run as they are:
+
+```yaml
+connector_type: mongodb
+connection_str: "{{ env_var('MONGO_URL') }}"
+database: shop
+collection: orders           # without it, the whole database is watched
+full_document: updateLookup  # the document after an update
+batch_size: 200
+```
+
+- Each change reaches the blocks as JSON: ObjectIds as their hex text, dates as ISO 8601
+  text, decimals as exact text, binary as base64, the cluster time as `{"t", "i"}`.
+- Once every sink took a batch, the resume token of its last change is saved in the
+  database's `_mage_stream_checkpoints` collection (`checkpoint_collection` changes it), which
+  the stream does not watch, so a restarted service resumes after it, on any machine. A
+  change stream is read by one instance. If the token is no longer in the oplog, the stream
+  stops and says which document to delete to start at the current time.
+- The sink inserts a batch at once; with `unique_constraints`, a message with those fields
+  updates or inserts the document they select, the last message of a key in a batch winning.
+  Integers past 64 bits are stored as Decimal128 with every digit. A message that is not an
+  object is stored as `{"data": ...}`, as in MageML.
+- A connection string with a password written in the file is refused; read it with
+  `env_var()`.
 
 ### RabbitMQ
 

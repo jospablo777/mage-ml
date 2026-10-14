@@ -576,8 +576,8 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the kinesis connector; services run azure_event_hub, ibm_mq, kafka, nats_js, '
-            'rabbitmq, webhook sources now',
+            'uses the kinesis connector; services run azure_event_hub, ibm_mq, kafka, mongodb, '
+            'nats_js, rabbitmq, webhook sources now',
             problems,
         )
 
@@ -712,6 +712,41 @@ class StreamRefusalTest(StreamExportTestCase):
             consumer_group: scorer
         '''))  # pragma: allowlist secret
         self.assertIn('event_streams_credentials is written in the file', self.problems())
+
+    def test_mongodb_streams_keep_their_settings_and_refuse_written_passwords(self):
+        self.stream(
+            source=textwrap.dedent('''
+                connector_type: mongodb
+                connection_str: "{{ env_var('MONGO_URL') }}"
+                database: shop
+                collection: orders
+                batch_size: 50
+                full_document: updateLookup
+            '''),
+            sink=textwrap.dedent('''
+                connector_type: mongodb
+                connection_string: mongodb://mongo:27017
+                database_name: shop
+                collection_name: states
+                unique_constraints: [order]
+            '''),
+        )
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'mongodb')
+        self.assertEqual(stream['source']['config']['full_document'], 'updateLookup')
+        self.assertEqual(stream['batch']['max_records'], 50)
+        self.assertEqual(stream['sinks'][0]['config']['unique_constraints'], ['order'])
+
+    def test_a_mongodb_password_written_in_the_file_is_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: mongodb
+            connection_string: mongodb://writer:hunter2@mongo:27017
+            database_name: shop
+            collection_name: states
+        '''))  # pragma: allowlist secret
+        self.assertIn('connection_string holds a password written in the file',
+                      self.problems())
 
     def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
         self.stream(source=textwrap.dedent(SOURCE)

@@ -559,19 +559,19 @@ STREAM_SOURCES = {
     'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
     # Read through Event Hubs' Kafka endpoint.
     'azure_event_hub': 'kafka',
-    'nats_js': 'nats',
+    'nats_js': 'nats', 'mongodb': 'mongodb',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
-    'clickhouse': 'clickhouse', 'nats_js': 'nats',
+    'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
-    'nats': 'nats',
+    'nats': 'nats', 'mongodb': 'mongodb',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -857,6 +857,39 @@ def _nats_connector(block, role: str, config: Dict, where: str, problems: List[s
     return connector
 
 
+MONGODB_SOURCE_SETTINGS = {'connection_str', 'database', 'collection', 'batch_size', 'pipeline',
+                           'operation_time', 'start_after', 'full_document',
+                           'checkpoint_collection'}
+MONGODB_SINK_SETTINGS = {'connection_string', 'database_name', 'collection_name',
+                         'unique_constraints'}
+
+
+def _mongodb_connector(block, role: str, config: Dict, where: str,
+                       problems: List[str]) -> Dict:
+    """MageML's MongoDB change stream source and collection sink."""
+    allowed = MONGODB_SOURCE_SETTINGS if role == 'source' else MONGODB_SINK_SETTINGS
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown MongoDB settings {", ".join(unknown)}.')
+    url_key = 'connection_str' if role == 'source' else 'connection_string'
+    required = (url_key, 'database') if role == 'source' else (
+        url_key, 'database_name', 'collection_name')
+    for key in required:
+        if not config.get(key):
+            problems.append(f'{where}: MongoDB settings need {key}.')
+    url = config.get(url_key)
+    if _literal(url) and isinstance(url, str) and re.search(r'://[^/@]+:[^/@]*@', url):
+        problems.append(
+            f"{where}: {url_key} holds a password written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    settings = {k: v for k, v in config.items() if k in allowed and k != 'batch_size'}
+    connector = dict(name=block.uuid, kind='mongodb', config=settings)
+    if role == 'source' and config.get('batch_size'):
+        connector['batch_size'] = config['batch_size']
+    return connector
+
+
 def _ibm_mq_connector(block, role: str, config: Dict, where: str,
                       problems: List[str]) -> Dict:
     allowed = IBM_MQ_SOURCE_SETTINGS if role == 'source' else IBM_MQ_SETTINGS
@@ -1124,6 +1157,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _rabbitmq_connector(block, role, config, where, problems)
     if kind == 'nats':
         return _nats_connector(block, role, config, where, problems)
+    if kind == 'mongodb':
+        return _mongodb_connector(block, role, config, where, problems)
     if kind == 'ibm_mq':
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':

@@ -30,7 +30,7 @@ def service_binary() -> Path:
 # The engine with every stream connector, in its own target folder: the other exported-service
 # tests build it without them, and test workers build at the same time. CI builds it first.
 STREAM_TARGET = SERVICE / 'target' / 'streams'
-STREAM_FEATURES = 'kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats'
+STREAM_FEATURES = 'kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb'
 
 
 def stream_service_binary(release: bool = False) -> Path:

@@ -1,0 +1,23 @@
+[package]
+name = "mage-connector-mongodb"
+description = "MongoDB change stream source and collection sink for Mage pipeline service streams"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mage-stream-core = { path = "../stream-core" }
+mage-stream-ports = { path = "../stream-ports" }
+serde_json = { workspace = true, features = ["raw_value"] }
+serde = "1"
+tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
+# bson 3: bson 2 turns on serde_json's preserve_order for the whole engine, which then
+# ordered JSON objects differently from builds without MongoDB.
+mongodb = { version = "3.9", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls", "dns-resolver"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

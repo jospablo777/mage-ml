@@ -95,6 +95,20 @@ fn source(
                 },
             )?))
         }
+        #[cfg(feature = "mongodb")]
+        ConnectorKind::Mongodb => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_mongodb::MongoSource::new(
+                &_config,
+                mage_connector_mongodb::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+                &pipeline.uuid,
+            )?))
+        }
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -241,6 +255,8 @@ fn sink(
             &_config,
             &pipeline.uuid,
         )?)),
+        #[cfg(feature = "mongodb")]
+        ConnectorKind::Mongodb => Ok(Arc::new(mage_connector_mongodb::MongoSink::new(&_config)?)),
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => Ok(Arc::new(mage_connector_nats::NatsSink::new(
             &_config,
@@ -269,6 +285,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         }
         ConnectorKind::IbmMq => "it was built without IBM MQ; build it with the ibm-mq feature",
         ConnectorKind::Nats => "it was built without NATS; build it with the nats feature",
+        ConnectorKind::Mongodb => "it was built without MongoDB; build it with the mongodb feature",
         ConnectorKind::ObjectStorage => {
             "it was built without object storage; build it with the object-store feature"
         }
@@ -585,6 +602,14 @@ mod tests {
             after: None,
             config: config.as_object().cloned().unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn json_objects_keep_their_keys_sorted_whatever_the_features() {
+        // A dependency that turns on serde_json's preserve_order changes every JSON object
+        // of the engine, and only in builds with that dependency (bson 2 did, I-97).
+        let value = serde_json::json!({"b": 1, "a": 2});
+        assert_eq!(value.to_string(), r#"{"a":2,"b":1}"#);
     }
 
     #[test]
