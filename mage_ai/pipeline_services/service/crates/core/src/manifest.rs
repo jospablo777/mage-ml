@@ -66,6 +66,11 @@ pub struct EnvironmentVariable {
     /// variable no block reads never reaches block processes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<String>,
+    /// Where the service fetches it at start-up when the environment does not set it, as
+    /// MAGE_SERVICE_SECRETS writes a reference: `ibm:<secret id>#field` for io_config.yaml's
+    /// `ibm_secret_var`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -11,6 +11,9 @@ class FakeIBMCloud:
         self.token_requests = []
         self.requests = []
         self.objects = {}
+        # Secrets Manager: secrets by id, and who asked for them.
+        self.secrets = {}
+        self.secret_requests = []
         self.tokens_issued = 0
         cloud = self
 
@@ -57,6 +60,8 @@ class FakeIBMCloud:
                 self._reply(200)
 
             def do_GET(self):
+                if self.path.startswith('/api/v2/secrets/'):
+                    return self._secret(self.path.rsplit('/', 1)[1])
                 cloud.requests.append(('GET', self.path, dict(self.headers), b''))
                 if not self._authorized():
                     return
@@ -108,6 +113,15 @@ class FakeIBMCloud:
                     f'<KeyCount>{len(keys)}</KeyCount><IsTruncated>false</IsTruncated>'
                     f'{contents}{common}</ListBucketResult>'
                 ).encode()
+
+            def _secret(self, secret_id):
+                cloud.secret_requests.append((secret_id, self.headers.get('Authorization')))
+                if not (self.headers.get('Authorization') or '').startswith('Bearer token-'):
+                    return self._reply(401, b'{}', 'application/json')
+                secret = cloud.secrets.get(secret_id)
+                if secret is None:
+                    return self._reply(404, b'{}', 'application/json')
+                self._reply(200, json.dumps(secret).encode(), 'application/json')
 
             def _authorized(self):
                 auth = self.headers.get('Authorization') or ''

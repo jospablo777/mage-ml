@@ -190,8 +190,23 @@ impl Secrets {
                 Err(error) => secrets.problems.push(format!("{name}: {error}")),
             }
         }
-        if let Some(text) = environment.get(SECRETS) {
-            secrets.load_references(text, environment);
+        // References from MAGE_SERVICE_SECRETS, and the manifest's sources of variables
+        // the environment does not set and MAGE_SERVICE_SECRETS does not map.
+        let mut text = environment.get(SECRETS).cloned().unwrap_or_default();
+        let mapped: Vec<String> = parse_references(&text)
+            .map(|r| r.into_iter().filter_map(|r| r.variable).collect())
+            .unwrap_or_default();
+        for variable in &manifest.environment {
+            if let Some(source) = &variable.source
+                && environment.get(&variable.name).is_none_or(|v| v.is_empty())
+                && !secrets.additions.contains_key(&variable.name)
+                && !mapped.contains(&variable.name)
+            {
+                text.push_str(&format!("\n{}={source}", variable.name));
+            }
+        }
+        if !text.trim().is_empty() {
+            secrets.load_references(&text, environment);
         }
         for variable in &manifest.environment {
             if (variable.secret || looks_secret(&variable.name))
@@ -376,6 +391,45 @@ mod tests {
             ]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn manifest_sources_fill_unset_variables_and_the_environment_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let from_source = dir.path().join("source.txt");
+        let from_mapping = dir.path().join("mapping.txt");
+        std::fs::write(&from_source, "from-source").unwrap();
+        std::fs::write(&from_mapping, "from-mapping").unwrap();
+        let manifest: Manifest = serde_json::from_value(json!({
+            "schema_version": 1,
+            "service": {"name": "s", "project": "p", "exported_at": "x", "mage_version": "x",
+                        "source_sha256": "0"},
+            "pipelines": [],
+            "environment": [
+                {"name": "IBM_SECRET_A", "secret": true,
+                 "source": format!("file:{}", from_source.display())},
+                {"name": "IBM_SECRET_B", "secret": true,
+                 "source": format!("file:{}", from_source.display())},
+                {"name": "IBM_SECRET_C", "secret": true,
+                 "source": format!("file:{}", from_source.display())}
+            ]
+        }))
+        .unwrap();
+        let env: BTreeMap<String, String> = [
+            ("IBM_SECRET_B".to_string(), "set-directly".to_string()),
+            (
+                SECRETS.to_string(),
+                format!("IBM_SECRET_C=file:{}", from_mapping.display()),
+            ),
+        ]
+        .into();
+
+        let secrets = Secrets::load(&manifest, &env);
+
+        assert!(secrets.problems.is_empty(), "{:?}", secrets.problems);
+        assert_eq!(secrets.get("IBM_SECRET_A"), Some("from-source"));
+        assert_eq!(secrets.get("IBM_SECRET_B"), None);
+        assert_eq!(secrets.get("IBM_SECRET_C"), Some("from-mapping"));
     }
 
     #[test]

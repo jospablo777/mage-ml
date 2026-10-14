@@ -361,7 +361,24 @@ option at it (for MongoDB, `tlsCAFile` in the connection string).
 
 ## Secrets Manager
 
-Exported services read secrets from IBM Cloud Secrets Manager at start-up:
+In `io_config.yaml`, `ibm_secret_var` reads a secret, as `aws_secret_var` and
+`azure_secret_var` do for the other clouds:
+
+```yaml
+default:
+  POSTGRES_USER: "{{ ibm_secret_var('3f1c9a2e-...', 'username') }}"
+  POSTGRES_PASSWORD: "{{ ibm_secret_var('3f1c9a2e-...') }}"
+```
+
+MageML reads the instance from `IBM_SECRETS_MANAGER_URL` and authenticates with
+`IBM_CLOUD_API_KEY` or `IBM_CLOUD_TRUSTED_PROFILE`; values are cached for five minutes, as
+`io_config.yaml` is read for every block. Without a field, an arbitrary secret gives its
+payload, a username and password secret its password, an IAM credentials secret its API key;
+key-value secrets need the key. An exported service fetches the same secrets itself at
+start-up: the export lists them in the manifest, so nothing more is configured than the
+instance and the credentials below.
+
+Exported services read other secrets from IBM Cloud Secrets Manager at start-up too:
 
 ```bash
 MAGE_SERVICE_IBM_SECRETS_MANAGER_URL=https://<instance id>.us-south.secrets-manager.appdomain.cloud

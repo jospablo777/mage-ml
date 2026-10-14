@@ -47,4 +47,12 @@ def get_template_vars_no_db(include_python_libraries: Dict = None) -> Dict[str, 
     except Exception:
         pass
 
+    # Loads requests and the IAM client only when a template calls it.
+    def ibm_secret_var(secret_id, field=None):
+        from mage_ai.services.ibm.secrets_manager import get_secret
+
+        return get_secret(secret_id, field)
+
+    kwargs['ibm_secret_var'] = ibm_secret_var
+
     return kwargs

@@ -522,6 +522,34 @@ class ExportedRunTest(ExportTestCase):
 
 
 class EnvironmentTest(ExportTestCase):
+    def test_cloud_secret_functions_become_variables_the_service_fetches(self):
+        (self.project / 'io_config.yaml').write_text(textwrap.dedent('''
+            version: 0.1.1
+            default:
+              POSTGRES_USER: "{{ ibm_secret_var('3f1c-9a', 'username') }}"
+              POSTGRES_PASSWORD: "{{ ibm_secret_var('3f1c-9a') }}"
+        '''))
+        self.add('load', 'data_loader', '''
+            from mage_ai.io.config import ConfigFileLoader
+
+            @data_loader
+            def load(*args, **kwargs):
+                ConfigFileLoader('io_config.yaml', 'default')
+                return {'ok': True}
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        variables = {v['name']: v for v in captured.manifest['environment']}
+        self.assertEqual(variables['IBM_SECRET_3F1C_9A_USERNAME']['source'],
+                         'ibm:3f1c-9a#username')
+        self.assertEqual(variables['IBM_SECRET_3F1C_9A']['source'], 'ibm:3f1c-9a')
+        self.assertTrue(variables['IBM_SECRET_3F1C_9A']['secret'])
+        self.assertTrue(variables['IBM_SECRET_3F1C_9A']['required'])
+        self.assertEqual(export.compile_io_config(
+            (self.project / 'io_config.yaml').read_text(), 'default',
+        )['POSTGRES_USER'], {'$parts': [{'env': 'IBM_SECRET_3F1C_9A_USERNAME'}]})
+
     def test_the_variables_the_code_reads_are_listed_without_values(self):
         (self.project / 'io_config.yaml').write_text(textwrap.dedent('''
             version: 0.1.1
