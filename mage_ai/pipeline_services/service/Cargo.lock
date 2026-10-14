@@ -2585,6 +2585,8 @@ dependencies = [
 name = "mage-connector-postgres"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures-util",
  "mage-stream-core",
  "mage-stream-ports",
  "rustls",

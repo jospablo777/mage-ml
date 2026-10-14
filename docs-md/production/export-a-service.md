@@ -301,7 +301,7 @@ Kafka through one block:
 | Rust, adds two fields (as JSON values) | Kafka | 600,000 |
 | Python, returns its messages | Parquet files | 521,000 |
 | Python, returns its messages | ClickHouse | 254,000 |
-| Python, returns its messages | PostgreSQL | 141,000 |
+| Python, returns its messages | PostgreSQL (COPY) | 206,000 |
 | Python, returns its messages | RabbitMQ (publisher confirms) | 32,000 |
 | Python, returns its messages | IBM MQ (emulated amd64 server) | 15,000 |
 
@@ -407,8 +407,9 @@ sslrootcert: "{{ env_var('PG_CA') }}"   # a file, PEM, or base64 PEM
 ```
 
 - Each batch is one transaction, committed before its messages are acknowledged.
-- The batch goes to PostgreSQL as one JSON array, the bytes as the blocks made them, and
-  PostgreSQL reads each value into its column: numbers keep every digit (`NUMERIC` for
+- The batch goes to PostgreSQL with `COPY`, each value as the text the blocks wrote (an
+  upsert stages it in a temporary table first), and PostgreSQL reads each value into its
+  column: numbers keep every digit (`NUMERIC` for
   integers past 64 bits), objects and lists become `JSONB`. A value that does not fit its
   column stops the stream with PostgreSQL's reason instead of being cut.
 - A missing table is made from the first batch, with MageML's column names (cleaned, lower

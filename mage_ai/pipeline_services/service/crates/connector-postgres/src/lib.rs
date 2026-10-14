@@ -1,10 +1,12 @@
 //! PostgreSQL sink for streams.
 //!
 //! A batch is one transaction, committed before the batch is confirmed. Its messages, JSON
-//! objects, go to PostgreSQL as one JSON array, the raw bytes as the blocks made them, and
-//! PostgreSQL reads each value into its column (`jsonb_array_elements`): numbers keep every
-//! digit, and a value that does not fit its column stops the write with PostgreSQL's reason
-//! instead of being cut.
+//! objects, go to PostgreSQL with COPY, each value as its text (numbers as the blocks wrote
+//! their digits, strings unquoted, objects and arrays as JSON), and PostgreSQL reads each into
+//! its column: numbers keep every digit, and a value that does not fit its column stops the
+//! write with PostgreSQL's reason instead of being cut. Upserts COPY into a temporary table
+//! first. A table with array columns gets the batch as one JSON array instead, read with
+//! `jsonb_array_elements`.
 //!
 //! The table is made from the first batch when it does not exist, and a field the table does
 //! not have adds a column, as streams change. Column names follow MageML's Python sink
@@ -331,6 +333,7 @@ impl PgSink {
         // The messages' fields, their columns, and the types the values ask for.
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
         let mut kinds: BTreeMap<String, Option<Kind>> = BTreeMap::new();
+        let mut rows: Vec<BTreeMap<String, Box<RawValue>>> = Vec::with_capacity(values.len());
         for (row, value) in values.iter().enumerate() {
             let text = std::str::from_utf8(value).map_err(|_| {
                 ConnectorError::fatal(format!("PostgreSQL: row {row} is not UTF-8"))
@@ -341,17 +344,17 @@ impl PgSink {
                         "PostgreSQL: row {row} is not a JSON object; the sink writes objects"
                     ))
                 })?;
-            for (key, raw) in fields {
-                let column = settings.column(&key);
+            for (key, raw) in &fields {
+                let column = settings.column(key);
                 match keys.get(&column) {
-                    Some(other) if other != &key => {
+                    Some(other) if other != key => {
                         return Err(ConnectorError::fatal(format!(
                             "PostgreSQL: fields {other:?} and {key:?} both become column \
                              {column}; rename one, or set auto_clean_name: false"
                         )));
                     }
                     _ => {
-                        keys.insert(column.clone(), key);
+                        keys.insert(column.clone(), key.clone());
                     }
                 }
                 let kind = Kind::of(raw.get());
@@ -361,6 +364,7 @@ impl PgSink {
                     (a, b) => a.or(b),
                 };
             }
+            rows.push(fields);
         }
         for unique in &settings.unique {
             if !keys.contains_key(&settings.column(unique)) && !keys.contains_key(unique) {
@@ -440,6 +444,18 @@ impl PgSink {
             }
         }
         let names: Vec<&String> = keys.keys().collect();
+        let types: Vec<&str> = names
+            .iter()
+            .map(|column| columns.get(*column).map_or("text", String::as_str))
+            .collect();
+        if !types.iter().any(|t| t.ends_with("[]")) {
+            self.copy_rows(&transaction, &names, &types, &keys, &rows)
+                .await?;
+            return transaction
+                .commit()
+                .await
+                .map_err(|e| classify("committing", e));
+        }
         let expressions: Vec<String> = names
             .iter()
             .map(|column| {
@@ -516,6 +532,140 @@ impl PgSink {
             .await
             .map_err(|e| classify("committing", e))?;
         Ok(())
+    }
+}
+
+impl PgSink {
+    /// The rows by COPY: into the table, or for upserts into a temporary table, then into the
+    /// table with the last message of each key, as one by one.
+    async fn copy_rows(
+        &self,
+        transaction: &tokio_postgres::Transaction<'_>,
+        names: &[&String],
+        types: &[&str],
+        keys: &BTreeMap<String, String>,
+        rows: &[BTreeMap<String, Box<RawValue>>],
+    ) -> Result<(), ConnectorError> {
+        use futures_util::SinkExt;
+
+        let settings = &self.settings;
+        let target: Vec<String> = names.iter().map(|c| quote(c)).collect();
+        let unique: Vec<String> = settings
+            .unique
+            .iter()
+            .map(|u| quote(&settings.column(u)))
+            .collect();
+        let mut data = Vec::with_capacity(rows.len() * 64);
+        for (index, row) in rows.iter().enumerate() {
+            for (position, (column, column_type)) in names.iter().zip(types).enumerate() {
+                if position > 0 {
+                    data.push(b'\t');
+                }
+                copy_field(
+                    &mut data,
+                    row.get(&keys[*column]).map(AsRef::as_ref),
+                    column_type,
+                );
+            }
+            if !unique.is_empty() {
+                data.extend_from_slice(format!("\t{index}").as_bytes());
+            }
+            data.push(b'\n');
+        }
+        let copy = if unique.is_empty() {
+            format!(
+                "COPY {} ({}) FROM STDIN",
+                settings.full_table(),
+                target.join(", ")
+            )
+        } else {
+            transaction
+                .batch_execute(&format!(
+                    "CREATE TEMP TABLE mage_stage (LIKE {}) ON COMMIT DROP; \
+                     ALTER TABLE mage_stage ADD COLUMN \"__mage_row\" BIGINT",
+                    settings.full_table()
+                ))
+                .await
+                .map_err(|e| classify("staging the batch", e))?;
+            format!(
+                "COPY mage_stage ({}, \"__mage_row\") FROM STDIN",
+                target.join(", ")
+            )
+        };
+        let sink = transaction
+            .copy_in::<_, bytes::Bytes>(copy.as_str())
+            .await
+            .map_err(|e| classify(&format!("writing to {}", settings.label()), e))?;
+        futures_util::pin_mut!(sink);
+        sink.send(bytes::Bytes::from(data))
+            .await
+            .map_err(|e| classify(&format!("writing to {}", settings.label()), e))?;
+        sink.finish()
+            .await
+            .map_err(|e| classify(&format!("writing to {}", settings.label()), e))?;
+        if unique.is_empty() {
+            return Ok(());
+        }
+        let updates: Vec<String> = target
+            .iter()
+            .filter(|c| !unique.contains(c))
+            .map(|c| format!("{c} = EXCLUDED.{c}"))
+            .collect();
+        let conflict = if settings.update && !updates.is_empty() {
+            format!(
+                "ON CONFLICT ({}) DO UPDATE SET {}",
+                unique.join(", "),
+                updates.join(", ")
+            )
+        } else {
+            format!("ON CONFLICT ({}) DO NOTHING", unique.join(", "))
+        };
+        // A key twice in one batch: the last message wins, as it would one by one.
+        transaction
+            .batch_execute(&format!(
+                "INSERT INTO {table} ({cols}) SELECT {cols} FROM (SELECT DISTINCT ON ({keys}) * \
+                 FROM mage_stage ORDER BY {keys}, \"__mage_row\" DESC) AS d {conflict}",
+                table = settings.full_table(),
+                cols = target.join(", "),
+                keys = unique.join(", "),
+            ))
+            .await
+            .map_err(|e| classify(&format!("writing to {}", settings.label()), e))
+    }
+}
+
+/// A value in COPY's text format, read as `(e->>key)::type` would read it: null and a
+/// missing field are NULL, a string is its text (for a JSON column, the JSON string), and
+/// numbers, booleans, objects and arrays are their JSON text.
+fn copy_field(out: &mut Vec<u8>, raw: Option<&RawValue>, column_type: &str) {
+    let Some(text) = raw.map(RawValue::get) else {
+        out.extend_from_slice(b"\\N");
+        return;
+    };
+    if text == "null" {
+        out.extend_from_slice(b"\\N");
+        return;
+    }
+    let json_column = matches!(column_type, "jsonb" | "json");
+    if !json_column
+        && text.starts_with('"')
+        && let Ok(string) = serde_json::from_str::<String>(text)
+    {
+        copy_escape(out, string.as_bytes());
+        return;
+    }
+    copy_escape(out, text.as_bytes());
+}
+
+fn copy_escape(out: &mut Vec<u8>, bytes: &[u8]) {
+    for &byte in bytes {
+        match byte {
+            b'\\' => out.extend_from_slice(b"\\\\"),
+            b'\n' => out.extend_from_slice(b"\\n"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            _ => out.push(byte),
+        }
     }
 }
 
@@ -627,6 +777,31 @@ mod tests {
         assert_eq!(Kind::BigInt.merge(Kind::Numeric), Kind::Numeric);
         assert_eq!(Kind::BigInt.merge(Kind::Text), Kind::Text);
         assert_eq!(Kind::Json.merge(Kind::BigInt), Kind::Json);
+    }
+
+    #[test]
+    fn copy_fields_read_as_the_json_path_did() {
+        let field = |json: &str, column_type: &str| {
+            let raw: Box<RawValue> = serde_json::from_str(json).unwrap();
+            let mut out = Vec::new();
+            copy_field(&mut out, Some(&raw), column_type);
+            String::from_utf8(out).unwrap()
+        };
+        assert_eq!(
+            field("1180591620717411303425", "numeric"),
+            "1180591620717411303425"
+        );
+        assert_eq!(
+            field(r#""Zürich\ttab\nline\\""#, "text"),
+            "Zürich\\ttab\\nline\\\\"
+        );
+        assert_eq!(field(r#""x""#, "jsonb"), r#""x""#);
+        assert_eq!(field(r#"{"n":[1,2]}"#, "text"), r#"{"n":[1,2]}"#);
+        assert_eq!(field("null", "bigint"), "\\N");
+        assert_eq!(field("true", "boolean"), "true");
+        let mut out = Vec::new();
+        copy_field(&mut out, None, "text");
+        assert_eq!(out, b"\\N");
     }
 
     #[test]

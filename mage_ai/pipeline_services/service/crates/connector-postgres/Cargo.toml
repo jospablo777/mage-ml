@@ -10,6 +10,8 @@ publish.workspace = true
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 serde_json = { workspace = true }
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 tokio-postgres-rustls = "0.13"
