@@ -297,8 +297,12 @@ def test_message_values_pass_through_exactly(
         service.stop()
 
     expected = [json.loads(v) for v in EXACT[:3]] + [EXACT[3].decode()]
-    assert [json.loads(v) for v in received] == expected
-    assert json.loads(received[0])['big'] == 123456789012345678901234567890
+    # Messages without a key spread over the output topic's partitions, which keep no order
+    # between them.
+    key = json.dumps
+    assert sorted((json.loads(v) for v in received), key=key) == sorted(expected, key=key)
+    first = next(v for v in map(json.loads, received) if isinstance(v, dict) and v['id'] == 1)
+    assert first['big'] == 123456789012345678901234567890
 
 
 def test_a_binary_message_stops_the_stream_without_being_rewritten(

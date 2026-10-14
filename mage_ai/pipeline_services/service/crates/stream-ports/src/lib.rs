@@ -11,6 +11,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+pub mod sql;
+mod sql_reserved;
+
 pub use arrow_array::RecordBatch;
 pub use envelope::{Envelope, EnvelopeBuilder, Header, envelope_schema, read_envelope};
 pub use mage_stream_core::{AssignmentEpoch, BatchMeta, Commit, PartitionId, Position};

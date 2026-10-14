@@ -216,6 +216,11 @@ fn sink(
             &_config,
             &pipeline.uuid,
         )?)),
+        #[cfg(feature = "clickhouse")]
+        ConnectorKind::Clickhouse => Ok(Arc::new(mage_connector_clickhouse::ClickHouseSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
         #[cfg(feature = "postgres")]
         ConnectorKind::Postgres => Ok(Arc::new(mage_connector_postgres::PgSink::new(&_config)?)),
         #[cfg(feature = "object-store")]
@@ -250,6 +255,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         }
         ConnectorKind::Postgres => {
             "it was built without PostgreSQL; build it with the postgres feature"
+        }
+        ConnectorKind::Clickhouse => {
+            "it was built without ClickHouse; build it with the clickhouse feature"
         }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",

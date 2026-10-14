@@ -560,11 +560,17 @@ STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
+    'clickhouse': 'clickhouse',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
-    'object_storage': 'object-store', 'postgres': 'postgres',
+    'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
+}
+# What the ClickHouse sink takes from the export config of MageML's sink, besides its
+# io_config.yaml profile.
+CLICKHOUSE_EXPORT_SETTINGS = {
+    'table_name', 'database', 'auto_clean_name', 'case_sensitive', 'allow_reserved_words',
 }
 # MageML's PostgreSQL stream sink settings, and TLS.
 POSTGRES_SINK_SETTINGS = {
@@ -898,6 +904,54 @@ def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Di
     return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
 
 
+def _clickhouse_sink_settings(config: Dict, capture_: Capture, where: str,
+                              problems: List[str]) -> Dict:
+    """
+    MageML's ClickHouse sink names an io_config.yaml profile and export settings
+    (`config: {table_name: ...}`): the profile's connection, with its variables kept as
+    references, and the table become the engine's sink settings.
+    """
+    unknown = sorted(set(config) - {'profile', 'config'})
+    if unknown:
+        problems.append(f'{where}: unknown ClickHouse sink settings {", ".join(unknown)}.')
+    export_config = config.get('config') or {}
+    extra = sorted(set(export_config) - CLICKHOUSE_EXPORT_SETTINGS)
+    if extra:
+        problems.append(
+            f'{where}: services do not take these ClickHouse export settings: '
+            f'{", ".join(extra)}.'
+        )
+    if not export_config.get('table_name'):
+        problems.append(f'{where}: the ClickHouse sink needs config.table_name.')
+    profile = config.get('profile') or 'default'
+    path = capture_.project / 'io_config.yaml'
+    try:
+        connection = compile_io_config(path.read_text(), profile) if path.is_file() else None
+    except ValueError as error:
+        problems.append(f'{where}: {error}')
+        connection = None
+    if connection is None:
+        problems.append(f'{where}: io_config.yaml has no profile {profile}.')
+        connection = {}
+    interface = str(connection.get('CLICKHOUSE_INTERFACE') or 'http').lower()
+    if interface not in ('http', 'https'):
+        problems.append(f'{where}: CLICKHOUSE_INTERFACE {interface}: services use HTTP.')
+    settings = {
+        'host': connection.get('CLICKHOUSE_HOST'),
+        'port': connection.get('CLICKHOUSE_PORT'),
+        'username': connection.get('CLICKHOUSE_USERNAME'),
+        'password': connection.get('CLICKHOUSE_PASSWORD'),
+        'database': export_config.get('database') or connection.get('CLICKHOUSE_DATABASE'),
+        'table': export_config.get('table_name'),
+        'secure': interface == 'https',
+        **{k: export_config[k] for k in ('auto_clean_name', 'case_sensitive',
+                                          'allow_reserved_words') if k in export_config},
+    }
+    if not settings['host']:
+        problems.append(f'{where}: profile {profile} has no CLICKHOUSE_HOST.')
+    return {k: v for k, v in settings.items() if v is not None}
+
+
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
     if unknown:
@@ -982,6 +1036,9 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     if kind == 'postgres':
         return dict(name=block.uuid, kind='postgres',
                     config=_postgres_sink_settings(config, where, problems))
+    if kind == 'clickhouse':
+        return dict(name=block.uuid, kind='clickhouse',
+                    config=_clickhouse_sink_settings(config, capture_, where, problems))
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(

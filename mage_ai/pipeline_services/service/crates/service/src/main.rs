@@ -651,22 +651,35 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
 
     let shutdown_service = service.clone();
     let deadline = Duration::from_secs(args.shutdown_seconds);
+    let stopping = Arc::new(tokio::sync::Notify::new());
+    let signalled = stopping.clone();
     let server = axum::serve(listener, api::router(state)).with_graceful_shutdown(async move {
         shutdown_signal().await;
+        signalled.notify_one();
         log::info("Stopping: no new runs are accepted.");
         // Streams stop reading and finish the batches in flight.
         shutdown_service.stream_stop.cancel();
         shutdown_service.shutdown(deadline).await;
     });
-    server
-        .await
-        .map_err(|e| format!("The server failed: {e}"))?;
+    // Open connections hold a graceful shutdown; past the deadline the service stops anyway.
+    let bounded = async {
+        stopping.notified().await;
+        tokio::time::sleep(deadline + Duration::from_secs(30)).await;
+    };
+    tokio::select! {
+        result = server.into_future() => {
+            result.map_err(|e| format!("The server failed: {e}"))?;
+        }
+        _ = bounded => log::warn("Stopping with connections still open, past the deadline."),
+    }
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
     for stream in streams {
         let _ = tokio::time::timeout(Duration::from_secs(25), stream).await;
     }
     log::info("Stopped.");
-    Ok(ExitCode::SUCCESS)
+    // A connector call stuck in a blocking thread would keep the runtime, and so the process,
+    // alive after its shutdown: everything that must finish has finished or timed out.
+    std::process::exit(0)
 }
 
 /// Without a configured token, a service that only listens on loopback makes one and keeps

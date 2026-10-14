@@ -2402,6 +2402,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-connector-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "mage-stream-core",
+ "mage-stream-ports",
+ "serde_json",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "mage-connector-http"
 version = "0.1.0"
 dependencies = [
@@ -2518,6 +2529,7 @@ dependencies = [
  "clap",
  "croner",
  "libc",
+ "mage-connector-clickhouse",
  "mage-connector-http",
  "mage-connector-ibmmq",
  "mage-connector-kafka",

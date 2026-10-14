@@ -535,6 +535,42 @@ class PostgresSinkExportTest(StreamExportTestCase):
         self.assertIn('unique_conflict_method is IGNORE or UPDATE', problems)
 
 
+class ClickHouseSinkExportTest(StreamExportTestCase):
+    def test_the_profile_and_table_become_the_engines_settings(self):
+        (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
+            version: 0.1.1
+            warehouse:
+              CLICKHOUSE_HOST: "{{ env_var('CH_HOST') }}"
+              CLICKHOUSE_PORT: 8443
+              CLICKHOUSE_INTERFACE: https
+              CLICKHOUSE_USERNAME: stream
+              CLICKHOUSE_PASSWORD: "{{ env_var('CH_PASSWORD') }}"
+              CLICKHOUSE_DATABASE: analytics
+        '''))
+        self.stream(sink='''
+            connector_type: clickhouse
+            profile: warehouse
+            config:
+              table_name: events
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['kind'], 'clickhouse')
+        self.assertEqual(sink['config']['table'], 'events')
+        self.assertEqual(sink['config']['database'], 'analytics')
+        self.assertTrue(sink['config']['secure'])
+        self.assertEqual(sink['config']['host'], {'$parts': [{'env': 'CH_HOST'}]})
+        password = next(v for v in captured.manifest['environment']
+                        if v['name'] == 'CH_PASSWORD')
+        self.assertTrue(password['secret'])
+
+    def test_a_missing_table_or_profile_is_refused(self):
+        self.stream(sink='connector_type: clickhouse\nprofile: nowhere\nconfig: {}\n')
+        problems = self.problems()
+        self.assertIn('needs config.table_name', problems)
+        self.assertIn('no profile nowhere', problems)
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')

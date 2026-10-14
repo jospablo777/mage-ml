@@ -18,12 +18,12 @@
 //! `auto_clean_name`, `case_sensitive`, `allow_reserved_words`; and `sslmode`, `sslrootcert`
 //! (a file, PEM, or base64 PEM), `connect_timeout`.
 
-mod reserved;
 mod tls;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use mage_stream_ports::sql::{Kind, clean_column};
 use mage_stream_ports::{
     BatchMeta, BoxFuture, ConnectorError, RecordBatch, Sink, SinkCapabilities, read_envelope,
 };
@@ -59,83 +59,15 @@ fn literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
-/// A column name as MageML's Python sink makes it (mage_ai.shared.utils.clean_name, then
-/// reserved words prefixed with `_`).
-pub fn clean_column(name: &str, case_sensitive: bool, allow_reserved: bool) -> String {
-    let mut out: String = name
-        .chars()
-        .filter(|c| !matches!(c, '\u{feff}' | '"' | '$' | '\n' | '\r' | '\t'))
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if out.chars().next().is_some_and(|c| c.is_numeric()) {
-        out = format!("letter_{out}");
-    }
-    if !case_sensitive {
-        out = out.to_lowercase();
-    }
-    if !allow_reserved
-        && reserved::RESERVED_WORDS
-            .binary_search(&out.to_uppercase().as_str())
-            .is_ok()
-    {
-        out = format!("_{out}");
-    }
-    out
-}
-
-/// The type a column gets from the values in a batch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Kind {
-    Boolean,
-    BigInt,
-    Double,
-    Numeric,
-    Jsonb,
-    Text,
-}
-
-impl Kind {
-    fn of(raw: &str) -> Option<Kind> {
-        let raw = raw.trim();
-        Some(match raw.as_bytes().first()? {
-            b'"' => Kind::Text,
-            b'{' | b'[' => Kind::Jsonb,
-            b't' | b'f' => Kind::Boolean,
-            b'n' => return None,
-            _ if raw.contains(['.', 'e', 'E']) => Kind::Double,
-            _ if raw.parse::<i64>().is_ok() => Kind::BigInt,
-            _ => Kind::Numeric,
-        })
-    }
-
-    /// Two values of one column: text takes anything, numbers widen, JSON takes scalars.
-    fn merge(self, other: Kind) -> Kind {
-        use Kind::*;
-        match (self, other) {
-            (a, b) if a == b => a,
-            (Text, _) | (_, Text) => Text,
-            (Jsonb, _) | (_, Jsonb) => Jsonb,
-            (Numeric, Double) | (Double, Numeric) | (Double, BigInt) | (BigInt, Double) => Double,
-            (Numeric, BigInt) | (BigInt, Numeric) => Numeric,
-            _ => Text,
-        }
-    }
-
-    fn sql(self) -> &'static str {
-        match self {
-            Kind::Boolean => "BOOLEAN",
-            Kind::BigInt => "BIGINT",
-            Kind::Double => "DOUBLE PRECISION",
-            Kind::Numeric => "NUMERIC",
-            Kind::Jsonb => "JSONB",
-            Kind::Text => "TEXT",
-        }
+/// The PostgreSQL type of a column made from values of a kind.
+fn pg_type(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Boolean => "BOOLEAN",
+        Kind::BigInt => "BIGINT",
+        Kind::Double => "DOUBLE PRECISION",
+        Kind::Numeric => "NUMERIC",
+        Kind::Json => "JSONB",
+        Kind::Text => "TEXT",
     }
 }
 
@@ -458,7 +390,7 @@ impl PgSink {
                     format!(
                         "{} {}{not_null}",
                         quote(column),
-                        kind.unwrap_or(Kind::Text).sql()
+                        pg_type(kind.unwrap_or(Kind::Text))
                     )
                 })
                 .chain((!settings.unique.is_empty()).then(|| {
@@ -491,7 +423,7 @@ impl PgSink {
                     format!(
                         "ADD COLUMN IF NOT EXISTS {} {}",
                         quote(column),
-                        kind.unwrap_or(Kind::Text).sql()
+                        pg_type(kind.unwrap_or(Kind::Text))
                     )
                 })
                 .collect();
@@ -674,7 +606,9 @@ mod tests {
         assert_eq!(clean_column("Größe", false, false), "größe");
         assert_eq!(clean_column("Price $", true, false), "Price_");
         assert!(
-            reserved::RESERVED_WORDS.windows(2).all(|w| w[0] < w[1]),
+            mage_stream_ports::sql::RESERVED_WORDS
+                .windows(2)
+                .all(|w| w[0] < w[1]),
             "sorted"
         );
     }
@@ -688,11 +622,11 @@ mod tests {
         );
         assert_eq!(Kind::of("1.5e3"), Some(Kind::Double));
         assert_eq!(Kind::of("\"x\""), Some(Kind::Text));
-        assert_eq!(Kind::of("{\"a\": 1}"), Some(Kind::Jsonb));
+        assert_eq!(Kind::of("{\"a\": 1}"), Some(Kind::Json));
         assert_eq!(Kind::of("null"), None);
         assert_eq!(Kind::BigInt.merge(Kind::Numeric), Kind::Numeric);
         assert_eq!(Kind::BigInt.merge(Kind::Text), Kind::Text);
-        assert_eq!(Kind::Jsonb.merge(Kind::BigInt), Kind::Jsonb);
+        assert_eq!(Kind::Json.merge(Kind::BigInt), Kind::Json);
     }
 
     #[test]

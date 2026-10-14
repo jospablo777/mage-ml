@@ -1,6 +1,6 @@
 """
-The stream PostgreSQL sink (Rust) names columns as MageML's Python sink does: its reserved
-words are MageML's, so the same stream makes the same table in MageML and in a service.
+The stream SQL sinks (Rust) name columns as MageML's Python sinks do: their reserved words
+are MageML's, so the same stream makes the same table in MageML and in a service.
 """
 import re
 import unittest
@@ -9,7 +9,7 @@ from pathlib import Path
 from mage_ai.io.constants import SQL_RESERVED_WORDS
 
 RUST = (Path(__file__).resolve().parents[2] / 'pipeline_services' / 'service' / 'crates'
-        / 'connector-postgres' / 'src' / 'reserved.rs')
+        / 'stream-ports' / 'src' / 'sql_reserved.rs')
 
 
 class ReservedWordsTest(unittest.TestCase):

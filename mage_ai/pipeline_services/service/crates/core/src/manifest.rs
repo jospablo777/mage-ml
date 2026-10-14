@@ -154,6 +154,8 @@ pub enum ConnectorKind {
     ObjectStorage,
     /// Sink: a PostgreSQL table, one transaction per batch.
     Postgres,
+    /// Sink: a ClickHouse table, one deduplicated insert per batch.
+    Clickhouse,
 }
 
 impl ConnectorKind {
@@ -167,6 +169,7 @@ impl ConnectorKind {
             ConnectorKind::IbmMq => "ibm_mq",
             ConnectorKind::ObjectStorage => "object_storage",
             ConnectorKind::Postgres => "postgres",
+            ConnectorKind::Clickhouse => "clickhouse",
         }
     }
 
@@ -191,6 +194,7 @@ impl ConnectorKind {
                 | ConnectorKind::IbmMq
                 | ConnectorKind::ObjectStorage
                 | ConnectorKind::Postgres
+                | ConnectorKind::Clickhouse
         )
     }
 }

@@ -321,12 +321,12 @@ jobs:
       # with CMake and includes curl's header. Built before the tests, so the test's time
       # limit does not pay for librdkafka and OpenSSL.
       - name: Build the engine with its stream connectors
-        if: matrix.id == 'streaming'
+        if: matrix.id == 'streaming' || matrix.id == 'sql'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres
+          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse
       # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
       # the version and checksum exported images pin.
       - name: Download the IBM MQ client

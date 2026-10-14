@@ -1,6 +1,6 @@
 //! The SQL reserved words that MageML prefixes with `_` in column names, from
 //! mage_ai/io/constants.py SQL_RESERVED_WORDS; mage_ai/tests/pipeline_services/
-//! test_postgres_sink_names.py checks the two lists match.
+//! test_sql_sink_names.py checks the two lists match.
 
 pub const RESERVED_WORDS: [&str; 825] = [
     "A",

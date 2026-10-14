@@ -739,7 +739,10 @@ impl Sink for KafkaSink {
         Box::pin(async move {
             let messages =
                 read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
+            // Every message is queued at once and the deliveries are awaited together:
+            // awaiting each send before queuing the next sent one message per round trip.
             let mut deliveries = Vec::with_capacity(messages.len());
+            let started = std::time::Instant::now();
             for message in &messages {
                 let mut headers = OwnedHeaders::new_with_capacity(message.headers.len());
                 for h in &message.headers {
@@ -754,11 +757,33 @@ impl Sink for KafkaSink {
                 if let Some(key) = &message.key {
                     record = record.key(key);
                 }
-                deliveries.push(self.producer.send(record, self.timeout));
+                loop {
+                    match self.producer.send_result(record) {
+                        Ok(delivery) => {
+                            deliveries.push(delivery);
+                            break;
+                        }
+                        // The producer's queue is full: wait for deliveries to make room.
+                        Err((
+                            KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                            returned,
+                        )) if started.elapsed() < self.timeout => {
+                            record = returned;
+                            tokio::time::sleep(Duration::from_millis(2)).await;
+                        }
+                        Err((error, _)) => return Err(connector_error(error)),
+                    }
+                }
             }
             for delivery in deliveries {
-                if let Err((error, _)) = delivery.await {
-                    return Err(connector_error(error));
+                match delivery.await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err((error, _))) => return Err(connector_error(error)),
+                    Err(_) => {
+                        return Err(ConnectorError::retryable(
+                            "Kafka: the producer stopped before confirming a message",
+                        ));
+                    }
                 }
             }
             Ok(())

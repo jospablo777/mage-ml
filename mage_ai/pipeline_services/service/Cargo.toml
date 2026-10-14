@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/stream-core", "crates/stream-ports", "crates/connector-local", "crates/connector-kafka", "crates/connector-http", "crates/connector-rabbitmq", "crates/connector-ibmmq", "crates/connector-objectstore", "crates/connector-postgres", "crates/service", "crates/console"]
+members = ["crates/core", "crates/stream-core", "crates/stream-ports", "crates/connector-local", "crates/connector-kafka", "crates/connector-http", "crates/connector-rabbitmq", "crates/connector-ibmmq", "crates/connector-objectstore", "crates/connector-postgres", "crates/connector-clickhouse", "crates/service", "crates/console"]
 resolver = "3"
 
 [workspace.package]

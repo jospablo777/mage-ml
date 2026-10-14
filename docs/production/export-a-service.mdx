@@ -215,7 +215,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | --- | --- |
 | Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -256,6 +256,14 @@ sasl_config:
   raw messages, a start `offset`, and passwords written in the file.
 - The image builds the engine with the connectors the pipeline uses. Kafka support
   (librdkafka) makes the first build a few minutes longer.
+
+### Throughput
+
+Measured on a laptop (Apple M-series, Kafka in Docker, one partition, release build): a
+stream from Kafka through a Python block back to Kafka moves about 58,000 messages a second
+when the block returns its messages, and about 48,000 when it adds two fields to each one.
+Larger `batch_size` values raise it; most of the cost is the block's JSON parsing in Python.
+`integration_tests/benchmark/test_stream_benchmark.py` measures it on your machine.
 
 ### Webhooks
 
@@ -352,6 +360,28 @@ sslrootcert: "{{ env_var('PG_CA') }}"   # a file, PEM, or base64 PEM
   case, SQL words such as `state` prefixed with `_`), so the same stream writes the same
   table from MageML and from a service. A new field adds a nullable column.
 - With `unique_constraints`, a key that appears twice in one batch keeps its last message.
+
+### ClickHouse
+
+MageML's ClickHouse sink settings export as they are: the `io_config.yaml` profile gives the
+connection (over HTTP, `CLICKHOUSE_INTERFACE: http` or `https`) and `config.table_name` the
+table.
+
+```yaml
+connector_type: clickhouse
+profile: warehouse
+config:
+  table_name: events
+```
+
+- Each batch is one insert of the messages as the blocks made them, so ClickHouse reads every
+  number from its text: integers past 64 bits go into `Int256` columns exactly. A value that
+  does not fit its column stops the stream with ClickHouse's reason.
+- Inserts carry a deduplication token made of the batch's stream, partition and positions: a
+  batch written again after a restart is dropped by ClickHouse on replicated tables and on
+  the tables the sink makes.
+- A missing table is made from the first batch (MergeTree, nullable columns, objects and lists
+  as JSON text), with MageML's column names; a new field adds a column.
 
 ### Object storage
 
