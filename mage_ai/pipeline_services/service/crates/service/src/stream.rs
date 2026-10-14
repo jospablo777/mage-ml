@@ -574,6 +574,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     Effect::Alert(message) => {
                         count(&status, |s| s.alerts += 1);
                         crate::log::warn(&format!("Stream {}: {message}", parts.name));
+                        // A sink retrying without end says why in the stream's status.
+                        record_error(&status, &message);
                     }
                     Effect::Stop(reason) => {
                         let message = match reason {
@@ -873,6 +875,57 @@ mod tests {
         assert_eq!(sink.received().len(), 9);
         assert_eq!(status.dead_lettered_messages, 3);
         assert_eq!(status.dead_lettered_batches, 0);
+    }
+
+    /// Fails with a retryable error a number of times, then writes.
+    struct FlakySink {
+        failures: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Sink for FlakySink {
+        fn write<'a>(
+            &'a self,
+            _batch: &'a RecordBatch,
+            _meta: &'a BatchMeta,
+        ) -> BoxFuture<'a, Result<(), ConnectorError>> {
+            Box::pin(async move {
+                let left = self.failures.load(std::sync::atomic::Ordering::SeqCst);
+                if left > 0 {
+                    self.failures
+                        .store(left - 1, std::sync::atomic::Ordering::SeqCst);
+                    return Err(ConnectorError::retryable("the database is unreachable"));
+                }
+                Ok(())
+            })
+        }
+
+        fn flush(&self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sink_that_keeps_failing_says_why_in_the_status() {
+        let source = MemorySource::new(vec![messages(3)], 4, true);
+        let sink = Arc::new(FlakySink {
+            failures: std::sync::atomic::AtomicUsize::new(4),
+        });
+
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(sink, None)],
+            dead_letter: None,
+            transform: None,
+            config: config(1, false, PoisonPolicy::DeadLetter),
+            shutdown_deadline: Duration::from_millis(200),
+            pause: None,
+        })
+        .await;
+
+        assert_eq!(status.alerts, 1, "{status:?}");
+        let error = status.last_error.unwrap_or_default();
+        assert!(error.contains("the database is unreachable"), "{error}");
     }
 
     #[tokio::test]

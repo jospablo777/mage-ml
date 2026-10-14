@@ -499,6 +499,42 @@ class ObjectStorageExportTest(StreamExportTestCase):
         self.assertIn('GOOGLE_APPLICATION_CREDENTIALS', problems)
 
 
+class PostgresSinkExportTest(StreamExportTestCase):
+    def test_mage_postgres_sinks_export_to_the_engines_sink(self):
+        self.stream(sink='''
+            connector_type: postgres
+            host: db.example.com
+            database: shop
+            username: stream
+            password: "{{ env_var('PG_PASSWORD') }}"
+            schema: raw
+            table: orders
+            unique_constraints: [order_id]
+            unique_conflict_method: UPDATE
+            sslmode: verify-full
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['kind'], 'postgres')
+        self.assertEqual(sink['config']['unique_constraints'], ['order_id'])
+        self.assertEqual(sink['config']['password'], {'$parts': [{'env': 'PG_PASSWORD'}]})
+        self.assertIn('postgres', captured.engine_features)
+
+    def test_a_written_password_and_an_unknown_method_are_refused(self):
+        self.stream(sink='''
+            connector_type: postgres
+            host: db
+            database: shop
+            username: stream
+            password: hunter2
+            table: orders
+            unique_conflict_method: MERGE
+        ''')  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('password is written in the file', problems)
+        self.assertIn('unique_conflict_method is IGNORE or UPDATE', problems)
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')

@@ -216,6 +216,8 @@ fn sink(
             &_config,
             &pipeline.uuid,
         )?)),
+        #[cfg(feature = "postgres")]
+        ConnectorKind::Postgres => Ok(Arc::new(mage_connector_postgres::PgSink::new(&_config)?)),
         #[cfg(feature = "object-store")]
         ConnectorKind::ObjectStorage => Ok(Arc::new(mage_connector_objectstore::ObjectSink::new(
             &_config,
@@ -245,6 +247,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         ConnectorKind::IbmMq => "it was built without IBM MQ; build it with the ibm-mq feature",
         ConnectorKind::ObjectStorage => {
             "it was built without object storage; build it with the object-store feature"
+        }
+        ConnectorKind::Postgres => {
+            "it was built without PostgreSQL; build it with the postgres feature"
         }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",

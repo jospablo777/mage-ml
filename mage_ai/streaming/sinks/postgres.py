@@ -24,6 +24,11 @@ class PostgresConfig(BaseConfig):
     allow_reserved_words: bool = False
     auto_clean_name: bool = True
     case_sensitive: bool = False
+    # TLS as libpq takes it; sslrootcert is a file, PEM, or base64 PEM. The engine's sink
+    # in exported services takes the same.
+    sslmode: str = None
+    sslrootcert: str = None
+    connect_timeout: int = None
 
 
 class PostgresSink(BaseSink):
@@ -31,6 +36,13 @@ class PostgresSink(BaseSink):
 
     def init_client(self):
         # Initialize postgres connection
+        tls = {}
+        if self.config.sslmode:
+            tls['sslmode'] = self.config.sslmode
+        if self.config.sslrootcert:
+            from mage_ai.io.tls import ca_certificate_file
+
+            tls['sslrootcert'] = ca_certificate_file(self.config.sslrootcert)
         self.postgres_client = Postgres(
             dbname=self.config.database,
             user=self.config.username,
@@ -38,6 +50,8 @@ class PostgresSink(BaseSink):
             host=self.config.host,
             port=self.config.port,
             schema=self.config.schema,
+            connect_timeout=self.config.connect_timeout,
+            **tls,
         )
         self.postgres_client.open()
 

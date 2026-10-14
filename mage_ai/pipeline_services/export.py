@@ -559,12 +559,18 @@ STREAM_SOURCES = {
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
-    'google_cloud_storage': 'object_storage',
+    'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
-    'object_storage': 'object-store',
+    'object_storage': 'object-store', 'postgres': 'postgres',
+}
+# MageML's PostgreSQL stream sink settings, and TLS.
+POSTGRES_SINK_SETTINGS = {
+    'host', 'port', 'database', 'username', 'password', 'schema', 'table',
+    'unique_constraints', 'unique_conflict_method', 'auto_clean_name', 'case_sensitive',
+    'allow_reserved_words', 'sslmode', 'sslrootcert', 'connect_timeout',
 }
 # Object storage sinks: the generic one, and Mage's S3 and GCS sinks, which name a bucket.
 OBJECT_STORAGE_SETTINGS = {
@@ -874,6 +880,24 @@ def _object_storage_connector(block, connector_type: str, config: Dict, where: s
     return connector
 
 
+def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - POSTGRES_SINK_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown PostgreSQL settings {", ".join(unknown)}.')
+    for key in ('host', 'database', 'username', 'table'):
+        if not config.get(key):
+            problems.append(f'{where}: PostgreSQL settings need {key}.')
+    if _literal(config.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    method = str(config.get('unique_conflict_method') or 'IGNORE').upper()
+    if method not in ('IGNORE', 'UPDATE'):
+        problems.append(f'{where}: unique_conflict_method is IGNORE or UPDATE.')
+    return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
+
+
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
     if unknown:
@@ -955,6 +979,9 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'postgres':
+        return dict(name=block.uuid, kind='postgres',
+                    config=_postgres_sink_settings(config, where, problems))
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(

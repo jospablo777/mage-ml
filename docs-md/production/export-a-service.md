@@ -212,7 +212,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | --- | --- |
 | Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -321,6 +321,34 @@ An `ibm_mq` source reads under syncpoint and commits after the sinks; an `ibm_mq
 under syncpoint and commits as the receipt. The image includes IBM's MQ client, which IBM
 publishes for Linux x86-64 only: build with `--platform linux/amd64`. Settings, TLS and
 gotchas: [IBM MQ](../integrations/ibm-cloud.md#ibm-mq).
+
+### PostgreSQL
+
+A `postgres` sink takes MageML's PostgreSQL sink settings, and TLS:
+
+```yaml
+connector_type: postgres
+host: db.example.com
+database: shop
+username: stream
+password: "{{ env_var('PG_PASSWORD') }}"
+schema: raw
+table: orders
+unique_constraints: [order_id]     # optional: upserts, so a replay writes nothing twice
+unique_conflict_method: UPDATE     # or IGNORE (the default)
+sslmode: verify-full               # disable, prefer, require, verify-ca, verify-full
+sslrootcert: "{{ env_var('PG_CA') }}"   # a file, PEM, or base64 PEM
+```
+
+- Each batch is one transaction, committed before its messages are acknowledged.
+- The batch goes to PostgreSQL as one JSON array, the bytes as the blocks made them, and
+  PostgreSQL reads each value into its column: numbers keep every digit (`NUMERIC` for
+  integers past 64 bits), objects and lists become `JSONB`. A value that does not fit its
+  column stops the stream with PostgreSQL's reason instead of being cut.
+- A missing table is made from the first batch, with MageML's column names (cleaned, lower
+  case, SQL words such as `state` prefixed with `_`), so the same stream writes the same
+  table from MageML and from a service. A new field adds a nullable column.
+- With `unique_constraints`, a key that appears twice in one batch keeps its last message.
 
 ### Object storage
 

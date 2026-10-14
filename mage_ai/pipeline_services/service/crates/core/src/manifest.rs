@@ -152,6 +152,8 @@ pub enum ConnectorKind {
     IbmMq,
     /// Sink: one object per batch, Parquet or JSON lines, on S3, GCS, Azure Blob or disk.
     ObjectStorage,
+    /// Sink: a PostgreSQL table, one transaction per batch.
+    Postgres,
 }
 
 impl ConnectorKind {
@@ -164,6 +166,7 @@ impl ConnectorKind {
             ConnectorKind::Rabbitmq => "rabbitmq",
             ConnectorKind::IbmMq => "ibm_mq",
             ConnectorKind::ObjectStorage => "object_storage",
+            ConnectorKind::Postgres => "postgres",
         }
     }
 
@@ -187,6 +190,7 @@ impl ConnectorKind {
                 | ConnectorKind::Rabbitmq
                 | ConnectorKind::IbmMq
                 | ConnectorKind::ObjectStorage
+                | ConnectorKind::Postgres
         )
     }
 }
