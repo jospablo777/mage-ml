@@ -2860,6 +2860,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-connector-sqs"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "http",
+ "mage-stream-core",
+ "mage-stream-ports",
+ "object_store",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mage-console"
 version = "0.1.0"
 dependencies = [
@@ -2895,6 +2908,7 @@ dependencies = [
  "mage-connector-objectstore",
  "mage-connector-postgres",
  "mage-connector-rabbitmq",
+ "mage-connector-sqs",
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",

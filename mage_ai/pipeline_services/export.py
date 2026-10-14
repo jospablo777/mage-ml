@@ -562,6 +562,7 @@ STREAM_SOURCES = {
     'nats_js': 'nats', 'mongodb': 'mongodb',
     # Changes by logical replication.
     'postgres': 'postgres',
+    'amazon_sqs': 'sqs',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
@@ -573,7 +574,7 @@ STREAM_SINKS = {
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
-    'nats': 'nats', 'mongodb': 'mongodb',
+    'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -630,7 +631,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'Kinesis, Pub/Sub, SQS and Pulsar come next'
+STREAM_PLANNED = 'Kinesis, Pub/Sub and Pulsar come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -1001,6 +1002,36 @@ def _postgres_sink_settings(config: Dict, where: str, problems: List[str]) -> Di
     return {k: v for k, v in config.items() if k in POSTGRES_SINK_SETTINGS}
 
 
+SQS_SOURCE_SETTINGS = {
+    'queue_name', 'queue_url', 'batch_size', 'wait_time_seconds', 'serde_config',
+    'message_deletion_method', 'receivers', 'visibility_timeout', 'region', 'endpoint_url',
+}
+
+
+def _sqs_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MageML's Amazon SQS source; services delete each message after the sinks."""
+    unknown = sorted(set(config) - SQS_SOURCE_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown SQS settings {", ".join(unknown)}.')
+    if not (config.get('queue_name') or config.get('queue_url')):
+        problems.append(f'{where}: SQS settings need queue_name or queue_url.')
+    if str(config.get('message_deletion_method') or '').upper() == 'MANUAL':
+        problems.append(
+            f'{where}: message_deletion_method MANUAL hands blocks the messages to delete; a '
+            'service deletes each message once every sink took it. Remove the setting.'
+        )
+    method = str((config.get('serde_config') or {}).get('serialization_method') or 'JSON')
+    if method.upper() not in ('JSON', 'RAW_VALUE'):
+        problems.append(f'{where}: SQS messages are JSON or RAW_VALUE, not {method}.')
+    settings = {k: v for k, v in config.items()
+                if k in SQS_SOURCE_SETTINGS
+                and k not in ('batch_size', 'message_deletion_method')}
+    connector = dict(name=block.uuid, kind='sqs', config=settings)
+    if config.get('batch_size'):
+        connector['batch_size'] = config['batch_size']
+    return connector
+
+
 def _postgres_source_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
     """MageML's change capture source: the slot and the publication, and its batches."""
     unknown = sorted(set(config) - POSTGRES_SOURCE_SETTINGS)
@@ -1197,6 +1228,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'sqs':
+        return _sqs_connector(block, config, where, problems)
     if kind == 'postgres' and role == 'source':
         return _postgres_source_connector(block, config, where, problems)
     if kind == 'postgres':

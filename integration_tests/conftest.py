@@ -327,6 +327,27 @@ def mysql_source(my):
 
 
 @pytest.fixture(scope='session')
+def sqs_url():
+    url = os.getenv('MAGE_TEST_SQS_URL')
+    if not url:
+        pytest.skip('SQS is not configured: MAGE_TEST_SQS_URL unset')
+    return url
+
+
+@pytest.fixture
+def sqs_queue(sqs_url):
+    """A queue of the SQS server, its client and its name, deleted after the test."""
+    import boto3
+
+    client = boto3.client('sqs', endpoint_url=sqs_url, region_name='us-east-1',
+                          aws_access_key_id='test', aws_secret_access_key='test')
+    name = f'it_{uuid.uuid4().hex[:12]}'
+    url = client.create_queue(QueueName=name, Attributes={'VisibilityTimeout': '5'})['QueueUrl']
+    yield client, name, url
+    client.delete_queue(QueueUrl=url)
+
+
+@pytest.fixture(scope='session')
 def mongodb_url():
     url = os.getenv('MAGE_TEST_MONGODB_URL')
     if not url:

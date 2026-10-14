@@ -109,6 +109,19 @@ fn source(
                 &pipeline.uuid,
             )?))
         }
+        #[cfg(feature = "sqs")]
+        ConnectorKind::Sqs => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_sqs::SqsSource::new(
+                &_config,
+                mage_connector_sqs::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         #[cfg(feature = "postgres")]
         ConnectorKind::Postgres => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -308,6 +321,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         ConnectorKind::Clickhouse => {
             "it was built without ClickHouse; build it with the clickhouse feature"
         }
+        ConnectorKind::Sqs => "it was built without SQS; build it with the sqs feature",
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }
@@ -485,6 +499,9 @@ fn source_shape(source: &Connector) -> MessageShape {
         .is_some_and(|method| method.eq_ignore_ascii_case("RAW_VALUE"));
     if source.kind == ConnectorKind::Rabbitmq {
         MessageShape::RabbitmqPayload
+    } else if raw && source.kind == ConnectorKind::Sqs {
+        // Mage's SQS source hands RAW_VALUE bodies over as text.
+        MessageShape::RawText
     } else if source.config.contains_key("event_hubs_connection_string") {
         MessageShape::EventHubsData
     } else if raw {
@@ -642,5 +659,10 @@ mod tests {
             serde_json::json!({"event_hubs_connection_string": {"$parts": ["x"]}}),
         );
         assert_eq!(source_shape(&hubs), MessageShape::EventHubsData);
+        let sqs = connector(
+            ConnectorKind::Sqs,
+            serde_json::json!({"serde_config": {"serialization_method": "RAW_VALUE"}}),
+        );
+        assert_eq!(source_shape(&sqs), MessageShape::RawText);
     }
 }

@@ -65,6 +65,8 @@ pub enum MessageShape {
     RawBytes,
     /// Mage's Azure Event Hubs source: blocks get `{"data": <the body as text>}`.
     EventHubsData,
+    /// Mage's SQS RAW_VALUE: blocks get each body as text.
+    RawText,
 }
 
 impl PythonStreamSession {
@@ -331,7 +333,7 @@ impl TransformSession for PythonStreamSession {
                     MessageShape::Values => message_value(envelope)?,
                     MessageShape::RabbitmqPayload => rabbitmq_message(envelope)?,
                     MessageShape::RawBytes => raw_message(envelope)?,
-                    MessageShape::EventHubsData => text_message(envelope)?,
+                    MessageShape::EventHubsData | MessageShape::RawText => text_message(envelope)?,
                 });
             }
             if self.frames.is_none() {
@@ -372,6 +374,7 @@ impl TransformSession for PythonStreamSession {
                         MessageShape::RabbitmqPayload => Some("rabbitmq"),
                         MessageShape::RawBytes => Some("raw"),
                         MessageShape::EventHubsData => Some("event_hub"),
+                        MessageShape::RawText => Some("text"),
                     },
                 })
             };

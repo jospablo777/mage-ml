@@ -61,3 +61,9 @@ We support two ways to delete messages:
               msg['raw_message'].delete()
           return processed_msgs
       ```
+
+## In an exported service
+
+[Exported services](../../../production/export-a-service.md#amazon-sqs) run this source in the Rust
+engine. A message is deleted once every sink took its batch, so a failure loses nothing;
+`MANUAL` deletion is refused there, since blocks get each body, not the SQS message.

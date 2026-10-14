@@ -210,7 +210,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, Amazon SQS, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
 | Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
@@ -393,6 +393,35 @@ user_credentials: [reader, "{{ env_var('NATS_PASSWORD') }}"]   # or a .creds fil
   duplicate window, and confirms a batch once JetStream acknowledged all of it. Without
   `stream_name` it publishes to the stream that takes the subject, as MageML's does. A
   `{"data": ..., "metadata": {...}}` message publishes its data with the metadata as headers.
+
+### Amazon SQS
+
+MageML's `amazon_sqs` source runs with its settings, and a few of its own:
+
+```yaml
+connector_type: amazon_sqs
+queue_name: orders            # or queue_url
+batch_size: 100
+wait_time_seconds: 20         # the long poll (20 by default, the most SQS allows)
+receivers: 4                  # long polls at once, each up to 10 messages
+visibility_timeout: 60        # optional; the queue's by default
+region: eu-west-1             # or AWS_REGION
+endpoint_url: http://localhost:9324   # optional, for another SQS server
+```
+
+- Credentials are the AWS chain the S3 sink uses: `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY`, a web identity (EKS service accounts), the ECS task role or the
+  instance role.
+- A message is deleted only once every sink took its batch. MageML deletes it when it is
+  received (`AFTER_RECEIVED`), which loses it if the pipeline fails; `MANUAL`, which hands
+  blocks the message to delete, is refused.
+- While a batch runs, its messages stay invisible to other consumers (the source extends
+  their visibility at half its timeout), so a slow batch is not read twice. A message not
+  deleted, because the service stopped or died, comes back after its visibility timeout.
+- Several instances read one queue as competing consumers; order holds per message group
+  only on a FIFO queue with one instance. With `RAW_VALUE`, blocks get each body as text,
+  as in MageML.
+- SQS returns at most 10 messages a call: `receivers` sets how many calls wait at once.
 
 ### MongoDB
 

@@ -161,6 +161,8 @@ pub enum ConnectorKind {
     Postgres,
     /// Sink: a ClickHouse table, one deduplicated insert per batch.
     Clickhouse,
+    /// Source: an Amazon SQS queue, messages deleted after the sinks.
+    Sqs,
 }
 
 impl ConnectorKind {
@@ -177,6 +179,7 @@ impl ConnectorKind {
             ConnectorKind::ObjectStorage => "object_storage",
             ConnectorKind::Postgres => "postgres",
             ConnectorKind::Clickhouse => "clickhouse",
+            ConnectorKind::Sqs => "sqs",
         }
     }
 
@@ -190,6 +193,7 @@ impl ConnectorKind {
                 | ConnectorKind::Nats
                 | ConnectorKind::Mongodb
                 | ConnectorKind::Postgres
+                | ConnectorKind::Sqs
         )
     }
 

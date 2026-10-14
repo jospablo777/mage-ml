@@ -580,6 +580,38 @@ class PostgresSourceExportTest(StreamExportTestCase):
         self.assertIn('unknown PostgreSQL source settings slot', problems)
 
 
+class SqsSourceExportTest(StreamExportTestCase):
+    def test_sqs_sources_export_to_the_engines_source(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: amazon_sqs
+            queue_name: orders
+            batch_size: 50
+            wait_time_seconds: 10
+            message_deletion_method: AFTER_RECEIVED
+            serde_config:
+              serialization_method: RAW_VALUE
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'sqs')
+        self.assertEqual(stream['source']['config']['queue_name'], 'orders')
+        self.assertNotIn('message_deletion_method', stream['source']['config'])
+        self.assertEqual(stream['batch']['max_records'], 50)
+        self.assertIn('sqs', captured.engine_features)
+
+    def test_manual_deletion_and_other_formats_are_refused(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: amazon_sqs
+            message_deletion_method: MANUAL
+            serde_config:
+              serialization_method: AVRO
+        '''))
+        problems = self.problems()
+        self.assertIn('SQS settings need queue_name or queue_url', problems)
+        self.assertIn('message_deletion_method MANUAL', problems)
+        self.assertIn('SQS messages are JSON or RAW_VALUE, not AVRO', problems)
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
@@ -621,8 +653,8 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the kinesis connector; services run azure_event_hub, ibm_mq, kafka, mongodb, '
-            'nats_js, postgres, rabbitmq, webhook sources now',
+            'uses the kinesis connector; services run amazon_sqs, azure_event_hub, ibm_mq, '
+            'kafka, mongodb, nats_js, postgres, rabbitmq, webhook sources now',
             problems,
         )
 

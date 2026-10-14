@@ -242,6 +242,18 @@ services:
       timeout: 5s
       retries: 60
 
+  # ElasticMQ, an SQS server in a native image (about 20 MB), for the SQS source.
+  sqs:
+    image: softwaremill/elasticmq-native:1.6.14
+    mem_limit: 128m
+    ports:
+      - "${MAGE_TEST_SQS_PORT:-19324}:9324"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9324"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   # ActiveMQ Classic 6.2 with a heap of 256 MB. Mage's ActiveMQ source and sink use STOMP.
   activemq:
     image: apache/activemq-classic:6.2.0

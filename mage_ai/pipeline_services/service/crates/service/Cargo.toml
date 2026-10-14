@@ -22,6 +22,7 @@ mage-connector-ibmmq = { path = "../connector-ibmmq", optional = true }
 mage-connector-objectstore = { path = "../connector-objectstore", optional = true }
 mage-connector-postgres = { path = "../connector-postgres", optional = true }
 mage-connector-clickhouse = { path = "../connector-clickhouse", optional = true }
+mage-connector-sqs = { path = "../connector-sqs", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -57,6 +58,7 @@ object-store = ["dep:mage-connector-objectstore"]
 postgres = ["dep:mage-connector-postgres"]
 # ClickHouse sinks.
 clickhouse = ["dep:mage-connector-clickhouse"]
+sqs = ["dep:mage-connector-sqs"]
 
 [dev-dependencies]
 tempfile = "3"
