@@ -628,6 +628,13 @@ class StreamRefusalTest(StreamExportTestCase):
         self.assertNotIn('schema_classpath', serde)
         self.assertIn('REGISTRY_PASSWORD', json.dumps(serde['schema_registry_password']))
 
+    def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
+        self.stream(source=textwrap.dedent(SOURCE)
+                    + 'serde_config:\n  serialization_method: RAW_VALUE\n')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        source = captured.manifest['pipelines'][0]['stream']['source']['config']
+        self.assertEqual(source['serde_config'], dict(serialization_method='RAW_VALUE'))
+
     def test_avro_without_a_registry_or_with_a_written_password_is_refused(self):
         self.stream(source=textwrap.dedent(SOURCE) + textwrap.dedent('''
             serde_config:

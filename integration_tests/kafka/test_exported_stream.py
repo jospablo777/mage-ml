@@ -585,3 +585,56 @@ def test_a_block_that_takes_a_dataframe_gets_the_batch_as_a_table(
     assert sorted((m['id'], m['doubled']) for m in delivered) == [(i, i * 2) for i in range(20)]
     assert [r.value for r in rejected] == [b'not an object']
     assert 'must be JSON objects' in dict(rejected[0].headers)['mage-error'].decode()
+
+
+def test_raw_value_messages_reach_the_block_as_their_bytes(
+    mage_project, topics, kafka_bootstrap, tmp_path,
+):
+    """Mage's RAW_VALUE: binary messages are handed over as bytes, not refused."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'kafka_raw_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+    try:
+        def add(suffix, kind, code, language, upstream=()):
+            block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                                 pipeline=pipeline)
+            Path(block.file_path).write_text(textwrap.dedent(code))
+            pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+            return block
+
+        source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=name)
+                     + 'serde_config:\n  serialization_method: RAW_VALUE\n', 'yaml')
+        step = add('hex', 'transformer', '''
+            @transformer
+            def hex_of(messages, *args, **kwargs):
+                return [dict(kind=type(m).__name__, hex=m.hex()) for m in messages]
+        ''', 'python', [source])
+        add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [step])
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap)
+        payloads = [bytes([i, 255 - i, 0]) for i in range(5)]
+        for payload in payloads:
+            producer.send(topics[0], partition=0, value=payload)
+        producer.flush()
+        producer.close()
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        output = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                               auto_offset_reset='earliest',
+                               group_id=f'reader_{uuid.uuid4().hex[:8]}')
+        service.start()
+        try:
+            service.wait_running()
+            delivered = consume(output, 5)
+        finally:
+            service.stop()
+            output.close()
+    finally:
+        pipeline.delete()
+
+    assert sorted(m['hex'] for m in delivered) == sorted(p.hex() for p in payloads)
+    assert {m['kind'] for m in delivered} == {'bytes'}

@@ -249,8 +249,10 @@ sasl_config:
   dead_letter: true
   ```
 - The export stops, with the reason, on what services can't run the same way as MageML
-  yet: Python sources and sinks, other connectors, `include_metadata`, Protobuf and raw
-  messages, a start `offset`, and passwords written in the file.
+  yet: Python sources and sinks, other connectors, `include_metadata`, Protobuf messages, a
+  start `offset`, and passwords written in the file.
+- With `serialization_method: RAW_VALUE`, blocks get each message's bytes, as in Mage (a
+  Rust block takes them as `Vec<Vec<u8>>`).
 - Avro messages in Confluent's format (Mage's `serialization_method: AVRO`) are decoded by
   the service with the schemas of the schema registry, each read once, and the blocks get
   JSON: records as objects, unions as their value, decimals as exact strings, dates and

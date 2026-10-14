@@ -61,6 +61,8 @@ pub struct SessionOptions {
 pub enum MessageShape {
     Values,
     RabbitmqPayload,
+    /// Mage's RAW_VALUE: blocks get each message's bytes (sent as base64).
+    RawBytes,
 }
 
 impl PythonStreamSession {
@@ -219,6 +221,16 @@ fn rabbitmq_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError
     serde_json::value::to_raw_value(&message).map_err(|e| TransformError::Protocol(e.to_string()))
 }
 
+/// A message's bytes as base64 text, which the worker turns back into bytes.
+fn raw_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
+    use base64::Engine as _;
+
+    serde_json::value::to_raw_value(
+        &base64::engine::general_purpose::STANDARD.encode(&envelope.value),
+    )
+    .map_err(|e| TransformError::Protocol(e.to_string()))
+}
+
 fn to_batch(messages: &[Box<RawValue>], partition: u32) -> Result<RecordBatch, TransformError> {
     let mut builder = EnvelopeBuilder::new();
     for message in messages {
@@ -310,6 +322,7 @@ impl TransformSession for PythonStreamSession {
                 messages.push(match self.shape {
                     MessageShape::Values => message_value(envelope)?,
                     MessageShape::RabbitmqPayload => rabbitmq_message(envelope)?,
+                    MessageShape::RawBytes => raw_message(envelope)?,
                 });
             }
             if self.frames.is_none() {
@@ -345,7 +358,11 @@ impl TransformSession for PythonStreamSession {
                     outputs,
                     kwargs,
                     isolate,
-                    message_shape: (shape == MessageShape::RabbitmqPayload).then_some("rabbitmq"),
+                    message_shape: match shape {
+                        MessageShape::Values => None,
+                        MessageShape::RabbitmqPayload => Some("rabbitmq"),
+                        MessageShape::RawBytes => Some("raw"),
+                    },
                 })
             };
             let (reply, replaced) = self

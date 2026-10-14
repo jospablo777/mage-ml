@@ -55,7 +55,8 @@ fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, Connecto
         .unwrap_or_else(|| "JSON".into())
         .to_uppercase();
     match method.as_str() {
-        "JSON" => Ok(None),
+        // RAW_VALUE: the bytes as they are; the stream hands them to blocks as bytes.
+        "JSON" | "RAW_VALUE" => Ok(None),
         "AVRO" => Ok(Some(avro::AvroDecoder::new(avro::RegistryConfig {
             url: text(serde, "schema_registry_url").ok_or_else(|| {
                 ConnectorError::fatal("Kafka source: AVRO messages need schema_registry_url.")
@@ -64,8 +65,8 @@ fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, Connecto
             password: text(serde, "schema_registry_password"),
         }))),
         other => Err(ConnectorError::fatal(format!(
-            "Kafka source: {other} messages are not read by services; they read JSON, text \
-             and Avro (with a schema registry)."
+            "Kafka source: {other} messages are not read by services; they read JSON, text, \
+             raw bytes and Avro (with a schema registry)."
         ))),
     }
 }

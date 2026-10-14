@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 use crate::log::{self, RunLog};
 use crate::service::Service;
 use crate::stream::{self, SharedStatus, StreamParts, StreamState, StreamStatus};
-use crate::stream_python::PythonStreamSession;
+use crate::stream_python::{MessageShape, PythonStreamSession};
 
 /// The environment variables connector settings read. Blocks do not get them unless a block
 /// reads them too (the manifest lists it).
@@ -360,7 +360,17 @@ fn transform_session(
         .filter_map(|s| s.after.clone())
         .collect();
     let dead_letters = stream.errors.dead_letter.is_some();
-    let rabbitmq = stream.source.kind == ConnectorKind::Rabbitmq;
+    // How the source's messages reach the first blocks, as Mage hands them over.
+    let source_shape = if stream.source.kind == ConnectorKind::Rabbitmq {
+        MessageShape::RabbitmqPayload
+    } else if stream.source.config["serde_config"]["serialization_method"]
+        .as_str()
+        .is_some_and(|m| m.eq_ignore_ascii_case("RAW_VALUE"))
+    {
+        MessageShape::RawBytes
+    } else {
+        MessageShape::Values
+    };
     let mut regions: Vec<Vec<Block>> = Vec::new();
     for block in order.iter().cloned() {
         match regions.last_mut() {
@@ -375,7 +385,11 @@ fn transform_session(
             blocks,
             outputs,
             first && dead_letters,
-            first && rabbitmq,
+            if first {
+                source_shape
+            } else {
+                MessageShape::Values
+            },
             log,
         )
     };
@@ -428,7 +442,7 @@ fn region_session(
     blocks: &[Block],
     outputs: Vec<String>,
     isolate: bool,
-    rabbitmq_payload: bool,
+    shape: MessageShape,
     log: RunLog,
 ) -> Result<Box<dyn TransformSession>, String> {
     let cancel = service.stream_stop.child_token();
@@ -460,11 +474,7 @@ fn region_session(
             cancel,
             // Messages that fail on their own go to the dead-letter sink when there is one.
             isolate,
-            shape: if rabbitmq_payload {
-                crate::stream_python::MessageShape::RabbitmqPayload
-            } else {
-                crate::stream_python::MessageShape::Values
-            },
+            shape,
         },
     )))
 }

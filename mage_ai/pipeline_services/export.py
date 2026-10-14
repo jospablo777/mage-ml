@@ -1059,11 +1059,15 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
                 if k in ('serialization_method', 'schema_registry_url',
                          'schema_registry_username', 'schema_registry_password') and v
             }
+        elif method == 'RAW_VALUE':
+            # The blocks get each message's bytes, as in Mage.
+            config['serde_config'] = dict(serialization_method='RAW_VALUE')
         else:
             if method != 'JSON':
                 problems.append(
                     f'{where}: {method} messages are not supported by services yet; services '
-                    'read JSON messages, text, and Avro with a schema registry.'
+                    'read JSON messages, text, raw bytes (RAW_VALUE), and Avro with a schema '
+                    'registry.'
                 )
             config.pop('serde_config', None)
         if config.get('offset'):

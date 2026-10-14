@@ -528,6 +528,20 @@ class StreamBatchTest(WorkerTestCase):
         reply = [json.loads(line) for line in channel.getvalue().splitlines()][-1]
         self.assertEqual(reply['inputs'], {'takes_frame': 'polars', 'takes_list': 'messages'})
 
+    def test_raw_messages_reach_the_block_as_bytes(self):
+        """Mage's RAW_VALUE: the engine sends each message's bytes as base64."""
+        block = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return [dict(kind=type(m).__name__, size=len(m)) for m in messages]
+        ''', name='raw')
+
+        result = worker.run_stream_batch(dict(chain=[block], messages=['AP8=', ''],
+                                              message_shape='raw', kwargs={}))
+
+        self.assertEqual(result['messages'], [dict(kind='bytes', size=2),
+                                              dict(kind='bytes', size=0)])
+
     def test_a_failing_block_is_named(self):
         fails = self.block('''
             @transformer
