@@ -2718,6 +2718,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-connector-activemq"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "mage-stream-core",
+ "mage-stream-ports",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mage-connector-clickhouse"
 version = "0.1.0"
 dependencies = [
@@ -2912,6 +2923,7 @@ dependencies = [
  "clap",
  "croner",
  "libc",
+ "mage-connector-activemq",
  "mage-connector-clickhouse",
  "mage-connector-http",
  "mage-connector-ibmmq",

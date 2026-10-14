@@ -109,6 +109,19 @@ fn source(
                 &pipeline.uuid,
             )?))
         }
+        #[cfg(feature = "activemq")]
+        ConnectorKind::Activemq => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_activemq::ActiveMqSource::new(
+                &_config,
+                mage_connector_activemq::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         #[cfg(feature = "pubsub")]
         ConnectorKind::Pubsub => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -298,6 +311,10 @@ fn sink(
         ConnectorKind::Mongodb => Ok(Arc::new(mage_connector_mongodb::MongoSink::new(&_config)?)),
         #[cfg(feature = "pubsub")]
         ConnectorKind::Pubsub => Ok(Arc::new(mage_connector_pubsub::PubSubSink::new(&_config)?)),
+        #[cfg(feature = "activemq")]
+        ConnectorKind::Activemq => Ok(Arc::new(mage_connector_activemq::ActiveMqSink::new(
+            &_config,
+        )?)),
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => Ok(Arc::new(mage_connector_nats::NatsSink::new(
             &_config,
@@ -338,6 +355,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         }
         ConnectorKind::Sqs => "it was built without SQS; build it with the sqs feature",
         ConnectorKind::Pubsub => "it was built without Pub/Sub; build it with the pubsub feature",
+        ConnectorKind::Activemq => {
+            "it was built without ActiveMQ; build it with the activemq feature"
+        }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }
@@ -515,8 +535,9 @@ fn source_shape(source: &Connector) -> MessageShape {
         .is_some_and(|method| method.eq_ignore_ascii_case("RAW_VALUE"));
     if source.kind == ConnectorKind::Rabbitmq {
         MessageShape::RabbitmqPayload
-    } else if raw && source.kind == ConnectorKind::Sqs {
-        // Mage's SQS source hands RAW_VALUE bodies over as text.
+    } else if (raw && source.kind == ConnectorKind::Sqs) || source.kind == ConnectorKind::Activemq {
+        // Mage's SQS source hands RAW_VALUE bodies over as text, its ActiveMQ source every
+        // body.
         MessageShape::RawText
     } else if source.config.contains_key("event_hubs_connection_string") {
         MessageShape::EventHubsData
@@ -680,5 +701,7 @@ mod tests {
             serde_json::json!({"serde_config": {"serialization_method": "RAW_VALUE"}}),
         );
         assert_eq!(source_shape(&sqs), MessageShape::RawText);
+        let activemq = connector(ConnectorKind::Activemq, serde_json::json!({}));
+        assert_eq!(source_shape(&activemq), MessageShape::RawText);
     }
 }

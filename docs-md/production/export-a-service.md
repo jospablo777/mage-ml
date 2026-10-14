@@ -210,9 +210,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, Google Cloud Pub/Sub, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -510,6 +510,30 @@ prefetch_count: 1000             # source: deliveries the broker sends ahead
   the same on a replay, for consumers that dedupe.
 - One queue has no partitions: several service instances share it as competing consumers,
   so order holds only with one instance.
+
+### ActiveMQ
+
+MageML's `activemq` source and sink (STOMP) run with their settings:
+
+```yaml
+connector_type: activemq
+connection_host: mq.example.com
+connection_port: 61613
+queue_name: orders
+username: orders
+password: "{{ env_var('ACTIVEMQ_PASSWORD') }}"
+batch_size: 100               # source
+batch_timeout: 0.5            # source: seconds before a smaller batch runs
+prefetch: 1000                # source: messages the broker sends ahead
+```
+
+- Blocks get each body as text, as in MageML. Once every sink took a batch, one cumulative
+  ACK of its last message acknowledges it; messages not acknowledged when the service stops
+  or dies go back to the queue.
+- The sink sends each message persistent, as MageML does (an object's `data`, or the object,
+  as JSON, its `metadata` as headers), and a batch is confirmed by the broker's receipt of
+  its last frame, within `receipt_timeout` seconds (30). The next batch is sent meanwhile.
+- The connection is plain STOMP, as in MageML.
 
 ### IBM MQ
 

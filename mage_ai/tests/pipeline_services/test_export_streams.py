@@ -650,6 +650,46 @@ class PubSubExportTest(StreamExportTestCase):
         self.assertIn('Pub/Sub settings need topic_id', problems)
 
 
+class ActiveMqExportTest(StreamExportTestCase):
+    def test_activemq_streams_export_to_the_engines_source_and_sink(self):
+        self.stream(
+            source=textwrap.dedent('''
+                connector_type: activemq
+                connection_host: mq.example.com
+                connection_port: 61613
+                queue_name: orders
+                username: reader
+                password: "{{ env_var('MQ_PASSWORD') }}"
+                batch_size: 100
+                batch_timeout: 0.5
+            '''),
+            sink=textwrap.dedent('''
+                connector_type: activemq
+                connection_host: mq.example.com
+                connection_port: 61613
+                queue_name: scores
+                receipt_timeout: 10
+            '''),
+        )
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'activemq')
+        self.assertNotIn('batch_size', stream['source']['config'])
+        self.assertEqual(stream['batch'], dict(max_records=100, max_wait_ms=500))
+        self.assertEqual(stream['sinks'][0]['config']['receipt_timeout'], 10)
+        self.assertIn('activemq', captured.engine_features)
+
+    def test_a_written_password_is_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: activemq
+            connection_host: mq
+            connection_port: 61613
+            queue_name: scores
+            password: hunter2
+        '''))  # pragma: allowlist secret
+        self.assertIn('password is written in the file', self.problems())
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
@@ -691,7 +731,7 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the kinesis connector; services run amazon_sqs, azure_event_hub, '
+            'uses the kinesis connector; services run activemq, amazon_sqs, azure_event_hub, '
             'google_cloud_pubsub, ibm_mq, kafka, mongodb, nats_js, postgres, rabbitmq, webhook '
             'sources now',
             problems,

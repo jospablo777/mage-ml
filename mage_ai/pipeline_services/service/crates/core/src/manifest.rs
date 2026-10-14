@@ -165,6 +165,8 @@ pub enum ConnectorKind {
     Sqs,
     /// Google Cloud Pub/Sub: a subscription, acknowledged after the sinks, and a topic.
     Pubsub,
+    /// ActiveMQ over STOMP: a queue, acknowledged after the sinks, and persistent sends.
+    Activemq,
 }
 
 impl ConnectorKind {
@@ -183,6 +185,7 @@ impl ConnectorKind {
             ConnectorKind::Clickhouse => "clickhouse",
             ConnectorKind::Sqs => "sqs",
             ConnectorKind::Pubsub => "pubsub",
+            ConnectorKind::Activemq => "activemq",
         }
     }
 
@@ -198,6 +201,7 @@ impl ConnectorKind {
                 | ConnectorKind::Postgres
                 | ConnectorKind::Sqs
                 | ConnectorKind::Pubsub
+                | ConnectorKind::Activemq
         )
     }
 
@@ -216,6 +220,7 @@ impl ConnectorKind {
                 | ConnectorKind::Postgres
                 | ConnectorKind::Clickhouse
                 | ConnectorKind::Pubsub
+                | ConnectorKind::Activemq
         )
     }
 }

@@ -54,3 +54,8 @@ the connection to the broker drops, the pipeline stops with an error.
 
 Click the run button of the data loader block, "Check connection". The block connects
 with its config and closes the connection; it reads no message.
+
+## In an exported service
+
+[Exported services](../../../production/export-a-service.md#activemq) run this source and the ActiveMQ
+sink in the Rust engine, with the same settings and messages.

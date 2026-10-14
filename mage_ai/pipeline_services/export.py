@@ -562,21 +562,21 @@ STREAM_SOURCES = {
     'nats_js': 'nats', 'mongodb': 'mongodb',
     # Changes by logical replication.
     'postgres': 'postgres',
-    'amazon_sqs': 'sqs', 'google_cloud_pubsub': 'pubsub',
+    'amazon_sqs': 'sqs', 'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
     'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
-    'google_cloud_pubsub': 'pubsub',
+    'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
-    'pubsub': 'pubsub',
+    'pubsub': 'pubsub', 'activemq': 'activemq',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -1040,6 +1040,40 @@ PUBSUB_SOURCE_SETTINGS = PUBSUB_SETTINGS | {
 }
 
 
+ACTIVEMQ_SETTINGS = {'connection_host', 'connection_port', 'queue_name', 'username',
+                     'password'}
+ACTIVEMQ_SOURCE_SETTINGS = ACTIVEMQ_SETTINGS | {
+    'configure_consume', 'batch_size', 'batch_timeout', 'prefetch',
+}
+
+
+def _activemq_connector(block, role: str, config: Dict, where: str,
+                        problems: List[str]) -> Dict:
+    """MageML's ActiveMQ source and sink, over STOMP."""
+    allowed = ACTIVEMQ_SOURCE_SETTINGS if role == 'source' else ACTIVEMQ_SETTINGS | {
+        'receipt_timeout'}
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown ActiveMQ settings {", ".join(unknown)}.')
+    for key in ('connection_host', 'connection_port', 'queue_name'):
+        if not config.get(key):
+            problems.append(f'{where}: ActiveMQ settings need {key}.')
+    if _literal(config.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    settings = {k: v for k, v in config.items()
+                if k in allowed and k not in ('batch_size', 'batch_timeout', 'configure_consume')}
+    connector = dict(name=block.uuid, kind='activemq', config=settings)
+    if role == 'source':
+        if config.get('batch_size'):
+            connector['batch_size'] = config['batch_size']
+        if config.get('batch_timeout'):
+            connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
 def _pubsub_connector(block, role: str, config: Dict, where: str,
                       problems: List[str]) -> Dict:
     """MageML's Google Cloud Pub/Sub source and sink."""
@@ -1263,6 +1297,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'activemq':
+        return _activemq_connector(block, role, config, where, problems)
     if kind == 'pubsub':
         return _pubsub_connector(block, role, config, where, problems)
     if kind == 'sqs':

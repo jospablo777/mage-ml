@@ -18,3 +18,8 @@ decimals and UUIDs are written as text. The sink waits for the broker to confirm
 batch (`receipt_timeout`, 30 seconds by default) and raises when the broker rejects a
 message. A message with the format `{"data": {...}, "metadata": {...}}` sends its data,
 with the metadata as message headers.
+
+## In an exported service
+
+[Exported services](/production/export-a-service#activemq) run this sink in the Rust engine:
+the next batch is sent while the broker confirms one.

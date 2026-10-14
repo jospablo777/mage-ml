@@ -24,6 +24,7 @@ mage-connector-postgres = { path = "../connector-postgres", optional = true }
 mage-connector-clickhouse = { path = "../connector-clickhouse", optional = true }
 mage-connector-sqs = { path = "../connector-sqs", optional = true }
 mage-connector-pubsub = { path = "../connector-pubsub", optional = true }
+mage-connector-activemq = { path = "../connector-activemq", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -61,6 +62,7 @@ postgres = ["dep:mage-connector-postgres"]
 clickhouse = ["dep:mage-connector-clickhouse"]
 sqs = ["dep:mage-connector-sqs"]
 pubsub = ["dep:mage-connector-pubsub"]
+activemq = ["dep:mage-connector-activemq"]
 
 [dev-dependencies]
 tempfile = "3"
