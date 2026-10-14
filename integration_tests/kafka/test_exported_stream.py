@@ -191,9 +191,13 @@ def test_partitions_move_between_instances_without_losing_or_repeating_messages(
         first.stop()
         produce(kafka_bootstrap, topics[0], range(600, 800))
         expected = [i for i in range(800) if i % 10]
-        received += consume(output, len(expected) - len(received), timeout=180)
+        # Until every message arrived: messages written twice count in received, so a
+        # count of what is left stopped reading short of them.
+        deadline = time.time() + 180
+        while {m['id'] for m in received} != set(expected) and time.time() < deadline:
+            received += consume(output, len(expected), timeout=5)
         time.sleep(3)
-        received += consume(output, 1, timeout=3)
+        received += consume(output, len(expected), timeout=3)
     finally:
         for service in (first, second):
             if service.process and service.process.poll() is None:
@@ -235,9 +239,13 @@ def test_a_killed_service_loses_nothing_and_repeats_at_most_its_batches_in_fligh
         service.process.wait(timeout=30)
         service.start()
         service.wait_running()
-        received += consume(output, len(expected) - len(received), timeout=180)
+        # Until every message arrived: messages written twice count in received, so a
+        # count of what is left stopped reading short of them.
+        deadline = time.time() + 180
+        while {m['id'] for m in received} != set(expected) and time.time() < deadline:
+            received += consume(output, len(expected), timeout=5)
         time.sleep(3)
-        received += consume(output, 1, timeout=3)
+        received += consume(output, len(expected), timeout=3)
     finally:
         if service.process.poll() is None:
             service.stop()

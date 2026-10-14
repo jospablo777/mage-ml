@@ -184,9 +184,13 @@ def test_a_killed_service_loses_nothing(
         service.process.wait(timeout=30)
         service.start()
         service.wait_running()
-        received += receive(ibm_mq, queues[1], len(expected) - len(received), timeout=180)
+        # Until every message arrived: the batch written twice counts in received, so a
+        # count of what is left stopped reading short of it.
+        deadline = time.time() + 180
+        while {r['id'] for r, _ in received} != set(expected) and time.time() < deadline:
+            received += receive(ibm_mq, queues[1], len(expected), timeout=5)
         time.sleep(3)
-        received += receive(ibm_mq, queues[1], 1, timeout=3)
+        received += receive(ibm_mq, queues[1], len(expected), timeout=3)
     finally:
         if service.process.poll() is None:
             service.stop()
