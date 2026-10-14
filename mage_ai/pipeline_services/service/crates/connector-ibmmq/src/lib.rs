@@ -950,8 +950,13 @@ fn sink_worker(settings: Settings, requests: std_mpsc::Receiver<Put>) {
 
 fn put_batch(session: &Session, messages: &[(Vec<u8>, [u8; 24])]) -> Result<(), MqError> {
     for (data, id) in messages {
+        // Asynchronous put responses: a put does not wait for the queue manager's answer.
+        // Failures of persistent puts in a unit of work fail its commit; MQSTAT below names
+        // the reason first.
         let options = (
-            constants::MQPMO_SYNCPOINT | constants::MQPMO_FAIL_IF_QUIESCING,
+            constants::MQPMO_SYNCPOINT
+                | constants::MQPMO_FAIL_IF_QUIESCING
+                | constants::MQPMO_ASYNC_RESPONSE,
             constants::MQPER_PERSISTENT,
             MessageId(*id),
         );
@@ -967,6 +972,23 @@ fn put_batch(session: &Session, messages: &[(Vec<u8>, [u8; 24])]) -> Result<(), 
         result
             .discard_warning()
             .map_err(|e| MqError::new("putting a message", &e))?;
+    }
+    let status = session
+        .qm
+        .stat_put()
+        .discard_warning()
+        .map_err(|e| MqError::new("checking the puts", &e))?;
+    if status.put_failure_count > 0 {
+        let reason = status.reason.0;
+        return Err(MqError {
+            reason,
+            message: format!(
+                "IBM MQ putting messages: {} of {} puts failed, reason {reason}{}",
+                status.put_failure_count,
+                messages.len(),
+                hint(reason)
+            ),
+        });
     }
     session.commit()
 }

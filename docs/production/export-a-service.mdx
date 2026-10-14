@@ -259,11 +259,21 @@ sasl_config:
 
 ### Throughput
 
-Measured on a laptop (Apple M-series, Kafka in Docker, one partition, release build): a
-stream from Kafka through a Python block back to Kafka moves about 58,000 messages a second
-when the block returns its messages, and about 48,000 when it adds two fields to each one.
-Larger `batch_size` values raise it; most of the cost is the block's JSON parsing in Python.
-`integration_tests/benchmark/test_stream_benchmark.py` measures it on your machine.
+Measured on a laptop (Apple silicon, the systems in Docker, one partition, release build,
+200,000 messages of about 120 bytes), from Kafka through a Python block:
+
+| Sink | Messages a second |
+| --- | --- |
+| Parquet files | 65,000 |
+| Kafka (block returns its messages) | 58,000 |
+| Kafka (block adds two fields) | 48,000 |
+| ClickHouse | 48,700 |
+| RabbitMQ (publisher confirms) | 24,500 |
+| PostgreSQL | 20,200 |
+| IBM MQ (emulated amd64 server) | 15,100 |
+
+Larger `batch_size` values raise these; most of the cost is the block's JSON parsing in
+Python. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
 
 ### Webhooks
 
