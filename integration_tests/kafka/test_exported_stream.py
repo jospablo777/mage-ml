@@ -724,7 +724,7 @@ def test_a_start_offset_applies_once_then_the_committed_position_wins(
             return block
 
         source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=name)
-                     + f'offset:\n  type: int\n  value: 5\n  partitions:\n'
+                     + 'offset:\n  type: int\n  value: 5\n  partitions:\n'
                      + f'    - {{topic: {topics[0]}, partition: 0}}\n', 'yaml')
         step = add('pass', 'transformer', TRANSFORM, 'python', [source])
         add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [step])
