@@ -236,6 +236,21 @@ sasl_config:
 - A position moves on only after every sink took the batch. A batch that still fails
   after its retries (the pipeline's retry settings, 3 by default) stops the stream, and
   the position stays where it was, so no message is lost.
+- A sink with `dead_letter: true` takes the messages a block fails on, each with its error
+  in a `mage-error` header (and the stream's name in `mage-stream`), while the rest of their
+  batch flows on; a batch is acknowledged only once both are written, and a failing
+  dead-letter sink is retried until it works. When every message of a batch fails, or a
+  block does not load, it is a code problem: the batch fails as a whole and stops the
+  stream, nothing goes to dead letters. A block can see a message more than once while its
+  batch is split to find the failing ones. In the editor, `Execute pipeline` does not write
+  to the dead-letter sink.
+
+  ```yaml
+  connector_type: kafka
+  bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+  topic: orders_dead_letters
+  dead_letter: true
+  ```
 - The export stops, with the reason, on what services can't run the same way as MageML
   yet: Python sources and sinks, other connectors, `include_metadata`, Avro, Protobuf and
   raw messages, a start `offset`, and passwords written in the file.

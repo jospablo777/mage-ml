@@ -143,3 +143,22 @@ class StreamingPipelineExecutorTest(DBTestCase):
 
         copy_messages.assert_not_called()
         self.assertEqual(sinks['sink'].batches, [[dict(id=1, seen=2), dict(id=2, seen=2)]])
+
+    def test_the_dead_letter_sink_is_not_written_in_the_editor(self):
+        """It takes only failing messages, in an exported service."""
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[source], language=BlockLanguage.YAML)
+        self.add('dead', 'data_exporter',
+                 'connector_type: dummy\nname: dead\ndead_letter: true\n',
+                 upstream=[source], language=BlockLanguage.YAML)
+
+        source, sinks = self.run_pipeline(['sink', 'dead'])
+
+        self.assertEqual(sinks['sink'].batches, [[dict(id=1), dict(id=2)]])
+        self.assertEqual(sinks['dead'].batches, [])

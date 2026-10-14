@@ -429,6 +429,51 @@ class StreamBatchTest(WorkerTestCase):
         self.assertTrue(replies[-1]['ok'])
 
 
+class StreamIsolationTest(WorkerTestCase):
+    """
+    With a dead-letter sink, the messages that fail on their own are found and the others
+    flow; a code problem (every message failing, a block that does not load) fails the batch.
+    """
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+        self.inverse = self.block('''
+            @transformer
+            def f(messages):
+                return [dict(m, inverse=1 / m['n']) for m in messages]
+        ''', name='inverse')
+
+    def stream(self, messages, isolate=True, chain=None):
+        return worker.run_stream_batch(dict(
+            chain=chain or [self.inverse], messages=messages, isolate=isolate,
+        ))
+
+    def test_the_messages_that_fail_on_their_own_are_found_and_the_others_flow(self):
+        messages = [{'n': n} for n in (1, 0, 2, 4, 0, 5, 8)]
+
+        result = self.stream(messages)
+
+        self.assertEqual([f['row'] for f in result['failures']], [1, 4])
+        self.assertIn('ZeroDivisionError', result['failures'][0]['message'])
+        self.assertEqual(result['failures'][0]['block_uuid'], 'inverse')
+        self.assertEqual([m['n'] for m in result['outputs']['inverse']], [1, 2, 4, 5, 8])
+
+    def test_every_message_failing_is_a_failure_of_the_batch(self):
+        with self.assertRaises(worker.BlockError):
+            self.stream([{'n': 0}, {'n': 0}])
+
+    def test_without_isolation_one_message_fails_the_batch(self):
+        with self.assertRaises(worker.BlockError):
+            self.stream([{'n': 1}, {'n': 0}], isolate=False)
+
+    def test_a_block_that_does_not_load_fails_the_batch(self):
+        broken = self.block('this is not python', name='broken')
+        with self.assertRaises(worker.BlockError) as caught:
+            self.stream([{'n': 1}], chain=[broken])
+        self.assertEqual(caught.exception.phase, 'load')
+
+
 class StreamLoadTest(WorkerTestCase):
     """
     A replaced worker gets a stream's blocks loaded before the stream's next batch, so a model

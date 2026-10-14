@@ -67,3 +67,11 @@ pub struct BatchMeta {
 /// A sink of the stream, by its index in the stream's sink list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SinkId(pub u16);
+
+impl SinkId {
+    /// The dead-letter sink, as the writer of a whole batch that failed.
+    pub const DEAD_LETTER: SinkId = SinkId(u16::MAX);
+    /// The dead-letter sink as the writer of the messages of a batch that failed on their
+    /// own (row-level dead letters): one more confirmation the batch needs.
+    pub const REJECTED_ROWS: SinkId = SinkId(u16::MAX - 1);
+}

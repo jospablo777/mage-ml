@@ -33,19 +33,34 @@ pub struct PythonStreamSession {
     log: RunLog,
     timeout: Option<Duration>,
     cancel: CancellationToken,
+    /// Ask the worker for the messages that fail on their own (row-level dead letters).
+    isolate: bool,
+}
+
+/// How a stream's Python session runs, besides its blocks.
+pub struct SessionOptions {
+    /// The blocks whose messages the sinks write.
+    pub outputs: Vec<String>,
+    pub log: RunLog,
+    pub cancel: CancellationToken,
+    /// Find the messages that fail on their own (the stream has a dead-letter sink).
+    pub isolate: bool,
 }
 
 impl PythonStreamSession {
-    /// `outputs`: the blocks whose messages the sinks write.
     pub fn new(
         pool: Arc<PythonPool>,
         project_dir: &std::path::Path,
         pipeline: &Pipeline,
         order: &[Block],
-        outputs: Vec<String>,
-        log: RunLog,
-        cancel: CancellationToken,
+        options: SessionOptions,
     ) -> PythonStreamSession {
+        let SessionOptions {
+            outputs,
+            log,
+            cancel,
+            isolate,
+        } = options;
         let chain = order
             .iter()
             .map(|block| {
@@ -74,6 +89,7 @@ impl PythonStreamSession {
             log,
             timeout,
             cancel,
+            isolate,
         }
     }
 }
@@ -119,6 +135,7 @@ struct StreamRequest<'a> {
     messages: &'a [Box<RawValue>],
     outputs: &'a [String],
     kwargs: &'a Value,
+    isolate: bool,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +146,18 @@ struct StreamReply {
     error: Value,
     #[serde(default)]
     outputs: BTreeMap<String, Vec<Box<RawValue>>>,
+    /// Messages that failed on their own, by their row in the batch.
+    #[serde(default)]
+    failures: Vec<Failure>,
+}
+
+#[derive(Deserialize)]
+struct Failure {
+    row: usize,
+    #[serde(default)]
+    block_uuid: Option<String>,
+    #[serde(default)]
+    message: String,
 }
 
 impl PythonStreamSession {
@@ -160,7 +189,8 @@ impl TransformSession for PythonStreamSession {
                 .iter()
                 .map(message_value)
                 .collect::<Result<Vec<_>, _>>()?;
-            let (chain, outputs, kwargs) = (&self.chain, &self.outputs, &self.kwargs);
+            let (chain, outputs, kwargs, isolate) =
+                (&self.chain, &self.outputs, &self.kwargs, self.isolate);
             let line = |id: &str| {
                 serde_json::to_string(&StreamRequest {
                     id,
@@ -169,6 +199,7 @@ impl TransformSession for PythonStreamSession {
                     messages: &messages,
                     outputs,
                     kwargs,
+                    isolate,
                 })
             };
             let (reply, replaced) = self
@@ -201,9 +232,21 @@ impl TransformSession for PythonStreamSession {
             for (block, messages) in &reply.outputs {
                 outputs.insert(block.clone(), to_batch(messages, partition)?);
             }
+            let row_errors = reply
+                .failures
+                .iter()
+                .map(|failure| mage_stream_ports::RowError {
+                    row: failure.row,
+                    error: format!(
+                        "{}: {}",
+                        failure.block_uuid.as_deref().unwrap_or("a block"),
+                        failure.message
+                    ),
+                })
+                .collect();
             Ok(TransformOutput {
                 outputs,
-                row_errors: Vec::new(),
+                row_errors,
             })
         })
     }

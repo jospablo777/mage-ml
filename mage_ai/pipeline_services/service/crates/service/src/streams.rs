@@ -289,9 +289,13 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
             &service.project_dir(),
             pipeline,
             &order,
-            outputs,
-            log,
-            service.stream_stop.child_token(),
+            crate::stream_python::SessionOptions {
+                outputs,
+                log,
+                cancel: service.stream_stop.child_token(),
+                // Messages that fail on their own go to the dead-letter sink when there is one.
+                isolate: stream.errors.dead_letter.is_some(),
+            },
         )))
     };
     Ok(StreamParts {

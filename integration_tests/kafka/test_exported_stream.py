@@ -42,6 +42,9 @@ def double(messages: List[Dict], *args, **kwargs):
     time.sleep(float(kwargs.get('delay', 0)))
     if kwargs.get('identity'):
         return messages
+    for m in messages:
+        if m['id'] in kwargs.get('reject', []):
+            raise ValueError(f"message {m['id']} is not accepted")
     return [dict(m, doubled=m['amount'] * 2) for m in messages if m['id'] % 10 != 0]
 '''
 SINK = '''
@@ -378,3 +381,63 @@ def test_a_paused_stream_reads_nothing_until_it_resumes_and_loses_nothing(
     assert snapshot['status'] == 'paused'
     assert snapshot['stream']['state'] == 'paused'
     assert sorted(m['id'] for m in after) == [i for i in range(100) if i % 10]
+
+
+def test_messages_that_fail_on_their_own_go_to_the_dead_letter_topic(
+    mage_project, stream_pipeline, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    A dead-letter sink takes the messages a block fails on, each with its error, and the
+    rest of their batch reaches the output topic; every position is committed.
+    """
+    from mage_ai.data_preparation.models.block import Block
+
+    pipeline, group = stream_pipeline
+    pipeline.variables = dict(reject=[3, 17, 41])
+    pipeline.save()
+    dead_topic = f'it_dead_{uuid.uuid4().hex[:10]}'
+    KafkaAdminClient(bootstrap_servers=kafka_bootstrap).create_topics(
+        [NewTopic(dead_topic, num_partitions=1, replication_factor=1)],
+    )
+    source = pipeline.get_block(f'{pipeline.uuid}_source')
+    dead = Block.create(f'{pipeline.uuid}_dead', 'data_exporter', mage_project,
+                        language='yaml', pipeline=pipeline)
+    Path(dead.file_path).write_text(textwrap.dedent(f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {dead_topic}
+        dead_letter: true
+    '''))
+    pipeline.add_block(dead, upstream_block_uuids=[source.uuid])
+    directory = export_service(mage_project, pipeline.uuid, tmp_path)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
+    output = KafkaConsumer(
+        topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    dead_letters = KafkaConsumer(
+        dead_topic, bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
+        group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
+    )
+    produce(kafka_bootstrap, topics[0], range(60))
+    expected = [i for i in range(60) if i % 10 and i not in (3, 17, 41)]
+    service.start()
+    try:
+        service.wait_running()
+        delivered = consume(output, len(expected))
+        rejected = []
+        deadline = time.time() + 60
+        while len(rejected) < 3 and time.time() < deadline:
+            for records in dead_letters.poll(timeout_ms=500).values():
+                rejected.extend(records)
+        time.sleep(2)
+    finally:
+        service.stop()
+
+    assert sorted(m['id'] for m in delivered) == expected
+    assert sorted(json.loads(r.value)['id'] for r in rejected) == [3, 17, 41]
+    errors = {json.loads(r.value)['id']: dict(r.headers)['mage-error'].decode() for r in rejected}
+    assert 'message 17 is not accepted' in errors[17], errors
+    assert committed(kafka_bootstrap, group, topics[0]) == 60

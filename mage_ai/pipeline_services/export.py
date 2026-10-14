@@ -713,6 +713,24 @@ def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
 
 def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture_: Capture,
                       problems: List[str]) -> Optional[Dict]:
+    connector = _stream_connector_settings(block, kinds, role, pipeline, capture_, problems)
+    if connector is not None and role == 'sink' and _marked_dead_letter(block, pipeline):
+        connector['dead_letter'] = True
+    return connector
+
+
+def _marked_dead_letter(block, pipeline) -> bool:
+    """Whether a YAML sink sets `dead_letter: true`."""
+    try:
+        config = compile_stream_config(Path(block.file_path).read_text(),
+                                       getattr(pipeline, 'variables', None))
+    except (OSError, ValueError):
+        return False
+    return bool(config.get('dead_letter'))
+
+
+def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline,
+                               capture_: Capture, problems: List[str]) -> Optional[Dict]:
     where = f'Pipeline {pipeline.uuid}, {role} {block.uuid}'
     language = str(getattr(block.language, 'value', block.language))
     if language != 'yaml':
@@ -732,6 +750,8 @@ def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture
         problems.append(f'{where}: {error}')
         return None
     connector_type = config.pop('connector_type', None)
+    # Read by _marked_dead_letter; not a connector setting.
+    config.pop('dead_letter', None)
     if connector_type not in kinds:
         problems.append(
             f'{where} uses the {connector_type or "unnamed"} connector; services run '
@@ -836,9 +856,16 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
         blocks.append(entry)
     sink_entries = []
+    dead_letters = []
     for block in sinks:
         sink = _stream_connector(block, STREAM_SINKS, 'sink', pipeline, capture_, problems)
         if sink is None:
+            continue
+        if sink.pop('dead_letter', False):
+            # Messages that fail go there, whichever block it hangs from.
+            sink.pop('batch_size', None)
+            sink.pop('timeout_ms', None)
+            dead_letters.append(sink)
             continue
         upstream = list(block.upstream_block_uuids or [])
         if len(upstream) != 1:
@@ -872,8 +899,18 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     capture_.notes.append(
         f'{prefix} runs from the service\'s start, with no trigger. A batch that still fails '
         f'after {errors["retries"]} retries stops the stream, so no message is dropped; its '
-        'position stays where it was.'
+        'position stays where it was. A sink with dead_letter: true takes the messages that '
+        'fail on their own instead.'
     )
+    if len(dead_letters) > 1:
+        problems.append(
+            f'{prefix} has {len(dead_letters)} dead-letter sinks '
+            f'({", ".join(d["name"] for d in dead_letters)}); a stream has one.'
+        )
+    elif dead_letters:
+        errors['dead_letter'] = dead_letters[0]
+    if not sink_entries and not problems:
+        problems.append(f'{prefix} has only a dead-letter sink; it needs a sink for its messages.')
     return dict(
         uuid=pipeline.uuid,
         name=pipeline.name or pipeline.uuid,

@@ -769,6 +769,53 @@ def _stream_messages(value: Any, block_uuid: str) -> List:
 
 def run_stream_batch(request: Dict) -> Dict:
     """
+    Runs a stream's blocks on one batch. With `isolate` (the stream has a dead-letter sink),
+    a batch that fails is split in halves until the messages that fail on their own are found:
+    the others' outputs come back with `failures`, each failing message's row and error. A
+    block that fails to load, or every message failing, is a failure of the batch, never
+    dead letters: a code or infrastructure problem must not empty the stream into them. A
+    block can see a message more than once while its batch is split.
+    """
+    if not request.get('isolate'):
+        return _run_stream_chain(request, request['messages'])
+    messages = request['messages']
+    try:
+        return _run_stream_chain(request, messages)
+    except BlockError as error:
+        if error.phase != 'run' or len(messages) <= 1:
+            raise
+        outputs, failures = _isolate(request, messages, 0)
+        if len(failures) == len(messages):
+            raise
+        last = request['chain'][-1]['uuid'] if request['chain'] else None
+        return dict(
+            outputs=outputs,
+            messages=outputs.get(last, []) if last else messages,
+            blocks=[],
+            failures=failures,
+        )
+
+
+def _isolate(request: Dict, messages: List, offset: int) -> Tuple[Dict[str, List], List[Dict]]:
+    """The outputs of the messages that run, and the rows of those that fail on their own."""
+    try:
+        return _run_stream_chain(request, messages)['outputs'], []
+    except BlockError as error:
+        if error.phase != 'run':
+            raise
+        if len(messages) == 1:
+            return {}, [dict(row=offset, block_uuid=error.block_uuid,
+                             message=str(error), details=error.details)]
+        middle = len(messages) // 2
+        left, left_failures = _isolate(request, messages[:middle], offset)
+        right, right_failures = _isolate(request, messages[middle:], offset + middle)
+        outputs = {uuid: left.get(uuid, []) + right.get(uuid, [])
+                   for uuid in dict.fromkeys([*left, *right])}
+        return outputs, left_failures + right_failures
+
+
+def _run_stream_chain(request: Dict, messages: List) -> Dict:
+    """
     Runs a stream's blocks on one batch of messages, as Mage's streaming transformers do:
     each gets the list of messages of the block before it (the source's for a block without
     an upstream) and returns a list. Streams branch, so the blocks come in topological order
@@ -787,8 +834,8 @@ def run_stream_batch(request: Dict) -> Dict:
         if len(upstream) > 1:
             raise BlockError('load', f"Block {block['uuid']} reads {len(upstream)} blocks; a "
                              'stream block reads one.', block_uuid=block['uuid'])
-        messages = results.get(upstream[0], []) if upstream else request['messages']
-        if upstream and not messages:
+        block_messages = results.get(upstream[0], []) if upstream else messages
+        if upstream and not block_messages:
             # The block before it kept nothing of this batch.
             results[block['uuid']] = []
             continue
@@ -797,7 +844,7 @@ def run_stream_batch(request: Dict) -> Dict:
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
         started = time.monotonic()
         try:
-            result = _call(function, [messages], kwargs)
+            result = _call(function, [block_messages], kwargs)
         except Exception as error:
             raise BlockError('run', f'{type(error).__name__}: {error}', _user_traceback(),
                              block_uuid=block['uuid'])
@@ -810,7 +857,7 @@ def run_stream_batch(request: Dict) -> Dict:
     wanted = request.get('outputs') or ([last] if last else [])
     return dict(
         outputs={uuid: results.get(uuid, []) for uuid in wanted},
-        messages=results.get(last, []) if last else request['messages'],
+        messages=results.get(last, []) if last else messages,
         blocks=timings,
     )
 

@@ -304,6 +304,34 @@ class FeastSinkExportTest(StreamExportTestCase):
         self.assertIn('a Feast sink needs push_source_name', self.problems())
 
 
+class DeadLetterExportTest(StreamExportTestCase):
+    DEAD = '''
+        connector_type: kafka
+        bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+        topic: orders_dead
+        dead_letter: true
+    '''
+
+    def test_a_sink_marked_dead_letter_becomes_the_streams_dead_letter_sink(self):
+        source = self.stream()
+        dead = self.add('dead', 'data_exporter', self.DEAD, upstream=[source], language='yaml')
+
+        stream = export.capture(self.repo_path, [self.pipeline.uuid]).manifest[
+            'pipelines'][0]['stream']
+
+        self.assertEqual(stream['errors']['dead_letter']['name'], dead.uuid)
+        self.assertEqual(stream['errors']['dead_letter']['config']['topic'], 'orders_dead')
+        self.assertNotIn('after', stream['errors']['dead_letter'])
+        self.assertNotIn('dead_letter', stream['errors']['dead_letter']['config'])
+        self.assertEqual([s['name'] for s in stream['sinks']], [f'{self.pipeline.uuid}_sink'])
+
+    def test_a_stream_has_one_dead_letter_sink(self):
+        source = self.stream()
+        self.add('dead', 'data_exporter', self.DEAD, upstream=[source], language='yaml')
+        self.add('dead2', 'data_exporter', self.DEAD, upstream=[source], language='yaml')
+        self.assertIn('has 2 dead-letter sinks', self.problems())
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: rabbitmq\nconnection_host: localhost\n')

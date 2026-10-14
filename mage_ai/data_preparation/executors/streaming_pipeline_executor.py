@@ -187,8 +187,18 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     global_vars=global_vars,
                 )
             else:
+                sink_config = self.__interpolate_vars(sink_block.content, global_vars=global_vars)
+                if isinstance(sink_config, dict) and sink_config.get('dead_letter'):
+                    # Only messages that fail go there, in an exported service; a run here
+                    # stops on a failure instead.
+                    self.logger.info(
+                        f'Sink {sink_block.uuid} is the dead-letter sink: it is not written '
+                        'here.',
+                        **(getattr(self, 'logging_tags', None) or {}),
+                    )
+                    continue
                 sinks_by_uuid[sink_block.uuid] = SinkFactory.get_sink(
-                    self.__interpolate_vars(sink_block.content, global_vars=global_vars),
+                    sink_config,
                     buffer_path=os.path.join(
                         self.pipeline.pipeline_variables_dir,
                         'buffer',
@@ -224,7 +234,8 @@ class StreamingPipelineExecutor(PipelineExecutor):
                             **execute_block_kwargs,
                     )['output']
                 elif downstream_block.type == BlockType.DATA_EXPORTER:
-                    sinks_by_uuid[downstream_block.uuid].batch_write(data)
+                    if downstream_block.uuid in sinks_by_uuid:
+                        sinks_by_uuid[downstream_block.uuid].batch_write(data)
                 if downstream_block.downstream_blocks:
                     handle_batch_events_recursively(
                         downstream_block,

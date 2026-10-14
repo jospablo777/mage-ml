@@ -17,7 +17,8 @@ use mage_stream_core::{
 };
 use mage_stream_ports::{
     AckKind, CommitOutcome, ConnectorError, EnvelopeBuilder, Header, PartitionId, RecordBatch,
-    Sink, Source, SourceEvent, TransformError, TransformSession, read_envelope,
+    RowError, Sink, Source, SourceEvent, TransformError, TransformOutput, TransformSession,
+    read_envelope,
 };
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -32,6 +33,8 @@ pub struct StreamStatus {
     pub messages_out: u64,
     pub retries: u64,
     pub dead_lettered_batches: u64,
+    /// Messages that failed on their own and went to the dead-letter sink.
+    pub dead_lettered_messages: u64,
     pub alerts: u64,
     pub last_error: Option<String>,
     /// Per partition: the last acknowledged position, as text.
@@ -91,10 +94,7 @@ pub struct StreamParts {
 enum Internal {
     Event(Event),
     /// A transform finished: each block's output, or the error.
-    Transformed(
-        BatchId,
-        Result<std::collections::BTreeMap<String, RecordBatch>, TransformError>,
-    ),
+    Transformed(BatchId, Result<TransformOutput, TransformError>),
     RetryNow(Operation),
 }
 
@@ -102,6 +102,9 @@ struct WriteJob {
     id: BatchId,
     batch: RecordBatch,
     meta: BatchMeta,
+    /// The batch's rejected messages for the dead-letter sink, confirmed as
+    /// [`SinkId::REJECTED_ROWS`], not the whole batch.
+    rows: bool,
 }
 
 /// A sink's writer: writes in order; after a failure, waits for the retry of that batch
@@ -121,15 +124,17 @@ fn spawn_writer(
         while let Some(job) = jobs.recv().await {
             loop {
                 let result = sink.write(&job.batch, &job.meta).await;
-                let event = match (&result, dead_letter) {
-                    (Ok(()), false) => Event::SinkReceipt {
-                        id: job.id,
-                        sink: sink_id,
-                    },
+                let sink = if job.rows {
+                    SinkId::REJECTED_ROWS
+                } else {
+                    sink_id
+                };
+                let event = match (&result, dead_letter && !job.rows) {
+                    (Ok(()), false) => Event::SinkReceipt { id: job.id, sink },
                     (Ok(()), true) => Event::DeadLetterReceipt(job.id),
                     (Err(error), false) => Event::SinkFailed {
                         id: job.id,
-                        sink: sink_id,
+                        sink,
                         retryable: error.retryable,
                         error: error.message.clone(),
                     },
@@ -157,6 +162,34 @@ fn spawn_writer(
         }
     });
     (jobs_tx, retry_tx)
+}
+
+/// The dead-letter copy of a batch's rejected messages, each with its own error.
+fn rejected_rows(
+    batch: &RecordBatch,
+    stream: &str,
+    errors: &[RowError],
+) -> Result<RecordBatch, ConnectorError> {
+    let messages = read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
+    let mut builder = EnvelopeBuilder::new();
+    for error in errors {
+        let Some(message) = messages.get(error.row) else {
+            continue;
+        };
+        let mut message = message.clone();
+        message.headers.push(Header {
+            key: "mage-stream".into(),
+            value: stream.as_bytes().to_vec(),
+        });
+        message.headers.push(Header {
+            key: "mage-error".into(),
+            value: error.error.as_bytes().to_vec(),
+        });
+        builder.push(&message);
+    }
+    builder
+        .finish()
+        .map_err(|e| ConnectorError::fatal(e.to_string()))
 }
 
 /// The dead-letter copy of a batch: its messages with the error in headers.
@@ -205,7 +238,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let dead_letter_writer = parts
         .dead_letter
         .clone()
-        .map(|sink| spawn_writer(sink, SinkId(u16::MAX), true, tx.clone()));
+        .map(|sink| spawn_writer(sink, SinkId::DEAD_LETTER, true, tx.clone()));
 
     // The transform lane.
     let (lane_tx, mut lane_rx) = mpsc::unbounded_channel::<(BatchId, RecordBatch)>();
@@ -214,8 +247,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let lane = tokio::spawn(async move {
         while let Some((id, batch)) = lane_rx.recv().await {
             let result = match transform.as_mut() {
-                Some(session) => session.transform(batch).await.map(|o| o.outputs),
-                None => Ok(Default::default()),
+                Some(session) => session.transform(batch).await,
+                None => Ok(TransformOutput {
+                    outputs: Default::default(),
+                    row_errors: Vec::new(),
+                }),
             };
             if lane_events.send(Internal::Transformed(id, result)).is_err() {
                 break;
@@ -229,6 +265,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let mut inputs: HashMap<BatchId, (RecordBatch, BatchMeta)> = HashMap::new();
     let mut outputs: HashMap<BatchId, std::collections::BTreeMap<String, RecordBatch>> =
         HashMap::new();
+    // Messages of a batch that failed on their own, by their row in the batch.
+    let mut rejected: HashMap<BatchId, Vec<RowError>> = HashMap::new();
     let mut reading = true;
     let mut assigned: std::collections::BTreeSet<PartitionId> = Default::default();
     let mut idle_warned = false;
@@ -262,10 +300,19 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
             }
             Some(message) = rx.recv() => match message {
                 Internal::Event(event) => events.push(event),
-                Internal::Transformed(id, Ok(by_block)) => {
-                    let rows: usize = by_block.values().map(RecordBatch::num_rows).sum();
+                Internal::Transformed(id, Ok(output)) => {
+                    let rows: usize = output.outputs.values().map(RecordBatch::num_rows).sum();
                     count(&status, |s| s.messages_out += rows as u64);
-                    outputs.insert(id, by_block);
+                    outputs.insert(id, output.outputs);
+                    if !output.row_errors.is_empty() {
+                        let first = output.row_errors[0].error.clone();
+                        events.push(Event::RowsRejected {
+                            id,
+                            count: output.row_errors.len(),
+                            error: first,
+                        });
+                        rejected.insert(id, output.row_errors);
+                    }
                     events.push(Event::TransformDone(id));
                 }
                 Internal::Transformed(id, Err(error)) => {
@@ -283,6 +330,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         Operation::Transform(id) => {
                             if let Some((batch, _)) = inputs.get(&id) {
                                 let _ = lane_tx.send((id, batch.clone()));
+                            }
+                        }
+                        Operation::Write(id, SinkId::REJECTED_ROWS) => {
+                            if let Some((_, retry)) = &dead_letter_writer {
+                                let _ = retry.send(id);
                             }
                         }
                         Operation::Write(id, sink) => {
@@ -425,6 +477,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                 id,
                                 batch,
                                 meta: meta.clone(),
+                                rows: false,
                             });
                         }
                     }
@@ -446,6 +499,25 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                         id,
                                         batch: copy,
                                         meta: meta.clone(),
+                                        rows: false,
+                                    });
+                                }
+                                Err(e) => record_error(&status, &e.message),
+                            }
+                        }
+                    }
+                    Effect::DeadLetterRows(id) => {
+                        if let (Some((batch, meta)), Some(errors), Some((jobs, _))) =
+                            (inputs.get(&id), rejected.get(&id), &dead_letter_writer)
+                        {
+                            count(&status, |s| s.dead_lettered_messages += errors.len() as u64);
+                            match rejected_rows(batch, &parts.name, errors) {
+                                Ok(copy) => {
+                                    let _ = jobs.send(WriteJob {
+                                        id,
+                                        batch: copy,
+                                        meta: meta.clone(),
+                                        rows: true,
                                     });
                                 }
                                 Err(e) => record_error(&status, &e.message),
@@ -465,6 +537,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                             && meta.last <= commit.position)
                                     });
                                     outputs.retain(|id, _| inputs.contains_key(id));
+                                    rejected.retain(|id, _| inputs.contains_key(id));
                                     count(&status, |s| {
                                         s.acknowledged.insert(id_partition, position);
                                     });
@@ -491,6 +564,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         for id in ids {
                             inputs.remove(&id);
                             outputs.remove(&id);
+                            rejected.remove(&id);
                         }
                     }
                     Effect::StopReading => {
@@ -727,6 +801,101 @@ mod tests {
         fn close(&mut self) -> BoxFuture<'_, ()> {
             Box::pin(async {})
         }
+    }
+
+    /// Rejects messages whose n is a multiple of self.0, on their own; passes the others.
+    struct RejectsSome(usize);
+
+    impl TransformSession for RejectsSome {
+        fn transform(
+            &mut self,
+            batch: RecordBatch,
+        ) -> BoxFuture<'_, Result<TransformOutput, TransformError>> {
+            let every = self.0;
+            let messages = read_envelope(&batch).unwrap();
+            let mut kept = EnvelopeBuilder::new();
+            let mut row_errors = Vec::new();
+            for (row, message) in messages.iter().enumerate() {
+                let value: serde_json::Value = serde_json::from_slice(&message.value).unwrap();
+                let n = value["n"].as_u64().unwrap() as usize;
+                if n.is_multiple_of(every) {
+                    row_errors.push(RowError {
+                        row,
+                        error: format!("n {n} is not allowed"),
+                    });
+                } else {
+                    kept.push(message);
+                }
+            }
+            let kept = kept.finish().unwrap();
+            Box::pin(async move {
+                Ok(TransformOutput {
+                    outputs: [("t".to_string(), kept)].into(),
+                    row_errors,
+                })
+            })
+        }
+
+        fn close(&mut self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn messages_that_fail_on_their_own_go_to_dead_letters_and_their_batch_flows() {
+        let source = MemorySource::new(vec![messages(12)], 4, true);
+        let handle = source.handle();
+        let (sink, dead) = (MemorySink::new(), MemorySink::new());
+        // The dead-letter sink fails twice: the batch waits for it, nothing is dropped.
+        dead.fail_next(2, true, "dead letters unavailable");
+
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(sink.clone()), Some("t".to_string()))],
+            dead_letter: Some(Arc::new(dead.clone())),
+            transform: Some(Box::new(RejectsSome(5))),
+            config: config(1, true, PoisonPolicy::DeadLetter),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+        })
+        .await;
+
+        assert_eq!(status.state, StreamState::Finished, "{status:?}");
+        assert_eq!(handle.committed(), vec![12]);
+        assert_eq!(values(&dead), ["{\"n\": 0}", "{\"n\": 5}", "{\"n\": 10}"]);
+        let error = dead.received()[1]
+            .headers
+            .iter()
+            .find(|h| h.key == "mage-error")
+            .map(|h| String::from_utf8_lossy(&h.value).into_owned());
+        assert_eq!(error.as_deref(), Some("n 5 is not allowed"));
+        assert_eq!(sink.received().len(), 9);
+        assert_eq!(status.dead_lettered_messages, 3);
+        assert_eq!(status.dead_lettered_batches, 0);
+    }
+
+    #[tokio::test]
+    async fn messages_that_fail_without_a_dead_letter_sink_stop_the_stream() {
+        let source = MemorySource::new(vec![messages(12)], 4, true);
+        let handle = source.handle();
+        let sink = MemorySink::new();
+
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(sink.clone()), Some("t".to_string()))],
+            dead_letter: None,
+            transform: Some(Box::new(RejectsSome(5))),
+            config: config(1, false, PoisonPolicy::DeadLetter),
+            shutdown_deadline: Duration::from_millis(200),
+            pause: None,
+        })
+        .await;
+
+        assert_eq!(status.state, StreamState::Failed, "{status:?}");
+        assert!(status.last_error.unwrap().contains("not allowed"));
+        assert!(handle.committed().iter().sum::<usize>() < 12);
     }
 
     #[tokio::test]

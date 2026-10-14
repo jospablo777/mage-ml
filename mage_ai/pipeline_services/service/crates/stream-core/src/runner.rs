@@ -92,6 +92,13 @@ pub enum Event {
         epoch: AssignmentEpoch,
     },
     BatchRead(BatchMeta),
+    /// Some messages of the batch failed on their own; the others' output is coming
+    /// (`TransformDone` follows). They go to the dead-letter sink, or the stream stops.
+    RowsRejected {
+        id: BatchId,
+        count: usize,
+        error: String,
+    },
     TransformDone(BatchId),
     TransformFailed {
         id: BatchId,
@@ -149,6 +156,9 @@ pub enum Effect {
         id: BatchId,
         error: String,
     },
+    /// Write the batch's rejected messages to the dead-letter sink; its receipt comes as a
+    /// `SinkReceipt` from [`SinkId::REJECTED_ROWS`].
+    DeadLetterRows(BatchId),
     /// Acknowledge these positions to the source, then report [`Event::Committed`].
     Commit(Vec<Commit>),
     Pause(PartitionId),
@@ -273,6 +283,23 @@ impl RunnerMachine {
                     }
                 }
             }
+            Event::RowsRejected { id, count, error } => {
+                if self.tracker.epoch(id.partition) == Some(id.epoch) {
+                    if self.config.poison == PoisonPolicy::DeadLetter && self.config.has_dead_letter
+                    {
+                        if self.tracker.require(id, SinkId::REJECTED_ROWS) {
+                            effects.push(Effect::DeadLetterRows(id));
+                        }
+                    } else {
+                        self.stopped = true;
+                        effects.push(Effect::StopReading);
+                        effects.push(Effect::Stop(StopReason::Poison {
+                            id,
+                            error: format!("{count} message(s) of {id} failed: {error}"),
+                        }));
+                    }
+                }
+            }
             Event::TransformDone(id) => {
                 if self.tracker.epoch(id.partition) == Some(id.epoch) {
                     self.transform_attempts.remove(&id);
@@ -321,7 +348,23 @@ impl RunnerMachine {
                 retryable,
                 error,
             } => {
-                if self.tracker.epoch(id.partition) == Some(id.epoch) {
+                if sink == SinkId::REJECTED_ROWS
+                    && self.tracker.epoch(id.partition) == Some(id.epoch)
+                {
+                    // Rejected messages are never dropped: retry for as long as it takes.
+                    let attempts = self.write_attempts.entry((id, sink)).or_insert(0);
+                    *attempts += 1;
+                    if *attempts == self.config.alert_after {
+                        effects.push(Effect::Alert(format!(
+                            "the dead-letter sink failed {attempts} times on {id}'s rejected \
+                             messages: {error}"
+                        )));
+                    }
+                    effects.push(Effect::Retry {
+                        operation: Operation::Write(id, sink),
+                        after: self.config.sink_retry.delay(*attempts),
+                    });
+                } else if self.tracker.epoch(id.partition) == Some(id.epoch) {
                     let required = self.config.tracker.required_sinks.contains(&sink);
                     let attempts = self.write_attempts.entry((id, sink)).or_insert(0);
                     *attempts += 1;
@@ -519,6 +562,65 @@ mod tests {
             epoch: E,
         });
         m
+    }
+
+    #[test]
+    fn rejected_messages_go_to_the_dead_letter_sink_and_the_batch_waits_for_both() {
+        let mut m = started(PoisonPolicy::DeadLetter, true);
+        let id = meta(0).id;
+        m.step(Event::BatchRead(meta(0)));
+
+        assert_eq!(
+            m.step(Event::RowsRejected {
+                id,
+                count: 2,
+                error: "bad".into()
+            }),
+            [Effect::DeadLetterRows(id)]
+        );
+        m.step(Event::TransformDone(id));
+        // The sinks took the other messages; the rejected ones are not confirmed yet.
+        let effects = m.step(Event::SinkReceipt { id, sink: REQUIRED });
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Commit(_))),
+            "{effects:?}"
+        );
+        // A failing dead-letter sink is retried past every sink retry limit.
+        for _ in 0..5 {
+            let effects = m.step(Event::SinkFailed {
+                id,
+                sink: SinkId::REJECTED_ROWS,
+                retryable: false,
+                error: "down".into(),
+            });
+            assert!(effects.iter().any(|e| matches!(e,
+                Effect::Retry { operation: Operation::Write(_, s), .. } if *s == SinkId::REJECTED_ROWS)),
+                "{effects:?}");
+        }
+        let effects = m.step(Event::SinkReceipt {
+            id,
+            sink: SinkId::REJECTED_ROWS,
+        });
+        assert!(matches!(&effects[0], Effect::Commit(c) if c[0].position == Position::Offset(9)));
+    }
+
+    #[test]
+    fn rejected_messages_without_a_dead_letter_sink_stop_the_stream() {
+        let mut m = started(PoisonPolicy::DeadLetter, false);
+        let id = meta(0).id;
+        m.step(Event::BatchRead(meta(0)));
+
+        let effects = m.step(Event::RowsRejected {
+            id,
+            count: 1,
+            error: "ValueError: x".into(),
+        });
+
+        assert_eq!(effects[0], Effect::StopReading);
+        assert!(
+            matches!(&effects[1], Effect::Stop(StopReason::Poison { error, .. })
+            if error.contains("1 message(s)") && error.contains("ValueError"))
+        );
     }
 
     #[test]
@@ -848,6 +950,8 @@ mod tests {
             let mut last_commit: BTreeMap<u64, i64> = BTreeMap::new();
             let mut stopped = false;
             let mut revoking: Option<u64> = None;
+            let mut rejected: BTreeSet<BatchId> = BTreeSet::new();
+            let mut rows_done: BTreeSet<BatchId> = BTreeSet::new();
             let mut revoked: BTreeSet<u64> = BTreeSet::new();
             for c in &choices {
                 let mut events = Vec::new();
@@ -875,9 +979,24 @@ mod tests {
                     let fail = c.outcome % 7 == 0;
                     match effect {
                         Effect::Transform(id) | Effect::Retry { operation: Operation::Transform(id), .. } => {
-                            events.push(if fail {
-                                Event::TransformFailed { id, kind: FailureKind::Crash, error: "x".into() }
-                            } else { Event::TransformDone(id) });
+                            if fail {
+                                events.push(Event::TransformFailed { id, kind: FailureKind::Crash, error: "x".into() });
+                            } else {
+                                if c.outcome % 5 == 0 {
+                                    // Some messages fail on their own.
+                                    rejected.insert(id);
+                                    events.push(Event::RowsRejected { id, count: 1, error: "row".into() });
+                                }
+                                events.push(Event::TransformDone(id));
+                            }
+                        }
+                        Effect::DeadLetterRows(id) | Effect::Retry { operation: Operation::Write(id, SinkId::REJECTED_ROWS), .. } => {
+                            if fail {
+                                events.push(Event::SinkFailed { id, sink: SinkId::REJECTED_ROWS, retryable: true, error: "down".into() });
+                            } else {
+                                rows_done.insert(id);
+                                events.push(Event::SinkReceipt { id, sink: SinkId::REJECTED_ROWS });
+                            }
                         }
                         Effect::Write { id, sink } | Effect::Retry { operation: Operation::Write(id, sink), .. } => {
                             if fail {
@@ -918,6 +1037,8 @@ mod tests {
                                 for id in read.iter().filter(|id| id.epoch == commit.epoch && id.seq <= through) {
                                     prop_assert!(done.contains(id),
                                         "commit through batch {} passes batch {} without a receipt", through, id.seq);
+                                    prop_assert!(!rejected.contains(id) || rows_done.contains(id),
+                                        "commit through batch {} passes batch {} before its rejected messages were written", through, id.seq);
                                 }
                                 if let Some(previous) = last_commit.get(&commit.epoch.0) {
                                     prop_assert!(offset >= *previous, "commit moved back");

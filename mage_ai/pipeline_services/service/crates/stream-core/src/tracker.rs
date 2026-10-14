@@ -200,6 +200,18 @@ impl AckTracker {
         }
     }
 
+    /// The batch also needs a confirmation from `sink` before it is done (its rejected
+    /// messages written to the dead-letter sink).
+    pub fn require(&mut self, id: BatchId, sink: SinkId) -> bool {
+        match self.batch_mut(id) {
+            Ok(batch) => {
+                batch.pending.insert(sink);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// The batch's rejected rows reached the dead-letter sink, which confirmed the write.
     pub fn on_dead_lettered(&mut self, id: BatchId) -> ReceiptOutcome {
         match self.batch_mut(id) {
