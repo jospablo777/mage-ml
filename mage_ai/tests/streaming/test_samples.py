@@ -281,15 +281,28 @@ class RustSampleRunTest(StreamSampleTestCase):
         self.assertIn('no amount', result['error']['message'])
         self.assertEqual(result['failing_message'], dict(index=1, message={'id': 7}))
 
-    def test_python_and_rust_blocks_in_one_chain_are_refused(self):
+    def test_python_and_rust_blocks_in_one_chain_run_in_turn(self):
         python = self.add('py', 'transformer', '''
             @transformer
             def f(messages, *args, **kwargs):
-                return messages
+                print('python first')
+                return [dict(m, amount=m['amount'] + 1) for m in messages]
         ''', [self.source])
         price = self.add('price', 'transformer', self.PRICE, [python], language='rust')
+        after = self.add('after', 'transformer', '''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return [dict(m, last=True) for m in messages]
+        ''', [price])
 
-        with self.assertRaises(sample_runner.SampleRunError) as raised:
-            sample_runner.run_on_sample(self.repo_path, self.pipeline.uuid, price.uuid, [{}])
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, after.uuid, [{'amount': 1}],
+            variables=dict(rate=10.0),
+        )
 
-        self.assertIn('mix Python and Rust', str(raised.exception))
+        self.assertNotIn('error', result, result)
+        self.assertEqual(result['outputs'][python.uuid], [{'amount': 2}])
+        self.assertEqual(result['outputs'][price.uuid], [{'amount': 2, 'total': 20.0}])
+        self.assertEqual(result['outputs'][after.uuid],
+                         [{'amount': 2, 'total': 20.0, 'last': True}])
+        self.assertIn(dict(block_uuid=python.uuid, line='python first'), result['logs'])

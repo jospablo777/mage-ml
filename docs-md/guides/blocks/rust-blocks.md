@@ -358,8 +358,11 @@ JSON.
 - `serde_json` holds integers up to 64 bits; a larger one in a `Vec<Value>` becomes a float.
   Take `Vec<String>` to keep every digit.
 - From a RabbitMQ source, a Rust block gets each message's body, not Mage's `Payload`.
-- A stream's transformers are all Python or all Rust, in one chain (each reads the block
-  before it), and share one io_config profile.
+- Rust and Python blocks can mix in one chain (each block reads the one before it): each
+  run of blocks in one language takes the messages of the run before. Consecutive Rust
+  blocks run in one program and share one io_config profile. With a dead-letter sink,
+  messages that fail on their own are found in the first run; a failure in a later run fails
+  the batch.
 - In the editor, sample runs and **Execute pipeline** build each block's program and run it
   the same way; [exported services](../../production/export-a-service.md#streaming-pipelines) run
   the stream's Rust blocks in one program.

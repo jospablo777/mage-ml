@@ -200,3 +200,39 @@ def test_failing_messages_go_to_the_dead_letter_topic_with_the_blocks_error(
     assert sorted(m['id'] for m in out) == [1, 3]
     assert [json.loads(r.value)['id'] for r in dead] == [2]
     assert 'message 2 has no amount' in dict(dead[0].headers)['mage-error'].decode()
+
+
+def test_a_stream_mixing_rust_and_python_blocks_runs_each_in_turn(
+    mage_project, topics, kafka_bootstrap, tmp_path,
+):
+    """Rust parses and prices, Python labels, Rust keeps the large orders."""
+    from mage_ai.data_preparation.models.block import Block
+
+    pipeline = make_pipeline(mage_project, topics, dict(rate=2.0, marker=''))
+    try:
+        price = pipeline.get_block(f'{pipeline.uuid}_price')
+        large = pipeline.get_block(f'{pipeline.uuid}_large')
+        label = Block.create(f'{pipeline.uuid}_label', 'transformer', mage_project,
+                             language='python', pipeline=pipeline)
+        Path(label.file_path).write_text(textwrap.dedent('''
+            @transformer
+            def label(messages, *args, **kwargs):
+                return [dict(m, label='python saw it') for m in messages]
+        '''))
+        pipeline.add_block(label, upstream_block_uuids=[price.uuid])
+        large.update(dict(upstream_blocks=[label.uuid]))
+        service = run(mage_project, pipeline, tmp_path, kafka_bootstrap)
+        produce(kafka_bootstrap, topics[0], [dict(id=i, amount=i) for i in range(10)])
+        service.start()
+        try:
+            service.wait_running()
+            out = consume(kafka_bootstrap, topics[1], 4)
+        finally:
+            service.stop()
+    finally:
+        pipeline.delete()
+
+    # total = amount * 2, kept over 10, doubled; labelled by the Python block between.
+    assert sorted((m['id'], m['double'], m['label']) for m in out) == [
+        (i, i * 4.0, 'python saw it') for i in range(6, 10)
+    ]

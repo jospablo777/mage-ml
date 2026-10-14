@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use mage_connector_local::StdoutSink;
 use mage_service_core::io_config;
-use mage_service_core::manifest::{Connector, ConnectorKind, Language, Manifest, Pipeline};
+use mage_service_core::manifest::{Block, Connector, ConnectorKind, Language, Manifest, Pipeline};
 use mage_stream_core::{PoisonPolicy, RetryPolicy, RunnerConfig, SinkId, TrackerConfig};
 use mage_stream_ports::{ConnectorError, Sink, Source, TransformSession};
 use serde_json::Value;
@@ -314,78 +314,7 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         Some(connector) => Some(sink(service, pipeline, connector).map_err(|e| e.message)?),
         None => None,
     };
-    let transform: Option<Box<dyn TransformSession>> = if pipeline.blocks.is_empty() {
-        None
-    } else {
-        let order: Vec<_> = pipeline
-            .topological_order()
-            .ok_or("the stream's blocks have a cycle")?
-            .into_iter()
-            .cloned()
-            .collect();
-        let outputs: Vec<String> = stream
-            .sinks
-            .iter()
-            .filter_map(|s| s.after.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let rust = order
-            .iter()
-            .filter(|b| b.language == Language::Rust)
-            .count();
-        if rust == order.len() {
-            return Ok(StreamParts {
-                name: pipeline.uuid.clone(),
-                source,
-                sinks,
-                dead_letter,
-                transform: Some(Box::new(crate::stream_rust::RustStreamSession::new(
-                    service.clone(),
-                    pipeline,
-                    &order,
-                    crate::stream_rust::RustSessionOptions {
-                        outputs,
-                        log,
-                        cancel: service.stream_stop.child_token(),
-                        isolate: stream.errors.dead_letter.is_some(),
-                    },
-                )?)),
-                config: runner_config(stream),
-                shutdown_deadline: Duration::from_secs(20),
-                pause: None,
-            });
-        }
-        if rust > 0 || order.iter().any(|b| b.language != Language::Python) {
-            return Err(
-                "this stream mixes Python and Rust blocks; a stream's transformers are all \
-                 Python or all Rust for now"
-                    .into(),
-            );
-        }
-        let pool = service
-            .python
-            .clone()
-            .ok_or("the stream has Python blocks but the service has no Python worker")?;
-        Some(Box::new(PythonStreamSession::new(
-            pool,
-            &service.project_dir(),
-            pipeline,
-            &order,
-            crate::stream_python::SessionOptions {
-                outputs,
-                log,
-                cancel: service.stream_stop.child_token(),
-                // Messages that fail on their own go to the dead-letter sink when there is one.
-                isolate: stream.errors.dead_letter.is_some(),
-                shape: if stream.source.kind == ConnectorKind::Rabbitmq {
-                    crate::stream_python::MessageShape::RabbitmqPayload
-                } else {
-                    crate::stream_python::MessageShape::Values
-                },
-            },
-        )))
-    };
+    let transform = transform_session(service, pipeline, log)?;
     Ok(StreamParts {
         name: pipeline.uuid.clone(),
         source,
@@ -396,6 +325,148 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         shutdown_deadline: Duration::from_secs(20),
         pause: None,
     })
+}
+
+/// The session that runs a stream's blocks: one Python or Rust session when they are all in
+/// one language; for a chain that mixes them, one session per run of blocks in a language,
+/// each taking the messages of the run before it.
+fn transform_session(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    log: RunLog,
+) -> Result<Option<Box<dyn TransformSession>>, String> {
+    let stream = pipeline.stream.as_ref().expect("a stream");
+    if pipeline.blocks.is_empty() {
+        return Ok(None);
+    }
+    let order: Vec<Block> = pipeline
+        .topological_order()
+        .ok_or("the stream's blocks have a cycle")?
+        .into_iter()
+        .cloned()
+        .collect();
+    if let Some(block) = order
+        .iter()
+        .find(|b| !matches!(b.language, Language::Python | Language::Rust))
+    {
+        return Err(format!(
+            "stream block {} is in {:?}; stream blocks run in Python or Rust",
+            block.uuid, block.language
+        ));
+    }
+    let wanted: BTreeSet<String> = stream
+        .sinks
+        .iter()
+        .filter_map(|s| s.after.clone())
+        .collect();
+    let dead_letters = stream.errors.dead_letter.is_some();
+    let rabbitmq = stream.source.kind == ConnectorKind::Rabbitmq;
+    let mut regions: Vec<Vec<Block>> = Vec::new();
+    for block in order.iter().cloned() {
+        match regions.last_mut() {
+            Some(region) if region[0].language == block.language => region.push(block),
+            _ => regions.push(vec![block]),
+        }
+    }
+    let session = |blocks: &[Block], outputs: Vec<String>, first: bool, log: RunLog| {
+        region_session(
+            service,
+            pipeline,
+            blocks,
+            outputs,
+            first && dead_letters,
+            first && rabbitmq,
+            log,
+        )
+    };
+    if regions.len() == 1 {
+        return session(&order, wanted.into_iter().collect(), true, log).map(Some);
+    }
+    // Mixed languages: one chain, each block reading the one before.
+    for (position, block) in order.iter().enumerate() {
+        let expected: Vec<&str> = order[..position]
+            .last()
+            .map(|b| vec![b.uuid.as_str()])
+            .unwrap_or_default();
+        if block
+            .upstream
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            != expected
+        {
+            return Err(format!(
+                "stream block {} does not read the block before it; a stream that mixes \
+                 Python and Rust blocks runs them as one chain",
+                block.uuid
+            ));
+        }
+    }
+    let mut chained = Vec::with_capacity(regions.len());
+    for (index, mut blocks) in regions.into_iter().enumerate() {
+        let last = blocks.last().expect("a block").uuid.clone();
+        let mut outputs: Vec<String> = blocks
+            .iter()
+            .filter(|b| wanted.contains(&b.uuid))
+            .map(|b| b.uuid.clone())
+            .collect();
+        if !outputs.contains(&last) {
+            outputs.push(last.clone());
+        }
+        // The run's first block takes the run's input, not a block of another session.
+        blocks[0].upstream.clear();
+        chained.push((session(&blocks, outputs, index == 0, log.clone())?, last));
+    }
+    Ok(Some(Box::new(crate::stream_chain::ChainedSession::new(
+        chained, wanted,
+    ))))
+}
+
+fn region_session(
+    service: &Arc<Service>,
+    pipeline: &Pipeline,
+    blocks: &[Block],
+    outputs: Vec<String>,
+    isolate: bool,
+    rabbitmq_payload: bool,
+    log: RunLog,
+) -> Result<Box<dyn TransformSession>, String> {
+    let cancel = service.stream_stop.child_token();
+    if blocks[0].language == Language::Rust {
+        return Ok(Box::new(crate::stream_rust::RustStreamSession::new(
+            service.clone(),
+            pipeline,
+            blocks,
+            crate::stream_rust::RustSessionOptions {
+                outputs,
+                log,
+                cancel,
+                isolate,
+            },
+        )?));
+    }
+    let pool = service
+        .python
+        .clone()
+        .ok_or("the stream has Python blocks but the service has no Python worker")?;
+    Ok(Box::new(PythonStreamSession::new(
+        pool,
+        &service.project_dir(),
+        pipeline,
+        blocks,
+        crate::stream_python::SessionOptions {
+            outputs,
+            log,
+            cancel,
+            // Messages that fail on their own go to the dead-letter sink when there is one.
+            isolate,
+            shape: if rabbitmq_payload {
+                crate::stream_python::MessageShape::RabbitmqPayload
+            } else {
+                crate::stream_python::MessageShape::Values
+            },
+        },
+    )))
 }
 
 /// Starts every stream of the manifest; a stream that cannot start is reported as failed with

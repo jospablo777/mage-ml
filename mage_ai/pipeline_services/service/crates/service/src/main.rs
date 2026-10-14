@@ -14,6 +14,7 @@ mod scheduler;
 mod secrets;
 mod service;
 mod stream;
+mod stream_chain;
 mod stream_python;
 mod stream_rust;
 mod streams;

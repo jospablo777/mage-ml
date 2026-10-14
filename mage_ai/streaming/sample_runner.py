@@ -137,10 +137,10 @@ def stop_workers() -> None:
         _workers.clear()
 
 
-def _rust_chain(pipeline, block_uuid: str) -> Optional[List]:
+def _language_runs(pipeline, block_uuid: str) -> Optional[List[List]]:
     """
-    The Rust blocks from the source down to block_uuid, when they are all Rust (and form one
-    chain, as services run them); None when they are all Python.
+    The blocks from the source down to block_uuid in runs of one language, when any is Rust
+    (they form one chain, as services run them); None when they are all Python.
     """
     blocks = pipeline.blocks_by_uuid
     if block_uuid not in blocks:
@@ -153,15 +153,33 @@ def _rust_chain(pipeline, block_uuid: str) -> Optional[List]:
         if len(parents) > 1:
             break
         block = blocks.get(parents[0]) if parents else None
-    languages = {str(getattr(b.language, 'value', b.language)) for b in chain}
-    if languages == {'rust'}:
-        return chain
-    if 'rust' in languages:
-        raise SampleRunError(
-            'The blocks down to this one mix Python and Rust; a stream\'s transformers are all '
-            'Python or all Rust for now.',
-        )
-    return None
+    languages = [str(getattr(b.language, 'value', b.language)) for b in chain]
+    if 'rust' not in languages:
+        return None
+    unknown = sorted(set(languages) - {'python', 'rust'})
+    if unknown:
+        raise SampleRunError(f'Stream blocks run in Python or Rust, not {unknown[0]}.')
+    runs: List[List] = []
+    for block, language in zip(chain, languages):
+        if runs and str(getattr(runs[-1][0].language, 'value', runs[-1][0].language)) == language:
+            runs[-1].append(block)
+        else:
+            runs.append([block])
+    return runs
+
+
+def _chain_entry(pipeline, block, upstream: List[str]) -> Dict:
+    path = Path(block.file_path)
+    return dict(
+        uuid=block.uuid,
+        type='transformer',
+        language='python',
+        file=str(path),
+        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        configuration=block.configuration or {},
+        upstream=upstream,
+        pipeline_uuid=pipeline.uuid,
+    )
 
 
 def _chain(pipeline, block_uuid: str) -> List[Dict]:
@@ -193,16 +211,8 @@ def _chain(pipeline, block_uuid: str) -> List[Dict]:
             raise SampleRunError(
                 f'{uuid_} is written in {language}; stream blocks run in Python or Rust.'
             )
-        path = Path(block.file_path)
-        chain.append(dict(
-            uuid=uuid_,
-            type='transformer',
-            language='python',
-            file=str(path),
-            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-            configuration=block.configuration or {},
-            upstream=[u for u in block.upstream_block_uuids or [] if u not in sources],
-            pipeline_uuid=pipeline.uuid,
+        chain.append(_chain_entry(
+            pipeline, block, [u for u in block.upstream_block_uuids or [] if u not in sources],
         ))
     return chain
 
@@ -234,9 +244,9 @@ def run_on_sample(
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
     pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
-    rust = _rust_chain(pipeline, block_uuid)
-    if rust is not None:
-        return _run_rust(repo_path, pipeline, block_uuid, rust, messages, variables)
+    runs = _language_runs(pipeline, block_uuid)
+    if runs is not None:
+        return _run_language_runs(repo_path, pipeline, block_uuid, runs, messages, variables)
     chain = _chain(pipeline, block_uuid)
     kwargs = dict(pipeline.variables or {})
     kwargs.update(variables or {})
@@ -337,3 +347,48 @@ def _first_failing_rust(program, batch: List[bytes]) -> Optional[Dict]:
         if not reply.get('ok'):
             return dict(index=index, message=rust_sample.decode(message))
     return None
+
+
+def _run_language_runs(repo_path: str, pipeline, block_uuid: str, runs: List[List],
+                       messages: List[Any], variables: Optional[Dict]) -> Dict:
+    """Each run of Python or Rust blocks takes the messages of the run before it."""
+    started = time.monotonic()
+    kwargs = dict(pipeline.variables or {})
+    kwargs.update(variables or {})
+    result: Dict = dict(block_uuid=block_uuid, input_messages=len(messages), logs=[],
+                        outputs={}, blocks=[])
+    current = messages
+    for run in runs:
+        language = str(getattr(run[0].language, 'value', run[0].language))
+        if language == 'rust':
+            part = _run_rust(repo_path, pipeline, run[-1].uuid, run, current, variables)
+        else:
+            chain = [_chain_entry(pipeline, block, [run[i - 1].uuid] if i else [])
+                     for i, block in enumerate(run)]
+            request = dict(op='stream', chain=chain, messages=current,
+                           outputs=[b['uuid'] for b in chain], kwargs=kwargs)
+            worker = _worker(repo_path)
+            reply = worker.request(request, RUN_TIMEOUT_SECONDS)
+            part = dict(logs=_logs(reply.get('output') or []))
+            if reply.get('ok'):
+                part.update(outputs=reply.get('outputs') or {}, blocks=reply.get('blocks') or [])
+            else:
+                error = reply.get('error') or {}
+                part['error'] = dict(block_uuid=error.get('block_uuid'),
+                                     message=error.get('message'), details=error.get('details'))
+                part['failing_message'] = _first_failing(worker, request,
+                                                         error.get('block_uuid'))
+        result['logs'] += part.get('logs') or []
+        if 'error' in part:
+            result['error'] = part['error']
+            if part.get('failing_message'):
+                result['failing_message'] = part['failing_message']
+            break
+        result['outputs'].update(part['outputs'])
+        result['blocks'] += part.get('blocks') or []
+        current = part['outputs'].get(run[-1].uuid, [])
+    result['seconds'] = round(time.monotonic() - started, 3)
+    if 'error' in result:
+        result.pop('outputs')
+        result.pop('blocks')
+    return result
