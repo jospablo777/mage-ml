@@ -276,10 +276,17 @@ MAGE_SERVICE_SECRETS='aws:prod/db, API_KEY=aws-ssm:/scoring/api-key'
 
 | Provider | Reference | Settings |
 | --- | --- | --- |
-| `ibm` | An IBM Cloud Secrets Manager secret id | `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL`, and `IBM_CLOUD_API_KEY` or a Code Engine trusted profile (`MAGE_SERVICE_IBM_TRUSTED_PROFILE`) |
 | `aws` | An AWS Secrets Manager secret name or ARN | `AWS_REGION` (or the ARN's region) and AWS credentials (below) |
 | `aws-ssm` | An AWS Systems Manager parameter name, such as `/app/key` | The same; SecureString parameters are decrypted |
+| `azure` | An Azure Key Vault secret name, or `https://<vault>.vault.azure.net/secrets/<name>[/<version>]` | `AZURE_KEY_VAULT_URL` and Azure credentials (below) |
+| `gcp` | A Google Cloud Secret Manager secret, or `projects/<p>/secrets/<s>[/versions/<v>]` | `GOOGLE_CLOUD_PROJECT` (or the credentials' project) and Google credentials (below) |
+| `ibm` | An IBM Cloud Secrets Manager secret id | `MAGE_SERVICE_IBM_SECRETS_MANAGER_URL`, and `IBM_CLOUD_API_KEY` or a Code Engine trusted profile (`MAGE_SERVICE_IBM_TRUSTED_PROFILE`) |
 | `file` | A path | none |
+
+The secret functions of `io_config.yaml`, `aws_secret_var`, `azure_secret_var`,
+`gcp_secret_var` and `ibm_secret_var`, need no list: the export writes each secret they read
+into the manifest, and the service fetches it at start-up with the provider's settings and
+credentials. A variable set in the environment, or mapped in `MAGE_SERVICE_SECRETS`, wins.
 
 An IBM arbitrary secret gives its payload, a username and password secret its password
 (`#username` for the user), an IAM credentials secret its API key. A key-value secret
@@ -298,6 +305,17 @@ The role needs `secretsmanager:GetSecretValue` or `ssm:GetParameter` on the secr
 reads, and `kms:Decrypt` when a customer managed key encrypts them.
 `AWS_ENDPOINT_URL_SECRETS_MANAGER`, `AWS_ENDPOINT_URL_SSM` and `AWS_ENDPOINT_URL` point the
 requests at a VPC endpoint.
+
+An Azure secret gives its value; `#key` picks one key of a JSON value. Credentials come as
+the Azure SDKs' `DefaultAzureCredential` finds them: a client secret (`AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`), an AKS workload identity
+(`AZURE_FEDERATED_TOKEN_FILE`), or a managed identity (App Service, Container Apps, VMs).
+The identity needs the Key Vault Secrets User role.
+
+A Google Cloud secret gives its latest version's payload; `#key` picks one key of a JSON
+payload. Credentials come as Google's application default credentials: a service account key
+or authorized user file in `GOOGLE_APPLICATION_CREDENTIALS`, or the metadata server on GKE,
+Cloud Run and Compute Engine. The account needs the Secret Manager Secret Accessor role.
 
 Platforms that inject secrets themselves need no provider: ECS task definition `secrets`,
 Kubernetes `secretKeyRef` and the Secrets Store CSI driver (with `MAGE_SERVICE_SECRETS_DIR`)

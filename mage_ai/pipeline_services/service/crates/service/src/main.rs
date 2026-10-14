@@ -2,8 +2,10 @@
 
 mod api;
 mod aws;
+mod azure;
 mod environment;
 mod executor;
+mod gcp;
 mod ibm;
 mod ledger;
 mod log;

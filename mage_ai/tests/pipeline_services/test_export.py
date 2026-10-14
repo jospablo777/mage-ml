@@ -523,11 +523,15 @@ class ExportedRunTest(ExportTestCase):
 
 class EnvironmentTest(ExportTestCase):
     def test_cloud_secret_functions_become_variables_the_service_fetches(self):
+        # Every cloud's secret store, as io_config.yaml reads it.
         (self.project / 'io_config.yaml').write_text(textwrap.dedent('''
             version: 0.1.1
             default:
               POSTGRES_USER: "{{ ibm_secret_var('3f1c-9a', 'username') }}"
               POSTGRES_PASSWORD: "{{ ibm_secret_var('3f1c-9a') }}"
+              MYSQL_PASSWORD: "{{ aws_secret_var('shop/mysql', False) }}"
+              MSSQL_PASSWORD: "{{ azure_secret_var('mssql-password') }}"
+              CLICKHOUSE_PASSWORD: "{{ gcp_secret_var('projects/p1/secrets/ch', 'password') }}"
         '''))
         self.add('load', 'data_loader', '''
             from mage_ai.io.config import ConfigFileLoader
@@ -546,6 +550,11 @@ class EnvironmentTest(ExportTestCase):
         self.assertEqual(variables['IBM_SECRET_3F1C_9A']['source'], 'ibm:3f1c-9a')
         self.assertTrue(variables['IBM_SECRET_3F1C_9A']['secret'])
         self.assertTrue(variables['IBM_SECRET_3F1C_9A']['required'])
+        self.assertEqual(variables['AWS_SECRET_SHOP_MYSQL']['source'], 'aws:shop/mysql')
+        self.assertEqual(variables['AZURE_SECRET_MSSQL_PASSWORD']['source'],
+                         'azure:mssql-password')
+        self.assertEqual(variables['GCP_SECRET_PROJECTS_P1_SECRETS_CH_PASSWORD']['source'],
+                         'gcp:projects/p1/secrets/ch#password')
         self.assertEqual(export.compile_io_config(
             (self.project / 'io_config.yaml').read_text(), 'default',
         )['POSTGRES_USER'], {'$parts': [{'env': 'IBM_SECRET_3F1C_9A_USERNAME'}]})

@@ -35,24 +35,46 @@ def get_template_vars_no_db(include_python_libraries: Dict = None) -> Dict[str, 
     if include_python_libraries:
         kwargs.update(include_python_libraries)
 
-    try:
+    kwargs.update(_cloud_secret_functions())
+    return kwargs
+
+
+def _cloud_secret_functions() -> Dict[str, Callable]:
+    """
+    The cloud secret stores' io_config.yaml functions. Each loads its client when a template
+    calls it; inside an exported service, which fetched the secrets at start-up, each reads
+    its environment variable.
+    """
+    def in_service(provider, secret_id, field=None):
+        from mage_ai.pipeline_services.secrets import service_cloud_secret
+
+        return service_cloud_secret(provider, secret_id, field)
+
+    def aws_secret_var(secret_id, cached=True):
+        if os.environ.get('MAGE_SERVICE'):
+            return in_service('aws', secret_id)
         from mage_ai.services.aws.secrets_manager.secrets_manager import get_secret
-        kwargs['aws_secret_var'] = get_secret
-    except Exception:
-        pass
 
-    try:
+        return get_secret(secret_id, cached)
+
+    def azure_secret_var(secret_name):
+        if os.environ.get('MAGE_SERVICE'):
+            return in_service('azure', secret_name)
         from mage_ai.services.azure.key_vault.key_vault import get_secret
-        kwargs['azure_secret_var'] = get_secret
-    except Exception:
-        pass
 
-    # Loads requests and the IAM client only when a template calls it.
+        return get_secret(secret_name)
+
+    def gcp_secret_var(secret, field=None):
+        if os.environ.get('MAGE_SERVICE'):
+            return in_service('gcp', secret, field)
+        from mage_ai.services.gcp.secret_manager import get_secret
+
+        return get_secret(secret, field)
+
     def ibm_secret_var(secret_id, field=None):
         from mage_ai.services.ibm.secrets_manager import get_secret
 
         return get_secret(secret_id, field)
 
-    kwargs['ibm_secret_var'] = ibm_secret_var
-
-    return kwargs
+    return dict(aws_secret_var=aws_secret_var, azure_secret_var=azure_secret_var,
+                gcp_secret_var=gcp_secret_var, ibm_secret_var=ibm_secret_var)

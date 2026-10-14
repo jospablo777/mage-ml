@@ -37,8 +37,9 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import yaml
 
 from mage_ai.pipeline_services.secrets import (
-    ibm_secret_source,
-    ibm_secret_variable_name,
+    CLOUD_SECRET_FUNCTIONS,
+    cloud_secret_source,
+    cloud_secret_variable_name,
     secret_variable_name,
 )
 
@@ -638,13 +639,9 @@ def compile_stream_config(text: str, variables: Dict) -> Dict:
         rendered = environment.from_string(text).render(
             env_var=_variable_mark,
             mage_secret_var=lambda name: _variable_mark(secret_variable_name(name)),
-            ibm_secret_var=lambda secret_id, field=None: _variable_mark(
-                ibm_secret_variable_name(secret_id, field),
-            ),
+            **_cloud_secret_marks(),
             variables=lambda name: (variables or {}).get(name),
             json_value=unsupported('json_value'),
-            aws_secret_var=unsupported('aws_secret_var'),
-            azure_secret_var=unsupported('azure_secret_var'),
         )
     except jinja2.TemplateError as error:
         raise ValueError(f'it has a template services can\'t fill in: {error}')
@@ -1243,12 +1240,8 @@ def compile_io_config(text: str, profile: str) -> Optional[Dict]:
         rendered = environment.from_string(text).render(
             env_var=_variable_mark,
             mage_secret_var=lambda name: _variable_mark(secret_variable_name(name)),
-            ibm_secret_var=lambda secret_id, field=None: _variable_mark(
-                ibm_secret_variable_name(secret_id, field),
-            ),
+            **_cloud_secret_marks(),
             json_value=unsupported('json_value'),
-            aws_secret_var=unsupported('aws_secret_var'),
-            azure_secret_var=unsupported('azure_secret_var'),
         )
     except jinja2.TemplateError as error:
         raise ValueError(f'io_config.yaml has a template services can\'t fill in: {error}')
@@ -1390,10 +1383,24 @@ def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:
 SECRET_HINTS = ('PASS', 'SECRET', 'TOKEN', 'KEY', 'CREDENTIAL', 'PRIVATE', 'AUTH')
 ENV_VAR_TEMPLATE = re.compile(r"""env_var\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]""")
 SECRET_VAR_TEMPLATE = re.compile(r"""mage_secret_var\(\s*['"]([^'"]+)['"]""")
-# ibm_secret_var('<secret id>'[, '<field>']) in io_config.yaml or stream settings.
-IBM_SECRET_VAR_TEMPLATE = re.compile(
-    r"ibm_secret_var\(\s*['\"]([^'\"]+)['\"](?:\s*,\s*['\"]([^'\"]+)['\"])?\s*\)"
+# Cloud secret functions in io_config.yaml or stream settings: aws_secret_var('<id>'),
+# azure_secret_var('<name>'), gcp_secret_var('<secret>'[, '<key>']), ibm_secret_var('<id>'
+# [, '<field>']). A second argument that is not text (aws_secret_var's cached) is no key.
+CLOUD_SECRET_VAR_TEMPLATE = re.compile(
+    r"\b(aws|azure|gcp|ibm)_secret_var\(\s*['\"]([^'\"]+)['\"]"
+    r"(?:\s*,\s*['\"]([^'\"]+)['\"])?"
 )
+
+
+def _cloud_secret_marks() -> Dict:
+    """The cloud secret functions for compiling settings: references to the variables the
+    service fetches at start-up."""
+    def mark(provider):
+        def function(secret_id, *args):
+            field = args[0] if args and isinstance(args[0], str) else None
+            return _variable_mark(cloud_secret_variable_name(provider, secret_id, field))
+        return function
+    return {name: mark(provider) for name, provider in CLOUD_SECRET_FUNCTIONS.items()}
 
 
 def _environment_reads(path: Path, project: Path) -> List[Tuple[str, bool, bool, str]]:
@@ -1405,8 +1412,8 @@ def _environment_reads(path: Path, project: Path) -> List[Tuple[str, bool, bool,
         reads += [(name, False, False) for name in ENV_VAR_TEMPLATE.findall(text)]
         reads += [(secret_variable_name(name), True, True)
                   for name in SECRET_VAR_TEMPLATE.findall(text)]
-        reads += [(ibm_secret_variable_name(secret_id, key or None), True, True)
-                  for secret_id, key in IBM_SECRET_VAR_TEMPLATE.findall(text)]
+        reads += [(cloud_secret_variable_name(provider, secret_id, key or None), True, True)
+                  for provider, secret_id, key in CLOUD_SECRET_VAR_TEMPLATE.findall(text)]
         return [(n, r, s, label) for n, r, s in reads]
     try:
         tree = ast.parse(text, str(path))
@@ -1574,15 +1581,15 @@ def _environment(capture_: Capture) -> List[Dict]:
                 entry.setdefault('connectors', [])
                 if connector['name'] not in entry['connectors']:
                     entry['connectors'].append(connector['name'])
-    # Variables of ibm_secret_var: the service fetches them from Secrets Manager itself.
+    # Variables of the cloud secret functions: the service fetches them itself.
     for path in sorted(capture_.files | capture_.stream_files):
         if path.suffix not in ('.yaml', '.yml') or not path.is_file():
             continue
         text = path.read_text(errors='replace')
-        for secret_id, secret_field in IBM_SECRET_VAR_TEMPLATE.findall(text):
-            name = ibm_secret_variable_name(secret_id, secret_field or None)
+        for provider, secret_id, key in CLOUD_SECRET_VAR_TEMPLATE.findall(text):
+            name = cloud_secret_variable_name(provider, secret_id, key or None)
             if name in variables:
-                variables[name]['source'] = ibm_secret_source(secret_id, secret_field or None)
+                variables[name]['source'] = cloud_secret_source(provider, secret_id, key or None)
     return [variables[name] for name in sorted(variables)]
 
 

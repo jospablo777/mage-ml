@@ -11,10 +11,12 @@
 //! - `MAGE_SERVICE_SECRETS_DIR=/dir` sets one variable per file, named after the file.
 //!
 //! - `MAGE_SERVICE_SECRETS` fetches secrets from a provider at start-up, one reference per
-//!   comma or line: `[NAME=]provider:reference[#field]`. Providers: `file` (a path), `ibm`
-//!   (IBM Cloud Secrets Manager, see `ibm.rs`), `aws` (AWS Secrets Manager) and `aws-ssm`
-//!   (AWS Systems Manager Parameter Store, see `aws.rs`). A provider runs only when a
-//!   reference uses it.
+//!   comma or line: `[NAME=]provider:reference[#field]`. Providers: `file` (a path), `aws`
+//!   (AWS Secrets Manager) and `aws-ssm` (AWS Systems Manager Parameter Store, see `aws.rs`),
+//!   `azure` (Azure Key Vault, `azure.rs`), `gcp` (Google Cloud Secret Manager, `gcp.rs`) and
+//!   `ibm` (IBM Cloud Secrets Manager, `ibm.rs`). A provider runs only when a reference uses
+//!   it. The manifest can name a variable's reference too (`source`), for the cloud secret
+//!   functions of io_config.yaml.
 //!
 //! A variable set directly wins over every other source. Values marked secret, and every
 //! value read from a file or a provider, are replaced by `***` in logs and stored errors.
@@ -238,6 +240,8 @@ impl Secrets {
         };
         let mut ibm = Vec::new();
         let mut aws = Vec::new();
+        let mut azure = Vec::new();
+        let mut gcp = Vec::new();
         let mut values = Vec::new();
         for reference in references {
             match reference.provider.as_str() {
@@ -272,9 +276,25 @@ impl Secrets {
                     Ok(mapping) => aws.push(mapping),
                     Err(error) => self.problems.push(format!("{SECRETS}: {error}")),
                 },
+                "azure" => match crate::azure::Mapping::new(
+                    reference.variable,
+                    &reference.id,
+                    reference.field,
+                ) {
+                    Ok(mapping) => azure.push(mapping),
+                    Err(error) => self.problems.push(format!("{SECRETS}: {error}")),
+                },
+                "gcp" => match crate::gcp::Mapping::new(
+                    reference.variable,
+                    &reference.id,
+                    reference.field,
+                ) {
+                    Ok(mapping) => gcp.push(mapping),
+                    Err(error) => self.problems.push(format!("{SECRETS}: {error}")),
+                },
                 other => self.problems.push(format!(
-                    "{SECRETS}: unknown provider {other:?}; the providers are file, ibm, aws \
-                     and aws-ssm"
+                    "{SECRETS}: unknown provider {other:?}; the providers are file, aws, \
+                     aws-ssm, azure, gcp and ibm"
                 )),
             }
         }
@@ -303,6 +323,23 @@ impl Secrets {
             match crate::aws::fetch(environment, &aws) {
                 Ok(fetched) => values.extend(fetched),
                 Err(error) => self.problems.push(format!("AWS: {error}")),
+            }
+        }
+        if !azure.is_empty() {
+            if let Some(value) = environment.get("AZURE_CLIENT_SECRET") {
+                self.redact(value);
+            }
+            match crate::azure::fetch(environment, &azure) {
+                Ok(fetched) => values.extend(fetched),
+                Err(error) => self.problems.push(format!("Azure Key Vault: {error}")),
+            }
+        }
+        if !gcp.is_empty() {
+            match crate::gcp::fetch(environment, &gcp) {
+                Ok(fetched) => values.extend(fetched),
+                Err(error) => self
+                    .problems
+                    .push(format!("Google Cloud Secret Manager: {error}")),
             }
         }
         for (name, value) in values {

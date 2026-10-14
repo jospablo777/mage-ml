@@ -126,15 +126,8 @@ def _manager() -> SecretsManager:
 def get_secret(secret_id: str, field: Optional[str] = None) -> str:
     """The io_config.yaml template function `ibm_secret_var`."""
     if os.environ.get('MAGE_SERVICE'):
-        # Exported services fetch IBM secrets at start-up into the environment.
-        from mage_ai.pipeline_services.secrets import ibm_secret_variable_name
+        # Exported services fetch these secrets at start-up into the environment.
+        from mage_ai.pipeline_services.secrets import service_cloud_secret
 
-        name = ibm_secret_variable_name(secret_id, field)
-        found = os.environ.get(name)
-        if found is None:
-            raise KeyError(
-                f'{name} is not set: the service fetches it from Secrets Manager at start-up; '
-                'set MAGE_SERVICE_IBM_SECRETS_MANAGER_URL and its credentials.'
-            )
-        return found
+        return service_cloud_secret('ibm', secret_id, field)
     return _manager().get(secret_id, field)

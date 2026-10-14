@@ -499,9 +499,17 @@ class StreamRefusalTest(StreamExportTestCase):
         self.add('raw', 'data_exporter', PRINT, upstream=[source], language='yaml')
         self.assertIn("writes the source's messages next to transformers", self.problems())
 
-    def test_secret_managers_are_refused_in_connector_settings(self):
-        self.stream(sink=SINK + "sasl_config:\n  password: \"{{ aws_secret_var('k') }}\"\n")
-        self.assertIn('aws_secret_var()', self.problems())
+    def test_cloud_secrets_in_connector_settings_are_fetched_by_the_service(self):
+        self.stream(sink=textwrap.dedent(SINK)
+                    + "sasl_config:\n  password: \"{{ aws_secret_var('kafka/pw') }}\"\n")
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['config']['sasl_config']['password'],
+                         {'$parts': [{'env': 'AWS_SECRET_KAFKA_PW'}]})
+        variable = next(v for v in captured.manifest['environment']
+                        if v['name'] == 'AWS_SECRET_KAFKA_PW')
+        self.assertEqual(variable['source'], 'aws:kafka/pw')
+        self.assertTrue(variable['secret'])
 
     def test_invalid_yaml_is_a_problem_not_a_crash(self):
         self.stream(source='connector_type: kafka\ntopic: [orders\n')
