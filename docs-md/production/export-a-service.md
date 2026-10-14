@@ -211,7 +211,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | Part | What services run now |
 | --- | --- |
 | Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
-| Transformers | Python |
+| Transformers | Python, or [Rust](../guides/blocks/rust-blocks.md#stream-transformers) |
 | Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
@@ -253,34 +253,41 @@ sasl_config:
   raw messages, a start `offset`, and passwords written in the file.
 - The image builds the engine with the connectors the pipeline uses. Kafka support
   (librdkafka) makes the first build a few minutes longer.
+- Rust transformers run in one program the service starts with the stream, outside its own
+  process. Messages reach it as their bytes, with no JSON written again on the way, and a
+  program that exits is started again for the next batch.
 
 ### Throughput
 
 Measured on a laptop (Apple silicon, the systems in Docker, one partition, release build,
-200,000 messages of about 120 bytes), from Kafka through a Python block:
+500,000 messages of about 120 bytes), from the first message written to the last, from
+Kafka through one block:
 
-| Sink | Messages a second |
-| --- | --- |
-| Parquet files | 781,000 |
-| Kafka (block returns its messages) | 652,000 |
-| Kafka (block adds two fields) | 460,000 |
-| ClickHouse | 190,000 |
-| PostgreSQL | 166,000 |
-| RabbitMQ (publisher confirms) | 33,000 |
-| IBM MQ (emulated amd64 server) | 13,700 |
+| Block | Into | Messages a second |
+| --- | --- | --- |
+| Python, returns its messages | Kafka | 497,000 |
+| Python, adds two fields | Kafka | 309,000 |
+| Rust, returns its messages | Kafka | 485,000 |
+| Rust, adds two fields | Kafka | 443,000 |
+| Python, returns its messages | Parquet files | 432,000 |
+| Python, returns its messages | ClickHouse | 261,000 |
+| Python, returns its messages | PostgreSQL | 152,000 |
+| Python, returns its messages | RabbitMQ (publisher confirms) | 33,000 |
+| Python, returns its messages | IBM MQ (emulated amd64 server) | 15,000 |
 
-Read from other sources into Kafka through the block:
+Read from other sources into Kafka through a Python block:
 
 | Source | Messages a second |
 | --- | --- |
 | RabbitMQ (one queue) | 16,000 to 27,000 |
-| IBM MQ, one connection (emulated amd64 server) | 2,100 |
-| IBM MQ, four connections | 5,700 |
+| IBM MQ, one connection (emulated amd64 server) | 1,900 |
+| IBM MQ, four connections | 4,600 |
 
-The Python block's JSON round trip is the limit for Kafka and files; the brokers' own work
-limits RabbitMQ and IBM MQ. IBM MQ reads one message per round trip under syncpoint, so
-`connections` (at the cost of queue order) is what raises it. Larger `batch_size` values raise
-these. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
+About 500,000 messages a second is the engine's own path from Kafka to Kafka; a block that
+does real work costs less in Rust. RabbitMQ and IBM MQ are limited by their brokers. IBM MQ
+reads one message per round trip under syncpoint, so `connections` (at the cost of queue
+order) is what raises it. Larger `batch_size` values raise these.
+`integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
 
 ### Webhooks
 

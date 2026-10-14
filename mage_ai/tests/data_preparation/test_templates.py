@@ -705,3 +705,16 @@ def test_output(output, *args) -> None:
         expected_bigquery_template = fetch_template_source(BlockType.TRANSFORMER, config2)
         self.assertEqual(postgres_template, expected_postgres_template)
         self.assertEqual(bigquery_template, expected_bigquery_template)
+
+    def test_a_rust_transformer_in_a_stream_gets_the_stream_template(self):
+        """It got the Python stream template, which a Rust block cannot compile."""
+        from mage_ai.data_preparation.models.block.rust import source as rust_source
+
+        stream = fetch_template_source(BlockType.TRANSFORMER, {}, language=BlockLanguage.RUST,
+                                       pipeline_type=PipelineType.STREAMING)
+        batch = fetch_template_source(BlockType.TRANSFORMER, {}, language=BlockLanguage.RUST)
+
+        self.assertIn('fn transform(messages: Vec<Value>, vars: Vars)', stream)
+        self.assertIn('fn transform(data: LazyFrame)', batch)
+        self.assertEqual(rust_source.analyze(stream, BlockType.TRANSFORMER).function,
+                         'transform')

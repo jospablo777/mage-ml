@@ -1270,6 +1270,12 @@ class RustBundleTest(unittest.TestCase):
             '    for (_, make) in entries { (make().0)() }\n'
             '    std::process::exit(0)\n'
             '}\n'
+            'pub struct StreamBlock(fn());\n'
+            'pub fn stream_block(block: fn()) -> StreamBlock { StreamBlock(block) }\n'
+            'pub fn serve_stream(entries: Vec<(&\'static str, fn() -> StreamBlock)>) -> ! {\n'
+            '    for (_, make) in entries { (make().0)() }\n'
+            '    std::process::exit(0)\n'
+            '}\n'
         )
         crates = []
         for name in ('a', 'b'):
@@ -1288,7 +1294,22 @@ class RustBundleTest(unittest.TestCase):
                 '    mage::main(load_data, vec![\n    ]);\n}\n'
             )
             export._block_library(directory)
-        export._write_bundle(root, crates)
+        # A stream transformer: its library returns the block for mage::serve_stream.
+        stream_crate = ws.crate_name('s')
+        directory = root / '.mage' / 'blocks' / stream_crate
+        (directory / 'src').mkdir(parents=True)
+        (directory / 'Cargo.toml').write_text(ws.block_manifest(stream_crate, ['mage-block']))
+        (directory / 'src' / 'main.rs').write_text(
+            'fn transform() { println!("stream s"); }\n'
+            f'include!("{block_source.MAIN_FILE}");\n'
+        )
+        (directory / 'src' / block_source.MAIN_FILE).write_text(
+            block_source.generated_stream_main(
+                block_source.BlockSource(code='', function='transform', tests=[]),
+            )
+        )
+        export._block_library(directory)
+        export._write_bundle(root, crates, [stream_crate])
         self.assertIn('".mage/bundle"', (root / 'Cargo.toml').read_text())
         target = root / 'target'
         subprocess.run(
@@ -1303,6 +1324,9 @@ class RustBundleTest(unittest.TestCase):
         chain = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                env=dict(os.environ, MAGE_CHAIN='1'))
         self.assertEqual((chain.returncode, chain.stdout), (0, 'block a\nblock b\n'))
+        stream = subprocess.run([binary, 'job'], capture_output=True, text=True,
+                                env=dict(os.environ, MAGE_STREAM='1'))
+        self.assertEqual((stream.returncode, stream.stdout), (0, 'stream s\n'))
         result = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                 env=dict(os.environ, MAGE_BLOCK='block_missing'))
         self.assertEqual(result.returncode, 2)

@@ -151,3 +151,53 @@ pub fn write_json_atomic(path: &Path, value: &impl Serialize) -> anyhow::Result<
     std::fs::rename(&temporary, path)?;
     Ok(())
 }
+
+/// What a stream's resident program reads at start, from `stream.json` in its directory
+/// (see `crate::stream`).
+pub const STREAM_FILE: &str = "stream.json";
+/// The version of the frames a stream program and the service engine exchange.
+pub const STREAM_PROTOCOL: u32 = 1;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamJob {
+    pub api_version: u32,
+    /// The Unix socket of the engine to connect to.
+    pub socket: PathBuf,
+    #[serde(default)]
+    pub pipeline_uuid: Option<String>,
+    #[serde(default)]
+    pub variables: Map<String, Value>,
+    /// The blocks in order, each taking the messages of the one before.
+    pub chain: Vec<StreamStep>,
+    /// Find the messages that fail on their own (the stream has a dead-letter sink).
+    #[serde(default)]
+    pub isolate: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamStep {
+    pub block_uuid: String,
+    pub block_type: String,
+    /// The block's name in the binary.
+    pub entry: String,
+    /// The engine wants the block's messages (a sink writes them).
+    #[serde(default)]
+    pub send: bool,
+}
+
+impl StreamJob {
+    pub fn read(directory: &Path) -> anyhow::Result<StreamJob> {
+        let bytes = std::fs::read(directory.join(STREAM_FILE))?;
+        let job: StreamJob = serde_json::from_slice(&bytes)?;
+        if job.api_version != API_VERSION {
+            anyhow::bail!(
+                "This block was built for job version {API_VERSION}; Mage sent version {}. \
+                 Export the service again to rebuild it.",
+                job.api_version
+            );
+        }
+        Ok(job)
+    }
+}

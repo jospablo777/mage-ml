@@ -181,7 +181,7 @@ function RMenuItems(
   return languageMenuItems(BlockLanguageEnum.R, 'R', addNewBlock, blockType, templates);
 }
 
-function RustMenuItems(
+export function RustMenuItems(
   addNewBlock: (block: BlockRequestPayloadType) => void,
   blockType: BlockTypeEnum,
   templates?: FlyoutMenuItemType[],

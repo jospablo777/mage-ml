@@ -25,6 +25,7 @@ import pytest
 
 from integration_tests.exported_services import (
     RunningService,
+    build_rust_blocks,
     export_service,
     stream_service_binary,
 )
@@ -41,6 +42,30 @@ BLOCKS = {
         def transform(messages, *args, **kwargs):
             return [dict(m, total=m['price'] * m['units'], large=m['units'] > 5)
                     for m in messages]
+    ''',
+    # Rust stream blocks: one resident program, messages as raw bytes or JSON values.
+    'rust_identity': '''
+        use mage::prelude::*;
+
+        fn transform(messages: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+            messages
+        }
+    ''',
+    'rust_enrich': '''
+        use mage::prelude::*;
+
+        fn transform(messages: Vec<Value>) -> Result<Vec<Value>> {
+            Ok(messages
+                .into_iter()
+                .map(|mut m| {
+                    let price = m["price"].as_f64().unwrap_or(0.0);
+                    let units = m["units"].as_f64().unwrap_or(0.0);
+                    m["total"] = json!(price * units);
+                    m["large"] = json!(units > 5.0);
+                    m
+                })
+                .collect())
+        }
     ''',
     # A RabbitMQ source hands blocks Mage's Payload(method, properties, body).
     'rabbitmq_body': '''
@@ -76,18 +101,38 @@ def count_until(bootstrap, topic, count, timeout):
 
     consumer = KafkaConsumer(bootstrap_servers=bootstrap, enable_auto_commit=False)
     partitions = [TopicPartition(topic, p) for p in consumer.partitions_for_topic(topic) or [0]]
+    try:
+        return _timed(lambda: sum(consumer.end_offsets(partitions).values()), count, timeout)
+    finally:
+        consumer.close()
+
+
+def _timed(count, total, timeout, failed=lambda: False, every=0.01):
+    """
+    Polls count() until it reaches total: (count, seconds from the first message written to
+    the last). The service's start and its first batch's wait are not measured. Counting a
+    database or a queue often slows it: `every` spaces the counts.
+    """
     deadline = time.time() + timeout
-    total = 0
-    while time.time() < deadline:
-        total = sum(consumer.end_offsets(partitions).values())
-        if total >= count:
-            break
-        time.sleep(0.05)
-    consumer.close()
-    return total
+    written, first, checked = 0, None, time.time()
+    while written < total and time.time() < deadline:
+        written = count()
+        if written and first is None:
+            first = (time.perf_counter(), written)
+        if time.time() - checked > 2:
+            checked = time.time()
+            if failed():
+                break
+        time.sleep(every)
+    if first is None:
+        return written, float('inf')
+    # The messages already written at the first look took part of a poll interval.
+    started, already = first
+    seconds = time.perf_counter() - started
+    return written, seconds * total / max(total - already, 1)
 
 
-@pytest.mark.parametrize('block', ['enrich', 'identity'])
+@pytest.mark.parametrize('block', ['enrich', 'identity', 'rust_enrich', 'rust_identity'])
 def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_path):
     from kafka.admin import KafkaAdminClient, NewTopic
 
@@ -118,7 +163,8 @@ def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_pat
             batch_size: 5000
             timeout_ms: 100
         ''', 'yaml')
-        step = add('block', 'transformer', BLOCKS[block], 'python', [source])
+        language = 'rust' if block.startswith('rust_') else 'python'
+        step = add('block', 'transformer', BLOCKS[block], language, [source])
         add('sink', 'data_exporter', f'''
             connector_type: kafka
             bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
@@ -126,14 +172,12 @@ def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_pat
         ''', 'yaml', [step])
         produce(kafka_bootstrap, topics[0], MESSAGES)
         directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        build_rust_blocks(directory)
         service = RunningService(binary, directory, tmp_path / 'data',
                                  KAFKA_BOOTSTRAP=kafka_bootstrap)
         service.start()
         try:
-            service.wait_running()
-            started = time.perf_counter()
-            written = count_until(kafka_bootstrap, topics[1], MESSAGES, timeout=900)
-            seconds = time.perf_counter() - started
+            written, seconds = count_until(kafka_bootstrap, topics[1], MESSAGES, timeout=900)
         finally:
             service.stop()
     finally:
@@ -186,18 +230,9 @@ def _run(binary, mage_project, pipeline, tmp_path, count, env):
     service = RunningService(binary, directory, tmp_path / pipeline.uuid / 'data', **env)
     service.start()
     try:
-        service.wait_running()
-        started = time.perf_counter()
-        deadline = time.time() + 900
-        written, checked = 0, time.time()
-        while written < MESSAGES and time.time() < deadline:
-            time.sleep(0.05)
-            written = count()
-            if time.time() - checked > 2:
-                checked = time.time()
-                if service.streams()[0]['state'] == 'failed':
-                    break
-        seconds = time.perf_counter() - started
+        written, seconds = _timed(
+            count, MESSAGES, 900, lambda: service.streams()[0]['state'] == 'failed', every=0.1,
+        )
         return written, seconds, service.streams()[0]
     finally:
         service.stop()

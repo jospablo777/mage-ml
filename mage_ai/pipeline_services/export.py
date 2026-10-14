@@ -87,6 +87,8 @@ class Capture:
     manifest: Dict
     files: Set[Path] = field(default_factory=set)
     rust_blocks: List[Tuple[str, str]] = field(default_factory=list)  # (block uuid, crate)
+    # Crates of Rust stream transformers: resident programs (mage::serve_stream).
+    rust_stream_crates: Set[str] = field(default_factory=set)
     requirements: Dict[str, str] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
     unresolved_imports: Set[str] = field(default_factory=set)
@@ -1107,13 +1109,14 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     blocks = []
     for block in transformers:
         language = str(getattr(block.language, 'value', block.language))
-        if language != 'python':
+        if language not in ('python', 'rust'):
             problems.append(
-                f'{prefix}, block {block.uuid} is written in {language}; services run Python '
-                'stream transformers now, and Rust ones come next.'
+                f'{prefix}, block {block.uuid} is written in {language}; services run stream '
+                'transformers written in Python or Rust.'
             )
             continue
-        entry = _block_entry(pipeline, block, project, repo_config, capture_, problems, {})
+        entry = _block_entry(pipeline, block, project, repo_config, capture_, problems, {},
+                             stream=True)
         if entry is None:
             continue
         if entry.pop('conditions', None):
@@ -1222,8 +1225,12 @@ def _apply_object_buffers(prefix: str, source: Dict, sinks: List[Dict], batch: D
 
 
 def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
-                 problems: List[str], conditionals: Dict[str, Dict]) -> Optional[Dict]:
-    """A block for the manifest, or None when it is left out (with a note or a problem)."""
+                 problems: List[str], conditionals: Dict[str, Dict],
+                 stream: bool = False) -> Optional[Dict]:
+    """
+    A block for the manifest, or None when it is left out (with a note or a problem).
+    `stream`: a stream's transformer.
+    """
     from mage_ai.data_preparation.models.block.dynamic.utils import (
         is_dynamic_block,
         is_dynamic_block_child,
@@ -1306,11 +1313,13 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
     if language == 'sql':
         entry['sql'] = _sql_details(pipeline, block)
     if language == 'rust':
-        crate = _prepare_rust_block(block, project, problems, where)
+        crate = _prepare_rust_block(block, project, problems, where, stream=stream)
         if crate:
             entry['binary'] = f'bin/{RUST_BUNDLE}'
             entry['entry'] = crate
             capture_.rust_blocks.append((block.uuid, crate))
+            if stream:
+                capture_.rust_stream_crates.add(crate)
         profile = _rust_io_config(block, path, project, problems, where)
         if profile is not None:
             entry['io_config'] = profile
@@ -1358,12 +1367,14 @@ def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
 
 
-def _prepare_rust_block(block, project: Path, problems: List[str], where: str) -> Optional[str]:
+def _prepare_rust_block(block, project: Path, problems: List[str], where: str,
+                        stream: bool = False) -> Optional[str]:
     from mage_ai.data_preparation.models.block.rust import build as rust_build
 
     try:
         prepared = rust_build.prepare(
             Path(block.file_path).read_text(), block.type, block.uuid, str(project),
+            stream=stream,
         )
     except Exception as error:
         problems.append(f'{where}: {error}')
@@ -2428,7 +2439,9 @@ def _copy_rust_workspace(capture_: Capture, target: Path) -> None:
         _copy_tree(root / '.mage' / 'blocks' / crate, target / '.mage' / 'blocks' / crate,
                    ['target'])
         _block_library(target / '.mage' / 'blocks' / crate)
-    _write_bundle(target, [crate for _, crate in capture_.rust_blocks])
+    crates = list(dict.fromkeys(crate for _, crate in capture_.rust_blocks))
+    _write_bundle(target, [c for c in crates if c not in capture_.rust_stream_crates],
+                  [c for c in crates if c in capture_.rust_stream_crates])
     capture_.rust_locked = _sync_cargo_lock(capture_, target)
 
 
@@ -2444,15 +2457,27 @@ def _block_library(directory: Path) -> None:
     main = (src / 'main.rs').read_text()
     generated = (src / block_source.MAIN_FILE).read_text()
     call = re.search(r'fn main\(\) \{\s*mage::main\((.*)\);\s*\}\s*$', generated, re.S)
-    if call is None:
-        raise ExportError([f'{directory.name}: its generated main is not the expected one.'])
-    arguments = call.group(1)
-    (src / 'mage_lib.rs').write_text(
-        f'{block_source.GENERATED_MARKER}\n'
-        f'pub fn mage_run() -> ! {{\n    mage::main({arguments});\n}}\n\n'
-        '/// The block for a chain of blocks run in one process (mage::run_chain).\n'
-        f'pub fn mage_block() -> mage::ChainBlock {{\n    mage::chain_block({arguments})\n}}\n'
+    stream = re.search(
+        r'fn main\(\) \{\s*mage::serve_stream\(vec!\[\("block", '
+        r'\|\| (mage::stream_block\(.*\))\)\]\);\s*\}\s*$',
+        generated, re.S,
     )
+    if call is not None:
+        arguments = call.group(1)
+        (src / 'mage_lib.rs').write_text(
+            f'{block_source.GENERATED_MARKER}\n'
+            f'pub fn mage_run() -> ! {{\n    mage::main({arguments});\n}}\n\n'
+            '/// The block for a chain of blocks run in one process (mage::run_chain).\n'
+            f'pub fn mage_block() -> mage::ChainBlock {{\n    mage::chain_block({arguments})\n}}\n'
+        )
+    elif stream is not None:
+        (src / 'mage_lib.rs').write_text(
+            f'{block_source.GENERATED_MARKER}\n'
+            '/// The stream block, for the program that serves a stream (mage::serve_stream).\n'
+            f'pub fn mage_stream_block() -> mage::StreamBlock {{\n    {stream.group(1)}\n}}\n'
+        )
+    else:
+        raise ExportError([f'{directory.name}: its generated main is not the expected one.'])
     (src / 'lib.rs').write_text(
         main.replace(f'include!("{block_source.MAIN_FILE}");', 'include!("mage_lib.rs");'),
     )
@@ -2466,15 +2491,16 @@ def _block_library(directory: Path) -> None:
     manifest.write_text(binary.sub('[lib]\npath = "src/lib.rs"\n', text, count=1))
 
 
-def _write_bundle(workspace: Path, crates: List[str]) -> None:
+def _write_bundle(workspace: Path, crates: List[str], stream_crates: List[str] = ()) -> None:
     """
     One binary for all the Rust blocks: each block's binary held a copy of Polars (about
-    75 MB), and after a few minutes idle macOS and Linux load each from disk again.
+    75 MB), and after a few minutes idle macOS and Linux load each from disk again. Stream
+    transformers (`stream_crates`) run in it with MAGE_STREAM=1, as one resident program.
     """
     bundle = workspace / '.mage' / 'bundle'
     (bundle / 'src').mkdir(parents=True, exist_ok=True)
     dependencies = 'mage-block = { workspace = true }\n' + ''.join(
-        f'{crate} = {{ path = "../blocks/{crate}" }}\n' for crate in crates
+        f'{crate} = {{ path = "../blocks/{crate}" }}\n' for crate in [*crates, *stream_crates]
     )
     (bundle / 'Cargo.toml').write_text(
         '# Generated by mage export service: the Rust blocks of the service in one binary.\n'
@@ -2484,11 +2510,20 @@ def _write_bundle(workspace: Path, crates: List[str]) -> None:
     )
     arms = ''.join(f'        "{crate}" => {crate}::mage_run(),\n' for crate in crates)
     entries = ''.join(f'            ("{crate}", {crate}::mage_block),\n' for crate in crates)
+    streams = ''.join(
+        f'            ("{crate}", {crate}::mage_stream_block),\n' for crate in stream_crates
+    )
     (bundle / 'src' / 'main.rs').write_text(
-        '// Generated by mage export service. MAGE_BLOCK names the block, or MAGE_CHAIN=1 runs\n'
-        '// the chain of blocks job.json lists in this process; the job directory is the first\n'
-        '// argument, as for a block\'s own binary.\n'
+        '// Generated by mage export service. MAGE_BLOCK names the block, MAGE_CHAIN=1 runs\n'
+        '// the chain of blocks job.json lists in this process, and MAGE_STREAM=1 serves the\n'
+        '// stream blocks stream.json lists; the job directory is the first argument, as for a\n'
+        '// block\'s own binary.\n'
         'fn main() {\n'
+        '    if std::env::var("MAGE_STREAM").is_ok_and(|v| v == "1") {\n'
+        '        mage::serve_stream(vec![\n'
+        f'{streams}'
+        '        ]);\n'
+        '    }\n'
         '    if std::env::var("MAGE_CHAIN").is_ok_and(|v| v == "1") {\n'
         '        mage::run_chain(vec![\n'
         f'{entries}'

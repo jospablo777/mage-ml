@@ -98,3 +98,16 @@ def generated_main(source: BlockSource) -> str:
         f'    mage::main({source.function}, vec![{tests}\n    ]);\n'
         '}\n'
     )
+
+
+def generated_stream_main(source: BlockSource) -> str:
+    """
+    The main of a stream transformer: a resident program that runs the block on each batch
+    (mage::serve_stream). Test functions are not run, as for Python stream blocks.
+    """
+    return (
+        f'{GENERATED_MARKER}\n'
+        'fn main() {\n'
+        f'    mage::serve_stream(vec![("block", || mage::stream_block({source.function}))]);\n'
+        '}\n'
+    )

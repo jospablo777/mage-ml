@@ -36,6 +36,7 @@ import {
   getdataSourceMenuItems,
   getNonPythonMenuItems,
   groupBlockTemplates,
+  RustMenuItems,
 } from './utils';
 
 type AddNewBlocksProps = {
@@ -255,6 +256,8 @@ function AddNewBlocks({
           label: () => 'Python',
           uuid: 'transformers/python',
         },
+        // Rust stream transformers run in one resident program per stream.
+        RustMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),
         ...getdataSourceMenuItems(
           addNewBlock,
           BlockTypeEnum.TRANSFORMER,

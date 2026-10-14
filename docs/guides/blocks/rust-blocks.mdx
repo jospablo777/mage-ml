@@ -322,6 +322,51 @@ image, which runs them without Mage or a Rust installation. A block's io_config 
 environment, so no password is written into the image. See
 [Pipeline services](/production/pipeline-services).
 
+## Stream transformers
+
+In a streaming pipeline, a Rust transformer runs on each batch of the stream's messages. The
+stream's Rust blocks run in one program that stays up while the stream runs, so code at the
+top of the file, such as a model in a `LazyLock`, loads once:
+
+```rust
+use mage::prelude::*;
+
+fn transform(messages: Vec<Value>, vars: Vars) -> Result<Vec<Value>> {
+    let rate: f64 = vars.get_or("rate", 1.0)?;
+    messages
+        .into_iter()
+        .map(|mut message| {
+            let amount = message["amount"].as_f64().context("no amount")?;
+            message["total"] = json!(amount * rate);
+            Ok(message)
+        })
+        .collect()
+}
+```
+
+| Messages as | Each message is |
+| --- | --- |
+| `Vec<Value>` | its JSON; text that is not JSON becomes a string |
+| `DataFrame` or `LazyFrame` | a row; every message must be a JSON object |
+| `Vec<String>` | its text |
+| `Vec<Vec<u8>>` | its bytes, for binary messages |
+
+`Vars` and `BlockContext` can follow the messages. The block returns its messages in any of
+those forms, one `Value` (an array is its messages, `null` none), `()`, or an `Option` or
+`Result` of these. `Vec<String>` and `Vec<Vec<u8>>` are written as they are; the others as
+JSON.
+
+- An error or a panic is the block's error, with its message: the batch is retried, then
+  stops the stream, or with a dead-letter sink only the messages that fail go there. The
+  program keeps running. If it exits, the next batch starts it again.
+- `serde_json` holds integers up to 64 bits; a larger one in a `Vec<Value>` becomes a float.
+  Take `Vec<String>` to keep every digit.
+- From a RabbitMQ source, a Rust block gets each message's body, not Mage's `Payload`.
+- A stream's transformers are all Python or all Rust, in one chain (each reads the block
+  before it), and share one io_config profile.
+- Rust stream blocks run in [exported services](/production/export-a-service#streaming-pipelines).
+  The editor's sample runs and **Execute pipeline** run Python stream blocks.
+
 ## Settings
 
 | Variable | Default | |

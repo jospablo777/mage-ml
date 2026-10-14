@@ -317,21 +317,6 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
     let transform: Option<Box<dyn TransformSession>> = if pipeline.blocks.is_empty() {
         None
     } else {
-        if pipeline
-            .blocks
-            .iter()
-            .any(|b| b.language != Language::Python)
-        {
-            return Err(
-                "this service runs Python stream blocks; Rust stream blocks come in a later \
-                 step of streaming"
-                    .into(),
-            );
-        }
-        let pool = service
-            .python
-            .clone()
-            .ok_or("the stream has Python blocks but the service has no Python worker")?;
         let order: Vec<_> = pipeline
             .topological_order()
             .ok_or("the stream's blocks have a cycle")?
@@ -345,6 +330,43 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
+        let rust = order
+            .iter()
+            .filter(|b| b.language == Language::Rust)
+            .count();
+        if rust == order.len() {
+            return Ok(StreamParts {
+                name: pipeline.uuid.clone(),
+                source,
+                sinks,
+                dead_letter,
+                transform: Some(Box::new(crate::stream_rust::RustStreamSession::new(
+                    service.clone(),
+                    pipeline,
+                    &order,
+                    crate::stream_rust::RustSessionOptions {
+                        outputs,
+                        log,
+                        cancel: service.stream_stop.child_token(),
+                        isolate: stream.errors.dead_letter.is_some(),
+                    },
+                )?)),
+                config: runner_config(stream),
+                shutdown_deadline: Duration::from_secs(20),
+                pause: None,
+            });
+        }
+        if rust > 0 || order.iter().any(|b| b.language != Language::Python) {
+            return Err(
+                "this stream mixes Python and Rust blocks; a stream's transformers are all \
+                 Python or all Rust for now"
+                    .into(),
+            );
+        }
+        let pool = service
+            .python
+            .clone()
+            .ok_or("the stream has Python blocks but the service has no Python worker")?;
         Some(Box::new(PythonStreamSession::new(
             pool,
             &service.project_dir(),

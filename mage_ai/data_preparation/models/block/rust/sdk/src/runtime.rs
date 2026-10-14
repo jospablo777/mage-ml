@@ -156,9 +156,9 @@ pub fn test<S, F: TestFn<S> + 'static>(name: &'static str, function: F) -> Test 
     }
 }
 
-static PANIC: Mutex<Option<ErrorRecord>> = Mutex::new(None);
+pub(crate) static PANIC: Mutex<Option<ErrorRecord>> = Mutex::new(None);
 
-fn install_panic_hook() {
+pub(crate) fn install_panic_hook() {
     // Mage reports the panic with its location; Rust's default message would repeat it.
     panic::set_hook(Box::new(move |info| {
         let message = if let Some(text) = info.payload().downcast_ref::<&str>() {
@@ -197,7 +197,7 @@ fn install_panic_hook() {
 
 /// The block binary exits when the Mage process that started it is gone, so a stopped
 /// block run leaves no Rust process computing.
-fn exit_with_parent() {
+pub(crate) fn exit_with_parent() {
     #[cfg(unix)]
     {
         let parent = std::os::unix::process::parent_id();
@@ -336,7 +336,7 @@ impl Timings {
     }
 }
 
-fn take_panic_message() -> String {
+pub(crate) fn take_panic_message() -> String {
     PANIC
         .lock()
         .ok()
@@ -442,7 +442,7 @@ fn current_block() -> Option<String> {
     CURRENT_BLOCK.lock().ok().and_then(|slot| slot.clone())
 }
 
-fn set_current_block(uuid: &str) {
+pub(crate) fn set_current_block(uuid: &str) {
     if let Ok(mut slot) = CURRENT_BLOCK.lock() {
         *slot = Some(uuid.to_string());
     }

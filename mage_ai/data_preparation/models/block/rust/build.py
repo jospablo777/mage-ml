@@ -238,13 +238,20 @@ def prepare(
     block_uuid: str,
     repo_path: str,
     label: Optional[str] = None,
+    stream: bool = False,
 ) -> Prepared:
+    """`stream`: a stream transformer, built as a resident program run on each batch."""
     source = block_source.analyze(code, block_type)
+    if stream and block_type != BlockType.TRANSFORMER:
+        raise block_source.RustSourceError(
+            f'A stream runs Rust transformers; this block is a {block_type} block.',
+        )
     workspace = ws.init(repo_path)
     sdk = ws.sync_sdk(workspace)
     crate = ws.crate_name(block_uuid)
     main = block_source.main_rs(source)
-    generated = block_source.generated_main(source)
+    generated = (block_source.generated_stream_main(source) if stream
+                 else block_source.generated_main(source))
     directory = ws.write_block_crate(
         workspace, crate, {'main.rs': main, block_source.MAIN_FILE: generated},
     )
