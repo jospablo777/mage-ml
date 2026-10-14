@@ -325,24 +325,63 @@ struct Fetched {
     error: Option<String>,
 }
 
+/// How the poll thread turns a message into the value blocks get.
+struct Reading {
+    decoder: Option<avro::AvroDecoder>,
+    /// Mage's include_metadata: `{"data": <value>, "metadata": {key, partition, offset,
+    /// time, topic}}`.
+    include_metadata: bool,
+}
+
 impl Fetched {
-    fn new(
-        message: rdkafka::message::OwnedMessage,
-        decoder: &mut Option<avro::AvroDecoder>,
-    ) -> Fetched {
-        let (value, error) = match (decoder.as_mut(), message.payload()) {
+    fn new(message: rdkafka::message::OwnedMessage, reading: &mut Reading) -> Fetched {
+        let (mut value, error) = match (reading.decoder.as_mut(), message.payload()) {
             (Some(decoder), Some(payload)) => match decoder.decode(payload) {
                 Ok(json) => (Some(json), None),
                 Err(error) => (None, Some(format!("Avro: {error}"))),
             },
             _ => (None, None),
         };
+        if reading.include_metadata && error.is_none() {
+            let data = value
+                .take()
+                .unwrap_or_else(|| message.payload().unwrap_or_default().to_vec());
+            value = Some(with_metadata(&message, &data));
+        }
         Fetched {
             message,
             value,
             error,
         }
     }
+}
+
+/// The message as Mage's include_metadata hands it over: its value (JSON as it is, text as
+/// a string) under `data`, and where it comes from under `metadata`. A key that is not
+/// UTF-8 is its base64 text.
+fn with_metadata(message: &rdkafka::message::OwnedMessage, data: &[u8]) -> Vec<u8> {
+    use base64::Engine as _;
+
+    let data: String = if serde_json::from_slice::<&serde_json::value::RawValue>(data).is_ok() {
+        String::from_utf8_lossy(data).into_owned()
+    } else {
+        Value::String(String::from_utf8_lossy(data).into_owned()).to_string()
+    };
+    let key = match message.key() {
+        None | Some([]) => Value::Null,
+        Some(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => Value::String(text.to_string()),
+            Err(_) => Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        },
+    };
+    format!(
+        r#"{{"data":{data},"metadata":{{"key":{key},"partition":{},"offset":{},"time":{},"topic":{}}}}}"#,
+        message.partition(),
+        message.offset(),
+        message.timestamp().to_millis().unwrap_or(0),
+        Value::String(message.topic().to_string()),
+    )
+    .into_bytes()
 }
 
 struct RebalanceContext {
@@ -471,7 +510,7 @@ fn poll_loop(
     consumer: Arc<KafkaConsumer>,
     table: Arc<Mutex<Table>>,
     stop: Arc<AtomicBool>,
-    mut decoder: Option<avro::AvroDecoder>,
+    mut reading: Reading,
 ) {
     let polled = consumer.context().polled.clone();
     let mut lag_at = Instant::now();
@@ -485,11 +524,11 @@ fn poll_loop(
                 // Decoded here, on the poll thread: a new schema's first read from the
                 // registry waits here, not in the stream's loop.
                 let mut chunk = Vec::with_capacity(CHUNK);
-                chunk.push(Fetched::new(message.detach(), &mut decoder));
+                chunk.push(Fetched::new(message.detach(), &mut reading));
                 while chunk.len() < CHUNK {
                     match consumer.poll(Duration::ZERO) {
                         Some(Ok(message)) => {
-                            chunk.push(Fetched::new(message.detach(), &mut decoder))
+                            chunk.push(Fetched::new(message.detach(), &mut reading))
                         }
                         Some(Err(error)) => {
                             items.push(Polled::Error(error));
@@ -640,7 +679,13 @@ impl KafkaSource {
                 stopped: stop.clone(),
             })
             .map_err(connector_error)?;
-        let decoder = message_decoder(config)?;
+        let reading = Reading {
+            decoder: message_decoder(config)?,
+            include_metadata: config
+                .get("include_metadata")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
         let names: Vec<&str> = topics.iter().map(String::as_str).collect();
         consumer.subscribe(&names).map_err(connector_error)?;
         let consumer = Arc::new(consumer);
@@ -648,7 +693,7 @@ impl KafkaSource {
             .name("kafka-source".into())
             .spawn({
                 let (consumer, table, stop) = (consumer.clone(), table.clone(), stop.clone());
-                move || poll_loop(consumer, table, stop, decoder)
+                move || poll_loop(consumer, table, stop, reading)
             })
             .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))?;
         Ok(KafkaSource {
@@ -1174,6 +1219,39 @@ impl Sink for KafkaSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn include_metadata_wraps_values_as_mage_does() {
+        let mut message = rdkafka::message::OwnedMessage::new(
+            Some(br#"{"n": 1}"#.to_vec()),
+            Some(b"k-1".to_vec()),
+            "orders".into(),
+            rdkafka::Timestamp::CreateTime(1_792_000_000_123),
+            3,
+            42,
+            None,
+        );
+        let wrapped: Value =
+            serde_json::from_slice(&with_metadata(&message, br#"{"n": 1}"#)).unwrap();
+        assert_eq!(
+            wrapped,
+            serde_json::json!({"data": {"n": 1}, "metadata": {"key": "k-1", "partition": 3,
+                "offset": 42, "time": 1_792_000_000_123_i64, "topic": "orders"}})
+        );
+        message = rdkafka::message::OwnedMessage::new(
+            Some(b"plain text".to_vec()),
+            None,
+            "orders".into(),
+            rdkafka::Timestamp::NotAvailable,
+            0,
+            1,
+            None,
+        );
+        let wrapped: Value =
+            serde_json::from_slice(&with_metadata(&message, b"plain text")).unwrap();
+        assert_eq!(wrapped["data"], "plain text");
+        assert_eq!(wrapped["metadata"]["key"], Value::Null);
+    }
 
     #[test]
     fn event_streams_credentials_become_brokers_and_sign_in() {

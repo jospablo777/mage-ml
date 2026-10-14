@@ -608,7 +608,6 @@ class StreamRefusalTest(StreamExportTestCase):
             fetch_size: 10
         '''))
         problems = self.problems()
-        self.assertIn('include_metadata is not supported', problems)
         self.assertIn('PROTOBUF messages are not supported', problems)
         self.assertIn('offset (a start position) is not supported', problems)
         self.assertIn('unknown Kafka settings fetch_size', problems)
@@ -747,6 +746,12 @@ class StreamRefusalTest(StreamExportTestCase):
         '''))  # pragma: allowlist secret
         self.assertIn('connection_string holds a password written in the file',
                       self.problems())
+
+    def test_include_metadata_is_kept_for_the_kafka_source(self):
+        self.stream(source=textwrap.dedent(SOURCE) + 'include_metadata: true\n')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        config = captured.manifest['pipelines'][0]['stream']['source']['config']
+        self.assertIs(config['include_metadata'], True)
 
     def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
         self.stream(source=textwrap.dedent(SOURCE)

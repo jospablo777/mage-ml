@@ -646,3 +646,56 @@ def test_raw_value_messages_reach_the_block_as_their_bytes(
 
     assert sorted(m['hex'] for m in delivered) == sorted(p.hex() for p in payloads)
     assert {m['kind'] for m in delivered} == {'bytes'}
+
+
+def test_include_metadata_hands_blocks_the_value_and_where_it_comes_from(
+    mage_project, topics, kafka_bootstrap, tmp_path,
+):
+    """Mage's include_metadata: {"data": <value>, "metadata": {key, partition, offset, ...}}."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'kafka_meta_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+    try:
+        def add(suffix, kind, code, language, upstream=()):
+            block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                                 pipeline=pipeline)
+            Path(block.file_path).write_text(textwrap.dedent(code))
+            pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+            return block
+
+        source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=name)
+                     + 'include_metadata: true\n', 'yaml')
+        step = add('flat', 'transformer', '''
+            @transformer
+            def flat(messages, *args, **kwargs):
+                return [dict(m['data'], **{f'meta_{k}': v for k, v in m['metadata'].items()})
+                        for m in messages]
+        ''', 'python', [source])
+        add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [step])
+        produce(kafka_bootstrap, topics[0], range(4))
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        output = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                               auto_offset_reset='earliest',
+                               group_id=f'reader_{uuid.uuid4().hex[:8]}')
+        service.start()
+        try:
+            service.wait_running()
+            delivered = consume(output, 4)
+        finally:
+            service.stop()
+            output.close()
+    finally:
+        pipeline.delete()
+
+    assert sorted(m['id'] for m in delivered) == [0, 1, 2, 3]
+    for message in delivered:
+        assert message['meta_topic'] == topics[0]
+        assert message['meta_key'] == str(message['id'])
+        assert message['meta_partition'] in (0, 1) and message['meta_offset'] >= 0
+        assert message['meta_time'] > 1_700_000_000_000

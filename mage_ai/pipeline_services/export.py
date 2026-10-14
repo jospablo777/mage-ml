@@ -1170,10 +1170,12 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return dict(name=block.uuid, kind='clickhouse',
                     config=_clickhouse_sink_settings(config, capture_, where, problems))
     if role == 'source':
-        if config.get('include_metadata'):
+        if config.get('include_metadata') and str(
+            (config.get('serde_config') or {}).get('serialization_method') or ''
+        ).upper() == 'RAW_VALUE':
             problems.append(
-                f'{where}: include_metadata is not supported by services yet; the blocks get '
-                'the message values.'
+                f'{where}: include_metadata with RAW_VALUE is not supported by services: the '
+                'bytes cannot go in the JSON message its metadata wraps.'
             )
         serde = config.get('serde_config') or {}
         method = str(serde.get('serialization_method') or 'JSON').upper()
@@ -1204,7 +1206,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
                 'stream starts.'
             )
         config.pop('offset', None)
-        config.pop('include_metadata', None)
+        if not config.get('include_metadata'):
+            config.pop('include_metadata', None)
         allowed = KAFKA_SOURCE_SETTINGS
     else:
         allowed = KAFKA_SINK_SETTINGS
