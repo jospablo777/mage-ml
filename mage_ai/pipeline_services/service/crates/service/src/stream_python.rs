@@ -36,7 +36,13 @@ pub struct PythonStreamSession {
     /// Ask the worker for the messages that fail on their own (row-level dead letters).
     isolate: bool,
     shape: MessageShape,
+    /// Whether the first blocks take a DataFrame, as the worker says when the stream starts:
+    /// then a batch goes as a JSON lines file Polars reads in one pass.
+    frames: Option<bool>,
+    file: std::path::PathBuf,
 }
+
+static FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// How a stream's Python session runs, besides its blocks.
 pub struct SessionOptions {
@@ -102,7 +108,47 @@ impl PythonStreamSession {
             cancel,
             isolate,
             shape,
+            frames: None,
+            file: std::env::temp_dir().join(format!(
+                "mage-stream-{}-{}.ndjson",
+                std::process::id(),
+                FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            )),
         }
+    }
+
+    /// Asks the worker what the stream's blocks take (stream_load, which also loads them).
+    async fn learn_frames(&mut self) -> bool {
+        if self.shape != MessageShape::Values {
+            return false;
+        }
+        let request = json!({"op": "stream_load", "chain": self.chain});
+        let Ok(reply) = self
+            .pool
+            .run(
+                request,
+                self.log.clone(),
+                "stream",
+                self.timeout,
+                &self.cancel,
+            )
+            .await
+        else {
+            return false;
+        };
+        let roots: Vec<&str> = self
+            .chain
+            .iter()
+            .filter(|b| b["upstream"].as_array().is_none_or(|u| u.is_empty()))
+            .filter_map(|b| b["uuid"].as_str())
+            .collect();
+        !roots.is_empty()
+            && roots.iter().all(|uuid| {
+                matches!(
+                    reply["inputs"][uuid].as_str(),
+                    Some("polars") | Some("pandas")
+                )
+            })
     }
 }
 
@@ -175,6 +221,9 @@ struct StreamRequest<'a> {
     op: &'static str,
     chain: &'a [Value],
     messages: &'a [Box<RawValue>],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    messages_file: Option<&'a std::path::Path>,
+    count: usize,
     outputs: &'a [String],
     kwargs: &'a Value,
     isolate: bool,
@@ -239,6 +288,25 @@ impl TransformSession for PythonStreamSession {
                     .map(rabbitmq_message)
                     .collect::<Result<Vec<_>, _>>()?,
             };
+            if self.frames.is_none() {
+                self.frames = Some(self.learn_frames().await);
+            }
+            let file = if self.frames == Some(true) {
+                let mut lines =
+                    Vec::with_capacity(messages.iter().map(|m| m.get().len() + 1).sum());
+                for message in &messages {
+                    lines.extend_from_slice(message.get().as_bytes());
+                    lines.push(b'\n');
+                }
+                std::fs::write(&self.file, lines).map_err(|e| {
+                    TransformError::Crash(format!("could not write the batch's file: {e}"))
+                })?;
+                Some(self.file.as_path())
+            } else {
+                None
+            };
+            let count = messages.len();
+            let sent: &[Box<RawValue>] = if file.is_some() { &[] } else { &messages };
             let shape = self.shape;
             let (chain, outputs, kwargs, isolate) =
                 (&self.chain, &self.outputs, &self.kwargs, self.isolate);
@@ -247,7 +315,9 @@ impl TransformSession for PythonStreamSession {
                     id,
                     op: "stream",
                     chain,
-                    messages: &messages,
+                    messages: sent,
+                    messages_file: file,
+                    count,
                     outputs,
                     kwargs,
                     isolate,
@@ -304,6 +374,8 @@ impl TransformSession for PythonStreamSession {
     }
 
     fn close(&mut self) -> BoxFuture<'_, ()> {
-        Box::pin(async {})
+        Box::pin(async move {
+            let _ = std::fs::remove_file(&self.file);
+        })
     }
 }

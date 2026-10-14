@@ -256,6 +256,19 @@ sasl_config:
   raw messages, a start `offset`, and passwords written in the file.
 - The image builds the engine with the connectors the pipeline uses. Kafka support
   (librdkafka) makes the first build a few minutes longer.
+- A Python transformer whose first parameter is annotated `pl.DataFrame` (or `pd.DataFrame`)
+  gets each batch as a table, one row per message, and can return one. The service sends
+  such a batch as JSON lines that Polars reads in one pass, with no Python object per
+  message. Every message must be a JSON object; with a dead-letter sink, one that is not
+  goes there.
+
+  ```python
+  import polars as pl
+
+  @transformer
+  def score(messages: pl.DataFrame, *args, **kwargs) -> pl.DataFrame:
+      return messages.with_columns(total=pl.col('price') * pl.col('units'))
+  ```
 - Rust transformers run in one program the service starts with the stream, outside its own
   process. Messages reach it as their bytes, with no JSON written again on the way, and a
   program that exits is started again for the next batch.
@@ -270,6 +283,8 @@ Kafka through one block:
 | --- | --- | --- |
 | Python, returns its messages | Kafka | 586,000 |
 | Python, adds two fields | Kafka | 479,000 |
+| Python, Polars, converts the messages itself | Kafka | 519,000 |
+| Python, takes a `pl.DataFrame` | Kafka | 651,000 |
 | Rust, returns its messages | Kafka | 1,012,000 |
 | Rust, adds two fields (as JSON values) | Kafka | 600,000 |
 | Python, returns its messages | Parquet files | 521,000 |

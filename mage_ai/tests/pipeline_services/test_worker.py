@@ -442,6 +442,92 @@ class StreamBatchTest(WorkerTestCase):
                          ('run', 'returns_object'))
         self.assertIn('SimpleNamespace is not JSON serializable', str(raised.exception))
 
+    def test_a_block_that_takes_a_dataframe_gets_one_and_returns_one(self):
+        """Annotated with pl.DataFrame or pd.DataFrame, a block gets its messages as a table."""
+        frame = self.block('''
+            import polars as pl
+
+            @transformer
+            def f(messages: pl.DataFrame, *args, **kwargs):
+                assert isinstance(messages, pl.DataFrame), type(messages)
+                return messages.with_columns(double=pl.col('n') * 2)
+        ''', name='frame')
+        pandas = self.block('''
+            import pandas as pd
+
+            @transformer
+            def f(messages: pd.DataFrame, *args, **kwargs):
+                assert isinstance(messages, pd.DataFrame), type(messages)
+                return messages.assign(seen=True)
+        ''', name='pandas')
+
+        result = self.stream([frame, pandas], [{'n': 1}, {'n': 2}])
+
+        self.assertEqual(result['messages'], [{'n': 1, 'double': 2, 'seen': True},
+                                              {'n': 2, 'double': 4, 'seen': True}])
+
+    def test_nan_in_a_returned_dataframe_names_its_row_and_column(self):
+        """Polars writes NaN as null: it is refused, as in a list of messages."""
+        block = self.block('''
+            import polars as pl
+
+            @transformer
+            def f(messages: pl.DataFrame, *args, **kwargs):
+                return messages.with_columns(score=pl.Series([1.0, float('nan')]))
+        ''', name='nan_frame')
+
+        with self.assertRaises(worker.BlockError) as raised:
+            worker._stream_batch(dict(chain=[block], messages=[{'n': 1}, {'n': 2}], kwargs={}))
+
+        self.assertIn('messages[1].score', str(raised.exception))
+
+    def test_a_batch_file_is_read_as_a_table_or_message_by_message(self):
+        """The engine writes JSON lines for blocks that take a DataFrame."""
+        block = self.block('''
+            import polars as pl
+
+            @transformer
+            def f(messages: pl.DataFrame, *args, **kwargs):
+                return messages
+        ''', name='file_frame')
+        path = os.path.join(self.directory, 'batch.ndjson')
+        with open(path, 'w') as file:
+            file.write('{"n": 1}\n{"n": 2}\n')
+
+        result = worker.run_stream_batch(dict(chain=[block], messages=[], messages_file=path,
+                                              count=2, kwargs={}))
+        self.assertEqual(result['messages'], [{'n': 1}, {'n': 2}])
+
+        with open(path, 'w') as file:
+            file.write('{"n": 1}\n"plain text"\n')
+        with self.assertRaises(worker.BlockError) as raised:
+            worker.run_stream_batch(dict(chain=[block], messages=[], messages_file=path,
+                                         count=2, kwargs={}))
+        self.assertIn('must be JSON objects', str(raised.exception))
+        self.assertEqual(raised.exception.block_uuid, 'file_frame')
+
+    def test_stream_load_says_what_each_block_takes(self):
+        frame = self.block('''
+            import polars as pl
+
+            @transformer
+            def f(messages: pl.DataFrame, *args, **kwargs):
+                return messages
+        ''', name='takes_frame')
+        plain = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return messages
+        ''', name='takes_list')
+        requests = io.StringIO(json.dumps(dict(id='1', op='stream_load',
+                                               chain=[frame, plain])) + '\n')
+        channel = io.StringIO()
+
+        worker.serve(requests, channel)
+
+        reply = [json.loads(line) for line in channel.getvalue().splitlines()][-1]
+        self.assertEqual(reply['inputs'], {'takes_frame': 'polars', 'takes_list': 'messages'})
+
     def test_a_failing_block_is_named(self):
         fails = self.block('''
             @transformer

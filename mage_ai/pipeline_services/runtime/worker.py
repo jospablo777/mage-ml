@@ -733,6 +733,68 @@ def _stream_function(block: Dict) -> Callable:
     return functions[0]
 
 
+def _input_kind(function: Callable) -> str:
+    """
+    What the block takes as its messages, by the annotation of its first parameter: a Polars
+    or pandas DataFrame (`polars`, `pandas`), or Mage's list of messages (`messages`).
+    """
+    try:
+        parameters = list(signature(function).parameters.values())
+    except (TypeError, ValueError):
+        return 'messages'
+    if not parameters or parameters[0].annotation is Parameter.empty:
+        return 'messages'
+    annotation = parameters[0].annotation
+    if isinstance(annotation, str):
+        name = annotation.replace(' ', '')
+        return {'pl.DataFrame': 'polars', 'polars.DataFrame': 'polars',
+                'pd.DataFrame': 'pandas', 'pandas.DataFrame': 'pandas'}.get(name, 'messages')
+    module = getattr(annotation, '__module__', '') or ''
+    if getattr(annotation, '__name__', '') == 'DataFrame':
+        if module.startswith('polars'):
+            return 'polars'
+        if module.startswith('pandas'):
+            return 'pandas'
+    return 'messages'
+
+
+def _is_polars(value: Any) -> bool:
+    return type(value).__module__.startswith('polars') and hasattr(value, 'write_json')
+
+
+def _as_input(value: Any, kind: str, block_uuid: str) -> Any:
+    """The messages as the block takes them: a list, or a Polars or pandas DataFrame."""
+    if kind == 'messages':
+        if _is_polars(value):
+            return value.to_dicts()
+        if hasattr(value, 'to_dict') and hasattr(value, 'columns'):
+            return value.to_dict('records')
+        return value
+    if isinstance(value, list):
+        if any(not isinstance(m, dict) for m in value):
+            raise BlockError('run', f'Block {block_uuid} takes a DataFrame, one row per '
+                             'message; its messages must be JSON objects.',
+                             block_uuid=block_uuid)
+        if kind == 'pandas':
+            import pandas as pd
+
+            return pd.DataFrame(value)
+        import polars as pl
+
+        return pl.DataFrame(value) if value else pl.DataFrame()
+    if kind == 'pandas' and _is_polars(value):
+        return value.to_pandas()
+    if kind == 'polars' and not _is_polars(value):
+        import polars as pl
+
+        return pl.from_pandas(value)
+    return value
+
+
+def _as_list(value: Any) -> List:
+    return _as_input(value, 'messages', '')
+
+
 def _check_finite(value: Any, block_uuid: str, path: str = 'messages') -> None:
     """
     Messages travel as JSON, which has no NaN or infinity. They used to become null without a
@@ -751,16 +813,19 @@ def _check_finite(value: Any, block_uuid: str, path: str = 'messages') -> None:
             _check_finite(item, block_uuid, f'{path}[{index}]')
 
 
-def _stream_messages(value: Any, block_uuid: str) -> List:
-    """A stream transformer returns a list of messages, a DataFrame, one message or None."""
+def _stream_messages(value: Any, block_uuid: str) -> Any:
+    """
+    A stream transformer returns a list of messages, a DataFrame, one message or None. A
+    Polars DataFrame stays one: the next block can take it as it is, and Polars writes it.
+    """
     if value is None:
         return []
     if isinstance(value, list):
         return value
     if isinstance(value, dict):
         return [value]
-    if hasattr(value, 'to_dicts'):  # Polars
-        return value.to_dicts()
+    if _is_polars(value):
+        return value
     if hasattr(value, 'to_dict') and hasattr(value, 'columns'):  # pandas
         return value.to_dict('records')
     raise BlockError('run', f'Block {block_uuid} returned {type(value).__name__}; a stream '
@@ -769,6 +834,13 @@ def _stream_messages(value: Any, block_uuid: str) -> List:
 
 
 def run_stream_batch(request: Dict) -> Dict:
+    """Runs a stream's blocks on one batch (see _stream_batch), with messages as lists."""
+    result = _stream_batch(request)
+    return dict(result, messages=_as_list(result['messages']),
+                outputs={uuid: _as_list(o) for uuid, o in result['outputs'].items()})
+
+
+def _stream_batch(request: Dict) -> Dict:
     """
     Runs a stream's blocks on one batch. With `isolate` (the stream has a dead-letter sink),
     a batch that fails is split in halves until the messages that fail on their own are found:
@@ -777,6 +849,8 @@ def run_stream_batch(request: Dict) -> Dict:
     dead letters: a code or infrastructure problem must not empty the stream into them. A
     block can see a message more than once while its batch is split.
     """
+    if request.get('messages_file'):
+        request = dict(request, messages=_read_messages_file(request))
     if request.get('message_shape') == 'rabbitmq':
         request = dict(request, messages=[_rabbitmq_payload(m) for m in request['messages']])
     if not request.get('isolate'):
@@ -798,6 +872,31 @@ def run_stream_batch(request: Dict) -> Dict:
             failures=failures,
             outputs_json={uuid: _messages_json(o, uuid) for uuid, o in outputs.items()},
         )
+
+
+def _read_messages_file(request: Dict) -> Any:
+    """
+    The batch's messages from the JSON lines file the engine wrote for blocks that take a
+    DataFrame: Polars reads it in one pass, with no Python object per message. A file Polars
+    cannot read as a table (a message that is not an object) is read message by message, so
+    the block's error names it.
+    """
+    with open(request['messages_file'], 'rb') as file:
+        data = file.read()
+    if not request.get('count'):
+        return []
+    try:
+        import polars as pl
+
+        return pl.read_ndjson(io.BytesIO(data))
+    except Exception:
+        messages = []
+        for line in data.splitlines():
+            try:
+                messages.append(json.loads(line))
+            except ValueError:
+                messages.append(line.decode('utf-8', errors='replace'))
+        return messages
 
 
 def _rabbitmq_payload(message: Dict):
@@ -841,7 +940,7 @@ def _isolate(request: Dict, messages: List, offset: int) -> Tuple[Dict[str, List
         middle = len(messages) // 2
         left, left_failures = _isolate(request, messages[:middle], offset)
         right, right_failures = _isolate(request, messages[middle:], offset + middle)
-        outputs = {uuid: left.get(uuid, []) + right.get(uuid, [])
+        outputs = {uuid: _as_list(left.get(uuid, [])) + _as_list(right.get(uuid, []))
                    for uuid in dict.fromkeys([*left, *right])}
         return outputs, left_failures + right_failures
 
@@ -867,7 +966,7 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
             raise BlockError('load', f"Block {block['uuid']} reads {len(upstream)} blocks; a "
                              'stream block reads one.', block_uuid=block['uuid'])
         block_messages = results.get(upstream[0], []) if upstream else messages
-        if upstream and not block_messages:
+        if upstream and not len(block_messages):
             # The block before it kept nothing of this batch.
             results[block['uuid']] = []
             continue
@@ -875,6 +974,7 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
         kwargs = _kwargs(request, block)
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
         started = time.monotonic()
+        block_messages = _as_input(block_messages, _input_kind(function), block['uuid'])
         try:
             result = _call(function, [block_messages], kwargs)
         except Exception as error:
@@ -896,7 +996,30 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
     )
 
 
-def _messages_json(messages: List, block_uuid: str) -> str:
+def _frame_json(frame, block_uuid: str) -> str:
+    """A Polars DataFrame's rows as a JSON array; NaN, which Polars writes as null, is refused."""
+    import polars as pl
+
+    floats = [name for name, dtype in frame.schema.items() if dtype.is_float()]
+    if floats:
+        nan = frame.select(pl.col(floats).is_nan().any())
+        for name in floats:
+            if nan[name][0]:
+                row = frame.with_row_index('__row').filter(pl.col(name).is_nan())['__row'][0]
+                raise BlockError('run', f'Block {block_uuid} returned NaN at messages[{row}].'
+                                 f'{name}; stream messages are JSON, which has no NaN or '
+                                 'infinity. Return None or a string.', block_uuid=block_uuid)
+    for name, dtype in frame.schema.items():
+        if dtype.is_float() and frame[name].is_infinite().any():
+            raise BlockError('run', f'Block {block_uuid} returned infinity in {name}; stream '
+                             'messages are JSON, which has no NaN or infinity.',
+                             block_uuid=block_uuid)
+    return frame.write_json() if frame.height else '[]'
+
+
+def _messages_json(messages: Any, block_uuid: str) -> str:
+    if _is_polars(messages):
+        return _frame_json(messages, block_uuid)
     try:
         return json.dumps(messages, allow_nan=False, default=_json_default)
     except (TypeError, ValueError) as error:
@@ -979,12 +1102,13 @@ def serve(requests=None, channel=None) -> None:
             return
         try:
             if request.get('op') == 'stream':
-                result = run_stream_batch(request)
+                # The reply holds the outputs' JSON: a Polars output is not made a list.
+                result = _stream_batch(request)
             elif request.get('op') == 'stream_load':
-                # Compiles a stream's blocks (their top-level code runs) without a batch.
-                for block in request['chain']:
-                    _stream_function(block)
-                result = dict(loaded=[b['uuid'] for b in request['chain']])
+                # Compiles a stream's blocks (their top-level code runs) without a batch,
+                # and says what each takes: the engine sends a table's rows as a file.
+                inputs = {b['uuid']: _input_kind(_stream_function(b)) for b in request['chain']}
+                result = dict(loaded=list(inputs), inputs=inputs)
             else:
                 result = run_block(request)
             message = dict(type='result', id=request_id, ok=True, **result)

@@ -504,3 +504,84 @@ def test_messages_that_fail_on_their_own_go_to_the_dead_letter_topic(
     errors = {json.loads(r.value)['id']: dict(r.headers)['mage-error'].decode() for r in rejected}
     assert 'message 17 is not accepted' in errors[17], errors
     assert committed(kafka_bootstrap, group, topics[0]) == 60
+
+
+def test_a_block_that_takes_a_dataframe_gets_the_batch_as_a_table(
+    mage_project, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    A block annotated with pl.DataFrame gets each batch as a Polars table, which the engine
+    sends as JSON lines; a message that is not an object goes to the dead-letter topic.
+    """
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'kafka_frame_{uuid.uuid4().hex[:8]}'
+    dead_topic = f'it_dead_{uuid.uuid4().hex[:10]}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(dead_topic, num_partitions=1, replication_factor=1)])
+    admin.close()
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+    try:
+        def add(suffix, kind, code, language, upstream=()):
+            block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                                 pipeline=pipeline)
+            Path(block.file_path).write_text(textwrap.dedent(code))
+            pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+            return block
+
+        source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=name),
+                     'yaml')
+        frame = add('frame', 'transformer', '''
+            import polars as pl
+
+            @transformer
+            def double(messages: pl.DataFrame, *args, **kwargs):
+                return messages.with_columns(doubled=pl.col('amount') * 2)
+        ''', 'python', [source])
+        add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [frame])
+        add('dead', 'data_exporter', f'''
+            connector_type: kafka
+            bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+            topic: {dead_topic}
+            dead_letter: true
+        ''', 'yaml', [source])
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap)
+        for i in range(20):
+            producer.send(topics[0], partition=0, value=json.dumps(dict(id=i, amount=i)).encode())
+        producer.send(topics[0], partition=0, value=b'not an object')
+        producer.flush()
+        producer.close()
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        output = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                               auto_offset_reset='earliest',
+                               group_id=f'reader_{uuid.uuid4().hex[:8]}')
+        dead = KafkaConsumer(dead_topic, bootstrap_servers=kafka_bootstrap,
+                             auto_offset_reset='earliest',
+                             group_id=f'reader_{uuid.uuid4().hex[:8]}')
+        service.start()
+        try:
+            service.wait_running()
+            delivered = consume(output, 20)
+            rejected = []
+            deadline = time.time() + 60
+            while not rejected and time.time() < deadline:
+                for records in dead.poll(timeout_ms=500).values():
+                    rejected.extend(records)
+        finally:
+            service.stop()
+            output.close()
+            dead.close()
+    finally:
+        pipeline.delete()
+        admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+        admin.delete_topics([dead_topic])
+        admin.close()
+
+    assert sorted((m['id'], m['doubled']) for m in delivered) == [(i, i * 2) for i in range(20)]
+    assert [r.value for r in rejected] == [b'not an object']
+    assert 'must be JSON objects' in dict(rejected[0].headers)['mage-error'].decode()

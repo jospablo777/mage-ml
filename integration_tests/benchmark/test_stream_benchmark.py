@@ -43,6 +43,26 @@ BLOCKS = {
             return [dict(m, total=m['price'] * m['units'], large=m['units'] > 5)
                     for m in messages]
     ''',
+    # The same with Polars, as blocks that score a model on a table do.
+    'polars_enrich': '''
+        import polars as pl
+
+        @transformer
+        def transform(messages, *args, **kwargs):
+            return pl.DataFrame(messages).with_columns(
+                total=pl.col('price') * pl.col('units'), large=pl.col('units') > 5,
+            )
+    ''',
+    # Takes a DataFrame: the engine sends the batch as JSON lines that Polars reads at once.
+    'polars_frame': '''
+        import polars as pl
+
+        @transformer
+        def transform(messages: pl.DataFrame, *args, **kwargs):
+            return messages.with_columns(
+                total=pl.col('price') * pl.col('units'), large=pl.col('units') > 5,
+            )
+    ''',
     # Rust stream blocks: one resident program, messages as raw bytes or JSON values.
     'rust_identity': '''
         use mage::prelude::*;
@@ -132,7 +152,8 @@ def _timed(count, total, timeout, failed=lambda: False, every=0.01):
     return written, seconds * total / max(total - already, 1)
 
 
-@pytest.mark.parametrize('block', ['enrich', 'identity', 'rust_enrich', 'rust_identity'])
+@pytest.mark.parametrize('block', ['enrich', 'identity', 'polars_enrich', 'polars_frame',
+                                   'rust_enrich', 'rust_identity'])
 def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_path):
     from kafka.admin import KafkaAdminClient, NewTopic
 
