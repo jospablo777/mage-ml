@@ -144,6 +144,31 @@ function PipelineExecution({
     }
   }, [frozen, lines.length, pipelineExecutionHidden, shown]);
   const jumpToLatest = useCallback(() => setFrozen(null), []);
+  // The reader's intent to leave the bottom freezes the view at once. Waiting for the scroll
+  // event lost it while lines arrived: a render could move the view back to the bottom
+  // between the reader's scroll and its event.
+  const refRange = useRef({ end, start });
+  refRange.current = { end, start };
+  const freeze = useCallback(() => {
+    setFrozen(previous => previous ?? { ...refRange.current });
+  }, []);
+  const onWheel = useCallback((event: React.WheelEvent) => {
+    if (event.deltaY < 0) {
+      freeze();
+    }
+  }, [freeze]);
+  const onKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) {
+      freeze();
+    }
+  }, [freeze]);
+  const onPointerDown = useCallback(() => {
+    // Dragging the scroll bar, selecting text, or a touch scroll.
+    const element = refOutput.current;
+    if (element && element.scrollHeight > element.clientHeight) {
+      freeze();
+    }
+  }, [freeze]);
 
   // Earlier lines go above what the reader sees: keep their place.
   const refHeightBefore = useRef<number>(null);
@@ -278,8 +303,13 @@ function PipelineExecution({
           <div style={{ position: 'relative' }}>
             <OutputContainerStyle
               noScrollbarTrackBackground
+              onKeyDown={onKeyDown}
+              onPointerDown={onPointerDown}
               onScroll={onScroll}
+              onTouchStart={onPointerDown}
+              onWheel={onWheel}
               ref={refOutput}
+              tabIndex={0}
             >
               <CodeBlockStyle
                 executedAndIdle

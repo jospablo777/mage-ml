@@ -48,14 +48,22 @@ test('stream output holds still while the reader scrolls up', async ({ page }) =
 
   await expect(line(page, 300)).toBeVisible({ timeout: 15_000 });
   const box = await scrollBox(page, 300);
-  await box.evaluate((element: HTMLElement) => { element.scrollTop = 0; });
+  // Scrolled up with the wheel, as a reader does: the panel stops following at once, also
+  // while lines keep arriving (a scroll used to be undone by the next render).
+  const bounds = await box.evaluate((element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  await page.mouse.move(bounds.x, bounds.y);
+  await page.mouse.wheel(0, -100_000);
   await expect(page.getByRole('button', { name: /Jump to latest \(\d+ new lines?\)/ }))
     .toBeVisible();
+  const top = await box.evaluate((element: HTMLElement) => element.scrollTop);
   const first = await box.evaluate((element: HTMLElement) => element.innerText.slice(0, 20));
 
   // Messages keep arriving; the view does not move.
   await page.waitForTimeout(1_000);
-  expect(await box.evaluate((element: HTMLElement) => element.scrollTop)).toBe(0);
+  expect(await box.evaluate((element: HTMLElement) => element.scrollTop)).toBe(top);
   expect(await box.evaluate((element: HTMLElement) => element.innerText.slice(0, 20)))
     .toBe(first);
 
