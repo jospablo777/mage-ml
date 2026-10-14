@@ -107,8 +107,13 @@ struct WriteJob {
     rows: bool,
 }
 
-/// A sink's writer: writes in order; after a failure, waits for the retry of that batch
-/// before taking the next one.
+/// Batches a writer has handed to its sink and awaits the confirmation of.
+const WRITES_IN_FLIGHT: usize = 4;
+
+/// A sink's writer: hands batches to the sink in order, up to [`WRITES_IN_FLIGHT`] awaiting
+/// their confirmation (a sink that does not split the two confirms each at once), and
+/// reports receipts in order. After a failure it hands over nothing new until the batches in
+/// flight are confirmed, then waits for each failed batch's retry, in order, before going on.
 fn spawn_writer(
     sink: Arc<dyn Sink>,
     sink_id: SinkId,
@@ -121,41 +126,113 @@ fn spawn_writer(
     let (jobs_tx, mut jobs) = mpsc::unbounded_channel::<WriteJob>();
     let (retry_tx, mut retries) = mpsc::unbounded_channel::<BatchId>();
     tokio::spawn(async move {
-        while let Some(job) = jobs.recv().await {
-            loop {
-                let result = sink.write(&job.batch, &job.meta).await;
-                let sink = if job.rows {
-                    SinkId::REJECTED_ROWS
+        let report = |job: &WriteJob, result: &Result<(), ConnectorError>| {
+            let sink = if job.rows {
+                SinkId::REJECTED_ROWS
+            } else {
+                sink_id
+            };
+            let event = match (result, dead_letter && !job.rows) {
+                (Ok(()), false) => Event::SinkReceipt { id: job.id, sink },
+                (Ok(()), true) => Event::DeadLetterReceipt(job.id),
+                (Err(error), false) => Event::SinkFailed {
+                    id: job.id,
+                    sink,
+                    retryable: error.retryable,
+                    error: error.message.clone(),
+                },
+                (Err(error), true) => Event::DeadLetterFailed {
+                    id: job.id,
+                    error: error.message.clone(),
+                },
+            };
+            events.send(Internal::Event(event)).is_ok()
+        };
+        let mut in_flight: std::collections::VecDeque<(
+            WriteJob,
+            tokio::task::JoinHandle<Result<(), ConnectorError>>,
+        )> = Default::default();
+        let mut failed: Vec<WriteJob> = Vec::new();
+        let mut scheduled: std::collections::HashSet<BatchId> = Default::default();
+        let mut open = true;
+        loop {
+            if failed.is_empty() && open && in_flight.len() < WRITES_IN_FLIGHT {
+                let next = if in_flight.is_empty() {
+                    jobs.recv().await
                 } else {
-                    sink_id
+                    tokio::select! {
+                        biased;
+                        done = &mut in_flight.front_mut().expect("in flight").1 => {
+                            let (job, _) = in_flight.pop_front().expect("in flight");
+                            let result = done.unwrap_or_else(|e| {
+                                Err(ConnectorError::retryable(format!("the sink's write stopped: {e}")))
+                            });
+                            if !report(&job, &result) {
+                                return;
+                            }
+                            if result.is_err() {
+                                failed.push(job);
+                            }
+                            continue;
+                        }
+                        job = jobs.recv() => job,
+                    }
                 };
-                let event = match (&result, dead_letter && !job.rows) {
-                    (Ok(()), false) => Event::SinkReceipt { id: job.id, sink },
-                    (Ok(()), true) => Event::DeadLetterReceipt(job.id),
-                    (Err(error), false) => Event::SinkFailed {
-                        id: job.id,
-                        sink,
-                        retryable: error.retryable,
-                        error: error.message.clone(),
-                    },
-                    (Err(error), true) => Event::DeadLetterFailed {
-                        id: job.id,
-                        error: error.message.clone(),
-                    },
+                let Some(job) = next else {
+                    open = false;
+                    continue;
                 };
-                if events.send(Internal::Event(event)).is_err() {
+                match sink.queue(&job.batch, &job.meta).await {
+                    Ok(confirmation) => {
+                        let handle = tokio::spawn(confirmation);
+                        in_flight.push_back((job, handle));
+                    }
+                    Err(error) => {
+                        if !report(&job, &Err(error)) {
+                            return;
+                        }
+                        failed.push(job);
+                    }
+                }
+                continue;
+            }
+            if let Some((job, handle)) = in_flight.pop_front() {
+                let result = handle.await.unwrap_or_else(|e| {
+                    Err(ConnectorError::retryable(format!(
+                        "the sink's write stopped: {e}"
+                    )))
+                });
+                if !report(&job, &result) {
                     return;
                 }
-                if result.is_ok() {
-                    break;
+                if result.is_err() {
+                    failed.push(job);
                 }
-                // Hold the queue until the machine schedules this batch's retry, or the
-                // stream ends (a fatal error stops it).
+                continue;
+            }
+            if failed.is_empty() {
+                // Nothing in flight, nothing failed, and no more jobs.
+                return;
+            }
+            // Each failed batch again, in order, once the machine schedules its retry; a
+            // retry writes the batch whole, as before.
+            for job in std::mem::take(&mut failed) {
                 loop {
-                    match retries.recv().await {
-                        Some(id) if id == job.id => break,
-                        Some(_) => continue,
-                        None => return,
+                    // A later batch's retry can come first: it is kept for its turn.
+                    while !scheduled.remove(&job.id) {
+                        match retries.recv().await {
+                            Some(id) => {
+                                scheduled.insert(id);
+                            }
+                            None => return,
+                        }
+                    }
+                    let result = sink.write(&job.batch, &job.meta).await;
+                    if !report(&job, &result) {
+                        return;
+                    }
+                    if result.is_ok() {
+                        break;
                     }
                 }
             }
@@ -902,6 +979,144 @@ mod tests {
         fn flush(&self) -> BoxFuture<'_, ()> {
             Box::pin(async {})
         }
+    }
+
+    /// Takes batches at once and confirms each later, as a Kafka producer does; the batch at
+    /// `fail_at` (counting from 0) is refused once when confirmed.
+    struct PipelinedSink {
+        queued: std::sync::Mutex<Vec<String>>,
+        in_flight: Arc<std::sync::atomic::AtomicUsize>,
+        most_in_flight: Arc<std::sync::atomic::AtomicUsize>,
+        batches: std::sync::atomic::AtomicUsize,
+        fail_at: Option<usize>,
+    }
+
+    impl PipelinedSink {
+        fn new(fail_at: Option<usize>) -> PipelinedSink {
+            PipelinedSink {
+                queued: Default::default(),
+                in_flight: Default::default(),
+                most_in_flight: Default::default(),
+                batches: Default::default(),
+                fail_at,
+            }
+        }
+
+        fn take(&self, batch: &RecordBatch) {
+            let mut queued = self.queued.lock().unwrap();
+            for message in read_envelope(batch).unwrap() {
+                queued.push(String::from_utf8(message.value).unwrap());
+            }
+        }
+    }
+
+    impl Sink for PipelinedSink {
+        fn write<'a>(
+            &'a self,
+            batch: &'a RecordBatch,
+            _meta: &'a BatchMeta,
+        ) -> BoxFuture<'a, Result<(), ConnectorError>> {
+            Box::pin(async move {
+                self.take(batch);
+                Ok(())
+            })
+        }
+
+        fn queue<'a>(
+            &'a self,
+            batch: &'a RecordBatch,
+            _meta: &'a BatchMeta,
+        ) -> BoxFuture<'a, Result<mage_stream_ports::Confirmation, ConnectorError>> {
+            use std::sync::atomic::Ordering::SeqCst;
+            Box::pin(async move {
+                self.take(batch);
+                let number = self.batches.fetch_add(1, SeqCst);
+                let now = self.in_flight.fetch_add(1, SeqCst) + 1;
+                self.most_in_flight.fetch_max(now, SeqCst);
+                let in_flight = self.in_flight.clone();
+                let refuse = self.fail_at == Some(number);
+                Ok(Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    in_flight.fetch_sub(1, SeqCst);
+                    if refuse {
+                        return Err(ConnectorError::retryable("the broker refused the batch"));
+                    }
+                    Ok(())
+                }) as mage_stream_ports::Confirmation)
+            })
+        }
+
+        fn flush(&self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sink_that_confirms_later_takes_the_next_batches_meanwhile() {
+        let source = MemorySource::new(vec![messages(24)], 4, true);
+        let handle = source.handle();
+        let sink = Arc::new(PipelinedSink::new(None));
+
+        let started = std::time::Instant::now();
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(sink.clone(), None)],
+            dead_letter: None,
+            transform: None,
+            config: config(1, false, PoisonPolicy::Stop),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+        })
+        .await;
+
+        assert_eq!(status.state, StreamState::Finished, "{status:?}");
+        assert_eq!(handle.committed(), vec![24]);
+        let expected: Vec<String> = (0..24).map(|n| format!("{{\"n\": {n}}}")).collect();
+        assert_eq!(*sink.queued.lock().unwrap(), expected);
+        // Six batches confirmed in 30 ms each, overlapping: well under 180 ms.
+        assert!(
+            sink.most_in_flight
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 1
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(170),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_confirmation_is_retried_and_nothing_is_lost() {
+        let source = MemorySource::new(vec![messages(24)], 4, true);
+        let handle = source.handle();
+        let sink = Arc::new(PipelinedSink::new(Some(1)));
+
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(sink.clone(), None)],
+            dead_letter: None,
+            transform: None,
+            config: config(1, false, PoisonPolicy::Stop),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+        })
+        .await;
+
+        assert_eq!(status.state, StreamState::Finished, "{status:?}");
+        assert_eq!(handle.committed(), vec![24]);
+        assert!(status.retries >= 1, "{status:?}");
+        let queued = sink.queued.lock().unwrap().clone();
+        for n in 0..24 {
+            assert!(
+                queued.contains(&format!("{{\"n\": {n}}}")),
+                "message {n} lost: {queued:?}"
+            );
+        }
+        // The refused batch (messages 4 to 7) was written again, after the others in flight.
+        assert_eq!(queued.len(), 28, "{queued:?}");
     }
 
     #[tokio::test]

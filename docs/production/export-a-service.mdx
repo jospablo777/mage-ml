@@ -268,14 +268,14 @@ Kafka through one block:
 
 | Block | Into | Messages a second |
 | --- | --- | --- |
-| Python, returns its messages | Kafka | 497,000 |
-| Python, adds two fields | Kafka | 309,000 |
-| Rust, returns its messages | Kafka | 485,000 |
-| Rust, adds two fields | Kafka | 443,000 |
-| Python, returns its messages | Parquet files | 432,000 |
-| Python, returns its messages | ClickHouse | 261,000 |
-| Python, returns its messages | PostgreSQL | 152,000 |
-| Python, returns its messages | RabbitMQ (publisher confirms) | 33,000 |
+| Python, returns its messages | Kafka | 586,000 |
+| Python, adds two fields | Kafka | 479,000 |
+| Rust, returns its messages | Kafka | 1,012,000 |
+| Rust, adds two fields (as JSON values) | Kafka | 600,000 |
+| Python, returns its messages | Parquet files | 521,000 |
+| Python, returns its messages | ClickHouse | 254,000 |
+| Python, returns its messages | PostgreSQL | 141,000 |
+| Python, returns its messages | RabbitMQ (publisher confirms) | 32,000 |
 | Python, returns its messages | IBM MQ (emulated amd64 server) | 15,000 |
 
 Read from other sources into Kafka through a Python block:
@@ -286,8 +286,9 @@ Read from other sources into Kafka through a Python block:
 | IBM MQ, one connection (emulated amd64 server) | 1,900 |
 | IBM MQ, four connections | 4,600 |
 
-About 500,000 messages a second is the engine's own path from Kafka to Kafka; a block that
-does real work costs less in Rust. RabbitMQ and IBM MQ are limited by their brokers. IBM MQ
+The engine's own path from Kafka to Kafka carries about a million messages a second; a
+Python block's JSON round trip, or parsing each message into a `Value` in Rust, costs the
+rest. A Rust block that takes `Vec<Vec<u8>>` or a `DataFrame` avoids most of it. RabbitMQ and IBM MQ are limited by their brokers. IBM MQ
 reads one message per round trip under syncpoint, so `connections` (at the cost of queue
 order) is what raises it. Larger `batch_size` values raise these.
 `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.

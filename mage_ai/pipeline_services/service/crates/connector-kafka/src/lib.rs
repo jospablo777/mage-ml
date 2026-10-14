@@ -21,16 +21,16 @@ use std::time::{Duration, Instant};
 
 use mage_stream_core::BatchId;
 use mage_stream_ports::{
-    AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, ConnectorError,
-    Envelope, EnvelopeBuilder, Header, PartitionId, Position, RecordBatch, Sink, SinkCapabilities,
-    Source, SourceCapabilities, SourceEvent, read_envelope,
+    AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, Confirmation,
+    ConnectorError, Envelope, EnvelopeBuilder, Header, PartitionId, Position, RecordBatch, Sink,
+    SinkCapabilities, Source, SourceCapabilities, SourceEvent, read_envelope,
 };
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, ConsumerContext, Rebalance};
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka::error::{KafkaError, KafkaResult, RDKafkaErrorCode};
 use rdkafka::message::{Header as KafkaHeader, Headers, Message, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::{Offset, TopicPartitionList};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -128,9 +128,11 @@ fn connector_error(error: KafkaError) -> ConnectorError {
 const REVOKE_WITHIN: Duration = Duration::from_secs(20);
 /// How often the poll thread updates the lag.
 const LAG_EVERY: Duration = Duration::from_secs(5);
-/// Messages between the poll thread and the stream; librdkafka's own queue, sized from the
-/// stream's byte budget, holds the rest.
-const CHANNEL: usize = 256;
+/// Chunks of messages between the poll thread and the stream; librdkafka's own queue, sized
+/// from the stream's byte budget, holds the rest.
+const CHANNEL: usize = 16;
+/// Messages per chunk at most: the poll thread takes what librdkafka already holds.
+const CHUNK: usize = 1024;
 /// How long a pause only holds a partition's batches back before it becomes librdkafka's
 /// pause (see [`KafkaSource::pause`]).
 const HOLD: Duration = Duration::from_secs(5);
@@ -146,6 +148,26 @@ struct Table {
     waiters: HashMap<u32, std::sync::mpsc::Sender<u32>>,
     /// Messages behind the end of each assigned partition.
     lag: BTreeMap<u32, i64>,
+    /// The next offset to read, as last committed (asynchronously) per partition: committed
+    /// again synchronously before a partition is given up and when the source closes.
+    committed: BTreeMap<u32, i64>,
+    /// An asynchronous commit's failure, reported by the next commit.
+    commit_error: Option<String>,
+}
+
+impl Table {
+    /// The committed offsets of the partitions, to commit synchronously.
+    fn committed_list(&self, ids: impl Iterator<Item = u32>) -> TopicPartitionList {
+        let mut list = TopicPartitionList::new();
+        for id in ids {
+            if let (Some(offset), Some((topic, partition))) =
+                (self.committed.get(&id), self.names.get(id as usize))
+            {
+                let _ = list.add_partition_offset(topic, *partition, Offset::Offset(*offset));
+            }
+        }
+        list
+    }
 }
 
 impl Table {
@@ -171,7 +193,8 @@ impl Table {
 /// What the poll thread hands to the stream, in the order librdkafka delivered it: an
 /// assignment change is never reordered with the messages around it.
 enum Polled {
-    Message(rdkafka::message::OwnedMessage),
+    /// Messages polled together: one handoff per chunk, not per message (I-84).
+    Messages(Vec<rdkafka::message::OwnedMessage>),
     Event(SourceEvent),
     Error(KafkaError),
 }
@@ -203,11 +226,18 @@ impl RebalanceContext {
 }
 
 impl ConsumerContext for RebalanceContext {
+    fn commit_callback(&self, result: KafkaResult<()>, _offsets: &TopicPartitionList) {
+        if let Err(error) = result {
+            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            table.commit_error = Some(error.to_string());
+        }
+    }
+
     /// Runs on the poll thread before partitions go. The partitions keep their epochs while
     /// the stream finishes their batches in flight and commits them (I-34), so the next owner
     /// starts after them; after REVOKE_WITHIN they go anyway, and what was not done is read
     /// again by the next owner.
-    fn pre_rebalance(&self, _consumer: &BaseConsumer<Self>, rebalance: &Rebalance<'_>) {
+    fn pre_rebalance(&self, consumer: &BaseConsumer<Self>, rebalance: &Rebalance<'_>) {
         let Rebalance::Revoke(list) = rebalance else {
             return;
         };
@@ -249,11 +279,21 @@ impl ConsumerContext for RebalanceContext {
                 Err(_) => break,
             }
         }
+        // The stream's commits are asynchronous: the last ones go out before the partitions
+        // do, so their next owner does not read them again.
+        let list = {
+            let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            table.committed_list(revoked.iter().map(|(id, _)| *id))
+        };
+        if list.count() > 0 {
+            let _ = consumer.commit(&list, CommitMode::Sync);
+        }
         let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
         for (id, _) in revoked {
             table.waiters.remove(&id);
             table.epochs.remove(&id);
             table.lag.remove(&id);
+            table.committed.remove(&id);
         }
     }
 
@@ -285,13 +325,32 @@ fn poll_loop(consumer: Arc<KafkaConsumer>, table: Arc<Mutex<Table>>, stop: Arc<A
     let polled = consumer.context().polled.clone();
     let mut lag_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
-        let item = match consumer.poll(Duration::from_millis(100)) {
-            Some(Ok(message)) => Some(Polled::Message(message.detach())),
-            Some(Err(error)) => Some(Polled::Error(error)),
-            None => None,
-        };
-        if let Some(item) = item
-            && polled.blocking_send(item).is_err()
+        // One message woke the stream's task and parked it again each time: the two
+        // threads mostly waited on each other (I-84). The messages librdkafka already
+        // holds go together.
+        let mut items = Vec::with_capacity(2);
+        match consumer.poll(Duration::from_millis(100)) {
+            Some(Ok(message)) => {
+                let mut chunk = Vec::with_capacity(CHUNK);
+                chunk.push(message.detach());
+                while chunk.len() < CHUNK {
+                    match consumer.poll(Duration::ZERO) {
+                        Some(Ok(message)) => chunk.push(message.detach()),
+                        Some(Err(error)) => {
+                            items.push(Polled::Error(error));
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+                items.insert(0, Polled::Messages(chunk));
+            }
+            Some(Err(error)) => items.push(Polled::Error(error)),
+            None => {}
+        }
+        if items
+            .into_iter()
+            .any(|item| polled.blocking_send(item).is_err())
         {
             break;
         }
@@ -369,6 +428,8 @@ pub struct KafkaSource {
     pending: BTreeMap<u32, Pending>,
     seq: BTreeMap<u32, u64>,
     paused: BTreeSet<u32>,
+    /// Messages of a chunk not yet in a batch: a batch filled before the chunk ended.
+    carry: std::collections::VecDeque<rdkafka::message::OwnedMessage>,
     /// Paused partitions only held back, since when; the others are paused in librdkafka.
     held: BTreeMap<u32, Instant>,
     stopped: BTreeSet<u32>,
@@ -444,6 +505,7 @@ impl KafkaSource {
             pending: BTreeMap::new(),
             seq: BTreeMap::new(),
             paused: BTreeSet::new(),
+            carry: std::collections::VecDeque::new(),
             held: BTreeMap::new(),
             stopped: BTreeSet::new(),
             limits,
@@ -550,7 +612,8 @@ impl KafkaSource {
         Some(list)
     }
 
-    fn add(&mut self, message: rdkafka::message::OwnedMessage) {
+    /// Adds the message to its partition's batch; true when that batch is now full.
+    fn add(&mut self, message: rdkafka::message::OwnedMessage) -> bool {
         let (id, epoch) = {
             let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
             let id = table.id(message.topic(), message.partition());
@@ -558,9 +621,9 @@ impl KafkaSource {
         };
         // A message of a partition no longer assigned, or being revoked, is not delivered;
         // the next owner reads it.
-        let Some(epoch) = epoch else { return };
+        let Some(epoch) = epoch else { return false };
         if self.revoking.contains(&id) {
-            return;
+            return false;
         }
         let headers = message
             .headers()
@@ -591,6 +654,8 @@ impl KafkaSource {
         });
         pending.builder.push(&envelope);
         pending.last = offset;
+        pending.builder.len() >= self.limits.max_records
+            || pending.builder.bytes() >= self.limits.max_bytes
     }
 }
 
@@ -632,11 +697,27 @@ impl KafkaSource {
     }
 }
 
+impl KafkaSource {
+    /// Adds the messages of the last chunk not yet added, until a batch is full.
+    fn take_carry(&mut self) -> Result<Option<SourceEvent>, ConnectorError> {
+        while let Some(message) = self.carry.pop_front() {
+            if self.add(message) {
+                return self.ready(false);
+            }
+        }
+        Ok(None)
+    }
+}
+
 impl Source for KafkaSource {
     fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
         Box::pin(async move {
             loop {
                 if let Some(batch) = self.ready(false)? {
+                    return Ok(batch);
+                }
+                // A chunk's messages before anything newer, so events keep their order.
+                if let Some(batch) = self.take_carry()? {
                     return Ok(batch);
                 }
                 self.stop_held();
@@ -646,7 +727,7 @@ impl Source for KafkaSource {
                 }
                 let wait = self.wait();
                 match tokio::time::timeout(wait, self.polled.recv()).await {
-                    Ok(Some(Polled::Message(message))) => self.add(message),
+                    Ok(Some(Polled::Messages(chunk))) => self.carry.extend(chunk),
                     Ok(Some(Polled::Event(event))) => return Ok(self.handle(event)),
                     Ok(Some(Polled::Error(error))) => return Err(connector_error(error)),
                     Ok(None) => return Ok(SourceEvent::End),
@@ -662,7 +743,13 @@ impl Source for KafkaSource {
         Box::pin(async move {
             let mut list = TopicPartitionList::new();
             {
-                let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(error) = table.commit_error.take() {
+                    return CommitOutcome::Failed(ConnectorError::retryable(format!(
+                        "Kafka: committing positions failed: {error}"
+                    )));
+                }
+                let mut next = Vec::with_capacity(commits.len());
                 for commit in commits {
                     let current = table.epochs.get(&commit.partition.0).copied();
                     let Position::Offset(last) = commit.position else {
@@ -683,20 +770,23 @@ impl Source for KafkaSource {
                     {
                         return CommitOutcome::Failed(connector_error(error));
                     }
+                    next.push((commit.partition.0, last + 1));
                 }
+                table.committed.extend(next);
             }
-            let consumer = self.consumer.clone();
-            match tokio::task::spawn_blocking(move || consumer.commit(&list, CommitMode::Sync))
-                .await
-            {
-                Ok(Ok(())) => CommitOutcome::Committed,
-                Ok(Err(error)) => match error.rdkafka_error_code() {
+            // Asynchronous, in order: a synchronous commit held the stream's loop for a
+            // round trip to the coordinator on every batch (I-85). A failure comes back
+            // through commit_callback; the positions are committed again synchronously
+            // before a partition is given up and at close. Committed here means handed to
+            // librdkafka: after a crash, a batch can be read again, as at-least-once allows.
+            match self.consumer.commit(&list, CommitMode::Async) {
+                Ok(()) => CommitOutcome::Committed,
+                Err(error) => match error.rdkafka_error_code() {
                     Some(RDKafkaErrorCode::IllegalGeneration)
                     | Some(RDKafkaErrorCode::RebalanceInProgress)
                     | Some(RDKafkaErrorCode::UnknownMemberId) => CommitOutcome::Stale,
                     _ => CommitOutcome::Failed(connector_error(error)),
                 },
-                Err(error) => CommitOutcome::Failed(ConnectorError::retryable(error.to_string())),
             }
         })
     }
@@ -767,8 +857,19 @@ impl Source for KafkaSource {
             if let Some(thread) = self.thread.take() {
                 let _ = tokio::task::spawn_blocking(move || thread.join()).await;
             }
+            // The last asynchronous commits, made sure of before the consumer leaves.
+            let list = {
+                let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+                table.committed_list(table.epochs.keys().copied())
+            };
             let consumer = self.consumer.clone();
-            let _ = tokio::task::spawn_blocking(move || consumer.unsubscribe()).await;
+            let _ = tokio::task::spawn_blocking(move || {
+                if list.count() > 0 {
+                    let _ = consumer.commit(&list, CommitMode::Sync);
+                }
+                consumer.unsubscribe()
+            })
+            .await;
         })
     }
 }
@@ -806,63 +907,84 @@ impl KafkaSink {
     }
 }
 
+impl KafkaSink {
+    /// Puts every message of the batch in the producer's queue, in order, and returns their
+    /// deliveries: queuing each message only after the last was confirmed sent one message
+    /// per round trip.
+    async fn enqueue(&self, batch: &RecordBatch) -> Result<Vec<DeliveryFuture>, ConnectorError> {
+        let messages = read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
+        let mut deliveries = Vec::with_capacity(messages.len());
+        let started = std::time::Instant::now();
+        for message in &messages {
+            let mut headers = OwnedHeaders::new_with_capacity(message.headers.len());
+            for h in &message.headers {
+                headers = headers.insert(KafkaHeader {
+                    key: &h.key,
+                    value: Some(&h.value),
+                });
+            }
+            let mut record = FutureRecord::to(&self.topic)
+                .payload(&message.value)
+                .headers(headers);
+            if let Some(key) = &message.key {
+                record = record.key(key);
+            }
+            loop {
+                match self.producer.send_result(record) {
+                    Ok(delivery) => {
+                        deliveries.push(delivery);
+                        break;
+                    }
+                    // The producer's queue is full: wait for deliveries to make room.
+                    Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), returned))
+                        if started.elapsed() < self.timeout =>
+                    {
+                        record = returned;
+                        tokio::time::sleep(Duration::from_millis(2)).await;
+                    }
+                    Err((error, _)) => return Err(connector_error(error)),
+                }
+            }
+        }
+        Ok(deliveries)
+    }
+}
+
+async fn delivered(deliveries: Vec<DeliveryFuture>) -> Result<(), ConnectorError> {
+    for delivery in deliveries {
+        match delivery.await {
+            Ok(Ok(_)) => {}
+            Ok(Err((error, _))) => return Err(connector_error(error)),
+            Err(_) => {
+                return Err(ConnectorError::retryable(
+                    "Kafka: the producer stopped before confirming a message",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Sink for KafkaSink {
     fn write<'a>(
         &'a self,
         batch: &'a RecordBatch,
         _meta: &'a BatchMeta,
     ) -> BoxFuture<'a, Result<(), ConnectorError>> {
+        Box::pin(async move { delivered(self.enqueue(batch).await?).await })
+    }
+
+    /// The producer keeps the order of what it was given (idempotence on), so the next
+    /// batch is queued while this one's deliveries are confirmed: a batch waited for its
+    /// last message's acknowledgement before the next was queued (I-85).
+    fn queue<'a>(
+        &'a self,
+        batch: &'a RecordBatch,
+        _meta: &'a BatchMeta,
+    ) -> BoxFuture<'a, Result<Confirmation, ConnectorError>> {
         Box::pin(async move {
-            let messages =
-                read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
-            // Every message is queued at once and the deliveries are awaited together:
-            // awaiting each send before queuing the next sent one message per round trip.
-            let mut deliveries = Vec::with_capacity(messages.len());
-            let started = std::time::Instant::now();
-            for message in &messages {
-                let mut headers = OwnedHeaders::new_with_capacity(message.headers.len());
-                for h in &message.headers {
-                    headers = headers.insert(KafkaHeader {
-                        key: &h.key,
-                        value: Some(&h.value),
-                    });
-                }
-                let mut record = FutureRecord::to(&self.topic)
-                    .payload(&message.value)
-                    .headers(headers);
-                if let Some(key) = &message.key {
-                    record = record.key(key);
-                }
-                loop {
-                    match self.producer.send_result(record) {
-                        Ok(delivery) => {
-                            deliveries.push(delivery);
-                            break;
-                        }
-                        // The producer's queue is full: wait for deliveries to make room.
-                        Err((
-                            KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
-                            returned,
-                        )) if started.elapsed() < self.timeout => {
-                            record = returned;
-                            tokio::time::sleep(Duration::from_millis(2)).await;
-                        }
-                        Err((error, _)) => return Err(connector_error(error)),
-                    }
-                }
-            }
-            for delivery in deliveries {
-                match delivery.await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err((error, _))) => return Err(connector_error(error)),
-                    Err(_) => {
-                        return Err(ConnectorError::retryable(
-                            "Kafka: the producer stopped before confirming a message",
-                        ));
-                    }
-                }
-            }
-            Ok(())
+            let deliveries = self.enqueue(batch).await?;
+            Ok(Box::pin(delivered(deliveries)) as Confirmation)
         })
     }
 

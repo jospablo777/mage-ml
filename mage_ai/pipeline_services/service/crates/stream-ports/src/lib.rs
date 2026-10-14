@@ -133,6 +133,9 @@ pub struct SinkCapabilities {
     pub transactional: bool,
 }
 
+/// A batch's confirmation by its target, after [`Sink::queue`].
+pub type Confirmation = BoxFuture<'static, Result<(), ConnectorError>>;
+
 pub trait Sink: Send + Sync {
     /// Writes the batch and returns once the target confirmed it (the receipt).
     fn write<'a>(
@@ -140,6 +143,20 @@ pub trait Sink: Send + Sync {
         batch: &'a RecordBatch,
         meta: &'a BatchMeta,
     ) -> BoxFuture<'a, Result<(), ConnectorError>>;
+    /// Hands the batch to the target in order and returns its confirmation, so the writer
+    /// queues the next batch while this one is confirmed. A sink whose target keeps the order
+    /// of what it was handed (a Kafka producer) splits the two; the default writes the batch
+    /// and is confirmed at once.
+    fn queue<'a>(
+        &'a self,
+        batch: &'a RecordBatch,
+        meta: &'a BatchMeta,
+    ) -> BoxFuture<'a, Result<Confirmation, ConnectorError>> {
+        Box::pin(async move {
+            self.write(batch, meta).await?;
+            Ok(Box::pin(async { Ok(()) }) as Confirmation)
+        })
+    }
     fn flush(&self) -> BoxFuture<'_, ()>;
     fn capabilities(&self) -> SinkCapabilities {
         SinkCapabilities::default()
