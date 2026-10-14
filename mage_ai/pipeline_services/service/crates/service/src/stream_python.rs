@@ -153,7 +153,27 @@ impl PythonStreamSession {
 }
 
 /// The message's value as JSON for the worker, unparsed.
+/// Why the source could not decode the message (Avro), from its mage-decode-error header:
+/// its bytes are not the message, whatever they are.
+pub(crate) fn decode_error(envelope: &Envelope) -> Option<String> {
+    envelope
+        .headers
+        .iter()
+        .find(|h| h.key == "mage-decode-error")
+        .map(|reason| {
+            format!(
+                "the message could not be read: {}",
+                String::from_utf8_lossy(&reason.value)
+            )
+        })
+}
+
 fn message_value(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
+    let position = || {
+        envelope
+            .position
+            .map_or_else(|| "?".to_string(), |p| p.to_string())
+    };
     if let Ok(raw) = serde_json::from_slice::<&RawValue>(&envelope.value) {
         return Ok(raw.to_owned());
     }
@@ -163,9 +183,7 @@ fn message_value(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
         Err(_) => Err(TransformError::User(format!(
             "the message at position {} of partition {} is neither JSON nor UTF-8 text; \
              Python stream blocks get JSON or text messages, and binary data is not rewritten",
-            envelope
-                .position
-                .map_or_else(|| "?".to_string(), |p| p.to_string()),
+            position(),
             envelope.partition
         ))),
     }
@@ -278,16 +296,22 @@ impl TransformSession for PythonStreamSession {
             let envelopes =
                 read_envelope(&batch).map_err(|e| TransformError::Protocol(e.to_string()))?;
             let partition = envelopes.first().map_or(0, |e| e.partition);
-            let messages = match self.shape {
-                MessageShape::Values => envelopes
-                    .iter()
-                    .map(message_value)
-                    .collect::<Result<Vec<_>, _>>()?,
-                MessageShape::RabbitmqPayload => envelopes
-                    .iter()
-                    .map(rabbitmq_message)
-                    .collect::<Result<Vec<_>, _>>()?,
-            };
+            // Messages the source could not decode fail on their own, before any block; the
+            // others go to the worker, which counts its rows among them.
+            let mut undecoded = Vec::new();
+            let mut rows = Vec::with_capacity(envelopes.len());
+            let mut messages = Vec::with_capacity(envelopes.len());
+            for (row, envelope) in envelopes.iter().enumerate() {
+                if let Some(reason) = decode_error(envelope) {
+                    undecoded.push(mage_stream_ports::RowError { row, error: reason });
+                    continue;
+                }
+                rows.push(row);
+                messages.push(match self.shape {
+                    MessageShape::Values => message_value(envelope)?,
+                    MessageShape::RabbitmqPayload => rabbitmq_message(envelope)?,
+                });
+            }
             if self.frames.is_none() {
                 self.frames = Some(self.learn_frames().await);
             }
@@ -354,11 +378,11 @@ impl TransformSession for PythonStreamSession {
             for (block, messages) in &reply.outputs {
                 outputs.insert(block.clone(), to_batch(messages, partition)?);
             }
-            let row_errors = reply
+            let mut row_errors: Vec<_> = reply
                 .failures
                 .iter()
                 .map(|failure| mage_stream_ports::RowError {
-                    row: failure.row,
+                    row: rows.get(failure.row).copied().unwrap_or(failure.row),
                     error: format!(
                         "{}: {}",
                         failure.block_uuid.as_deref().unwrap_or("a block"),
@@ -366,6 +390,8 @@ impl TransformSession for PythonStreamSession {
                     ),
                 })
                 .collect();
+            row_errors.extend(undecoded);
+            row_errors.sort_by_key(|e| e.row);
             Ok(TransformOutput {
                 outputs,
                 row_errors,

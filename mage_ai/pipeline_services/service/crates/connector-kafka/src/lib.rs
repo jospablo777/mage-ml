@@ -14,6 +14,8 @@
 //! (`mechanism`, `username`, `password`), `ssl_config` (`cafile`, `certfile`, `keyfile`,
 //! `password`, `check_hostname`), and `librdkafka` for any other client property.
 
+pub mod avro;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,6 +43,31 @@ pub struct BatchLimits {
     pub max_records: usize,
     pub max_bytes: usize,
     pub max_wait: Duration,
+}
+
+/// Mage's serde_config: JSON (and text) as they are, or Avro decoded with the schemas of a
+/// schema registry.
+fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, ConnectorError> {
+    let Some(serde) = config.get("serde_config") else {
+        return Ok(None);
+    };
+    let method = text(serde, "serialization_method")
+        .unwrap_or_else(|| "JSON".into())
+        .to_uppercase();
+    match method.as_str() {
+        "JSON" => Ok(None),
+        "AVRO" => Ok(Some(avro::AvroDecoder::new(avro::RegistryConfig {
+            url: text(serde, "schema_registry_url").ok_or_else(|| {
+                ConnectorError::fatal("Kafka source: AVRO messages need schema_registry_url.")
+            })?,
+            username: text(serde, "schema_registry_username"),
+            password: text(serde, "schema_registry_password"),
+        }))),
+        other => Err(ConnectorError::fatal(format!(
+            "Kafka source: {other} messages are not read by services; they read JSON, text \
+             and Avro (with a schema registry)."
+        ))),
+    }
 }
 
 fn text(config: &Value, key: &str) -> Option<String> {
@@ -194,9 +221,37 @@ impl Table {
 /// assignment change is never reordered with the messages around it.
 enum Polled {
     /// Messages polled together: one handoff per chunk, not per message (I-84).
-    Messages(Vec<rdkafka::message::OwnedMessage>),
+    Messages(Vec<Fetched>),
     Event(SourceEvent),
     Error(KafkaError),
+}
+
+/// A polled message and its value decoded for the blocks (Avro as JSON), or why it could
+/// not be: then the message keeps its bytes and says why in a mage-decode-error header.
+struct Fetched {
+    message: rdkafka::message::OwnedMessage,
+    value: Option<Vec<u8>>,
+    error: Option<String>,
+}
+
+impl Fetched {
+    fn new(
+        message: rdkafka::message::OwnedMessage,
+        decoder: &mut Option<avro::AvroDecoder>,
+    ) -> Fetched {
+        let (value, error) = match (decoder.as_mut(), message.payload()) {
+            (Some(decoder), Some(payload)) => match decoder.decode(payload) {
+                Ok(json) => (Some(json), None),
+                Err(error) => (None, Some(format!("Avro: {error}"))),
+            },
+            _ => (None, None),
+        };
+        Fetched {
+            message,
+            value,
+            error,
+        }
+    }
 }
 
 struct RebalanceContext {
@@ -321,7 +376,12 @@ type KafkaConsumer = BaseConsumer<RebalanceContext>;
 
 /// Polls the consumer until stopped. Rebalance callbacks run here, so a revoke can wait for
 /// the stream without holding up the stream's own task.
-fn poll_loop(consumer: Arc<KafkaConsumer>, table: Arc<Mutex<Table>>, stop: Arc<AtomicBool>) {
+fn poll_loop(
+    consumer: Arc<KafkaConsumer>,
+    table: Arc<Mutex<Table>>,
+    stop: Arc<AtomicBool>,
+    mut decoder: Option<avro::AvroDecoder>,
+) {
     let polled = consumer.context().polled.clone();
     let mut lag_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
@@ -331,11 +391,15 @@ fn poll_loop(consumer: Arc<KafkaConsumer>, table: Arc<Mutex<Table>>, stop: Arc<A
         let mut items = Vec::with_capacity(2);
         match consumer.poll(Duration::from_millis(100)) {
             Some(Ok(message)) => {
+                // Decoded here, on the poll thread: a new schema's first read from the
+                // registry waits here, not in the stream's loop.
                 let mut chunk = Vec::with_capacity(CHUNK);
-                chunk.push(message.detach());
+                chunk.push(Fetched::new(message.detach(), &mut decoder));
                 while chunk.len() < CHUNK {
                     match consumer.poll(Duration::ZERO) {
-                        Some(Ok(message)) => chunk.push(message.detach()),
+                        Some(Ok(message)) => {
+                            chunk.push(Fetched::new(message.detach(), &mut decoder))
+                        }
                         Some(Err(error)) => {
                             items.push(Polled::Error(error));
                             break;
@@ -429,7 +493,7 @@ pub struct KafkaSource {
     seq: BTreeMap<u32, u64>,
     paused: BTreeSet<u32>,
     /// Messages of a chunk not yet in a batch: a batch filled before the chunk ended.
-    carry: std::collections::VecDeque<rdkafka::message::OwnedMessage>,
+    carry: std::collections::VecDeque<Fetched>,
     /// Paused partitions only held back, since when; the others are paused in librdkafka.
     held: BTreeMap<u32, Instant>,
     stopped: BTreeSet<u32>,
@@ -485,6 +549,7 @@ impl KafkaSource {
                 stopped: stop.clone(),
             })
             .map_err(connector_error)?;
+        let decoder = message_decoder(config)?;
         let names: Vec<&str> = topics.iter().map(String::as_str).collect();
         consumer.subscribe(&names).map_err(connector_error)?;
         let consumer = Arc::new(consumer);
@@ -492,7 +557,7 @@ impl KafkaSource {
             .name("kafka-source".into())
             .spawn({
                 let (consumer, table, stop) = (consumer.clone(), table.clone(), stop.clone());
-                move || poll_loop(consumer, table, stop)
+                move || poll_loop(consumer, table, stop, decoder)
             })
             .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))?;
         Ok(KafkaSource {
@@ -613,7 +678,12 @@ impl KafkaSource {
     }
 
     /// Adds the message to its partition's batch; true when that batch is now full.
-    fn add(&mut self, message: rdkafka::message::OwnedMessage) -> bool {
+    fn add(&mut self, fetched: Fetched) -> bool {
+        let Fetched {
+            message,
+            value,
+            error,
+        } = fetched;
         let (id, epoch) = {
             let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
             let id = table.id(message.topic(), message.partition());
@@ -625,7 +695,7 @@ impl KafkaSource {
         if self.revoking.contains(&id) {
             return false;
         }
-        let headers = message
+        let mut headers: Vec<Header> = message
             .headers()
             .map(|h| {
                 h.iter()
@@ -636,10 +706,17 @@ impl KafkaSource {
                     .collect()
             })
             .unwrap_or_default();
+        if let Some(error) = error {
+            headers.push(Header {
+                key: "mage-decode-error".into(),
+                value: error.into_bytes(),
+            });
+        }
         let offset = message.offset();
         let envelope = Envelope {
             key: message.key().map(<[u8]>::to_vec),
-            value: message.payload().map(<[u8]>::to_vec).unwrap_or_default(),
+            value: value
+                .unwrap_or_else(|| message.payload().map(<[u8]>::to_vec).unwrap_or_default()),
             headers,
             partition: id,
             position: Some(offset),

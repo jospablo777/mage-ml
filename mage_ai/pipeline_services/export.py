@@ -639,6 +639,7 @@ SSL_SETTINGS = {'cafile', 'certfile', 'keyfile', 'password', 'check_hostname'}
 # Settings that hold secrets: written as env_var() references, never as values.
 SECRET_SETTINGS = {
     ('sasl_config', 'password'), ('ssl_config', 'password'), ('signature', 'secret'),
+    ('serde_config', 'schema_registry_password'),
 }
 # Top-level settings that hold secrets (RabbitMQ's password).
 SECRET_KEYS = {'password'}
@@ -1047,13 +1048,24 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
                 f'{where}: include_metadata is not supported by services yet; the blocks get '
                 'the message values.'
             )
-        method = ((config.get('serde_config') or {}).get('serialization_method') or 'JSON')
-        if str(method).upper() != 'JSON':
-            problems.append(
-                f'{where}: {method} messages are not supported by services yet; services read '
-                'JSON messages (and text).'
-            )
-        config.pop('serde_config', None)
+        serde = config.get('serde_config') or {}
+        method = str(serde.get('serialization_method') or 'JSON').upper()
+        if method == 'AVRO':
+            # Decoded by the engine with the schemas of the registry, to JSON for the blocks.
+            if not serde.get('schema_registry_url'):
+                problems.append(f'{where}: AVRO messages need serde_config.schema_registry_url.')
+            config['serde_config'] = {
+                k: v for k, v in serde.items()
+                if k in ('serialization_method', 'schema_registry_url',
+                         'schema_registry_username', 'schema_registry_password') and v
+            }
+        else:
+            if method != 'JSON':
+                problems.append(
+                    f'{where}: {method} messages are not supported by services yet; services '
+                    'read JSON messages, text, and Avro with a schema registry.'
+                )
+            config.pop('serde_config', None)
         if config.get('offset'):
             problems.append(
                 f'{where}: offset (a start position) is not supported by services yet; the '

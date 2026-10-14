@@ -409,7 +409,19 @@ impl TransformSession for RustStreamSession {
             let envelopes =
                 read_envelope(&batch).map_err(|e| TransformError::Protocol(e.to_string()))?;
             let partition = envelopes.first().map_or(0, |e| e.partition);
-            let values: Vec<Vec<u8>> = envelopes.into_iter().map(|e| e.value).collect();
+            // Messages the source could not decode fail on their own, before any block.
+            let mut undecoded = Vec::new();
+            let mut rows = Vec::with_capacity(envelopes.len());
+            let mut values: Vec<Vec<u8>> = Vec::with_capacity(envelopes.len());
+            for (row, envelope) in envelopes.into_iter().enumerate() {
+                match crate::stream_python::decode_error(&envelope) {
+                    Some(error) => undecoded.push(RowError { row, error }),
+                    None => {
+                        rows.push(row);
+                        values.push(envelope.value);
+                    }
+                }
+            }
             if self.live.is_none() {
                 self.live = Some(self.start().await.map_err(TransformError::Crash)?);
             }
@@ -464,16 +476,18 @@ impl TransformSession for RustStreamSession {
             for (output, messages) in reply.outputs.iter().zip(reply.messages) {
                 outputs.insert(output.block_uuid.clone(), to_batch(messages, partition)?);
             }
-            let row_errors = reply
+            let mut row_errors: Vec<RowError> = reply
                 .failures
                 .into_iter()
                 .filter_map(|failure| {
                     failure.row.map(|row| RowError {
-                        row,
+                        row: rows.get(row).copied().unwrap_or(row),
                         error: format!("{}: {}", failure.block_uuid, failure.message),
                     })
                 })
                 .collect();
+            row_errors.extend(undecoded);
+            row_errors.sort_by_key(|e| e.row);
             Ok(TransformOutput {
                 outputs,
                 row_errors,

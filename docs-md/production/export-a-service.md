@@ -249,8 +249,21 @@ sasl_config:
   dead_letter: true
   ```
 - The export stops, with the reason, on what services can't run the same way as MageML
-  yet: Python sources and sinks, other connectors, `include_metadata`, Avro, Protobuf and
-  raw messages, a start `offset`, and passwords written in the file.
+  yet: Python sources and sinks, other connectors, `include_metadata`, Protobuf and raw
+  messages, a start `offset`, and passwords written in the file.
+- Avro messages in Confluent's format (Mage's `serialization_method: AVRO`) are decoded by
+  the service with the schemas of the schema registry, each read once, and the blocks get
+  JSON: records as objects, unions as their value, decimals as exact strings, dates and
+  timestamps as ISO 8601 text, bytes as base64. A message that is not Avro fails on its own,
+  with the reason in its dead letter's `mage-error` header.
+
+```yaml
+  serde_config:
+    serialization_method: AVRO
+    schema_registry_url: https://registry.example.com
+    schema_registry_username: "{{ env_var('REGISTRY_USER') }}"
+    schema_registry_password: "{{ env_var('REGISTRY_PASSWORD') }}"
+  ```
 - The image builds the engine with the connectors the pipeline uses. Kafka support
   (librdkafka) makes the first build a few minutes longer.
 - A Python transformer whose first parameter is annotated `pl.DataFrame` (or `pd.DataFrame`)

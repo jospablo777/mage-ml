@@ -601,16 +601,42 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source=textwrap.dedent(SOURCE) + textwrap.dedent('''
             include_metadata: true
             serde_config:
-              serialization_method: AVRO
+              serialization_method: PROTOBUF
             offset:
               type: beginning
             fetch_size: 10
         '''))
         problems = self.problems()
         self.assertIn('include_metadata is not supported', problems)
-        self.assertIn('AVRO messages are not supported', problems)
+        self.assertIn('PROTOBUF messages are not supported', problems)
         self.assertIn('offset (a start position) is not supported', problems)
         self.assertIn('unknown Kafka settings fetch_size', problems)
+
+    def test_avro_messages_go_with_their_registry_and_its_password_as_a_reference(self):
+        self.stream(source=textwrap.dedent(SOURCE) + textwrap.dedent('''
+            serde_config:
+              serialization_method: AVRO
+              schema_registry_url: https://registry.example.com
+              schema_registry_username: reader
+              schema_registry_password: "{{ env_var('REGISTRY_PASSWORD') }}"
+              schema_classpath: unused
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        serde = captured.manifest['pipelines'][0]['stream']['source']['config']['serde_config']
+        self.assertEqual(serde['serialization_method'], 'AVRO')
+        self.assertEqual(serde['schema_registry_url'], 'https://registry.example.com')
+        self.assertNotIn('schema_classpath', serde)
+        self.assertIn('REGISTRY_PASSWORD', json.dumps(serde['schema_registry_password']))
+
+    def test_avro_without_a_registry_or_with_a_written_password_is_refused(self):
+        self.stream(source=textwrap.dedent(SOURCE) + textwrap.dedent('''
+            serde_config:
+              serialization_method: AVRO
+              schema_registry_password: hunter2
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('AVRO messages need serde_config.schema_registry_url', problems)
+        self.assertIn('serde_config.schema_registry_password is written in the file', problems)
 
     def test_a_sink_on_the_source_next_to_transformers_is_refused(self):
         source = self.stream()
