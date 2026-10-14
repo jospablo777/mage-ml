@@ -35,8 +35,9 @@ class SecretsManagerTest(unittest.TestCase):
     def setUp(self):
         self.cloud = FakeIBMCloud()
         self.addCleanup(self.cloud.close)
+        password = 's3cret'  # pragma: allowlist secret
         self.cloud.secrets['db'] = dict(secret_type='username_password', name='db',
-                                        username='shop', password='s3cret')  # pragma: allowlist secret
+                                        username='shop', password=password)
         tokens = TokenManager(api_key='key-1', iam_url=self.cloud.url)
         self.manager = SecretsManager(self.cloud.url, tokens)
 
