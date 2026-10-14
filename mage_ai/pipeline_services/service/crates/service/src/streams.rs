@@ -109,6 +109,19 @@ fn source(
                 &pipeline.uuid,
             )?))
         }
+        #[cfg(feature = "pubsub")]
+        ConnectorKind::Pubsub => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_pubsub::PubSubSource::new(
+                &_config,
+                mage_connector_pubsub::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         #[cfg(feature = "sqs")]
         ConnectorKind::Sqs => {
             let stream = pipeline.stream.as_ref().expect("a stream");
@@ -283,6 +296,8 @@ fn sink(
         )?)),
         #[cfg(feature = "mongodb")]
         ConnectorKind::Mongodb => Ok(Arc::new(mage_connector_mongodb::MongoSink::new(&_config)?)),
+        #[cfg(feature = "pubsub")]
+        ConnectorKind::Pubsub => Ok(Arc::new(mage_connector_pubsub::PubSubSink::new(&_config)?)),
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => Ok(Arc::new(mage_connector_nats::NatsSink::new(
             &_config,
@@ -322,6 +337,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
             "it was built without ClickHouse; build it with the clickhouse feature"
         }
         ConnectorKind::Sqs => "it was built without SQS; build it with the sqs feature",
+        ConnectorKind::Pubsub => "it was built without Pub/Sub; build it with the pubsub feature",
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }

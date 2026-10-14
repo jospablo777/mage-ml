@@ -29,6 +29,7 @@ make -C integration_tests test-trino       # Trino only
 make -C integration_tests test-rabbitmq    # RabbitMQ only
 make -C integration_tests test-nats        # NATS JetStream only
 make -C integration_tests test-sqs         # Amazon SQS (ElasticMQ) only
+make -C integration_tests test-pubsub      # Google Cloud Pub/Sub (its emulator) only
 make -C integration_tests test-activemq    # ActiveMQ only
 make -C integration_tests test-streaming   # streaming pipelines
 make -C integration_tests test-r           # R blocks, with R 4.6 and rv
@@ -42,16 +43,16 @@ make -C integration_tests down             # stop the services and drop their da
 
 The services stay up between runs. PostgreSQL, MySQL, MongoDB, ClickHouse and MinIO keep their data in memory, so `down`
 leaves nothing behind. Kafka's heap is 512 MB, Trino's 768 MB within a 2 GB limit,
-ActiveMQ's 256 MB; ClickHouse uses at most 2 GB, RabbitMQ 512 MB, NATS 256 MB, ElasticMQ 128 MB and
+ActiveMQ's 256 MB; ClickHouse uses at most 2 GB, RabbitMQ 512 MB, NATS 256 MB, ElasticMQ 128 MB, the Pub/Sub emulator 384 MB and
 PostgreSQL's WAL 128 MB; MLflow runs without its job runner and MySQL without its
 performance schema. The suite needs a Docker VM with 16 GB of memory. Ports default to 15432, 16379, 18000, 16566, 15000, 19000, 13306, 17017, 18123,
-19092, 18080, 15673, 14222, 19324 and 16613;
+19092, 18080, 15673, 14222, 19324, 18681 and 16613;
 set
 `MAGE_TEST_POSTGRES_PORT`, `MAGE_TEST_REDIS_PORT`, `MAGE_TEST_API_PORT`,
 `MAGE_TEST_FEAST_PORT`, `MAGE_TEST_MLFLOW_PORT`, `MAGE_TEST_S3_PORT`,
 `MAGE_TEST_MYSQL_PORT`, `MAGE_TEST_MONGODB_PORT`, `MAGE_TEST_CLICKHOUSE_PORT`,
 `MAGE_TEST_KAFKA_PORT`, `MAGE_TEST_TRINO_PORT`, `MAGE_TEST_RABBITMQ_PORT`,
-`MAGE_TEST_NATS_PORT`, `MAGE_TEST_SQS_PORT` or `MAGE_TEST_ACTIVEMQ_PORT` to change them. `make up` rebuilds the
+`MAGE_TEST_NATS_PORT`, `MAGE_TEST_SQS_PORT`, `MAGE_TEST_PUBSUB_PORT` or `MAGE_TEST_ACTIVEMQ_PORT` to change them. `make up` rebuilds the
 service images when their files change. To use another interpreter, pass `PYTHON`, for
 example `PYTHON=.venv/bin/python`.
 
@@ -67,7 +68,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, RabbitMQ 4.3, NATS 2.15, ElasticMQ 1.6 (SQS), ActiveMQ Classic 6.2, Trino 483, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, RabbitMQ 4.3, NATS 2.15, ElasticMQ 1.6 (SQS), Google's Pub/Sub emulator, ActiveMQ Classic 6.2, Trino 483, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines; and the PostgreSQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs, upserts, and change data capture through a logical replication slot (`test_cdc.py`) |
@@ -93,6 +94,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 | `rabbitmq/` | Mage's RabbitMQ source and sink: acks, acks by the transformer, failed handlers, inactivity timeouts, the prefetch count, batches, confirms, value encoding, and credentials that a URL must quote, which are not printed |
 | `nats/` | Mage's NATS JetStream source, pull and push, and sink: acks after the handler, redelivery, text messages, idle push consumers, connection errors, value encoding and missing streams |
 | `sqs/` | An exported stream from an SQS queue: each message written once, a batch longer than the visibility timeout, deletes after the sink, restarts, and RAW_VALUE text |
+| `pubsub/` | An exported stream from a Pub/Sub subscription to a topic: MageML's message shape with attributes, each message published once, a batch longer than the ack deadline, restarts |
 | `activemq/` | Mage's ActiveMQ source and sink: acks after the handler, failed handlers, batches, and persistent JSON |
 | `streaming_runner.py` | Runs a streaming pipeline as a trigger runs it and as the notebook's Execute pipeline runs it, until the test stops it |
 | `streaming/` | The PostgreSQL streaming source (`test_postgres_cdc.py`): typed changes, restarts, TOASTed values, table filters and notebook checks. Streaming pipelines from Kafka, RabbitMQ, NATS, ActiveMQ, MongoDB change streams and PostgreSQL changes to Kafka, RabbitMQ, NATS, ActiveMQ, PostgreSQL, MongoDB, MySQL and ClickHouse, run both ways; source and sink blocks run from the notebook; and the source and sink templates |

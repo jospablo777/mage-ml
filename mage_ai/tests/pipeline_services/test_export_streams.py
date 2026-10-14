@@ -612,6 +612,44 @@ class SqsSourceExportTest(StreamExportTestCase):
         self.assertIn('SQS messages are JSON or RAW_VALUE, not AVRO', problems)
 
 
+class PubSubExportTest(StreamExportTestCase):
+    def test_pubsub_streams_export_to_the_engines_source_and_sink(self):
+        self.stream(
+            source=textwrap.dedent('''
+                connector_type: google_cloud_pubsub
+                project_id: shop
+                topic_id: orders
+                subscription_id: scorer
+                batch_size: 200
+                timeout: 5
+            '''),
+            sink=textwrap.dedent('''
+                connector_type: google_cloud_pubsub
+                project_id: shop
+                topic_id: scores
+            '''),
+        )
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'pubsub')
+        self.assertEqual(stream['source']['config'], dict(
+            project_id='shop', topic_id='orders', subscription_id='scorer',
+        ))
+        self.assertEqual(stream['batch']['max_records'], 200)
+        self.assertEqual(stream['sinks'][0]['kind'], 'pubsub')
+        self.assertIn('pubsub', captured.engine_features)
+
+    def test_a_credentials_file_is_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: google_cloud_pubsub
+            project_id: shop
+            path_to_credentials_json_file: ./google_credentials.json
+        '''))
+        problems = self.problems()
+        self.assertIn('GOOGLE_APPLICATION_CREDENTIALS', problems)
+        self.assertIn('Pub/Sub settings need topic_id', problems)
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
@@ -653,8 +691,9 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the kinesis connector; services run amazon_sqs, azure_event_hub, ibm_mq, '
-            'kafka, mongodb, nats_js, postgres, rabbitmq, webhook sources now',
+            'uses the kinesis connector; services run amazon_sqs, azure_event_hub, '
+            'google_cloud_pubsub, ibm_mq, kafka, mongodb, nats_js, postgres, rabbitmq, webhook '
+            'sources now',
             problems,
         )
 

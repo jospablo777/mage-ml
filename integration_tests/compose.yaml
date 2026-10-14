@@ -254,6 +254,20 @@ services:
       timeout: 5s
       retries: 30
 
+  # Google's Pub/Sub emulator (Java, with a heap of 160 MB), for the Pub/Sub source and sink.
+  pubsub:
+    image: thekevjames/gcloud-pubsub-emulator:589.0.0
+    mem_limit: 384m
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx160m
+    ports:
+      - "${MAGE_TEST_PUBSUB_PORT:-18681}:8681"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8681/"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
   # ActiveMQ Classic 6.2 with a heap of 256 MB. Mage's ActiveMQ source and sink use STOMP.
   activemq:
     image: apache/activemq-classic:6.2.0

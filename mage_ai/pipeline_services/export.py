@@ -562,19 +562,21 @@ STREAM_SOURCES = {
     'nats_js': 'nats', 'mongodb': 'mongodb',
     # Changes by logical replication.
     'postgres': 'postgres',
-    'amazon_sqs': 'sqs',
+    'amazon_sqs': 'sqs', 'google_cloud_pubsub': 'pubsub',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
     'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
+    'google_cloud_pubsub': 'pubsub',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
+    'pubsub': 'pubsub',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -631,7 +633,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'Kinesis, Pub/Sub and Pulsar come next'
+STREAM_PLANNED = 'Kinesis and Pulsar come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -1032,6 +1034,39 @@ def _sqs_connector(block, config: Dict, where: str, problems: List[str]) -> Dict
     return connector
 
 
+PUBSUB_SETTINGS = {'project_id', 'topic_id', 'pubsub_emulator_host'}
+PUBSUB_SOURCE_SETTINGS = PUBSUB_SETTINGS | {
+    'subscription_id', 'batch_size', 'timeout', 'receivers', 'ack_deadline',
+}
+
+
+def _pubsub_connector(block, role: str, config: Dict, where: str,
+                      problems: List[str]) -> Dict:
+    """MageML's Google Cloud Pub/Sub source and sink."""
+    allowed = PUBSUB_SOURCE_SETTINGS if role == 'source' else PUBSUB_SETTINGS
+    if config.get('path_to_credentials_json_file'):
+        problems.append(
+            f'{where}: path_to_credentials_json_file names a file on this machine; set '
+            "GOOGLE_APPLICATION_CREDENTIALS (or use the platform's identity) in the "
+            "service's environment instead."
+        )
+    unknown = sorted(set(config) - allowed - {'path_to_credentials_json_file'})
+    if unknown:
+        problems.append(f'{where}: unknown Pub/Sub settings {", ".join(unknown)}.')
+    required = ('project_id', 'topic_id', 'subscription_id') if role == 'source' else (
+        'project_id', 'topic_id')
+    for key in required:
+        if not config.get(key):
+            problems.append(f'{where}: Pub/Sub settings need {key}.')
+    # timeout is MageML's wait of a streaming pull; services pull without end.
+    settings = {k: v for k, v in config.items()
+                if k in allowed and k not in ('batch_size', 'timeout')}
+    connector = dict(name=block.uuid, kind='pubsub', config=settings)
+    if role == 'source' and config.get('batch_size'):
+        connector['batch_size'] = config['batch_size']
+    return connector
+
+
 def _postgres_source_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
     """MageML's change capture source: the slot and the publication, and its batches."""
     unknown = sorted(set(config) - POSTGRES_SOURCE_SETTINGS)
@@ -1228,6 +1263,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'pubsub':
+        return _pubsub_connector(block, role, config, where, problems)
     if kind == 'sqs':
         return _sqs_connector(block, config, where, problems)
     if kind == 'postgres' and role == 'source':

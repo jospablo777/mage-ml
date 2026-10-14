@@ -213,9 +213,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, Amazon SQS, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication), or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, [Rust](/guides/blocks/rust-blocks#stream-transformers) or [R](/guides/blocks/r-blocks#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, Google Cloud Pub/Sub, MongoDB, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -425,6 +425,34 @@ endpoint_url: http://localhost:9324   # optional, for another SQS server
   only on a FIFO queue with one instance. With `RAW_VALUE`, blocks get each body as text,
   as in MageML.
 - SQS returns at most 10 messages a call: `receivers` sets how many calls wait at once.
+
+### Google Cloud Pub/Sub
+
+MageML's `google_cloud_pubsub` source and sink run with their settings:
+
+```yaml
+connector_type: google_cloud_pubsub
+project_id: shop
+topic_id: orders
+subscription_id: scorer       # source: made on the topic when missing
+batch_size: 500
+receivers: 2                  # source: pulls at once, each up to 1,000 messages
+ack_deadline: 60              # source: optional; the subscription's by default
+```
+
+- Credentials are the Google chain the GCS sink uses: `GOOGLE_APPLICATION_CREDENTIALS`,
+  application default credentials, or the metadata server (GKE workload identity, Cloud
+  Run). `path_to_credentials_json_file` names a file on your machine and is refused;
+  `pubsub_emulator_host` (or `PUBSUB_EMULATOR_HOST`) reads an emulator.
+- Blocks get each message as MageML hands it over: `{"data": <the body as text>,
+  "metadata": {"attributes": {...}}}`.
+- A message is acknowledged only once every sink took its batch, and while a batch runs its
+  messages' ack deadlines are extended, so a slow batch is not delivered twice. One not
+  acknowledged comes back after its deadline. Several instances share a subscription.
+- The sink publishes as MageML does (an object's `data`, or the object, as JSON; a string
+  as its text), up to 1,000 messages a request, and confirms the batch once Pub/Sub took
+  every message. Pub/Sub has no idempotent publish: a batch written again after a failure
+  is published again.
 
 ### MongoDB
 

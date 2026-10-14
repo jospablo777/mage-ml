@@ -348,6 +348,14 @@ def sqs_queue(sqs_url):
 
 
 @pytest.fixture(scope='session')
+def pubsub_host():
+    host = os.getenv('MAGE_TEST_PUBSUB_HOST')
+    if not host:
+        pytest.skip('Pub/Sub is not configured: MAGE_TEST_PUBSUB_HOST unset')
+    return host
+
+
+@pytest.fixture(scope='session')
 def mongodb_url():
     url = os.getenv('MAGE_TEST_MONGODB_URL')
     if not url:

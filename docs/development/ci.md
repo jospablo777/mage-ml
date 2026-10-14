@@ -122,7 +122,7 @@ services, and fails when one of its tests is skipped.
 | --- | --- | --- | --- | --- |
 | Integration: SQL databases | `postgres`, `mysql`, `clickhouse`, `trino`, `duckdb` | PostgreSQL, MySQL, ClickHouse, Trino (with MinIO) | No | Yes |
 | Integration: document stores and caches | `mongodb`, `redis` | MongoDB, Redis | No | No |
-| Integration: streaming and storage | `kafka`, `rabbitmq`, `ibm_mq`, `nats`, `sqs`, `activemq`, `streaming`, `s3` | The brokers, MinIO, and the sinks the streaming tests write to | No | No |
+| Integration: streaming and storage | `kafka`, `rabbitmq`, `ibm_mq`, `nats`, `sqs`, `pubsub`, `activemq`, `streaming`, `s3` | The brokers, MinIO, and the sinks the streaming tests write to | No | No |
 | Integration: ML and HTTP services | `feast`, `mlflow`, `api` | Feast (with PostgreSQL and Redis), MLflow, the test HTTP API | No | No |
 | MageML: compiled and polyglot pipelines | `chains`, `tutorials`, `benchmark`, `r` | PostgreSQL, MySQL, MinIO, the test HTTP API | Yes | Yes |
 | MageML: pipeline shape study | `topologies` | PostgreSQL, for the warm-up | Yes | Yes |

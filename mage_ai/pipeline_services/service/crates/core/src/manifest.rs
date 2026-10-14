@@ -163,6 +163,8 @@ pub enum ConnectorKind {
     Clickhouse,
     /// Source: an Amazon SQS queue, messages deleted after the sinks.
     Sqs,
+    /// Google Cloud Pub/Sub: a subscription, acknowledged after the sinks, and a topic.
+    Pubsub,
 }
 
 impl ConnectorKind {
@@ -180,6 +182,7 @@ impl ConnectorKind {
             ConnectorKind::Postgres => "postgres",
             ConnectorKind::Clickhouse => "clickhouse",
             ConnectorKind::Sqs => "sqs",
+            ConnectorKind::Pubsub => "pubsub",
         }
     }
 
@@ -194,6 +197,7 @@ impl ConnectorKind {
                 | ConnectorKind::Mongodb
                 | ConnectorKind::Postgres
                 | ConnectorKind::Sqs
+                | ConnectorKind::Pubsub
         )
     }
 
@@ -211,6 +215,7 @@ impl ConnectorKind {
                 | ConnectorKind::ObjectStorage
                 | ConnectorKind::Postgres
                 | ConnectorKind::Clickhouse
+                | ConnectorKind::Pubsub
         )
     }
 }

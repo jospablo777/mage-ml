@@ -63,6 +63,8 @@ export MAGE_TEST_NATS_URL ?= nats://127.0.0.1:$(MAGE_TEST_NATS_PORT)
 export MAGE_TEST_ACTIVEMQ_PORT ?= 16613
 export MAGE_TEST_SQS_PORT ?= 19324
 export MAGE_TEST_SQS_URL ?= http://127.0.0.1:$(MAGE_TEST_SQS_PORT)
+export MAGE_TEST_PUBSUB_PORT ?= 18681
+export MAGE_TEST_PUBSUB_HOST ?= 127.0.0.1:$(MAGE_TEST_PUBSUB_PORT)
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
 # The rv environment of the R tests: R 4.6 with the tidyverse, mageml's
@@ -70,7 +72,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -138,6 +140,9 @@ test-nats: up
 
 test-sqs: up
 	cd .. && $(PYTHON) -m pytest integration_tests/sqs $(PYTEST_ARGS)
+
+test-pubsub: up
+	cd .. && $(PYTHON) -m pytest integration_tests/pubsub $(PYTEST_ARGS)
 
 test-activemq: up
 	cd .. && $(PYTHON) -m pytest integration_tests/activemq $(PYTEST_ARGS)
