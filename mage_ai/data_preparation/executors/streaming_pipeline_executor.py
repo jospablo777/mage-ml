@@ -205,6 +205,35 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     ),
                 )
 
+        # Rust transformers: one program per block for the run (rust_sample).
+        rust_programs: Dict = dict()
+
+        def run_rust(block, data, variables: Dict):
+            from mage_ai.streaming import rust_sample
+
+            program = rust_programs.get(block.uuid)
+            if program is None:
+                program = rust_sample.RustStreamProgram(
+                    rust_sample.build_stream_program(block, self.pipeline.repo_path),
+                    block.uuid, self.pipeline.uuid, variables, self.pipeline.repo_path,
+                    rust_sample.program_env(block), float(block.timeout or 3600),
+                )
+                rust_programs[block.uuid] = program
+            messages = data if isinstance(data, list) else [data]
+            try:
+                reply = program.run([rust_sample.encode(m) for m in messages])
+            except rust_sample.RustSampleError:
+                rust_programs.pop(block.uuid, None)
+                raise
+            finally:
+                for line in program.take_lines():
+                    if not line.startswith('\x1emage-block '):
+                        print(line)
+            if not reply.get('ok'):
+                error = reply.get('error') or {}
+                raise Exception(f'{block.uuid}: {error.get("message")}')
+            return [rust_sample.decode(m) for m in reply['messages']]
+
         def handle_batch_events_recursively(curr_block, outputs_by_block: Dict, **kwargs):
             curr_block_output = outputs_by_block[curr_block.uuid]
             downstream_blocks = curr_block.downstream_blocks
@@ -220,7 +249,12 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     data = list(curr_block_output)
                 else:
                     data = curr_block_output
-                if downstream_block.type == BlockType.TRANSFORMER:
+                if (downstream_block.type == BlockType.TRANSFORMER
+                        and downstream_block.language == BlockLanguage.RUST):
+                    outputs_by_block[downstream_block.uuid] = run_rust(
+                        downstream_block, data, kwargs,
+                    )
+                elif downstream_block.type == BlockType.TRANSFORMER:
                     execute_block_kwargs = dict(
                         global_vars=kwargs,
                         input_args=[data],
@@ -291,6 +325,8 @@ class StreamingPipelineExecutor(PipelineExecutor):
             source.destroy()
             for sink in sinks_by_uuid.values():
                 sink.destroy()
+            for program in rust_programs.values():
+                program.close()
 
     @safe_db_query
     def __update_pipeline_run_status(

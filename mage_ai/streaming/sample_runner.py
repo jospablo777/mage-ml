@@ -1,6 +1,7 @@
 """
 Runs a streaming pipeline's blocks on sample messages for the editor, with the same Python
 worker and `stream` request the service engine uses, so the editor runs what production runs.
+Rust blocks run in their own programs over the engine's protocol (rust_sample).
 
 The worker is a child process of the server (a block cannot crash or block the server) kept
 warm per project: a block's top-level code, such as loading a model, runs again only when its
@@ -136,6 +137,33 @@ def stop_workers() -> None:
         _workers.clear()
 
 
+def _rust_chain(pipeline, block_uuid: str) -> Optional[List]:
+    """
+    The Rust blocks from the source down to block_uuid, when they are all Rust (and form one
+    chain, as services run them); None when they are all Python.
+    """
+    blocks = pipeline.blocks_by_uuid
+    if block_uuid not in blocks:
+        raise SampleRunError(f'The pipeline has no block {block_uuid}.')
+    chain = []
+    block = blocks[block_uuid]
+    while block is not None and str(getattr(block.type, 'value', block.type)) == 'transformer':
+        chain.insert(0, block)
+        parents = block.upstream_block_uuids or []
+        if len(parents) > 1:
+            break
+        block = blocks.get(parents[0]) if parents else None
+    languages = {str(getattr(b.language, 'value', b.language)) for b in chain}
+    if languages == {'rust'}:
+        return chain
+    if 'rust' in languages:
+        raise SampleRunError(
+            'The blocks down to this one mix Python and Rust; a stream\'s transformers are all '
+            'Python or all Rust for now.',
+        )
+    return None
+
+
 def _chain(pipeline, block_uuid: str) -> List[Dict]:
     """The stream's transformers from the source down to block_uuid, in run order."""
     blocks = pipeline.blocks_by_uuid
@@ -163,8 +191,7 @@ def _chain(pipeline, block_uuid: str) -> List[Dict]:
             raise SampleRunError(f'{uuid_} is a {kind} block; samples run through transformers.')
         if language != 'python':
             raise SampleRunError(
-                f'{uuid_} is written in {language}; stream blocks run in Python now, and Rust '
-                'and R come next.'
+                f'{uuid_} is written in {language}; stream blocks run in Python or Rust.'
             )
         path = Path(block.file_path)
         chain.append(dict(
@@ -207,6 +234,9 @@ def run_on_sample(
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
     pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+    rust = _rust_chain(pipeline, block_uuid)
+    if rust is not None:
+        return _run_rust(repo_path, pipeline, block_uuid, rust, messages, variables)
     chain = _chain(pipeline, block_uuid)
     kwargs = dict(pipeline.variables or {})
     kwargs.update(variables or {})
@@ -242,4 +272,68 @@ def _first_failing(worker: _Worker, request: Dict, block_uuid: Optional[str]) ->
         reply = worker.request(dict(request, messages=[message]), RUN_TIMEOUT_SECONDS)
         if not reply.get('ok') and (reply.get('error') or {}).get('block_uuid') == block_uuid:
             return dict(index=index, message=message)
+    return None
+
+
+def _run_rust(repo_path: str, pipeline, block_uuid: str, chain: List, messages: List[Any],
+              variables: Optional[Dict]) -> Dict:
+    """Each block's program runs on the messages of the block before it."""
+    from mage_ai.streaming import rust_sample
+
+    kwargs = dict(pipeline.variables or {})
+    kwargs.update(variables or {})
+    started = time.monotonic()
+    result = dict(block_uuid=block_uuid, input_messages=len(messages), logs=[])
+    outputs: Dict[str, List] = {}
+    timings = []
+    current = [rust_sample.encode(m) for m in messages]
+    for block in chain:
+        try:
+            binary = rust_sample.build_stream_program(block, repo_path)
+            program = rust_sample.RustStreamProgram(
+                binary, block.uuid, pipeline.uuid, kwargs, repo_path,
+                rust_sample.program_env(block), RUN_TIMEOUT_SECONDS,
+            )
+        except Exception as error:
+            result['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
+            break
+        try:
+            reply = program.run(current)
+            result['logs'] += _logs(program.take_lines())
+            if not reply.get('ok'):
+                error = reply.get('error') or {}
+                result['error'] = dict(block_uuid=block.uuid, message=error.get('message'),
+                                       details=None)
+                result['failing_message'] = _first_failing_rust(program, current)
+                break
+            timings += reply.get('blocks') or []
+            current = reply['messages']
+            outputs[block.uuid] = [rust_sample.decode(m) for m in current]
+        except rust_sample.RustSampleError as error:
+            result['logs'] += _logs(program.take_lines())
+            result['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
+            break
+        finally:
+            program.close()
+    result['seconds'] = round(time.monotonic() - started, 3)
+    if 'error' not in result:
+        result.update(outputs=outputs, blocks=timings)
+    return result
+
+
+def _first_failing_rust(program, batch: List[bytes]) -> Optional[Dict]:
+    """
+    The first message of the batch that fails in the block on its own, with its index; the
+    batch is the block's input, which for the first block is the sample's messages.
+    """
+    from mage_ai.streaming import rust_sample
+
+    for index, message in enumerate(batch[:FIND_FAILING_LIMIT]):
+        try:
+            reply = program.run([message])
+        except rust_sample.RustSampleError:
+            return None
+        program.take_lines()
+        if not reply.get('ok'):
+            return dict(index=index, message=rust_sample.decode(message))
     return None

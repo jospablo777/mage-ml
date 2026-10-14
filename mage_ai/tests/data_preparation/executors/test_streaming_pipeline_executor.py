@@ -162,3 +162,27 @@ class StreamingPipelineExecutorTest(DBTestCase):
 
         self.assertEqual(sinks['sink'].batches, [[dict(id=1), dict(id=2)]])
         self.assertEqual(sinks['dead'].batches, [])
+
+    def test_rust_transformers_run_in_their_programs(self):
+        """Execute pipeline built them as batch blocks, which a stream block cannot be."""
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        rust = self.add('rust', 'transformer', '''
+            use mage::prelude::*;
+
+            fn transform(messages: Vec<Value>) -> Vec<Value> {
+                println!("rust saw {}", messages.len());
+                messages.into_iter().map(|mut m| { m["rust"] = json!(true); m }).collect()
+            }
+        ''', upstream=[source], language=BlockLanguage.RUST)
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[rust], language=BlockLanguage.YAML)
+
+        _, sinks = self.run_pipeline(['sink'])
+
+        self.assertEqual(sinks['sink'].batches,
+                         [[dict(id=1, rust=True), dict(id=2, rust=True)]])

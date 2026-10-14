@@ -360,8 +360,9 @@ JSON.
 - From a RabbitMQ source, a Rust block gets each message's body, not Mage's `Payload`.
 - A stream's transformers are all Python or all Rust, in one chain (each reads the block
   before it), and share one io_config profile.
-- Rust stream blocks run in [exported services](../../production/export-a-service.md#streaming-pipelines).
-  The editor's sample runs and **Execute pipeline** run Python stream blocks.
+- In the editor, sample runs and **Execute pipeline** build each block's program and run it
+  the same way; [exported services](../../production/export-a-service.md#streaming-pipelines) run
+  the stream's Rust blocks in one program.
 
 ## Settings
 

@@ -222,3 +222,74 @@ class SampleApiTest(StreamSampleTestCase):
             stream_sample=dict(name='../x', messages=[]),
         ))
         self.assertIn('not a sample name', bad['error']['message'])
+
+
+class RustSampleRunTest(StreamSampleTestCase):
+    """
+    Rust stream blocks run on samples in their programs, over the protocol the service
+    engine uses. Builds real binaries (the dependencies once, into the shared target).
+    """
+
+    PRICE = '''
+        use mage::prelude::*;
+
+        fn transform(messages: Vec<Value>, vars: Vars) -> Result<Vec<Value>> {
+            let rate: f64 = vars.get_or("rate", 1.0)?;
+            println!("pricing {}", messages.len());
+            messages
+                .into_iter()
+                .map(|mut m| {
+                    let amount = m["amount"].as_f64().context("no amount")?;
+                    m["total"] = json!(amount * rate);
+                    Ok(m)
+                })
+                .collect()
+        }
+    '''
+    LARGE = '''
+        use mage::prelude::*;
+
+        fn transform(orders: DataFrame) -> Result<DataFrame> {
+            Ok(orders.lazy().filter(col("total").gt(lit(5.0))).collect()?)
+        }
+    '''
+
+    def test_each_rust_block_runs_on_the_messages_of_the_one_before(self):
+        price = self.add('price', 'transformer', self.PRICE, [self.source], language='rust')
+        large = self.add('large', 'transformer', self.LARGE, [price], language='rust')
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, large.uuid,
+            [{'amount': 1}, {'amount': 4}], variables=dict(rate=2.0),
+        )
+
+        self.assertNotIn('error', result, result)
+        self.assertEqual(result['outputs'][price.uuid],
+                         [{'amount': 1, 'total': 2.0}, {'amount': 4, 'total': 8.0}])
+        self.assertEqual(result['outputs'][large.uuid], [{'amount': 4, 'total': 8.0}])
+        self.assertIn(dict(block_uuid=price.uuid, line='pricing 2'), result['logs'])
+
+    def test_a_failing_rust_block_names_its_error_and_first_failing_message(self):
+        price = self.add('price', 'transformer', self.PRICE, [self.source], language='rust')
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, price.uuid,
+            [{'amount': 1}, {'id': 7}, {'amount': 3}],
+        )
+
+        self.assertEqual(result['error']['block_uuid'], price.uuid)
+        self.assertIn('no amount', result['error']['message'])
+        self.assertEqual(result['failing_message'], dict(index=1, message={'id': 7}))
+
+    def test_python_and_rust_blocks_in_one_chain_are_refused(self):
+        python = self.add('py', 'transformer', '''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return messages
+        ''', [self.source])
+        price = self.add('price', 'transformer', self.PRICE, [python], language='rust')
+
+        with self.assertRaises(sample_runner.SampleRunError) as raised:
+            sample_runner.run_on_sample(self.repo_path, self.pipeline.uuid, price.uuid, [{}])
+
+        self.assertIn('mix Python and Rust', str(raised.exception))
