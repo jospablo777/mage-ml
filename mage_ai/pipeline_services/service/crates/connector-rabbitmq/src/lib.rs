@@ -29,9 +29,10 @@ use lapin::types::{AMQPValue, FieldTable, LongString, ShortString};
 use lapin::{BasicProperties, Channel, Confirmation, Connection, ConnectionProperties, Consumer};
 use mage_stream_core::BatchId;
 use mage_stream_ports::{
-    AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, ConnectorError,
-    Envelope, EnvelopeBuilder, Header, PartitionId, Position, RecordBatch, Sink, SinkCapabilities,
-    Source, SourceCapabilities, SourceEvent, read_envelope,
+    AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome,
+    Confirmation as BatchConfirmation, ConnectorError, Envelope, EnvelopeBuilder, Header,
+    PartitionId, Position, RecordBatch, Sink, SinkCapabilities, Source, SourceCapabilities,
+    SourceEvent, read_envelope,
 };
 use serde_json::Value;
 
@@ -406,6 +407,89 @@ impl RabbitSink {
     }
 }
 
+impl RabbitSink {
+    /// Publishes the batch's messages on the channel, in order, and returns their confirms.
+    async fn publish(
+        &self,
+        batch: &RecordBatch,
+        meta: &BatchMeta,
+    ) -> Result<Vec<lapin::PublisherConfirm>, ConnectorError> {
+        let messages = read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
+        let mut guard = self.channel.lock().await;
+        if guard.as_ref().is_none_or(|(_, c)| !c.status().connected()) {
+            *guard = Some(self.open().await?);
+        }
+        let channel = guard.as_ref().expect("opened").1.clone();
+        let mut confirms = Vec::with_capacity(messages.len());
+        for (index, message) in messages.iter().enumerate() {
+            let mut headers = FieldTable::default();
+            for header in &message.headers {
+                headers.insert(
+                    ShortString::from(header.key.clone()),
+                    AMQPValue::LongString(LongString::from(header.value.clone())),
+                );
+            }
+            let properties = BasicProperties::default()
+                .with_delivery_mode(2)
+                .with_content_type(ShortString::from("application/json"))
+                .with_message_id(ShortString::from(format!(
+                    "{}:{}:{}",
+                    self.stream,
+                    meta.id.partition.0,
+                    meta.row_key(message.position, index)
+                )))
+                .with_headers(headers);
+            let confirm = channel
+                .basic_publish(
+                    ShortString::from(self.exchange.clone()),
+                    ShortString::from(self.routing_key.clone()),
+                    BasicPublishOptions {
+                        mandatory: true,
+                        ..BasicPublishOptions::default()
+                    },
+                    &message.value,
+                    properties,
+                )
+                .await;
+            match confirm {
+                Ok(confirm) => confirms.push(confirm),
+                Err(error) => {
+                    *guard = None;
+                    return Err(amqp_error("publishing", error));
+                }
+            }
+        }
+        Ok(confirms)
+    }
+}
+
+/// Waits for every confirm of a batch; a returned message names the routing key.
+async fn confirmed(
+    confirms: Vec<lapin::PublisherConfirm>,
+    routing_key: String,
+    exchange: String,
+) -> Result<(), ConnectorError> {
+    for confirm in confirms {
+        match confirm.await {
+            Ok(Confirmation::Ack(None)) | Ok(Confirmation::NotRequested) => {}
+            Ok(Confirmation::Ack(Some(_))) => {
+                return Err(ConnectorError::fatal(format!(
+                    "RabbitMQ: no queue is bound to routing key {routing_key} on exchange \
+                     {exchange:?}; the message was returned"
+                )));
+            }
+            Ok(Confirmation::Nack(_)) => {
+                return Err(ConnectorError::retryable(
+                    "RabbitMQ refused a message (nack)",
+                ));
+            }
+            // A closed channel is opened again by the next publish.
+            Err(error) => return Err(amqp_error("waiting for a confirm", error)),
+        }
+    }
+    Ok(())
+}
+
 impl Sink for RabbitSink {
     fn write<'a>(
         &'a self,
@@ -413,74 +497,26 @@ impl Sink for RabbitSink {
         meta: &'a BatchMeta,
     ) -> BoxFuture<'a, Result<(), ConnectorError>> {
         Box::pin(async move {
-            let messages =
-                read_envelope(batch).map_err(|e| ConnectorError::fatal(e.to_string()))?;
-            let mut guard = self.channel.lock().await;
-            if guard.as_ref().is_none_or(|(_, c)| !c.status().connected()) {
-                *guard = Some(self.open().await?);
-            }
-            let channel = guard.as_ref().expect("opened").1.clone();
-            let mut confirms = Vec::with_capacity(messages.len());
-            for (index, message) in messages.iter().enumerate() {
-                let mut headers = FieldTable::default();
-                for header in &message.headers {
-                    headers.insert(
-                        ShortString::from(header.key.clone()),
-                        AMQPValue::LongString(LongString::from(header.value.clone())),
-                    );
-                }
-                let properties = BasicProperties::default()
-                    .with_delivery_mode(2)
-                    .with_content_type(ShortString::from("application/json"))
-                    .with_message_id(ShortString::from(format!(
-                        "{}:{}:{}",
-                        self.stream,
-                        meta.id.partition.0,
-                        meta.row_key(message.position, index)
-                    )))
-                    .with_headers(headers);
-                let confirm = channel
-                    .basic_publish(
-                        ShortString::from(self.exchange.clone()),
-                        ShortString::from(self.routing_key.clone()),
-                        BasicPublishOptions {
-                            mandatory: true,
-                            ..BasicPublishOptions::default()
-                        },
-                        &message.value,
-                        properties,
-                    )
-                    .await;
-                match confirm {
-                    Ok(confirm) => confirms.push(confirm),
-                    Err(error) => {
-                        *guard = None;
-                        return Err(amqp_error("publishing", error));
-                    }
-                }
-            }
-            for confirm in confirms {
-                match confirm.await {
-                    Ok(Confirmation::Ack(None)) | Ok(Confirmation::NotRequested) => {}
-                    Ok(Confirmation::Ack(Some(_))) => {
-                        return Err(ConnectorError::fatal(format!(
-                            "RabbitMQ: no queue is bound to routing key {} on exchange {:?}; \
-                             the message was returned",
-                            self.routing_key, self.exchange
-                        )));
-                    }
-                    Ok(Confirmation::Nack(_)) => {
-                        return Err(ConnectorError::retryable(
-                            "RabbitMQ refused a message (nack)",
-                        ));
-                    }
-                    Err(error) => {
-                        *guard = None;
-                        return Err(amqp_error("waiting for a confirm", error));
-                    }
-                }
-            }
-            Ok(())
+            let confirms = self.publish(batch, meta).await?;
+            confirmed(confirms, self.routing_key.clone(), self.exchange.clone()).await
+        })
+    }
+
+    /// A channel keeps the order of what is published on it, so the next batch is published
+    /// while this one's confirms come back: a batch waited for its last confirm before the
+    /// next was published (I-86).
+    fn queue<'a>(
+        &'a self,
+        batch: &'a RecordBatch,
+        meta: &'a BatchMeta,
+    ) -> BoxFuture<'a, Result<BatchConfirmation, ConnectorError>> {
+        Box::pin(async move {
+            let confirms = self.publish(batch, meta).await?;
+            Ok(Box::pin(confirmed(
+                confirms,
+                self.routing_key.clone(),
+                self.exchange.clone(),
+            )) as BatchConfirmation)
         })
     }
 
