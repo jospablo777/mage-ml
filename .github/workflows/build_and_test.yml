@@ -326,7 +326,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq
+          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq,object-store
       # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
       # the version and checksum exported images pin.
       - name: Download the IBM MQ client

@@ -39,6 +39,7 @@ class SinkType(StrEnum):
     MSSQL = 'mssql'
     MYSQL = 'mysql'
     NATS = 'nats'
+    OBJECT_STORAGE = 'object_storage'
     OPENSEARCH = 'opensearch'
     ORACLEDB = 'oracledb'
     POSTGRES = 'postgres'

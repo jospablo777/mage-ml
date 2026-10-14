@@ -453,6 +453,52 @@ class IbmMqExportTest(StreamExportTestCase):
         self.assertIn('unknown IBM MQ settings reconnect', problems)
 
 
+class ObjectStorageExportTest(StreamExportTestCase):
+    def test_mage_s3_sinks_export_with_their_buffers_as_batches(self):
+        self.stream(sink='''
+            connector_type: amazon_s3
+            bucket: lake
+            prefix: /orders/raw/
+            file_type: parquet
+            buffer_size_mb: 16
+            buffer_timeout_seconds: 60
+            date_partition_format: "%Y/%m/%d"
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['sinks'][0]['kind'], 'object_storage')
+        self.assertEqual(stream['sinks'][0]['config'], dict(
+            url='s3://lake/orders/raw', format='parquet', date_partition_format='%Y/%m/%d',
+        ))
+        self.assertEqual(stream['batch']['max_bytes'], 16 * 1024 * 1024)
+        self.assertEqual(stream['batch']['max_wait_ms'], 60_000)
+        self.assertIn('object-store', captured.engine_features)
+        self.assertTrue(any('each batch becomes one object' in n for n in captured.notes))
+
+    def test_the_generic_sink_takes_any_store(self):
+        self.stream(sink='''
+            connector_type: object_storage
+            url: "abfs://lake@shop.dfs.core.windows.net/orders"
+            format: jsonl
+        ''')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['sinks'][0]['config']['format'], 'jsonl')
+        self.assertNotIn('max_bytes', stream['batch'])
+
+    def test_what_would_change_values_or_needs_local_files_is_refused(self):
+        self.stream(sink='''
+            connector_type: google_cloud_storage
+            bucket: lake
+            prefix: raw
+            file_type: csv
+            path_to_credentials_json_file: ./google_credentials.json
+        ''')
+        problems = self.problems()
+        self.assertIn('CSV has no types', problems)
+        self.assertIn('GOOGLE_APPLICATION_CREDENTIALS', problems)
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')

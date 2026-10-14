@@ -72,6 +72,10 @@ class SinkFactory:
             from mage_ai.streaming.sinks.postgres import PostgresSink
 
             return PostgresSink(config, **kwargs)
+        elif connector_type == SinkType.OBJECT_STORAGE:
+            from mage_ai.streaming.sinks.object_storage import ObjectStorageSink
+
+            return ObjectStorageSink(config, **kwargs)
         elif connector_type == SinkType.IBM_MQ:
             from mage_ai.streaming.sinks.ibm_mq import IbmMqSink
 

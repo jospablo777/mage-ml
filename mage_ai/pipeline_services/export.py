@@ -558,10 +558,23 @@ STREAM_SOURCES = {
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
-    'ibm_mq': 'ibm_mq',
+    'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
+    'google_cloud_storage': 'object_storage',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
-ENGINE_FEATURES = {'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq'}
+ENGINE_FEATURES = {
+    'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
+    'object_storage': 'object-store',
+}
+# Object storage sinks: the generic one, and Mage's S3 and GCS sinks, which name a bucket.
+OBJECT_STORAGE_SETTINGS = {
+    'url', 'format', 'date_partition_format', 'endpoint_url', 'region', 'buffer_size_mb',
+    'buffer_timeout_seconds',
+}
+MAGE_OBJECT_SINK_SETTINGS = {
+    'bucket', 'prefix', 'file_type', 'buffer_size_mb', 'buffer_timeout_seconds',
+    'date_partition_format', 'path_to_credentials_json_file',
+}
 IBM_MQ_SETTINGS = {
     'queue_manager', 'channel', 'connection_name', 'host', 'port', 'queue', 'user', 'password',
     'application_name', 'cipher_spec', 'key_repository', 'certificate_label',
@@ -806,6 +819,61 @@ def _ibm_mq_connector(block, role: str, config: Dict, where: str,
     return connector
 
 
+def _object_storage_connector(block, connector_type: str, config: Dict, where: str,
+                              problems: List[str]) -> Dict:
+    """
+    One object per batch: the generic sink names a url; Mage's amazon_s3 and
+    google_cloud_storage sinks a bucket and prefix. Their buffer settings become the stream's
+    batch size and wait, so objects hold what Mage's buffers held, and a batch is
+    acknowledged only once its object is written.
+    """
+    if connector_type == 'object_storage':
+        allowed = OBJECT_STORAGE_SETTINGS
+    else:
+        allowed = MAGE_OBJECT_SINK_SETTINGS
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown object storage settings {", ".join(unknown)}.')
+    settings = {}
+    if connector_type == 'object_storage':
+        if not config.get('url'):
+            problems.append(f'{where}: object storage needs url, such as s3://bucket/prefix.')
+        settings.update({k: config[k] for k in ('url', 'format', 'date_partition_format',
+                                                 'endpoint_url', 'region') if config.get(k)})
+    else:
+        if not config.get('bucket'):
+            problems.append(f'{where}: {connector_type} needs bucket.')
+        scheme = 's3' if connector_type == 'amazon_s3' else 'gs'
+        prefix = str(config.get('prefix') or '').strip('/')
+        settings['url'] = f'{scheme}://{config.get("bucket")}' + (f'/{prefix}' if prefix else '')
+        file_type = str(config.get('file_type') or 'parquet').lower()
+        if file_type in ('json', 'jsonl'):
+            settings['format'] = 'jsonl'
+        elif file_type == 'parquet':
+            settings['format'] = 'parquet'
+        else:
+            problems.append(
+                f'{where}: file_type {file_type} would change values (CSV has no types); '
+                'services write parquet or json.'
+            )
+        if config.get('date_partition_format'):
+            settings['date_partition_format'] = config['date_partition_format']
+        if config.get('path_to_credentials_json_file'):
+            problems.append(
+                f'{where}: path_to_credentials_json_file names a file on this machine; set '
+                "GOOGLE_APPLICATION_CREDENTIALS (or use the platform's identity) in the "
+                "service's environment instead."
+            )
+    if str(settings.get('format', 'parquet')) not in ('parquet', 'jsonl'):
+        problems.append(f'{where}: format is parquet or jsonl.')
+    connector = dict(name=block.uuid, kind='object_storage', config=settings)
+    if config.get('buffer_size_mb'):
+        connector['buffer_bytes'] = int(float(config['buffer_size_mb']) * 1024 * 1024)
+    if config.get('buffer_timeout_seconds'):
+        connector['buffer_ms'] = int(float(config['buffer_timeout_seconds']) * 1000)
+    return connector
+
+
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
     if unknown:
@@ -885,6 +953,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _rabbitmq_connector(block, role, config, where, problems)
     if kind == 'ibm_mq':
         return _ibm_mq_connector(block, role, config, where, problems)
+    if kind == 'object_storage':
+        return _object_storage_connector(block, connector_type, config, where, problems)
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(
@@ -978,8 +1048,8 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
             continue
         if sink.pop('dead_letter', False):
             # Messages that fail go there, whichever block it hangs from.
-            sink.pop('batch_size', None)
-            sink.pop('timeout_ms', None)
+            for key in ('batch_size', 'timeout_ms', 'buffer_bytes', 'buffer_ms'):
+                sink.pop(key, None)
             dead_letters.append(sink)
             continue
         upstream = list(block.upstream_block_uuids or [])
@@ -1005,6 +1075,7 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         max_records=int(source.pop('batch_size', None) or 100),
         max_wait_ms=int(source.pop('timeout_ms', None) or 500),
     )
+    _apply_object_buffers(prefix, source, sink_entries, batch, capture_)
     retry = getattr(pipeline, 'retry_config', None) or {}
     errors = dict(
         retries=int(retry.get('retries', 3)),
@@ -1035,6 +1106,34 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         blocks=blocks,
         triggers=[],
         stream=dict(source=source, sinks=sink_entries, batch=batch, errors=errors),
+    )
+
+
+def _apply_object_buffers(prefix: str, source: Dict, sinks: List[Dict], batch: Dict,
+                          capture_: Capture) -> None:
+    """Object storage sinks' buffers set larger batches: one object holds one batch."""
+    buffers = [(s.pop('buffer_bytes', None), s.pop('buffer_ms', None)) for s in sinks]
+    sizes = [b for b, _ in buffers if b]
+    waits = [w for _, w in buffers if w]
+    if not sizes and not waits:
+        return
+    if source.get('kind') == 'http':
+        capture_.notes.append(
+            f'{prefix}: object storage buffer settings are not applied to a webhook stream, '
+            'whose callers wait for the sinks; each request\'s messages make one object.'
+        )
+        return
+    if sizes:
+        batch['max_bytes'] = max(sizes)
+        # Size decides, as in Mage's buffer: a count that is reached first does not.
+        batch['max_records'] = max(batch['max_records'], 1_000_000)
+    if waits:
+        batch['max_wait_ms'] = max(batch['max_wait_ms'], max(waits))
+    capture_.notes.append(
+        f'{prefix}: batches hold up to {batch.get("max_bytes", 8 * 1024 * 1024) // 1024} KiB '
+        f'or {batch["max_wait_ms"] // 1000} s of messages, from the object storage buffer '
+        'settings; each batch becomes one object, written before its messages are '
+        'acknowledged.'
     )
 
 

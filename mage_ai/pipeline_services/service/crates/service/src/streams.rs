@@ -216,6 +216,11 @@ fn sink(
             &_config,
             &pipeline.uuid,
         )?)),
+        #[cfg(feature = "object-store")]
+        ConnectorKind::ObjectStorage => Ok(Arc::new(mage_connector_objectstore::ObjectSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
         #[cfg(feature = "ibm-mq")]
         ConnectorKind::IbmMq => Ok(Arc::new(mage_connector_ibmmq::MqSink::new(
             &_config,
@@ -238,6 +243,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
             "it was built without RabbitMQ; build it with the rabbitmq feature"
         }
         ConnectorKind::IbmMq => "it was built without IBM MQ; build it with the ibm-mq feature",
+        ConnectorKind::ObjectStorage => {
+            "it was built without object storage; build it with the object-store feature"
+        }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }

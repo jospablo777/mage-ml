@@ -215,7 +215,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | --- | --- |
 | Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast; `dummy` prints each message to the service's output |
+| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -324,6 +324,36 @@ An `ibm_mq` source reads under syncpoint and commits after the sinks; an `ibm_mq
 under syncpoint and commits as the receipt. The image includes IBM's MQ client, which IBM
 publishes for Linux x86-64 only: build with `--platform linux/amd64`. Settings, TLS and
 gotchas: [IBM MQ](/integrations/ibm-cloud#ibm-mq).
+
+### Object storage
+
+An `object_storage` sink writes each batch as one object, Parquet or JSON lines, on Amazon
+S3 and S3-compatible stores (MinIO, Cloudflare R2, IBM COS with HMAC keys), Google Cloud
+Storage, Azure Blob Storage, or local disk. MageML's `amazon_s3` and `google_cloud_storage`
+sinks export to it with their settings.
+
+```yaml
+connector_type: object_storage
+url: s3://lake/orders          # gs://bucket/prefix, abfs://container@account.dfs.core.windows.net/prefix, file:///path
+format: parquet                # or jsonl
+date_partition_format: "dt=%Y-%m-%d"
+buffer_size_mb: 16             # optional: larger batches, so larger objects
+buffer_timeout_seconds: 60
+```
+
+- A batch's messages are acknowledged once its object is written. Objects are named
+  `<stream>-p<partition>-<first>-<last>`, so a batch written again after a restart replaces
+  its object when it covers the same messages.
+- `buffer_size_mb` and `buffer_timeout_seconds` set the stream's batch size and wait, so an
+  object holds what MageML's buffer held; MageML's buffered sinks acknowledged before
+  writing, services after. A webhook stream ignores them, as its callers wait.
+- Parquet keeps values exact: the schema comes from each batch, integers past 64 bits are
+  stored as decimals, and a nested one stops the stream instead of losing digits (write
+  `jsonl` for such data). JSON lines keep every value byte for byte. CSV is refused: it has
+  no types.
+- Credentials come from the environment, as each cloud's tools read them: AWS keys or roles,
+  `AWS_ENDPOINT_URL` for S3-compatible stores; Google application default credentials;
+  Azure's `AZURE_STORAGE_ACCOUNT_NAME` with a key, a service principal or a managed identity.
 
 ### HTTP and Feast sinks
 

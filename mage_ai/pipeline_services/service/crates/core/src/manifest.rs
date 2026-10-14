@@ -150,6 +150,8 @@ pub enum ConnectorKind {
     Feast,
     Rabbitmq,
     IbmMq,
+    /// Sink: one object per batch, Parquet or JSON lines, on S3, GCS, Azure Blob or disk.
+    ObjectStorage,
 }
 
 impl ConnectorKind {
@@ -161,6 +163,7 @@ impl ConnectorKind {
             ConnectorKind::Feast => "feast",
             ConnectorKind::Rabbitmq => "rabbitmq",
             ConnectorKind::IbmMq => "ibm_mq",
+            ConnectorKind::ObjectStorage => "object_storage",
         }
     }
 
@@ -183,6 +186,7 @@ impl ConnectorKind {
                 | ConnectorKind::Feast
                 | ConnectorKind::Rabbitmq
                 | ConnectorKind::IbmMq
+                | ConnectorKind::ObjectStorage
         )
     }
 }
