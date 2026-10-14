@@ -180,6 +180,7 @@ class SampleApiTest(StreamSampleTestCase):
         created = self.call(OperationType.CREATE, payload=dict(
             stream_sample=dict(name='numbers', messages=[{'n': 1}, {'n': 2}]),
         ))
+        self.assertIn('stream_sample', created, created)
         self.assertEqual(created['stream_sample']['message_count'], 2, created)
         listed = self.call(OperationType.LIST)
         self.assertEqual([s['name'] for s in listed['stream_samples']], ['numbers'])
@@ -202,7 +203,7 @@ class SampleApiTest(StreamSampleTestCase):
         from mage_ai.api.operations.constants import OperationType
 
         missing = self.call(OperationType.DETAIL, pk='nothing')
-        self.assertEqual(missing['error']['code'], 404)
+        self.assertEqual(missing['error']['code'], 404, missing)
         bad = self.call(OperationType.CREATE, payload=dict(
             stream_sample=dict(name='../x', messages=[]),
         ))

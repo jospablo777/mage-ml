@@ -7,10 +7,10 @@ from mage_ai.settings.repo import get_repo_path
 
 
 def _pipeline(kwargs) -> str:
-    from mage_ai.data_preparation.models.pipeline import Pipeline
-
+    # Checked by what it has rather than its class: a reloaded pipeline module (tests do it)
+    # makes a pipeline from an earlier import fail isinstance.
     parent = kwargs.get('parent_model')
-    if not isinstance(parent, Pipeline):
+    if not (getattr(parent, 'uuid', None) and hasattr(parent, 'blocks_by_uuid')):
         raise ApiError(dict(code=400, message='Samples belong to a pipeline: '
                                               '/api/pipelines/<uuid>/stream_samples.'))
     return parent.uuid
