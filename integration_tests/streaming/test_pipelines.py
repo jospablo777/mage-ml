@@ -252,6 +252,12 @@ def test_activemq_to_activemq(mode, mage_project, activemq_port):
             return len(frames) >= COUNT
 
         wait_until(out_messages, run, message='ActiveMQ sink')
+        # The source acknowledges a batch after its sinks wrote it; stopping the run in
+        # between returns that batch to the queue, as at-least-once delivery does. Let the
+        # last acknowledgement go out first (held messages are not visible from outside).
+        for _ in range(6):
+            run.check_alive()
+            time.sleep(0.5)
 
     values = [json.loads(f.body) for f in frames]
     assert sorted(values, key=lambda v: v['n']) == [expected(i) for i in range(COUNT)]
