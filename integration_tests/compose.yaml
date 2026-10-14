@@ -179,6 +179,27 @@ services:
       timeout: 10s
       retries: 60
 
+  # IBM MQ Advanced for Developers: queue manager QM1, the DEV.* queues and the app user.
+  # IBM publishes the image for amd64; elsewhere it runs emulated.
+  ibm-mq:
+    image: icr.io/ibm-messaging/mq:9.4.5.1-r1
+    platform: linux/amd64
+    mem_limit: 1g
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      MQ_APP_USER: app
+      MQ_APP_PASSWORD: "p@ssw0rd"
+      MQ_ADMIN_PASSWORD: "adm1nPass"
+    ports:
+      - "${MAGE_TEST_IBM_MQ_PORT:-11414}:1414"
+      - "${MAGE_TEST_IBM_MQ_WEB_PORT:-19443}:9443"
+    healthcheck:
+      test: ["CMD-SHELL", "chkmqhealthy && chkmqready"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+
   # NATS 2.15 with JetStream, data in memory.
   nats:
     image: nats:2.15-alpine

@@ -213,9 +213,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, RabbitMQ, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka, RabbitMQ, HTTP, Feast; `dummy` prints each message to the service's output |
+| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast; `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -317,6 +317,13 @@ prefetch_count: 1000             # source: deliveries the broker sends ahead
   the same on a replay, for consumers that dedupe.
 - One queue has no partitions: several service instances share it as competing consumers,
   so order holds only with one instance.
+
+### IBM MQ
+
+An `ibm_mq` source reads under syncpoint and commits after the sinks; an `ibm_mq` sink puts
+under syncpoint and commits as the receipt. The image includes IBM's MQ client, which IBM
+publishes for Linux x86-64 only: build with `--platform linux/amd64`. Settings, TLS and
+gotchas: [IBM MQ](/integrations/ibm-cloud#ibm-mq).
 
 ### HTTP and Feast sinks
 

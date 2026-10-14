@@ -16,6 +16,7 @@ mage-connector-http = { path = "../connector-http" }
 mage-connector-kafka = { path = "../connector-kafka", optional = true }
 # RabbitMQ streams (lapin, pure Rust); exports turn it on when a stream uses RabbitMQ.
 mage-connector-rabbitmq = { path = "../connector-rabbitmq", optional = true }
+mage-connector-ibmmq = { path = "../connector-ibmmq", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -41,6 +42,8 @@ arrow-json = { version = "60", default-features = false }
 [features]
 kafka = ["dep:mage-connector-kafka"]
 rabbitmq = ["dep:mage-connector-rabbitmq"]
+# Loads IBM's MQ client library at runtime; building needs no IBM SDK.
+ibm-mq = ["dep:mage-connector-ibmmq"]
 
 [dev-dependencies]
 tempfile = "3"

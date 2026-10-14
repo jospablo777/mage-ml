@@ -140,6 +140,7 @@ def test_an_exported_rabbitmq_stream_transforms_each_message_once_across_a_resta
     assert all(r['source'] == 'it' and isinstance(r['tag'], int) for r in rows)
     # Each output names the input position it came from, for consumers that dedupe.
     assert all(p.message_id and p.delivery_mode == 2 for p, _ in first)
+    assert len({p.message_id for p, _ in first}) == len(first)
     # A graceful stop acknowledges every delivery it processed: nothing is redelivered.
     assert ready(rabbitmq_channel, queues[0]) == 0
 

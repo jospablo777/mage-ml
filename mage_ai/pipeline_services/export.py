@@ -119,7 +119,11 @@ class Capture:
     @property
     def engine_features(self) -> List[str]:
         """The engine's optional connectors the streams use."""
-        return sorted(self.connector_kinds & {'kafka', 'rabbitmq'})
+        return sorted(ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES)
+
+    @property
+    def needs_ibm_mq(self) -> bool:
+        return 'ibm_mq' in self.connector_kinds
 
     @property
     def needs_r(self) -> bool:
@@ -544,10 +548,28 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 
 
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
-STREAM_SOURCES = {'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq'}
+STREAM_SOURCES = {
+    'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
+}
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
+    'ibm_mq': 'ibm_mq',
 }
+# Engine features (cargo) by manifest kind, for the connectors that are optional.
+ENGINE_FEATURES = {'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq'}
+IBM_MQ_SETTINGS = {
+    'queue_manager', 'channel', 'connection_name', 'host', 'port', 'queue', 'user', 'password',
+    'application_name', 'cipher_spec', 'key_repository', 'certificate_label',
+}
+IBM_MQ_SOURCE_SETTINGS = IBM_MQ_SETTINGS | {'connections', 'batch_size', 'batch_timeout'}
+# IBM's redistributable MQ client for exported images: Linux x86-64 only (IBM publishes no
+# arm64 one). Pinned and checked.
+IBM_MQ_CLIENT_VERSION = '9.4.5.1'
+IBM_MQ_CLIENT_SHA256 = 'd01fa65721639040755ab155291d1f6327bd429e4f503748abe0f3b3a04fa853'
+IBM_MQ_CLIENT_URL = (
+    'https://public.dhe.ibm.com/ibmdl/export/pub/software/websphere/messaging/mqdev/redist/'
+    f'{IBM_MQ_CLIENT_VERSION}-IBM-MQC-Redist-LinuxX64.tar.gz'
+)
 # Mage's RabbitMQ settings the engine's connector reads.
 RABBITMQ_SETTINGS = {
     'connection_host', 'connection_port', 'queue_name', 'username', 'password',
@@ -564,7 +586,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'NATS, Pulsar, IBM MQ and PostgreSQL change capture come next'
+STREAM_PLANNED = 'NATS, Pulsar and PostgreSQL change capture come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -750,6 +772,36 @@ def _rabbitmq_connector(block, role: str, config: Dict, where: str,
     return connector
 
 
+def _ibm_mq_connector(block, role: str, config: Dict, where: str,
+                      problems: List[str]) -> Dict:
+    allowed = IBM_MQ_SOURCE_SETTINGS if role == 'source' else IBM_MQ_SETTINGS
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown IBM MQ settings {", ".join(unknown)}.')
+    if not config.get('channel'):
+        problems.append(f'{where}: IBM MQ settings need channel.')
+    if not config.get('queue'):
+        problems.append(f'{where}: IBM MQ settings need queue.')
+    if not (config.get('connection_name') or config.get('host')):
+        problems.append(f'{where}: IBM MQ settings need connection_name (host(port)) or host.')
+    if bool(config.get('cipher_spec')) != bool(config.get('key_repository')):
+        problems.append(f'{where}: IBM MQ TLS needs both cipher_spec and key_repository.')
+    if _literal(config.get('password')):
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    settings = {k: v for k, v in config.items()
+                if k in IBM_MQ_SETTINGS or k == 'connections'}
+    connector = dict(name=block.uuid, kind='ibm_mq', config=settings)
+    if role == 'source':
+        if config.get('batch_size'):
+            connector['batch_size'] = config['batch_size']
+        if config.get('batch_timeout'):
+            connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
     if unknown:
@@ -827,6 +879,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
                     config=_feast_sink_settings(config, where, problems))
     if kind == 'rabbitmq':
         return _rabbitmq_connector(block, role, config, where, problems)
+    if kind == 'ibm_mq':
+        return _ibm_mq_connector(block, role, config, where, problems)
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(
@@ -2449,6 +2503,34 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
             '      perl libcurl4-openssl-dev && \\\n'
             '    rm -rf /var/lib/apt/lists/*\n'
         )
+    ibm_mq_stage = ''
+    copy_ibm_mq = ''
+    ibm_mq_env = ''
+    if capture_.needs_ibm_mq:
+        ibm_mq_stage = f'''
+# IBM's redistributable MQ client, for the IBM MQ connector, which loads it at run time. IBM
+# publishes it for linux/amd64 only: build with --platform linux/amd64.
+FROM debian:{build_base}-slim AS ibm-mq
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" != "amd64" ]; then \\
+      echo "IBM MQ's client is for linux/amd64 only; build with --platform linux/amd64" >&2; \\
+      exit 1; fi && \\
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \\
+    curl -fsSL -o /tmp/mq.tar.gz {IBM_MQ_CLIENT_URL} && \\
+    echo "{IBM_MQ_CLIENT_SHA256}  /tmp/mq.tar.gz" | sha256sum -c - && \\
+    mkdir -p /opt/mqm && tar -xzf /tmp/mq.tar.gz -C /opt/mqm && \\
+    cd /opt/mqm && rm -rf bin inc java lap lib samp swidtag && \\
+    find msg -mindepth 1 -maxdepth 1 ! -name en_US -exec rm -rf {{}} + && \\
+    rm -f lib64/*.a lib64/*.dll lib64/libimq*
+'''
+        copy_ibm_mq = 'COPY --from=ibm-mq /opt/mqm /opt/mqm\n'
+        # The client writes its error logs under its data path; the root file system may be
+        # read-only, /tmp is writable.
+        ibm_mq_env = (
+            ' \\\n    MAGE_SERVICE_MQ_LIBRARY=/opt/mqm/lib64/libmqm_r.so'
+            ' \\\n    LD_LIBRARY_PATH=/opt/mqm/lib64'
+            ' \\\n    MQ_OVERRIDE_DATA_PATH=/tmp/mage-mq'
+        )
     if capture_.models:
         copy_models = 'COPY --chown=mage:mage models ./models\n'
         models_env = ' \\\n    MAGE_SERVICE_MODELS_DIR=/srv/mage-service/models'
@@ -2471,20 +2553,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \\
       -p mage-service -p mage-console{engine_features} && \\
     mkdir -p /out && \\
     cp mage_service/target/release/mage-service mage_service/target/release/mage-console /out/
-{rust_blocks}
+{rust_blocks}{ibm_mq_stage}
 {runtime}RUN groupadd --system --gid 10001 mage && \\
     useradd --system --uid 10001 --gid mage --home-dir /srv/mage-service --no-create-home mage && \\
     mkdir -p /srv/mage-service /var/lib/mage-service && \\
     chown mage:mage /var/lib/mage-service
 WORKDIR /srv/mage-service
 COPY --from=build /out/mage-service /out/mage-console /usr/local/bin/
-{copy_python}{copy_blocks}{copy_models}COPY --chown=mage:mage {project} ./{project}
+{copy_ibm_mq}{copy_python}{copy_blocks}{copy_models}COPY --chown=mage:mage {project} ./{project}
 COPY --chown=mage:mage service.json ./service.json
 {r_prepare}
 ENV MAGE_SERVICE_DIR=/srv/mage-service \\
     MAGE_SERVICE_DATA=/var/lib/mage-service \\
     MAGE_SERVICE_HOST=0.0.0.0 \\
-    MAGE_SERVICE_PORT=8080{models_env}{python_env}
+    MAGE_SERVICE_PORT=8080{models_env}{python_env}{ibm_mq_env}
 USER mage
 VOLUME /var/lib/mage-service
 EXPOSE 8080

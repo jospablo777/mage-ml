@@ -406,10 +406,6 @@ impl RabbitSink {
     }
 }
 
-fn position_text(position: Option<i64>, index: usize) -> String {
-    position.map_or_else(|| format!("row{index}"), |p| p.to_string())
-}
-
 impl Sink for RabbitSink {
     fn write<'a>(
         &'a self,
@@ -440,7 +436,7 @@ impl Sink for RabbitSink {
                         "{}:{}:{}",
                         self.stream,
                         meta.id.partition.0,
-                        position_text(message.position, index)
+                        meta.row_key(message.position, index)
                     )))
                     .with_headers(headers);
                 let confirm = channel

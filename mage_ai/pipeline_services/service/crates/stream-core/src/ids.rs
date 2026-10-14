@@ -64,6 +64,18 @@ pub struct BatchMeta {
     pub bytes: u64,
 }
 
+impl BatchMeta {
+    /// A written row's key, unique within the stream's partition and the same when the batch
+    /// is written again: its own position when it has one (rows passed through), otherwise
+    /// its index in the batch's input range (rows the blocks made).
+    pub fn row_key(&self, position: Option<i64>, index: usize) -> String {
+        match position {
+            Some(position) => position.to_string(),
+            None => format!("{}-{}#{index}", self.first, self.last),
+        }
+    }
+}
+
 /// A sink of the stream, by its index in the stream's sink list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SinkId(pub u16);
@@ -74,4 +86,34 @@ impl SinkId {
     /// The dead-letter sink as the writer of the messages of a batch that failed on their
     /// own (row-level dead letters): one more confirmation the batch needs.
     pub const REJECTED_ROWS: SinkId = SinkId(u16::MAX - 1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta(first: u64, last: u64) -> BatchMeta {
+        BatchMeta {
+            id: BatchId {
+                partition: PartitionId(0),
+                epoch: AssignmentEpoch(1),
+                seq: 0,
+            },
+            first: Position::Tag(first),
+            last: Position::Tag(last),
+            records: (last - first + 1) as u32,
+            bytes: 0,
+        }
+    }
+
+    #[test]
+    fn row_keys_are_unique_across_batches_and_stable_for_a_replay() {
+        let (a, b) = (meta(1, 50), meta(51, 100));
+        let keys: std::collections::BTreeSet<String> = (0..45)
+            .flat_map(|i| [a.row_key(None, i), b.row_key(None, i)])
+            .collect();
+        assert_eq!(keys.len(), 90);
+        assert_eq!(a.row_key(None, 3), meta(1, 50).row_key(None, 3));
+        assert_eq!(a.row_key(Some(17), 3), "17");
+    }
 }

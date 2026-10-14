@@ -2749,6 +2749,17 @@ wheels = [
 ]
 
 [[package]]
+name = "ibmmq"
+version = "2.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/68/d495039aa3502748813e31e8916f0d66a167dfc6f5429ba02a1e820f29b5/ibmmq-2.1.2.tar.gz", hash = "sha256:b9fc092f9ffa2ddf03e49558c726f458cab9e74a260a0cc2da2b944f5a27adcc", size = 438267, upload-time = "2026-10-13T11:29:35.001Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/87/9f41239c05b021d6872a06606eba9c10d5c26319e43a21e1874a4817caac/ibmmq-2.1.2-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:886027536575607e0f5ab5c6d691aa66565420b725098f7d95cc8352aca16ad1", size = 396587, upload-time = "2026-10-13T11:29:28.8Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/8a/4e79f8ce4a02379f5847a72bc94502c6e077438a299a659681a64eccd458/ibmmq-2.1.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:f6dbaf11fffc59cd92da76b1ff05e648050e830e9856e5ee9fda9747d9a2d989", size = 438526, upload-time = "2026-10-13T11:29:30.849Z" },
+    { url = "https://files.pythonhosted.org/packages/df/68/7e38be9e6291a043f0f7ac40fbc7346a033efc34f2de2506fa6581df507e/ibmmq-2.1.2-cp39-abi3-win_amd64.whl", hash = "sha256:d9b9331d7d571ef5f3d1fff996918b2b7bf0b5218d8e00cb0da47bba17b2efdf", size = 401394, upload-time = "2026-10-13T11:29:32.964Z" },
+]
+
+[[package]]
 name = "identify"
 version = "2.6.20"
 source = { registry = "https://pypi.org/simple" }
@@ -3698,6 +3709,9 @@ great-expectations = [
 hdf5 = [
     { name = "tables" },
 ]
+ibm-mq = [
+    { name = "ibmmq" },
+]
 integrations = [
     { name = "mage-integrations" },
 ]
@@ -3835,6 +3849,7 @@ requires-dist = [
     { name = "great-expectations", marker = "extra == 'great-expectations'", specifier = ">=1.0" },
     { name = "gspread", marker = "extra == 'google-cloud-storage'", specifier = ">=5.12.4,<6" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "ibmmq", marker = "extra == 'ibm-mq'", specifier = ">=2.1,<3" },
     { name = "inflection", specifier = "==0.5.1" },
     { name = "influxdb-client", marker = "extra == 'streaming'", specifier = ">=1.50" },
     { name = "ipykernel", specifier = ">=6.30,<8" },
@@ -3937,7 +3952,7 @@ requires-dist = [
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "all"]
 
 [package.metadata.requires-dev]
 dev = [

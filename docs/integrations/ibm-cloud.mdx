@@ -13,11 +13,12 @@ IBM Cloud Databases.
 | [Cloud Object Storage](#cloud-object-storage) | Data loader and exporter blocks; `IBMCloudObjectStorage` in code | Blocks run as in MageML |
 | [MLflow on COS](#mlflow-artifacts-in-cos) | Built in (`cos://` artifact locations) | Built in |
 | [Event Streams](#event-streams) | Streaming pipelines (Kafka source and sink) | Kafka source and sink in Rust |
+| [IBM MQ](#ibm-mq) (on Cloud or your own) | Streaming pipelines (`mage-ml[ibm-mq]`) | IBM MQ source and sink in Rust |
 | [Cloud Databases for PostgreSQL](#cloud-databases) | SQL blocks, loaders and exporters, with TLS verified | Blocks run as in MageML |
 | [Secrets Manager](#secrets-manager) | | `ibm:` secret references |
 | [Code Engine, Container Registry, IKS, OpenShift](#run-services-on-ibm-cloud) | | Deploy scripts, Tekton pipeline, manifests |
 
-Db2 and IBM MQ support are in progress.
+Db2 support is in progress.
 
 ## Credentials
 
@@ -183,6 +184,74 @@ sasl_config:
   lag in the service console.
 - Use the private endpoints from inside IBM Cloud (the credentials of a private service
   endpoint list them).
+
+## IBM MQ
+
+Streaming pipelines read from and write to IBM MQ queues, on IBM MQ on Cloud or any queue
+manager you run:
+
+```yaml
+connector_type: ibm_mq
+queue_manager: QM1
+channel: APP.SVRCONN
+connection_name: "qm1.example.com(1414)"   # host(port), comma separated for multi-instance
+queue: ORDERS.IN
+user: orders
+password: "{{ env_var('MQ_PASSWORD') }}"
+cipher_spec: ANY_TLS12_OR_HIGHER          # TLS; leave out with key_repository for plain text
+key_repository: /etc/mq/keys/client       # the key database, without .kdb
+batch_size: 200                           # source: messages per batch
+batch_timeout: 0.5                        # source: seconds before a smaller batch runs
+connections: 1                            # source: connections reading in parallel
+```
+
+The same file runs in MageML and in exported services. On IBM MQ on Cloud, the user is the
+application's MQ user name and the password its API key; the channel and connection come from
+the queue manager's connection information, and its TLS certificate goes into the key
+database (`runmqakm -cert -add`).
+
+### How messages are acknowledged
+
+- The source reads under syncpoint and commits only after every sink took the batch. A
+  stream that stops, fails or dies leaves the batch on the queue: the queue manager backs out
+  a dead connection's unit of work. A normal disconnect would commit it, so the source backs
+  out before every disconnect.
+- A unit of work belongs to its connection, so each connection has one batch in flight and
+  reads the next after the commit. `connections` reads in parallel; with more than one, queue
+  order holds only within a batch. Keep one where order matters.
+- `batch_size` must not exceed the queue manager's `MAXUMSGS` (10000 by default), the most
+  messages one unit of work holds.
+- The sink puts persistent messages under syncpoint and commits the batch as its receipt.
+  Each MsgId is derived from the stream and the input's position, the same when a batch is
+  written again after a restart, so consumers can drop duplicates by MsgId.
+- Text messages are converted to UTF-8 by the queue manager. Binary messages that are not
+  UTF-8 stop the stream rather than being changed.
+- Blocks get each message's value (JSON, or the text). Message properties are not passed yet.
+
+### Where it runs
+
+| | Needs |
+| --- | --- |
+| Exported services | Nothing: the image downloads IBM's redistributable MQ client (pinned version, checked against its SHA-256) and the engine loads it. IBM publishes that client for Linux x86-64 only, so build those images with `docker build --platform linux/amd64`. |
+| MageML | `uv pip install "mage-ml[ibm-mq]"` and the IBM MQ client: on macOS the MQ toolkit, on Linux the redistributable client, with its `lib64` on the library path (`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH` on macOS). |
+
+The engine builds without IBM's SDK and loads the client at run time, from
+`MAGE_SERVICE_MQ_LIBRARY`, `MQ_HOME/lib64` or the library path.
+
+### Gotchas
+
+| Reason | What to check |
+| --- | --- |
+| 2035 `NOT_AUTHORIZED` | User and password, the channel's `CHLAUTH` rules, and the user's authority on the queue |
+| 2085 `UNKNOWN_OBJECT_NAME` | The queue's name, which is case sensitive |
+| 2059 `Q_MGR_NOT_AVAILABLE`, 2538 | The address and port; a firewall or allowlist in between. Retried with backoff. |
+| 2024 `SYNCPOINT_LIMIT_REACHED` | `batch_size` above `MAXUMSGS` |
+| 2053 `Q_FULL` | The output queue's `MAXDEPTH`; retried |
+| 2393 `SSL_INITIALIZATION_ERROR` | `key_repository`, `certificate_label`, and a `cipher_spec` the channel's `SSLCIPH` accepts |
+
+Messages that fail in a block and go back to the queue count up `BackoutCount`. Set the
+queue's `BOTHRESH` and `BOQNAME` so the queue manager moves messages that keep failing to a
+backout queue, or give the stream a dead-letter sink.
 
 ## Cloud Databases
 

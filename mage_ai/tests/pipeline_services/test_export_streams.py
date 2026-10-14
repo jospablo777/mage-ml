@@ -380,12 +380,86 @@ class RabbitmqExportTest(StreamExportTestCase):
         self.assertIn('auto_ack', problems)
 
 
+class IbmMqExportTest(StreamExportTestCase):
+    SOURCE = '''
+        connector_type: ibm_mq
+        queue_manager: QM1
+        channel: APP.SVRCONN
+        connection_name: "mq1.example.com(1414),mq2.example.com(1414)"
+        queue: ORDERS.IN
+        user: app
+        password: "{{ env_var('MQ_PASSWORD') }}"
+        connections: 2
+        batch_size: 100
+        batch_timeout: 0.25
+    '''
+    SINK = '''
+        connector_type: ibm_mq
+        queue_manager: QM1
+        channel: APP.SVRCONN
+        host: mq1.example.com
+        queue: ORDERS.CLEAN
+        user: app
+        password: "{{ env_var('MQ_PASSWORD') }}"
+        cipher_spec: ANY_TLS13_OR_HIGHER
+        key_repository: /etc/mq/keys/client
+    '''
+
+    def test_ibm_mq_exports_with_its_feature_and_the_pinned_client_in_the_image(self):
+        self.stream(source=self.SOURCE, sink=self.SINK)
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        export.write(captured, str(out), force=True)
+
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'ibm_mq')
+        self.assertEqual(stream['source']['config']['connections'], 2)
+        self.assertEqual(stream['source']['config']['queue'], 'ORDERS.IN')
+        self.assertEqual(stream['batch'], dict(max_records=100, max_wait_ms=250))
+        self.assertEqual(stream['sinks'][0]['config']['cipher_spec'], 'ANY_TLS13_OR_HIGHER')
+        self.assertEqual(captured.engine_features, ['ibm-mq'])
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('--features mage-service/ibm-mq', dockerfile)
+        self.assertIn(f'{export.IBM_MQ_CLIENT_SHA256}  /tmp/mq.tar.gz" | sha256sum -c -',
+                      dockerfile)
+        self.assertIn('build with --platform linux/amd64', dockerfile)
+        self.assertIn('COPY --from=ibm-mq /opt/mqm /opt/mqm', dockerfile)
+        self.assertIn('MAGE_SERVICE_MQ_LIBRARY=/opt/mqm/lib64/libmqm_r.so', dockerfile)
+        self.assertIn('MQ_OVERRIDE_DATA_PATH=/tmp/mage-mq', dockerfile)
+        self.assertIn("-name en_US -exec rm -rf {} +", dockerfile)
+        password = next(v for v in captured.manifest['environment']
+                        if v['name'] == 'MQ_PASSWORD')
+        self.assertTrue(password['secret'])
+
+    def test_streams_without_ibm_mq_carry_no_mq_client(self):
+        self.stream(source=SOURCE, sink=SINK)
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        export.write(captured, str(out), force=True)
+        self.assertNotIn('/opt/mqm', (out / 'Dockerfile').read_text())
+
+    def test_missing_and_unsafe_settings_are_refused(self):
+        source = textwrap.dedent(self.SOURCE).replace('channel: APP.SVRCONN\n', '').replace(
+            "\"{{ env_var('MQ_PASSWORD') }}\"", 'hunter2',  # pragma: allowlist secret
+        ) + 'cipher_spec: ANY_TLS13\nreconnect: true\n'
+        self.stream(source=source)
+        problems = self.problems()
+        self.assertIn('IBM MQ settings need channel', problems)
+        self.assertIn('password is written in the file', problems)
+        self.assertIn('IBM MQ TLS needs both cipher_spec and key_repository', problems)
+        self.assertIn('unknown IBM MQ settings reconnect', problems)
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')
         problems = self.problems()
         self.assertIn(
-            'uses the nats connector; services run kafka, rabbitmq, webhook sources now', problems,
+            'uses the nats connector; services run ibm_mq, kafka, rabbitmq, webhook sources now',
+            problems,
         )
 
     def test_python_sources_are_refused(self):

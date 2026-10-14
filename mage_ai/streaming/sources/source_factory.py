@@ -22,6 +22,10 @@ class SourceFactory:
             )
 
             return GoogleCloudPubSubSource(config, **kwargs)
+        elif connector_type == SourceType.IBM_MQ:
+            from mage_ai.streaming.sources.ibm_mq import IbmMqSource
+
+            return IbmMqSource(config, **kwargs)
         elif connector_type == SourceType.INFLUXDB:
             from mage_ai.streaming.sources.influxdb import InfluxDbSource
 

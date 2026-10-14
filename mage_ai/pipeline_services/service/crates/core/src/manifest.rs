@@ -144,6 +144,7 @@ pub enum ConnectorKind {
     /// Sink: a Feast feature server's push endpoint.
     Feast,
     Rabbitmq,
+    IbmMq,
 }
 
 impl ConnectorKind {
@@ -154,13 +155,17 @@ impl ConnectorKind {
             ConnectorKind::Kafka => "kafka",
             ConnectorKind::Feast => "feast",
             ConnectorKind::Rabbitmq => "rabbitmq",
+            ConnectorKind::IbmMq => "ibm_mq",
         }
     }
 
     pub fn can_read(self) -> bool {
         matches!(
             self,
-            ConnectorKind::Http | ConnectorKind::Kafka | ConnectorKind::Rabbitmq
+            ConnectorKind::Http
+                | ConnectorKind::Kafka
+                | ConnectorKind::Rabbitmq
+                | ConnectorKind::IbmMq
         )
     }
 
@@ -172,6 +177,7 @@ impl ConnectorKind {
                 | ConnectorKind::Kafka
                 | ConnectorKind::Feast
                 | ConnectorKind::Rabbitmq
+                | ConnectorKind::IbmMq
         )
     }
 }

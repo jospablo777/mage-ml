@@ -533,6 +533,27 @@ def rabbitmq_queue(rabbitmq_channel):
 
 
 @pytest.fixture(scope='session')
+def ibm_mq():
+    """The IBM MQ queue manager, and the MQ client library the engine loads."""
+    port = os.getenv('MAGE_TEST_IBM_MQ_PORT')
+    if not port:
+        pytest.skip('IBM MQ is not configured: MAGE_TEST_IBM_MQ_PORT unset')
+    library = os.getenv('MAGE_TEST_MQ_LIBRARY')
+    if not library or not os.path.exists(library):
+        pytest.skip('The IBM MQ client library is not configured: MAGE_TEST_MQ_LIBRARY unset')
+    from integration_tests.ibm_mq.admin import IbmMqAdmin
+
+    return IbmMqAdmin(
+        port=int(port),
+        web_port=int(os.environ['MAGE_TEST_IBM_MQ_WEB_PORT']),
+        user=os.environ['MAGE_TEST_IBM_MQ_USER'],
+        password=os.environ['MAGE_TEST_IBM_MQ_PASSWORD'],
+        admin_password=os.environ['MAGE_TEST_IBM_MQ_ADMIN_PASSWORD'],
+        library=library,
+    ).wait_ready()
+
+
+@pytest.fixture(scope='session')
 def nats_url():
     url = os.getenv('MAGE_TEST_NATS_URL')
     if not url:

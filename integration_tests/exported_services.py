@@ -30,7 +30,7 @@ def service_binary() -> Path:
 # The engine with every stream connector, in its own target folder: the other exported-service
 # tests build it without them, and test workers build at the same time. CI builds it first.
 STREAM_TARGET = SERVICE / 'target' / 'streams'
-STREAM_FEATURES = 'kafka,rabbitmq'
+STREAM_FEATURES = 'kafka,rabbitmq,ibm-mq'
 
 
 def stream_service_binary() -> Path:
@@ -150,10 +150,12 @@ class RunningService:
         self.process = None
 
     def start(self):
-        self.process = subprocess.Popen(
-            [str(self.binary), 'serve'], env=self.env,
-            stdout=self.log.open('a'), stderr=subprocess.STDOUT,
-        )
+        # The child keeps its own copy of the file descriptor; ours closes at once.
+        with self.log.open('a') as log:
+            self.process = subprocess.Popen(
+                [str(self.binary), 'serve'], env=self.env,
+                stdout=log, stderr=subprocess.STDOUT,
+            )
 
     def streams(self) -> list:
         request = urllib.request.Request(

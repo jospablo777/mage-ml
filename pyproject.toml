@@ -171,6 +171,11 @@ postgres = [
 ]
 # The MLflow tracking client, to read runs and registered models and download artifacts
 # from an MLflow server. The server itself is not installed.
+# IBM MQ in streaming pipelines run by MageML; needs the IBM MQ client installed. Exported
+# services use the engine's own connector instead.
+ibm-mq = [
+  "ibmmq>=2.1,<3",
+]
 mlflow = [
   "mlflow-skinny>=3.17,<4",
   # MLflow 3 saves scikit-learn models with skops by default.

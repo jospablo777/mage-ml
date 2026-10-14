@@ -237,8 +237,8 @@ jobs:
             warm: ""
           - id: streaming
             name: "Integration: streaming and storage"
-            services: kafka rabbitmq nats activemq minio postgres mongodb mysql clickhouse
-            tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/nats integration_tests/activemq integration_tests/streaming integration_tests/s3
+            services: kafka rabbitmq ibm-mq nats activemq minio postgres mongodb mysql clickhouse
+            tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/ibm_mq integration_tests/nats integration_tests/activemq integration_tests/streaming integration_tests/s3
             r: false
             warm: ""
           - id: ml
@@ -289,7 +289,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R
@@ -326,7 +326,17 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq
+          CARGO_TARGET_DIR=target/streams cargo build -q -p mage-service --features kafka,rabbitmq,ibm-mq
+      # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
+      # the version and checksum exported images pin.
+      - name: Download the IBM MQ client
+        if: matrix.id == 'streaming'
+        run: |
+          read -r url sha <<< "$(uv run --no-sync python -c 'from mage_ai.pipeline_services import export as e; print(e.IBM_MQ_CLIENT_URL, e.IBM_MQ_CLIENT_SHA256)')"
+          curl -fsSL -o /tmp/mq.tar.gz "$url"
+          echo "$sha  /tmp/mq.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/mqm" && tar -xzf /tmp/mq.tar.gz -C "$RUNNER_TEMP/mqm"
+          echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
       - name: Start the group's services
         if: matrix.services != ''
         run: make -C integration_tests up SERVICES="${{ matrix.services }}"

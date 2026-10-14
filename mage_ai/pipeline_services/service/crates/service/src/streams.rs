@@ -95,6 +95,19 @@ fn source(
                 },
             )?))
         }
+        #[cfg(feature = "ibm-mq")]
+        ConnectorKind::IbmMq => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_ibmmq::MqSource::new(
+                &_config,
+                mage_connector_ibmmq::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         ConnectorKind::Http => {
             let stream = pipeline.stream.as_ref().expect("a stream");
             let seconds = |key: &str, default: u64| {
@@ -203,6 +216,11 @@ fn sink(
             &_config,
             &pipeline.uuid,
         )?)),
+        #[cfg(feature = "ibm-mq")]
+        ConnectorKind::IbmMq => Ok(Arc::new(mage_connector_ibmmq::MqSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
         // Kafka without the kafka feature; with it, every kind has its own arm.
         #[allow(unreachable_patterns)]
         kind => Err(ConnectorError::fatal(format!(
@@ -219,6 +237,7 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         ConnectorKind::Rabbitmq => {
             "it was built without RabbitMQ; build it with the rabbitmq feature"
         }
+        ConnectorKind::IbmMq => "it was built without IBM MQ; build it with the ibm-mq feature",
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }
