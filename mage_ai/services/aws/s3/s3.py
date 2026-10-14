@@ -10,6 +10,35 @@ MAX_POOL_CONNECTIONS = 100
 PAGE_SIZE = 1000
 
 
+def _cos_client(settings: Dict):
+    """
+    A client for IBM Cloud Object Storage when the S3 endpoint is one (from the settings, or
+    boto3's AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL): HMAC keys as the AWS keys, or IBM_COS_API_KEY
+    (IBM_CLOUD_API_KEY) or IBM_CLOUD_TRUSTED_PROFILE. COS takes IAM tokens and fails boto3's
+    default checksums, which a plain S3 client sends.
+    """
+    import os
+
+    from mage_ai.services.ibm import cos
+
+    endpoint = (settings.get('endpoint_url') or os.getenv('AWS_ENDPOINT_URL_S3')
+                or os.getenv('AWS_ENDPOINT_URL'))
+    if not endpoint or not cos.is_cos_endpoint(endpoint):
+        return None
+    return cos.client(
+        endpoint,
+        hmac_access_key_id=settings.get('aws_access_key_id') or os.getenv('AWS_ACCESS_KEY_ID'),
+        hmac_secret_access_key=(settings.get('aws_secret_access_key')
+                                or os.getenv('AWS_SECRET_ACCESS_KEY')),
+        api_key=os.getenv('IBM_COS_API_KEY') or os.getenv('IBM_CLOUD_API_KEY'),
+        instance_id=os.getenv('IBM_COS_INSTANCE_ID'),
+        trusted_profile=os.getenv('IBM_CLOUD_TRUSTED_PROFILE'),
+        iam_url=os.getenv('IBM_CLOUD_IAM_URL'),
+        region_name=settings.get('region_name'),
+        config=botocore.client.Config(max_pool_connections=MAX_POOL_CONNECTIONS),
+    )
+
+
 class Client:
     def __init__(self, bucket, **kwargs):
         self.bucket = bucket
@@ -24,7 +53,10 @@ class Client:
             )
             if kwargs.get(key)
         }
-        self.client = kwargs.get('client') or boto3.client(
+        cos_client = None if kwargs.get('client') else _cos_client(kwargs)
+        # Polars cannot send COS's IAM tokens, so it does not read COS on its own.
+        self.is_cos = cos_client is not None
+        self.client = kwargs.get('client') or cos_client or boto3.client(
             's3',
             aws_access_key_id=kwargs.get('aws_access_key_id'),
             aws_secret_access_key=kwargs.get('aws_secret_access_key'),

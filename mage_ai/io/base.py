@@ -25,6 +25,7 @@ class DataSource(StrEnum):
     BIGQUERY = 'bigquery'
     CHROMA = 'chroma'
     CLICKHOUSE = 'clickhouse'
+    DB2 = 'db2'
     DRUID = 'druid'
     DUCKDB = 'duckdb'
     FILE = 'file'

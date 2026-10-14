@@ -179,6 +179,29 @@ services:
       timeout: 10s
       retries: 60
 
+  # Db2 Community Edition: database TESTDB, user db2inst1. Published for amd64 only (emulated
+  # elsewhere); it needs privileged mode and takes minutes to create the database.
+  db2:
+    image: icr.io/db2_community/db2:12.1.5.0
+    platform: linux/amd64
+    privileged: true
+    mem_limit: 3g
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: "db2-Pass1"
+      DBNAME: testdb
+      ARCHIVE_LOGS: "false"
+      AUTOCONFIG: "false"
+      PERSISTENT_HOME: "false"
+    ports:
+      - "${MAGE_TEST_DB2_PORT:-15050}:50000"
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to testdb' > /dev/null"]
+      interval: 10s
+      timeout: 30s
+      retries: 90
+      start_period: 120s
+
   # IBM MQ Advanced for Developers: queue manager QM1, the DEV.* queues and the app user.
   # IBM publishes the image for amd64; elsewhere it runs emulated.
   ibm-mq:

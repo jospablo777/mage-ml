@@ -53,6 +53,19 @@ def endpoint_host(endpoint_url: str) -> str:
     return authority
 
 
+# IBM's public, private and direct COS endpoints: s3.<region>.cloud-object-storage...
+COS_DOMAIN = 'cloud-object-storage.appdomain.cloud'
+
+
+def is_cos_endpoint(endpoint_url: str) -> bool:
+    """An IBM COS endpoint: IBM's domain, or the IBM_COS_ENDPOINT this process was given."""
+    host = endpoint_host(endpoint_url)
+    if host.split(':')[0].endswith(COS_DOMAIN):
+        return True
+    configured = os.getenv('IBM_COS_ENDPOINT')
+    return bool(configured) and endpoint_host(configured) == host
+
+
 def _host_matches(url: str, host: str) -> bool:
     # Path-style URLs carry the endpoint's host; virtual-hosted ones put the bucket before it.
     actual = _authority(url)

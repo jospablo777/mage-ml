@@ -42,7 +42,9 @@ test('stream output follows the latest line and keeps rows', async ({ page }) =>
 test('stream output holds still while the reader scrolls up', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(STORY);
+  // A stream that outlasts the test: on a slow machine the 1,200 messages of the default
+  // story had all arrived before the scroll, and no new lines meant no Jump to latest.
+  await page.goto(`${STORY}&args=total:20000`);
 
   await expect(line(page, 300)).toBeVisible({ timeout: 15_000 });
   const box = await scrollBox(page, 300);
@@ -58,7 +60,10 @@ test('stream output holds still while the reader scrolls up', async ({ page }) =
     .toBe(first);
 
   await page.getByRole('button', { name: /Jump to latest/ }).click();
-  await expect(line(page, 1200)).toBeInViewport({ timeout: 15_000 });
   await expect(page.getByRole('button', { name: /Jump to latest/ })).toHaveCount(0);
+  // Following again: the view stays at the bottom as lines keep arriving.
+  await expect.poll(() => box.evaluate((element: HTMLElement) => (
+    element.scrollHeight - element.scrollTop - element.clientHeight
+  )), { timeout: 15_000 }).toBeLessThan(40);
   expect(errors).toEqual([]);
 });

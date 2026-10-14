@@ -11,6 +11,7 @@ from mage_ai.data_preparation.models.block.dynamic.utils import (
 from mage_ai.data_preparation.models.block.sql import (
     bigquery,
     clickhouse,
+    db2,
     druid,
     duckdb,
     mssql,
@@ -407,6 +408,55 @@ def execute_sql_code(
                             # Add the limit directly in the SELECT statement
                             # since io.mssql doesn't support enforcing limit
                             f'SELECT TOP {limit} * FROM {table_name}',
+                            limit=limit,
+                            verbose=False,
+                        ),
+                    ]
+    elif DataSource.DB2.value == data_provider:
+        from mage_ai.io.db2 import Db2
+
+        with Db2.with_config(config_file_loader) as loader:
+            not is_dynamic and db2.create_upstream_block_tables(
+                loader,
+                block,
+                **create_upstream_block_tables_kwargs,
+            )
+
+            query_string = db2.interpolate_input_data(
+                block,
+                query,
+                **interpolate_input_data_kwargs,
+            )
+
+            schema = schema or loader.default_schema()
+            query_string = interpolate_vars(query_string, **interpolate_vars_options)
+
+            if use_raw_sql:
+                return db2.execute_raw_sql(
+                    loader,
+                    block,
+                    query_string,
+                    disable_query_preprocessing=disable_query_preprocessing,
+                    configuration=configuration,
+                    should_query=should_query,
+                    limit=limit,
+                )
+            else:
+                loader.export(
+                    None,
+                    schema,
+                    table_name,
+                    query_string=query_string,
+                    drop_table_on_replace=True,
+                    if_exists=export_write_policy,
+                    index=False,
+                    verbose=BlockType.DATA_EXPORTER == block.type,
+                )
+
+                if should_query:
+                    return [
+                        loader.load(
+                            f'SELECT * FROM {table_name}',
                             limit=limit,
                             verbose=False,
                         ),

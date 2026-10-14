@@ -10,15 +10,15 @@ IBM Cloud Databases.
 
 | Service | In MageML | In exported services |
 | --- | --- | --- |
-| [Cloud Object Storage](#cloud-object-storage) | Data loader and exporter blocks; `IBMCloudObjectStorage` in code | Blocks run as in MageML |
+| [Cloud Object Storage](#cloud-object-storage) | Data loader and exporter blocks; block outputs and logs; `IBMCloudObjectStorage` in code | Blocks run as in MageML |
 | [MLflow on COS](#mlflow-artifacts-in-cos) | Built in (`cos://` artifact locations) | Built in |
 | [Event Streams](#event-streams) | Streaming pipelines (Kafka source and sink) | Kafka source and sink in Rust |
 | [IBM MQ](#ibm-mq) (on Cloud or your own) | Streaming pipelines (`mage-ml[ibm-mq]`) | IBM MQ source and sink in Rust |
+| [Db2](#db2) (Db2 on Cloud, Db2 Warehouse) | SQL blocks, loaders and exporters (`mage-ml[db2]`) | Blocks run as in MageML |
 | [Cloud Databases for PostgreSQL](#cloud-databases) | SQL blocks, loaders and exporters, with TLS verified | Blocks run as in MageML |
 | [Secrets Manager](#secrets-manager) | | `ibm:` secret references |
 | [Code Engine, Container Registry, IKS, OpenShift](#run-services-on-ibm-cloud) | | Deploy scripts, Tekton pipeline, manifests |
 
-Db2 support is in progress.
 
 ## Credentials
 
@@ -88,6 +88,30 @@ CSV, JSON, Parquet and HDF5 are read and written as with the S3 blocks, with the
 options (`exact_types=True`, `polars=True`).
 
 For a boto3 client of your own: `mage_ai.services.ibm.cos.client(endpoint_url, api_key=...)`.
+
+### MageML's own files in COS
+
+Block outputs (`remote_variables_dir`) and logs can live in COS. MageML uses a COS client
+whenever the S3 endpoint is a COS endpoint, so `s3://` paths work with either kind of
+credentials:
+
+```yaml
+# metadata.yaml
+remote_variables_dir: s3://mage-outputs/shop
+logging_config:
+  type: s3
+  destination_config:
+    bucket: mage-logs
+    prefix: shop
+    endpoint_url: https://s3.private.us-south.cloud-object-storage.appdomain.cloud
+```
+
+```bash
+# The endpoint for remote_variables_dir, and the credentials for both.
+export AWS_ENDPOINT_URL_S3=https://s3.private.us-south.cloud-object-storage.appdomain.cloud
+export IBM_CLOUD_API_KEY=...        # or IBM_CLOUD_TRUSTED_PROFILE, or HMAC keys as
+                                    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+```
 
 ### HMAC keys or IAM
 
@@ -252,6 +276,58 @@ The engine builds without IBM's SDK and loads the client at run time, from
 Messages that fail in a block and go back to the queue count up `BackoutCount`. Set the
 queue's `BOTHRESH` and `BOQNAME` so the queue manager moves messages that keep failing to a
 backout queue, or give the stream a dead-letter sink.
+
+## Db2
+
+Install the driver with `uv pip install "mage-ml[db2]"`. IBM's `ibm_db` wheels include its CLI
+driver for macOS, Linux x86-64 and Windows; IBM builds none for Linux arm64, so run MageML
+images that use Db2 as `linux/amd64`.
+
+```yaml
+default:
+  DB2_HOST: 1a2b3c.databases.appdomain.cloud   # Db2 on Cloud: connection.db2.hosts[0]
+  DB2_PORT: 30376                              # its TLS port
+  DB2_DATABASE: bludb
+  DB2_USER: "{{ env_var('DB2_USER') }}"
+  DB2_PASSWORD: "{{ env_var('DB2_PASSWORD') }}"
+  DB2_SCHEMA: ANALYTICS                        # optional; the user's schema by default
+  DB2_SSL: true
+  DB2_SSL_CERTIFICATE: "{{ env_var('DB2_CA_BASE64') }}"   # optional: base64, PEM or a path
+```
+
+Pick **IBM Db2** as a SQL block's data provider, or the **IBM Db2** loader and exporter
+templates (`mage_ai.io.db2.Db2` in code).
+
+- **Names.** Db2 folds unquoted names to upper case. Tables and columns are created unquoted,
+  so your SQL needs no quotes, and loaded columns come back in lower case, so a frame keeps its
+  column names through a round trip. SQL keywords (`select`, `order`, `user`), and names
+  that do not start with a letter or hold other characters, are quoted, and keep their case.
+- **Types** keep values exact: integers as `BIGINT`, or `DECFLOAT(34)` past 64 bits; decimals
+  as `DECFLOAT(34)`; floats as `DOUBLE`; text as `VARCHAR` sized from the data, or `CLOB` past
+  32,672 bytes; timestamps as `TIMESTAMP(6)`, time zones converted to UTC; lists and dicts as
+  JSON text.
+- **Upserts** (`unique_constraints` with `unique_conflict_method` `UPDATE` or `IGNORE`) are
+  `MERGE` statements. Db2 requires the columns of a unique constraint to be `NOT NULL`, so they
+  are created that way.
+- **SQL blocks** write their upstream outputs as tables in `DB2_SCHEMA`, which the connection
+  sets as the current schema, so blocks name them without a schema.
+- **TLS.** Db2 on Cloud's certificate is from a public CA, so `DB2_SSL: true` is enough. For a
+  server with a private CA, set `DB2_SSL_CERTIFICATE`. User and password are passed to the
+  driver on their own, so they may contain `;`.
+- Text keeps every character, emoji included: MageML sends it as UTF-8, as some `ibm_db`
+  releases cut characters outside the Basic Multilingual Plane from text, or crash writing
+  text to a `CLOB`. A database whose code set is not UTF-8 gets text as the driver sends it.
+- Queries in blocks are limited with `FETCH FIRST n ROWS ONLY` around them.
+
+Gotchas:
+
+- `SQL30082N` (security processing failed): the user or password, or a user without
+  `CONNECT` on the database.
+- `SQL0551N`: no privilege on the table or schema; tables go to `DB2_SCHEMA`, which the user
+  must be allowed to create in (`CREATEIN`).
+- `SQL0911N` reason 2 (deadlock) or 68 (lock timeout): long-running writes to the same table
+  from parallel blocks. Make them run in order, or write to separate tables.
+- Db2 on Cloud plans limit connections; blocks that run in parallel each open one.
 
 ## Cloud Databases
 

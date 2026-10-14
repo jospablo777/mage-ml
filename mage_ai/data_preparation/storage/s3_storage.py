@@ -142,7 +142,10 @@ class S3Storage(BaseStorage):
             self.client.upload(s3_url_path(file_path), stream.getvalue())
             stream.close()
 
-    def polars_location(self, path: str) -> Tuple[str, Optional[Dict]]:
+    def polars_location(self, path: str) -> Optional[Tuple[str, Optional[Dict]]]:
+        if self.client.is_cos:
+            # Through this class: Polars cannot authenticate to COS with IAM tokens.
+            return None
         uri = path if path.startswith(S3_PREFIX) else f'{S3_PREFIX}{self.client.bucket}/{path}'
         return uri, self.client.polars_storage_options()
 

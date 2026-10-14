@@ -533,6 +533,42 @@ def rabbitmq_queue(rabbitmq_channel):
 
 
 @pytest.fixture(scope='session')
+def db2_settings():
+    port = os.getenv('MAGE_TEST_DB2_PORT')
+    if not port:
+        pytest.skip('Db2 is not configured: MAGE_TEST_DB2_PORT unset')
+    pytest.importorskip('ibm_db')
+    return dict(database='testdb', host='127.0.0.1', port=int(port), user='db2inst1',
+                password=os.environ['MAGE_TEST_DB2_PASSWORD'])
+
+
+@pytest.fixture
+def db2_schema(db2_settings, monkeypatch):
+    """A schema of one test, dropped with its tables after it."""
+    import ibm_db_dbi
+
+    name = f'IT_{uuid.uuid4().hex[:10].upper()}'
+    dsn = (f"DATABASE={db2_settings['database']};HOSTNAME={db2_settings['host']};"
+           f"PORT={db2_settings['port']};PROTOCOL=TCPIP;")
+    connection = ibm_db_dbi.connect(dsn, db2_settings['user'], db2_settings['password'])
+    monkeypatch.setenv('MAGE_TEST_DB2_SCHEMA', name)
+    yield name, connection
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TYPE = 'T'", (name,),
+        )
+        for (table,) in cursor.fetchall():
+            cursor.execute(f'DROP TABLE "{name}"."{table}"')
+        cursor.execute(
+            'SELECT 1 FROM SYSCAT.SCHEMATA WHERE SCHEMANAME = ?', (name,),
+        )
+        if cursor.fetchone():
+            cursor.execute(f'DROP SCHEMA "{name}" RESTRICT')
+    connection.commit()
+    connection.close()
+
+
+@pytest.fixture(scope='session')
 def ibm_mq():
     """The IBM MQ queue manager, and the MQ client library the engine loads."""
     port = os.getenv('MAGE_TEST_IBM_MQ_PORT')

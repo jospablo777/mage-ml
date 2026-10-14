@@ -171,6 +171,12 @@ postgres = [
 ]
 # The MLflow tracking client, to read runs and registered models and download artifacts
 # from an MLflow server. The server itself is not installed.
+# IBM Db2 (Db2 on Cloud, Db2 Warehouse). The wheels include IBM's CLI driver; IBM builds
+# none for Linux arm64. MageML binds text as UTF-8 bytes: some releases cut characters
+# outside the BMP from bound strings, or crash binding strings to CLOBs.
+db2 = [
+  "ibm-db>=3.2.7,<4",
+]
 # IBM MQ in streaming pipelines run by MageML; needs the IBM MQ client installed. Exported
 # services use the engine's own connector instead.
 ibm-mq = [

@@ -33,6 +33,14 @@ mysql:
   MYSQL_PASSWORD: "{{ env_var('MAGE_TEST_MYSQL_PASSWORD') }}"
   MYSQL_PORT: "{{ env_var('MAGE_TEST_MYSQL_PORT') }}"
   MYSQL_USER: "{{ env_var('MAGE_TEST_MYSQL_USER') }}"
+# Db2, in the schema of one test (MAGE_TEST_DB2_SCHEMA, which the test sets).
+db2:
+  DB2_DATABASE: testdb
+  DB2_HOST: 127.0.0.1
+  DB2_PORT: "{{ env_var('MAGE_TEST_DB2_PORT') }}"
+  DB2_USER: db2inst1
+  DB2_PASSWORD: "{{ env_var('MAGE_TEST_DB2_PASSWORD') }}"
+  DB2_SCHEMA: "{{ env_var('MAGE_TEST_DB2_SCHEMA') }}"
 # The schema of one test, from MAGE_TEST_SCHEMA, which the test sets. SQL blocks
 # interpolate their profile, not their schema.
 test_schema:

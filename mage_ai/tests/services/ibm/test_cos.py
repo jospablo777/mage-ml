@@ -162,3 +162,43 @@ class SharedSessionTest(unittest.TestCase):
         self.assertEqual(lower(first.requests[0][2])['authorization'], 'Bearer token-1')
         self.assertTrue(lower(second.requests[0][2])['authorization'].startswith('AWS4'))
         self.assertEqual(second.token_requests, [])
+
+
+class MageStorageOnCOSTest(unittest.TestCase):
+    """MageML's own S3 storage (remote variables, logs) on COS, chosen by the endpoint."""
+
+    def setUp(self):
+        self.cloud = FakeIBMCloud()
+        self.addCleanup(self.cloud.close)
+
+    def test_variables_in_cos_use_iam_when_the_endpoint_is_cos(self):
+        from mage_ai.data_preparation.storage.s3_storage import S3Storage
+
+        environ = dict(IBM_COS_ENDPOINT=self.cloud.url, AWS_ENDPOINT_URL_S3=self.cloud.url,
+                       IBM_CLOUD_API_KEY='key-1', IBM_CLOUD_IAM_URL=self.cloud.url)
+        with patch.dict('os.environ', environ):
+            storage = S3Storage(dirpath='s3://mage-vars/project')
+            storage.write_json_file('s3://mage-vars/project/pipelines/p/output.json',
+                                    dict(rows=3, city='Zürich'))
+            data = storage.read_json_file('s3://mage-vars/project/pipelines/p/output.json')
+
+        self.assertEqual(data, dict(rows=3, city='Zürich'))
+        # Lazy Polars outputs go through the COS client, which Polars cannot replace.
+        self.assertIsNone(storage.polars_location('s3://mage-vars/project/x.parquet'))
+        headers = lower(self.cloud.requests[0][2])
+        self.assertEqual(headers['authorization'], 'Bearer token-1')
+        self.assertFalse([h for h in CHECKSUM_HEADERS if h in headers], headers)
+
+    def test_other_endpoints_keep_a_plain_client(self):
+        from mage_ai.services.aws.s3 import s3
+
+        with patch.dict('os.environ', {'IBM_COS_ENDPOINT': self.cloud.url}):
+            client = s3.Client('b', endpoint_url='https://s3.eu-west-1.amazonaws.com',
+                               aws_access_key_id='AKIA' + 'X' * 16,
+                               aws_secret_access_key='s' * 40)
+        # boto3's own checksum default: not a COS client.
+        self.assertNotEqual(client.client.meta.config.request_checksum_calculation,
+                            'when_required')
+        self.assertTrue(cos.is_cos_endpoint(
+            'https://s3.private.eu-de.cloud-object-storage.appdomain.cloud'))
+        self.assertFalse(cos.is_cos_endpoint('https://s3.amazonaws.com'))

@@ -28,6 +28,14 @@ default:
   CLICKHOUSE_PASSWORD: null
   CLICKHOUSE_PORT: 8123
   CLICKHOUSE_USERNAME: null
+  # Db2 (Db2 on Cloud: the service credentials' connection.db2; TLS on its 30xxx or 50001 port)
+  DB2_HOST: db2.example.com
+  DB2_PORT: 50001
+  DB2_DATABASE: bludb
+  DB2_USER: "{{ env_var('DB2_USER') }}"
+  DB2_PASSWORD: "{{ env_var('DB2_PASSWORD') }}"
+  DB2_SCHEMA: null
+  DB2_SSL: true
   # Druid
   DRUID_HOST: hostname
   DRUID_PASSWORD: password

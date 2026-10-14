@@ -225,8 +225,8 @@ jobs:
         include:
           - id: sql
             name: "Integration: SQL databases"
-            services: postgres mysql clickhouse trino
-            tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb
+            services: postgres mysql clickhouse trino db2
+            tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb integration_tests/db2
             r: false
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
           - id: documents
@@ -289,7 +289,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R
