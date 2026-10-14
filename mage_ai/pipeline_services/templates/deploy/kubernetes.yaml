@@ -28,6 +28,12 @@ spec:
   template:
     metadata:
       labels: {app: $name}
+      # Prometheus, and agents that read the same annotations (IBM Cloud Monitoring, Datadog,
+      # Grafana Agent), scrape the service's metrics; /metrics needs no token.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
     spec:
       securityContext:
         runAsNonRoot: true

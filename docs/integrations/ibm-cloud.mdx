@@ -415,6 +415,23 @@ Push images to IBM Cloud Container Registry with `ibmcloud cr login`, or
 `docker login -u iamapikey icr.io` with an API key. See
 [exported services](/production/pipeline-services).
 
+### Logs and metrics
+
+A service writes its logs to its output and serves Prometheus metrics at `/metrics`, with no
+token, so IBM Cloud's own collectors take them as they take any container's:
+
+- **IBM Cloud Logs.** Set `MAGE_SERVICE_LOG_FORMAT=json` so each line is a JSON object with
+  its run, block and level. On Code Engine, the logs reach IBM Cloud Logs once the region's
+  platform logs are routed to a Cloud Logs instance. On IKS and OpenShift, the logging
+  agent collects the containers' output.
+- **IBM Cloud Monitoring.** On IKS and OpenShift, the monitoring agent scrapes pods with the
+  `prometheus.io/scrape` annotations, which `deploy/kubernetes.yaml` sets, and keeps
+  metrics such as `mage_service_stream_lag_messages` per stream and partition: alert on lag,
+  or scale on it. Code Engine sends its platform metrics (CPU, memory, requests) to
+  Monitoring; the service's own metrics need a scraper that reaches it.
+- Runs, their logs and errors stay readable through the service's API and `mage-console`,
+  whichever collector is set up.
+
 ## Good practices
 
 - One service ID or trusted profile per workload, with the least roles, scoped to resource
