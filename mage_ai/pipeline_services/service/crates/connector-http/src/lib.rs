@@ -12,7 +12,12 @@
 //! its caller sends it again. Keys are remembered for `dedupe_window` in memory; after a
 //! restart, a retried request is written again.
 
+pub mod feast;
 pub mod signature;
+pub mod sink;
+
+pub use feast::FeastSink;
+pub use sink::HttpSink;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -431,6 +436,17 @@ impl Source for HttpSource {
         }
     }
 
+    fn failed(&mut self, reason: &str) {
+        let reason = format!("the stream stopped: {reason}");
+        *self.shared.closed.lock().unwrap_or_else(|p| p.into_inner()) = Some(reason.clone());
+        while let Ok(submission) = self.submissions.try_recv() {
+            let _ = submission
+                .answer
+                .send(Err(IngestError::Unavailable(reason.clone())));
+        }
+        self.fail_all(&reason);
+    }
+
     fn close(&mut self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
             *self.shared.closed.lock().unwrap_or_else(|p| p.into_inner()) =
@@ -577,6 +593,29 @@ mod tests {
         ));
         assert!(matches!(
             handle.submit(vec![raw("3")], None).await,
+            Err(IngestError::Unavailable(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_stopped_stream_answers_its_callers_at_once_with_the_reason() {
+        let (mut source, handle) = HttpSource::new(HttpSourceConfig::default());
+        let waiting = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.submit(vec![raw("1")], Some("k".into())).await })
+        };
+        next_batch(&mut source).await;
+
+        source.failed("sink 0 rejected the batch");
+
+        match waiting.await.unwrap() {
+            Err(IngestError::Unavailable(reason)) => {
+                assert!(reason.contains("rejected"), "{reason}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            handle.submit(vec![raw("2")], None).await,
             Err(IngestError::Unavailable(_))
         ));
     }

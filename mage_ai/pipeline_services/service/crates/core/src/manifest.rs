@@ -141,6 +141,8 @@ pub enum ConnectorKind {
     /// Sink: one JSON line per message on the service's output, for development.
     Stdout,
     Kafka,
+    /// Sink: a Feast feature server's push endpoint.
+    Feast,
 }
 
 impl ConnectorKind {
@@ -149,6 +151,7 @@ impl ConnectorKind {
             ConnectorKind::Http => "http",
             ConnectorKind::Stdout => "stdout",
             ConnectorKind::Kafka => "kafka",
+            ConnectorKind::Feast => "feast",
         }
     }
 
@@ -159,7 +162,10 @@ impl ConnectorKind {
     pub fn can_write(self) -> bool {
         matches!(
             self,
-            ConnectorKind::Http | ConnectorKind::Stdout | ConnectorKind::Kafka
+            ConnectorKind::Http
+                | ConnectorKind::Stdout
+                | ConnectorKind::Kafka
+                | ConnectorKind::Feast
         )
     }
 }

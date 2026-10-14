@@ -6,8 +6,13 @@ of Mage's Python code and the repository for integration_tests.data.
 import json
 import os
 import shutil
+import signal
+import socket
 import subprocess
 import sys
+import time
+import urllib.request
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -96,3 +101,88 @@ def differences(expected: dict, actual: dict) -> dict:
             if left.get(column) != right.get(column):
                 found[f'{table}.{column}'] = (left.get(column), right.get(column))
     return found
+
+
+TOKEN = 'stream-test-token'  # pragma: allowlist secret
+
+
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+
+class RunningService:
+    """An exported service serving its API, with its streams, for a test."""
+
+    def __init__(self, binary: Path, directory: Path, data: Path, **env):
+        self.port = free_port()
+        self.log = data.parent / f'service-{self.port}.log'
+        self.env = dict(
+            os.environ,
+            MAGE_SERVICE_DIR=str(directory),
+            MAGE_SERVICE_DATA=str(data),
+            MAGE_SERVICE_PORT=str(self.port),
+            MAGE_SERVICE_TOKEN=TOKEN,
+            MAGE_SERVICE_WORKER=str(
+                directory / 'python/mage_ai/pipeline_services/runtime/worker.py',
+            ),
+            MAGE_SERVICE_PYTHON=sys.executable,
+            PYTHONPATH=os.pathsep.join([str(directory / 'python'), str(REPO)]),
+            **env,
+        )
+        self.binary = binary
+        self.process = None
+
+    def start(self):
+        self.process = subprocess.Popen(
+            [str(self.binary), 'serve'], env=self.env,
+            stdout=self.log.open('a'), stderr=subprocess.STDOUT,
+        )
+
+    def streams(self) -> list:
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}/v1/streams',
+            headers={'Authorization': f'Bearer {TOKEN}'},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read())['streams']
+
+    def control(self, kind):
+        snapshot = self.get('/v1/snapshot')
+        pipeline = snapshot['pipelines'][0]
+        body = json.dumps(dict(
+            pipeline_id=pipeline['id'], request_id=uuid.uuid4().hex,
+            expected_config_revision=pipeline['config_revision'], command=dict(kind=kind),
+        )).encode()
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}/v1/control', data=body, method='POST',
+            headers={'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+
+    def get(self, path):
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{self.port}{path}', headers={'Authorization': f'Bearer {TOKEN}'},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read())
+
+    def wait_running(self, timeout=120):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            assert self.process.poll() is None, self.log.read_text()[-4000:]
+            try:
+                streams = self.streams()
+                if streams and streams[0]['state'] == 'running':
+                    return streams[0]
+            except OSError:
+                pass
+            time.sleep(0.5)
+        raise AssertionError(f'the stream did not start:\n{self.log.read_text()[-4000:]}')
+
+    def stop(self):
+        self.process.send_signal(signal.SIGTERM)
+        assert self.process.wait(timeout=60) == 0, self.log.read_text()[-4000:]

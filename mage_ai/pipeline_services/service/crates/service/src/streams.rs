@@ -167,12 +167,26 @@ fn static_membership(mut config: Value, pipeline: &str) -> Value {
     config
 }
 
-fn sink(service: &Service, connector: &Connector) -> Result<Arc<dyn Sink>, ConnectorError> {
+fn sink(
+    service: &Service,
+    pipeline: &Pipeline,
+    connector: &Connector,
+) -> Result<Arc<dyn Sink>, ConnectorError> {
     let _config = settings(service, connector);
     match connector.kind {
         ConnectorKind::Stdout => Ok(Arc::new(StdoutSink)),
+        ConnectorKind::Http => Ok(Arc::new(mage_connector_http::HttpSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
+        ConnectorKind::Feast => Ok(Arc::new(mage_connector_http::FeastSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
         #[cfg(feature = "kafka")]
         ConnectorKind::Kafka => Ok(Arc::new(mage_connector_kafka::KafkaSink::new(&_config)?)),
+        // Kafka without the kafka feature; with it, every kind has its own arm.
+        #[allow(unreachable_patterns)]
         kind => Err(ConnectorError::fatal(format!(
             "this service cannot write a {} sink: {}",
             kind.as_str(),
@@ -184,8 +198,8 @@ fn sink(service: &Service, connector: &Connector) -> Result<Arc<dyn Sink>, Conne
 fn unavailable(kind: ConnectorKind) -> &'static str {
     match kind {
         ConnectorKind::Kafka => "it was built without Kafka; build it with the kafka feature",
-        ConnectorKind::Http => "HTTP sinks come in the next step of streaming",
-        ConnectorKind::Stdout => "stdout is a sink only",
+        ConnectorKind::Http => "HTTP is built in",
+        ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }
 }
 
@@ -231,12 +245,12 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
     let mut sinks = Vec::new();
     for connector in &stream.sinks {
         sinks.push((
-            sink(service, connector).map_err(|e| e.message)?,
+            sink(service, pipeline, connector).map_err(|e| e.message)?,
             connector.after.clone(),
         ));
     }
     let dead_letter = match &stream.errors.dead_letter {
-        Some(connector) => Some(sink(service, connector).map_err(|e| e.message)?),
+        Some(connector) => Some(sink(service, pipeline, connector).map_err(|e| e.message)?),
         None => None,
     };
     let transform: Option<Box<dyn TransformSession>> = if pipeline.blocks.is_empty() {

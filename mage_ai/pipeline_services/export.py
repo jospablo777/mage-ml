@@ -535,7 +535,13 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
 STREAM_SOURCES = {'kafka': 'kafka', 'webhook': 'http'}
-STREAM_SINKS = {'kafka': 'kafka', 'dummy': 'stdout'}
+STREAM_SINKS = {'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast'}
+FEAST_SINK_SETTINGS = {
+    'url', 'push_source_name', 'to', 'headers', 'timeout_seconds', 'allow_private',
+}
+HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_private'}
+# Header names whose values are credentials: written as env_var() references.
+CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
 STREAM_PLANNED = 'RabbitMQ, NATS, Pulsar and PostgreSQL change capture come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
@@ -665,6 +671,46 @@ def _webhook_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     return {k: v for k, v in config.items() if k in WEBHOOK_SETTINGS}
 
 
+def _http_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - HTTP_SINK_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown HTTP sink settings {", ".join(unknown)}.')
+    url = config.get('url')
+    if not url:
+        problems.append(f'{where}: an HTTP sink needs a url.')
+    elif isinstance(url, str) and not url.startswith(('https://', 'http://')):
+        problems.append(f'{where}: the url must start with https:// or http://.')
+    headers = config.get('headers') or {}
+    if not isinstance(headers, dict):
+        problems.append(f'{where}: headers must be a mapping of names to values.')
+        headers = {}
+    for name, value in headers.items():
+        if CREDENTIAL_HEADER.search(str(name)) and _literal(value):
+            problems.append(
+                f"{where}: the {name} header is written in the file; use "
+                f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+            )
+    if config.get('format') not in (None, 'json', 'ndjson'):
+        problems.append(f"{where}: format is json (an array per batch) or ndjson.")
+    return {k: v for k, v in config.items() if k in HTTP_SINK_SETTINGS}
+
+
+def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown Feast sink settings {", ".join(unknown)}.')
+    if not config.get('push_source_name'):
+        problems.append(f"{where}: a Feast sink needs push_source_name, the push source of "
+                        'the feature view it writes.')
+    if config.get('to', 'online') not in ('online', 'offline', 'online_and_offline'):
+        problems.append(f'{where}: to is online, offline or online_and_offline.')
+    # url, headers and the other settings are checked as for an HTTP sink.
+    checked = _http_sink_settings(
+        {k: v for k, v in config.items() if k in HTTP_SINK_SETTINGS}, where, problems,
+    )
+    return {**checked, **{k: config[k] for k in ('push_source_name', 'to') if k in config}}
+
+
 def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture_: Capture,
                       problems: List[str]) -> Optional[Dict]:
     where = f'Pipeline {pipeline.uuid}, {role} {block.uuid}'
@@ -695,9 +741,15 @@ def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture
     kind = kinds[connector_type]
     if kind == 'stdout':
         return dict(name=block.uuid, kind=kind, config={})
-    if kind == 'http':
+    if kind == 'http' and role == 'source':
         return dict(name=block.uuid, kind=kind,
                     config=_webhook_settings(config, where, problems))
+    if kind == 'http':
+        return dict(name=block.uuid, kind=kind,
+                    config=_http_sink_settings(config, where, problems))
+    if kind == 'feast':
+        return dict(name=block.uuid, kind=kind,
+                    config=_feast_sink_settings(config, where, problems))
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(

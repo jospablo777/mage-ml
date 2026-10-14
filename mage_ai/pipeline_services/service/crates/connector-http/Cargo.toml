@@ -13,6 +13,8 @@ serde_json.workspace = true
 tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
 # HMAC-SHA256 with constant-time verification; already in the tree through rustls.
 ring = "0.17"
+# The HTTP sink's client; already in the tree for secret managers.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

@@ -112,6 +112,8 @@ pub trait Source: Send {
     /// The stream finished with a partition it was revoking ([`SourceEvent::Revoking`]):
     /// what was done is acknowledged, and the source may hand the partition over.
     fn revoked(&mut self, _partition: PartitionId, _epoch: AssignmentEpoch) {}
+    /// The stream stopped on an error that needs a person; nothing more is acknowledged.
+    fn failed(&mut self, _reason: &str) {}
     /// Messages behind the end of each partition this instance reads, where the source
     /// knows it.
     fn lag(&self) -> std::collections::BTreeMap<u32, i64> {

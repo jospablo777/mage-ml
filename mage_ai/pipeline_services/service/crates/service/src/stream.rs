@@ -514,6 +514,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         crate::log::error(&format!("Stream {}: {message}", parts.name));
                         record_error(&status, &message);
                         set_state(&status, StreamState::Failed);
+                        parts.source.failed(&message);
                     }
                     Effect::Finished { unfinished } => {
                         if !unfinished.is_empty() {

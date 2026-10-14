@@ -40,6 +40,13 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
             'samples (the Samples tab), then export the stream as a service.'
         )
         return
+    if connector_type in ('http', 'feast') and block_type == BlockType.DATA_EXPORTER:
+        print(
+            f'The {connector_type} sink posts each batch to {config.get("url")} from the '
+            'exported service, which checks its address when the stream starts. Run the '
+            'blocks on samples to see the messages it would send.'
+        )
+        return
     print(f'Connecting to the {connector_type} {kind}...')
     if block_type == BlockType.DATA_LOADER:
         from mage_ai.streaming.sources.source_factory import SourceFactory

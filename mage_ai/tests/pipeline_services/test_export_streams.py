@@ -250,6 +250,60 @@ class WebhookExportTest(StreamExportTestCase):
         self.assertIn('signature.secret is written in the file', self.problems())
 
 
+class HttpSinkExportTest(StreamExportTestCase):
+    def test_an_http_sink_exports_with_its_headers_as_references(self):
+        self.stream(sink='''
+            connector_type: http
+            url: https://hooks.example.com/orders
+            format: ndjson
+            headers:
+              Authorization: "Bearer {{ env_var('HOOK_TOKEN') }}"
+              X-Source: mageml
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        [sink] = captured.manifest['pipelines'][0]['stream']['sinks']
+        self.assertEqual(sink['kind'], 'http')
+        self.assertEqual(sink['config']['headers']['Authorization'],
+                         {'$parts': ['Bearer ', {'env': 'HOOK_TOKEN'}]})
+        self.assertEqual(sink['config']['headers']['X-Source'], 'mageml')
+        token = next(v for v in captured.manifest['environment'] if v['name'] == 'HOOK_TOKEN')
+        self.assertEqual(token['used_by'], [])
+
+    def test_a_credential_header_written_in_the_file_is_refused(self):
+        self.stream(sink='''
+            connector_type: http
+            url: https://hooks.example.com/orders
+            headers:
+              Authorization: Bearer abc123
+        ''')
+        self.assertIn('the Authorization header is written in the file', self.problems())
+
+
+class FeastSinkExportTest(StreamExportTestCase):
+    def test_a_feast_sink_exports_its_push_source(self):
+        self.stream(sink='''
+            connector_type: feast
+            url: http://feast:6566
+            push_source_name: customer_features_push
+            to: online_and_offline
+        ''')
+
+        [sink] = export.capture(self.repo_path, [self.pipeline.uuid]).manifest[
+            'pipelines'][0]['stream']['sinks']
+
+        self.assertEqual(sink['kind'], 'feast')
+        self.assertEqual(sink['config'], dict(
+            url='http://feast:6566', push_source_name='customer_features_push',
+            to='online_and_offline',
+        ))
+
+    def test_a_feast_sink_needs_its_push_source(self):
+        self.stream(sink='connector_type: feast\nurl: http://feast:6566\n')
+        self.assertIn('a Feast sink needs push_source_name', self.problems())
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: rabbitmq\nconnection_host: localhost\n')

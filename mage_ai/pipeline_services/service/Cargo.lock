@@ -1449,6 +1449,7 @@ dependencies = [
  "ring",
  "serde_json",
  "tokio",
+ "ureq",
 ]
 
 [[package]]

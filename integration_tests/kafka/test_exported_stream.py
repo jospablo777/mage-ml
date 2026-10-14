@@ -6,13 +6,9 @@ repeats messages.
 """
 import json
 import os
-import signal
-import socket
 import subprocess
-import sys
 import textwrap
 import time
-import urllib.request
 import uuid
 from pathlib import Path
 
@@ -20,9 +16,8 @@ import pytest
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.admin import KafkaAdminClient, NewTopic
 
-from integration_tests.exported_services import REPO, SERVICE, export_service
+from integration_tests.exported_services import SERVICE, RunningService, export_service
 
-TOKEN = 'stream-test-token'  # pragma: allowlist secret
 # Its own target folder: the other exported-service tests build the engine without Kafka,
 # and test workers build at the same time.
 TARGET = SERVICE / 'target' / 'kafka'
@@ -64,12 +59,6 @@ def kafka_service_binary() -> Path:
     return TARGET / 'debug' / 'mage-service'
 
 
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture
 def topics(kafka_bootstrap):
     names = [f'it_in_{uuid.uuid4().hex[:10]}', f'it_out_{uuid.uuid4().hex[:10]}']
@@ -104,80 +93,6 @@ def stream_pipeline(mage_project, topics):
     pipeline.delete()
 
 
-class Service:
-    def __init__(self, binary: Path, directory: Path, data: Path, bootstrap: str, **env):
-        self.port = free_port()
-        self.log = data.parent / f'service-{self.port}.log'
-        self.env = dict(
-            os.environ,
-            MAGE_SERVICE_DIR=str(directory),
-            MAGE_SERVICE_DATA=str(data),
-            MAGE_SERVICE_PORT=str(self.port),
-            MAGE_SERVICE_TOKEN=TOKEN,
-            MAGE_SERVICE_WORKER=str(
-                directory / 'python/mage_ai/pipeline_services/runtime/worker.py',
-            ),
-            MAGE_SERVICE_PYTHON=sys.executable,
-            PYTHONPATH=os.pathsep.join([str(directory / 'python'), str(REPO)]),
-            KAFKA_BOOTSTRAP=bootstrap,
-            **env,
-        )
-        self.binary = binary
-        self.process = None
-
-    def start(self):
-        self.process = subprocess.Popen(
-            [str(self.binary), 'serve'], env=self.env,
-            stdout=self.log.open('a'), stderr=subprocess.STDOUT,
-        )
-
-    def streams(self) -> list:
-        request = urllib.request.Request(
-            f'http://127.0.0.1:{self.port}/v1/streams',
-            headers={'Authorization': f'Bearer {TOKEN}'},
-        )
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return json.loads(response.read())['streams']
-
-    def control(self, kind):
-        snapshot = self.get('/v1/snapshot')
-        pipeline = snapshot['pipelines'][0]
-        body = json.dumps(dict(
-            pipeline_id=pipeline['id'], request_id=uuid.uuid4().hex,
-            expected_config_revision=pipeline['config_revision'], command=dict(kind=kind),
-        )).encode()
-        request = urllib.request.Request(
-            f'http://127.0.0.1:{self.port}/v1/control', data=body, method='POST',
-            headers={'Authorization': f'Bearer {TOKEN}', 'Content-Type': 'application/json'},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read())
-
-    def get(self, path):
-        request = urllib.request.Request(
-            f'http://127.0.0.1:{self.port}{path}', headers={'Authorization': f'Bearer {TOKEN}'},
-        )
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return json.loads(response.read())
-
-    def wait_running(self, timeout=120):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            assert self.process.poll() is None, self.log.read_text()[-4000:]
-            try:
-                streams = self.streams()
-                if streams and streams[0]['state'] == 'running':
-                    return streams[0]
-            except OSError:
-                pass
-            time.sleep(0.5)
-        raise AssertionError(f'the stream did not start:\n{self.log.read_text()[-4000:]}')
-
-    def stop(self):
-        self.process.send_signal(signal.SIGTERM)
-        assert self.process.wait(timeout=60) == 0, self.log.read_text()[-4000:]
-
-
 def produce(bootstrap, topic, ids):
     producer = KafkaProducer(
         bootstrap_servers=bootstrap,
@@ -210,7 +125,9 @@ def test_an_exported_kafka_stream_transforms_each_message_once_across_a_restart(
 ):
     pipeline, group = stream_pipeline
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
         group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
@@ -258,8 +175,12 @@ def test_partitions_move_between_instances_without_losing_or_repeating_messages(
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     binary = kafka_service_binary()
-    first = Service(binary, directory, tmp_path / 'data-a', kafka_bootstrap)
-    second = Service(binary, directory, tmp_path / 'data-b', kafka_bootstrap)
+    first = RunningService(
+        binary, directory, tmp_path / 'data-a', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
+    second = RunningService(
+        binary, directory, tmp_path / 'data-b', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
         group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
@@ -304,7 +225,9 @@ def test_a_killed_service_loses_nothing_and_repeats_at_most_its_batches_in_fligh
     pipeline.variables = dict(delay=0.2)
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
         group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
@@ -358,7 +281,9 @@ def test_message_values_pass_through_exactly(
     pipeline.variables = dict(identity=True)
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
         group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,
@@ -395,7 +320,9 @@ def test_a_binary_message_stops_the_stream_without_being_rewritten(
     pipeline.variables = dict(identity=True)
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     producer = raw_producer(kafka_bootstrap)
     producer.send(topics[0], value=b'\xff\xfe\x00binary', partition=0)
     producer.flush()
@@ -426,7 +353,9 @@ def test_a_paused_stream_reads_nothing_until_it_resumes_and_loses_nothing(
     """
     pipeline, _ = stream_pipeline
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    service = Service(kafka_service_binary(), directory, tmp_path / 'data', kafka_bootstrap)
+    service = RunningService(
+        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+    )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
         group_id=f'reader_{uuid.uuid4().hex[:8]}', consumer_timeout_ms=1000,

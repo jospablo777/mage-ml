@@ -215,7 +215,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | --- | --- |
 | Source | Kafka, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka; `dummy` prints each message to the service's output |
+| Sinks | Kafka, HTTP, Feast; `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -269,6 +269,42 @@ curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
   the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
 - `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
 - A request larger than the stream's batch size in bytes gets `413`.
+
+### HTTP and Feast sinks
+
+An `http` sink posts each batch to a URL, as a JSON array (or JSON lines with
+`format: ndjson`), with `Idempotency-Key: <stream>:<partition>:<first>-<last>`, the same on
+every retry of the batch. A `feast` sink pushes each batch's rows, JSON objects, to a Feast
+feature server's push source.
+
+```yaml
+connector_type: http
+url: https://hooks.example.com/orders
+format: json
+timeout_seconds: 10
+headers:
+  Authorization: "Bearer {{ env_var('HOOK_TOKEN') }}"
+```
+
+```yaml
+connector_type: feast
+url: "{{ env_var('FEAST_URL') }}"
+push_source_name: driver_stats_push
+to: online                 # online, offline or online_and_offline
+```
+
+- A batch counts as written only on a `2xx` answer. Network errors and `408`, `429`, `5xx`
+  answers are retried; other answers stop the stream with the receiver's reason, keeping its
+  position. Feast answers `500` for a row it cannot write, so a Feast sink tries a `500` three
+  times and then stops the stream with Feast's reason.
+- Requests never follow redirects, verify TLS, and never go to loopback, private, link-local
+  or cloud metadata addresses, checked on the addresses the client connects to. A sink inside
+  your own network sets `allow_private: true`.
+- Feast online pushes are upserts by entity and event time, so a batch replayed after a crash
+  writes the same values again; offline pushes append, so a replay can add rows twice there.
+- Values are sent exactly as the blocks made them: large integers keep every digit.
+- Headers whose names look like credentials (`Authorization`, tokens, keys) must be
+  `env_var()` references.
 
 ## Update the service
 
