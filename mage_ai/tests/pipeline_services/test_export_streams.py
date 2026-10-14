@@ -609,7 +609,7 @@ class StreamRefusalTest(StreamExportTestCase):
         '''))
         problems = self.problems()
         self.assertIn('PROTOBUF messages are not supported', problems)
-        self.assertIn('offset (a start position) is not supported', problems)
+        self.assertIn('offset needs partitions', problems)
         self.assertIn('unknown Kafka settings fetch_size', problems)
 
     def test_avro_messages_go_with_their_registry_and_its_password_as_a_reference(self):
@@ -746,6 +746,19 @@ class StreamRefusalTest(StreamExportTestCase):
         '''))  # pragma: allowlist secret
         self.assertIn('connection_string holds a password written in the file',
                       self.problems())
+
+    def test_a_start_offset_with_partitions_is_kept(self):
+        self.stream(source=textwrap.dedent(SOURCE) + textwrap.dedent('''
+            offset:
+              type: int
+              value: 5
+              partitions:
+                - {topic: orders, partition: 0}
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        config = captured.manifest['pipelines'][0]['stream']['source']['config']
+        self.assertEqual(config['offset'], dict(type='int', value=5,
+                                                partitions=[dict(topic='orders', partition=0)]))
 
     def test_include_metadata_is_kept_for_the_kafka_source(self):
         self.stream(source=textwrap.dedent(SOURCE) + 'include_metadata: true\n')

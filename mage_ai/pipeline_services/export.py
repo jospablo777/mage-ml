@@ -1199,13 +1199,23 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
                     'registry.'
                 )
             config.pop('serde_config', None)
-        if config.get('offset'):
-            problems.append(
-                f'{where}: offset (a start position) is not supported by services yet; the '
-                'consumer group\'s committed position, or auto_offset_reset, decides where the '
-                'stream starts.'
-            )
-        config.pop('offset', None)
+        offset = config.get('offset')
+        if offset:
+            # The listed partitions start there when the consumer group has nothing
+            # committed for them; then the committed position wins.
+            if not isinstance(offset, dict) or not offset.get('partitions'):
+                problems.append(
+                    f'{where}: offset needs partitions, a list of {{topic, partition}}, as in '
+                    'MageML.'
+                )
+            elif str(offset.get('type') or 'beginning') not in (
+                    'beginning', 'end', 'int', 'timestamp'):
+                problems.append(
+                    f'{where}: offset type {offset.get("type")} is not beginning, end, int or '
+                    'timestamp.'
+                )
+        else:
+            config.pop('offset', None)
         if not config.get('include_metadata'):
             config.pop('include_metadata', None)
         allowed = KAFKA_SOURCE_SETTINGS

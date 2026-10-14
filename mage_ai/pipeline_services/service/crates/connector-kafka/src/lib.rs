@@ -121,6 +121,106 @@ fn event_streams(client: &mut ClientConfig, credentials: &Value) -> Result<(), C
     Ok(())
 }
 
+/// Assigns Mage's `offset.partitions` to the consumer. Each starts where the consumer group
+/// committed, or where `offset` says when the group has nothing for it: Mage seeks at every
+/// start, which in a service read everything again after each restart.
+fn assign_from(
+    consumer: &KafkaConsumer,
+    table: &Mutex<Table>,
+    offset: &Value,
+) -> Result<Vec<(u32, AssignmentEpoch)>, ConnectorError> {
+    let fatal = |message: &str| ConnectorError::fatal(format!("Kafka source offset: {message}"));
+    let partitions: Vec<(String, i32)> = offset["partitions"]
+        .as_array()
+        .ok_or_else(|| fatal("it needs partitions, a list of {topic, partition}"))?
+        .iter()
+        .map(|p| {
+            Ok((
+                p["topic"]
+                    .as_str()
+                    .ok_or_else(|| fatal("a partition has no topic"))?
+                    .to_string(),
+                p["partition"]
+                    .as_i64()
+                    .ok_or_else(|| fatal("a partition has no number"))? as i32,
+            ))
+        })
+        .collect::<Result<_, ConnectorError>>()?;
+    let mut list = TopicPartitionList::new();
+    for (topic, partition) in &partitions {
+        list.add_partition(topic, *partition);
+    }
+    let committed = consumer
+        .committed_offsets(list.clone(), Duration::from_secs(30))
+        .map_err(connector_error)?;
+    let kind = offset["type"].as_str().unwrap_or("beginning");
+    let wanted = match kind {
+        "beginning" => Offset::Beginning,
+        "end" => Offset::End,
+        "int" => Offset::Offset(
+            offset["value"]
+                .as_i64()
+                .ok_or_else(|| fatal("type int needs value, the offset"))?,
+        ),
+        "timestamp" => Offset::Invalid,
+        other => {
+            return Err(fatal(&format!(
+                "type {other} is not beginning, end, int or timestamp"
+            )));
+        }
+    };
+    let mut starts = TopicPartitionList::new();
+    let mut by_time = TopicPartitionList::new();
+    for element in committed.elements() {
+        let offset = match element.offset() {
+            Offset::Offset(n) if n >= 0 => Offset::Offset(n),
+            _ if kind == "timestamp" => {
+                let at = offset_value_ms(offset).ok_or_else(|| {
+                    fatal("type timestamp needs value, milliseconds since the epoch")
+                })?;
+                let _ = by_time.add_partition_offset(
+                    element.topic(),
+                    element.partition(),
+                    Offset::Offset(at),
+                );
+                continue;
+            }
+            _ => wanted,
+        };
+        starts
+            .add_partition_offset(element.topic(), element.partition(), offset)
+            .map_err(connector_error)?;
+    }
+    if by_time.count() > 0 {
+        let found = consumer
+            .offsets_for_times(by_time, Duration::from_secs(30))
+            .map_err(connector_error)?;
+        for element in found.elements() {
+            let offset = match element.offset() {
+                Offset::Offset(n) if n >= 0 => Offset::Offset(n),
+                // No message at or after the time: from the end.
+                _ => Offset::End,
+            };
+            starts
+                .add_partition_offset(element.topic(), element.partition(), offset)
+                .map_err(connector_error)?;
+        }
+    }
+    consumer.assign(&starts).map_err(connector_error)?;
+    let mut table = table.lock().unwrap_or_else(|p| p.into_inner());
+    Ok(partitions
+        .iter()
+        .map(|(topic, partition)| {
+            let id = table.id(topic, *partition);
+            (id, table.assign(id))
+        })
+        .collect())
+}
+
+fn offset_value_ms(offset: &Value) -> Option<i64> {
+    offset["value"].as_i64()
+}
+
 /// Mage's serde_config: JSON (and text) as they are, or Avro decoded with the schemas of a
 /// schema registry.
 fn message_decoder(config: &Value) -> Result<Option<avro::AvroDecoder>, ConnectorError> {
@@ -620,6 +720,8 @@ pub struct KafkaSource {
     /// Partitions being revoked: their messages still in the channel are not delivered.
     revoking: BTreeSet<u32>,
     pending: BTreeMap<u32, Pending>,
+    /// Assignments made at start (Mage's offset assigns partitions itself).
+    initial: std::collections::VecDeque<SourceEvent>,
     seq: BTreeMap<u32, u64>,
     paused: BTreeSet<u32>,
     /// Messages of a chunk not yet in a batch: a batch filled before the chunk ended.
@@ -686,8 +788,19 @@ impl KafkaSource {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         };
-        let names: Vec<&str> = topics.iter().map(String::as_str).collect();
-        consumer.subscribe(&names).map_err(connector_error)?;
+        let mut initial = std::collections::VecDeque::new();
+        if let Some(offset) = config.get("offset").filter(|o| !o.is_null()) {
+            // Mage's offset: the listed partitions, assigned without the group's rebalancing.
+            for (id, epoch) in assign_from(&consumer, &table, offset)? {
+                initial.push_back(SourceEvent::Assigned {
+                    partition: PartitionId(id),
+                    epoch,
+                });
+            }
+        } else {
+            let names: Vec<&str> = topics.iter().map(String::as_str).collect();
+            consumer.subscribe(&names).map_err(connector_error)?;
+        }
         let consumer = Arc::new(consumer);
         let thread = std::thread::Builder::new()
             .name("kafka-source".into())
@@ -704,6 +817,7 @@ impl KafkaSource {
             thread: Some(thread),
             revoking: BTreeSet::new(),
             pending: BTreeMap::new(),
+            initial,
             seq: BTreeMap::new(),
             paused: BTreeSet::new(),
             carry: std::collections::VecDeque::new(),
@@ -925,6 +1039,9 @@ impl KafkaSource {
 impl Source for KafkaSource {
     fn next_event(&mut self) -> BoxFuture<'_, Result<SourceEvent, ConnectorError>> {
         Box::pin(async move {
+            if let Some(event) = self.initial.pop_front() {
+                return Ok(event);
+            }
             loop {
                 if let Some(batch) = self.ready(false)? {
                     return Ok(batch);

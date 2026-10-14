@@ -249,8 +249,14 @@ sasl_config:
   dead_letter: true
   ```
 - The export stops, with the reason, on what services can't run the same way as MageML
-  yet: Python sources and sinks, other connectors, Protobuf messages, a start `offset`, and
-  passwords written in the file.
+  yet: Python sources and sinks, other connectors, Protobuf messages, and passwords written
+  in the file.
+- `offset` (with `partitions`, as in MageML) reads the listed partitions without the consumer
+  group's rebalancing, each starting at the offset (`beginning`, `end`, an `int`, or a
+  `timestamp` in milliseconds) when the group has nothing committed for it, and at the
+  committed position after that. MageML seeks at every start, which in a service would read
+  everything again after each restart; to read from the offset again, use a new
+  `consumer_group`.
 - `include_metadata: true` hands blocks Mage's
   `{"data": <value>, "metadata": {"key", "partition", "offset", "time", "topic"}}`; a key
   that is not UTF-8 is its base64 text.

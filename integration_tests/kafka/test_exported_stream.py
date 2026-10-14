@@ -699,3 +699,71 @@ def test_include_metadata_hands_blocks_the_value_and_where_it_comes_from(
         assert message['meta_key'] == str(message['id'])
         assert message['meta_partition'] in (0, 1) and message['meta_offset'] >= 0
         assert message['meta_time'] > 1_700_000_000_000
+
+
+def test_a_start_offset_applies_once_then_the_committed_position_wins(
+    mage_project, topics, kafka_bootstrap, tmp_path,
+):
+    """
+    Mage's offset assigns the listed partitions and starts at the offset; a restart goes on
+    from what was committed instead of reading from the offset again.
+    """
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'kafka_offset_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, pipeline_type=PipelineType.STREAMING,
+                               repo_path=mage_project)
+    try:
+        def add(suffix, kind, code, language, upstream=()):
+            block = Block.create(f'{name}_{suffix}', kind, mage_project, language=language,
+                                 pipeline=pipeline)
+            Path(block.file_path).write_text(textwrap.dedent(code))
+            pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+            return block
+
+        source = add('source', 'data_loader', SOURCE % dict(topic=topics[0], group=name)
+                     + f'offset:\n  type: int\n  value: 5\n  partitions:\n'
+                     + f'    - {{topic: {topics[0]}, partition: 0}}\n', 'yaml')
+        step = add('pass', 'transformer', TRANSFORM, 'python', [source])
+        add('sink', 'data_exporter', SINK % dict(topic=topics[1]), 'yaml', [step])
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap)
+        for i in range(10):
+            producer.send(topics[0], partition=0,
+                          value=json.dumps(dict(id=i, amount=i)).encode())
+        producer.flush()
+        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        output = KafkaConsumer(topics[1], bootstrap_servers=kafka_bootstrap,
+                               auto_offset_reset='earliest',
+                               group_id=f'reader_{uuid.uuid4().hex[:8]}')
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        service.start()
+        try:
+            service.wait_running()
+            first = consume(output, 5)
+        finally:
+            service.stop()
+        for i in range(10, 13):
+            producer.send(topics[0], partition=0,
+                          value=json.dumps(dict(id=i, amount=i)).encode())
+        producer.flush()
+        producer.close()
+        service = RunningService(stream_service_binary(), directory, tmp_path / 'data2',
+                                 KAFKA_BOOTSTRAP=kafka_bootstrap)
+        service.start()
+        try:
+            service.wait_running()
+            second = consume(output, 2)
+            time.sleep(3)
+            second += consume(output, 10, timeout=3)
+        finally:
+            service.stop()
+            output.close()
+    finally:
+        pipeline.delete()
+
+    # The block drops ids divisible by 10: 5..9 gives 5,6,7,8,9; then 11 and 12.
+    assert sorted(m['id'] for m in first) == [5, 6, 7, 8, 9]
+    assert sorted(m['id'] for m in second) == [11, 12]
