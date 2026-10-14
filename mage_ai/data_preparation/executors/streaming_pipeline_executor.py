@@ -205,14 +205,20 @@ class StreamingPipelineExecutor(PipelineExecutor):
                     ),
                 )
 
-        # Rust transformers: one program per block for the run (rust_sample).
+        # Rust and R transformers: one program per block for the run (rust_sample).
         rust_programs: Dict = dict()
 
         def run_rust(block, data, variables: Dict):
             from mage_ai.streaming import rust_sample
 
             program = rust_programs.get(block.uuid)
-            if program is None:
+            if program is None and block.language == BlockLanguage.R:
+                program = rust_sample.RStreamProgram(
+                    block, self.pipeline.uuid, variables, self.pipeline.repo_path,
+                    float(block.timeout or 3600),
+                )
+                rust_programs[block.uuid] = program
+            elif program is None:
                 program = rust_sample.RustStreamProgram(
                     rust_sample.build_stream_program(block, self.pipeline.repo_path),
                     block.uuid, self.pipeline.uuid, variables, self.pipeline.repo_path,
@@ -250,7 +256,7 @@ class StreamingPipelineExecutor(PipelineExecutor):
                 else:
                     data = curr_block_output
                 if (downstream_block.type == BlockType.TRANSFORMER
-                        and downstream_block.language == BlockLanguage.RUST):
+                        and downstream_block.language in (BlockLanguage.RUST, BlockLanguage.R)):
                     outputs_by_block[downstream_block.uuid] = run_rust(
                         downstream_block, data, kwargs,
                     )

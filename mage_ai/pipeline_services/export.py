@@ -1217,10 +1217,10 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     blocks = []
     for block in transformers:
         language = str(getattr(block.language, 'value', block.language))
-        if language not in ('python', 'rust'):
+        if language not in ('python', 'rust', 'r'):
             problems.append(
                 f'{prefix}, block {block.uuid} is written in {language}; services run stream '
-                'transformers written in Python or Rust.'
+                'transformers written in Python, Rust or R.'
             )
             continue
         entry = _block_entry(pipeline, block, project, repo_config, capture_, problems, {},

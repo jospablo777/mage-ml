@@ -173,7 +173,7 @@ function languageMenuItems(
   };
 }
 
-function RMenuItems(
+export function RMenuItems(
   addNewBlock: (block: BlockRequestPayloadType) => void,
   blockType: BlockTypeEnum,
   templates?: FlyoutMenuItemType[],

@@ -47,30 +47,38 @@ def decode(data: bytes) -> Any:
         return data.decode('utf-8', errors='replace')
 
 
-class RustStreamProgram:
-    """One block's program, running while the sample runs."""
+class StreamProgram:
+    """
+    A stream program, running while the sample or the editor's run does: a Rust block's
+    binary on a Unix socket, or R (mageml::serve_stream) on 127.0.0.1 with a token, as base
+    R has no Unix sockets.
+    """
 
-    def __init__(self, binary: Path, block_uuid: str, pipeline_uuid: str, variables: Dict,
-                 cwd: str, env: Dict[str, str], timeout: float):
+    def __init__(self, command: List[str], chain: List[Dict], pipeline_uuid: str,
+                 variables: Dict, cwd: str, env: Dict[str, str], timeout: float,
+                 tcp: bool = False):
         self.timeout = timeout
         self.lines: List[str] = []
-        self.directory = tempfile.mkdtemp(prefix='mage-rust-sample-')
-        # A short path: Unix socket paths hold about 100 bytes.
-        path = os.path.join(tempfile.gettempdir(), f'mage-s-{uuid.uuid4().hex[:12]}.sock')
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(path)
+        self.directory = tempfile.mkdtemp(prefix='mage-stream-program-')
+        job = dict(api_version=1, pipeline_uuid=pipeline_uuid, variables=variables,
+                   chain=chain)
+        token = uuid.uuid4().hex
+        path = None
+        if tcp:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(('127.0.0.1', 0))
+            job.update(port=listener.getsockname()[1], token=token)
+        else:
+            # A short path: Unix socket paths hold about 100 bytes.
+            path = os.path.join(tempfile.gettempdir(), f'mage-s-{uuid.uuid4().hex[:12]}.sock')
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(path)
+            job.update(socket=path)
         listener.listen(1)
         listener.settimeout(START_SECONDS)
-        Path(self.directory, 'stream.json').write_text(json.dumps(dict(
-            api_version=1,
-            socket=path,
-            pipeline_uuid=pipeline_uuid,
-            variables=variables,
-            chain=[dict(block_uuid=block_uuid, block_type='transformer', entry='block',
-                        send=True)],
-        ), default=str))
+        Path(self.directory, 'stream.json').write_text(json.dumps(job, default=str))
         self.process = subprocess.Popen(
-            [str(binary), self.directory], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+            [*command, self.directory], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace',
             start_new_session=True,
         )
@@ -82,9 +90,13 @@ class RustStreamProgram:
             raise RustSampleError(self._stopped(f'did not connect within {START_SECONDS} s'))
         finally:
             listener.close()
-            os.unlink(path)
+            if path:
+                os.unlink(path)
         self.connection.settimeout(timeout)
         ready = json.loads(self._read_frame() or b'{}')
+        if tcp and ready.get('token') != token:
+            self.close()
+            raise RustSampleError('A program that is not the stream\'s connected; stopped.')
         if ready.get('protocol') != PROTOCOL:
             self.close()
             raise RustSampleError(
@@ -191,3 +203,31 @@ def program_env(block) -> Dict[str, str]:
     if io_config:
         env['MAGE_IO_CONFIG'] = json.dumps(io_config, default=str)
     return env
+
+
+class RustStreamProgram(StreamProgram):
+    """One Rust block's program (its own binary, entry `block`)."""
+
+    def __init__(self, binary: Path, block_uuid: str, pipeline_uuid: str, variables: Dict,
+                 cwd: str, env: Dict[str, str], timeout: float):
+        super().__init__(
+            [str(binary)],
+            [dict(block_uuid=block_uuid, block_type='transformer', entry='block', send=True)],
+            pipeline_uuid, variables, cwd, env, timeout,
+        )
+
+
+class RStreamProgram(StreamProgram):
+    """An R stream block's program: mageml::serve_stream with the project's R setup."""
+
+    def __init__(self, block, pipeline_uuid: str, variables: Dict, repo_path: str,
+                 timeout: float):
+        from mage_ai.data_preparation.models.block.r.stream import stream_command
+
+        command = stream_command(repo_path)
+        super().__init__(
+            command['command'],
+            [dict(block_uuid=block.uuid, block_type='transformer', file=block.file_path,
+                  send=True)],
+            pipeline_uuid, variables, command['cwd'], command['env'], timeout, tcp=True,
+        )

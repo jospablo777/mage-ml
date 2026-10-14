@@ -1112,6 +1112,14 @@ def serve(requests=None, channel=None) -> None:
             if request.get('op') == 'stream':
                 # The reply holds the outputs' JSON: a Polars output is not made a list.
                 result = _stream_batch(request)
+            elif request.get('op') == 'r_stream_command':
+                # How a stream's R program starts: the R setup lives here, not in the engine.
+                import importlib
+
+                _r_execution()
+                stream = importlib.import_module('mage_service_r.stream')
+                result = stream.stream_command(os.environ.get('MAGE_REPO_PATH') or os.getcwd(),
+                                               supervised=False)
             elif request.get('op') == 'stream_load':
                 # Compiles a stream's blocks (their top-level code runs) without a batch,
                 # and says what each takes: the engine sends a table's rows as a file.

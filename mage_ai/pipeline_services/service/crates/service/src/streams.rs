@@ -366,10 +366,10 @@ fn transform_session(
         .collect();
     if let Some(block) = order
         .iter()
-        .find(|b| !matches!(b.language, Language::Python | Language::Rust))
+        .find(|b| !matches!(b.language, Language::Python | Language::Rust | Language::R))
     {
         return Err(format!(
-            "stream block {} is in {:?}; stream blocks run in Python or Rust",
+            "stream block {} is in {:?}; stream blocks run in Python, Rust or R",
             block.uuid, block.language
         ));
     }
@@ -420,7 +420,7 @@ fn transform_session(
         {
             return Err(format!(
                 "stream block {} does not read the block before it; a stream that mixes \
-                 Python and Rust blocks runs them as one chain",
+                 languages runs its blocks as one chain",
                 block.uuid
             ));
         }
@@ -474,7 +474,7 @@ fn region_session(
     log: RunLog,
 ) -> Result<Box<dyn TransformSession>, String> {
     let cancel = service.stream_stop.child_token();
-    if blocks[0].language == Language::Rust {
+    if matches!(blocks[0].language, Language::Rust | Language::R) {
         return Ok(Box::new(crate::stream_rust::RustStreamSession::new(
             service.clone(),
             pipeline,
@@ -484,6 +484,7 @@ fn region_session(
                 log,
                 cancel,
                 isolate,
+                pool: service.python.clone(),
             },
         )?));
     }

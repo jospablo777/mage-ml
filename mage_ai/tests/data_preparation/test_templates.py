@@ -718,3 +718,9 @@ def test_output(output, *args) -> None:
         self.assertIn('fn transform(data: LazyFrame)', batch)
         self.assertEqual(rust_source.analyze(stream, BlockType.TRANSFORMER).function,
                          'transform')
+
+    def test_an_r_transformer_in_a_stream_gets_the_stream_template(self):
+        stream = fetch_template_source(BlockType.TRANSFORMER, {}, language=BlockLanguage.R,
+                                       pipeline_type=PipelineType.STREAMING)
+        self.assertIn('transform <- function(messages, ...)', stream)
+        self.assertIn('variable("minimum", 0)', stream)

@@ -36,6 +36,7 @@ import {
   getdataSourceMenuItems,
   getNonPythonMenuItems,
   groupBlockTemplates,
+  RMenuItems,
   RustMenuItems,
 } from './utils';
 
@@ -256,7 +257,8 @@ function AddNewBlocks({
           label: () => 'Python',
           uuid: 'transformers/python',
         },
-        // Rust stream transformers run in one resident program per stream.
+        // Rust and R stream transformers run in one resident program per stream.
+        RMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),
         RustMenuItems(addNewBlock, BlockTypeEnum.TRANSFORMER),
         ...getdataSourceMenuItems(
           addNewBlock,

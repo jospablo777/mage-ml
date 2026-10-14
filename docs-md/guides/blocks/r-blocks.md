@@ -338,6 +338,35 @@ outputs. `mage export service` exports R blocks with the project's rv environmen
 [pipeline service](../../production/pipeline-services.md) image installs R and the packages
 `rv.lock` pins, and runs the blocks the same way.
 
+## Stream transformers
+
+In a streaming pipeline, an R transformer runs on each batch of the stream's messages, as a
+tibble with one row per JSON message. The stream's R blocks run in one R session that stays
+up for the stream, so code at the top of the file, such as loading a model, runs once:
+
+```r
+model <- readRDS("models/churn.rds")
+
+#* @transformer
+transform <- function(messages, ...) {
+  messages$score <- predict(model, newdata = messages, type = "response")
+  messages[messages$score > variable("threshold", 0.5), ]
+}
+```
+
+- The block returns its messages: a data frame (one JSON object per row), a list of
+  messages, or `NULL` for none.
+- Arrow reads the messages: integers that fit stay R integers, larger ones become
+  `integer64` with every digit, as in batch R blocks; missing fields are `NA`, written back
+  as `null`.
+- Every message must be a JSON object. An error is the block's error: the batch is retried,
+  then stops the stream, or with a dead-letter sink only the messages that fail go there.
+  If R exits, the next batch starts it again.
+- R blocks mix with Python and Rust blocks in one chain (each block reading the one before).
+- In the editor, sample runs and **Execute pipeline** run each R block the same way;
+  [exported services](../../production/export-a-service.md#streaming-pipelines) run the stream's
+  consecutive R blocks in one session.
+
 ## Settings
 
 | Variable | Default | |

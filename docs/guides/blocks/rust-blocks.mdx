@@ -362,7 +362,7 @@ JSON.
 - `serde_json` holds integers up to 64 bits; a larger one in a `Vec<Value>` becomes a float.
   Take `Vec<String>` to keep every digit.
 - From a RabbitMQ source, a Rust block gets each message's body, not Mage's `Payload`.
-- Rust and Python blocks can mix in one chain (each block reads the one before it): each
+- Rust, Python and R blocks can mix in one chain (each block reads the one before it): each
   run of blocks in one language takes the messages of the run before. Consecutive Rust
   blocks run in one program and share one io_config profile. With a dead-letter sink,
   messages that fail on their own are found in the first run; a failure in a later run fails

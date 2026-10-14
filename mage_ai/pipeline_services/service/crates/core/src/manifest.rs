@@ -659,9 +659,12 @@ impl Pipeline {
                     block.uuid, block.block_type
                 ));
             }
-            if !matches!(block.language, Language::Python | Language::Rust) {
+            if !matches!(
+                block.language,
+                Language::Python | Language::Rust | Language::R
+            ) {
                 problems.push(format!(
-                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python or Rust.",
+                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust or R.",
                     block.uuid, block.language
                 ));
             }

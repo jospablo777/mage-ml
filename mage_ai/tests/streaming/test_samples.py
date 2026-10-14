@@ -2,7 +2,9 @@
 Stream samples for the editor: files of JSON lines next to the pipeline, and blocks run on
 them with the service engine's Python worker.
 """
+import shutil
 import textwrap
+import unittest
 from pathlib import Path
 
 from mage_ai.data_preparation.models.block import Block
@@ -306,3 +308,50 @@ class RustSampleRunTest(StreamSampleTestCase):
         self.assertEqual(result['outputs'][after.uuid],
                          [{'amount': 2, 'total': 20.0, 'last': True}])
         self.assertIn(dict(block_uuid=python.uuid, line='python first'), result['logs'])
+
+
+@unittest.skipUnless(shutil.which('Rscript'), 'needs Rscript, with arrow and jsonlite')
+class RSampleRunTest(StreamSampleTestCase):
+    """R stream blocks run on samples in mageml::serve_stream, as services run them."""
+
+    PRICE = '''
+        #* @transformer
+        transform <- function(messages, ...) {
+          rate <- variable("rate", 1)
+          cat("pricing", nrow(messages), "\\n")
+          if (any(is.na(messages$amount))) stop("an amount is missing")
+          messages$total <- messages$amount * rate
+          messages
+        }
+    '''
+
+    def test_an_r_block_runs_on_samples_between_python_blocks(self):
+        double = self.add('double', 'transformer', '''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return [dict(m, amount=m['amount'] * 2) for m in messages]
+        ''', [self.source])
+        price = self.add('price', 'transformer', self.PRICE, [double], language='r')
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, price.uuid,
+            [{'amount': 1, 'big': 2**60}, {'amount': 2}], variables=dict(rate=10),
+        )
+
+        self.assertNotIn('error', result, result)
+        self.assertEqual(result['outputs'][price.uuid], [
+            {'amount': 2, 'big': 2**60, 'total': 20},
+            {'amount': 4, 'big': None, 'total': 40},
+        ])
+        self.assertIn(dict(block_uuid=price.uuid, line='pricing 2 '), result['logs'])
+
+    def test_a_failing_r_block_names_the_first_failing_message(self):
+        price = self.add('price', 'transformer', self.PRICE, [self.source], language='r')
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, price.uuid,
+            [{'amount': 1}, {'id': 7}, {'amount': 3}],
+        )
+
+        self.assertIn('an amount is missing', result['error']['message'])
+        self.assertEqual(result['failing_message'], dict(index=1, message={'id': 7}))

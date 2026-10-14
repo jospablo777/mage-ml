@@ -203,6 +203,8 @@ def __fetch_transformer_templates(
             template_path = 'transformers/default_pyspark.jinja'
         elif pipeline_type == PipelineType.STREAMING and language == BlockLanguage.RUST:
             template_path = 'transformers/rust/default_streaming.rs'
+        elif pipeline_type == PipelineType.STREAMING and language == BlockLanguage.R:
+            template_path = 'transformers/r/default_streaming.r'
         elif pipeline_type == PipelineType.STREAMING:
             template_path = 'transformers/default_streaming.jinja'
         elif language == BlockLanguage.R:

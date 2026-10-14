@@ -1,4 +1,6 @@
+import shutil
 import textwrap
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -186,3 +188,25 @@ class StreamingPipelineExecutorTest(DBTestCase):
 
         self.assertEqual(sinks['sink'].batches,
                          [[dict(id=1, rust=True), dict(id=2, rust=True)]])
+
+    @unittest.skipUnless(shutil.which('Rscript'), 'needs Rscript, with arrow and jsonlite')
+    def test_r_transformers_run_in_their_programs(self):
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        r = self.add('r', 'transformer', '''
+            #* @transformer
+            transform <- function(messages, ...) {
+              messages$r <- TRUE
+              messages
+            }
+        ''', upstream=[source], language=BlockLanguage.R)
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[r], language=BlockLanguage.YAML)
+
+        _, sinks = self.run_pipeline(['sink'])
+
+        self.assertEqual(sinks['sink'].batches, [[dict(id=1, r=True), dict(id=2, r=True)]])

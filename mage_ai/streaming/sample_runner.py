@@ -154,11 +154,11 @@ def _language_runs(pipeline, block_uuid: str) -> Optional[List[List]]:
             break
         block = blocks.get(parents[0]) if parents else None
     languages = [str(getattr(b.language, 'value', b.language)) for b in chain]
-    if 'rust' not in languages:
+    if not {'rust', 'r'} & set(languages):
         return None
-    unknown = sorted(set(languages) - {'python', 'rust'})
+    unknown = sorted(set(languages) - {'python', 'rust', 'r'})
     if unknown:
-        raise SampleRunError(f'Stream blocks run in Python or Rust, not {unknown[0]}.')
+        raise SampleRunError(f'Stream blocks run in Python, Rust or R, not {unknown[0]}.')
     runs: List[List] = []
     for block, language in zip(chain, languages):
         if runs and str(getattr(runs[-1][0].language, 'value', runs[-1][0].language)) == language:
@@ -299,11 +299,16 @@ def _run_rust(repo_path: str, pipeline, block_uuid: str, chain: List, messages: 
     current = [rust_sample.encode(m) for m in messages]
     for block in chain:
         try:
-            binary = rust_sample.build_stream_program(block, repo_path)
-            program = rust_sample.RustStreamProgram(
-                binary, block.uuid, pipeline.uuid, kwargs, repo_path,
-                rust_sample.program_env(block), RUN_TIMEOUT_SECONDS,
-            )
+            if str(getattr(block.language, 'value', block.language)) == 'r':
+                program = rust_sample.RStreamProgram(
+                    block, pipeline.uuid, kwargs, repo_path, RUN_TIMEOUT_SECONDS,
+                )
+            else:
+                binary = rust_sample.build_stream_program(block, repo_path)
+                program = rust_sample.RustStreamProgram(
+                    binary, block.uuid, pipeline.uuid, kwargs, repo_path,
+                    rust_sample.program_env(block), RUN_TIMEOUT_SECONDS,
+                )
         except Exception as error:
             result['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
             break
@@ -360,7 +365,7 @@ def _run_language_runs(repo_path: str, pipeline, block_uuid: str, runs: List[Lis
     current = messages
     for run in runs:
         language = str(getattr(run[0].language, 'value', run[0].language))
-        if language == 'rust':
+        if language in ('rust', 'r'):
             part = _run_rust(repo_path, pipeline, run[-1].uuid, run, current, variables)
         else:
             chain = [_chain_entry(pipeline, block, [run[i - 1].uuid] if i else [])

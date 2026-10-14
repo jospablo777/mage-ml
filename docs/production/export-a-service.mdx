@@ -214,7 +214,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 | Part | What services run now |
 | --- | --- |
 | Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
-| Transformers | Python, or [Rust](/guides/blocks/rust-blocks#stream-transformers) |
+| Transformers | Python, [Rust](/guides/blocks/rust-blocks#stream-transformers) or [R](/guides/blocks/r-blocks#stream-transformers), mixed in one chain |
 | Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
