@@ -474,6 +474,31 @@ class StreamIsolationTest(WorkerTestCase):
         self.assertEqual(caught.exception.phase, 'load')
 
 
+class RabbitmqPayloadTest(WorkerTestCase):
+    """A RabbitMQ stream's blocks get Mage's Payload(method, properties, body)."""
+
+    def test_blocks_written_for_mages_rabbitmq_source_run_unchanged(self):
+        worker._STREAM_FUNCTIONS.clear()
+        block = self.block('''
+            import json
+
+            @transformer
+            def f(messages):
+                return [dict(json.loads(m.body), tag=m.method.delivery_tag,
+                             trace=m.properties.headers.get('trace')) for m in messages]
+        ''', name='rabbit')
+
+        result = worker.run_stream_batch(dict(
+            chain=[block], message_shape='rabbitmq',
+            messages=[{'body': '{"id": 1}', 'delivery_tag': 7, 'headers': {'trace': 'x'}},
+                      {'body_base64': 'eyJpZCI6IDJ9', 'delivery_tag': 8}],
+        ))
+
+        self.assertEqual(result['messages'], [
+            dict(id=1, tag=7, trace='x'), dict(id=2, tag=8, trace=None),
+        ])
+
+
 class StreamLoadTest(WorkerTestCase):
     """
     A replaced worker gets a stream's blocks loaded before the stream's next batch, so a model

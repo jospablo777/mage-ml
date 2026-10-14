@@ -82,6 +82,19 @@ fn source(
                 in_flight_bytes(stream),
             )?))
         }
+        #[cfg(feature = "rabbitmq")]
+        ConnectorKind::Rabbitmq => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let batch = &stream.batch;
+            Ok(Box::new(mage_connector_rabbitmq::RabbitSource::new(
+                &_config,
+                mage_connector_rabbitmq::BatchLimits {
+                    max_records: batch.max_records,
+                    max_bytes: batch.max_bytes,
+                    max_wait: Duration::from_millis(batch.max_wait_ms),
+                },
+            )?))
+        }
         ConnectorKind::Http => {
             let stream = pipeline.stream.as_ref().expect("a stream");
             let seconds = |key: &str, default: u64| {
@@ -185,6 +198,11 @@ fn sink(
         )?)),
         #[cfg(feature = "kafka")]
         ConnectorKind::Kafka => Ok(Arc::new(mage_connector_kafka::KafkaSink::new(&_config)?)),
+        #[cfg(feature = "rabbitmq")]
+        ConnectorKind::Rabbitmq => Ok(Arc::new(mage_connector_rabbitmq::RabbitSink::new(
+            &_config,
+            &pipeline.uuid,
+        )?)),
         // Kafka without the kafka feature; with it, every kind has its own arm.
         #[allow(unreachable_patterns)]
         kind => Err(ConnectorError::fatal(format!(
@@ -198,6 +216,9 @@ fn sink(
 fn unavailable(kind: ConnectorKind) -> &'static str {
     match kind {
         ConnectorKind::Kafka => "it was built without Kafka; build it with the kafka feature",
+        ConnectorKind::Rabbitmq => {
+            "it was built without RabbitMQ; build it with the rabbitmq feature"
+        }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
     }
@@ -295,6 +316,11 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
                 cancel: service.stream_stop.child_token(),
                 // Messages that fail on their own go to the dead-letter sink when there is one.
                 isolate: stream.errors.dead_letter.is_some(),
+                shape: if stream.source.kind == ConnectorKind::Rabbitmq {
+                    crate::stream_python::MessageShape::RabbitmqPayload
+                } else {
+                    crate::stream_python::MessageShape::Values
+                },
             },
         )))
     };

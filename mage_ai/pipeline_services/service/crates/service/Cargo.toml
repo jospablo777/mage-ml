@@ -14,6 +14,8 @@ mage-connector-local = { path = "../connector-local" }
 mage-connector-http = { path = "../connector-http" }
 # Kafka streams (librdkafka, built with cmake); exports turn it on when a stream uses Kafka.
 mage-connector-kafka = { path = "../connector-kafka", optional = true }
+# RabbitMQ streams (lapin, pure Rust); exports turn it on when a stream uses RabbitMQ.
+mage-connector-rabbitmq = { path = "../connector-rabbitmq", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -38,6 +40,7 @@ arrow-json = { version = "60", default-features = false }
 
 [features]
 kafka = ["dep:mage-connector-kafka"]
+rabbitmq = ["dep:mage-connector-rabbitmq"]
 
 [dev-dependencies]
 tempfile = "3"

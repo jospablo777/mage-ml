@@ -27,6 +27,20 @@ def service_binary() -> Path:
     return BINARY
 
 
+# The engine with every stream connector, in its own target folder: the other exported-service
+# tests build it without them, and test workers build at the same time. CI builds it first.
+STREAM_TARGET = SERVICE / 'target' / 'streams'
+STREAM_FEATURES = 'kafka,rabbitmq'
+
+
+def stream_service_binary() -> Path:
+    subprocess.run(
+        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', STREAM_FEATURES],
+        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(STREAM_TARGET)),
+    )
+    return STREAM_TARGET / 'debug' / 'mage-service'
+
+
 def run_exported(project, pipeline: str, out: Path, variables=None, timeout: int = 600):
     """Exports the pipeline to out, runs it once and returns the run; every block must
     complete."""

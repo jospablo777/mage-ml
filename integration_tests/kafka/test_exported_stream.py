@@ -5,8 +5,6 @@ message is transformed once, positions are committed, and a restart neither lose
 repeats messages.
 """
 import json
-import os
-import subprocess
 import textwrap
 import time
 import uuid
@@ -16,11 +14,11 @@ import pytest
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.admin import KafkaAdminClient, NewTopic
 
-from integration_tests.exported_services import SERVICE, RunningService, export_service
-
-# Its own target folder: the other exported-service tests build the engine without Kafka,
-# and test workers build at the same time.
-TARGET = SERVICE / 'target' / 'kafka'
+from integration_tests.exported_services import (
+    RunningService,
+    export_service,
+    stream_service_binary,
+)
 
 SOURCE = '''
 connector_type: kafka
@@ -52,14 +50,6 @@ connector_type: kafka
 bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
 topic: %(topic)s
 '''
-
-
-def kafka_service_binary() -> Path:
-    subprocess.run(
-        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', 'kafka'],
-        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(TARGET)),
-    )
-    return TARGET / 'debug' / 'mage-service'
 
 
 @pytest.fixture
@@ -129,7 +119,7 @@ def test_an_exported_kafka_stream_transforms_each_message_once_across_a_restart(
     pipeline, group = stream_pipeline
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
@@ -177,7 +167,7 @@ def test_partitions_move_between_instances_without_losing_or_repeating_messages(
     pipeline.variables = dict(delay=0.2)
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
-    binary = kafka_service_binary()
+    binary = stream_service_binary()
     first = RunningService(
         binary, directory, tmp_path / 'data-a', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
@@ -229,7 +219,7 @@ def test_a_killed_service_loses_nothing_and_repeats_at_most_its_batches_in_fligh
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
@@ -285,7 +275,7 @@ def test_message_values_pass_through_exactly(
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
@@ -324,7 +314,7 @@ def test_a_binary_message_stops_the_stream_without_being_rewritten(
     pipeline.save()
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     producer = raw_producer(kafka_bootstrap)
     producer.send(topics[0], value=b'\xff\xfe\x00binary', partition=0)
@@ -357,7 +347,7 @@ def test_a_paused_stream_reads_nothing_until_it_resumes_and_loses_nothing(
     pipeline, _ = stream_pipeline
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',
@@ -411,7 +401,7 @@ def test_messages_that_fail_on_their_own_go_to_the_dead_letter_topic(
     pipeline.add_block(dead, upstream_block_uuids=[source.uuid])
     directory = export_service(mage_project, pipeline.uuid, tmp_path)
     service = RunningService(
-        kafka_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
+        stream_service_binary(), directory, tmp_path / 'data', KAFKA_BOOTSTRAP=kafka_bootstrap,
     )
     output = KafkaConsumer(
         topics[1], bootstrap_servers=kafka_bootstrap, auto_offset_reset='earliest',

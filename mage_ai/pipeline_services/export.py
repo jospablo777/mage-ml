@@ -104,12 +104,22 @@ class Capture:
         return [p['stream'] for p in self.manifest['pipelines'] if p.get('stream')]
 
     @property
+    def connector_kinds(self) -> Set[str]:
+        kinds = set()
+        for stream in self.streams:
+            dead_letter = (stream.get('errors') or {}).get('dead_letter')
+            for connector in [stream['source'], *stream['sinks'], *filter(None, [dead_letter])]:
+                kinds.add(connector['kind'])
+        return kinds
+
+    @property
     def needs_kafka(self) -> bool:
-        return any(
-            connector['kind'] == 'kafka'
-            for stream in self.streams
-            for connector in [stream['source'], *stream['sinks']]
-        )
+        return 'kafka' in self.connector_kinds
+
+    @property
+    def engine_features(self) -> List[str]:
+        """The engine's optional connectors the streams use."""
+        return sorted(self.connector_kinds & {'kafka', 'rabbitmq'})
 
     @property
     def needs_r(self) -> bool:
@@ -534,8 +544,19 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 
 
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
-STREAM_SOURCES = {'kafka': 'kafka', 'webhook': 'http'}
-STREAM_SINKS = {'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast'}
+STREAM_SOURCES = {'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq'}
+STREAM_SINKS = {
+    'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
+}
+# Mage's RabbitMQ settings the engine's connector reads.
+RABBITMQ_SETTINGS = {
+    'connection_host', 'connection_port', 'queue_name', 'username', 'password',
+    'amqp_url_virtual_host', 'url_protocol',
+}
+RABBITMQ_SOURCE_SETTINGS = RABBITMQ_SETTINGS | {
+    'prefetch_count', 'batch_size', 'batch_timeout', 'configure_consume', 'consume_config',
+}
+RABBITMQ_SINK_SETTINGS = RABBITMQ_SETTINGS | {'exchange', 'routing_key'}
 FEAST_SINK_SETTINGS = {
     'url', 'push_source_name', 'to', 'headers', 'timeout_seconds', 'allow_private',
 }
@@ -543,7 +564,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'RabbitMQ, NATS, Pulsar and PostgreSQL change capture come next'
+STREAM_PLANNED = 'NATS, Pulsar, IBM MQ and PostgreSQL change capture come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -565,6 +586,8 @@ SSL_SETTINGS = {'cafile', 'certfile', 'keyfile', 'password', 'check_hostname'}
 SECRET_SETTINGS = {
     ('sasl_config', 'password'), ('ssl_config', 'password'), ('signature', 'secret'),
 }
+# Top-level settings that hold secrets (RabbitMQ's password).
+SECRET_KEYS = {'password'}
 
 
 def compile_stream_config(text: str, variables: Dict) -> Dict:
@@ -695,6 +718,38 @@ def _http_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     return {k: v for k, v in config.items() if k in HTTP_SINK_SETTINGS}
 
 
+def _rabbitmq_connector(block, role: str, config: Dict, where: str,
+                        problems: List[str]) -> Dict:
+    allowed = RABBITMQ_SOURCE_SETTINGS if role == 'source' else RABBITMQ_SINK_SETTINGS
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown RabbitMQ settings {", ".join(unknown)}.')
+    if not config.get('connection_host'):
+        problems.append(f'{where}: RabbitMQ settings need connection_host.')
+    if role == 'source' and not config.get('queue_name'):
+        problems.append(f'{where}: a RabbitMQ source needs queue_name.')
+    if _literal(config.get('password')) and config.get('password') != 'guest':
+        problems.append(
+            f"{where}: password is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    if (config.get('consume_config') or {}).get('auto_ack'):
+        problems.append(
+            f'{where}: consume_config.auto_ack acknowledges messages as they arrive, before '
+            'any sink took them; services acknowledge after the sinks, so remove it.'
+        )
+    settings = {k: v for k, v in config.items() if k in RABBITMQ_SETTINGS
+                or k in ('prefetch_count', 'exchange', 'routing_key')}
+    connector = dict(name=block.uuid, kind='rabbitmq', config=settings)
+    if role == 'source':
+        # Mage's RabbitMQ source batches by count and seconds.
+        if config.get('batch_size'):
+            connector['batch_size'] = config['batch_size']
+        if config.get('batch_timeout'):
+            connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
 def _feast_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     unknown = sorted(set(config) - FEAST_SINK_SETTINGS)
     if unknown:
@@ -770,6 +825,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     if kind == 'feast':
         return dict(name=block.uuid, kind=kind,
                     config=_feast_sink_settings(config, where, problems))
+    if kind == 'rabbitmq':
+        return _rabbitmq_connector(block, role, config, where, problems)
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(
@@ -1454,7 +1511,8 @@ def _references(value, path: Tuple[str, ...] = ()) -> List[Tuple[str, bool, bool
     """(variable, secret, required) for each environment reference in connector settings."""
     found: List[Tuple[str, bool, bool]] = []
     if isinstance(value, dict) and '$parts' in value:
-        secret = tuple(path[-2:]) in SECRET_SETTINGS
+        secret = (tuple(path[-2:]) in SECRET_SETTINGS
+                  or (len(path) == 1 and path[0] in SECRET_KEYS))
         for part in value['$parts']:
             if isinstance(part, dict) and part.get('env'):
                 found.append((part['env'], secret, 'default' not in part))
@@ -2378,8 +2436,11 @@ RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.
         copy_python = ''
     engine_features = ''
     kafka_build = ''
+    if capture_.engine_features:
+        engine_features = ' --features ' + ','.join(
+            f'mage-service/{feature}' for feature in capture_.engine_features
+        )
     if capture_.needs_kafka:
-        engine_features = ' --features mage-service/kafka'
         # librdkafka builds with CMake, OpenSSL from source (make, perl), and includes curl's
         # header (I-40). All of it links statically: the runtime image needs nothing more.
         kafka_build = (

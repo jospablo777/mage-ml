@@ -332,12 +332,60 @@ class DeadLetterExportTest(StreamExportTestCase):
         self.assertIn('has 2 dead-letter sinks', self.problems())
 
 
+class RabbitmqExportTest(StreamExportTestCase):
+    SOURCE = '''
+        connector_type: rabbitmq
+        connection_host: rabbit
+        connection_port: 5672
+        queue_name: orders
+        username: svc
+        password: "{{ env_var('RABBIT_PASSWORD') }}"
+        batch_size: 50
+        batch_timeout: 0.5
+    '''
+    SINK = '''
+        connector_type: rabbitmq
+        connection_host: rabbit
+        connection_port: 5672
+        queue_name: orders_clean
+        password: "{{ env_var('RABBIT_PASSWORD') }}"
+    '''
+
+    def test_rabbitmq_source_and_sink_export_with_their_engine_feature(self):
+        self.stream(source=self.SOURCE, sink=self.SINK)
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        export.write(captured, str(out), force=True)
+
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'rabbitmq')
+        self.assertEqual(stream['source']['config']['queue_name'], 'orders')
+        self.assertEqual(stream['batch'], dict(max_records=50, max_wait_ms=500))
+        self.assertEqual(stream['sinks'][0]['kind'], 'rabbitmq')
+        self.assertEqual(captured.engine_features, ['rabbitmq'])
+        self.assertIn('--features mage-service/rabbitmq', (out / 'Dockerfile').read_text())
+        password = next(v for v in captured.manifest['environment']
+                        if v['name'] == 'RABBIT_PASSWORD')
+        self.assertTrue(password['secret'])
+        self.assertEqual(password['used_by'], [])
+
+    def test_auto_ack_and_written_passwords_are_refused(self):
+        self.stream(source=textwrap.dedent(self.SOURCE).replace(
+            "\"{{ env_var('RABBIT_PASSWORD') }}\"", 'hunter2',  # pragma: allowlist secret
+        ) + 'consume_config:\n  auto_ack: true\n')
+        problems = self.problems()
+        self.assertIn('password is written in the file', problems)
+        self.assertIn('auto_ack', problems)
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
-        self.stream(source='connector_type: rabbitmq\nconnection_host: localhost\n')
+        self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')
         problems = self.problems()
         self.assertIn(
-            'uses the rabbitmq connector; services run kafka, webhook sources now', problems,
+            'uses the nats connector; services run kafka, rabbitmq, webhook sources now', problems,
         )
 
     def test_python_sources_are_refused(self):

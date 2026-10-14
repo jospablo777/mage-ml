@@ -213,9 +213,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, RabbitMQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
-| Sinks | Kafka, HTTP, Feast; `dummy` prints each message to the service's output |
+| Sinks | Kafka, RabbitMQ, HTTP, Feast; `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -254,8 +254,8 @@ sasl_config:
 - The export stops, with the reason, on what services can't run the same way as MageML
   yet: Python sources and sinks, other connectors, `include_metadata`, Avro, Protobuf and
   raw messages, a start `offset`, and passwords written in the file.
-- The image builds the engine with Kafka support (librdkafka), so the first build takes a
-  few minutes longer.
+- The image builds the engine with the connectors the pipeline uses. Kafka support
+  (librdkafka) makes the first build a few minutes longer.
 
 ### Webhooks
 
@@ -284,6 +284,39 @@ curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
   the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
 - `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
 - A request larger than the stream's batch size in bytes gets `413`.
+
+### RabbitMQ
+
+The `rabbitmq` source and sink take MageML's settings:
+
+```yaml
+connector_type: rabbitmq
+connection_host: rabbitmq.example.com
+connection_port: 5672
+url_protocol: amqps              # amqp or amqps
+amqp_url_virtual_host: orders
+username: orders
+password: "{{ env_var('RABBITMQ_PASSWORD') }}"
+queue_name: orders
+batch_size: 250                  # source: messages per batch
+batch_timeout: 0.2               # source: seconds before a smaller batch runs
+prefetch_count: 1000             # source: deliveries the broker sends ahead
+```
+
+- Blocks get each message as MageML's RabbitMQ source hands it, `Payload(method,
+  properties, body)` with `body` in bytes, so blocks written for MageML run unchanged.
+  The service acknowledges deliveries itself after the sinks: blocks must not ack them, and
+  `consume_config.auto_ack` is refused.
+- A delivery is acknowledged only once every sink took its batch. Deliveries not acknowledged
+  when the service stops or dies go back to the queue, so a restart repeats at most the
+  batches that were in flight.
+- The sink publishes persistent, mandatory messages and waits for the broker's publisher
+  confirms. A message no queue takes, or one the broker refuses, stops the stream with the
+  reason, and its input stays unacknowledged. A sink takes `exchange` and `routing_key`
+  (the queue by default); each message's `message_id` is `<stream>:<partition>:<position>`,
+  the same on a replay, for consumers that dedupe.
+- One queue has no partitions: several service instances share it as competing consumers,
+  so order holds only with one instance.
 
 ### HTTP and Feast sinks
 

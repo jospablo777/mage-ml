@@ -776,6 +776,8 @@ def run_stream_batch(request: Dict) -> Dict:
     dead letters: a code or infrastructure problem must not empty the stream into them. A
     block can see a message more than once while its batch is split.
     """
+    if request.get('message_shape') == 'rabbitmq':
+        request = dict(request, messages=[_rabbitmq_payload(m) for m in request['messages']])
     if not request.get('isolate'):
         return _run_stream_chain(request, request['messages'])
     messages = request['messages']
@@ -794,6 +796,34 @@ def run_stream_batch(request: Dict) -> Dict:
             blocks=[],
             failures=failures,
         )
+
+
+def _rabbitmq_payload(message: Dict):
+    """
+    A RabbitMQ delivery as Mage's RabbitMQ source hands it to blocks: Payload(method,
+    properties, body), body the message's bytes, so blocks written for Mage run unchanged.
+    """
+    import base64
+    from collections import namedtuple
+    from types import SimpleNamespace
+
+    payload = namedtuple('Payload', ['method', 'properties', 'body'])
+    if 'body_base64' in message:
+        body = base64.b64decode(message['body_base64'])
+    else:
+        body = (message.get('body') or '').encode('utf-8')
+    method = SimpleNamespace(
+        delivery_tag=message.get('delivery_tag'),
+        routing_key=message.get('routing_key'),
+        exchange='',
+        redelivered=False,
+    )
+    properties = SimpleNamespace(
+        headers=message.get('headers') or {},
+        content_type=None,
+        message_id=None,
+    )
+    return payload(method, properties, body)
 
 
 def _isolate(request: Dict, messages: List, offset: int) -> Tuple[Dict[str, List], List[Dict]]:

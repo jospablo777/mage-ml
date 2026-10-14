@@ -35,6 +35,7 @@ pub struct PythonStreamSession {
     cancel: CancellationToken,
     /// Ask the worker for the messages that fail on their own (row-level dead letters).
     isolate: bool,
+    shape: MessageShape,
 }
 
 /// How a stream's Python session runs, besides its blocks.
@@ -45,6 +46,15 @@ pub struct SessionOptions {
     pub cancel: CancellationToken,
     /// Find the messages that fail on their own (the stream has a dead-letter sink).
     pub isolate: bool,
+    /// How blocks receive messages: their values, or for a RabbitMQ source Mage's
+    /// `Payload(method, properties, body)`, so its blocks run unchanged.
+    pub shape: MessageShape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageShape {
+    Values,
+    RabbitmqPayload,
 }
 
 impl PythonStreamSession {
@@ -60,6 +70,7 @@ impl PythonStreamSession {
             log,
             cancel,
             isolate,
+            shape,
         } = options;
         let chain = order
             .iter()
@@ -90,6 +101,7 @@ impl PythonStreamSession {
             timeout,
             cancel,
             isolate,
+            shape,
         }
     }
 }
@@ -111,6 +123,36 @@ fn message_value(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
             envelope.partition
         ))),
     }
+}
+
+/// A RabbitMQ delivery for the worker, which makes Mage's `Payload` of it: the body as text
+/// (or base64 when it is not UTF-8), with its headers, routing key and delivery tag.
+fn rabbitmq_message(envelope: &Envelope) -> Result<Box<RawValue>, TransformError> {
+    use base64::Engine as _;
+
+    let headers: serde_json::Map<String, Value> = envelope
+        .headers
+        .iter()
+        .map(|h| {
+            (
+                h.key.clone(),
+                Value::String(String::from_utf8_lossy(&h.value).into_owned()),
+            )
+        })
+        .collect();
+    let mut message = json!({
+        "headers": headers,
+        "routing_key": envelope.key.as_ref().map(|k| String::from_utf8_lossy(k).into_owned()),
+        "delivery_tag": envelope.position,
+    });
+    match std::str::from_utf8(&envelope.value) {
+        Ok(text) => message["body"] = Value::String(text.to_string()),
+        Err(_) => {
+            message["body_base64"] =
+                Value::String(base64::engine::general_purpose::STANDARD.encode(&envelope.value))
+        }
+    }
+    serde_json::value::to_raw_value(&message).map_err(|e| TransformError::Protocol(e.to_string()))
 }
 
 fn to_batch(messages: &[Box<RawValue>], partition: u32) -> Result<RecordBatch, TransformError> {
@@ -136,6 +178,8 @@ struct StreamRequest<'a> {
     outputs: &'a [String],
     kwargs: &'a Value,
     isolate: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_shape: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -185,10 +229,17 @@ impl TransformSession for PythonStreamSession {
             let envelopes =
                 read_envelope(&batch).map_err(|e| TransformError::Protocol(e.to_string()))?;
             let partition = envelopes.first().map_or(0, |e| e.partition);
-            let messages = envelopes
-                .iter()
-                .map(message_value)
-                .collect::<Result<Vec<_>, _>>()?;
+            let messages = match self.shape {
+                MessageShape::Values => envelopes
+                    .iter()
+                    .map(message_value)
+                    .collect::<Result<Vec<_>, _>>()?,
+                MessageShape::RabbitmqPayload => envelopes
+                    .iter()
+                    .map(rabbitmq_message)
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            let shape = self.shape;
             let (chain, outputs, kwargs, isolate) =
                 (&self.chain, &self.outputs, &self.kwargs, self.isolate);
             let line = |id: &str| {
@@ -200,6 +251,7 @@ impl TransformSession for PythonStreamSession {
                     outputs,
                     kwargs,
                     isolate,
+                    message_shape: (shape == MessageShape::RabbitmqPayload).then_some("rabbitmq"),
                 })
             };
             let (reply, replaced) = self
