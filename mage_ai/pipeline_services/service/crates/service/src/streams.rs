@@ -360,17 +360,7 @@ fn transform_session(
         .filter_map(|s| s.after.clone())
         .collect();
     let dead_letters = stream.errors.dead_letter.is_some();
-    // How the source's messages reach the first blocks, as Mage hands them over.
-    let source_shape = if stream.source.kind == ConnectorKind::Rabbitmq {
-        MessageShape::RabbitmqPayload
-    } else if stream.source.config["serde_config"]["serialization_method"]
-        .as_str()
-        .is_some_and(|m| m.eq_ignore_ascii_case("RAW_VALUE"))
-    {
-        MessageShape::RawBytes
-    } else {
-        MessageShape::Values
-    };
+    let source_shape = source_shape(&stream.source);
     let mut regions: Vec<Vec<Block>> = Vec::new();
     for block in order.iter().cloned() {
         match regions.last_mut() {
@@ -434,6 +424,23 @@ fn transform_session(
     Ok(Some(Box::new(crate::stream_chain::ChainedSession::new(
         chained, wanted,
     ))))
+}
+
+/// How the source's messages reach the first blocks, as Mage hands them over.
+fn source_shape(source: &Connector) -> MessageShape {
+    let raw = source
+        .config
+        .get("serde_config")
+        .and_then(|serde| serde.get("serialization_method"))
+        .and_then(Value::as_str)
+        .is_some_and(|method| method.eq_ignore_ascii_case("RAW_VALUE"));
+    if source.kind == ConnectorKind::Rabbitmq {
+        MessageShape::RabbitmqPayload
+    } else if raw {
+        MessageShape::RawBytes
+    } else {
+        MessageShape::Values
+    }
 }
 
 fn region_session(
@@ -542,5 +549,33 @@ fn fail(status: &SharedStatus, pipeline: &str, reason: &str) {
     if let Ok(mut s) = status.lock() {
         s.state = StreamState::Failed;
         s.last_error = Some(reason.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connector(kind: ConnectorKind, config: Value) -> Connector {
+        Connector {
+            name: "source".into(),
+            kind,
+            after: None,
+            config: config.as_object().cloned().unwrap_or_default(),
+        }
+    }
+
+    #[test]
+    fn a_source_without_serde_settings_hands_over_values() {
+        // Indexing the settings map with a missing key panicked at start (I-89).
+        let kafka = connector(ConnectorKind::Kafka, serde_json::json!({"topic": "t"}));
+        assert_eq!(source_shape(&kafka), MessageShape::Values);
+        let raw = connector(
+            ConnectorKind::Kafka,
+            serde_json::json!({"serde_config": {"serialization_method": "raw_value"}}),
+        );
+        assert_eq!(source_shape(&raw), MessageShape::RawBytes);
+        let rabbit = connector(ConnectorKind::Rabbitmq, serde_json::json!({}));
+        assert_eq!(source_shape(&rabbit), MessageShape::RabbitmqPayload);
     }
 }
