@@ -108,6 +108,25 @@ class RustBlockTest(DBTestCase):
                 if name == 'onnx.rs':
                     # Needs the onnx feature: test_the_onnx_template_scores_rows builds it.
                     continue
+                if name == 'default_streaming.rs':
+                    # A stream transformer: its program runs on each batch of messages.
+                    from mage_ai.streaming import rust_sample
+
+                    prepared = rust_build.prepare(
+                        code, block_type, 'template_streaming', self.rust_repo, stream=True,
+                    )
+                    program = rust_sample.RustStreamProgram(
+                        rust_build.build(prepared).binary, 'template_streaming', 'p',
+                        dict(minimum=2), self.rust_repo, dict(os.environ), 60,
+                    )
+                    try:
+                        reply = program.run([b'{"amount": 1}', b'{"amount": 3}'])
+                    finally:
+                        program.close()
+                    self.assertTrue(reply['ok'], reply)
+                    self.assertEqual([rust_sample.decode(m) for m in reply['messages']],
+                                     [{'amount': 3, 'seen_by': 'rust'}])
+                    continue
                 if name == 'postgres.rs':
                     # Needs a database: compiled here, run by integration_tests/postgres.
                     prepared = rust_build.prepare(

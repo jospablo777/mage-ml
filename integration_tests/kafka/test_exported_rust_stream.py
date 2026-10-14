@@ -110,8 +110,12 @@ def topics(kafka_bootstrap):
     names = [f'it_rust_{uuid.uuid4().hex[:10]}' for _ in range(3)]
     admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
     admin.create_topics([NewTopic(n, num_partitions=1, replication_factor=1) for n in names])
+    admin.close()
     yield names
+    # A new client: the first one's connection can drop while the blocks build.
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
     admin.delete_topics(names)
+    admin.close()
 
 
 def produce(bootstrap, topic, messages):
