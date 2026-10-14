@@ -210,9 +210,9 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, Azure Event Hubs, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
+| Source | Kafka, Azure Event Hubs, NATS JetStream, RabbitMQ, IBM MQ, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python, or [Rust](../guides/blocks/rust-blocks.md#stream-transformers) |
-| Sinks | Kafka, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, HTTP, Feast, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk); `dummy` prints each message to the service's output |
 
 ```yaml
 connector_type: kafka
@@ -307,6 +307,7 @@ Kafka through one block:
 | Python, returns its messages | Parquet files | 521,000 |
 | Python, returns its messages | ClickHouse | 254,000 |
 | Python, returns its messages | PostgreSQL (COPY) | 206,000 |
+| Python, returns its messages | NATS JetStream | 197,000 |
 | Python, returns its messages | RabbitMQ (publisher confirms) | 32,000 |
 | Python, returns its messages | IBM MQ (emulated amd64 server) | 15,000 |
 
@@ -314,6 +315,7 @@ Read from other sources into Kafka through a Python block:
 
 | Source | Messages a second |
 | --- | --- |
+| NATS JetStream (one pull consumer) | 242,000 |
 | RabbitMQ (one queue) | 16,000 to 27,000 |
 | IBM MQ, one connection (emulated amd64 server) | 1,900 |
 | IBM MQ, four connections | 4,600 |
@@ -352,6 +354,33 @@ curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
   the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
 - `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
 - A request larger than the stream's batch size in bytes gets `413`.
+
+### NATS JetStream
+
+MageML's `nats_js` source and sink run as they are:
+
+```yaml
+connector_type: nats_js
+server_url: nats://nats:4222
+stream_name: orders          # made when it does not exist
+subject: orders.new
+consumer_name: scorer        # the durable consumer; the stream's name by default
+batch_size: 500
+timeout: 0.5                 # seconds a smaller batch waits
+ack_wait: 120                # seconds before an unacknowledged message comes again
+user_credentials: [reader, "{{ env_var('NATS_PASSWORD') }}"]   # or a .creds file
+```
+
+- The source is a durable pull consumer. Each message is acknowledged after every sink took
+  its batch; several instances share the consumer's messages, so order across them is not
+  kept. A consumer the service makes allows ten batches unacknowledged, since JetStream's
+  default of 1,000 is smaller than a large batch. `consumer_type: PUSH` is refused: the
+  same durable consumer cannot be read both ways.
+- The sink publishes each message with a `Nats-Msg-Id` made from the stream, partition and
+  position, so JetStream drops a message that a replayed batch publishes again within its
+  duplicate window, and confirms a batch once JetStream acknowledged all of it. Without
+  `stream_name` it publishes to the stream that takes the subject, as MageML's does. A
+  `{"data": ..., "metadata": {...}}` message publishes its data with the metadata as headers.
 
 ### RabbitMQ
 

@@ -559,17 +559,19 @@ STREAM_SOURCES = {
     'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
     # Read through Event Hubs' Kafka endpoint.
     'azure_event_hub': 'kafka',
+    'nats_js': 'nats',
 }
 STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
-    'clickhouse': 'clickhouse',
+    'clickhouse': 'clickhouse', 'nats_js': 'nats',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
+    'nats': 'nats',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -620,7 +622,7 @@ HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_priv
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'NATS, Pulsar and PostgreSQL change capture come next'
+STREAM_PLANNED = 'Kinesis, Pub/Sub, SQS, Pulsar and PostgreSQL change capture come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
 WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
@@ -803,6 +805,47 @@ def _rabbitmq_connector(block, role: str, config: Dict, where: str,
             connector['batch_size'] = config['batch_size']
         if config.get('batch_timeout'):
             connector['timeout_ms'] = int(float(config['batch_timeout']) * 1000)
+    return connector
+
+
+NATS_SETTINGS = {'server_url', 'subject', 'stream_name', 'nkeys_seed_str', 'user_credentials',
+                 'use_tls', 'ssl_config'}
+NATS_SOURCE_SETTINGS = NATS_SETTINGS | {'consumer_name', 'batch_size', 'timeout', 'ack_wait',
+                                        'consumer_type', 'use_queue_group'}
+NATS_SINK_SETTINGS = NATS_SETTINGS | {'timeout'}
+
+
+def _nats_connector(block, role: str, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MageML's NATS JetStream source (a durable pull consumer) and sink."""
+    allowed = NATS_SOURCE_SETTINGS if role == 'source' else NATS_SINK_SETTINGS
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown NATS settings {", ".join(unknown)}.')
+    for key in ('server_url', 'subject') + (('stream_name',) if role == 'source' else ()):
+        if not config.get(key):
+            problems.append(f'{where}: NATS settings need {key}.')
+    credentials = config.get('user_credentials')
+    secrets = [config.get('nkeys_seed_str')]
+    if isinstance(credentials, (list, tuple)) and len(credentials) == 2:
+        secrets.append(credentials[1])
+    if any(_literal(secret) for secret in secrets):
+        problems.append(
+            f"{where}: a NATS password or seed is written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    if role == 'source' and str(config.get('consumer_type') or 'PULL').upper() != 'PULL':
+        problems.append(
+            f'{where}: services read NATS with a pull consumer; remove consumer_type: PUSH '
+            '(the same durable consumer cannot be both).'
+        )
+    settings = {k: v for k, v in config.items() if k in NATS_SETTINGS
+                or (role == 'source' and k in ('consumer_name', 'ack_wait'))}
+    connector = dict(name=block.uuid, kind='nats', config=settings)
+    if role == 'source':
+        if config.get('batch_size'):
+            connector['batch_size'] = config['batch_size']
+        if config.get('timeout'):
+            connector['timeout_ms'] = int(float(config['timeout']) * 1000)
     return connector
 
 
@@ -1071,6 +1114,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _event_hubs_connector(block, config, where, problems)
     if kind == 'rabbitmq':
         return _rabbitmq_connector(block, role, config, where, problems)
+    if kind == 'nats':
+        return _nats_connector(block, role, config, where, problems)
     if kind == 'ibm_mq':
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':

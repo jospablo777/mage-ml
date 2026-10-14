@@ -228,6 +228,10 @@ services:
     image: nats:2.15-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]
     mem_limit: 256m
+    # Go sizes its heap by the host's memory, not the container's: under load NATS grew
+    # past the limit and was killed. Its JetStream store is on tmpfs, inside it too.
+    environment:
+      GOMEMLIMIT: 160MiB
     tmpfs:
       - /data
     ports:

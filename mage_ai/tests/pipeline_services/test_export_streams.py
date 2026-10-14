@@ -573,10 +573,11 @@ class ClickHouseSinkExportTest(StreamExportTestCase):
 
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
-        self.stream(source='connector_type: nats\nserver_url: nats://localhost:4222\n')
+        self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the nats connector; services run ibm_mq, kafka, rabbitmq, webhook sources now',
+            'uses the kinesis connector; services run azure_event_hub, ibm_mq, kafka, nats_js, '
+            'rabbitmq, webhook sources now',
             problems,
         )
 
@@ -650,6 +651,47 @@ class StreamRefusalTest(StreamExportTestCase):
         problems = self.problems()
         self.assertIn('connection_str is written in the file', problems)
         self.assertIn('Azure Event Hubs needs eventhub_name', problems)
+
+    def test_nats_jetstream_streams_keep_their_settings(self):
+        self.stream(
+            source=textwrap.dedent('''
+                connector_type: nats_js
+                server_url: nats://nats:4222
+                stream_name: orders
+                subject: orders.new
+                consumer_name: scorer
+                batch_size: 200
+                timeout: 0.5
+                ack_wait: 120
+                user_credentials: [reader, "{{ env_var('NATS_PASSWORD') }}"]
+            '''),
+            sink=textwrap.dedent('''
+                connector_type: nats_js
+                server_url: nats://nats:4222
+                subject: scores.new
+            '''),
+        )
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        stream = captured.manifest['pipelines'][0]['stream']
+        self.assertEqual(stream['source']['kind'], 'nats')
+        self.assertEqual(stream['source']['config']['consumer_name'], 'scorer')
+        self.assertEqual(stream['batch'], dict(stream['batch'], max_records=200, max_wait_ms=500))
+        self.assertIn('NATS_PASSWORD', json.dumps(stream['source']['config']))
+        self.assertEqual(stream['sinks'][0]['kind'], 'nats')
+        self.assertNotIn('stream_name', stream['sinks'][0]['config'])
+
+    def test_a_nats_push_consumer_or_written_password_is_refused(self):
+        self.stream(source=textwrap.dedent('''
+            connector_type: nats_js
+            server_url: nats://nats:4222
+            subject: orders.new
+            consumer_type: PUSH
+            user_credentials: [reader, hunter2]
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('NATS settings need stream_name', problems)
+        self.assertIn('pull consumer', problems)
+        self.assertIn('NATS password or seed is written in the file', problems)
 
     def test_raw_value_messages_go_to_the_blocks_as_bytes(self):
         self.stream(source=textwrap.dedent(SOURCE)

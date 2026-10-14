@@ -335,10 +335,29 @@ def _sink_case(sink, request, tmp_path):
         return yaml, count, dict(MQ_PASSWORD=mq.password, MAGE_SERVICE_MQ_LIBRARY=mq.library,
                                  LD_LIBRARY_PATH=libraries, DYLD_LIBRARY_PATH=libraries,
                                  MQ_OVERRIDE_DATA_PATH=str(tmp_path / 'mq-data'))
+    if sink == 'nats':
+        url = request.getfixturevalue('nats_url')
+        from integration_tests.nats.test_streaming import jetstream
+
+        stream = f'bench_{uuid.uuid4().hex[:8]}'
+        request.addfinalizer(lambda: jetstream(url, lambda js: js.delete_stream(stream)))
+
+        def count():
+            async def action(js):
+                return (await js.stream_info(stream)).state.messages
+
+            try:
+                return jetstream(url, action)
+            except Exception:
+                return 0
+        yaml = (f'connector_type: nats_js\nserver_url: {url}\nstream_name: {stream}\n'
+                f'subject: {stream}.events\n')
+        return yaml, count, {}
     raise ValueError(sink)
 
 
-@pytest.mark.parametrize('sink', ['clickhouse', 'ibm_mq', 'parquet', 'postgres', 'rabbitmq'])
+@pytest.mark.parametrize('sink', ['clickhouse', 'ibm_mq', 'nats', 'parquet', 'postgres',
+                                  'rabbitmq'])
 def test_sink_throughput(sink, request, mage_project, kafka_bootstrap, binary, tmp_path):
     from kafka.admin import KafkaAdminClient, NewTopic
 
@@ -363,7 +382,8 @@ def test_sink_throughput(sink, request, mage_project, kafka_bootstrap, binary, t
     _record(result)
 
 
-@pytest.mark.parametrize('source,connections', [('ibm_mq', 1), ('ibm_mq', 4), ('rabbitmq', 1)])
+@pytest.mark.parametrize('source,connections', [('ibm_mq', 1), ('ibm_mq', 4), ('nats', 1),
+                                                ('rabbitmq', 1)])
 def test_source_throughput(source, connections, request, mage_project, kafka_bootstrap, binary,
                            tmp_path):
     """
@@ -381,7 +401,8 @@ def test_source_throughput(source, connections, request, mage_project, kafka_boo
     name = f'bench_source_{source}_{uuid.uuid4().hex[:6]}'
     fill = _stream(mage_project, f'{name}_fill', _kafka_source(topics[0], name), queue_yaml)
     read = _stream(mage_project, f'{name}_read',
-                   queue_yaml + 'batch_size: 5000\nbatch_timeout: 0.1\n'
+                   queue_yaml + ('batch_size: 5000\ntimeout: 0.1\nconsumer_name: bench\n'
+                                 if source == 'nats' else 'batch_size: 5000\nbatch_timeout: 0.1\n')
                    + (f'connections: {connections}\n' if connections > 1 else ''),
                    f'''
                        connector_type: kafka
