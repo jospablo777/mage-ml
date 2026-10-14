@@ -50,6 +50,8 @@ pub struct Service {
     pub streams: Mutex<BTreeMap<String, crate::stream::SharedStatus>>,
     /// Each running stream's pause switch, set by the control API.
     pub stream_pause: Mutex<BTreeMap<String, tokio::sync::watch::Sender<bool>>>,
+    /// Streams with an HTTP source: where the API hands their requests.
+    pub ingest: Mutex<BTreeMap<String, Arc<crate::streams::HttpIngest>>>,
     /// Cancelled at shutdown: streams stop reading and drain.
     pub stream_stop: CancellationToken,
     max_total_runs: usize,
@@ -108,6 +110,7 @@ impl Service {
             extra_env: config.extra_env,
             streams: Mutex::new(BTreeMap::new()),
             stream_pause: Mutex::new(BTreeMap::new()),
+            ingest: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),

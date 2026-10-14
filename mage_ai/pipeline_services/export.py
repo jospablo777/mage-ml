@@ -534,10 +534,14 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 
 
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
-STREAM_SOURCES = {'kafka': 'kafka'}
+STREAM_SOURCES = {'kafka': 'kafka', 'webhook': 'http'}
 STREAM_SINKS = {'kafka': 'kafka', 'dummy': 'stdout'}
 # What comes next, for the message that names an unsupported connector.
-STREAM_PLANNED = 'HTTP, RabbitMQ, NATS and PostgreSQL change capture come next'
+STREAM_PLANNED = 'RabbitMQ, NATS, Pulsar and PostgreSQL change capture come next'
+# A webhook source's settings: requests signed with an HMAC of the body, and how long a
+# caller waits and a retry's key is remembered.
+WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
+SIGNATURE_SETTINGS = {'header', 'prefix', 'secret'}
 # Mage's Kafka settings the engine's connector reads; others stop the export, as Mage's own
 # settings class refuses unknown keys.
 KAFKA_SETTINGS = {
@@ -552,7 +556,9 @@ KAFKA_SINK_SETTINGS = KAFKA_SETTINGS | {'topic', 'batch_size', 'timeout_ms'}
 SASL_SETTINGS = {'mechanism', 'username', 'password'}
 SSL_SETTINGS = {'cafile', 'certfile', 'keyfile', 'password', 'check_hostname'}
 # Settings that hold secrets: written as env_var() references, never as values.
-SECRET_SETTINGS = {('sasl_config', 'password'), ('ssl_config', 'password')}
+SECRET_SETTINGS = {
+    ('sasl_config', 'password'), ('ssl_config', 'password'), ('signature', 'secret'),
+}
 
 
 def compile_stream_config(text: str, variables: Dict) -> Dict:
@@ -632,6 +638,33 @@ def _kafka_settings(config: Dict, allowed: Set[str], where: str,
     return settings
 
 
+def _webhook_settings(config: Dict, where: str, problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - WEBHOOK_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown webhook settings {", ".join(unknown)}.')
+    signature = config.get('signature')
+    if signature is not None:
+        if not isinstance(signature, dict):
+            problems.append(f'{where}: signature must be a mapping (header, prefix, secret).')
+        else:
+            extra = sorted(set(signature) - SIGNATURE_SETTINGS)
+            if extra:
+                problems.append(f'{where}: unknown signature settings {", ".join(extra)}.')
+            secret = signature.get('secret')
+            if not secret:
+                problems.append(f'{where}: signature needs a secret.')
+            elif _literal(secret):
+                problems.append(
+                    f"{where}: signature.secret is written in the file; use "
+                    f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+                )
+    for key in ('answer_within_seconds', 'dedupe_window_seconds'):
+        value = config.get(key)
+        if value is not None and not (isinstance(value, int) and value > 0):
+            problems.append(f'{where}: {key} must be a whole number of seconds above 0.')
+    return {k: v for k, v in config.items() if k in WEBHOOK_SETTINGS}
+
+
 def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture_: Capture,
                       problems: List[str]) -> Optional[Dict]:
     where = f'Pipeline {pipeline.uuid}, {role} {block.uuid}'
@@ -662,6 +695,9 @@ def _stream_connector(block, kinds: Dict[str, str], role: str, pipeline, capture
     kind = kinds[connector_type]
     if kind == 'stdout':
         return dict(name=block.uuid, kind=kind, config={})
+    if kind == 'http':
+        return dict(name=block.uuid, kind=kind,
+                    config=_webhook_settings(config, where, problems))
     if role == 'source':
         if config.get('include_metadata'):
             problems.append(

@@ -135,6 +135,22 @@ fn manifest(once_trigger: bool) -> Value {
 }
 
 impl Service {
+    /// A service with its own manifest and block files.
+    fn with_manifest(manifest: &Value, files: &[(&str, &str)]) -> Service {
+        let dir = tempfile::tempdir().unwrap();
+        for (file, code) in files {
+            let path = dir.path().join("proj").join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, code).unwrap();
+        }
+        std::fs::write(dir.path().join("service.json"), manifest.to_string()).unwrap();
+        Service {
+            dir,
+            port: 0,
+            child: None,
+        }
+    }
+
     fn create(once_trigger: bool) -> Service {
         let dir = tempfile::tempdir().unwrap();
         for (file, code) in BLOCKS {
@@ -229,11 +245,27 @@ impl Service {
         token: Option<&str>,
         body: &str,
     ) -> std::io::Result<(u16, Value)> {
+        self.request_with(method, path, token, body, &[])
+    }
+
+    fn request_with(
+        &self,
+        method: &str,
+        path: &str,
+        token: Option<&str>,
+        body: &str,
+        headers: &[(&str, &str)],
+    ) -> std::io::Result<(u16, Value)> {
+        let extra: String = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect();
         let mut stream = TcpStream::connect(("127.0.0.1", self.port))?;
         stream.set_read_timeout(Some(Duration::from_secs(120)))?;
         let auth = token
             .map(|t| format!("Authorization: Bearer {t}\r\n"))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            + &extra;
         write!(
             stream,
             "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -837,4 +869,126 @@ fn a_block_cannot_read_or_reach_the_worker_protocol() {
     // The worker still serves the next run.
     let (status, run) = service.post("/v1/pipelines/sum/runs?wait=60&output=total", json!({}));
     assert_eq!(status, 201, "{run}");
+}
+
+const TAG_BLOCK: &str = "@transformer\ndef tag(messages, *args, **kwargs):\n    return [dict(m, tagged=True) for m in messages]\n";
+
+fn webhook_manifest(source_config: Value, max_bytes: usize) -> Value {
+    json!({
+        "schema_version": 2,
+        "service": {"name": "hooks", "project": "proj", "exported_at": "2026-10-13T00:00:00Z",
+                    "mage_version": "test", "source_sha256": "abc"},
+        "pipelines": [{
+            "uuid": "hooks", "name": "hooks", "max_concurrent_runs": 1, "variables": {},
+            "blocks": [{"uuid": "tag", "type": "transformer", "language": "python",
+                        "file": "transformers/tag.py", "sha256": "0", "upstream": []}],
+            "triggers": [],
+            "stream": {
+                "source": {"name": "hook", "kind": "http", "config": source_config},
+                "sinks": [{"name": "out", "kind": "stdout", "after": "tag"}],
+                "batch": {"max_records": 100, "max_wait_ms": 100, "max_bytes": max_bytes}
+            }
+        }]
+    })
+}
+
+fn wait_for_stream(service: &Service, pipeline: &str) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        let (_, streams) = service.get("/v1/streams");
+        if streams["streams"].as_array().is_some_and(|list| {
+            list.iter()
+                .any(|s| s["pipeline"] == pipeline && s["state"] == "running")
+        }) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("stream {pipeline} did not start");
+}
+
+#[test]
+fn a_webhook_is_answered_once_its_messages_are_delivered_and_a_retry_writes_nothing() {
+    let mut service = Service::with_manifest(
+        &webhook_manifest(json!({}), 1 << 20),
+        &[("transformers/tag.py", TAG_BLOCK)],
+    );
+    service.start(&[("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")]);
+    wait_for_stream(&service, "hooks");
+    let send = |token: Option<&str>, key: &str| {
+        service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                token,
+                r#"[{"id": 1, "big": 123456789012345678901234567890}, {"id": 2}]"#,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap()
+    };
+
+    let (status, body) = send(Some("ingest-secret"), "k1");
+    assert_eq!((status, &body["accepted"]), (200, &json!(2)), "{body}");
+    let (status, body) = send(Some("ingest-secret"), "k1");
+    assert_eq!((status, &body["duplicate"]), (200, &json!(true)), "{body}");
+
+    // The sink wrote each message once, the big integer whole.
+    let log = std::fs::read_to_string(service.dir.path().join("service.log")).unwrap();
+    assert_eq!(
+        log.matches(r#""tagged": true"#).count() + log.matches(r#""tagged":true"#).count(),
+        2,
+        "{log}"
+    );
+    assert!(log.contains("123456789012345678901234567890"), "{log}");
+
+    // The ingest token only sends messages; nothing without a token.
+    assert_eq!(send(None, "k2").0, 401);
+    let (status, _) = service
+        .request_text(
+            "POST",
+            "/v1/pipelines/hooks/runs",
+            Some("ingest-secret"),
+            "{}",
+        )
+        .unwrap();
+    assert_eq!(status, 403);
+}
+
+#[test]
+fn a_webhook_checks_its_signature_and_size() {
+    let config = json!({"signature": {
+        "header": "X-Hub-Signature-256",
+        "prefix": "sha256=",
+        "secret": {"$parts": [{"env": "WEBHOOK_SECRET"}]}
+    }});
+    let mut service = Service::with_manifest(
+        &webhook_manifest(config, 2048),
+        &[("transformers/tag.py", TAG_BLOCK)],
+    );
+    service.start(&[("WEBHOOK_SECRET", "shh")]);
+    wait_for_stream(&service, "hooks");
+    let body = r#"{"event": "opened"}"#;
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"shh");
+    let signature: String = ring::hmac::sign(&key, body.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let post = |body: &str, signature: &str| {
+        service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some(TOKEN),
+                body,
+                &[("X-Hub-Signature-256", signature)],
+            )
+            .unwrap()
+    };
+
+    assert_eq!(post(body, &format!("sha256={signature}")).0, 200);
+    let (status, error) = post(body, "sha256=00");
+    assert_eq!(status, 401, "{error}");
+    let large = format!("[{}]", vec![r#"{"x": 1}"#; 400].join(","));
+    assert_eq!(post(&large, &format!("sha256={signature}")).0, 413);
 }

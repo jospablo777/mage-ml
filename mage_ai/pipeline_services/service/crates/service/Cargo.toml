@@ -11,6 +11,7 @@ mage-service-core = { path = "../core" }
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 mage-connector-local = { path = "../connector-local" }
+mage-connector-http = { path = "../connector-http" }
 # Kafka streams (librdkafka, built with cmake); exports turn it on when a stream uses Kafka.
 mage-connector-kafka = { path = "../connector-kafka", optional = true }
 serde.workspace = true

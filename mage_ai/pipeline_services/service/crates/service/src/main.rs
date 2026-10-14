@@ -145,6 +145,10 @@ struct ServeArgs {
     /// A token that can only read runs, logs and the snapshot.
     #[arg(long, env = "MAGE_SERVICE_READ_TOKEN", hide_env_values = true)]
     read_token: Option<String>,
+    /// A token that can only send messages to streams with an HTTP source, for webhook
+    /// senders; they never hold the service token.
+    #[arg(long, env = "MAGE_SERVICE_INGEST_TOKEN", hide_env_values = true)]
+    ingest_token: Option<String>,
     /// `off` serves the API without tokens; only for a service no one else can reach.
     #[arg(long, env = "MAGE_SERVICE_AUTH", value_enum, default_value_t = Switch::On)]
     auth: Switch,
@@ -569,6 +573,14 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
                 .get("MAGE_SERVICE_READ_TOKEN")
                 .map(str::to_string)
         });
+    let ingest_token_value = args
+        .ingest_token
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| {
+            from_files
+                .get("MAGE_SERVICE_INGEST_TOKEN")
+                .map(str::to_string)
+        });
     let token = match (args.auth, token_value) {
         (Switch::Off, _) => {
             log::warn(
@@ -584,6 +596,7 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
         auth: api::Auth {
             token,
             read_token: read_token_value,
+            ingest_token: ingest_token_value,
         },
     };
     let address: SocketAddr = format!("{}:{}", args.host, args.port)

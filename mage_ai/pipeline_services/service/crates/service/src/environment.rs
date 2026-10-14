@@ -15,9 +15,10 @@
 use std::collections::BTreeSet;
 
 /// Service variables blocks never see, with their `_FILE` forms.
-const SERVICE_SECRETS: [&str; 4] = [
+const SERVICE_SECRETS: [&str; 5] = [
     "MAGE_SERVICE_TOKEN",
     "MAGE_SERVICE_READ_TOKEN",
+    "MAGE_SERVICE_INGEST_TOKEN",
     "MAGE_SERVICE_SECRETS",
     "IBM_CLOUD_API_KEY",
 ];

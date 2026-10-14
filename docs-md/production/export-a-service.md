@@ -210,7 +210,7 @@ trigger: it reads its source without end and runs the transformers on each batch
 
 | Part | What services run now |
 | --- | --- |
-| Source | Kafka, set up in YAML |
+| Source | Kafka, or webhooks (`connector_type: webhook`), set up in YAML |
 | Transformers | Python |
 | Sinks | Kafka; `dummy` prints each message to the service's output |
 
@@ -238,6 +238,34 @@ sasl_config:
   raw messages, a start `offset`, and passwords written in the file.
 - The image builds the engine with Kafka support (librdkafka), so the first build takes a
   few minutes longer.
+
+### Webhooks
+
+A `webhook` source takes JSON messages over HTTP at `POST /v1/streams/<pipeline>/messages`:
+a JSON array, one JSON message, or JSON lines (`Content-Type: application/x-ndjson`).
+
+```yaml
+connector_type: webhook
+answer_within_seconds: 30        # how long a sender waits for delivery
+dedupe_window_seconds: 86400     # how long an Idempotency-Key is remembered
+signature:                       # optional: an HMAC-SHA256 of the body, as GitHub sends
+  header: X-Hub-Signature-256
+  prefix: "sha256="
+  secret: "{{ env_var('WEBHOOK_SECRET') }}"
+```
+
+```bash
+curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
+  -H "Authorization: Bearer $MAGE_SERVICE_INGEST_TOKEN" \
+  -H "Idempotency-Key: order-1042" \
+  -d '[{"order_id": 1042, "amount": 12.5}]'
+```
+
+- The answer is `200` only once every sink took the messages. `503` with `Retry-After` means
+  the stream is busy or stopped, `504` that delivery was not confirmed in time: retry with
+  the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
+- `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
+- A request larger than the stream's batch size in bytes gets `413`.
 
 ## Update the service
 

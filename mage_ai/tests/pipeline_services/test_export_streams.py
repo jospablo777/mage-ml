@@ -215,11 +215,48 @@ class StreamManifestTest(StreamExportTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class WebhookExportTest(StreamExportTestCase):
+    def test_a_webhook_source_becomes_the_engines_http_source(self):
+        self.stream(source='''
+            connector_type: webhook
+            answer_within_seconds: 10
+            signature:
+              header: X-Hub-Signature-256
+              prefix: "sha256="
+              secret: "{{ env_var('WEBHOOK_SECRET') }}"
+        ''')
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        export.write(captured, str(out), force=True)
+
+        source = captured.manifest['pipelines'][0]['stream']['source']
+        self.assertEqual(source['kind'], 'http')
+        self.assertEqual(source['config']['signature']['secret'],
+                         {'$parts': [{'env': 'WEBHOOK_SECRET'}]})
+        secret = next(v for v in captured.manifest['environment'] if v['name'] == 'WEBHOOK_SECRET')
+        self.assertTrue(secret['secret'])
+        self.assertEqual(secret['used_by'], [])
+        if SERVICE_BINARY.is_file():
+            result = subprocess.run(
+                [str(SERVICE_BINARY), 'validate'], capture_output=True, text=True, timeout=60,
+                env=dict(os.environ, MAGE_SERVICE_DIR=str(out)),
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_signature_secret_in_the_file_is_refused(self):
+        self.stream(source='connector_type: webhook\nsignature:\n  secret: shh\n')
+        self.assertIn('signature.secret is written in the file', self.problems())
+
+
 class StreamRefusalTest(StreamExportTestCase):
     def test_unsupported_connectors_name_what_runs_now(self):
         self.stream(source='connector_type: rabbitmq\nconnection_host: localhost\n')
         problems = self.problems()
-        self.assertIn('uses the rabbitmq connector; services run kafka sources now', problems)
+        self.assertIn(
+            'uses the rabbitmq connector; services run kafka, webhook sources now', problems,
+        )
 
     def test_python_sources_are_refused(self):
         self.stream(source='''

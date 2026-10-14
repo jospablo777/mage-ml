@@ -84,6 +84,20 @@ class SampleFilesTest(StreamSampleTestCase):
             samples.capture_sample(self.repo_path, self.pipeline.uuid, 'r')
 
 
+class WebhookCheckTest(StreamSampleTestCase):
+    def test_checking_a_webhook_source_explains_how_it_receives_messages(self):
+        import contextlib
+        import io
+
+        from mage_ai.data_preparation.models.block.streaming import check_connection
+
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            check_connection('data_loader', 'connector_type: webhook\n')
+
+        self.assertIn('/v1/streams/<pipeline>/messages', printed.getvalue())
+
+
 class RunOnSampleTest(StreamSampleTestCase):
     def setUp(self):
         super().setUp()

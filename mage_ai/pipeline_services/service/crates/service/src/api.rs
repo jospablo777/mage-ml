@@ -25,6 +25,8 @@ use crate::service::{AdmissionError, BUCKETS, Service};
 pub struct Auth {
     pub token: Option<String>,
     pub read_token: Option<String>,
+    /// Only sends messages to HTTP stream sources.
+    pub ingest_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -34,6 +36,8 @@ pub struct AppState {
 }
 
 const MAX_BODY: usize = 1024 * 1024;
+/// The largest webhook request; each stream also caps it at its batch size in bytes.
+const MAX_INGEST_BODY: usize = 64 * 1024 * 1024;
 const MAX_WAIT_SECONDS: u64 = 3600;
 
 pub fn router(state: AppState) -> Router {
@@ -54,6 +58,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/models", get(models))
         .route("/v1/streams", get(streams))
         .route("/v1/streams/{pipeline}", get(stream_detail))
+        .route(
+            "/v1/streams/{pipeline}/messages",
+            post(ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BODY)),
+        )
         .route("/v1/control", post(control))
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .with_state(state)
@@ -79,6 +87,8 @@ type ApiResult<T> = Result<T, ApiError>;
 enum Access {
     Read,
     Write,
+    /// Sending messages to a stream's HTTP source.
+    Ingest,
 }
 
 fn authorize(state: &AppState, headers: &HeaderMap, access: Access) -> ApiResult<()> {
@@ -104,6 +114,23 @@ fn authorize(state: &AppState, headers: &HeaderMap, access: Access) -> ApiResult
         && constant_time_eq(provided, read)
     {
         return Ok(());
+    }
+    if access == Access::Ingest
+        && let Some(ingest) = &state.auth.ingest_token
+        && constant_time_eq(provided, ingest)
+    {
+        return Ok(());
+    }
+    if state
+        .auth
+        .ingest_token
+        .as_deref()
+        .is_some_and(|ingest| constant_time_eq(provided, ingest))
+    {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "The ingest token only sends messages to streams.".into(),
+        ));
     }
     if state
         .auth
@@ -638,6 +665,171 @@ async fn streams(State(state): State<AppState>, headers: HeaderMap) -> ApiResult
         })
         .collect();
     Ok(Json(json!({ "streams": list })))
+}
+
+/// `POST /v1/streams/{pipeline}/messages`: a webhook's messages for a stream with an HTTP
+/// source (ADR-0031). The answer is 200 only once every required sink confirmed them; 503
+/// with `Retry-After` when the stream is busy or stopped, 504 when they were not confirmed in
+/// time. An `Idempotency-Key` header makes a retry safe.
+async fn ingest(
+    State(state): State<AppState>,
+    Path(pipeline): Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    match ingest_messages(&state, &pipeline, &headers, &body).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn ingest_messages(
+    state: &AppState,
+    pipeline: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> ApiResult<Response> {
+    use mage_connector_http::{IngestError, IngestOutcome};
+
+    authorize(state, headers, Access::Ingest)?;
+    let ingest = state
+        .service
+        .ingest
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(pipeline)
+        .cloned()
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                format!("The service has no stream {pipeline} with an HTTP source."),
+            )
+        })?;
+    if body.len() > ingest.max_bytes {
+        return Err(ApiError(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "The request has {} bytes; this stream takes at most {}.",
+                body.len(),
+                ingest.max_bytes
+            ),
+        ));
+    }
+    if let Some(check) = &ingest.signature {
+        let value = headers
+            .get(check.header.as_str())
+            .and_then(|v| v.to_str().ok());
+        if !check.verify(value, body) {
+            return Err(ApiError(
+                StatusCode::UNAUTHORIZED,
+                format!("The {} header does not sign this request.", check.header),
+            ));
+        }
+    }
+    let stopped = state
+        .service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(pipeline)
+        .and_then(|s| s.lock().ok().map(|s| (s.state, s.last_error.clone())))
+        .filter(|(stream_state, _)| *stream_state == crate::stream::StreamState::Failed);
+    if let Some((_, error)) = stopped {
+        return Ok(busy(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "The stream stopped: {}",
+                error.unwrap_or_else(|| "see its log".into())
+            ),
+            Duration::from_secs(30),
+        ));
+    }
+    let messages = parse_messages(headers, body)?;
+    let key = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_string);
+    if key.as_ref().is_some_and(|k| k.len() > 200) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "The Idempotency-Key has more than 200 characters.".into(),
+        ));
+    }
+    match ingest.handle.submit(messages, key).await {
+        Ok(IngestOutcome::Delivered { messages }) => {
+            Ok(Json(json!({"accepted": messages})).into_response())
+        }
+        Ok(IngestOutcome::Duplicate { messages }) => {
+            Ok(Json(json!({"accepted": messages, "duplicate": true})).into_response())
+        }
+        Err(error @ IngestError::Busy { retry_after }) => Ok(busy(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.to_string(),
+            retry_after,
+        )),
+        Err(error @ IngestError::Unavailable(_)) => Ok(busy(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.to_string(),
+            Duration::from_secs(5),
+        )),
+        Err(error @ IngestError::Timeout) => {
+            Err(ApiError(StatusCode::GATEWAY_TIMEOUT, error.to_string()))
+        }
+        Err(error @ IngestError::Empty) => {
+            Err(ApiError(StatusCode::BAD_REQUEST, error.to_string()))
+        }
+    }
+}
+
+fn busy(status: StatusCode, message: String, retry_after: Duration) -> Response {
+    let seconds = retry_after.as_secs().max(1).to_string();
+    (
+        status,
+        [(header::RETRY_AFTER, seconds)],
+        Json(json!({"error": message})),
+    )
+        .into_response()
+}
+
+/// A JSON array of messages, one JSON message, or JSON lines (`application/x-ndjson`); each
+/// message is kept as the JSON it is.
+fn parse_messages(
+    headers: &HeaderMap,
+    body: &[u8],
+) -> ApiResult<Vec<Box<serde_json::value::RawValue>>> {
+    use serde_json::value::RawValue;
+
+    let invalid = |error: String| {
+        ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("The body is not JSON messages: {error}"),
+        )
+    };
+    let text = std::str::from_utf8(body).map_err(|_| invalid("it is not UTF-8".into()))?;
+    let lines = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("ndjson") || v.contains("jsonlines"));
+    if lines {
+        return text
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| !line.trim().is_empty())
+            .map(|(number, line)| {
+                RawValue::from_string(line.trim().to_string())
+                    .map_err(|e| invalid(format!("line {}: {e}", number + 1)))
+            })
+            .collect();
+    }
+    if text.trim_start().starts_with('[') {
+        let messages: Vec<Box<RawValue>> =
+            serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
+        return Ok(messages);
+    }
+    let message: Box<RawValue> = serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
+    Ok(vec![message])
 }
 
 async fn stream_detail(

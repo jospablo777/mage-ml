@@ -32,6 +32,14 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
         raise ValueError('The block needs a connector_type, such as kafka or rabbitmq.')
     connector_type = config['connector_type']
     kind = 'source' if block_type == BlockType.DATA_LOADER else 'sink'
+    if connector_type == 'webhook' and block_type == BlockType.DATA_LOADER:
+        # Nothing to connect to: webhooks call the exported service.
+        print(
+            'A webhook source has no connection to check: senders POST JSON messages to the '
+            'exported service at /v1/streams/<pipeline>/messages. Develop the blocks on '
+            'samples (the Samples tab), then export the stream as a service.'
+        )
+        return
     print(f'Connecting to the {connector_type} {kind}...')
     if block_type == BlockType.DATA_LOADER:
         from mage_ai.streaming.sources.source_factory import SourceFactory

@@ -349,19 +349,27 @@ impl Sink for MemorySink {
 #[derive(Debug, Default)]
 pub struct StdoutSink;
 
-pub fn message_json(message: &Envelope) -> serde_json::Value {
-    let value = serde_json::from_slice(&message.value).unwrap_or_else(|_| {
-        serde_json::Value::String(String::from_utf8_lossy(&message.value).into_owned())
+/// A message as one JSON line. The value is written as the JSON it is, never parsed into
+/// numbers of 64 bits, so every digit stays; a value that is not JSON is written as text.
+pub fn message_json(message: &Envelope) -> String {
+    let value = match serde_json::from_slice::<&serde_json::value::RawValue>(&message.value) {
+        Ok(raw) => raw.get().to_string(),
+        Err(_) => serde_json::Value::String(String::from_utf8_lossy(&message.value).into_owned())
+            .to_string(),
+    };
+    let position = message
+        .position
+        .map_or_else(|| "null".to_string(), |p| p.to_string());
+    let key = message.key.as_ref().map_or_else(String::new, |key| {
+        format!(
+            ",\"key\":{}",
+            serde_json::Value::String(String::from_utf8_lossy(key).into_owned())
+        )
     });
-    let mut line = serde_json::json!({
-        "partition": message.partition,
-        "position": message.position,
-        "value": value,
-    });
-    if let Some(key) = &message.key {
-        line["key"] = String::from_utf8_lossy(key).into_owned().into();
-    }
-    line
+    format!(
+        "{{\"partition\":{},\"position\":{position},\"value\":{value}{key}}}",
+        message.partition
+    )
 }
 
 impl Sink for StdoutSink {
@@ -386,5 +394,32 @@ impl Sink for StdoutSink {
 
     fn flush(&self) -> BoxFuture<'_, ()> {
         Box::pin(async {})
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stdout_line_keeps_the_value_exactly_and_text_as_text() {
+        let exact = Envelope {
+            value: br#"{"big": 123456789012345678901234567890, "x": 0.1}"#.to_vec(),
+            partition: 2,
+            position: Some(7),
+            key: Some(b"k\"1".to_vec()),
+            ..Envelope::default()
+        };
+        assert_eq!(
+            message_json(&exact),
+            r#"{"partition":2,"position":7,"value":{"big": 123456789012345678901234567890, "x": 0.1},"key":"k\"1"}"#
+        );
+        let text = Envelope {
+            value: b"plain \"text\"".to_vec(),
+            ..Envelope::default()
+        };
+        let line: serde_json::Value = serde_json::from_str(&message_json(&text)).unwrap();
+        assert_eq!(line["value"], "plain \"text\"");
+        assert_eq!(line["position"], serde_json::Value::Null);
     }
 }

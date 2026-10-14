@@ -62,7 +62,7 @@ fn settings(service: &Service, connector: &Connector) -> Value {
 
 fn source(
     service: &Service,
-    #[cfg_attr(not(feature = "kafka"), allow(unused_variables))] pipeline: &Pipeline,
+    pipeline: &Pipeline,
     connector: &Connector,
 ) -> Result<Box<dyn Source>, ConnectorError> {
     let _config = settings(service, connector);
@@ -82,12 +82,64 @@ fn source(
                 in_flight_bytes(stream),
             )?))
         }
+        ConnectorKind::Http => {
+            let stream = pipeline.stream.as_ref().expect("a stream");
+            let seconds = |key: &str, default: u64| {
+                _config
+                    .get(key)
+                    .and_then(Value::as_u64)
+                    .map_or(Duration::from_secs(default), Duration::from_secs)
+            };
+            let config = mage_connector_http::HttpSourceConfig {
+                answer_within: seconds("answer_within_seconds", 30),
+                dedupe_window: seconds("dedupe_window_seconds", 24 * 3600),
+                ..mage_connector_http::HttpSourceConfig::default()
+            };
+            let signature = match _config.get("signature") {
+                None | Some(Value::Null) => None,
+                Some(settings) => {
+                    let text = |key: &str| settings.get(key).and_then(Value::as_str);
+                    let secret = text("secret").filter(|s| !s.is_empty()).ok_or_else(|| {
+                        ConnectorError::fatal(
+                            "the webhook's signature needs a secret (an environment variable)",
+                        )
+                    })?;
+                    Some(mage_connector_http::signature::SignatureCheck::new(
+                        text("header").unwrap_or("X-Hub-Signature-256"),
+                        text("prefix").unwrap_or("sha256="),
+                        secret.as_bytes(),
+                    ))
+                }
+            };
+            let (source, handle) = mage_connector_http::HttpSource::new(config);
+            service
+                .ingest
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(
+                    pipeline.uuid.clone(),
+                    Arc::new(HttpIngest {
+                        handle,
+                        signature,
+                        max_bytes: stream.batch.max_bytes,
+                    }),
+                );
+            Ok(Box::new(source))
+        }
         kind => Err(ConnectorError::fatal(format!(
             "this service cannot read a {} source: {}",
             kind.as_str(),
             unavailable(kind)
         ))),
     }
+}
+
+/// What the API needs to hand a webhook request to its stream.
+pub struct HttpIngest {
+    pub handle: mage_connector_http::IngestHandle,
+    pub signature: Option<mage_connector_http::signature::SignatureCheck>,
+    /// The largest request body accepted, the stream's batch size in bytes.
+    pub max_bytes: usize,
 }
 
 /// With `MAGE_SERVICE_INSTANCE_ID` (a stable name per replica, such as a StatefulSet pod's),
@@ -132,7 +184,7 @@ fn sink(service: &Service, connector: &Connector) -> Result<Arc<dyn Sink>, Conne
 fn unavailable(kind: ConnectorKind) -> &'static str {
     match kind {
         ConnectorKind::Kafka => "it was built without Kafka; build it with the kafka feature",
-        ConnectorKind::Http => "HTTP sources and sinks come in the next step of streaming",
+        ConnectorKind::Http => "HTTP sinks come in the next step of streaming",
         ConnectorKind::Stdout => "stdout is a sink only",
     }
 }
