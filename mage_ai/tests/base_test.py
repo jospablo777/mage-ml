@@ -39,9 +39,14 @@ def set_up_test_repo(test_case):
     init_project_uuid()
 
 
+# One Faker for the process: faker.unique then holds across tests, whose classes share a
+# test repository; a Faker per test drew a pipeline name an earlier test had left there.
+FAKER = Faker()
+
+
 class AsyncDBTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.faker = Faker()
+        self.faker = FAKER
 
     def tearDown(self):
         pass
@@ -63,7 +68,7 @@ class AsyncDBTestCase(unittest.IsolatedAsyncioTestCase):
 
 class DBTestCase(unittest.TestCase):
     def setUp(self):
-        self.faker = Faker()
+        self.faker = FAKER
 
     def tearDown(self):
         pass
