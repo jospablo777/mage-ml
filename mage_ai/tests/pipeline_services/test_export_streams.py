@@ -425,6 +425,8 @@ class IbmMqExportTest(StreamExportTestCase):
         self.assertIn(f'{export.IBM_MQ_CLIENT_SHA256}  /tmp/mq.tar.gz" | sha256sum -c -',
                       dockerfile)
         self.assertIn('build with --platform linux/amd64', dockerfile)
+        # IBM's server refuses connections now and then; a build tries again.
+        self.assertIn('curl -fsSL --retry 5 --retry-all-errors', dockerfile)
         self.assertIn('COPY --from=ibm-mq /opt/mqm /opt/mqm', dockerfile)
         self.assertIn('MAGE_SERVICE_MQ_LIBRARY=/opt/mqm/lib64/libmqm_r.so', dockerfile)
         self.assertIn('MQ_OVERRIDE_DATA_PATH=/tmp/mage-mq', dockerfile)

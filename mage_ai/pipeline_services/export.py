@@ -2958,7 +2958,7 @@ RUN if [ "$TARGETARCH" != "amd64" ]; then \\
       echo "IBM MQ's client is for linux/amd64 only; build with --platform linux/amd64" >&2; \\
       exit 1; fi && \\
     apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \\
-    curl -fsSL -o /tmp/mq.tar.gz {IBM_MQ_CLIENT_URL} && \\
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o /tmp/mq.tar.gz {IBM_MQ_CLIENT_URL} && \\
     echo "{IBM_MQ_CLIENT_SHA256}  /tmp/mq.tar.gz" | sha256sum -c - && \\
     mkdir -p /opt/mqm && tar -xzf /tmp/mq.tar.gz -C /opt/mqm && \\
     cd /opt/mqm && rm -rf bin inc java lap lib samp swidtag && \\

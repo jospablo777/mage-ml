@@ -337,7 +337,8 @@ jobs:
         if: matrix.id == 'streaming'
         run: |
           read -r url sha <<< "$(uv run --no-sync python -c 'from mage_ai.pipeline_services import export as e; print(e.IBM_MQ_CLIENT_URL, e.IBM_MQ_CLIENT_SHA256)')"
-          curl -fsSL -o /tmp/mq.tar.gz "$url"
+          # IBM's server refuses connections now and then.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 -o /tmp/mq.tar.gz "$url"
           echo "$sha  /tmp/mq.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/mqm" && tar -xzf /tmp/mq.tar.gz -C "$RUNNER_TEMP/mqm"
           echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
