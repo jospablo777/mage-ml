@@ -207,12 +207,15 @@ def test_a_sink_queue_that_is_missing_stops_the_stream_and_acknowledges_nothing(
     publish(rabbitmq_channel, queues[0], range(1, 6))
     service.start()
     try:
-        service.wait_running()
+        # The stream can fail before it is seen running.
         deadline = time.time() + 60
         status = None
         while time.time() < deadline:
-            status = service.streams()[0]
-            if status['state'] == 'failed':
+            try:
+                status = service.streams()[0]
+            except OSError:  # not listening yet
+                status = None
+            if status and status['state'] == 'failed':
                 break
             time.sleep(0.5)
     finally:
