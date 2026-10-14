@@ -1,4 +1,5 @@
-from typing import Dict
+import threading
+from typing import Dict, List
 
 from jupyter_client import KernelClient, KernelManager
 from jupyter_client.kernelspec import NoSuchKernel
@@ -18,6 +19,12 @@ class ActiveKernel:
     def __init__(self):
         self.kernel = kernel_managers[DEFAULT_KERNEL_NAME]
         self.kernel_client = self.kernel.client()
+        # Clients replaced while the kernel output reader may still be reading them: it
+        # closes them on its own thread, since a zmq socket closed from another thread while
+        # in use fails, or crashes libzmq.
+        self.retired_clients: List[KernelClient] = []
+        self.output_reader_running = False
+        self.lock = threading.Lock()
 
 
 active_kernel = ActiveKernel()
@@ -31,10 +38,30 @@ def _replace_client(client: KernelClient) -> None:
     """
     from mage_ai.kernels.models import close_client
 
-    previous = active_kernel.kernel_client
-    active_kernel.kernel_client = client
-    if previous is not None and previous is not client:
-        close_client(previous)
+    with active_kernel.lock:
+        previous = active_kernel.kernel_client
+        active_kernel.kernel_client = client
+        if previous is None or previous is client:
+            return
+        if active_kernel.output_reader_running:
+            active_kernel.retired_clients.append(previous)
+            return
+    close_client(previous)
+
+
+def close_retired_clients() -> None:
+    """Closes the replaced clients; the kernel output reader calls it on its thread."""
+    from mage_ai.kernels.models import close_client
+
+    with active_kernel.lock:
+        retired, active_kernel.retired_clients = active_kernel.retired_clients, []
+    for client in retired:
+        close_client(client)
+
+
+def set_output_reader_running(running: bool) -> None:
+    with active_kernel.lock:
+        active_kernel.output_reader_running = running
 
 
 def switch_active_kernel(

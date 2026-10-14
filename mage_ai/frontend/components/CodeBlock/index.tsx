@@ -653,12 +653,18 @@ function CodeBlock(
   const [sampleRun, setSampleRun] = useState<StreamSampleRunType>(null);
   const [sampleRunning, setSampleRunning] = useState<boolean>(false);
   const [sampleRunError, setSampleRunError] = useState<string>(null);
+  // The editor's ⌘↵ and the page's both reach a run: one at a time.
+  const sampleRunningRef = useRef<boolean>(false);
   const runOnSample = useCallback(async () => {
+    if (sampleRunningRef.current) {
+      return;
+    }
     if (!selectedSample) {
       setSampleRunError('Choose a sample first: capture or paste messages in the Samples panel.');
       openSidekickView?.(ViewKeyEnum.SAMPLES);
       return;
     }
+    sampleRunningRef.current = true;
     setSampleRunning(true);
     setSampleRunError(null);
     try {
@@ -675,9 +681,13 @@ function CodeBlock(
         setSampleRun(result?.stream_sample_run);
       }
     } finally {
+      sampleRunningRef.current = false;
       setSampleRunning(false);
     }
   }, [blockUUID, openSidekickView, pipelineUUID, savePipelineContent, selectedSample]);
+  // The editor registers its shortcuts once, so they call the latest runOnSample.
+  const runOnSampleRef = useRef(runOnSample);
+  runOnSampleRef.current = runOnSample;
   const isDBT = useMemo(() => BlockTypeEnum.DBT === blockType, [blockType]);
   const isSQLBlock = BlockLanguageEnum.SQL === blockLanguage;
   const isRBlock = BlockLanguageEnum.R === blockLanguage;
@@ -1424,7 +1434,6 @@ function CodeBlock(
             onlyKeysPresent([KEY_CODE_CONTROL, KEY_CODE_ENTER], keyMapping)
           ) {
             if (isStreamingTransformer) {
-              // eslint-disable-next-line @typescript-eslint/no-floating-promises
               runOnSample();
             } else {
               runBlockAndTrack({ block });
@@ -1544,8 +1553,13 @@ function CodeBlock(
           setSelected={isReplicated ? null : setSelected}
           setTextareaFocused={isReplicated ? null : setTextareaFocused}
           shortcuts={
-            hideRunButton || isReplicated
+            // Monaco takes Ctrl+Enter for itself unless the editor has its own run action.
+            isReplicated || (hideRunButton && !isStreamingTransformer)
               ? []
+              : hideRunButton
+              ? [
+                  monaco => executeCode(monaco, () => runOnSampleRef.current()),
+                ]
               : [
                   (monaco, editor) =>
                     executeCode(monaco, () => {
@@ -1643,6 +1657,7 @@ function CodeBlock(
 
     dispatchEventChanged,
     isDBT,
+    isStreamingTransformer,
     savePipelineContent,
     showDataIntegrationModal,
     updateBlock,
