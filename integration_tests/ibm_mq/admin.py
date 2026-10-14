@@ -63,10 +63,10 @@ class IbmMqAdmin:
         response.raise_for_status()
         return response.json()
 
-    def define(self) -> str:
+    def define(self, depth: int = 100_000) -> str:
         """A new local queue; the developer setup authorizes the app user on DEV.**."""
         name = f'DEV.IT.{uuid.uuid4().hex[:12].upper()}'
-        result = self.mqsc('define', 'qlocal', name, defpsist='yes', maxdepth=100000)
+        result = self.mqsc('define', 'qlocal', name, defpsist='yes', maxdepth=depth)
         assert result['overallCompletionCode'] == 0, result
         return name
 

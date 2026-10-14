@@ -264,16 +264,18 @@ Measured on a laptop (Apple silicon, the systems in Docker, one partition, relea
 
 | Sink | Messages a second |
 | --- | --- |
-| Parquet files | 65,000 |
-| Kafka (block returns its messages) | 58,000 |
-| Kafka (block adds two fields) | 48,000 |
-| ClickHouse | 48,700 |
-| RabbitMQ (publisher confirms) | 24,500 |
-| PostgreSQL | 20,200 |
-| IBM MQ (emulated amd64 server) | 15,100 |
+| Parquet files | 388,000 |
+| Kafka (block returns its messages) | 373,000 |
+| Kafka (block adds two fields) | 267,000 |
+| ClickHouse | 190,000 |
+| PostgreSQL | 166,000 |
+| RabbitMQ (publisher confirms) | 33,000 |
+| IBM MQ (emulated amd64 server) | 13,700 |
 
-Larger `batch_size` values raise these; most of the cost is the block's JSON parsing in
-Python. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
+Up to about 400,000 messages a second, the Python block's JSON round trip is the limit;
+RabbitMQ and IBM MQ are limited by their brokers' confirmations. Larger `batch_size` values
+raise these. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your
+machine.
 
 ### Webhooks
 

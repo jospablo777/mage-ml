@@ -227,7 +227,7 @@ def _sink_case(sink, request, tmp_path):
         return yaml, count, dict(RABBIT_PASSWORD=settings['password'])
     if sink == 'ibm_mq':
         mq = request.getfixturevalue('ibm_mq')
-        queue = mq.define()
+        queue = mq.define(depth=max(MESSAGES, 100_000))
         request.addfinalizer(lambda: mq.delete(queue))
         libraries = os.path.dirname(mq.library)
 
