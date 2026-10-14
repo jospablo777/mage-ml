@@ -1098,6 +1098,7 @@ impl Source for PgCdcSource {
             // One slot: the server lets one connection read it.
             max_instances: Some(1),
             needs_keepalive: true,
+            durable_positions: false,
         }
     }
 

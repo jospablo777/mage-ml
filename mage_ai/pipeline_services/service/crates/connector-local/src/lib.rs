@@ -263,6 +263,7 @@ impl Source for MemorySource {
             ack_kind: AckKind::Offset,
             max_instances: Some(1),
             needs_keepalive: false,
+            durable_positions: true,
         }
     }
 

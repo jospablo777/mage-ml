@@ -230,6 +230,10 @@ sasl_config:
 
 - The settings go into the service's manifest with `env_var()` kept as a reference. The
   service reads those variables itself; the blocks never get them.
+- Sinks that name objects or deduplicate by position (object storage, ClickHouse insert
+  tokens, NATS message ids, HTTP idempotency keys) use the stream's name when its source's
+  positions survive a restart (Kafka offsets), and the stream's name and run otherwise, so a
+  restart never overwrites what the last run wrote or drops a new message as a duplicate.
 - A position moves on only after every sink took the batch. A batch that still fails
   after its retries (the pipeline's retry settings, 3 by default) stops the stream, and
   the position stays where it was, so no message is lost.

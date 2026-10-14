@@ -272,40 +272,37 @@ fn static_membership(mut config: Value, pipeline: &str) -> Value {
     config
 }
 
+/// `scope` names the stream for the sinks' object names and deduplication keys (see
+/// [`sink_scope`]).
 fn sink(
     service: &Service,
-    pipeline: &Pipeline,
+    scope: &str,
     connector: &Connector,
 ) -> Result<Arc<dyn Sink>, ConnectorError> {
     let _config = settings(service, connector);
     match connector.kind {
         ConnectorKind::Stdout => Ok(Arc::new(StdoutSink)),
         ConnectorKind::Http => Ok(Arc::new(mage_connector_http::HttpSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         ConnectorKind::Feast => Ok(Arc::new(mage_connector_http::FeastSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         #[cfg(feature = "kafka")]
         ConnectorKind::Kafka => Ok(Arc::new(mage_connector_kafka::KafkaSink::new(&_config)?)),
         #[cfg(feature = "rabbitmq")]
         ConnectorKind::Rabbitmq => Ok(Arc::new(mage_connector_rabbitmq::RabbitSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         #[cfg(feature = "clickhouse")]
         ConnectorKind::Clickhouse => Ok(Arc::new(mage_connector_clickhouse::ClickHouseSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         #[cfg(feature = "postgres")]
         ConnectorKind::Postgres => Ok(Arc::new(mage_connector_postgres::PgSink::new(&_config)?)),
         #[cfg(feature = "object-store")]
         ConnectorKind::ObjectStorage => Ok(Arc::new(mage_connector_objectstore::ObjectSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         #[cfg(feature = "mongodb")]
         ConnectorKind::Mongodb => Ok(Arc::new(mage_connector_mongodb::MongoSink::new(&_config)?)),
@@ -317,13 +314,11 @@ fn sink(
         )?)),
         #[cfg(feature = "nats")]
         ConnectorKind::Nats => Ok(Arc::new(mage_connector_nats::NatsSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         #[cfg(feature = "ibm-mq")]
         ConnectorKind::IbmMq => Ok(Arc::new(mage_connector_ibmmq::MqSink::new(
-            &_config,
-            &pipeline.uuid,
+            &_config, scope,
         )?)),
         // Kafka without the kafka feature; with it, every kind has its own arm.
         #[allow(unreachable_patterns)]
@@ -399,18 +394,34 @@ fn runner_config(stream: &mage_service_core::manifest::Stream) -> RunnerConfig {
     }
 }
 
+/// The name sinks give the stream in object names and deduplication keys, with positions:
+/// the pipeline's when its source's positions survive a restart (Kafka), otherwise the
+/// pipeline's and this run's. A source that numbers its messages from 1 again at each start
+/// would otherwise make a sink overwrite the objects of the last run, or drop new messages
+/// as ones it already wrote (NATS message ids, ClickHouse insert tokens); a batch retried
+/// within a run keeps its keys.
+fn sink_scope(pipeline: &str, durable_positions: bool) -> String {
+    if durable_positions {
+        pipeline.to_string()
+    } else {
+        let run = uuid::Uuid::new_v4().simple().to_string();
+        format!("{pipeline}~{}", &run[..16])
+    }
+}
+
 fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<StreamParts, String> {
     let stream = pipeline.stream.as_ref().expect("a stream");
     let source = source(service, pipeline, &stream.source).map_err(|e| e.message)?;
+    let scope = sink_scope(&pipeline.uuid, source.capabilities().durable_positions);
     let mut sinks = Vec::new();
     for connector in &stream.sinks {
         sinks.push((
-            sink(service, pipeline, connector).map_err(|e| e.message)?,
+            sink(service, &scope, connector).map_err(|e| e.message)?,
             connector.after.clone(),
         ));
     }
     let dead_letter = match &stream.errors.dead_letter {
-        Some(connector) => Some(sink(service, pipeline, connector).map_err(|e| e.message)?),
+        Some(connector) => Some(sink(service, &scope, connector).map_err(|e| e.message)?),
         None => None,
     };
     let transform = transform_session(service, pipeline, log)?;
@@ -669,6 +680,16 @@ mod tests {
             after: None,
             config: config.as_object().cloned().unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn sinks_name_a_run_unless_positions_survive_a_restart() {
+        // Positions numbered from 1 at each start made a sink overwrite the last run's
+        // objects and drop new messages as duplicates (I-101).
+        assert_eq!(sink_scope("orders", true), "orders");
+        let (a, b) = (sink_scope("orders", false), sink_scope("orders", false));
+        assert!(a.starts_with("orders~") && b.starts_with("orders~"));
+        assert_ne!(a, b);
     }
 
     #[test]

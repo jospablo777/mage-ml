@@ -1168,6 +1168,7 @@ impl Source for KafkaSource {
             ack_kind: AckKind::Offset,
             max_instances: None,
             needs_keepalive: false,
+            durable_positions: true,
         }
     }
 

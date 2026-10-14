@@ -339,6 +339,7 @@ impl Source for ActiveMqSource {
             // Competing consumers of one queue.
             max_instances: None,
             needs_keepalive: false,
+            durable_positions: false,
         }
     }
 

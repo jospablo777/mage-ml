@@ -447,6 +447,7 @@ impl Source for NatsSource {
             ack_kind: AckKind::Message,
             max_instances: None,
             needs_keepalive: false,
+            durable_positions: false,
         }
     }
 

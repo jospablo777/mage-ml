@@ -433,6 +433,7 @@ impl Source for HttpSource {
             ack_kind: AckKind::Response,
             max_instances: None,
             needs_keepalive: false,
+            durable_positions: false,
         }
     }
 

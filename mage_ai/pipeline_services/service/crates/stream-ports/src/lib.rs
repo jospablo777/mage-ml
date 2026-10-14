@@ -105,6 +105,11 @@ pub struct SourceCapabilities {
     pub max_instances: Option<u32>,
     /// The connection must be kept alive while the stream is paused.
     pub needs_keepalive: bool,
+    /// A message keeps its position after a restart (Kafka offsets), so sinks may name
+    /// objects and deduplicate by position across runs. Sources that number what they
+    /// deliver from 1 again at each start must not claim it: a sink would take a new
+    /// message for one it already wrote.
+    pub durable_positions: bool,
 }
 
 pub trait Source: Send {

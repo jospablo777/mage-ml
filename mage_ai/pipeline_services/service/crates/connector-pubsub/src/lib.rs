@@ -500,6 +500,7 @@ impl Source for PubSubSource {
             ack_kind: AckKind::Message,
             max_instances: None,
             needs_keepalive: false,
+            durable_positions: false,
         }
     }
 

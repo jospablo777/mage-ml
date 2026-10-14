@@ -348,6 +348,7 @@ impl Source for RabbitSource {
             ack_kind: AckKind::Message,
             max_instances: None,
             needs_keepalive: true,
+            durable_positions: false,
         }
     }
 

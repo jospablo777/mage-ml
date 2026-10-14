@@ -124,7 +124,8 @@ def test_messages_flow_once_and_are_acknowledged_after_the_sink(
     assert sorted(m['n'] for m, _ in out) == list(range(120))
     assert all(m['doubled'] == m['n'] * 2 and m['big'] == 2**70 + m['n']
                and m['city'] == 'Zürich 🚀' for m, _ in out)
-    assert all(headers.get('Nats-Msg-Id', '').startswith(f'{pipeline.uuid}:0:')
+    # Ids name the run: NATS's source numbers messages from 1 again after a restart (I-101).
+    assert all(headers.get('Nats-Msg-Id', '').startswith(f'{pipeline.uuid}~')
                for _, headers in out)
     assert state == (0, 0), state
     assert [m['n'] for m, _ in more] == [1000]

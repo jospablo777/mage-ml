@@ -497,6 +497,7 @@ impl Source for MongoSource {
             // One change stream: a second instance would see the same changes.
             max_instances: Some(1),
             needs_keepalive: false,
+            durable_positions: false,
         }
     }
 
