@@ -429,6 +429,8 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 
 ### Infrastructure
 
+- **Cloud platforms**
+  - [IBM Cloud](integrations/ibm-cloud.md)
 - **Compute**
   - [Spark and PySpark](integrations/compute/spark-pyspark.md)
 - **Storage**

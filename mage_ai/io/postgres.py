@@ -97,6 +97,21 @@ def stored_name(name: str) -> str:
     return name
 
 
+def _tls_settings(config: BaseConfigLoader) -> dict:
+    """
+    POSTGRES_SSLMODE (such as verify-full) and POSTGRES_SSLROOTCERT: a CA file, or the PEM or
+    base64 certificate, as IBM Cloud Databases credentials give it.
+    """
+    settings = {}
+    if config[ConfigKey.POSTGRES_SSLMODE]:
+        settings['sslmode'] = config[ConfigKey.POSTGRES_SSLMODE]
+    if config[ConfigKey.POSTGRES_SSLROOTCERT]:
+        from mage_ai.io.tls import ca_certificate_file
+
+        settings['sslrootcert'] = ca_certificate_file(config[ConfigKey.POSTGRES_SSLROOTCERT])
+    return settings
+
+
 class Postgres(BaseSQL):
     """
     Handles data transfer between a PostgreSQL database and the Mage app.
@@ -165,6 +180,7 @@ class Postgres(BaseSQL):
             ssh_password=config[ConfigKey.POSTGRES_SSH_PASSWORD],
             ssh_pkey=config[ConfigKey.POSTGRES_SSH_PKEY],
             connect_timeout=config[ConfigKey.POSTGRES_CONNECT_TIMEOUT],
+            **_tls_settings(config),
         )
 
     def default_database(self) -> str:

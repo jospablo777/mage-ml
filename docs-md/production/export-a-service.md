@@ -371,3 +371,4 @@ needed only to export into a folder that holds something other than an earlier e
 - [Secrets](pipeline-services.md#configuration-and-secrets) from files, IBM Cloud
   Secrets Manager or AWS.
 - [Models](pipeline-services.md#models) from MLflow, embedded in the image.
+- [IBM Cloud](../integrations/ibm-cloud.md): Code Engine, Event Streams, COS and Secrets Manager.

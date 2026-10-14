@@ -1,0 +1,251 @@
+# IBM Cloud
+
+*Use Cloud Object Storage, Event Streams, Cloud Databases, Secrets Manager and Code Engine from MageML: setup, credentials, trade-offs and gotchas.*
+
+MageML works with IBM Cloud without IBM's SDKs. IBM services that speak open protocols (S3,
+Kafka, PostgreSQL) are reached through the same clients as anywhere else, with IBM's
+differences handled for you: IAM tokens, COS's limits on the S3 API, and the private CAs of
+IBM Cloud Databases.
+
+| Service | In MageML | In exported services |
+| --- | --- | --- |
+| [Cloud Object Storage](#cloud-object-storage) | Data loader and exporter blocks; `IBMCloudObjectStorage` in code | Blocks run as in MageML |
+| [MLflow on COS](#mlflow-artifacts-in-cos) | Built in (`cos://` artifact locations) | Built in |
+| [Event Streams](#event-streams) | Streaming pipelines (Kafka source and sink) | Kafka source and sink in Rust |
+| [Cloud Databases for PostgreSQL](#cloud-databases) | SQL blocks, loaders and exporters, with TLS verified | Blocks run as in MageML |
+| [Secrets Manager](#secrets-manager) | | `ibm:` secret references |
+| [Code Engine, Container Registry, IKS, OpenShift](#run-services-on-ibm-cloud) | | Deploy scripts, Tekton pipeline, manifests |
+
+Db2 and IBM MQ support are in progress.
+
+## Credentials
+
+Every IBM Cloud API takes an IAM access token. MageML gets one from either of:
+
+| Credential | Use it for | Notes |
+| --- | --- | --- |
+| A **service ID API key** | MageML servers, CI, anything outside IBM Cloud | Give the service ID only the roles it needs. Prefer it to a personal API key, which carries all of that user's access and leaves with them. |
+| A **trusted profile** | Code Engine apps and jobs, IKS and OpenShift pods | No key is stored: the platform mounts a compute resource token that IAM exchanges. Set `IBM_CLOUD_TRUSTED_PROFILE` to the profile id (`Profile-...`) or name. |
+| **HMAC keys** (COS only) | Tools that need AWS signatures: DuckDB, Polars, pyarrow, presigned URLs | Created with the COS service credential ("Include HMAC credential"). They never expire, so rotate them yourself. |
+
+Tokens last an hour. MageML caches each one and replaces it five minutes before it expires,
+also on retries, so long runs and streams never send an expired token.
+
+Inside IBM Cloud, set `IBM_CLOUD_IAM_URL=https://private.iam.cloud.ibm.com` to keep token
+requests on the private network.
+
+## Cloud Object Storage
+
+### Set up
+
+1. Create a bucket and note its **endpoint**: in the bucket's Configuration tab, or in the
+   endpoints list. Endpoints are per region and per network:
+
+   | Endpoint | Reaches COS from | Example |
+   | --- | --- | --- |
+   | Public | Anywhere | `https://s3.us-south.cloud-object-storage.appdomain.cloud` |
+   | Private | IBM Cloud classic and VPC networks | `https://s3.private.us-south.cloud-object-storage.appdomain.cloud` |
+   | Direct | VPC, without public egress | `https://s3.direct.us-south.cloud-object-storage.appdomain.cloud` |
+
+   From inside IBM Cloud, use the private or direct endpoint: traffic to them is not billed as
+   public bandwidth and never leaves IBM's network.
+2. Create a service credential with the **Writer** role (or **Reader** for loaders only), with
+   HMAC on if you want HMAC keys. Better: give a service ID or trusted profile the role on the
+   one bucket, not the whole instance.
+3. Add the settings to `io_config.yaml`:
+
+```yaml
+default:
+  IBM_COS_ENDPOINT: https://s3.us-south.cloud-object-storage.appdomain.cloud
+  # Either HMAC keys:
+  IBM_COS_HMAC_ACCESS_KEY_ID: "{{ env_var('IBM_COS_HMAC_ACCESS_KEY_ID') }}"
+  IBM_COS_HMAC_SECRET_ACCESS_KEY: "{{ env_var('IBM_COS_HMAC_SECRET_ACCESS_KEY') }}"
+  # Or an API key (or IBM_CLOUD_TRUSTED_PROFILE on Code Engine and IKS):
+  IBM_CLOUD_API_KEY: "{{ env_var('IBM_CLOUD_API_KEY') }}"
+  # The instance CRN: needed only to list or create buckets with an API key.
+  IBM_COS_INSTANCE_ID: crn:v1:bluemix:public:cloud-object-storage:global:a/...
+```
+
+HMAC keys win when both are set.
+
+### Load and export
+
+Add a block from **Data loader > Data lakes > IBM Cloud Object Storage** (or the exporter of
+the same name), or in code:
+
+```python
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.io.ibm_cos import IBMCloudObjectStorage
+
+storage = IBMCloudObjectStorage.with_config(ConfigFileLoader(config_path, 'default'))
+orders = storage.load('lake', 'orders/2026/10/orders.parquet')
+storage.export(orders, 'lake', 'orders/clean/orders.parquet')
+```
+
+CSV, JSON, Parquet and HDF5 are read and written as with the S3 blocks, with the same
+options (`exact_types=True`, `polars=True`).
+
+For a boto3 client of your own: `mage_ai.services.ibm.cos.client(endpoint_url, api_key=...)`.
+
+### HMAC keys or IAM
+
+| | HMAC keys | API key or trusted profile |
+| --- | --- | --- |
+| Works with | Every S3 tool: boto3, DuckDB, Polars, pyarrow, Spark, rclone | boto3 through MageML; MageML's blocks and MLflow plugin |
+| Presigned URLs | Yes | No |
+| Revocation | Delete the credential | Disable the key or profile; tokens already issued last up to an hour |
+| Rotation | By hand | Keys by hand; trusted profiles need none |
+| Access control | The credential's role on the instance | IAM policies on the bucket, groups, conditions |
+| Common policy | Some organizations forbid long-lived HMAC keys | Allowed |
+
+Use IAM (trusted profiles on Code Engine and IKS, service ID keys elsewhere) unless a tool needs
+AWS signatures. Then create HMAC keys for that tool only, on a service ID scoped to its buckets.
+
+### Gotchas
+
+- **COS is not boto3-compatible as it comes.** IAM credentials need a bearer token instead of
+  an AWS signature; IBM ships a fork of boto3 for it. MageML adds the token with botocore hooks
+  scoped to your COS endpoint, so plain boto3 works, and clients for other hosts in the same
+  process (AWS S3 included) are untouched. Do not swap `boto3` for `ibm_boto3` in
+  `sys.modules`: it breaks every AWS client in the process.
+- **boto3 1.36 and later add CRC checksums to uploads**, which COS fails (`MissingContentLength`,
+  `InvalidRequest`). MageML's COS clients send checksums only where an operation requires them.
+  In your own clients, set `request_checksum_calculation` and `response_checksum_validation` to
+  `when_required` in the botocore `Config`, or `AWS_REQUEST_CHECKSUM_CALCULATION` and
+  `AWS_RESPONSE_CHECKSUM_VALIDATION`.
+- **Bucket locations name a storage class**: `LocationConstraint` is `us-south-standard`,
+  `eu-de-smart` and so on, not an AWS region. Create buckets in the console or with Terraform;
+  the region in clients is not used.
+- **Listing and creating buckets with an API key** need the instance CRN
+  (`IBM_COS_INSTANCE_ID`); object operations do not.
+- **Cold and Vault classes charge for retrieval** and have minimum storage durations. Use
+  Smart Tier for data whose access pattern you do not know.
+- **Archive** (Glacier-like) objects must be restored before reads; a load fails until then.
+- Key Protect or Hyper Protect Crypto Services encryption is set on the bucket at creation and
+  needs nothing in MageML.
+
+## MLflow artifacts in COS
+
+MageML registers a `cos` artifact scheme with MLflow, so runs log to and read from
+`cos://<bucket>/<path>` with any of the credentials above:
+
+```bash
+export IBM_COS_ENDPOINT=https://s3.private.us-south.cloud-object-storage.appdomain.cloud
+export IBM_CLOUD_TRUSTED_PROFILE=Profile-...    # or IBM_CLOUD_API_KEY, or the HMAC keys
+```
+
+**An MLflow server of its own**, without MageML, installs only the plugin, a few small modules
+on boto3 and requests:
+
+```bash
+uv pip install "mlflow-ibm-cos @ git+https://github.com/jospablo777/mage-ml#subdirectory=packages/mlflow-ibm-cos"
+mlflow server --artifacts-destination cos://models/mlflow --backend-store-uri postgresql://...
+```
+
+MLflow and MageML stay independent: either one can be upgraded or moved without the other.
+The plugin is MageML's own code, built into its own package, and works with MLflow 2.9 and
+later.
+
+- **Existing `s3://` locations on COS keep working.** When `MLFLOW_S3_ENDPOINT_URL` is your COS
+  endpoint, the plugin makes MLflow's S3 client use IAM tokens. This replaces
+  `sitecustomize.py` patches that swap boto3 for IBM's fork.
+- With IAM credentials, MLflow cannot hand out presigned URLs, so keep the artifact proxy on
+  (the default with `--artifacts-destination`), or give the server HMAC keys.
+- Clients that only talk to a proxying server (`mlflow-artifacts:` locations) need no COS
+  settings at all.
+
+## Event Streams
+
+Event Streams is Kafka. A streaming pipeline's Kafka source and sink connect with the API key
+of a service credential, user `token`:
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('EVENT_STREAMS_BROKERS') }}"   # kafka_brokers_sasl, comma separated
+topic: orders
+consumer_group: orders-clean
+security_protocol: SASL_SSL
+sasl_config:
+  mechanism: PLAIN
+  username: token
+  password: "{{ env_var('EVENT_STREAMS_API_KEY') }}"
+```
+
+- The brokers are `kafka_brokers_sasl` in the service credentials. Join them with commas.
+- Exported services run the same settings in their Rust Kafka connector; the key stays an
+  `env_var()` reference that the service reads, never written into the image.
+- Create topics in the console, CLI or Terraform, with the partitions you need: each plan
+  limits topics and partitions.
+- Throughput is limited per partition by plan. Scale a stream by partitions and service
+  instances, up to one instance per partition.
+- Retention is set per topic. A consumer group that falls behind past it loses data; watch the
+  lag in the service console.
+- Use the private endpoints from inside IBM Cloud (the credentials of a private service
+  endpoint list them).
+
+## Cloud Databases
+
+IBM Cloud Databases for PostgreSQL serves TLS with IBM's own CA. Give MageML the certificate
+from the service credentials (`certificate.certificate_base64`) as it is:
+
+```yaml
+default:
+  POSTGRES_HOST: 1a2b3c.databases.appdomain.cloud     # connection.postgres.hosts[0].hostname
+  POSTGRES_PORT: 31234                                # connection.postgres.hosts[0].port
+  POSTGRES_DBNAME: ibmclouddb                         # connection.postgres.database
+  POSTGRES_USER: "{{ env_var('PG_USER') }}"
+  POSTGRES_PASSWORD: "{{ env_var('PG_PASSWORD') }}"
+  POSTGRES_SSLMODE: verify-full
+  POSTGRES_SSLROOTCERT: "{{ env_var('PG_CA_BASE64') }}"  # base64, PEM text, or a file path
+```
+
+- Use `verify-full`: it checks the certificate's name too, so a DNS mistake cannot send your
+  password to another server. `require` encrypts but trusts any server.
+- The certificate is written once to a private file, named by its hash; a rotated certificate
+  gets a new file.
+- Create a user per application instead of using the admin user from the credentials, and give
+  it only the schemas it needs.
+- Connections are limited by plan and memory. Pipelines with many parallel blocks can exhaust
+  them; use PgBouncer or lower block concurrency.
+- Private endpoints keep traffic off the public network; with an IP allowlist, add the
+  addresses MageML connects from.
+
+For MongoDB, Redis and MySQL, decode the certificate to a file and point the driver's TLS CA
+option at it (for MongoDB, `tlsCAFile` in the connection string).
+
+## Secrets Manager
+
+Exported services read secrets from IBM Cloud Secrets Manager at start-up:
+
+```bash
+MAGE_SERVICE_IBM_SECRETS_MANAGER_URL=https://<instance id>.us-south.secrets-manager.appdomain.cloud
+MAGE_SERVICE_SECRETS='PGPASSWORD=ibm:<secret id>, PGUSER=ibm:<secret id>#username'
+```
+
+They authenticate with `IBM_CLOUD_API_KEY` or a trusted profile
+(`MAGE_SERVICE_IBM_TRUSTED_PROFILE`). Give the identity the **SecretsReader** role on the
+secret group only. See [secrets](../production/pipeline-services.md#configuration-and-secrets).
+
+## Run services on IBM Cloud
+
+`mage export service` writes deployment files for IBM Cloud next to each service:
+
+- `deploy/ibm/code-engine.sh` builds the image and deploys it to Code Engine;
+- `.tekton/` is a Continuous Delivery pipeline: build with kaniko, push to Container Registry,
+  deploy to Code Engine by digest;
+- `deploy/kubernetes.yaml` runs on IKS and OpenShift.
+
+Push images to IBM Cloud Container Registry with `ibmcloud cr login`, or
+`docker login -u iamapikey icr.io` with an API key. See
+[exported services](../production/pipeline-services.md).
+
+## Good practices
+
+- One service ID or trusted profile per workload, with the least roles, scoped to resource
+  groups or buckets. Trusted profiles on Code Engine and IKS, so no keys are stored.
+- Keep keys in Secrets Manager or Code Engine secrets, referenced with `env_var()`, never in
+  `io_config.yaml`.
+- Private endpoints for COS, Event Streams, databases and IAM when MageML runs in IBM Cloud.
+- Put MageML, its databases and buckets in the same region: cross-region traffic is slower and
+  billed.
+- Rotate HMAC keys and API keys on a schedule; prefer credentials that expire.

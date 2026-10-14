@@ -680,6 +680,12 @@
             "group": "Infrastructure",
             "pages": [
               {
+                "group": "Cloud platforms",
+                "pages": [
+                  "integrations/ibm-cloud"
+                ]
+              },
+              {
                 "group": "Compute",
                 "icon": "diamonds-4",
                 "pages": [

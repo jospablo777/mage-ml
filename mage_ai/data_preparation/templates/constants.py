@@ -175,6 +175,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         block_type=BlockType.DATA_LOADER,
         groups=[GROUP_DATA_LAKES],
         language=BlockLanguage.PYTHON,
+        name='IBM Cloud Object Storage',
+        path='data_loaders/ibm_cos.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_LOADER,
+        groups=[GROUP_DATA_LAKES],
+        language=BlockLanguage.PYTHON,
         name='Google Cloud Storage',
         path='data_loaders/google_cloud_storage.py',
     ),
@@ -566,6 +573,13 @@ TEMPLATES_ONLY_FOR_V2 = [
         language=BlockLanguage.PYTHON,
         name='Azure Blob Storage',
         path='data_exporters/azure_blob_storage.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_EXPORTER,
+        groups=[GROUP_DATA_LAKES],
+        language=BlockLanguage.PYTHON,
+        name='IBM Cloud Object Storage',
+        path='data_exporters/ibm_cos.py',
     ),
     dict(
         block_type=BlockType.DATA_EXPORTER,

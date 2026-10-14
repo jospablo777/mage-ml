@@ -51,6 +51,12 @@ default:
     client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/your_service_account_email"
   GOOGLE_SERVICE_ACC_KEY_FILEPATH: "/path/to/your/service/account/key.json"
   GOOGLE_LOCATION: US # Optional
+  # IBM Cloud Object Storage: HMAC keys, or an API key (with the instance CRN to list or create buckets)
+  IBM_COS_ENDPOINT: https://s3.us-south.cloud-object-storage.appdomain.cloud
+  IBM_COS_HMAC_ACCESS_KEY_ID: "{{ env_var('IBM_COS_HMAC_ACCESS_KEY_ID') }}"
+  IBM_COS_HMAC_SECRET_ACCESS_KEY: "{{ env_var('IBM_COS_HMAC_SECRET_ACCESS_KEY') }}"
+  IBM_CLOUD_API_KEY: "{{ env_var('IBM_CLOUD_API_KEY') }}"
+  IBM_COS_INSTANCE_ID: crn:v1:bluemix:public:cloud-object-storage:global:a/...
   # MongoDB
   # Specify either the connection string or the (host, password, user, port) to connect to MongoDB.
   MONGODB_CONNECTION_STRING: "mongodb://{username}:{password}@{host}:{port}/"

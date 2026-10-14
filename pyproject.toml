@@ -92,6 +92,10 @@ mage = "mage_ai.cli.main:app"
 [project.entry-points."mlflow.run_context_provider"]
 mage = "mage_ai.orchestration.mlflow_context:MlflowRunContext"
 
+# MLflow artifacts at cos://<bucket>/<path> in IBM Cloud Object Storage (mage_ai/services/ibm/mlflow_cos.py).
+[project.entry-points."mlflow.artifact_repository"]
+cos = "mage_ai.services.ibm.mlflow_cos:COSArtifactRepository"
+
 [project.optional-dependencies]
 airtable = [
   "pyairtable>=2.3.3",
