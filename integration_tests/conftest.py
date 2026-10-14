@@ -9,6 +9,7 @@ is unreachable.
 
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -553,18 +554,32 @@ def db2_schema(db2_settings, monkeypatch):
     connection = ibm_db_dbi.connect(dsn, db2_settings['user'], db2_settings['password'])
     monkeypatch.setenv('MAGE_TEST_DB2_SCHEMA', name)
     yield name, connection
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TYPE = 'T'", (name,),
-        )
-        for (table,) in cursor.fetchall():
-            cursor.execute(f'DROP TABLE "{name}"."{table}"')
-        cursor.execute(
-            'SELECT 1 FROM SYSCAT.SCHEMATA WHERE SCHEMANAME = ?', (name,),
-        )
-        if cursor.fetchone():
-            cursor.execute(f'DROP SCHEMA "{name}" RESTRICT')
-    connection.commit()
+
+    def drop():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TYPE = 'T'", (name,),
+            )
+            for (table,) in cursor.fetchall():
+                cursor.execute(f'DROP TABLE "{name}"."{table}"')
+            cursor.execute(
+                'SELECT 1 FROM SYSCAT.SCHEMATA WHERE SCHEMANAME = ?', (name,),
+            )
+            if cursor.fetchone():
+                cursor.execute(f'DROP SCHEMA "{name}" RESTRICT')
+        connection.commit()
+
+    # Tests in parallel change the catalog too: a drop can be chosen as a deadlock's victim
+    # (SQL0911N), which rolls it back; it is tried again.
+    for attempt in range(5):
+        try:
+            drop()
+            break
+        except ibm_db_dbi.Error as error:
+            connection.rollback()
+            if 'SQL0911N' not in str(error) or attempt == 4:
+                raise
+            time.sleep(1 + attempt)
     connection.close()
 
 
