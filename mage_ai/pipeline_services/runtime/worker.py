@@ -899,7 +899,7 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
 def _messages_json(messages: List, block_uuid: str) -> str:
     try:
         return json.dumps(messages, allow_nan=False, default=_json_default)
-    except ValueError as error:
+    except (TypeError, ValueError) as error:
         _check_finite(messages, block_uuid)
         raise BlockError('run', f'Block {block_uuid} returned messages that are not JSON: '
                          f'{error}.', block_uuid=block_uuid)

@@ -340,9 +340,16 @@ jobs:
           echo "$sha  /tmp/mq.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/mqm" && tar -xzf /tmp/mq.tar.gz -C "$RUNNER_TEMP/mqm"
           echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
+      # Registries time out now and then (icr.io for Db2): three tries before failing.
       - name: Start the group's services
         if: matrix.services != ''
-        run: make -C integration_tests up SERVICES="${{ matrix.services }}"
+        run: |
+          for attempt in 1 2 3; do
+            make -C integration_tests up SERVICES="${{ matrix.services }}" && exit 0
+            echo "Starting the services failed (attempt $attempt); trying again."
+            sleep 20
+          done
+          exit 1
       # Rust blocks compile into one cargo target directory. Restore it, build Polars and the
       # block SDK into it before the tests, and save it at once, so no test pays for a cold
       # build within its time limit and a failing test run still keeps the cache.

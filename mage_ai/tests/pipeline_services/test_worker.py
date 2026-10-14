@@ -425,6 +425,23 @@ class StreamBatchTest(WorkerTestCase):
         self.assertEqual((raised.exception.phase, raised.exception.block_uuid),
                          ('run', 'numpy_nan'))
 
+    def test_a_message_that_is_not_json_names_its_block(self):
+        """A RabbitMQ Payload returned as it came was a worker error naming no block."""
+        returns_object = self.block('''
+            from types import SimpleNamespace
+
+            @transformer
+            def f(messages):
+                return [SimpleNamespace(body=b'{}')]
+        ''', name='returns_object')
+
+        with self.assertRaises(worker.BlockError) as raised:
+            self.stream([returns_object], [{}])
+
+        self.assertEqual((raised.exception.phase, raised.exception.block_uuid),
+                         ('run', 'returns_object'))
+        self.assertIn('SimpleNamespace is not JSON serializable', str(raised.exception))
+
     def test_a_failing_block_is_named(self):
         fails = self.block('''
             @transformer

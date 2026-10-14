@@ -8,7 +8,8 @@ for messages already waiting in the topic, so the service's own speed is measure
 
 test_sink_throughput measures the sinks after the identity block: PostgreSQL, ClickHouse,
 Parquet files, RabbitMQ and IBM MQ, each with its services' settings; it skips those not
-running.
+running. test_source_throughput measures the RabbitMQ and IBM MQ sources, into Kafka, from
+a queue their sink filled.
 
 MAGE_BENCHMARK_MESSAGES sets the messages (200,000 by default); MAGE_BENCHMARK_RESULTS names
 a JSON file for the results.
@@ -40,6 +41,14 @@ BLOCKS = {
         def transform(messages, *args, **kwargs):
             return [dict(m, total=m['price'] * m['units'], large=m['units'] > 5)
                     for m in messages]
+    ''',
+    # A RabbitMQ source hands blocks Mage's Payload(method, properties, body).
+    'rabbitmq_body': '''
+        import json
+
+        @transformer
+        def transform(messages, *args, **kwargs):
+            return [json.loads(m.body) for m in messages]
     ''',
 }
 
@@ -78,7 +87,7 @@ def count_until(bootstrap, topic, count, timeout):
     return total
 
 
-@pytest.mark.parametrize('block', sorted(BLOCKS))
+@pytest.mark.parametrize('block', ['enrich', 'identity'])
 def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_path):
     from kafka.admin import KafkaAdminClient, NewTopic
 
@@ -135,13 +144,22 @@ def test_stream_throughput(block, mage_project, kafka_bootstrap, binary, tmp_pat
     result = dict(block=block, messages=MESSAGES, seconds=round(seconds, 2),
                   messages_per_second=round(MESSAGES / seconds))
     print(f'\nstream benchmark: {json.dumps(result)}')
-    if os.getenv('MAGE_BENCHMARK_RESULTS'):
-        path = Path(os.environ['MAGE_BENCHMARK_RESULTS'])
-        previous = json.loads(path.read_text()) if path.exists() else []
-        path.write_text(json.dumps(previous + [result], indent=2))
+    _record(result)
 
 
-def _stream(mage_project, name, source_topic, sink_yaml, kafka_bootstrap):
+def _kafka_source(topic, group):
+    return f'''
+        connector_type: kafka
+        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+        topic: {topic}
+        consumer_group: {group}
+        auto_offset_reset: earliest
+        batch_size: 5000
+        timeout_ms: 100
+    '''
+
+
+def _stream(mage_project, name, source_yaml, sink_yaml, block='identity'):
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.constants import PipelineType
     from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -156,18 +174,40 @@ def _stream(mage_project, name, source_topic, sink_yaml, kafka_bootstrap):
         pipeline.add_block(created, upstream_block_uuids=[b.uuid for b in upstream])
         return created
 
-    source = add('source', 'data_loader', f'''
-        connector_type: kafka
-        bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
-        topic: {source_topic}
-        consumer_group: {name}
-        auto_offset_reset: earliest
-        batch_size: 5000
-        timeout_ms: 100
-    ''', 'yaml')
-    step = add('block', 'transformer', BLOCKS['identity'], 'python', [source])
+    source = add('source', 'data_loader', source_yaml, 'yaml')
+    step = add('block', 'transformer', BLOCKS[block], 'python', [source])
     add('sink', 'data_exporter', sink_yaml, 'yaml', [step])
     return pipeline
+
+
+def _run(binary, mage_project, pipeline, tmp_path, count, env):
+    """Runs the stream until `count()` reaches MESSAGES: (messages, seconds, status)."""
+    directory = export_service(mage_project, pipeline.uuid, tmp_path / pipeline.uuid)
+    service = RunningService(binary, directory, tmp_path / pipeline.uuid / 'data', **env)
+    service.start()
+    try:
+        service.wait_running()
+        started = time.perf_counter()
+        deadline = time.time() + 900
+        written, checked = 0, time.time()
+        while written < MESSAGES and time.time() < deadline:
+            time.sleep(0.05)
+            written = count()
+            if time.time() - checked > 2:
+                checked = time.time()
+                if service.streams()[0]['state'] == 'failed':
+                    break
+        seconds = time.perf_counter() - started
+        return written, seconds, service.streams()[0]
+    finally:
+        service.stop()
+
+
+def _record(result):
+    if os.getenv('MAGE_BENCHMARK_RESULTS'):
+        path = Path(os.environ['MAGE_BENCHMARK_RESULTS'])
+        previous = json.loads(path.read_text()) if path.exists() else []
+        path.write_text(json.dumps(previous + [result], indent=2))
 
 
 def _sink_case(sink, request, tmp_path):
@@ -251,25 +291,11 @@ def test_sink_throughput(sink, request, mage_project, kafka_bootstrap, binary, t
     admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
     admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
     name = f'bench_sink_{sink}_{uuid.uuid4().hex[:6]}'
-    pipeline = _stream(mage_project, name, topic, yaml, kafka_bootstrap)
+    pipeline = _stream(mage_project, name, _kafka_source(topic, name), yaml)
     try:
         produce(kafka_bootstrap, topic, MESSAGES)
-        directory = export_service(mage_project, pipeline.uuid, tmp_path)
-        service = RunningService(binary, directory, tmp_path / 'data',
-                                 KAFKA_BOOTSTRAP=kafka_bootstrap, **env)
-        service.start()
-        try:
-            service.wait_running()
-            started = time.perf_counter()
-            deadline = time.time() + 900
-            written = 0
-            while written < MESSAGES and time.time() < deadline:
-                time.sleep(0.25)
-                written = count()
-            seconds = time.perf_counter() - started
-            status = service.streams()[0]
-        finally:
-            service.stop()
+        written, seconds, status = _run(binary, mage_project, pipeline, tmp_path, count,
+                                        dict(env, KAFKA_BOOTSTRAP=kafka_bootstrap))
     finally:
         pipeline.delete()
         admin.delete_topics([topic])
@@ -278,7 +304,52 @@ def test_sink_throughput(sink, request, mage_project, kafka_bootstrap, binary, t
     result = dict(sink=sink, messages=MESSAGES, seconds=round(seconds, 2),
                   messages_per_second=round(MESSAGES / seconds))
     print(f'\nsink benchmark: {json.dumps(result)}')
-    if os.getenv('MAGE_BENCHMARK_RESULTS'):
-        path = Path(os.environ['MAGE_BENCHMARK_RESULTS'])
-        previous = json.loads(path.read_text()) if path.exists() else []
-        path.write_text(json.dumps(previous + [result], indent=2))
+    _record(result)
+
+
+@pytest.mark.parametrize('source,connections', [('ibm_mq', 1), ('ibm_mq', 4), ('rabbitmq', 1)])
+def test_source_throughput(source, connections, request, mage_project, kafka_bootstrap, binary,
+                           tmp_path):
+    """
+    The queue is filled by a stream into it, then read by a stream from it into Kafka. IBM MQ
+    reads one message per round trip under syncpoint; `connections` read in parallel.
+    """
+    from kafka import KafkaConsumer, TopicPartition
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    queue_yaml, depth, env = _sink_case(source, request, tmp_path)
+    env = dict(env, KAFKA_BOOTSTRAP=kafka_bootstrap)
+    topics = [f'bench_fill_{uuid.uuid4().hex[:8]}', f'bench_out_{uuid.uuid4().hex[:8]}']
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(t, num_partitions=1, replication_factor=1) for t in topics])
+    name = f'bench_source_{source}_{uuid.uuid4().hex[:6]}'
+    fill = _stream(mage_project, f'{name}_fill', _kafka_source(topics[0], name), queue_yaml)
+    read = _stream(mage_project, f'{name}_read',
+                   queue_yaml + 'batch_size: 5000\nbatch_timeout: 0.1\n'
+                   + (f'connections: {connections}\n' if connections > 1 else ''),
+                   f'''
+                       connector_type: kafka
+                       bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
+                       topic: {topics[1]}
+                   ''', block='rabbitmq_body' if source == 'rabbitmq' else 'identity')
+    consumer = KafkaConsumer(bootstrap_servers=kafka_bootstrap)
+    try:
+        produce(kafka_bootstrap, topics[0], MESSAGES)
+        filled, _, status = _run(binary, mage_project, fill, tmp_path, depth, env)
+        assert filled >= MESSAGES, status
+
+        def written():
+            return sum(consumer.end_offsets([TopicPartition(topics[1], 0)]).values())
+        written, seconds, status = _run(binary, mage_project, read, tmp_path, written, env)
+    finally:
+        consumer.close()
+        fill.delete()
+        read.delete()
+        admin.delete_topics(topics)
+
+    assert written >= MESSAGES, status
+    result = dict(source=source, connections=connections, messages=MESSAGES,
+                  seconds=round(seconds, 2),
+                  messages_per_second=round(MESSAGES / seconds))
+    print(f'\nsource benchmark: {json.dumps(result)}')
+    _record(result)

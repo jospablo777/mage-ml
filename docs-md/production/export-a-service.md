@@ -261,18 +261,26 @@ Measured on a laptop (Apple silicon, the systems in Docker, one partition, relea
 
 | Sink | Messages a second |
 | --- | --- |
-| Parquet files | 388,000 |
-| Kafka (block returns its messages) | 373,000 |
-| Kafka (block adds two fields) | 267,000 |
+| Parquet files | 781,000 |
+| Kafka (block returns its messages) | 652,000 |
+| Kafka (block adds two fields) | 460,000 |
 | ClickHouse | 190,000 |
 | PostgreSQL | 166,000 |
 | RabbitMQ (publisher confirms) | 33,000 |
 | IBM MQ (emulated amd64 server) | 13,700 |
 
-Up to about 400,000 messages a second, the Python block's JSON round trip is the limit;
-RabbitMQ and IBM MQ are limited by their brokers' confirmations. Larger `batch_size` values
-raise these. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your
-machine.
+Read from other sources into Kafka through the block:
+
+| Source | Messages a second |
+| --- | --- |
+| RabbitMQ (one queue) | 16,000 to 27,000 |
+| IBM MQ, one connection (emulated amd64 server) | 2,100 |
+| IBM MQ, four connections | 5,700 |
+
+The Python block's JSON round trip is the limit for Kafka and files; the brokers' own work
+limits RabbitMQ and IBM MQ. IBM MQ reads one message per round trip under syncpoint, so
+`connections` (at the cost of queue order) is what raises it. Larger `batch_size` values raise
+these. `integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
 
 ### Webhooks
 
