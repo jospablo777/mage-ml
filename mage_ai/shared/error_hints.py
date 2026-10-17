@@ -97,6 +97,32 @@ def _missing_submodule_hint(name: str, repo_path: Optional[str]) -> Optional[str
     )
 
 
+def _project_module_hint(name: str, repo_path: Optional[str]) -> Optional[str]:
+    """
+    The hint for a missing module that is a folder or file of the project: Python looks for
+    it on its import path, where the project folder is not. Installing a package with that
+    name from PyPI would install someone else's code under it.
+    """
+    project = _project_path(repo_path)
+    if not project:
+        return None
+    top = name.split('.')[0]
+    for candidate in (os.path.join(project, top), os.path.join(project, f'{top}.py')):
+        if os.path.exists(candidate):
+            break
+    else:
+        return None
+    project_name = os.path.basename(os.path.normpath(project))
+    kind = 'folder' if os.path.isdir(candidate) else 'module'
+    return (
+        f'{top} is a {kind} in the project ({candidate}), but the project folder is not on '
+        f"Python's import path, so `import {name}` does not find it. Import it through the "
+        f'project\'s name (`from {project_name}.{name} import ...`), or make the shared code '
+        'a package installed in the environment (a pyproject.toml and `uv pip install -e .`). '
+        f'Do not install a package named {package_for(name)} from PyPI: it is not this code.'
+    )
+
+
 def hint_for(error: BaseException, repo_path: Optional[str] = None) -> Optional[str]:
     """What to do about a common error, or None when there is nothing useful to add."""
     if isinstance(error, ModuleNotFoundError) and error.name:
@@ -106,10 +132,14 @@ def hint_for(error: BaseException, repo_path: Optional[str] = None) -> Optional[
             hint = _missing_submodule_hint(error.name, repo_path)
             if hint:
                 return hint
+        hint = _project_module_hint(error.name, repo_path)
+        if hint:
+            return hint
         package = package_for(error.name)
         return (
             f'{package} is not installed in the Python environment MageML runs in '
-            f'({sys.executable}). Install it with `uv pip install --python '
+            f'({sys.executable}). If {package} is the PyPI package you mean (check the name: '
+            'installing a package runs its code), install it with `uv pip install --python '
             f'{shlex.quote(sys.executable)} {package}` and add it to the project\'s '
             'requirements.txt, so deployments get it too.'
         )

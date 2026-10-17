@@ -51,6 +51,26 @@ class HintTest(TestCase):
         self.assertIn('pandas is installed but has no module pandas.nope', hint)
         self.assertIn('uv pip show pandas', hint)
 
+    def test_a_project_folder_is_never_offered_as_a_package_to_install(self):
+        # The hint told users to install the PyPI package named like a project folder,
+        # someone else's code (I-105).
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as project:
+            os.makedirs(os.path.join(project, 'utils'))
+            Path(project, 'helpers.py').write_text('')
+            hint = error_hints.hint_for(
+                ModuleNotFoundError("No module named 'utils'", name='utils.io'), project,
+            )
+            self.assertIn('utils is a folder in the project', hint)
+            self.assertIn(f'from {os.path.basename(project)}.utils.io import', hint)
+            self.assertIn('Do not install a package named utils', hint)
+            self.assertNotIn('uv pip install --python', hint)
+            hint = error_hints.hint_for(ModuleNotFoundError('x', name='helpers'), project)
+            self.assertIn('helpers is a module in the project', hint)
+            hint = error_hints.hint_for(ModuleNotFoundError('x', name='polars_ds'), project)
+            self.assertIn('If polars-ds is the PyPI package you mean', hint)
+
     def test_mageml_modules_get_no_install_hint(self):
         self.assertIsNone(error_hints.hint_for(ModuleNotFoundError('x', name='mage_ai.nope')))
 
