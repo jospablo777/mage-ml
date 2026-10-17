@@ -58,6 +58,8 @@ export MAGE_TEST_IBM_MQ_WEB_PORT ?= 19443
 export MAGE_TEST_IBM_MQ_USER ?= app
 export MAGE_TEST_IBM_MQ_PASSWORD ?= p@ssw0rd
 export MAGE_TEST_IBM_MQ_ADMIN_PASSWORD ?= adm1nPass
+# mage service deploy builds an image and runs it in this Docker.
+export MAGE_TEST_DOCKER_DEPLOY ?= 1
 export MAGE_TEST_NATS_PORT ?= 14222
 export MAGE_TEST_NATS_URL ?= nats://127.0.0.1:$(MAGE_TEST_NATS_PORT)
 export MAGE_TEST_ACTIVEMQ_PORT ?= 16613
@@ -76,7 +78,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -150,6 +152,9 @@ test-pubsub: up
 
 test-opensearch: up
 	cd .. && $(PYTHON) -m pytest integration_tests/opensearch $(PYTEST_ARGS)
+
+test-deploy:
+	cd .. && $(PYTHON) -m pytest integration_tests/deploy $(PYTEST_ARGS)
 
 test-influxdb: up
 	cd .. && $(PYTHON) -m pytest integration_tests/influxdb $(PYTEST_ARGS)

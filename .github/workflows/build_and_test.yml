@@ -246,7 +246,8 @@ jobs:
           - id: ml
             name: "Integration: ML and HTTP services"
             services: feast mlflow api
-            tests: integration_tests/feast integration_tests/mlflow integration_tests/api
+            # The deploy test builds a service image and deploys it to the runner's Docker.
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy
             r: false
             warm: ""
           - id: pipelines
