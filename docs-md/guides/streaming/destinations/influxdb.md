@@ -71,25 +71,20 @@ bucket: "data"
 measurement: "default"
 ```
 
-- The default time timestamp is the current time of execution.
-- The default tags are none.
+- Messages without a time get the batch's time in nanoseconds plus their position in the
+  batch, so messages with the same measurement and tags do not overwrite each other.
+- The default tags are none. Lists and objects in `data` are written as JSON text.
 
 The `data` part of the message is taken for the fields elements.
 If the data is a scalar value or a list type it will be written to the database with the field name `_value`.
 
-## Advanced config
+## Writes
 
-The influxdb data exporter writes data to the InfluxDB server in batches, if either the batch size or the timeout are reached. Both values can be changed if necessary in the config file:
-
-```yaml
-connector_type: influxdb
-url: "http://localhost:8086"
-token: "my-token"
-org: "my-org"
-bucket: "data"
-batch_size: 100
-timeout_ms: 500
-```
+Each batch of the stream is written in one request, and the sink returns once InfluxDB
+accepted it: the source acknowledges the messages after that, and a rejected write, such as
+one to a bucket that does not exist, stops the stream with InfluxDB's reason. `batch_size`
+and `timeout_ms` are accepted and no longer used; the source's batch settings set the size
+of each write.
 
 ## In an exported service
 

@@ -364,6 +364,15 @@ def opensearch_url():
 
 
 @pytest.fixture(scope='session')
+def influxdb():
+    """The test InfluxDB: its URL, org, bucket and operator token (compose.yaml)."""
+    url = os.getenv('MAGE_TEST_INFLUXDB_URL')
+    if not url:
+        pytest.skip('InfluxDB is not configured: MAGE_TEST_INFLUXDB_URL unset')
+    return dict(url=url, org='mage', bucket='data', token='mage-test-token')
+
+
+@pytest.fixture(scope='session')
 def mongodb_url():
     url = os.getenv('MAGE_TEST_MONGODB_URL')
     if not url:

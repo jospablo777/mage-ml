@@ -177,6 +177,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Kubernetes executor: a block whose pod failed and was retried within the Job's
   `backoffLimit` no longer fails at the first failed pod, and a failed Job says why its pods
   stopped, such as `OOMKilled (exit code 137)` (upstream #6177, #6086).
+- The InfluxDB stream sink writes each batch before the source acknowledges it: it batched
+  in the background, so acknowledged messages could be lost and rejected writes were only
+  logged. Messages without a time no longer overwrite each other, and the documented
+  `metadata['time']` is read (only `timestamp` was).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

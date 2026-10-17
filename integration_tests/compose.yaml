@@ -285,6 +285,25 @@ services:
       timeout: 5s
       retries: 80
 
+  # InfluxDB 2.7, set up with an org, a bucket and an operator token for the stream sinks.
+  influxdb:
+    image: influxdb:2.7-alpine
+    mem_limit: 512m
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: mage
+      DOCKER_INFLUXDB_INIT_PASSWORD: mage-password
+      DOCKER_INFLUXDB_INIT_ORG: mage
+      DOCKER_INFLUXDB_INIT_BUCKET: data
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mage-test-token
+    ports:
+      - "${MAGE_TEST_INFLUXDB_PORT:-18086}:8086"
+    healthcheck:
+      test: ["CMD-SHELL", "influx ping --host http://127.0.0.1:8086"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
   # ActiveMQ Classic 6.2 with a heap of 256 MB. Mage's ActiveMQ source and sink use STOMP.
   activemq:
     image: apache/activemq-classic:6.2.0
