@@ -130,6 +130,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - ECS executor: a task that outlives the wait timeout is stopped instead of running on
   unseen (a retry ran the block twice), and a container that never started or a task ECS
   did not place reports ECS's reason (upstream #4655).
+- Kubernetes executor: a block whose pod failed and was retried within the Job's
+  `backoffLimit` no longer fails at the first failed pod, and a failed Job says why its pods
+  stopped, such as `OOMKilled (exit code 137)` (upstream #6177, #6086).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

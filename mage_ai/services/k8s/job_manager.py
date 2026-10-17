@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Dict, Union
+from typing import Dict, List, Optional, Union
 
 from kubernetes import client, config
 from kubernetes.client import V1Container, V1PodSpec
@@ -84,22 +84,54 @@ class JobManager():
             self.create_job(job)
 
         api_response = None
-        job_completed = False
-        while not job_completed:
+        succeeded = None
+        while succeeded is None:
             api_response = self.batch_api_client.read_namespaced_job(
                 name=self.job_name,
                 namespace=self.namespace
             )
-            if api_response.status.succeeded is not None or \
-                    api_response.status.failed is not None:
-                job_completed = True
-            time.sleep(5)
-            # self._print(f'Job {self.job_name} status={api_response.status}')
+            succeeded = job_outcome(api_response.status)
+            if succeeded is None:
+                time.sleep(5)
 
+        # Read before the Job and its pods are deleted: a failure gave no reason (#6086).
+        reasons = [] if succeeded else self.failure_reasons()
         self.delete_job()
         self._print(f'Job {self.job_name} status={api_response.status}')
-        if api_response.status.succeeded is None:
-            raise Exception(f'Failed to execute k8s job {self.job_name}')
+        if not succeeded:
+            raise Exception(
+                f'Failed to execute k8s job {self.job_name}'
+                + (f': {"; ".join(reasons)}' if reasons else ''),
+            )
+
+    def failure_reasons(self) -> List[str]:
+        """Why the Job's pods stopped: OOMKilled, Evicted, exit codes and messages."""
+        try:
+            pods = self.core_api_client.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=f'job-name={self.job_name}',
+            ).items
+        except Exception as error:
+            return [f'its pods could not be read: {error}']
+        reasons = []
+        for pod in pods:
+            status = pod.status
+            if status is None:
+                continue
+            if status.reason:
+                reasons.append(f'pod {pod.metadata.name}: {status.reason} {status.message or ""}'
+                               .rstrip())
+            for container in status.container_statuses or []:
+                for state in (container.state, container.last_state):
+                    terminated = state.terminated if state else None
+                    if terminated and terminated.exit_code:
+                        reasons.append(
+                            f'pod {pod.metadata.name} container {container.name}: '
+                            f'{terminated.reason or "Error"} (exit code {terminated.exit_code})'
+                            + (f' {terminated.message}' if terminated.message else ''),
+                        )
+                        break
+        return reasons
 
     def create_job_object(
         self,
@@ -260,6 +292,22 @@ class JobManager():
             print(message, **kwargs)
         else:
             self.logger.info(message, **merge_dict(self.logging_tags, kwargs))
+
+
+def job_outcome(status) -> Optional[bool]:
+    """
+    True when the Job completed, False when it failed for good, None while it runs. A failed
+    pod counts while Kubernetes still retries it within backoffLimit: the run failed on the
+    first failed pod and the Job was deleted during its retry (upstream #6177).
+    """
+    for condition in (status.conditions or []) if status else []:
+        if condition.status != 'True':
+            continue
+        if condition.type == 'Complete':
+            return True
+        if condition.type == 'Failed':
+            return False
+    return None
 
 
 def filter_used_volumes(pod_spec: V1PodSpec):

@@ -518,3 +518,68 @@ class KubernetesClientProxyTest(TestCase):
         configuration = client.Configuration()
 
         self.assertEqual(configuration.no_proxy, 'kubernetes.default.svc')
+
+
+class JobOutcomeTest(TestCase):
+    def status(self, *conditions, failed=None, succeeded=None):
+        from kubernetes.client import V1JobCondition, V1JobStatus
+
+        return V1JobStatus(
+            conditions=[V1JobCondition(type=t, status=s) for t, s in conditions] or None,
+            failed=failed, succeeded=succeeded,
+        )
+
+    def manager(self, statuses, pods=()):
+        manager = object.__new__(JobManager)
+        manager.job_name = 'mage-job'
+        manager.namespace = 'default'
+        manager.logger = None
+        manager.logging_tags = {}
+        manager.job_exists = MagicMock(return_value=True)
+        manager.delete_job = MagicMock()
+        manager.batch_api_client = MagicMock()
+        manager.batch_api_client.read_namespaced_job.side_effect = [
+            MagicMock(status=s) for s in statuses
+        ]
+        manager.core_api_client = MagicMock()
+        manager.core_api_client.list_namespaced_pod.return_value = MagicMock(items=list(pods))
+        return manager
+
+    def test_a_failed_pod_retried_within_the_backoff_limit_is_waited_for(self):
+        """The run failed on the first failed pod while Kubernetes retried it (#6177)."""
+        manager = self.manager([
+            self.status(failed=1),
+            self.status(('Complete', 'True'), failed=1, succeeded=1),
+        ])
+
+        with patch('mage_ai.services.k8s.job_manager.time.sleep'):
+            manager.run_job('mage run')
+
+        self.assertEqual(manager.batch_api_client.read_namespaced_job.call_count, 2)
+        manager.delete_job.assert_called_once()
+
+    def test_a_failed_job_says_why_its_pods_stopped(self):
+        """A failure gave no reason, such as a pod killed for its memory (#6086)."""
+        from kubernetes.client import (
+            V1ContainerState,
+            V1ContainerStateTerminated,
+            V1ContainerStatus,
+            V1ObjectMeta,
+            V1PodStatus,
+        )
+
+        pod = V1Pod(metadata=V1ObjectMeta(name='mage-job-x'), status=V1PodStatus(
+            container_statuses=[V1ContainerStatus(
+                name='mage', image='i', image_id='i', ready=False, restart_count=0,
+                state=V1ContainerState(terminated=V1ContainerStateTerminated(
+                    exit_code=137, reason='OOMKilled',
+                )),
+            )],
+        ))
+        manager = self.manager([self.status(('Failed', 'True'), failed=3)], pods=[pod])
+
+        with patch('mage_ai.services.k8s.job_manager.time.sleep'), \
+                self.assertRaisesRegex(Exception, 'OOMKilled \\(exit code 137\\)'):
+            manager.run_job('mage run')
+
+        manager.delete_job.assert_called_once()
