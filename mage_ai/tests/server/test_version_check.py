@@ -139,7 +139,7 @@ class GetLatestVersionTests(unittest.TestCase):
             session.__aexit__ = AsyncMock(return_value=False)
             return session
 
-        target = 'mage_ai.server.version_check.aiohttp.ClientSession'
+        target = 'mage_ai.server.version_check.client_session'
         with patch(target, return_value=session_answering(200, {'tag_name': 'v0.9.79+ml.6'})) \
                 as client:
             self.assertEqual(run(fetch_published_version('owner/repo')), '0.9.79+ml.6')
@@ -151,7 +151,7 @@ class GetLatestVersionTests(unittest.TestCase):
 
     def test_an_offline_lookup_returns_nothing_rather_than_raising(self):
         with patch(
-            'mage_ai.server.version_check.aiohttp.ClientSession',
+            'mage_ai.server.version_check.client_session',
             side_effect=OSError('no network'),
         ):
             self.assertIsNone(run(fetch_published_version()))
@@ -174,3 +174,15 @@ class UpdateCheckSettingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ClientSessionTests(unittest.TestCase):
+    def test_sessions_use_proxy_settings_and_a_short_timeout(self):
+        """Sign-in and update checks ignored HTTPS_PROXY (upstream #5748)."""
+        from mage_ai.shared.http_client import client_session
+
+        async def make():
+            async with client_session() as session:
+                return session.trust_env, session.timeout.total
+
+        self.assertEqual(run(make()), (True, 30))

@@ -3,8 +3,6 @@ import uuid
 from typing import Awaitable, Dict
 from urllib.parse import quote_plus
 
-import aiohttp
-
 from mage_ai.authentication.oauth.constants import ProviderName
 from mage_ai.authentication.providers.oauth import OauthProvider
 from mage_ai.authentication.providers.sso import SsoProvider
@@ -19,6 +17,7 @@ from mage_ai.settings.keys import (
     AZURE_HOST,
     MICROSOFT_GRAPH_API_HOST,
 )
+from mage_ai.shared.http_client import client_session
 
 logger = Logger().new_server_logger(__name__)
 
@@ -93,7 +92,7 @@ class ADProvider(SsoProvider, OauthProvider):
     async def get_access_token_response(self, code: str, **kwargs) -> Awaitable[Dict]:
         base_url = get_base_url(kwargs.get('redirect_uri'))
 
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.host}/organizations/oauth2/v2.0/token',
                 headers={
@@ -120,7 +119,7 @@ class ADProvider(SsoProvider, OauthProvider):
             raise Exception('Access token is required to fetch user info.')
 
         mage_roles = []
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.get(
                 f'{self.graph_api_host}/v1.0/me',
                 headers={

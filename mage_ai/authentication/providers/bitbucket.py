@@ -2,7 +2,6 @@ import urllib.parse
 import uuid
 from typing import Awaitable, Dict
 
-import aiohttp
 from aiohttp import BasicAuth
 
 from mage_ai.authentication.oauth.constants import ProviderName
@@ -14,6 +13,7 @@ from mage_ai.settings.keys import (
     BITBUCKET_OAUTH_KEY,
     BITBUCKET_OAUTH_SECRET,
 )
+from mage_ai.shared.http_client import client_session
 
 
 class BitbucketProvider(OauthProvider):
@@ -61,7 +61,7 @@ class BitbucketProvider(OauthProvider):
     async def get_access_token_response(self, code: str, **kwargs) -> Awaitable[Dict]:
         base_url = get_base_url(kwargs.get('redirect_uri'))
         data = dict()
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.hostname}/site/oauth2/access_token',
                 headers={
@@ -82,7 +82,7 @@ class BitbucketProvider(OauthProvider):
     async def get_refresh_token_response(self, refresh_token: str) -> Awaitable[Dict]:
         data = dict()
 
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.hostname}/site/oauth2/access_token',
                 headers={

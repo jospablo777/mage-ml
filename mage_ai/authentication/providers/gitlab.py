@@ -2,13 +2,12 @@ import urllib.parse
 import uuid
 from typing import Awaitable, Dict
 
-import aiohttp
-
 from mage_ai.authentication.oauth.constants import ProviderName
 from mage_ai.authentication.providers.oauth import OauthProvider
 from mage_ai.authentication.providers.utils import get_base_url
 from mage_ai.settings import get_settings_value
 from mage_ai.settings.keys import GITLAB_CLIENT_ID, GITLAB_CLIENT_SECRET, GITLAB_HOST
+from mage_ai.shared.http_client import client_session
 
 
 class GitlabProvider(OauthProvider):
@@ -60,7 +59,7 @@ class GitlabProvider(OauthProvider):
         base_url = get_base_url(kwargs.get('redirect_uri'))
         data = dict()
 
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.hostname}/oauth/token',
                 headers={
@@ -82,7 +81,7 @@ class GitlabProvider(OauthProvider):
     async def get_refresh_token_response(self, refresh_token: str) -> Awaitable[Dict]:
         data = dict()
 
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.hostname}/oauth/token',
                 headers={

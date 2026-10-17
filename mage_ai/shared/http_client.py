@@ -1,7 +1,9 @@
-from mage_ai.shared.hash import ignore_keys_with_blank_values
-from typing import Dict
 import json
+from typing import Dict
+
 import requests
+
+from mage_ai.shared.hash import ignore_keys_with_blank_values
 
 
 class HttpClient:
@@ -38,3 +40,17 @@ class HttpClient:
             if response.text:
                 return response.json()
         return response
+
+
+def client_session(timeout_seconds: float = 30):
+    """
+    An aiohttp session that uses HTTP_PROXY, HTTPS_PROXY and NO_PROXY (sign-in failed behind
+    proxies, upstream #5748) and gives up after timeout_seconds instead of aiohttp's 5
+    minutes, which held a sign-in that long.
+    """
+    import aiohttp
+
+    return aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        trust_env=True,
+    )

@@ -12,10 +12,10 @@ import os
 import time
 from typing import Optional
 
-import aiohttp
 from packaging.version import InvalidVersion, Version
 
 from mage_ai.server.constants import VERSION
+from mage_ai.shared.http_client import client_session
 
 TIMEOUT_SECONDS = 3
 # MageML is published as GitHub releases of this repository, not on PyPI.
@@ -52,7 +52,7 @@ async def fetch_published_version(
     """The version of the repository's latest GitHub release (its tag without a leading
     v), or None when there is none or GitHub cannot be reached."""
     try:
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.get(
                 f'https://api.github.com/repos/{repository}/releases/latest',
                 headers={'Accept': 'application/vnd.github+json'},

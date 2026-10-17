@@ -2,13 +2,12 @@ import urllib.parse
 import uuid
 from typing import Awaitable, Dict
 
-import aiohttp
-
 from mage_ai.authentication.oauth.constants import ProviderName, get_ghe_hostname
 from mage_ai.authentication.providers.oauth import OauthProvider
 from mage_ai.authentication.providers.utils import get_base_url
 from mage_ai.settings import get_settings_value
 from mage_ai.settings.keys import GHE_CLIENT_ID, GHE_CLIENT_SECRET
+from mage_ai.shared.http_client import client_session
 
 
 class GHEProvider(OauthProvider):
@@ -59,7 +58,7 @@ class GHEProvider(OauthProvider):
 
     async def get_access_token_response(self, code: str, **kwargs) -> Awaitable[Dict]:
         data = dict()
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 f'{self.hostname}/login/oauth/access_token',
                 headers={

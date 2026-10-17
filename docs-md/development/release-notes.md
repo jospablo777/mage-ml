@@ -100,6 +100,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `kwargs['body']`; it failed with a 500 (upstream #5414). A body that is not JSON gets a 400
   with the reason, refused API requests no longer return the server's traceback, and the
   trigger token is compared in constant time.
+- Single sign-on (OIDC, Active Directory, Google, GitHub Enterprise, GitLab, Bitbucket) and
+  the update check use `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, and give up after 30
+  seconds instead of 5 minutes (upstream #5748).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

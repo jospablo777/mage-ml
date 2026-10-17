@@ -2,14 +2,13 @@ import urllib.parse
 import uuid
 from typing import Awaitable, Dict
 
-import aiohttp
-
 from mage_ai.authentication.oauth.constants import ProviderName
 from mage_ai.authentication.providers.oauth import OauthProvider
 from mage_ai.authentication.providers.sso import SsoProvider
 from mage_ai.authentication.providers.utils import get_base_url
 from mage_ai.settings import get_settings_value
 from mage_ai.settings.keys import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+from mage_ai.shared.http_client import client_session
 
 
 class GoogleProvider(SsoProvider, OauthProvider):
@@ -56,7 +55,7 @@ class GoogleProvider(SsoProvider, OauthProvider):
         base_url = get_base_url(kwargs.get('redirect_uri'))
 
         data = dict()
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 'https://oauth2.googleapis.com/token',
                 data=dict(
@@ -75,7 +74,7 @@ class GoogleProvider(SsoProvider, OauthProvider):
     async def get_user_info(self, access_token: str = None, **kwargs) -> Awaitable[Dict]:
         if access_token is None:
             raise Exception('Access token is required to fetch user info.')
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.get(
                 'https://www.googleapis.com/oauth2/v3/userinfo',
                 params=dict(access_token=access_token),

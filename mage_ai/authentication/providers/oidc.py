@@ -3,7 +3,6 @@ import urllib.parse
 import uuid
 from typing import Awaitable, Dict
 
-import aiohttp
 import requests
 
 from mage_ai.authentication.oauth.constants import ProviderName
@@ -18,6 +17,7 @@ from mage_ai.settings.keys import (
     OIDC_DISCOVERY_URL,
     OIDC_ROLES_MAPPING,
 )
+from mage_ai.shared.http_client import client_session
 
 logger = Logger().new_server_logger(__name__)
 
@@ -111,7 +111,7 @@ class OidcProvider(OauthProvider, SsoProvider):
         if self.client_secret:
             payload['client_secret'] = self.client_secret
 
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.post(
                 self.token_endpoint,
                 headers={
@@ -128,7 +128,7 @@ class OidcProvider(OauthProvider, SsoProvider):
         if access_token is None:
             raise Exception('Access token is required to fetch user info.')
         mage_roles = []
-        async with aiohttp.ClientSession() as session:
+        async with client_session() as session:
             async with session.get(
                 self.userinfo_endpoint,
                 headers={
