@@ -85,6 +85,8 @@ type PipelineRunsProp = {
   };
 };
 
+const DELETE_SELECTED_PIPELINE_RUNS_UUID = 'delete_selected_pipeline_runs';
+
 const RUN_RANGES = [
   { label: 'All time', seconds: 0 },
   { label: 'Last hour', seconds: 3600 },
@@ -265,6 +267,11 @@ function PipelineRuns({
       .filter((run) => run !== null && RUNNING_STATUSES.includes(run?.status))
   ), [selectedRuns]);
   const selectedRunningRunsCount = selectedRunningRunsArr.length;
+  // Runs that are not waiting or running can be deleted (upstream #4516).
+  const selectedDeletableRunsArr = useMemo(() => selectedRunsArr.filter(
+    (run) => !RUNNING_STATUSES.includes(run?.status) && run?.status !== RunStatusEnum.INITIAL,
+  ), [selectedRunsArr]);
+  const selectedDeletableRunsCount = selectedDeletableRunsArr.length;
 
   const [updatePipeline]: any = useMutation(
     api.pipelines.useUpdate(pipelineUUID),
@@ -386,7 +393,21 @@ function PipelineRuns({
       openConfirmationDialogue: true,
       uuid: CANCEL_ALL_RUNNING_PIPELINE_RUNS_UUID,
     },
+    {
+      beforeIcon: <AlertTriangle muted={selectedDeletableRunsCount === 0} />,
+      disabled: selectedDeletableRunsCount === 0,
+      label: () => `Delete selected (${selectedDeletableRunsCount})`,
+      onClick: () => Promise.all(
+        // @ts-ignore
+        selectedDeletableRunsArr.map(({ id }) => deletePipelineRun(id)),
+      ).then(() => setSelectedRuns({})),
+      openConfirmationDialogue: true,
+      uuid: DELETE_SELECTED_PIPELINE_RUNS_UUID,
+    },
   ]), [
+    deletePipelineRun,
+    selectedDeletableRunsArr,
+    selectedDeletableRunsCount,
     hasFailedPipelineRun,
     hasRunningPipeline,
     isPipelineRunsTab,
@@ -549,19 +570,27 @@ function PipelineRuns({
                     open={!!confirmationDialogueOpenId}
                   >
                     <PopupMenu
-                      danger={confirmationDialogueOpenId === CANCEL_ALL_RUNNING_PIPELINE_RUNS_UUID}
+                      danger={[
+                        CANCEL_ALL_RUNNING_PIPELINE_RUNS_UUID,
+                        DELETE_SELECTED_PIPELINE_RUNS_UUID,
+                      ].includes(confirmationDialogueOpenId)}
                       onCancel={() => setConfirmationDialogueOpenId(null)}
                       onClick={() => {
                         confirmationAction?.();
                         setConfirmationDialogueOpenId(null);
                       }}
-                      subtitle={'This includes runs on other pages as well, not just the current page.' +
+                      subtitle={confirmationDialogueOpenId === DELETE_SELECTED_PIPELINE_RUNS_UUID
+                        ? 'Their block runs are deleted too; log files stay until log retention '
+                          + 'removes them. Runs that are waiting or running are kept.'
+                        : 'This includes runs on other pages as well, not just the current page.' +
                         (confirmationDialogueOpenId === PipelineStatusEnum.RETRY_INCOMPLETE_BLOCK_RUNS
                           ? ' Incomplete block runs will be retried for FAILED pipeline runs specifically.'
                           : ''
                         )
                       }
-                      title={confirmationDialogueOpenId === CANCEL_ALL_RUNNING_PIPELINE_RUNS_UUID
+                      title={confirmationDialogueOpenId === DELETE_SELECTED_PIPELINE_RUNS_UUID
+                        ? `Delete ${selectedDeletableRunsCount} selected pipeline runs?`
+                        : confirmationDialogueOpenId === CANCEL_ALL_RUNNING_PIPELINE_RUNS_UUID
                         ? 'Are you sure you want to cancel all pipeline runs in progress?'
                         : 'Are you sure you want to retry all incomplete block runs for any failed pipeline runs?'
                       }

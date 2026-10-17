@@ -86,6 +86,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Triggers
 
+- The pipeline runs page deletes the selected runs that are not waiting or running
+  (upstream #4516).
 - The triggers page searches triggers by name or pipeline (upstream #5697).
 - The pipeline runs page filters runs by time range (last hour, 24 hours, 7 or 30 days)
   (upstream #6062). `start_timestamp` and `end_timestamp` in the API are read as UTC; they
