@@ -28,7 +28,9 @@ ca_cert: "certificate.cert"
 
 ## In an exported service
 
-[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.
+[Exported services](../../../production/stream-services.md#elasticsearch-and-opensearch) run this sink
+in Rust through the bulk API, with the same settings. Secrets (`api_key`) come from the
+environment, as `"{{ env_var('NAME') }}"`, and `ca_cert` is the PEM text, not a file path.
 
 ## Documents and ids
 

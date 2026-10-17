@@ -171,7 +171,7 @@ Loads the whole file at the filepath specified into a data frame.
 
     -   `filepath (os.PathLike)`: Filepath to load data frame from.
     -   `format (FileFormat | str, Optional)`: Format of the file to load data frame from. Defaults to None, in which case the format is inferred.
-    -   `file_directories (List[str], optional)`: Load every file in these directories instead and concatenate them into one data frame.
+    -   `file_directories (List[str], optional)`: Load every file in these directories instead, in name order, and concatenate them into one data frame. Each file is read in the format of its extension unless `format` is given; hidden files and files starting with `_` (such as `_SUCCESS`) are skipped.
     -   `exact_types (bool, optional)`: Return pyarrow-backed pandas columns, so integers with missing values stay integers and decimals, nested values and strings keep their types. CSV, JSON and Parquet only. Defaults to `False`.
     -   `polars (bool, optional)`: Return a Polars DataFrame read by Polars. CSV, JSON and Parquet only. Defaults to `False`.
     -   `**kwargs` - Additional keyword arguments to pass to the file writer. See possible arguments by file formats at:

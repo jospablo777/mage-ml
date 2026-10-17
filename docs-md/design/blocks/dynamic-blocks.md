@@ -171,6 +171,9 @@ Every downstream block from a dynamic block is referred to as a dynamically crea
 
 The number of these blocks created are determined by the return output data of a dynamic block.
 
+A dynamic block that returns no items (an empty list or DataFrame) creates no blocks: the run
+completes, and a block downstream of a reduced output receives an empty list.
+
 For example, if a dynamic block returns the following data:
 
 ```json
@@ -261,6 +264,12 @@ dynamically created:
 → clean_column_names:for_user_3
 → compute_engagement_score:for_user_3
 ```
+
+A block downstream of two dynamically created blocks of the same dynamic block, such as
+`clean_column_names` and `compute_engagement_score` together, is created once per item:
+the block for user 1 gets `clean_column_names:for_user_1` and
+`compute_engagement_score:for_user_1`. Upstream blocks created from different dynamic blocks
+make one block per combination of their items.
 
 The data that is passed into each of these downstream blocks
 (e.g. `clean_column_names`, `compute_engagement_score`) will come from its upstream block

@@ -26,6 +26,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `_source: _doc` keeps the old shape for an existing index.
 - **Pipeline `metadata.yaml` no longer stores block statuses or `variables_dir`**; statuses
   are kept beside the pipeline's outputs on each machine.
+- **A block downstream of several children of one dynamic block pairs their items**: with
+  `B` and `C` both downstream of dynamic `A`, `D` runs once per item with `B:i` and `C:i`. It
+  ran once per combination, n * n times (upstream #5980). Dynamic upstream blocks from
+  different dynamic blocks still make every combination.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
 
@@ -36,7 +40,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, and PostgreSQL changes
   by logical replication.
 - Sinks: Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB,
-  PostgreSQL (COPY, upserts), ClickHouse (deduplicated inserts), object storage (S3, GCS,
+  PostgreSQL (COPY, upserts), ClickHouse (deduplicated inserts), Elasticsearch and OpenSearch
+  (bulk API, `_id` replaces documents, SigV4 for AWS), object storage (S3, GCS,
   Azure Blob, disk; Parquet or JSON lines), HTTP and Feast.
 - At least once everywhere: a source's position moves only after every sink took the batch.
   Dead letters take the messages a block fails on, found by splitting the batch.
@@ -83,6 +88,17 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - The kernel restart, switch and interrupt no longer block the server: they run off its
   event loop with a time limit, and a replaced kernel client is closed.
 - The first export on a fresh server is fast (secret clients made on first use).
+- Object columns with missing values keep their values between blocks: ints came back as
+  floats (integers past 2**53 lost digits, also in Rust blocks reading the file), and None
+  as NaN or NaT, in a column of another dtype (upstream #5913).
+- `FileIO.load(file_directories=...)` reads each file in its own format (it used the first
+  file's), in name order, skips hidden and `_` files such as `_SUCCESS`, and concatenates
+  Polars frames with Polars (upstream #6160).
+- A dynamic block that returns no items creates no children. The scheduler waited 2 minutes
+  for items, then ran one child without input, which failed the run (upstream #6045).
+- The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
+  event loop for the scheduler process to make the database tables. It now migrates the
+  database itself before starting the scheduler (0.01 s when already up to date).
 
 ## MageML 0.1.1 (2026-10-13)
 
