@@ -52,7 +52,7 @@ schedules: off        # on runs the time triggers; keep off where MageML runs th
 variables: {}
 secrets: {}
 """
-GITIGNORE_LINES = ('.mage/build/', 'services/*/.env*')
+GITIGNORE_LINES = ('.mage/build/', '.mage/run/', 'services/*/.env*')
 _NAME = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 

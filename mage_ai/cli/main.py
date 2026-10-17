@@ -1187,18 +1187,52 @@ def service_new(
 
 
 @service_app.command('check')
-def service_check(name: str = typer.Argument(...), project: str = SERVICE_PROJECT):
+def service_check(
+    name: Union[str, None] = typer.Argument(None),
+    project: str = SERVICE_PROJECT,
+    affected: bool = typer.Option(
+        False, '--affected', help='check the services that changed files touch, for CI.',
+    ),
+    base: str = typer.Option(
+        'origin/main', '--base', help='with --affected, the Git ref the changes are against.',
+    ),
+):
     """What would stop the service from building, and what to know about it."""
+    import subprocess
+
     from mage_ai.pipeline_services import lifecycle
 
-    result = lifecycle.check(project, name)
-    if not result.ok:
-        typer.echo(f'{name} cannot be built:', err=True)
-        for problem in result.problems:
-            typer.echo(f'  - {problem}', err=True)
+    if affected:
+        try:
+            paths = lifecycle.changed_paths(project, base)
+        except subprocess.CalledProcessError as error:
+            typer.echo(f'Git could not list the changes since {base}: '
+                       f'{(error.stderr or "").strip()}', err=True)
+            raise typer.Exit(code=1)
+        names = lifecycle.affected(project, paths)
+        if not names:
+            typer.echo(f'No service is affected by the changes since {base}.')
+            return
+        typer.echo(f'Affected: {", ".join(names)}')
+    elif name:
+        names = [name]
+    else:
+        typer.echo('Name a service, or pass --affected.', err=True)
         raise typer.Exit(code=1)
-    typer.echo(result.report)
-    typer.echo(f'{name} is ready to build: mage service build {name}')
+
+    failed = False
+    for service in names:
+        result = lifecycle.check(project, service)
+        if not result.ok:
+            failed = True
+            typer.echo(f'{service} cannot be built:', err=True)
+            for problem in result.problems:
+                typer.echo(f'  - {problem}', err=True)
+            continue
+        typer.echo(result.report)
+        typer.echo(f'{service} is ready to build: mage service build {service}')
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @service_app.command('build')
@@ -1230,6 +1264,196 @@ def service_build(
         except export.ExportError as error:
             _service_error(error)
         typer.echo(f'Image {tag or name} is {"pushed" if push else "built"}.')
+
+
+@service_app.command('run')
+def service_run(
+    name: str = typer.Argument(...),
+    project: str = SERVICE_PROJECT,
+    env: str = typer.Option('dev', '--env', help='the environment whose values to use.'),
+    port: int = typer.Option(6790, help='the port of the service API.'),
+):
+    """Runs the service on this machine's engine, without Docker, until Ctrl+C."""
+    import signal
+    import subprocess
+
+    from mage_ai.pipeline_services import definitions, engine, export, local_run
+
+    try:
+        run = local_run.prepare(project, name, environment=env, port=port)
+    except (definitions.DefinitionError, export.ExportError) as error:
+        _service_error(error)
+    except (engine.EngineNotFound, local_run.LocalRunError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    if run.missing:
+        typer.echo(
+            f'Not set: {", ".join(run.missing)}. Add them to '
+            f'services/{name}/.env.{env} (git-ignored) or the environment.',
+            err=True,
+        )
+    typer.echo(f'Service {name} on http://127.0.0.1:{run.port} (environment {env}).')
+    typer.echo(f'API token: in {os.path.relpath(run.token_file, project)}, readable by you only.')
+    typer.echo('Stop with Ctrl+C.')
+    process = subprocess.Popen(run.command, env=run.env)
+    try:
+        code = process.wait()
+    except KeyboardInterrupt:
+        process.send_signal(signal.SIGTERM)
+        code = process.wait()
+    raise typer.Exit(code=code)
+
+
+DEPLOY_ENV = typer.Option(..., '--env', help='the environment to deploy to.')
+
+
+def _docker_target(project: str, name: str, env: str):
+    """The deploy target of the environment; Docker is the one supported so far."""
+    from mage_ai.pipeline_services import deploy, local_run
+
+    try:
+        settings = local_run.environment_settings(project, name, env)
+    except local_run.LocalRunError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    target = settings.get('target', 'docker')
+    if target != 'docker':
+        typer.echo(
+            f'Environment {env} deploys to {target}; mage service deploy supports docker so '
+            f'far. Use the build context (mage service export {name}) and its deploy/ files.',
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return deploy.DockerTarget(), settings
+
+
+@service_app.command('deploy')
+def service_deploy(
+    name: str = typer.Argument(...),
+    env: str = DEPLOY_ENV,
+    project: str = SERVICE_PROJECT,
+    timeout: int = typer.Option(120, help='seconds to wait for the service to be healthy.'),
+):
+    """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
+    from mage_ai.pipeline_services import (
+        definitions,
+        deploy,
+        export,
+        lifecycle,
+        local_run,
+    )
+
+    target, settings = _docker_target(project, name, env)
+    result = lifecycle.check(project, name)
+    if not result.ok:
+        typer.echo(f'{name} cannot be built:', err=True)
+        for problem in result.problems:
+            typer.echo(f'  - {problem}', err=True)
+        raise typer.Exit(code=1)
+    try:
+        box = lifecycle.build(project, name)
+        lock = lifecycle.read_lock(project, name) or {}
+        digest = str(lock.get('manifest_sha256', ''))[:12] or 'latest'
+        image = f'mage-{name}:{digest}'
+        export.build_image(box, image)
+        values = local_run.environment_values(project, name, env)
+    except (definitions.DefinitionError, export.ExportError, local_run.LocalRunError) as error:
+        _service_error(error)
+    values['MAGE_SERVICE_TOKEN'] = local_run.service_token(deploy.token_file(project, name, env))
+    port = int(settings.get('port') or 6800)
+    try:
+        deployment = target.deploy(
+            name, env, image, port, values,
+            labels=dict(commit=deploy.git_commit(project),
+                        lock=str(lock.get('manifest_sha256', ''))),
+            timeout=timeout,
+        )
+    except deploy.DeployError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f'{name} runs in {env} on http://127.0.0.1:{port} ({deployment.image}).')
+    typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
+
+
+@service_app.command('status')
+def service_status(
+    name: Union[str, None] = typer.Argument(None),
+    project: str = SERVICE_PROJECT,
+):
+    """Per environment: what runs, its health, and whether it is the repository version."""
+    from mage_ai.pipeline_services import deploy, lifecycle
+
+    try:
+        deployments = deploy.DockerTarget().status(name)
+    except deploy.DeployError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    if not deployments:
+        typer.echo('No deployment found.' if not name else f'{name} is not deployed.')
+        return
+    for item in deployments:
+        lock = (lifecycle.read_lock(project, item.service) or {}).get('manifest_sha256')
+        commit = item.commit[:12] if item.commit else 'unknown commit'
+        typer.echo(f'{item.service}  {item.environment}  {item.drift(lock)}  '
+                   f'{item.image}  {commit}')
+
+
+@service_app.command('diff')
+def service_diff(
+    name: str = typer.Argument(...),
+    env: str = DEPLOY_ENV,
+    project: str = SERVICE_PROJECT,
+):
+    """The service's files the repository changed since the deployed commit."""
+    import subprocess
+
+    from mage_ai.pipeline_services import lifecycle
+
+    target, _ = _docker_target(project, name, env)
+    deployment = target.inspect(name, env)
+    if deployment is None:
+        typer.echo(f'{name} is not deployed in {env}.', err=True)
+        raise typer.Exit(code=1)
+    commit = deployment.commit.replace('+dirty', '')
+    if not commit:
+        typer.echo('The deployment has no commit label.', err=True)
+        raise typer.Exit(code=1)
+    try:
+        paths = lifecycle.changed_paths(project, commit)
+    except subprocess.CalledProcessError as error:
+        typer.echo(f'Git could not compare with {commit}: {(error.stderr or "").strip()}',
+                   err=True)
+        raise typer.Exit(code=1)
+    inputs = lifecycle.service_inputs(project, name, lifecycle.capture(project, name))
+    changed = [
+        path for path in paths
+        if any(path == item or path.startswith(item.rstrip('/') + '/') for item in inputs)
+    ]
+    dirty = ' (deployed with uncommitted changes)' if '+dirty' in deployment.commit else ''
+    if not changed:
+        typer.echo(f'No change to {name} since the deployed commit {commit[:12]}{dirty}.')
+        return
+    typer.echo(f'Changed since the deployed commit {commit[:12]}{dirty}:')
+    for path in changed:
+        typer.echo(f'  {path}')
+
+
+@service_app.command('rollback')
+def service_rollback(
+    name: str = typer.Argument(...),
+    env: str = DEPLOY_ENV,
+    project: str = SERVICE_PROJECT,
+):
+    """Runs the previous deployment of the environment again."""
+    from mage_ai.pipeline_services import deploy
+
+    target, _ = _docker_target(project, name, env)
+    try:
+        deployment = target.rollback(name, env)
+    except deploy.DeployError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f'{name} in {env} runs {deployment.image} again.')
 
 
 @service_app.command('export')

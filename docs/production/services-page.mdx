@@ -69,7 +69,13 @@ The same services from the command line, in the project folder:
 | `mage service new shop-live --pipelines live_traffic,live_minute_kpis` | Creates the folder with `service.yaml` and a `dev` environment |
 | `mage service list` | The services, their pipelines and where each is saved |
 | `mage service check shop-live` | What would stop the service from building, and what to know |
+| `mage service check --affected [--base origin/main]` | Checks the services that the changes since `--base` touch, for CI ([below](#check-the-services-a-change-touches)) |
+| `mage service run shop-live [--env dev] [--port 6790]` | Runs the service on this machine's engine, without Docker, until Ctrl+C ([below](#run-a-service-locally)) |
 | `mage service build shop-live [--image]` | Writes the build to `.mage/build/shop-live/` (kept out of Git) and updates `service.lock` |
+| `mage service deploy shop-live --env prod` | Builds the image, runs it in the environment's target, waits for health and brings the previous deployment back on failure ([below](#deploy-with-docker)) |
+| `mage service status [shop-live]` | Per environment: what runs and whether it is the repository version |
+| `mage service diff shop-live --env prod` | The service's files changed since the deployed commit |
+| `mage service rollback shop-live --env prod` | Runs the previous deployment again |
 | `mage service export shop-live --out ./shop-live` | The build context in a folder, for a team that builds elsewhere |
 | `mage service migrate` | Moves the services of the earlier `pipeline_services.yaml` to their folders |
 
@@ -79,6 +85,83 @@ changed, and its diff in a pull request says what moved.
 
 Projects that still have `pipeline_services.yaml` keep working: its services are read, and
 saving one on the Services page moves it to its folder.
+
+### Deploy with Docker
+
+An environment with `target: docker` deploys to the Docker of this machine:
+
+```yaml
+# services/shop-live/environments/prod.yaml
+target: docker
+port: 6800           # the host port, on 127.0.0.1
+schedules: on        # the service runs its time triggers
+variables:
+  REGION: eu
+```
+
+`mage service deploy shop-live --env prod` checks the service, builds it (updating
+`service.lock`), builds the image `mage-shop-live:<lock digest>` and starts the container
+`mage-shop-live-prod`, with the environment's variables, the secrets of
+`services/shop-live/.env.prod` (passed in a private file, never on the command line) and an
+API token in `.mage/deploy/shop-live/prod/token`. Run history and stream positions are kept
+in the volume `mage-shop-live-prod-data`.
+
+- The container carries labels with the commit, the lock and the image, so `status` and
+  `diff` read what runs from Docker; nothing is committed back.
+- The deploy waits for `/healthz`. When the new container does not become healthy, it is
+  removed, its last log lines are shown, and the previous deployment runs again.
+- The previous deployment is kept, stopped, as `mage-shop-live-prod-previous`:
+  `mage service rollback shop-live --env prod` swaps them.
+
+Kubernetes and IBM Code Engine deploy from the build context's `deploy/` files for now.
+
+### Check the services a change touches
+
+In CI, `mage service check --affected --base origin/main` lists the services that the
+changes since `origin/main` (committed or not) touch, and checks each: a change to a
+service's folder, its pipelines, the code its blocks import, its stream settings,
+`io_config.yaml`, `requirements.txt` or the project's `metadata.yaml` counts. It exits with 1
+when a check fails, and does nothing when no service is affected.
+
+```yaml
+# .github/workflows/services.yml
+on: pull_request
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - run: uv pip install --system mage-ml
+      - run: mage service check --affected --base origin/${{ github.base_ref }}
+```
+
+### Run a service locally
+
+`mage service run shop-live` builds the service into `.mage/run/shop-live/` and runs it on
+the engine, `mage-service`, with the Python running MageML: the same API, schedules and
+streams as the image, without Docker.
+
+- **The engine.** `uv pip install mageml-engine` installs it next to Python (Linux x86_64
+  and aarch64 with glibc 2.28 or later, macOS on Apple silicon). Elsewhere, build it with
+  `cargo build --release -p mage-service --features full` and set `MAGE_ENGINE_PATH`.
+- **Values.** `environments/dev.yaml` holds the non-secret `variables`; secrets go in
+  `services/shop-live/.env.dev` (`KEY=value` lines, ignored by Git). The run lists the
+  variables the blocks need that are not set. `--env staging` reads `staging.yaml` and
+  `.env.staging`.
+- **The API token.** Each service gets one, written to `.mage/run/shop-live/token` and
+  readable by you only; send it as `Authorization: Bearer <token>`.
+- **State.** Run history and stream positions stay in `.mage/run/shop-live/data` across
+  restarts. A local run does not change `service.lock`.
+- **Rust blocks** are compiled with cargo, as the image does.
+
+```bash
+mage service run shop-live
+curl -X POST "http://127.0.0.1:6790/v1/pipelines/live_minute_kpis/runs?wait=60" \
+  -H "Authorization: Bearer $(cat .mage/run/shop-live/token)" -d '{}'
+```
 
 ### Pipelines and how they start
 

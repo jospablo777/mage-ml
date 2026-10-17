@@ -66,6 +66,14 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Services
 
+- `mage service deploy`, `status`, `diff` and `rollback` for Docker targets: labeled
+  containers, health waits with automatic rollback, drift from the repository, and the
+  previous deployment kept for rollback.
+- `mage service check --affected` checks the services that the changes since a Git ref touch
+  (their pipelines, imported code, stream settings and `io_config.yaml`), for CI.
+- `mage service run` runs a service on this machine's engine without Docker, with the
+  environment's variables and `.env.<env>` secrets, a private API token and state kept across
+  restarts. The engine ships as the `mageml-engine` platform wheel.
 - `mage service new, list, check, build, export, migrate`; the pipeline settings page lists
   the services that run the pipeline.
 - Secrets at start-up from AWS Secrets Manager and Parameter Store, Azure Key Vault, Google

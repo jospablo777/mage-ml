@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mageml-engine"
+version = "0.1.0"
+description = "The MageML service engine (mage-service): runs exported pipelines and streams, with the standard connectors"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+
+[tool.maturin]
+# The engine is an executable: the wheel installs it next to Python (ADR-0017).
+bindings = "bin"
+manifest-path = "../../mage_ai/pipeline_services/service/crates/service/Cargo.toml"
+features = ["full"]
+profile = "release"
+strip = true

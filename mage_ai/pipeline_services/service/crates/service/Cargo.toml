@@ -67,6 +67,11 @@ pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
 search = ["dep:mage-connector-search"]
 influxdb = ["dep:mage-connector-influxdb"]
+# The standard connectors: the engine the mageml-engine wheel ships (ADR-0017).
+full = [
+    "kafka", "rabbitmq", "nats", "mongodb", "ibm-mq", "object-store", "postgres", "clickhouse",
+    "sqs", "pubsub", "activemq", "search", "influxdb",
+]
 
 [dev-dependencies]
 tempfile = "3"

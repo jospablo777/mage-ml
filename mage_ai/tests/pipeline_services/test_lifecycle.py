@@ -114,3 +114,54 @@ class LifecycleTest(ExportTestCase):
 
         failed = runner.invoke(app, ['service', 'check', 'nope', *project])
         self.assertEqual(failed.exit_code, 1)
+
+
+class AffectedServicesTest(ExportTestCase):
+    def setUp(self):
+        super().setUp()
+        root = Path(self.repo_path)
+        for path in (root / 'services', root / '.mage'):
+            self.addCleanup(shutil.rmtree, path, True)
+        gitignore = root / '.gitignore'
+        before = gitignore.read_text() if gitignore.exists() else None
+        self.addCleanup(lambda: gitignore.write_text(before) if before is not None
+                        else gitignore.unlink(missing_ok=True))
+        self.load, self.summary, _ = self.chain()
+        lifecycle.new(self.repo_path, 'sales', [self.pipeline.uuid])
+
+    def test_a_change_affects_the_services_that_read_it(self):
+        """CI had no way to find the services a pull request changes."""
+        block = Path(self.load.file_path).resolve().relative_to(
+            Path(self.repo_path).resolve()).as_posix()
+
+        self.assertEqual(lifecycle.affected(self.repo_path, [block]), ['sales'])
+        self.assertEqual(lifecycle.affected(self.repo_path, ['utils/rates.py']), ['sales'])
+        self.assertEqual(lifecycle.affected(self.repo_path, ['io_config.yaml']), ['sales'])
+        self.assertEqual(
+            lifecycle.affected(self.repo_path, ['services/sales/environments/dev.yaml']),
+            ['sales'],
+        )
+        self.assertEqual(lifecycle.affected(self.repo_path, ['notes/README.md']), [])
+
+    def test_changed_paths_lists_committed_and_uncommitted_changes(self):
+        import subprocess
+
+        work = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, work, True)
+
+        def git(*args):
+            subprocess.run(['git', *args], cwd=work, check=True, capture_output=True)
+
+        git('init', '-q', '-b', 'main')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'test')
+        (work / 'a.py').write_text('a = 1\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'base')
+        git('checkout', '-q', '-b', 'change')
+        (work / 'b.py').write_text('b = 1\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'b')
+        (work / 'a.py').write_text('a = 2\n')
+
+        self.assertEqual(lifecycle.changed_paths(str(work), 'main'), ['a.py', 'b.py'])

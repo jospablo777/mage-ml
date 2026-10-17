@@ -171,3 +171,76 @@ def _tree_sha256(root: Path, skip: set) -> Optional[str]:
             digest.update(str(relative).encode())
             digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+# Project files every service reads.
+SHARED_INPUTS = ('io_config.yaml', 'io_config.yml', 'requirements.txt', 'metadata.yaml')
+
+
+def service_inputs(repo_path: str, name: str, captured: export.Capture) -> List[str]:
+    """The project paths (files and folders) whose change can change the service's build."""
+    root = Path(repo_path).resolve()
+
+    def relative(path) -> Optional[str]:
+        path = Path(path)
+        path = (path if path.is_absolute() else root / path).resolve()
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return None
+
+    inputs = {relative(definitions.service_path(repo_path, name))}
+    for pipeline in captured.manifest.get('pipelines') or []:
+        inputs.add(f"pipelines/{pipeline.get('uuid')}")
+    for path in set(captured.files) | set(captured.stream_files):
+        inputs.add(relative(path))
+    if captured.r_project:
+        inputs.add(relative(captured.r_project))
+    inputs.update(SHARED_INPUTS)
+    return sorted(p for p in inputs if p)
+
+
+def changed_paths(repo_path: str, base: str) -> List[str]:
+    """The project paths changed since base (a Git ref), committed or not."""
+    import subprocess
+
+    def git(*args) -> str:
+        return subprocess.run(
+            ['git', *args], cwd=repo_path, capture_output=True, text=True, check=True,
+        ).stdout
+
+    top = Path(git('rev-parse', '--show-toplevel').strip()).resolve()
+    names = set(git('diff', '--name-only', f'{base}...HEAD').splitlines())
+    for line in git('status', '--porcelain').splitlines():
+        names.add(line[3:].split(' -> ')[-1].strip('"'))
+    root = Path(repo_path).resolve()
+    paths = set()
+    for name in names:
+        if not name:
+            continue
+        try:
+            paths.add((top / name).resolve().relative_to(root).as_posix())
+        except ValueError:
+            continue  # outside the project
+    return sorted(paths)
+
+
+def affected(repo_path: str, paths: List[str]) -> List[str]:
+    """
+    The services that the changed project paths touch: their definitions, pipelines, block
+    code, shared modules and io_config.yaml. A service that cannot be captured counts, so
+    its check says why.
+    """
+    found = []
+    for name in definitions.names(repo_path):
+        try:
+            inputs = service_inputs(repo_path, name, capture(repo_path, name))
+        except (definitions.DefinitionError, export.ExportError):
+            found.append(name)
+            continue
+        if any(
+            path == item or path.startswith(item.rstrip('/') + '/')
+            for path in paths for item in inputs
+        ):
+            found.append(name)
+    return found
