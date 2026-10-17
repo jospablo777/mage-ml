@@ -144,6 +144,23 @@ class MySQL(BaseSQL):
         with self.printer.print_msg('Opening connection to MySQL database'):
             self._ctx = connect(**self.settings)
 
+    def execute_query_raw(self, query: str, **kwargs) -> List:
+        """
+        Runs the statements in query as written, in order, and returns the rows of the
+        last one that returns rows. The results of each statement are read: left unread,
+        a block of several statements failed with "Commands out of sync" (upstream #5696).
+        """
+        rows = None
+        with self.conn.cursor() as cursor:
+            cursor.execute(query)
+            while True:
+                if cursor.with_rows:
+                    rows = cursor.fetchall()
+                if not cursor.nextset():
+                    break
+        self.conn.commit()
+        return rows
+
     def table_exists(self, schema_name: str, table_name: str) -> bool:
         with self.conn.cursor() as cur:
             cur.execute(

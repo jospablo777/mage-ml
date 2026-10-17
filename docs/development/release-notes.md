@@ -112,6 +112,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - A block output holding an object of the user's own class shows as the object's text; it
   raised "Circular reference detected" (upstream #5850). Storage still refuses values it
   cannot encode.
+- MySQL and Snowflake SQL blocks with query preprocessing off run every statement of the
+  block and return the last one's rows. MySQL failed with "Commands out of sync" and
+  Snowflake with "Actual statement count did not match" (upstream #5695, #5696).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

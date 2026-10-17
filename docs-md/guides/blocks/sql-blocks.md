@@ -446,6 +446,10 @@ However, there are scenarios where the SQL command you write must be executed as
 You can disable this pre-processing by opening a SQL block and checking the box labeled
 <b>Use raw SQL</b> and <b>Disable query preprocessing</b>.
 
+The block's text then goes to the database as written: several statements run in order, and
+the block gets the rows of the last one. MySQL and Snowflake split the statements themselves,
+so semicolons in strings, comments and Snowflake scripting blocks are safe.
+
 <p align="center">
 </p>
 

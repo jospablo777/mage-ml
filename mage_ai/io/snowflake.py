@@ -82,9 +82,18 @@ class Snowflake(BaseSQLConnection):
             with self.conn.cursor() as cur:
                 return cur.execute(query_string, timeout=self.timeout, **kwargs).fetchall()
 
-    def execute_query_raw(self, query: str, **kwargs) -> None:
-        with self.conn.cursor() as cur:
-            return cur.execute(query, timeout=self.timeout).fetchall()
+    def execute_query_raw(self, query: str, **kwargs) -> List:
+        """
+        Runs the statements in query as written, in order, and returns the rows of the last.
+        One cursor.execute takes one statement: a block of several failed with "Actual
+        statement count 4 did not match the desired statement count 1" (upstream #5695).
+        execute_string splits them as Snowflake does, scripting blocks included.
+        """
+        rows = None
+        for cursor in self.conn.execute_string(query, timeout=self.timeout):
+            rows = cursor.fetchall()
+            cursor.close()
+        return rows
 
     def execute_queries(
         self,
