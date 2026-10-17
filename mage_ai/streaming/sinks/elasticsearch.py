@@ -56,14 +56,21 @@ class ElasticSearchSink(BaseSink):
         docs = []
         for msg in messages:
             doc = {'_index': self.config.index_name}
+            # The bulk helper reads _id; `id` was stored as a field of the document, so
+            # replays wrote duplicates instead of replacing documents.
             if self.config._id is not None:
-                doc['id'] = msg[self.config._id]
+                doc['_id'] = msg[self.config._id]
+            op_type = self.config._op_type or 'index'
             if self.config._op_type is not None:
-                doc['_op_type'] = self.config._op_type
-            if self.config._source is not None:
+                doc['_op_type'] = op_type
+            if op_type == 'update':
+                # A partial update sends the fields under doc.
+                doc[self.config._source or 'doc'] = msg
+            elif self.config._source not in (None, '_source'):
                 doc[self.config._source] = msg
             else:
-                doc['_doc'] = msg
+                # The message is the document. It was wrapped as {"_doc": message}.
+                doc['_source'] = msg
             docs.append(doc)
 
         helpers.bulk(self.client, docs)

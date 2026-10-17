@@ -21,6 +21,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `/dev/null`.
 - **No service token is printed.** On 127.0.0.1 a made token goes to a private file;
   elsewhere the service needs `MAGE_SERVICE_TOKEN`.
+- **The Elasticsearch sink writes each message as the document**, with `_id` as the
+  document id. It wrapped messages as `{"_doc": message, "id": ...}` and never set the id;
+  `_source: _doc` keeps the old shape for an existing index.
+- **Pipeline `metadata.yaml` no longer stores block statuses or `variables_dir`**; statuses
+  are kept beside the pipeline's outputs on each machine.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
 

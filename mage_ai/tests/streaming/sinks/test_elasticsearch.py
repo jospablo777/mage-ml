@@ -24,3 +24,32 @@ class ElasticSearchTests(TestCase):
                 in str(context.exception),
             )
             self.assertEqual(mock_init_client.call_count, 0)
+
+
+class ElasticSearchBatchTests(TestCase):
+    def actions(self, messages, **config):
+        from elasticsearch.helpers.actions import expand_action
+
+        with patch.object(ElasticSearchSink, 'init_client'):
+            sink = ElasticSearchSink(dict(host='h', index_name='orders', **config))
+        sink.client = object()
+        with patch('mage_ai.streaming.sinks.elasticsearch.helpers.bulk') as bulk:
+            sink.batch_write(messages)
+        return [expand_action(doc) for doc in bulk.call_args.args[1]]
+
+    def test_the_message_is_the_document_and_id_sets_the_documents_id(self):
+        # Documents were stored as {"_doc": message, "id": ...} and _id was never set.
+        action, document = self.actions([{'order': 7, 'total': 3}], _id='order')[0]
+        self.assertEqual(action, {'index': {'_index': 'orders', '_id': 7}})
+        self.assertEqual(document, {'order': 7, 'total': 3})
+
+    def test_an_update_sends_the_fields_under_doc(self):
+        action, document = self.actions(
+            [{'order': 7, 'total': 4}], _id='order', _op_type='update',
+        )[0]
+        self.assertEqual(action, {'update': {'_index': 'orders', '_id': 7}})
+        self.assertEqual(document, {'doc': {'order': 7, 'total': 4}})
+
+    def test_a_named_source_key_still_wraps_the_message(self):
+        _, document = self.actions([{'n': 1}], _source='payload')[0]
+        self.assertEqual(document, {'payload': {'n': 1}})
