@@ -19,3 +19,7 @@ config:
   database: database  # Override the database
   schema: schema      # Override the schema
 ```
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.

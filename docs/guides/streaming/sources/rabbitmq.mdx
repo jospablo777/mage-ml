@@ -42,3 +42,7 @@ consume_config:
   exclusive: False
   inactivity_timeout: 10.0
 ```
+
+## In an exported service
+
+[Exported services](/production/stream-services#rabbitmq) run this source in the Rust engine, which acknowledges deliveries after the sinks; blocks must not ack them.

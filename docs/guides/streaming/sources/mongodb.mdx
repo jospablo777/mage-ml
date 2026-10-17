@@ -40,3 +40,7 @@ start_after: {"_data": "..."}
 
 `batch_size`, `pipeline` and `full_document` are passed to
 [watch](https://pymongo.readthedocs.io/en/stable/api/pymongo/collection.html#pymongo.collection.Collection.watch).
+
+## In an exported service
+
+[Exported services](/production/stream-services#mongodb) run this source in the Rust engine, with the resume token saved in the database once every sink took a batch.

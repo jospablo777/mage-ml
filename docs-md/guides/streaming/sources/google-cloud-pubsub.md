@@ -141,6 +141,6 @@ are available to subscriber applications.
 
 ## In an exported service
 
-[Exported services](../../../production/export-a-service.md#google-cloud-pub/sub) run this source and
+[Exported services](../../../production/stream-services.md#google-cloud-pub/sub) run this source and
 the Pub/Sub sink in the Rust engine, with the same settings and messages. A message is
 acknowledged once every sink took its batch, so a failure loses nothing.

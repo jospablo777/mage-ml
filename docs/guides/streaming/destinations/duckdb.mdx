@@ -21,3 +21,7 @@ config:
   schema_name: schema_name    # Override the schema name. Default schema is "main"
   if_exists: append           # Default for the streaming sink
 ```
+
+## In an exported service
+
+[Exported services](/production/stream-services) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.

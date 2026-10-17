@@ -1,5 +1,84 @@
 # Release notes
 
+## Unreleased (next: MageML 0.2.0)
+
+Changes since 0.1.1. The main addition is stream services: streaming pipelines exported as
+services that run in the Rust engine, with Python, Rust or R blocks
+([Stream services](../production/stream-services.md)).
+
+### Behavior changes to check before upgrading
+
+- **Services live in `services/<name>/service.yaml`.** `pipeline_services.yaml` is still
+  read; a saved service moves to its folder, and `mage service migrate` moves them all. A
+  build writes `services/<name>/service.lock`, which pins the manifest, files,
+  requirements, model versions and engine.
+- **Integers too large for 64 bits are refused** in run variables and manifest values: the
+  run API answers 400 and the exporter stops, naming the value. They lost their last digits
+  without an error.
+- **Service blocks start from an empty environment.** The service's API tokens, secret
+  references and IBM Cloud key no longer reach user code; a block that read one of them
+  must get it as a pipeline variable or secret. Requests come on descriptor 4 and stdin is
+  `/dev/null`.
+- **No service token is printed.** On 127.0.0.1 a made token goes to a private file;
+  elsewhere the service needs `MAGE_SERVICE_TOKEN`.
+- **Kafka `offset` in services** applies while the consumer group has committed nothing,
+  then the committed position (MageML seeks at every start).
+
+### Stream services
+
+- Sources: Kafka, Azure Event Hubs (Kafka endpoint), IBM Event Streams credentials, webhooks
+  (answered once the sinks confirm, `Idempotency-Key`), RabbitMQ, NATS JetStream, IBM MQ,
+  ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, and PostgreSQL changes
+  by logical replication.
+- Sinks: Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB,
+  PostgreSQL (COPY, upserts), ClickHouse (deduplicated inserts), object storage (S3, GCS,
+  Azure Blob, disk; Parquet or JSON lines), HTTP and Feast.
+- At least once everywhere: a source's position moves only after every sink took the batch.
+  Dead letters take the messages a block fails on, found by splitting the batch.
+- Message formats: JSON values kept exact, Kafka `RAW_VALUE` as bytes, Avro through a schema
+  registry, `include_metadata`, and MageML's message shapes for each source.
+- Blocks: Python, Rust (a resident program) and R (a resident R session), mixed in one
+  chain; a Python block annotated `pl.DataFrame` gets each batch as a table.
+- Throughput on a laptop, Kafka to Kafka through one block: a Rust block about a million
+  messages a second, a Python block 586,000, a Polars DataFrame block 651,000.
+- Stream images hold only what their blocks import (a Kafka stream image: 485 MB to 185 MB);
+  logs rotate by size; `mage-console` shows each stream's state, lag and rates, and pauses
+  it; the Kubernetes deployment carries Prometheus scrape annotations.
+
+### Stream development in the editor
+
+- A Samples tab captures the newest or first messages of a Kafka source without a consumer
+  group (no position moves), or takes pasted ones, and Cmd+Enter runs a stream transformer and the blocks before it on a sample, showing input
+  and output side by side, each block's time and output. Rust stream blocks run the same
+  way, and in Execute pipeline.
+
+### Services
+
+- `mage service new, list, check, build, export, migrate`; the pipeline settings page lists
+  the services that run the pipeline.
+- Secrets at start-up from AWS Secrets Manager and Parameter Store, Azure Key Vault, Google
+  Secret Manager and IBM Cloud Secrets Manager; `aws_secret_var`, `azure_secret_var`,
+  `gcp_secret_var` and `ibm_secret_var` in `io_config.yaml` export as those sources.
+
+### IBM Cloud
+
+- IBM Cloud Object Storage (IAM tokens or HMAC keys), MLflow artifacts on COS (`cos://`),
+  and the standalone `mlflow-ibm-cos` package for MLflow servers.
+- IBM Db2: io class, templates and SQL blocks (the `db2` extra), values exact.
+- IBM MQ sources and sinks in streams; IBM Event Streams from its service credentials.
+
+### Fixes
+
+- Restarted streams: sinks named objects and deduplication keys by position, and only
+  Kafka keeps positions across a restart, so the object storage sink overwrote the last
+  run's objects, and ClickHouse tokens or NATS message ids could drop new messages. Sinks
+  now name the stream's run unless the source's positions survive restarts.
+- Kafka backpressure stalled streams (48,000 to 412,000 messages a second after the fix);
+  partitions are handed over only after their batches finish.
+- The kernel restart, switch and interrupt no longer block the server: they run off its
+  event loop with a time limit, and a replaced kernel client is closed.
+- The first export on a fresh server is fast (secret clients made on first use).
+
 ## MageML 0.1.1 (2026-10-13)
 
 A security release; the GitHub release text is in `releases/v0.1.1.md`.

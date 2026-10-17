@@ -22,3 +22,7 @@ config:
 ```
 
 Without `create_table_statement`, the sink builds the `CREATE TABLE` statement from the data.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#clickhouse) run this sink in the Rust engine, one deduplicated insert per batch.

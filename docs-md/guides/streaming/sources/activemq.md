@@ -57,5 +57,5 @@ with its config and closes the connection; it reads no message.
 
 ## In an exported service
 
-[Exported services](../../../production/export-a-service.md#activemq) run this source and the ActiveMQ
+[Exported services](../../../production/stream-services.md#activemq) run this source and the ActiveMQ
 sink in the Rust engine, with the same settings and messages.

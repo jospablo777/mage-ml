@@ -438,3 +438,7 @@ offset:
 8. **Restart After Config Changes:** Always restart the pipeline after changing `batch_size` or `max_partition_fetch_bytes`
 9. **Memory Planning:** Calculate memory needs: `max_partition_fetch_bytes × partitions × 1.5`
 10. **Testing:** Test configuration changes in a staging environment before production
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#kafka-and-azure-event-hubs) run this source in the Rust engine: offsets are committed only after every sink took a batch.

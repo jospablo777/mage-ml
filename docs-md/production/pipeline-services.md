@@ -169,7 +169,7 @@ service answers [inference requests](../guides/pipelines/model-inference.md).
 | `GET /v1/models` | Embedded models and their MLflow metadata |
 | `GET /v1/snapshot` | Counts, durations and triggers per pipeline |
 | `POST /v1/control` | Pause, resume, change a pipeline's concurrency |
-| `POST /v1/streams/{pipeline}/messages` | Messages for a stream with a webhook source; answered once its sinks took them ([webhooks](export-a-service.md#webhooks)) |
+| `POST /v1/streams/{pipeline}/messages` | Messages for a stream with a webhook source; answered once its sinks took them ([webhooks](stream-services.md#webhooks)) |
 | `GET /v1/streams` | Each stream's state, message counts, acknowledged positions, lag per partition and last error |
 | `GET /metrics` | Prometheus metrics, including `mage_service_stream_lag_messages` per stream and partition (scale on it); no token needed |
 | `GET /healthz` | Health; no token needed |

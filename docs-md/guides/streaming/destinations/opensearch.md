@@ -20,3 +20,7 @@ http_auth: "@awsauth"
    1. "@awsauth": Authenticate with AWS Signature Version 4. Need to provide
       AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables.
    2. "username:password": Authenticate with username and password.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.

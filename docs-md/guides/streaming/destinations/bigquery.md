@@ -51,3 +51,7 @@ config:
 | `unique_constraints` | list | Column names for upsert. When set with `unique_conflict_method` and `if_exists: append`, the batch is written with `MERGE` instead of an append. | None |
 | `unique_conflict_method` | string | `UPDATE` updates rows that match `unique_constraints`. `IGNORE` leaves them unchanged and inserts only new rows. Required for the `MERGE`. | None |
 | `create_dataset` | boolean | Create the dataset if it does not exist. | `true` |
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.

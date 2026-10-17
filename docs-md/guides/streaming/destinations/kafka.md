@@ -131,3 +131,7 @@ topic: topic_name
 - The default time timestamp is the current time of execution.
 
 - MageML detects the broker's protocol version. Set `api_version` only for brokers that cannot report it; `0.10.2`, the old default, fails against Kafka 4, which removed protocol versions older than 2.1.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#kafka-and-azure-event-hubs) run this sink with an idempotent producer (`acks=all`).

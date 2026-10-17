@@ -61,3 +61,7 @@ print_msg: true
 
 The source reads every partition from the beginning (`starting_position='-1'`) and hands
 each batch of events to the transformer as a list of `{'data': <event body as text>}`.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#kafka-and-azure-event-hubs) run this source through the event hub namespace's Kafka endpoint (Standard tier or above), with the same settings and messages.

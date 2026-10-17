@@ -20,3 +20,7 @@ collection_name: collection_name
 ```yaml
 unique_constraints: ['col1', 'col2']    # Upsert documents based on unique constraints
 ```
+
+## In an exported service
+
+[Exported services](/production/stream-services#mongodb) run this sink in the Rust engine, with upserts by `unique_constraints`.

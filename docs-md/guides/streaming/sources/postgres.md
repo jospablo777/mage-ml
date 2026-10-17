@@ -82,7 +82,7 @@ position when restarted.
 
 ## In an exported service
 
-[Exported services](../../../production/export-a-service.md#postgresql-changes) run this source in the
+[Exported services](../../../production/stream-services.md#postgresql-changes) run this source in the
 Rust engine, with the same settings and messages. The slot holds the position there, so a
 service on another machine continues where the last one stopped, and the connection stays
 alive while the blocks run, whatever they take.

@@ -85,7 +85,7 @@ Tests that run blocks restart the kernel in `beforeEach`.
 | `MAGE_TEST_SOAK_*` | Length, pipelines and fusion of the soak tests |
 | `MAGE_STUDY_FULL=1` | The compilation study's full grid, its machine guards and the model experiments |
 | `MAGE_STUDY_GPU=1` | The CUDA scorers and the GPU readings; without it no test uses a GPU |
-| `MAGE_STUDY_RESULTS_DIR`, `MAGE_STUDY_REPEATS`, `MAGE_STUDY_*` | Where the study writes results and its limits ([compilation-study.md](compilation-study.md)) |
+| `MAGE_STUDY_RESULTS_DIR`, `MAGE_STUDY_REPEATS`, `MAGE_STUDY_*` | Where the study writes results and its limits ([compilation-study.md](/development/compilation-study)) |
 | `MAGE_TEST_SERVER_URL` | A running server for the browser tests instead of one Playwright starts |
 
 ## Workflows

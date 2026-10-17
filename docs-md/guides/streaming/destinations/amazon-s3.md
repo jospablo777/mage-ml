@@ -38,3 +38,7 @@ Here are the options to authenticate with the AWS S3 bucket.
    to this ECS task execution role.
 
 The sink config takes no credentials. The S3 client reads them from the environment variables or the IAM role above.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#object-storage) run this sink as the object storage sink, writing one object per batch before acknowledging it.

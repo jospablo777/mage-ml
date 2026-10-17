@@ -31,3 +31,7 @@ To store the Google Cloud Storage data in time-based partition folders, add `dat
 to the config. Example values: `%Y%m%d`, `%Y%m%dT%H`.
 
 **Security Note:** Storing credentials in configuration files can be insecure. Prefer using environment variables (e.g., `GOOGLE_APPLICATION_CREDENTIALS`) or secret variables when possible, especially for production deployments.
+
+## In an exported service
+
+[Exported services](/production/stream-services#object-storage) run this sink as the object storage sink, writing one object per batch before acknowledging it.

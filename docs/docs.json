@@ -532,6 +532,7 @@
               "production/ci-cd/local-cloud/buildkite",
               "production/configuring-production-settings/overview",
               "production/export-a-service",
+              "production/stream-services",
               "production/services-page",
               "production/pipeline-services",
               "production/service-console",

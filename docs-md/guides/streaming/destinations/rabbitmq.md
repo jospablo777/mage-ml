@@ -12,3 +12,7 @@ password: 'guest'
 amqp_url_virtual_host: '%2f'
 url_protocol: 'amqp'
 ```
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#rabbitmq) run this sink in the Rust engine, with publisher confirms.

@@ -1,0 +1,565 @@
+---
+title: "Stream services"
+sidebarTitle: "Stream services"
+icon: "wave-square"
+description: "Streaming pipelines exported as services: the connectors they run, what each one guarantees, message shapes, throughput and every connector's settings."
+---
+
+A streaming pipeline [exports](/production/export-a-service) like any other. The service
+runs it from its start, with no trigger: it reads its source without end, runs the
+transformers on each batch, and moves the source's position on only once every sink took
+the batch. The engine is written in Rust; blocks run in Python, Rust or R.
+
+## What runs
+
+| Part | What services run |
+| --- | --- |
+| Source | Kafka, Azure Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication) |
+| Transformers | Python, [Rust](/guides/blocks/rust-blocks#stream-transformers) or [R](/guides/blocks/r-blocks#stream-transformers), mixed in one chain |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
+
+The export stops, with the reason, on what a service can't run the same way as MageML yet:
+Python sources and sinks, other connectors (Kinesis, Pulsar, InfluxDB, Elasticsearch,
+OpenSearch), Protobuf messages, and passwords written in the file.
+
+## Connectors at a glance
+
+Every stream is at least once: a batch is acknowledged only after its sinks wrote it, so a
+crash or restart can repeat the batches that were in flight, and never loses one. "Repeats
+absorbed" names how a sink writes a repeated batch only once, where it can.
+
+| `connector_type` | Source: acknowledged | Source: instances | Sink: confirmed | Repeats absorbed | Unlike MageML |
+| --- | --- | --- | --- | --- | --- |
+| [`kafka`](#kafka-and-azure-event-hubs) | Offsets committed after the sinks | One per partition | Idempotent producer, `acks=all` | Producer retries; positions survive restarts | `offset` applies until the group commits |
+| [`azure_event_hub`](#kafka-and-azure-event-hubs) | As Kafka, through the Kafka endpoint | One per partition | | | Standard tier or above |
+| [`webhook`](#webhooks) | `200` answered after the sinks | Any | | `Idempotency-Key` within its window | Service only |
+| [`rabbitmq`](#rabbitmq) | Delivery acked after the sinks | Competing consumers | Publisher confirms | No (`message_id` for consumers) | Blocks must not ack |
+| [`nats_js`](#nats-jetstream) | Acked after the sinks | Competing consumers | JetStream acks | Message ids, within the duplicate window | Pull consumers only |
+| [`ibm_mq`](#ibm-mq) | Syncpoint committed after the sinks | Competing consumers | Syncpoint commit | No | |
+| [`activemq`](#activemq) | Cumulative ACK after the sinks | Competing consumers | Receipt of the batch's last frame | No | |
+| [`amazon_sqs`](#amazon-sqs) | Deleted after the sinks; visibility kept while a batch runs | Competing consumers | | | MageML deletes on receipt; `MANUAL` refused |
+| [`google_cloud_pubsub`](#google-cloud-pub/sub) | Acked after the sinks; deadlines extended | Competing subscribers | Publish answered | No | |
+| [`mongodb`](#mongodb) | Resume token saved in the database | One | Bulk write | Upserts with `unique_constraints` | |
+| [`postgres`](#postgresql-changes) (source) | End LSN confirmed to the slot | One | | | Position kept in the slot |
+| [`postgres`](#postgresql) (sink) | | | Transaction committed | Upserts with `unique_constraints` | |
+| [`clickhouse`](#clickhouse) | | | Insert answered | Insert tokens | |
+| [`object_storage`](#object-storage), `amazon_s3`, `google_cloud_storage` | | | Object written | Same object name | Buffers acknowledged after writing |
+| [`http`](#http-and-feast-sinks) | | | `2xx` | `Idempotency-Key`, for receivers that dedupe | |
+| [`feast`](#http-and-feast-sinks) | | | `2xx` | Online pushes are upserts | |
+
+## How a stream runs
+
+- Settings go into the service's manifest with `env_var()` kept as a reference. The service
+  reads those variables itself; the blocks never get them.
+- A position moves on only after every sink took the batch. A batch that still fails after
+  its retries (the pipeline's retry settings, 3 by default) stops the stream, and the
+  position stays where it was, so no message is lost.
+- A sink with `dead_letter: true` takes the messages a block fails on, each with its error
+  in a `mage-error` header (and the stream's name in `mage-stream`), while the rest of their
+  batch flows on; a batch is acknowledged only once both are written, and a failing
+  dead-letter sink is retried until it works. When every message of a batch fails, or a
+  block does not load, it is a code problem: the batch fails as a whole and stops the
+  stream, nothing goes to dead letters. A block can see a message more than once while its
+  batch is split to find the failing ones. In the editor, `Execute pipeline` does not write
+  to the dead-letter sink.
+
+  ```yaml
+  connector_type: kafka
+  bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+  topic: orders_dead_letters
+  dead_letter: true
+  ```
+- **Sink names.** Sinks that name objects or deduplicate by position (object storage,
+  ClickHouse insert tokens, NATS message ids, HTTP idempotency keys) use
+  `<stream>:<partition>:<position>`. Kafka positions are offsets and survive a restart, so
+  the stream's name is enough. Other sources number their messages from 1 again at each
+  start, so these sinks name the stream and its run: a restart never overwrites what the
+  last run wrote or drops a new message as a duplicate, and a batch retried within a run
+  keeps its keys.
+- The image builds the engine with the connectors the pipeline uses. Kafka support
+  (librdkafka) makes the first build a few minutes longer.
+
+## Message shapes
+
+What blocks receive, as MageML's sources hand it over:
+
+| Source and settings | A block gets |
+| --- | --- |
+| JSON messages (the default) | Each message's JSON value |
+| `serialization_method: RAW_VALUE` | The bytes (a Rust block takes `Vec<Vec<u8>>`); text for SQS |
+| `serialization_method: AVRO` (Kafka) | JSON decoded with the registry's schemas |
+| Kafka with `include_metadata: true` | `{"data": <value>, "metadata": {"key", "partition", "offset", "time", "topic"}}` |
+| `azure_event_hub` | `{"data": <the body as text>}` |
+| `rabbitmq` | `Payload(method, properties, body)`, `body` in bytes |
+| `google_cloud_pubsub` | `{"data": <the body as text>, "metadata": {"attributes": {...}}}` |
+| `activemq` | The body as text |
+| `mongodb` | The change as JSON: ObjectIds as hex, dates ISO 8601, decimals exact |
+| `postgres` | The changed row, with `_mage_operation`, `_mage_schema`, `_mage_table`, `_mage_lsn`, `_mage_commit_time` |
+
+- A Python transformer whose first parameter is annotated `pl.DataFrame` (or `pd.DataFrame`)
+  gets each batch as a table, one row per message, and can return one. The service sends
+  such a batch as JSON lines that Polars reads in one pass, with no Python object per
+  message. Every message must be a JSON object; with a dead-letter sink, one that is not
+  goes there.
+
+  ```python
+  import polars as pl
+
+  @transformer
+  def score(messages: pl.DataFrame, *args, **kwargs) -> pl.DataFrame:
+      return messages.with_columns(total=pl.col('price') * pl.col('units'))
+  ```
+- Rust transformers run in one program the service starts with the stream, outside its own
+  process. Messages reach it as their bytes, with no JSON written again on the way, and a
+  program that exits is started again for the next batch.
+- Large integers keep every digit from source to sink inside the engine; a Python block
+  reads a JSON number with a fraction as a float.
+
+## Throughput
+
+Measured on a laptop (Apple silicon, the systems in Docker, one partition, release build,
+500,000 messages of about 120 bytes), from the first message written to the last, from
+Kafka through one block:
+
+| Block | Into | Messages a second |
+| --- | --- | --- |
+| Python, returns its messages | Kafka | 586,000 |
+| Python, adds two fields | Kafka | 479,000 |
+| Python, Polars, converts the messages itself | Kafka | 519,000 |
+| Python, takes a `pl.DataFrame` | Kafka | 651,000 |
+| Rust, returns its messages | Kafka | 1,012,000 |
+| Rust, adds two fields (as JSON values) | Kafka | 600,000 |
+| Python, returns its messages | Parquet files | 521,000 |
+| Python, returns its messages | ClickHouse | 254,000 |
+| Python, returns its messages | PostgreSQL (COPY) | 206,000 |
+| Python, returns its messages | NATS JetStream | 197,000 |
+| Python, returns its messages | RabbitMQ (publisher confirms) | 32,000 |
+| Python, returns its messages | IBM MQ (emulated amd64 server) | 15,000 |
+
+Read from other sources into Kafka through a Python block:
+
+| Source | Messages a second |
+| --- | --- |
+| NATS JetStream (one pull consumer) | 242,000 |
+| PostgreSQL changes (one slot, through Docker's network) | 205,000 |
+| RabbitMQ (one queue) | 16,000 to 27,000 |
+| IBM MQ, one connection (emulated amd64 server) | 1,900 |
+| IBM MQ, four connections | 4,600 |
+
+The engine's own path from Kafka to Kafka carries about a million messages a second; a
+Python block's JSON round trip, or parsing each message into a `Value` in Rust, costs the
+rest. A Rust block that takes `Vec<Vec<u8>>` or a `DataFrame` avoids most of it. RabbitMQ and IBM MQ are limited by their brokers. IBM MQ
+reads one message per round trip under syncpoint, so `connections` (at the cost of queue
+order) is what raises it. Larger `batch_size` values raise these. PostgreSQL sends each change in its own message;
+the server alone decodes about 1.3 million a second and streams about 370,000 inside its
+container, so on a laptop Docker's network is the limit.
+`integration_tests/benchmark/test_stream_benchmark.py` measures them on your machine.
+
+## Connectors
+
+### Kafka and Azure Event Hubs
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders
+consumer_group: orders-clean
+batch_size: 250    # messages per batch
+timeout_ms: 200    # a smaller batch runs after this long
+security_protocol: SASL_SSL
+sasl_config:
+  mechanism: PLAIN
+  username: "{{ env_var('KAFKA_USER') }}"
+  password: "{{ env_var('KAFKA_PASSWORD') }}"
+```
+
+- `offset` (with `partitions`, as in MageML) reads the listed partitions without the consumer
+  group's rebalancing, each starting at the offset (`beginning`, `end`, an `int`, or a
+  `timestamp` in milliseconds) when the group has nothing committed for it, and at the
+  committed position after that. MageML seeks at every start, which in a service would read
+  everything again after each restart; to read from the offset again, use a new
+  `consumer_group`.
+- `include_metadata: true` hands blocks Mage's
+  `{"data": <value>, "metadata": {"key", "partition", "offset", "time", "topic"}}`; a key
+  that is not UTF-8 is its base64 text.
+- An Azure Event Hubs source (Mage's `azure_event_hub`) is read through the namespace's
+  Kafka endpoint, which needs the Standard tier or above: the event hub is the topic, the
+  consumer group is Kafka's, and the connection string, set as an environment variable, is
+  the password. Blocks get `{'data': <the body as text>}`, as from Mage's source. The
+  mapping is tested against the endpoint's settings, not against a live namespace.
+- Avro messages in Confluent's format (Mage's `serialization_method: AVRO`) are decoded by
+  the service with the schemas of the schema registry, each read once, and the blocks get
+  JSON: records as objects, unions as their value, decimals as exact strings, dates and
+  timestamps as ISO 8601 text, bytes as base64. A message that is not Avro fails on its own,
+  with the reason in its dead letter's `mage-error` header.
+
+  ```yaml
+  serde_config:
+    serialization_method: AVRO
+    schema_registry_url: https://registry.example.com
+    schema_registry_username: "{{ env_var('REGISTRY_USER') }}"
+    schema_registry_password: "{{ env_var('REGISTRY_PASSWORD') }}"
+  ```
+- IBM Event Streams credentials: see [IBM Cloud](/integrations/ibm-cloud).
+
+### Webhooks
+
+A `webhook` source takes JSON messages over HTTP at `POST /v1/streams/<pipeline>/messages`:
+a JSON array, one JSON message, or JSON lines (`Content-Type: application/x-ndjson`).
+
+```yaml
+connector_type: webhook
+answer_within_seconds: 30        # how long a sender waits for delivery
+dedupe_window_seconds: 86400     # how long an Idempotency-Key is remembered
+signature:                       # optional: an HMAC-SHA256 of the body, as GitHub sends
+  header: X-Hub-Signature-256
+  prefix: "sha256="
+  secret: "{{ env_var('WEBHOOK_SECRET') }}"
+```
+
+```bash
+curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
+  -H "Authorization: Bearer $MAGE_SERVICE_INGEST_TOKEN" \
+  -H "Idempotency-Key: order-1042" \
+  -d '[{"order_id": 1042, "amount": 12.5}]'
+```
+
+- The answer is `200` only once every sink took the messages. `503` with `Retry-After` means
+  the stream is busy or stopped, `504` that delivery was not confirmed in time: retry with
+  the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
+- `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
+- A request larger than the stream's batch size in bytes gets `413`.
+
+### NATS JetStream
+
+MageML's `nats_js` source and sink run as they are:
+
+```yaml
+connector_type: nats_js
+server_url: nats://nats:4222
+stream_name: orders          # made when it does not exist
+subject: orders.new
+consumer_name: scorer        # the durable consumer; the stream's name by default
+batch_size: 500
+timeout: 0.5                 # seconds a smaller batch waits
+ack_wait: 120                # seconds before an unacknowledged message comes again
+user_credentials: [reader, "{{ env_var('NATS_PASSWORD') }}"]   # or a .creds file
+```
+
+- The source is a durable pull consumer. Each message is acknowledged after every sink took
+  its batch; several instances share the consumer's messages, so order across them is not
+  kept. A consumer the service makes allows ten batches unacknowledged, since JetStream's
+  default of 1,000 is smaller than a large batch. `consumer_type: PUSH` is refused: the
+  same durable consumer cannot be read both ways.
+- The sink publishes each message with a `Nats-Msg-Id` made from the stream, partition and
+  position ([sink names](#how-a-stream-runs)), so JetStream drops a message that a retried
+  batch publishes again within its duplicate window, and confirms a batch once JetStream acknowledged all of it. Without
+  `stream_name` it publishes to the stream that takes the subject, as MageML's does. A
+  `{"data": ..., "metadata": {...}}` message publishes its data with the metadata as headers.
+
+### Amazon SQS
+
+MageML's `amazon_sqs` source runs with its settings, and a few of its own:
+
+```yaml
+connector_type: amazon_sqs
+queue_name: orders            # or queue_url
+batch_size: 100
+wait_time_seconds: 20         # the long poll (20 by default, the most SQS allows)
+receivers: 4                  # long polls at once, each up to 10 messages
+visibility_timeout: 60        # optional; the queue's by default
+region: eu-west-1             # or AWS_REGION
+endpoint_url: http://localhost:9324   # optional, for another SQS server
+```
+
+- Credentials are the AWS chain the S3 sink uses: `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY`, a web identity (EKS service accounts), the ECS task role or the
+  instance role.
+- A message is deleted only once every sink took its batch. MageML deletes it when it is
+  received (`AFTER_RECEIVED`), which loses it if the pipeline fails; `MANUAL`, which hands
+  blocks the message to delete, is refused.
+- While a batch runs, its messages stay invisible to other consumers (the source extends
+  their visibility at half its timeout), so a slow batch is not read twice. A message not
+  deleted, because the service stopped or died, comes back after its visibility timeout.
+- Several instances read one queue as competing consumers; order holds per message group
+  only on a FIFO queue with one instance. With `RAW_VALUE`, blocks get each body as text,
+  as in MageML.
+- SQS returns at most 10 messages a call: `receivers` sets how many calls wait at once.
+
+### Google Cloud Pub/Sub
+
+MageML's `google_cloud_pubsub` source and sink run with their settings:
+
+```yaml
+connector_type: google_cloud_pubsub
+project_id: shop
+topic_id: orders
+subscription_id: scorer       # source: made on the topic when missing
+batch_size: 500
+receivers: 2                  # source: pulls at once, each up to 1,000 messages
+ack_deadline: 60              # source: optional; the subscription's by default
+```
+
+- Credentials are the Google chain the GCS sink uses: `GOOGLE_APPLICATION_CREDENTIALS`,
+  application default credentials, or the metadata server (GKE workload identity, Cloud
+  Run). `path_to_credentials_json_file` names a file on your machine and is refused;
+  `pubsub_emulator_host` (or `PUBSUB_EMULATOR_HOST`) reads an emulator.
+- Blocks get each message as MageML hands it over: `{"data": <the body as text>,
+  "metadata": {"attributes": {...}}}`.
+- A message is acknowledged only once every sink took its batch, and while a batch runs its
+  messages' ack deadlines are extended, so a slow batch is not delivered twice. One not
+  acknowledged comes back after its deadline. Several instances share a subscription.
+- The sink publishes as MageML does (an object's `data`, or the object, as JSON; a string
+  as its text), up to 1,000 messages a request, and confirms the batch once Pub/Sub took
+  every message. Pub/Sub has no idempotent publish: a batch written again after a failure
+  is published again.
+
+### MongoDB
+
+MageML's `mongodb` source (a change stream) and sink run as they are:
+
+```yaml
+connector_type: mongodb
+connection_str: "{{ env_var('MONGO_URL') }}"
+database: shop
+collection: orders           # without it, the whole database is watched
+full_document: updateLookup  # the document after an update
+batch_size: 200
+```
+
+- Each change reaches the blocks as JSON: ObjectIds as their hex text, dates as ISO 8601
+  text, decimals as exact text, binary as base64, the cluster time as `{"t", "i"}`.
+- Once every sink took a batch, the resume token of its last change is saved in the
+  database's `_mage_stream_checkpoints` collection (`checkpoint_collection` changes it), which
+  the stream does not watch, so a restarted service resumes after it, on any machine. A
+  change stream is read by one instance. If the token is no longer in the oplog, the stream
+  stops and says which document to delete to start at the current time.
+- The sink inserts a batch at once; with `unique_constraints`, a message with those fields
+  updates or inserts the document they select, the last message of a key in a batch winning.
+  Integers past 64 bits are stored as Decimal128 with every digit. A message that is not an
+  object is stored as `{"data": ...}`, as in MageML.
+- A connection string with a password written in the file is refused; read it with
+  `env_var()`.
+
+### RabbitMQ
+
+The `rabbitmq` source and sink take MageML's settings:
+
+```yaml
+connector_type: rabbitmq
+connection_host: rabbitmq.example.com
+connection_port: 5672
+url_protocol: amqps              # amqp or amqps
+amqp_url_virtual_host: orders
+username: orders
+password: "{{ env_var('RABBITMQ_PASSWORD') }}"
+queue_name: orders
+batch_size: 250                  # source: messages per batch
+batch_timeout: 0.2               # source: seconds before a smaller batch runs
+prefetch_count: 1000             # source: deliveries the broker sends ahead
+```
+
+- Blocks get each message as MageML's RabbitMQ source hands it, `Payload(method,
+  properties, body)` with `body` in bytes, so blocks written for MageML run unchanged.
+  The service acknowledges deliveries itself after the sinks: blocks must not ack them, and
+  `consume_config.auto_ack` is refused.
+- A delivery is acknowledged only once every sink took its batch. Deliveries not acknowledged
+  when the service stops or dies go back to the queue, so a restart repeats at most the
+  batches that were in flight.
+- The sink publishes persistent, mandatory messages and waits for the broker's publisher
+  confirms. A message no queue takes, or one the broker refuses, stops the stream with the
+  reason, and its input stays unacknowledged. A sink takes `exchange` and `routing_key`
+  (the queue by default); each message's `message_id` is `<stream>:<partition>:<position>`,
+  the same on a replay, for consumers that dedupe.
+- One queue has no partitions: several service instances share it as competing consumers,
+  so order holds only with one instance.
+
+### ActiveMQ
+
+MageML's `activemq` source and sink (STOMP) run with their settings:
+
+```yaml
+connector_type: activemq
+connection_host: mq.example.com
+connection_port: 61613
+queue_name: orders
+username: orders
+password: "{{ env_var('ACTIVEMQ_PASSWORD') }}"
+batch_size: 100               # source
+batch_timeout: 0.5            # source: seconds before a smaller batch runs
+prefetch: 1000                # source: messages the broker sends ahead
+```
+
+- Blocks get each body as text, as in MageML. Once every sink took a batch, one cumulative
+  ACK of its last message acknowledges it; messages not acknowledged when the service stops
+  or dies go back to the queue.
+- The sink sends each message persistent, as MageML does (an object's `data`, or the object,
+  as JSON, its `metadata` as headers), and a batch is confirmed by the broker's receipt of
+  its last frame, within `receipt_timeout` seconds (30). The next batch is sent meanwhile.
+- The connection is plain STOMP, as in MageML.
+
+### IBM MQ
+
+An `ibm_mq` source reads under syncpoint and commits after the sinks; an `ibm_mq` sink puts
+under syncpoint and commits as the receipt. The image includes IBM's MQ client, which IBM
+publishes for Linux x86-64 only: build with `--platform linux/amd64`. Settings, TLS and
+gotchas: [IBM MQ](/integrations/ibm-cloud#ibm-mq).
+
+### PostgreSQL changes
+
+MageML's `postgres` source reads changes by logical replication (pgoutput), with its
+settings:
+
+```yaml
+connector_type: postgres
+host: db.example.com
+database: shop
+user: replicator              # a role with REPLICATION
+password: "{{ env_var('PG_PASSWORD') }}"
+replication_slot: orders_slot # mage_slot by default
+publication_name: orders_pub  # mage_pub by default
+tables: [public.orders]       # without it, every table of the publication
+batch_size: 500
+batch_timeout: 0.5
+sslmode: verify-full
+```
+
+- The server needs `wal_level = logical`. The slot and the publication are made when missing
+  (`create_slot: false` stops that); a publication without `tables` is `FOR ALL TABLES`,
+  which needs a superuser, and would also capture a PostgreSQL sink's own table in the same
+  database.
+- Each changed row reaches the blocks as a JSON object of its columns and `_mage_operation`
+  (`insert`, `update` or `delete`), `_mage_schema`, `_mage_table`, `_mage_lsn`,
+  `_mage_commit_time` and, for deletes, `_mage_deleted_at`, as MageML's source gives them.
+  Integers and numerics are JSON numbers with every digit (a Python block reads a numeric
+  with a fraction as a float), booleans, `json` and `jsonb` are JSON, arrays are JSON arrays,
+  timestamps ISO 8601 text in UTC, `bytea` base64, and other types their PostgreSQL text.
+- A delete has the key columns only, unless the table has `REPLICA IDENTITY FULL`. An update
+  that changes the primary key is a delete of the old key, then the update. A large value an
+  update did not change is not in the log; it is read from the table by key.
+- The slot holds the position: once every sink took a batch, the end of the last
+  transaction whose changes are all in it is confirmed to the server, so a restarted service
+  continues after it, on any machine, and a transaction that was partly handled comes again.
+  While the stream reads nothing of interest, the slot follows the server's log, so the
+  server does not keep the log of other tables' changes for it.
+- One slot is read by one connection, so the stream runs one instance. `start_lsn` sets
+  where a new slot starts. `TRUNCATE` is not replicated; the service says so once.
+
+### PostgreSQL
+
+A `postgres` sink takes MageML's PostgreSQL sink settings, and TLS:
+
+```yaml
+connector_type: postgres
+host: db.example.com
+database: shop
+username: stream
+password: "{{ env_var('PG_PASSWORD') }}"
+schema: raw
+table: orders
+unique_constraints: [order_id]     # optional: upserts, so a replay writes nothing twice
+unique_conflict_method: UPDATE     # or IGNORE (the default)
+sslmode: verify-full               # disable, prefer, require, verify-ca, verify-full
+sslrootcert: "{{ env_var('PG_CA') }}"   # a file, PEM, or base64 PEM
+```
+
+- Each batch is one transaction, committed before its messages are acknowledged.
+- The batch goes to PostgreSQL with `COPY`, each value as the text the blocks wrote (an
+  upsert stages it in a temporary table first), and PostgreSQL reads each value into its
+  column: numbers keep every digit (`NUMERIC` for
+  integers past 64 bits), objects and lists become `JSONB`. A value that does not fit its
+  column stops the stream with PostgreSQL's reason instead of being cut.
+- A missing table is made from the first batch, with MageML's column names (cleaned, lower
+  case, SQL words such as `state` prefixed with `_`), so the same stream writes the same
+  table from MageML and from a service. A new field adds a nullable column.
+- With `unique_constraints`, a key that appears twice in one batch keeps its last message.
+
+### ClickHouse
+
+MageML's ClickHouse sink settings export as they are: the `io_config.yaml` profile gives the
+connection (over HTTP, `CLICKHOUSE_INTERFACE: http` or `https`) and `config.table_name` the
+table.
+
+```yaml
+connector_type: clickhouse
+profile: warehouse
+config:
+  table_name: events
+```
+
+- Each batch is one insert of the messages as the blocks made them, so ClickHouse reads every
+  number from its text: integers past 64 bits go into `Int256` columns exactly. A value that
+  does not fit its column stops the stream with ClickHouse's reason.
+- Inserts carry a deduplication token made of the batch's stream, partition and positions
+  ([sink names](#how-a-stream-runs)): a batch written again is dropped by ClickHouse on
+  replicated tables and on the tables the sink makes, after a restart too when the source is
+  Kafka.
+- A missing table is made from the first batch (MergeTree, nullable columns, objects and lists
+  as JSON text), with MageML's column names; a new field adds a column.
+
+### Object storage
+
+An `object_storage` sink writes each batch as one object, Parquet or JSON lines, on Amazon
+S3 and S3-compatible stores (MinIO, Cloudflare R2, IBM COS with HMAC keys), Google Cloud
+Storage, Azure Blob Storage, or local disk. MageML's `amazon_s3` and `google_cloud_storage`
+sinks export to it with their settings.
+
+```yaml
+connector_type: object_storage
+url: s3://lake/orders          # gs://bucket/prefix, abfs://container@account.dfs.core.windows.net/prefix, file:///path
+format: parquet                # or jsonl
+date_partition_format: "dt=%Y-%m-%d"
+buffer_size_mb: 16             # optional: larger batches, so larger objects
+buffer_timeout_seconds: 60
+```
+
+- A batch's messages are acknowledged once its object is written. Objects are named
+  `<stream>-p<partition>-<first>-<last>` ([sink names](#how-a-stream-runs)): a batch
+  written again replaces its object, after a restart too when the source is Kafka; with
+  other sources each run writes objects of its own.
+- `buffer_size_mb` and `buffer_timeout_seconds` set the stream's batch size and wait, so an
+  object holds what MageML's buffer held; MageML's buffered sinks acknowledged before
+  writing, services after. A webhook stream ignores them, as its callers wait.
+- Parquet keeps values exact: the schema comes from each batch, integers past 64 bits are
+  stored as decimals, and a nested one stops the stream instead of losing digits (write
+  `jsonl` for such data). JSON lines keep every value byte for byte. CSV is refused: it has
+  no types.
+- Credentials come from the environment, as each cloud's tools read them: AWS keys or roles,
+  `AWS_ENDPOINT_URL` for S3-compatible stores; Google application default credentials;
+  Azure's `AZURE_STORAGE_ACCOUNT_NAME` with a key, a service principal or a managed identity.
+
+### HTTP and Feast sinks
+
+An `http` sink posts each batch to a URL, as a JSON array (or JSON lines with
+`format: ndjson`), with `Idempotency-Key: <stream>:<partition>:<first>-<last>`, the same on
+every retry of the batch ([sink names](#how-a-stream-runs)). A `feast` sink pushes each batch's rows, JSON objects, to a Feast
+feature server's push source.
+
+```yaml
+connector_type: http
+url: https://hooks.example.com/orders
+format: json
+timeout_seconds: 10
+headers:
+  Authorization: "Bearer {{ env_var('HOOK_TOKEN') }}"
+```
+
+```yaml
+connector_type: feast
+url: "{{ env_var('FEAST_URL') }}"
+push_source_name: driver_stats_push
+to: online                 # online, offline or online_and_offline
+```
+
+- A batch counts as written only on a `2xx` answer. Network errors and `408`, `429`, `5xx`
+  answers are retried; other answers stop the stream with the receiver's reason, keeping its
+  position. Feast answers `500` for a row it cannot write, so a Feast sink tries a `500` three
+  times and then stops the stream with Feast's reason.
+- Requests never follow redirects, verify TLS, and never go to loopback, private, link-local
+  or cloud metadata addresses, checked on the addresses the client connects to. A sink inside
+  your own network sets `allow_private: true`.
+- Feast online pushes are upserts by entity and event time, so a batch replayed after a crash
+  writes the same values again; offline pushes append, so a replay can add rows twice there.
+- Values are sent exactly as the blocks made them: large integers keep every digit.
+- Headers whose names look like credentials (`Authorization`, tokens, keys) must be
+  `env_var()` references.

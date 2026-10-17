@@ -47,3 +47,7 @@ use_tls: false
 # nkeys_seed_str: "SUAPAEYJQOQHJ4"
 # user_credentials: "path/to/credentials.creds"
 ```
+
+## In an exported service
+
+[Exported services](/production/stream-services#nats-jetstream) run this source (pull consumers) in the Rust engine: messages are acknowledged after every sink took their batch.

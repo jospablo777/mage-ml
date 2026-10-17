@@ -19,5 +19,5 @@ with the metadata as message headers.
 
 ## In an exported service
 
-[Exported services](../../../production/export-a-service.md#activemq) run this sink in the Rust engine:
+[Exported services](../../../production/stream-services.md#activemq) run this sink in the Rust engine:
 the next batch is sent while the broker confirms one.

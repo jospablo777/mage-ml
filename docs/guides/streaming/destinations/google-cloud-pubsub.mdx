@@ -80,3 +80,7 @@ gcloud pubsub subscriptions create test-subscription-id-0 --topic test-topic-id
 
 Only messages published to the topic after the subscription is created
 are available to subscriber applications.
+
+## In an exported service
+
+[Exported services](/production/stream-services#google-cloud-pub/sub) run this sink in the Rust engine, up to 1,000 messages a request.

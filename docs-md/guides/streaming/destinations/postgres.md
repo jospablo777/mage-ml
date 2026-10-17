@@ -27,3 +27,7 @@ allow_reserved_words: False
 auto_clean_name: True
 case_sensitive: False
 ```
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md#postgresql) run this sink in the Rust engine: one transaction per batch, written with COPY, values exact.

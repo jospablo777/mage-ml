@@ -16,3 +16,7 @@ file_type: delta
 * `access_key`: Azure Storage Access key
 * `mode`: write mode. 'append' or 'overwrite' are accepted. default is 'append'
 * `file_type`: File type to insert in Azure Data Lake. Only 'delta' is supported.
+
+## In an exported service
+
+[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.
