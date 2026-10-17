@@ -30,6 +30,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `B` and `C` both downstream of dynamic `A`, `D` runs once per item with `B:i` and `C:i`. It
   ran once per combination, n * n times (upstream #5980). Dynamic upstream blocks from
   different dynamic blocks still make every combination.
+- **A callback block attached to no block is a pipeline callback**: it runs once when a run
+  completes or fails. Such blocks ran nothing before.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
 
@@ -79,6 +81,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Blocks
 
+- Pipeline callbacks: a callback block attached to no block runs once when a run completes or
+  fails, with its status and failed blocks (upstream #5438). `@callback('success', 'failure')`
+  runs for both statuses; it ran for the first only, and stacked `@callback` decorators work.
 - A block that returns a matplotlib figure, a PIL image or PNG or JPEG bytes shows the image
   in the editor (upstream #6073).
 - A block can be disabled in its settings (`configuration.disabled`): runs skip it and its

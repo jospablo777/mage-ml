@@ -101,6 +101,32 @@ def only_run_this_function_on_cancelled(parent_block_data, **kwargs):
     pass
 ```
 
+One function can take several statuses, `@callback('success', 'failure')`, and decorators
+can be stacked.
+
+## Pipeline callbacks
+
+A callback block attached to no block is a pipeline callback: it runs once when a run of the
+pipeline completes or fails, instead of once for each block. Its functions get the run's
+status and details as keyword arguments:
+
+```python
+@callback('success', 'failure')
+def notify(status, failed_blocks, pipeline_run, **kwargs):
+    if status == 'failure':
+        send_alert(f'{pipeline_run.pipeline_uuid} failed in {failed_blocks}')
+```
+
+| Keyword argument | Value |
+| --- | --- |
+| `status` | `success` or `failure` |
+| `failed_blocks` | The UUIDs of the blocks that failed |
+| `error` | The run's error message, on failure |
+| `pipeline_run` | The pipeline run |
+| `pipeline_uuid` | The pipeline's UUID |
+
+Pipeline callbacks run in the scheduler without holding it up, once per run.
+
 ### Positional arguments
 
 The 1st positional argument is the data output of the callback block’s parent block.

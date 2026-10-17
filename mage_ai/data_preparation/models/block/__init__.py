@@ -4776,18 +4776,24 @@ class CallbackBlock(AddonBlock):
                 decorated_functions.append(func)
                 return func
 
-            if callback_status not in CALLBACK_STATUSES:
-                raise Exception(
-                    f"Callback status '{callback_status}' in @callback decorator must be 1 of: "
-                    f"{', '.join(CALLBACK_STATUSES)}",
-                )
+            # @callback('success', 'failure') ran for success only: the statuses after the
+            # first were dropped. Each is checked and kept.
+            statuses = (callback_status,) + tuple(args)
+            for status in statuses:
+                if status not in CALLBACK_STATUSES:
+                    raise Exception(
+                        f"Callback status '{status}' in @callback decorator must be 1 of: "
+                        f"{', '.join(CALLBACK_STATUSES)}",
+                    )
 
             def inner(function):
                 def func(callback_status_inner):
-                    if callback_status_inner == callback_status:
+                    if callback_status_inner in statuses:
                         return function
 
                 decorated_functions.append(func)
+                # Returned, so decorators can be stacked; it was None.
+                return function
 
             return inner
 

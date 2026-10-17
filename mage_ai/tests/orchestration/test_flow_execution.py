@@ -712,6 +712,72 @@ class FlowExecutionTest(DBTestCase):
         })
         self.assertFalse(self.output.exists())
 
+    def pipeline_callback_flow(self, fail: bool):
+        self.block('load', 'data_loader', f'''
+            @data_loader
+            def load(**kwargs):
+                if {fail}:
+                    raise ValueError('load failed')
+                return 1
+        ''')
+        self.block('notify', 'callback', '''
+            from pathlib import Path
+            @callback('success', 'failure')
+            def notify(status, **kwargs):
+                with open(kwargs['output_path'], 'a') as f:
+                    f.write(f"{status} {kwargs['failed_blocks']}\\n")
+        ''')
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+        with patch('mage_ai.orchestration.pipeline_callbacks._start', lambda target: target()):
+            try:
+                self.execute_run(run)
+            except ValueError:
+                # The executor raises the failed block's error; the scheduler goes on.
+                PipelineScheduler(run).schedule()
+            # A second pass over the finished run calls nothing again.
+            PipelineScheduler(run).schedule()
+        run.refresh()
+        return run
+
+    def test_a_pipeline_callback_runs_once_when_the_run_completes(self):
+        """Callbacks were per block only: a pipeline-level callback did not exist (#5438)."""
+        run = self.pipeline_callback_flow(fail=False)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertEqual(self.output.read_text(), 'success []\n')
+
+    def test_a_pipeline_callback_gets_the_failed_blocks(self):
+        run = self.pipeline_callback_flow(fail=True)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.FAILED)
+        self.assertEqual(self.output.read_text(), f"failure ['{self.pipeline.uuid}_load']\n")
+
+    def test_a_callback_with_several_statuses_runs_for_each(self):
+        """@callback('success', 'failure') ran for success only; stacked decorators broke."""
+        from mage_ai.data_preparation.models.block import CallbackBlock
+
+        callback = self.block('several', 'callback', '''
+            @callback('success', 'failure')
+            def both(status, **kwargs):
+                kwargs['seen'].append(('both', status))
+
+            @callback('cancelled')
+            @callback('failure')
+            def stacked(status, **kwargs):
+                kwargs['seen'].append(('stacked', status))
+        ''')
+        block = CallbackBlock(callback.name, callback.uuid, callback.type, pipeline=self.pipeline)
+        seen = []
+        for callback_name, status in (('on_success', 'success'), ('on_failure', 'failure')):
+            block.execute_callback(
+                callback_name, callback_kwargs=dict(seen=seen, status=status), global_vars={},
+                upstream_block_uuids_override=[],
+            )
+
+        self.assertEqual(seen, [
+            ('both', 'success'), ('both', 'failure'), ('stacked', 'failure'),
+        ])
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()

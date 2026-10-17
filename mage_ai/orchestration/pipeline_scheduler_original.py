@@ -51,6 +51,7 @@ from mage_ai.orchestration.metrics.pipeline_run import (
 )
 from mage_ai.orchestration.notification.config import NotificationConfig
 from mage_ai.orchestration.notification.sender import NotificationSender
+from mage_ai.orchestration.pipeline_callbacks import run_pipeline_callbacks
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
 from mage_ai.orchestration.utils.git import log_git_sync, run_git_sync
 from mage_ai.orchestration.utils.resources import get_compute, get_memory
@@ -298,6 +299,10 @@ class PipelineScheduler:
                         pipeline=self.pipeline,
                         pipeline_run=self.pipeline_run,
                     )
+                    run_pipeline_callbacks(
+                        self.pipeline, self.pipeline_run, 'success',
+                        logger=self.logger, logging_tags=self.build_tags(),
+                    )
                     start_followers(self.pipeline_run, 'completed')
 
                 self.logger_manager.output_logs_to_destination()
@@ -403,6 +408,10 @@ class PipelineScheduler:
                 pipeline_run=self.pipeline_run,
                 error=error_msg,
                 stacktrace=stacktrace,
+            )
+            run_pipeline_callbacks(
+                self.pipeline, self.pipeline_run, 'failure', error=error_msg,
+                logger=self.logger, logging_tags=self.build_tags(),
             )
 
         # Cancel block runs that are still in progress for the pipeline run.
