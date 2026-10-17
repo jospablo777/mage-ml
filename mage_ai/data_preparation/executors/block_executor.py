@@ -42,6 +42,7 @@ from mage_ai.data_preparation.models.project import Project
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleType
 from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
+from mage_ai.orchestration.db import end_transaction
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
@@ -1165,6 +1166,11 @@ class BlockExecutor:
                             arr.append(br)
 
                     return arr
+
+        # End the transaction the reads before opened: it stayed open while the block ran,
+        # on PostgreSQL an idle-in-transaction connection holding locks for hours
+        # (upstream #6030). Commit keeps any pending status write.
+        end_transaction()
 
         result = self.block.execute_sync(
             analyze_outputs=analyze_outputs,

@@ -585,6 +585,26 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(len(children), 3)
         self.assertEqual(self.output.read_text(), '[(10, 100), (20, 200), (30, 300)]')
 
+    def test_no_database_transaction_stays_open_while_a_block_runs(self):
+        """
+        Reads before the block opened a transaction that stayed open for the whole block:
+        on PostgreSQL an idle-in-transaction connection holding locks (upstream #6030).
+        """
+        self.block('load', 'data_loader', '''
+            from pathlib import Path
+            from mage_ai.orchestration.db import db_connection
+            @data_loader
+            def load(**kwargs):
+                Path(kwargs['output_path']).write_text(str(db_connection.session().in_transaction()))
+                return 1
+        ''')
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertEqual(self.output.read_text(), 'False')
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()

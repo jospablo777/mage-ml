@@ -166,6 +166,16 @@ def set_db_schema():
                 )
 
 
+def end_transaction() -> None:
+    """
+    Commits the session's open transaction, if any, before long work such as running a
+    block, so the connection does not sit idle in a transaction holding locks.
+    """
+    session = db_connection.session
+    if session is not None and session().in_transaction():
+        session.commit()
+
+
 def safe_db_query(func):
     def func_with_rollback(*args, **kwargs):
         retry_count = 0

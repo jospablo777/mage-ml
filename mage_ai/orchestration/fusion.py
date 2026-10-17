@@ -486,6 +486,7 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
     """Runs a stage's blocks in order, each taking the previous block's output in memory;
     a Rust or R block followed by one of its language may plan (block/plans.py)."""
     from mage_ai.data_preparation.models.block import plans
+    from mage_ai.orchestration.db import end_transaction
 
     previous = None
     for index, uuid in enumerate(stage):
@@ -502,6 +503,7 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
         if summary is not None:
             summary.append(row)
         block.test_summary = None
+        end_transaction()
         with _block_tracking(tracking, uuid), plans.stage_context(next_block, None):
             result = block.execute_sync(
                 block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
