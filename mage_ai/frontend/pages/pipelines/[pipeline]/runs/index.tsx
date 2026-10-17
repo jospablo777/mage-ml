@@ -85,6 +85,14 @@ type PipelineRunsProp = {
   };
 };
 
+const RUN_RANGES = [
+  { label: 'All time', seconds: 0 },
+  { label: 'Last hour', seconds: 3600 },
+  { label: 'Last 24 hours', seconds: 86400 },
+  { label: 'Last 7 days', seconds: 7 * 86400 },
+  { label: 'Last 30 days', seconds: 30 * 86400 },
+];
+
 function PipelineRuns({
   pipeline: pipelineProp,
 }: PipelineRunsProp) {
@@ -196,6 +204,11 @@ function PipelineRuns({
   };
   if (q?.status) {
     pipelineRunsRequestQuery.status = q.status;
+  }
+  // Runs created within the selected time range (upstream #6062).
+  if (q?.start_timestamp) {
+    // @ts-ignore
+    pipelineRunsRequestQuery.start_timestamp = q.start_timestamp;
   }
   if (!isPipelineRunsTab) {
     pipelineRunsRequestQuery = ignoreKeys(pipelineRunsRequestQuery, [MetaQueryEnum.OFFSET]);
@@ -586,6 +599,34 @@ function PipelineRuns({
                   {PIPELINE_RUN_STATUSES.map(status => (
                     <option key={status} value={status}>
                       {RUN_STATUS_TO_LABEL[status]}
+                    </option>
+                  ))}
+                </Select>
+
+                <Spacing ml={2} />
+
+                <Select
+                  compact
+                  defaultColor
+                  greyBorder
+                  onChange={e => {
+                    e.preventDefault();
+                    const seconds = Number(e.target.value);
+                    goToWithQuery({
+                      page: 0,
+                      run_range: seconds || null,
+                      start_timestamp: seconds
+                        ? Math.floor(Date.now() / 1000) - seconds
+                        : null,
+                    });
+                  }}
+                  paddingRight={UNIT * 4}
+                  placeholder="Select time range"
+                  value={q?.run_range || 0}
+                >
+                  {RUN_RANGES.map(({ label, seconds }) => (
+                    <option key={label} value={seconds}>
+                      {label}
                     </option>
                   ))}
                 </Select>

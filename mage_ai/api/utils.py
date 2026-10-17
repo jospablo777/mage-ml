@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Tuple
 
 from mage_ai.api.errors import ApiError
@@ -131,6 +131,14 @@ def parse_cookie_header(cookies_raw):
     return cookies
 
 
+def _utc(timestamp) -> datetime:
+    """
+    A Unix time as a UTC time without a zone, as run times are stored and compared. It was
+    read as local time, which moved the range by the server's offset from UTC.
+    """
+    return datetime.fromtimestamp(int(timestamp), tz=timezone.utc).replace(tzinfo=None)
+
+
 def get_query_timestamps(query_arg) -> Tuple[datetime, datetime]:
     start_timestamp = query_arg.get('start_timestamp', [None])
     if start_timestamp:
@@ -142,13 +150,13 @@ def get_query_timestamps(query_arg) -> Tuple[datetime, datetime]:
     error = ApiError.RESOURCE_INVALID.copy()
     if start_timestamp:
         try:
-            start_timestamp = datetime.fromtimestamp(int(start_timestamp))
+            start_timestamp = _utc(start_timestamp)
         except (ValueError, OverflowError):
             error.update(message='Value is invalid for start_timestamp.')
             raise ApiError(error)
     if end_timestamp:
         try:
-            end_timestamp = datetime.fromtimestamp(int(end_timestamp))
+            end_timestamp = _utc(end_timestamp)
         except (ValueError, OverflowError):
             error.update(message='Value is invalid for end_timestamp.')
             raise ApiError(error)

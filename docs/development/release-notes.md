@@ -86,6 +86,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Triggers
 
+- The pipeline runs page filters runs by time range (last hour, 24 hours, 7 or 30 days)
+  (upstream #6062). `start_timestamp` and `end_timestamp` in the API are read as UTC; they
+  were read as the server's local time.
 - Cancelling a pipeline run cancels the runs its blocks started with `trigger_pipeline` that
   are still waiting or running; they ran on (upstream #5641).
 - API triggers honor **Skip run if previous run still in progress**: a call while a run is

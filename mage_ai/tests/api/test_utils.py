@@ -7,7 +7,7 @@ from mage_ai.api.utils import (
 from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db.models.oauth import Permission, Role, User
-from mage_ai.tests.base_test import DBTestCase
+from mage_ai.tests.base_test import DBTestCase, TestCase
 
 
 class UtilsTest(DBTestCase):
@@ -170,3 +170,31 @@ class UtilsTest(DBTestCase):
         self.assertTrue(has_at_least_editor_role(user, Entity.PIPELINE, 'test'))
         self.assertFalse(has_at_least_editor_role(user, Entity.PIPELINE, 'test1'))
         self.assertTrue(has_at_least_viewer_role(user, Entity.PIPELINE, 'test1'))
+
+
+class QueryTimestampsTest(TestCase):
+    def test_unix_times_are_read_as_utc(self):
+        """They were read as local time, moving a range by the server's offset from UTC."""
+        import os
+        import time
+        from datetime import datetime
+
+        from mage_ai.api.utils import get_query_timestamps
+
+        if not hasattr(time, 'tzset'):
+            self.skipTest('time.tzset is not available')
+        previous = os.environ.get('TZ')
+        os.environ['TZ'] = 'America/Costa_Rica'
+        time.tzset()
+        try:
+            start, end = get_query_timestamps(
+                {'start_timestamp': ['0'], 'end_timestamp': ['3600']},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop('TZ', None)
+            else:
+                os.environ['TZ'] = previous
+            time.tzset()
+
+        self.assertEqual((start, end), (datetime(1970, 1, 1, 0), datetime(1970, 1, 1, 1)))
