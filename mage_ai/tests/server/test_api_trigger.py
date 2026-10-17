@@ -16,22 +16,42 @@ class ApiTriggerBodyTest(AsyncHTTPTestCase):
              ApiTriggerPipelineHandler),
         ])
 
-    def trigger(self, body, token='secret'):
+    def trigger(self, body, token='secret', skip=False, running=0):
+        from mage_ai.data_preparation.models.triggers import SettingsConfig
+
         schedule = SimpleNamespace(
             schedule_type=ScheduleType.API, token='secret', pipeline_uuid='p', repo_path='r',
+            get_settings=lambda: SettingsConfig(skip_if_previous_running=skip),
+            running_pipeline_run_count=running, initial_pipeline_runs=[],
         )
         run = SimpleNamespace(to_dict=lambda: {'id': 1})
+        self.cancelled = None
         with patch('mage_ai.server.api.triggers.PipelineSchedule.get_by_id',
                    return_value=schedule), \
                 patch('mage_ai.server.api.triggers.Pipeline.get'), \
+                patch('mage_ai.server.api.triggers.create_and_cancel_pipeline_run',
+                      return_value=SimpleNamespace(to_dict=lambda: {'id': 2})) as cancel, \
                 patch('mage_ai.server.api.triggers.create_and_start_pipeline_run',
                       return_value=run) as start:
             response = self.fetch(
                 '/api/pipeline_schedules/1/api_trigger', method='POST', body=body,
                 headers={'Authorization': f'Bearer {token}'},
             )
+        self.cancelled = cancel.called
         payload = start.call_args.args[2] if start.called else None
         return response, json.loads(response.body), payload
+
+    def test_a_trigger_that_skips_while_a_run_runs_starts_no_run(self):
+        """Skip if the previous run is still running applied to schedules only (PR 5961)."""
+        _, answer, payload = self.trigger('{}', skip=True, running=1)
+
+        self.assertIsNone(payload)
+        self.assertTrue(self.cancelled)
+        self.assertEqual(answer, {'pipeline_run': {'id': 2}})
+
+        _, _, payload = self.trigger('{}', skip=True, running=0)
+        self.assertIsNotNone(payload)
+        self.assertFalse(self.cancelled)
 
     def test_an_array_body_reaches_blocks_as_body(self):
         """A list body, as HubSpot webhooks send, failed with a 500 (upstream #5414)."""

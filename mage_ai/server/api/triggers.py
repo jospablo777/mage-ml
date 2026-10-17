@@ -6,7 +6,10 @@ from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import ScheduleType
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.schedules import PipelineRun, PipelineSchedule
-from mage_ai.orchestration.triggers.utils import create_and_start_pipeline_run
+from mage_ai.orchestration.triggers.utils import (
+    create_and_cancel_pipeline_run,
+    create_and_start_pipeline_run,
+)
 from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.errors import UnauthenticatedRequestException
 from mage_ai.shared.requests import get_bearer_auth_token_from_headers
@@ -62,11 +65,25 @@ class ApiTriggerPipelineHandler(BaseHandler):
         pipeline = Pipeline.get(
             pipeline_schedule.pipeline_uuid, repo_path=pipeline_schedule.repo_path
         )
-        pipeline_run = create_and_start_pipeline_run(
-            pipeline,
-            pipeline_schedule,
-            payload,
-            should_schedule=False,
-        )
+        # The trigger's "skip if the previous run is still running" applied to schedules
+        # only: each call started a run (upstream PR 5961). A skipped call gets a cancelled
+        # run, so the caller sees it was not run.
+        if pipeline_schedule.get_settings().skip_if_previous_running and (
+            pipeline_schedule.running_pipeline_run_count > 0
+            or pipeline_schedule.initial_pipeline_runs
+        ):
+            pipeline_run = create_and_cancel_pipeline_run(
+                pipeline,
+                pipeline_schedule,
+                payload,
+                message='Skipped: the previous run of this trigger is still running.',
+            )
+        else:
+            pipeline_run = create_and_start_pipeline_run(
+                pipeline,
+                pipeline_schedule,
+                payload,
+                should_schedule=False,
+            )
 
         self.write(dict(pipeline_run=pipeline_run.to_dict()))

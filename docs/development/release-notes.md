@@ -82,6 +82,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Block functions can be `async def`; they ran nothing and returned the coroutine
   (upstream #5164).
 
+### Triggers
+
+- API triggers honor **Skip run if previous run still in progress**: a call while a run is
+  queued or running answers with a cancelled run (upstream PR 5961).
+
 ### Observability
 
 - `/metrics` (with `ENABLE_PROMETHEUS`) exposes pipeline and block runs by status, the last

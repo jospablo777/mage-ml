@@ -77,6 +77,10 @@ def load_data(**kwargs) -> DataFrame:
     # ...other code
 ```
 
+With **Skip run if previous run still in progress** set on the trigger, a call made while an
+earlier run of the trigger is queued or running starts nothing: it answers with a cancelled
+run, whose log says it was skipped.
+
 A body that is not a JSON object, such as the list of events HubSpot webhooks send, reaches
 the blocks as `kwargs['body']` (also `kwargs['event']['body']`). A body that is not JSON is
 refused with a 400 error that gives the reason.
