@@ -161,3 +161,49 @@ class RunInputTests(TestCase):
             assert result.exit_code == 2, result.output
             assert expected in ' '.join(result.output.split()), result.output
         mock_executor_factory.get_pipeline_executor.assert_not_called()
+
+
+class RunCleanupTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        cwd = os.getcwd()
+        directory = tempfile.mkdtemp()
+        os.makedirs(os.path.join(directory, 'my_mage_project'))
+        os.chdir(directory)
+        self.addCleanup(os.chdir, cwd)
+        self.addCleanup(shutil.rmtree, directory, True)
+
+    @mock.patch('mage_ai.data_preparation.variable_manager.VariableManager')
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_clean_after_success_removes_the_runs_outputs(
+        self, mock_executor_factory, mock_pipeline, mock_manager,
+    ):
+        mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
+        mock_pipeline.get.return_value.blocks_by_uuid = {'load': None}
+        mock_manager.return_value.clean_run_outputs.return_value = ['x']
+        result = runner.invoke(app, [
+            'run', 'my_mage_project', 'load_titanic', '--clean-after-success',
+            '--execution-partition', 'cli_1',
+        ])
+        assert result.exit_code == 0, result.output
+        mock_manager.return_value.clean_run_outputs.assert_called_once_with(
+            mock.ANY, ['load'], 'cli_1',
+        )
+        # A failed run keeps its outputs for debugging.
+        mock_manager.reset_mock()
+        mock_executor_factory.get_pipeline_executor.return_value.execute.side_effect = (
+            RuntimeError('failed')
+        )
+        result = runner.invoke(app, [
+            'run', 'my_mage_project', 'load_titanic', '--clean-after-success',
+        ])
+        assert result.exit_code == 1
+        mock_manager.return_value.clean_run_outputs.assert_not_called()
+
+    def test_clean_cached_variables_refuses_a_duration_it_cannot_read(self):
+        result = runner.invoke(
+            app, ['clean-cached-variables', 'my_mage_project', '--older-than', 'soon'],
+        )
+        assert result.exit_code == 2, result.output
+        assert 'not a duration' in result.output

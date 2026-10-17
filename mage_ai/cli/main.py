@@ -85,6 +85,10 @@ RUN_RUNTIME_VARS_DEFAULT = typer.Option(
     None, help='specify runtime variables. These will overwrite the pipeline global variables.'
 )
 RUN_SKIP_SENSORS_DEFAULT = typer.Option(False, help='specify if the sensors should be skipped.')
+RUN_CLEAN_AFTER_SUCCESS_DEFAULT = typer.Option(
+    False, help='remove the outputs the run stored once it succeeds (a failed run keeps them '
+    'for debugging).',
+)
 RUN_MAX_PARALLEL_DEFAULT = typer.Option(
     None, help='most stages that run at once (default: the pipeline\'s block_run_limit, '
     'else no limit).',
@@ -100,6 +104,13 @@ CLEAN_VARIABLES_PROJECT_PATH_DEFAULT = typer.Argument(
     ..., help='path of the MageML project to clean variables.'
 )
 CLEAN_VARIABLES_PIPELINE_UUID_DEFAULT = typer.Option(None, help='uuid of the pipeline to clean.')
+CLEAN_VARIABLES_OLDER_THAN_DEFAULT = typer.Option(
+    None, help='remove stored outputs older than this, such as 12h or 7d (0d removes all); '
+    'the project\'s variables_retention_period by default.',
+)
+CLEAN_VARIABLES_DRY_RUN_DEFAULT = typer.Option(
+    False, help='list what would be removed, with sizes, and remove nothing.',
+)
 
 CREATE_SPARK_CLUSTER_PROJECT_PATH_DEFAULT = typer.Argument(
     ..., help='path of the MageML project that contains the EMR config.'
@@ -182,6 +193,7 @@ def run(
     skip_sensors: bool = RUN_SKIP_SENSORS_DEFAULT,
     template_runtime_configuration: Union[str, None] = RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT,
     max_parallel: Union[int, None] = RUN_MAX_PARALLEL_DEFAULT,
+    clean_after_success: bool = RUN_CLEAN_AFTER_SUCCESS_DEFAULT,
 ):
     """
     Run pipeline.
@@ -319,13 +331,26 @@ def run(
             print('[red]Pipeline run failed.[/red]')
             raise typer.Exit(code=1)
         print('Pipeline run completed.')
+        if clean_after_success and block_uuid is None:
+            from mage_ai.data_preparation.variable_manager import VariableManager
+
+            removed = VariableManager(variables_dir=pipeline.variables_dir).clean_run_outputs(
+                pipeline.uuid, list(pipeline.blocks_by_uuid), execution_partition,
+            )
+            print(f'Removed the outputs the run stored ({len(removed)} folders).')
 
 
 @app.command()
 def clean_cached_variables(
     project_path: str = CLEAN_VARIABLES_PROJECT_PATH_DEFAULT,
     pipeline_uuid: str = CLEAN_VARIABLES_PIPELINE_UUID_DEFAULT,
+    older_than: Union[str, None] = CLEAN_VARIABLES_OLDER_THAN_DEFAULT,
+    dry_run: bool = CLEAN_VARIABLES_DRY_RUN_DEFAULT,
 ):
+    """
+    Remove stored block outputs: scheduled runs' partitions, and outputs of editor and
+    mage run runs, older than the retention period or --older-than.
+    """
     from mage_ai.settings.repo import set_repo_path
 
     project_path = os.path.abspath(project_path)
@@ -333,7 +358,16 @@ def clean_cached_variables(
 
     from mage_ai.data_preparation.variable_manager import clean_variables
 
-    clean_variables(pipeline_uuid=pipeline_uuid)
+    try:
+        report = clean_variables(pipeline_uuid=pipeline_uuid, older_than=older_than,
+                                 dry_run=dry_run)
+    except ValueError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    print(f'{"Would remove" if dry_run else "Removed"} {len(report["removed"])} folders, '
+          f'{report["bytes_removed"] / 1e6:.1f} MB.')
+    if report['errors']:
+        raise typer.Exit(code=1)
 
 
 @app.command()

@@ -155,7 +155,7 @@ def hint_for(error: BaseException, repo_path: Optional[str] = None) -> Optional[
             f'The disk is full{f" ({error.filename})" if error.filename else ""}. Block outputs '
             'are stored under MAGE_DATA_DIR; free space there, or keep fewer outputs with '
             'variables_retention_period in the project\'s metadata.yaml and '
-            '`mage clean-cached-variables`.'
+            '`mage clean-cached-variables` (`--older-than 7d` without a retention period).'
         )
     if isinstance(error, MemoryError):
         return (

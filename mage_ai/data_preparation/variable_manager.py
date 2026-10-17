@@ -257,21 +257,37 @@ class VariableManager:
         variable.variable_type = variable_type
         await variable.write_data_async(data)
 
-    def clean_variables(self, pipeline_uuid: Optional[str] = None):
+    def clean_variables(
+        self,
+        pipeline_uuid: Optional[str] = None,
+        older_than: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Removes stored block outputs older than the project's variables_retention_period,
+        or `older_than` (such as 7d; 0d removes all). Scheduled runs keep outputs under
+        <schedule id>/<partition>; editor and `mage run` outputs sit beside them, per block
+        or per given partition, and were never removed, so data read by CLI runs stayed on
+        disk. Their age is their newest file's. Returns what was found and removed.
+        """
         from mage_ai.data_preparation.models.pipeline import Pipeline
 
-        repo_config = get_repo_config()
-        if repo_config.variables_retention_period is None:
-            print('Variable retention period is not provided.')
-            return
+        report = dict(removed=[], kept=[], errors=[], bytes_removed=0, bytes_kept=0)
+        limit_text = older_than
+        if limit_text is None:
+            limit_text = get_repo_config().variables_retention_period
+        try:
+            limit = str_to_timedelta(limit_text) if limit_text is not None else None
+        except Exception:
+            limit = None
+        if limit_text is not None and limit is None:
+            raise ValueError(f'{limit_text} is not a duration such as 12h, 7d or 0d.')
 
-        retention_ds = str_to_timedelta(repo_config.variables_retention_period)
-        if retention_ds is None:
-            return
+        min_partition = None
+        if limit is not None:
+            min_partition = (utc_now() - limit).strftime(format='%Y%m%dT%H%M%S')
+            print(f'Removing stored outputs older than {limit_text}.')
 
-        min_partition = (utc_now() - retention_ds).strftime(format='%Y%m%dT%H%M%S')
-
-        print(f'Clean variables before partition {min_partition}')
         if pipeline_uuid is None:
             pipeline_uuids = [
                 d[0] if isinstance(d, tuple) else d
@@ -280,27 +296,96 @@ class VariableManager:
         else:
             pipeline_uuids = [pipeline_uuid]
 
-        for pipeline_uuid in pipeline_uuids:
-            print(f'Removing cached variables from pipeline {pipeline_uuid}')
-            pipeline_variable_path = os.path.join(
-                self.pipeline_path(pipeline_uuid),
-                VARIABLE_DIR,
-            )
-            dirs = self.storage.listdir(pipeline_variable_path)
-            for dirname in dirs:
+        def remove(path: str, size: Optional[int]) -> None:
+            report['removed'].append(path)
+            report['bytes_removed'] += size or 0
+            print(f'{"Would remove" if dry_run else "Removing"} {path}'
+                  + (f' ({size / 1e6:.1f} MB)' if size is not None else ''))
+            if dry_run:
+                return
+            try:
+                self.storage.remove_dir(path)
+            except Exception as error:
+                report['errors'].append(f'{path}: {error}')
+                print(f'Could not remove {path}: {error}')
+
+        for uuid in pipeline_uuids:
+            variable_path = os.path.join(self.pipeline_path(uuid), VARIABLE_DIR)
+            if not self.storage.path_exists(variable_path):
+                continue
+            for dirname in self.storage.listdir(variable_path):
+                path = os.path.join(variable_path, dirname)
                 if dirname.isdigit():
-                    pipeline_schedule_vpath = os.path.join(pipeline_variable_path, dirname)
-                    execution_partitions = self.storage.listdir(
-                        pipeline_schedule_vpath,
-                    )
-                    for partition in execution_partitions:
+                    # A schedule's outputs, one folder per run partition (a timestamp).
+                    if min_partition is None:
+                        continue
+                    for partition in self.storage.listdir(path):
                         if partition <= min_partition:
-                            pipeline_partition_vpath = os.path.join(
-                                pipeline_schedule_vpath,
-                                partition,
-                            )
-                            print(f'Removing folder {pipeline_partition_vpath}')
-                            self.storage.remove_dir(pipeline_partition_vpath)
+                            remove(os.path.join(path, partition), self.__size(path, partition))
+                    continue
+                # Editor and mage run outputs: a block's folder or a given partition.
+                size, newest = self.__stats(path)
+                old_enough = limit is not None and (
+                    limit.total_seconds() <= 0
+                    or (newest is not None and utc_now().timestamp() - newest
+                        > limit.total_seconds())
+                )
+                if old_enough:
+                    remove(path, size)
+                else:
+                    report['kept'].append(path)
+                    report['bytes_kept'] += size or 0
+
+        if limit is None:
+            print(
+                'No variables_retention_period is set, so nothing was removed. Outputs of '
+                f'editor and mage run runs keep {report["bytes_kept"] / 1e6:.1f} MB in '
+                f'{len(report["kept"])} folders; remove them with --older-than 0d, or set '
+                'variables_retention_period in the project\'s metadata.yaml.'
+            )
+        return report
+
+    def __size(self, folder: str, name: str) -> Optional[int]:
+        return self.__stats(os.path.join(folder, name))[0]
+
+    def __stats(self, path: str):
+        """The bytes under a local folder and its newest file's time; None when unknown."""
+        if not isinstance(self.storage, LocalStorage) or not os.path.exists(path):
+            return None, None
+        size, newest = 0, None
+        for root, _, files in os.walk(path):
+            for name in files:
+                try:
+                    stat = os.stat(os.path.join(root, name))
+                except OSError:
+                    continue
+                size += stat.st_size
+                newest = stat.st_mtime if newest is None else max(newest, stat.st_mtime)
+        if newest is None:
+            try:
+                newest = os.stat(path).st_mtime
+            except OSError:
+                pass
+        return size, newest
+
+    def clean_run_outputs(
+        self, pipeline_uuid: str, block_uuids: List[str], partition: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Removes the outputs one run stored: its partition's folder, or without a partition
+        the folders of the pipeline's blocks. For `mage run --clean-after-success`.
+        """
+        variable_path = os.path.join(self.pipeline_path(pipeline_uuid), VARIABLE_DIR)
+        if partition:
+            paths = [os.path.join(variable_path, partition)]
+        else:
+            paths = [os.path.join(variable_path, clean_name(uuid)) for uuid in block_uuids]
+        removed = []
+        for path in paths:
+            if self.storage.path_exists(path):
+                self.storage.remove_dir(path)
+                removed.append(path)
+        return removed
 
     def delete_variable(
         self,
@@ -495,9 +580,15 @@ class GCSVariableManager(VariableManager):
         self.storage = GCSStorage(dirpath=variables_dir)
 
 
-def clean_variables(pipeline_uuid: str = None):
+def clean_variables(
+    pipeline_uuid: str = None,
+    older_than: Optional[str] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
     variables_dir = get_variables_dir()
-    VariableManager(variables_dir=variables_dir).clean_variables(pipeline_uuid=pipeline_uuid)
+    return VariableManager(variables_dir=variables_dir).clean_variables(
+        pipeline_uuid=pipeline_uuid, older_than=older_than, dry_run=dry_run,
+    )
 
 
 def get_global_variables(

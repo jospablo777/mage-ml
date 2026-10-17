@@ -13,7 +13,7 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`init`](#init-initialize-a-project) | Initialize a new MageML project at the specified path |
 | [`start`](#start-start-the-server-and-ui) | Start the MageML server and web UI |
 | [`run`](#run-run-a-pipeline) | Execute a pipeline or a specific block within a pipeline |
-| [`clean-cached-variables`](#clean-cached-variables) | Delete pipeline run outputs older than the project's retention period |
+| [`clean-cached-variables`](#clean-cached-variables) | Delete stored block outputs older than the retention period or `--older-than` |
 | [`clean-old-logs`](#clean-old-logs) | Delete pipeline run logs older than the logging retention period |
 | [`create-spark-cluster`](#create-spark-cluster) | Create an EMR cluster from the project's EMR config |
 | [`contract-draft`](#contract-draft) | Draft a data contract from a block's stored output |
@@ -118,6 +118,7 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 - `--runtime-vars` (optional): Runtime variables in JSON format. These will overwrite the pipeline global variables
 - `--skip-sensors` (optional): Specify if the sensors should be skipped (default: `False`)
 - `--template-runtime-configuration` (optional): Runtime configuration of data integration block runs (JSON format)
+- `--clean-after-success` (optional): Remove the outputs the run stored once it succeeds; a failed run keeps them for debugging
 - `--max-parallel` (optional): Most stages that run at once (default: the pipeline's `concurrency_config.block_run_limit`, else no limit)
 
 With block fusion (the default), `mage run` runs the pipeline in stages: each chain of blocks
@@ -153,8 +154,12 @@ mage run /path/to/project my_pipeline_uuid --max-parallel 1 --execution-partitio
 
 #### `clean-cached-variables`
 
-Delete pipeline run outputs older than `variables_retention_period` in the project's
-`metadata.yaml`. See [Variable retention](../design/data-pipeline-management.md#variable-retention).
+Delete stored block outputs older than `variables_retention_period` in the project's
+`metadata.yaml`, or `--older-than`. See [Variable retention](../design/data-pipeline-management.md#variable-retention).
+It covers scheduled runs' partitions and the outputs of editor and `mage run` runs (per
+block, or per `--execution-partition`), whose age is their newest file's. Block outputs
+hold the data blocks read, personal data included; they stay under `MAGE_DATA_DIR`
+until removed.
 
 **Usage:**
 ```bash
@@ -164,10 +169,15 @@ mage clean-cached-variables <project_path> [OPTIONS]
 **Parameters:**
 - `project_path` (required): Path of the MageML project to clean variables
 - `--pipeline-uuid` (optional): UUID of the pipeline to clean (if not specified, cleans all pipelines)
+- `--older-than` (optional): Remove outputs older than this, such as `12h`, `7d` or `2w`; `0d` removes all (default: the retention period)
+- `--dry-run` (optional): List what would be removed, with sizes, and remove nothing
+
+Without a retention period or `--older-than`, nothing is removed and the command says how
+much the outputs hold. It exits with 1 when a folder could not be removed.
 
 **Example:**
 ```bash
-mage clean-cached-variables /path/to/project
+mage clean-cached-variables /path/to/project --older-than 7d --dry-run
 ```
 
 ---
