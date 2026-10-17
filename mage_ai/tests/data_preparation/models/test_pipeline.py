@@ -1009,6 +1009,27 @@ def export_data(df, *args):
             mock.assert_called_once_with(repo_path=self.repo_path, repo_paths=[self.repo_path])
 
 
+class CallbackRenameTest(AsyncDBTestCase):
+    async def test_a_callback_block_is_renamed_from_the_callbacks_list(self):
+        """The editor renames a block by sending it with its list (upstream #6110)."""
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        loader = Block.create('load_rename', 'data_loader', self.repo_path, pipeline=pipeline)
+        callback = Block.create(
+            'notify_rename', 'callback', self.repo_path, pipeline=pipeline,
+            upstream_block_uuids=[loader.uuid],
+        )
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+
+        await pipeline.update(
+            dict(callbacks=[dict(name='notify renamed', uuid=callback.uuid)]),
+            update_content=True,
+        )
+
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        self.assertEqual(list(pipeline.callbacks_by_uuid), ['notify_renamed'])
+
+
 class PipelineProjectPlatformTests(ProjectPlatformMixin, AsyncDBTestCase):
     def test_config_path(self):
         for settings in self.repo_paths.values():

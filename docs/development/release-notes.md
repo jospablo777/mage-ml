@@ -118,6 +118,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - An active schedule trigger saved with an empty cron stopped every scheduler pass, so no
   other trigger ran (upstream #5769). An empty cron is now no schedule, and a trigger that
   fails to schedule is logged while the others run.
+- Callback blocks can be renamed in the editor; the new name was dropped (upstream #6110).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

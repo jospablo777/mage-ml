@@ -2207,8 +2207,10 @@ function PipelineDetailPage({
                 name: opts?.name,
                 uuid: block.uuid,
               },
+              // The editor's blocks, with callbacks and conditionals: pipeline.blocks has
+              // neither, so renaming a callback block did nothing (upstream #6110).
               pipeline: {
-                blocks: pipeline?.blocks || [],
+                blocks,
               },
             }).then(() => {
               setSelectedBlock(null);
@@ -2233,6 +2235,7 @@ function PipelineDetailPage({
   ), {
   }, [
     addNewBlockAtIndex,
+    blocks,
     pipeline,
   ], {
     background: true,
