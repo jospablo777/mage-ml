@@ -654,6 +654,17 @@ fn transform(data: LazyFrame) -> Result<LazyFrame> {
             expect_path=True,
         )
 
+    def test_object_columns_with_missing_values_go_by_path_with_exact_values(self):
+        # They were stored as floats, so the file and the loaded table had 2**63 - 1 wrong.
+        output = self.assert_same_with_and_without_paths(
+            'import pandas as pd\n@data_loader\ndef load(**kwargs):\n'
+            "    return pd.DataFrame({'big': [2**63 - 1, None, 1], 'b': [True, None, False], "
+            "'s': ['x', None, 'y']}, dtype=object)\n",
+            expect_path=True,
+        )
+        self.assertEqual(output['big'].to_list(), [2**63 - 1, None, 1])
+        self.assertEqual(output['b'].to_list(), [True, None, False])
+
     def test_pandas_outputs_that_mage_converts_are_loaded(self):
         # Lists are stored as JSON text and categories as codes; loading converts them.
         self.assert_same_with_and_without_paths(

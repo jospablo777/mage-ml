@@ -207,6 +207,39 @@ class VariableTest(DBTestCase):
         self.assertEqual(back['dates'].tolist(), df['dates'].tolist())
         self.assertEqual(back['doc'].tolist(), df['doc'].tolist())
 
+    def test_object_columns_with_missing_values_keep_their_values(self):
+        """
+        Object columns of one scalar type with None came back as another dtype: ints as
+        floats (2**63 - 1 lost digits), None as NaN or NaT (upstream #5913).
+        """
+        df = pd.DataFrame({
+            'ts': [pd.Timestamp('2024-01-01 10:00'), None, pd.Timestamp('2024-01-02')],
+            'ts_utc': [pd.Timestamp('2024-01-01', tz='UTC'), None, None],
+            'ints': [1, None, 3],
+            'big': [2**63 - 1, None, -(2**63)],
+            'floats': [1.5, None, 2.0],
+            'bools': [True, None, False],
+            'text': ['x', None, 'y'],
+            'full': [1, 2, 3],
+        }, dtype=object)
+
+        back = self.write_and_read('object_scalars', df)
+
+        for column in df.columns:
+            self.assertEqual(back[column].dtype, object, column)
+            self.assertEqual(
+                [(type(v), v) for v in back[column].tolist()],
+                [(type(v), v) for v in df[column].tolist()],
+                column,
+            )
+
+    def test_a_missing_pd_na_in_an_object_column_comes_back_as_none(self):
+        df = pd.DataFrame({'na': pd.Series([1, pd.NA, 3], dtype=object)})
+
+        back = self.write_and_read('object_na', df)
+
+        self.assertEqual(back['na'].tolist(), [1, None, 3])
+
     def test_write_and_read_dataframe_analysis(self):
         pipeline = self.__create_pipeline('test pipeline 3')
         variable = Variable(

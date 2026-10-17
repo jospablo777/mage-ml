@@ -21,10 +21,11 @@ from mage_ai.data_preparation.models.variables.constants import (
     VariableType,
 )
 
-# pandas column types that Parquet stores and reads back unchanged.
+# pandas column types that Parquet stores and reads back unchanged. object_scalars columns
+# are stored with Arrow's nullable type for their values, which is what loading gives.
 _PLAIN_PANDAS_TYPE = re.compile(
     r'^(u?int(8|16|32|64)|U?Int(8|16|32|64)|float(32|64)|Float(32|64)|bool|boolean|str|'
-    r'string|datetime64\[(ns|us|ms|s)(, [^\]]+)?\])$',
+    r'string|object_scalars|datetime64\[(ns|us|ms|s)(, [^\]]+)?\])$',
 )
 
 

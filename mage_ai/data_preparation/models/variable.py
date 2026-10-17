@@ -36,6 +36,7 @@ from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     DECIMAL_COLUMN_TYPE,
     FLOAT_COLUMN_TYPE,
     OBJECT_JSON_COLUMN_TYPE,
+    OBJECT_SCALARS_COLUMN_TYPE,
     STRING_SERIALIZABLE_COLUMN_TYPES,
     TIMETZ_COLUMN_TYPE,
     UUID_COLUMN_TYPE,
@@ -48,6 +49,7 @@ from mage_ai.data_preparation.models.utils import (  # dask_from_pandas,
     infer_variable_type,
     is_basic_iterable,
     needs_object_json,
+    object_scalars,
     pad_safe,
     resolve_object_paths,
     restorable_dtype,
@@ -1552,6 +1554,11 @@ class Variable:
                         # Casting to the type of the first value turned 2.5 into 2 in a
                         # column of ints and floats.
                         column_types[c] = OBJECT_JSON_COLUMN_TYPE
+                        continue
+                    scalars = object_scalars(df_col, series_non_null)
+                    if scalars is not None:
+                        df_output[c] = scalars
+                        column_types[c] = OBJECT_SCALARS_COLUMN_TYPE
                         continue
                     coltype_inferred = infer_dtype(series_non_null)
                     if is_object_dtype(series_non_null.dtype):

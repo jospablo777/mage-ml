@@ -53,6 +53,11 @@ CATEGORY_CODES_COLUMN_TYPE = 'category_codes'
 # Object columns whose values differ in type, or that Arrow cannot hold, such as integers
 # beyond 64 bits. Each value is stored as tagged JSON and read back with its type.
 OBJECT_JSON_COLUMN_TYPE = 'object_json'
+# Object columns of ints, floats, bools, strings or timestamps, often with None for missing
+# values. Parquet returned ints with a missing value as floats (integers past 2**53 lost
+# digits), None as NaN or NaT, and a column of another dtype. The column is written with
+# Arrow's nullable type for its values and read back as objects, with None where missing.
+OBJECT_SCALARS_COLUMN_TYPE = 'object_scalars'
 
 AMBIGUOUS_COLUMN_TYPES = {
     'mixed-integer',
@@ -199,6 +204,36 @@ def needs_object_json(values: List[Any]) -> bool:
     return False
 
 
+def object_scalars(series: pd.Series, present: pd.Series) -> Optional[pd.Series]:
+    """
+    The column to write for an object column whose values (present, without the missing
+    ones) are all ints, all floats, all bools, all strings or all timestamps in one time
+    zone, or None for other columns. Missing values become nulls.
+    """
+    kinds = {type(v) for v in present.tolist()}
+    if len(kinds) != 1:
+        return None
+    kind = kinds.pop()
+    values = [None if _is_missing(v) else v for v in series.tolist()]
+    if kind is int:
+        if any(v < INT64_MIN or v > INT64_MAX for v in present.tolist()):
+            return None
+        return pd.Series(pd.array(values, dtype='Int64'), index=series.index)
+    if kind is float:
+        return pd.Series(pd.array(values, dtype='Float64'), index=series.index)
+    if kind is bool:
+        return pd.Series(pd.array(values, dtype='boolean'), index=series.index)
+    if kind is str:
+        return pd.Series(values, index=series.index, dtype=object)
+    if kind is pd.Timestamp and len({str(v.tz) for v in present.tolist()}) == 1:
+        return pd.Series(pd.to_datetime(values), index=series.index)
+    return None
+
+
+def restore_object_scalars(series: pd.Series) -> pd.Series:
+    return series.astype(object).where(series.notna(), None)
+
+
 # Dtypes that Parquet cannot store or stores at another resolution. The column is written
 # as values Parquet holds and cast back to the recorded dtype on read.
 def restorable_dtype(dtype: Any) -> bool:
@@ -212,6 +247,9 @@ def restorable_dtype(dtype: Any) -> bool:
 def restore_column_dtypes(df: pd.DataFrame, column_types: Dict) -> pd.DataFrame:
     for column, column_type in column_types.items():
         if column not in df.columns or not isinstance(column_type, str):
+            continue
+        if column_type == OBJECT_SCALARS_COLUMN_TYPE:
+            df[column] = restore_object_scalars(df[column])
             continue
         if not (column_type.startswith(('Sparse[', 'complex')) or column_type in (
             'datetime64[s]', 'timedelta64[s]',
