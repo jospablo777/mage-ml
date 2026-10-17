@@ -268,6 +268,12 @@ def _write_once(pipeline, path: str, data: Any) -> None:
     storage.write_json_file(path, data)
 
 
+def code_digest(pipeline) -> str:
+    """The digest a run record would give the pipeline's code now, without recording."""
+    files, _ = source_files(pipeline)
+    return _digest({relative: _file_digest(path) for relative, path in files.items()})
+
+
 def capture(pipeline, pipeline_run) -> Dict[str, Any]:
     """Records the manifest of a run as it starts; returns it."""
     files, truncated = source_files(pipeline)

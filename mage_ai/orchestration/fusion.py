@@ -453,8 +453,34 @@ def member_variables(variables: Optional[Dict]) -> Dict:
 # ---- stages in one process, for mage run -------------------------------------------------
 
 
+def cli_tracking(pipeline, execution_partition: Optional[str] = None) -> Optional[Dict]:
+    """
+    The tags MLflow runs get while a block runs in `mage run` (experiments.py): the
+    project, pipeline, block, partition, code digest and an id shared by the blocks of
+    one invocation. Runs started from the CLI had no mage.* tags at all.
+    """
+    import uuid as uuid_lib
+
+    from mage_ai.orchestration import experiments, run_records
+
+    if not experiments.enabled():
+        return None
+    try:
+        digest = run_records.code_digest(pipeline)
+    except Exception:
+        digest = None
+    return dict(
+        project=os.path.basename(os.path.realpath(pipeline.repo_path)),
+        pipeline_uuid=pipeline.uuid,
+        execution_partition=execution_partition,
+        code_digest=digest,
+        cli_run_id=uuid_lib.uuid4().hex[:16],
+    )
+
+
 def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tests: bool,
-                          update_status: bool, execution_partition: Optional[str] = None) -> None:
+                          update_status: bool, execution_partition: Optional[str] = None,
+                          tracking: Optional[Dict] = None) -> None:
     """Runs a stage's blocks in order, each taking the previous block's output in memory;
     a Rust or R block followed by one of its language may plan (block/plans.py)."""
     from mage_ai.data_preparation.models.block import plans
@@ -469,7 +495,7 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
             next_block = following.uuid
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
-        with plans.stage_context(next_block, None):
+        with _block_tracking(tracking, uuid), plans.stage_context(next_block, None):
             result = block.execute_sync(
                 block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
                 execution_partition=execution_partition,
@@ -477,11 +503,11 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
                 run_all_blocks=True,
                 update_status=update_status,
             )
-        # Without tests the data contract is still checked (contracts_only).
-        block.run_tests(
-            contracts_only=not run_tests, execution_partition=execution_partition,
-            global_vars=variables, update_tests=False,
-        )
+            # Without tests the data contract is still checked (contracts_only).
+            block.run_tests(
+                contracts_only=not run_tests, execution_partition=execution_partition,
+                global_vars=variables, update_tests=False,
+            )
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
         release_block(block)
@@ -508,6 +534,16 @@ def stages_apply_to_cli(pipeline) -> bool:
         block_can_fuse(pipeline, block)
         for block in pipeline.blocks_by_uuid.values() if executable(block)
     )
+
+
+def _block_tracking(tracking: Optional[Dict], block_uuid: str):
+    from contextlib import nullcontext
+
+    if not tracking:
+        return nullcontext()
+    from mage_ai.orchestration import experiments
+
+    return experiments.block_context(dict(tracking, block_uuid=block_uuid))
 
 
 def stage_limit(pipeline, max_parallel: Optional[int] = None) -> Optional[int]:
@@ -544,6 +580,7 @@ async def execute_in_stages(
     global_vars = global_vars or {}
     pending = [list(stage) for stage in fusion_plan(pipeline)]
     limit = stage_limit(pipeline, max_parallel)
+    tracking = await asyncio.to_thread(cli_tracking, pipeline, execution_partition)
     done: set = set()
     running: Dict = {}
     failures: List = []
@@ -564,7 +601,7 @@ async def execute_in_stages(
                     break
                 task = asyncio.ensure_future(asyncio.to_thread(
                     _run_stage_in_process, pipeline, stage, global_vars, run_tests,
-                    update_status, execution_partition,
+                    update_status, execution_partition, tracking,
                 ))
                 running[task] = stage
                 pending.remove(stage)

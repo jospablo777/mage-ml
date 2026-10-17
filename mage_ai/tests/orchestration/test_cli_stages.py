@@ -36,7 +36,8 @@ class Recorder:
         self.peak = 0
         self.partitions = []
 
-    def __call__(self, pipeline, stage, global_vars, run_tests, update_status, partition=None):
+    def __call__(self, pipeline, stage, global_vars, run_tests, update_status, partition=None,
+                 tracking=None):
         with self.lock:
             self.events.append(('start', stage[0]))
             self.running += 1
@@ -53,6 +54,7 @@ class Recorder:
 def run(pipeline, recorder, **kwargs):
     stages = [[uuid] for uuid in pipeline.upstream]
     with patch.object(fusion, 'fusion_plan', return_value=stages), \
+            patch.object(fusion, 'cli_tracking', return_value=None), \
             patch.object(fusion, '_run_stage_in_process', recorder):
         asyncio.run(fusion.execute_in_stages(pipeline, **kwargs))
 

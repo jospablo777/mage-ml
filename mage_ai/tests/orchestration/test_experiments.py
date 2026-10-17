@@ -101,6 +101,26 @@ class ExperimentsTest(DBTestCase):
             pass
         self.assertNotIn('mage.block_run_id', mlflow.get_run(outside.info.run_id).data.tags)
 
+    def test_a_cli_run_tags_the_mlflow_runs_its_blocks_start(self):
+        # mage run with fusion skipped the tracking of scheduled runs: no mage.* tags (I-103).
+        from mage_ai.data_preparation.executors.pipeline_executor import (
+            PipelineExecutor,
+        )
+        from mage_ai.orchestration import fusion
+
+        self.assertTrue(fusion.stages_apply_to_cli(self.pipeline))
+        PipelineExecutor(self.pipeline, execution_partition='cli_1').execute(
+            global_vars=dict(rate=0.2), update_status=False,
+        )
+        runs = mlflow.search_runs(experiment_names=['churn'], output_format='list')
+        self.assertEqual(len(runs), 1)
+        tags = runs[0].data.tags
+        self.assertEqual(tags['mage.pipeline_uuid'], self.pipeline.uuid)
+        self.assertEqual(tags['mage.block_uuid'], self.block_uuid)
+        self.assertEqual(tags['mage.execution_partition'], 'cli_1')
+        self.assertEqual(tags['mage.code_digest'], run_records.code_digest(self.pipeline))
+        self.assertEqual(len(tags['mage.cli_run_id']), 16)
+
     def test_mlflow_finds_the_provider_through_the_package_entry_point(self):
         pyproject = Path(__file__).resolve().parents[3] / 'pyproject.toml'
         entry_points = tomllib.loads(pyproject.read_text())['project']['entry-points']

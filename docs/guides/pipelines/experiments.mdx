@@ -47,6 +47,11 @@ def train(frame, *args, **kwargs):
 | `mage.block_run_id` | The block run |
 | `mage.execution_partition` | Where the run's outputs are stored |
 | `mage.code_digest` | The code digest of the run's [run record](/guides/pipelines/run-records) |
+| `mage.cli_run_id` | Runs from `mage run`: one id for the blocks of one invocation |
+
+Runs started by `mage run` get the same tags without `mage.pipeline_run_id` and
+`mage.block_run_id`, since the CLI run has no pipeline run in MageML's database, and with
+`mage.cli_run_id` instead. Their MLflow runs are not listed on a run page.
 
 In MLflow you can search for them, such as
 `tags."mage.pipeline_uuid" = 'train_churn'`. With `mage.code_digest` you can find every
