@@ -200,19 +200,17 @@ def service_inputs(repo_path: str, name: str, captured: export.Capture) -> List[
     return sorted(p for p in inputs if p)
 
 
-def changed_paths(repo_path: str, base: str) -> List[str]:
-    """The project paths changed since base (a Git ref), committed or not."""
+def _git(repo_path: str, *args) -> str:
     import subprocess
 
-    def git(*args) -> str:
-        return subprocess.run(
-            ['git', *args], cwd=repo_path, capture_output=True, text=True, check=True,
-        ).stdout
+    return subprocess.run(
+        ['git', *args], cwd=repo_path, capture_output=True, text=True, check=True,
+    ).stdout
 
-    top = Path(git('rev-parse', '--show-toplevel').strip()).resolve()
-    names = set(git('diff', '--name-only', f'{base}...HEAD').splitlines())
-    for line in git('status', '--porcelain').splitlines():
-        names.add(line[3:].split(' -> ')[-1].strip('"'))
+
+def _project_paths(repo_path: str, names) -> List[str]:
+    """Git's paths (relative to the top of the repository) as project paths."""
+    top = Path(_git(repo_path, 'rev-parse', '--show-toplevel').strip()).resolve()
     root = Path(repo_path).resolve()
     paths = set()
     for name in names:
@@ -223,6 +221,43 @@ def changed_paths(repo_path: str, base: str) -> List[str]:
         except ValueError:
             continue  # outside the project
     return sorted(paths)
+
+
+def _uncommitted_names(repo_path: str) -> List[str]:
+    # Every untracked file, not the folder holding them: a new service folder must match
+    # services/<name>, not services.
+    lines = _git(repo_path, 'status', '--porcelain', '--untracked-files=all').splitlines()
+    return [line[3:].split(' -> ')[-1].strip('"') for line in lines]
+
+
+def changed_paths(repo_path: str, base: str) -> List[str]:
+    """The project paths changed since base (a Git ref), committed or not."""
+    names = set(_git(repo_path, 'diff', '--name-only', f'{base}...HEAD').splitlines())
+    names.update(_uncommitted_names(repo_path))
+    return _project_paths(repo_path, names)
+
+
+def _touches(paths: List[str], inputs: List[str]) -> List[str]:
+    return sorted(
+        path for path in paths
+        if any(path == item or path.startswith(item.rstrip('/') + '/') for item in inputs)
+    )
+
+
+def uncommitted_inputs(
+    repo_path: str, name: str, captured: export.Capture,
+) -> Optional[List[str]]:
+    """
+    The service's inputs with uncommitted changes, its lock among them; None outside a Git
+    repository, where nothing records what was deployed.
+    """
+    import subprocess
+
+    try:
+        names = _uncommitted_names(repo_path)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return _touches(_project_paths(repo_path, names), service_inputs(repo_path, name, captured))
 
 
 def affected(repo_path: str, paths: List[str]) -> List[str]:
@@ -238,9 +273,6 @@ def affected(repo_path: str, paths: List[str]) -> List[str]:
         except (definitions.DefinitionError, export.ExportError):
             found.append(name)
             continue
-        if any(
-            path == item or path.startswith(item.rstrip('/') + '/')
-            for path in paths for item in inputs
-        ):
+        if _touches(paths, inputs):
             found.append(name)
     return found

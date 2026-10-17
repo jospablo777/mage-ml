@@ -165,3 +165,34 @@ class AffectedServicesTest(ExportTestCase):
         (work / 'a.py').write_text('a = 2\n')
 
         self.assertEqual(lifecycle.changed_paths(str(work), 'main'), ['a.py', 'b.py'])
+
+    def test_uncommitted_inputs_name_what_a_deploy_would_ship_uncommitted(self):
+        """A deploy could ship uncommitted code, and nothing recorded what ran."""
+        import subprocess
+
+        root = Path(self.repo_path)
+        captured = lifecycle.capture(self.repo_path, 'sales')
+        self.assertIsNone(lifecycle.uncommitted_inputs(self.repo_path, 'sales', captured))
+
+        self.addCleanup(shutil.rmtree, root / '.git', True)
+
+        def git(*args):
+            subprocess.run(['git', *args], cwd=root, check=True, capture_output=True)
+
+        git('init', '-q', '-b', 'main')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'test')
+        # Every untracked file counts, not only the folder holding them.
+        uncommitted = lifecycle.uncommitted_inputs(self.repo_path, 'sales', captured)
+        self.assertIn('services/sales/service.yaml', uncommitted)
+        self.assertNotIn('services', uncommitted)
+
+        git('add', '.')
+        git('commit', '-q', '-m', 'base')
+        self.assertEqual(lifecycle.uncommitted_inputs(self.repo_path, 'sales', captured), [])
+
+        block = Path(self.load.file_path).resolve().relative_to(root.resolve()).as_posix()
+        Path(self.load.file_path).write_text(Path(self.load.file_path).read_text() + '\n')
+        (root / 'notes.md').write_text('not an input\n')
+        self.assertEqual(lifecycle.uncommitted_inputs(self.repo_path, 'sales', captured),
+                         [block])

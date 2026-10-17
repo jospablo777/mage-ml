@@ -39,6 +39,8 @@ class Deployment:
     commit: str = ''
     lock: str = ''
     port: Optional[int] = None
+    # Why uncommitted changes were deployed (--allow-uncommitted).
+    reason: str = ''
 
     def drift(self, lock: Optional[str]) -> str:
         if self.state != 'running':
@@ -186,6 +188,7 @@ def _deployment(item: Dict) -> Deployment:
         commit=labels.get(f'{LABEL}.commit', ''),
         lock=labels.get(f'{LABEL}.lock', ''),
         port=int(port) if port and port.isdigit() else None,
+        reason=labels.get(f'{LABEL}.reason', ''),
     )
 
 

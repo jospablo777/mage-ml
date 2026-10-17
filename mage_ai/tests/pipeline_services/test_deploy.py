@@ -153,6 +153,7 @@ class DeployCommandTest(TestCase):
         self.addCleanup(shutil.rmtree, self.project / 'services', True)
         self.addCleanup(shutil.rmtree, self.project / '.mage', True)
         self.docker = FakeDocker()
+        self.uncommitted = []
 
     def invoke(self, *arguments):
         from unittest.mock import MagicMock, patch
@@ -170,6 +171,7 @@ class DeployCommandTest(TestCase):
                 patch.object(lifecycle, 'read_lock',
                              return_value=dict(manifest_sha256='a' * 64)), \
                 patch('mage_ai.pipeline_services.export.build_image') as build_image, \
+                patch.object(lifecycle, 'uncommitted_inputs', return_value=self.uncommitted), \
                 patch.object(deploy, 'git_commit', return_value='c0ffee'):
             result = CliRunner().invoke(app, ['service', *arguments, '--project',
                                               self.repo_path])
@@ -191,6 +193,33 @@ class DeployCommandTest(TestCase):
 
         status, _ = self.invoke('status', 'shop')
         self.assertIn('shop  prod  running the repository version', status.output)
+
+    def test_uncommitted_changes_need_a_reason_which_the_deployment_records(self):
+        self.uncommitted = ['services/shop/service.lock', 'data_loaders/load.py']
+
+        refused, build_image = self.invoke('deploy', 'shop', '--env', 'prod')
+
+        self.assertEqual(refused.exit_code, 1)
+        build_image.assert_not_called()
+        self.assertIn('services/shop/service.lock (the build updated it)', refused.output)
+        self.assertIn('data_loaders/load.py', refused.output)
+        self.assertNotIn('mage-shop-prod', self.docker.containers)
+
+        allowed, _ = self.invoke('deploy', 'shop', '--env', 'prod',
+                                 '--allow-uncommitted', 'hotfix for the outage')
+        self.assertEqual(allowed.exit_code, 0, allowed.output)
+        labels = self.docker.containers['mage-shop-prod']['labels']
+        self.assertEqual(labels['ai.mageml.reason'], 'hotfix for the outage')
+        status, _ = self.invoke('status', 'shop')
+        self.assertIn('uncommitted: hotfix for the outage', status.output)
+
+    def test_outside_git_a_deploy_says_it_records_no_commit(self):
+        self.uncommitted = None
+
+        result, _ = self.invoke('deploy', 'shop', '--env', 'prod')
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('records no commit', result.output)
 
     def test_rollback_and_other_targets(self):
         self.invoke('deploy', 'shop', '--env', 'prod')

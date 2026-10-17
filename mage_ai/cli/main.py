@@ -1333,6 +1333,10 @@ def service_deploy(
     env: str = DEPLOY_ENV,
     project: str = SERVICE_PROJECT,
     timeout: int = typer.Option(120, help='seconds to wait for the service to be healthy.'),
+    allow_uncommitted: Union[str, None] = typer.Option(
+        None, '--allow-uncommitted', metavar='REASON',
+        help='deploy uncommitted changes; the reason is recorded on the deployment.',
+    ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
     from mage_ai.pipeline_services import (
@@ -1352,6 +1356,7 @@ def service_deploy(
         raise typer.Exit(code=1)
     try:
         box = lifecycle.build(project, name)
+        _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
         lock = lifecycle.read_lock(project, name) or {}
         digest = str(lock.get('manifest_sha256', ''))[:12] or 'latest'
         image = f'mage-{name}:{digest}'
@@ -1365,7 +1370,8 @@ def service_deploy(
         deployment = target.deploy(
             name, env, image, port, values,
             labels=dict(commit=deploy.git_commit(project),
-                        lock=str(lock.get('manifest_sha256', ''))),
+                        lock=str(lock.get('manifest_sha256', '')),
+                        **({'reason': allow_uncommitted} if allow_uncommitted else {})),
             timeout=timeout,
         )
     except deploy.DeployError as error:
@@ -1373,6 +1379,29 @@ def service_deploy(
         raise typer.Exit(code=1)
     typer.echo(f'{name} runs in {env} on http://127.0.0.1:{port} ({deployment.image}).')
     typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
+
+
+def _refuse_uncommitted(project: str, name: str, captured, reason: Union[str, None]) -> None:
+    """What runs must be a commit: uncommitted inputs stop a deploy unless a reason is given."""
+    from mage_ai.pipeline_services import lifecycle
+
+    paths = lifecycle.uncommitted_inputs(project, name, captured)
+    if paths is None:
+        typer.echo('The project is not in a Git repository, so the deployment records no '
+                   'commit.', err=True)
+        return
+    if not paths or reason:
+        return
+    lock = os.path.relpath(lifecycle.lock_path(project, name), project)
+    typer.echo(f'{name} has uncommitted changes:', err=True)
+    for path in paths[:20]:
+        note = ' (the build updated it)' if path == lock else ''
+        typer.echo(f'  {path}{note}', err=True)
+    if len(paths) > 20:
+        typer.echo(f'  and {len(paths) - 20} more', err=True)
+    typer.echo('Commit them, or deploy anyway with --allow-uncommitted "<reason>"; the '
+               'reason is recorded on the deployment.', err=True)
+    raise typer.Exit(code=1)
 
 
 @service_app.command('status')
@@ -1394,8 +1423,9 @@ def service_status(
     for item in deployments:
         lock = (lifecycle.read_lock(project, item.service) or {}).get('manifest_sha256')
         commit = item.commit[:12] if item.commit else 'unknown commit'
+        reason = f'  uncommitted: {item.reason}' if item.reason else ''
         typer.echo(f'{item.service}  {item.environment}  {item.drift(lock)}  '
-                   f'{item.image}  {commit}')
+                   f'{item.image}  {commit}{reason}')
 
 
 @service_app.command('diff')
