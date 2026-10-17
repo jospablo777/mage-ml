@@ -101,6 +101,22 @@ def load_data(*args, **kwargs):
     ...
 ```
 
+### Libraries' logs in block logs
+
+To see a library's own logs in the log of the block that uses it, such as the requests
+urllib3 makes, list its loggers with their levels in `logging_config.loggers`:
+
+```yaml
+logging_config:
+  loggers:
+    urllib3: DEBUG
+    botocore: INFO
+```
+
+While a block runs, their records go to its log, prefixed with the logger's name, such as
+`[urllib3.connectionpool] Starting new HTTPS connection`, at the listed level even when it
+is below the project's `level`. Loggers that are not listed keep their own handling.
+
 ## Logging to external destination
 
 ### S3

@@ -13,6 +13,7 @@ from mage_ai.data_integrations.utils.scheduler import (
     build_block_run_metadata,
     get_extra_variables,
 )
+from mage_ai.data_preparation.logging.library_loggers import forward_library_logs
 from mage_ai.data_preparation.logging.logger import DictLogger
 from mage_ai.data_preparation.logging.logger_manager_factory import LoggerManagerFactory
 from mage_ai.data_preparation.models.block.data_integration.utils import (
@@ -1175,6 +1176,13 @@ class BlockExecutor:
 
         # trigger_pipeline in the block records this run as the new run's parent.
         lineage = current_pipeline_run_id.set((global_vars or {}).get('pipeline_run_id'))
+        library_logs = forward_library_logs(
+            ((self.pipeline.repo_config.logging_config or {}).get('loggers')
+             if self.pipeline and self.pipeline.repo_config else None),
+            self.logger,
+            logging_tags,
+        )
+        library_logs.__enter__()
         try:
             result = self.block.execute_sync(
                 analyze_outputs=analyze_outputs,
@@ -1196,6 +1204,7 @@ class BlockExecutor:
                 **extra_options,
             )
         finally:
+            library_logs.__exit__(None, None, None)
             current_pipeline_run_id.reset(lineage)
 
         # execute_sync returns dict(output=[...]); tests take the outputs as arguments.

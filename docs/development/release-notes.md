@@ -97,6 +97,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Pipeline logs
 
+- `logging_config.loggers` sends libraries' log records, such as urllib3 at DEBUG, to the log
+  of the block that logs them (upstream #5766).
 - A search box on the logs page, and `text` in the logs API, return only the log lines that
   contain the text, over up to 200 log files (upstream #6105).
 

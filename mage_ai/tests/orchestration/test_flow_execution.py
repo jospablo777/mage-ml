@@ -657,6 +657,29 @@ class FlowExecutionTest(DBTestCase):
         child_run.refresh()
         self.assertEqual(child_run.status, PipelineRun.PipelineRunStatus.CANCELLED)
 
+    def test_listed_library_loggers_reach_the_block_log(self):
+        """Libraries' log records, such as urllib3's, never reached block logs (#5766)."""
+        import logging
+
+        self.block('load', 'data_loader', '''
+            import logging
+            @data_loader
+            def load(**kwargs):
+                logging.getLogger('example.library').debug('library says hi')
+                logging.getLogger('example.unlisted').warning('not listed')
+                return 1
+        ''')
+        self.pipeline.repo_config.logging_config = {'loggers': {'example.library': 'DEBUG'}}
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        content = run.block_runs[0].logs['content']
+        self.assertIn('[example.library] library says hi', content)
+        self.assertNotIn('not listed', content)
+        # The block's run put the logger back as it was.
+        self.assertEqual(logging.getLogger('example.library').handlers, [])
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()

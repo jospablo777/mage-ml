@@ -19,3 +19,6 @@ class LoggingConfig(BaseConfig):
     destination_config: Dict = field(default_factory=dict)
     # The period to keep the log files, e.g. '30d', '24h', '3w'
     retention_period: str = None
+    # Libraries' loggers whose records go to the log of the block that logs them, with
+    # their levels, e.g. {'urllib3': 'DEBUG'} (library_loggers.py).
+    loggers: Dict = field(default_factory=dict)
