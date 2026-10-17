@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import json
 import os
 import shutil
@@ -60,56 +59,28 @@ class PipelineTest(AsyncDBTestCase):
         self.assertTrue(os.path.exists(os.path.join(
             self.repo_path, 'pipelines', 'test_pipeline', 'metadata.yaml')))
 
-    def test_pipeline_in_one_process_true(self):
-        with (patch.dict('os.environ', {'RUN_PIPELINE_IN_ONE_PROCESS': 'True'})):
-            import mage_ai.data_preparation.models.pipeline as pipeline_mod
-            import mage_ai.settings.server as server_mod
+    def assert_run_in_one_process(self, env_value: str, expected: bool):
+        # Reloading the pipeline module to read the setting left Pipeline objects that
+        # failed isinstance checks in later tests of the worker (the blocks API listed none).
+        from mage_ai.settings.server import get_bool_value
 
-            importlib.reload(server_mod)
-            importlib.reload(pipeline_mod)
-
+        value = get_bool_value(env_value)
+        self.assertEqual(value, expected)
+        with patch('mage_ai.data_preparation.models.pipeline.RUN_PIPELINE_IN_ONE_PROCESS', value):
             pipeline = Pipeline.create(
-                'test pipeline one process true',
+                f'test pipeline one process {env_value}',
                 repo_path=self.repo_path,
             )
-            self.assertEqual(pipeline.run_pipeline_in_one_process, True)
+        self.assertEqual(pipeline.run_pipeline_in_one_process, expected)
 
-        importlib.reload(server_mod)
-        importlib.reload(pipeline_mod)
+    def test_pipeline_in_one_process_true(self):
+        self.assert_run_in_one_process('True', True)
 
     def test_pipeline_in_one_process_false(self):
-        with (patch.dict('os.environ', {'RUN_PIPELINE_IN_ONE_PROCESS': 'False'})):
-            import mage_ai.data_preparation.models.pipeline as pipeline_mod
-            import mage_ai.settings.server as server_mod
-
-            importlib.reload(server_mod)
-            importlib.reload(pipeline_mod)
-
-            pipeline = Pipeline.create(
-                'test pipeline one process false',
-                repo_path=self.repo_path,
-            )
-            self.assertEqual(pipeline.run_pipeline_in_one_process, False)
-
-        importlib.reload(server_mod)
-        importlib.reload(pipeline_mod)
+        self.assert_run_in_one_process('False', False)
 
     def test_pipeline_in_one_process_invalid_string(self):
-        with (patch.dict('os.environ', {'RUN_PIPELINE_IN_ONE_PROCESS': 'InvalidString'})):
-            import mage_ai.data_preparation.models.pipeline as pipeline_mod
-            import mage_ai.settings.server as server_mod
-
-            importlib.reload(server_mod)
-            importlib.reload(pipeline_mod)
-
-            pipeline = Pipeline.create(
-                'test pipeline one process invalid',
-                repo_path=self.repo_path,
-            )
-            self.assertEqual(pipeline.run_pipeline_in_one_process, False)
-
-        importlib.reload(server_mod)
-        importlib.reload(pipeline_mod)
+        self.assert_run_in_one_process('InvalidString', False)
 
     @freeze_time('2023-08-01 08:08:24')
     def test_add_block(self):
