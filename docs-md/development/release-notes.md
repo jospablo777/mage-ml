@@ -122,6 +122,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - A running block no longer holds a database transaction open: reads before the block
   left one open for the whole run, on PostgreSQL an idle-in-transaction connection holding
   locks (upstream #6030, #5408, #4167).
+- With Redis, the job keys of a replica killed while jobs ran are deleted by the other
+  schedulers within 5 minutes; they stayed in Redis for good (upstream #6102).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

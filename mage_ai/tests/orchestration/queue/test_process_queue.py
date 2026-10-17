@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 import time
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -411,3 +412,35 @@ class PolarsAfterForkTests(TestCase):
 
         self.assertTrue(result.exists(), 'The worker did not finish its Polars job.')
         self.assertEqual(result.read_text(), '7')
+
+
+class SweepDeadJobKeysTest(unittest.TestCase):
+    def test_job_keys_of_gone_replicas_are_deleted(self):
+        """A replica killed while jobs ran left their keys in Redis (upstream #6102)."""
+        import fnmatch
+
+        from mage_ai.orchestration.queue.process_queue import sweep_dead_job_keys
+        from mage_ai.services.redis.redis import redis_namespace
+
+        ns = redis_namespace()
+
+        class Redis(dict):
+            def scan_iter(self, match, count):
+                return [k for k in list(self) if fnmatch.fnmatch(k, match)]
+
+            def delete(self, key):
+                self.pop(key, None)
+
+        redis = Redis({
+            'alive': '1',
+            f'{ns}:mine': 'me',
+            f'{ns}:running': 'alive',
+            f'{ns}:orphan': 'gone',
+            f'{ns}:kill_job_1': '1',
+        })
+
+        self.assertEqual(sweep_dead_job_keys(redis, 'me'), 1)
+        self.assertEqual(
+            sorted(redis),
+            sorted(['alive', f'{ns}:mine', f'{ns}:running', f'{ns}:kill_job_1']),
+        )

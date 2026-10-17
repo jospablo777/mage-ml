@@ -37,6 +37,8 @@ LIVENESS_TIMEOUT_SECONDS = int(os.getenv('MAGE_QUEUE_LIVENESS_SECONDS') or 30)
 # Seconds a request to kill a job waits for the process that runs it, which checks on
 # every scheduler tick.
 KILL_REQUEST_SECONDS = 300
+# How often a scheduler deletes the job keys of replicas that are gone.
+SWEEP_SECONDS = 300
 # Seconds the worker pool waits with no workers and an empty queue before it exits.
 POOL_IDLE_CHECKS = 5
 # Seconds a queued job counts as present while the queue looks empty.
@@ -102,6 +104,7 @@ class ProcessQueue(Queue):
         self.worker_pool_proc = None
         # When each job was enqueued, in this process.
         self.queued_at = {}
+        self.last_sweep = None
 
     def clean_up_jobs(self):
         """
@@ -122,6 +125,11 @@ class ProcessQueue(Queue):
         # exiting waited until the next enqueue started a pool.
         if not self.queue.empty() and not self.is_worker_pool_alive():
             self.start_worker_pool()
+        if self.redis_client and (
+            self.last_sweep is None or time.monotonic() - self.last_sweep >= SWEEP_SECONDS
+        ):
+            self.last_sweep = time.monotonic()
+            sweep_dead_job_keys(self.redis_client, self.client_id)
 
     def jobs_finished(self) -> bool:
         """
@@ -374,6 +382,27 @@ _current_job: Optional[_CurrentJob] = None
 
 def _redis_job_key(job_id: str) -> str:
     return f'{redis_namespace()}:{job_id}'
+
+
+def sweep_dead_job_keys(redis_client, client_id: str) -> int:
+    """
+    Deletes the job keys of replicas whose liveness key expired: a replica killed while
+    jobs ran left their keys in Redis for good (upstream #6102). Other replicas already
+    treat such keys as not running, so deleting them changes no decision; a replica's own
+    keys are left to it. Returns how many keys were deleted.
+    """
+    deleted = 0
+    try:
+        for key in redis_client.scan_iter(match=f'{redis_namespace()}:*', count=500):
+            if ':kill_job_' in key:
+                continue
+            owner = redis_client.get(key)
+            if owner and owner != client_id and not redis_client.get(owner):
+                redis_client.delete(key)
+                deleted += 1
+    except Exception as error:
+        print(f'[WARNING] Could not sweep the Redis job keys: {error}')
+    return deleted
 
 
 def _release_redis_job_key(redis_client, client_id: Optional[str], job_id: str) -> None:
