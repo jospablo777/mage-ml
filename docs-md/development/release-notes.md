@@ -79,6 +79,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Blocks
 
+- A block can be disabled in its settings (`configuration.disabled`): runs skip it and its
+  downstream blocks, as a false condition does (upstream #5470).
 - R blocks read MageML secrets with `get_secret_value("name")`; only the secrets the code
   names are passed to R (upstream #4265).
 - Block functions can be `async def`; they ran nothing and returned the coroutine

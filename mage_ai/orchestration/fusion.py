@@ -544,6 +544,9 @@ def stages_apply_to_cli(pipeline) -> bool:
         return False
     if getattr(pipeline, 'conditionals', None) or getattr(pipeline, 'callbacks', None):
         return False
+    # Disabled blocks are skipped by the block executor, as conditions skip blocks.
+    if any((b.configuration or {}).get('disabled') for b in pipeline.blocks_by_uuid.values()):
+        return False
     return all(
         block_can_fuse(pipeline, block)
         for block in pipeline.blocks_by_uuid.values() if executable(block)

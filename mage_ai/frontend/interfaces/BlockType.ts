@@ -300,6 +300,8 @@ export interface ConfigurationType extends BaseConfigurationType {
     output?: string;
     version?: string;
   } | null;
+  // Runs skip the block and the blocks downstream of it, as a false condition does.
+  disabled?: boolean | null;
   // False runs the block alone when chains of blocks run together (block fusion).
   fusion?: boolean | null;
   // What the block needs to start in a triggered run (orchestration/resources.py).

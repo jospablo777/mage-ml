@@ -680,6 +680,38 @@ class FlowExecutionTest(DBTestCase):
         # The block's run put the logger back as it was.
         self.assertEqual(logging.getLogger('example.library').handlers, [])
 
+    def test_a_disabled_block_and_its_downstream_blocks_are_skipped(self):
+        """Blocks could not be disabled (upstream #5470)."""
+        load = self.block('load', 'data_loader', '''
+            @data_loader
+            def load(**kwargs):
+                return 1
+        ''')
+        disabled = self.block('disabled', 'transformer', '''
+            from pathlib import Path
+            @transformer
+            def transform(value, **kwargs):
+                Path(kwargs['output_path']).write_text('ran')
+                return value
+        ''', upstream=[load], configuration={'disabled': True})
+        self.block('export', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            def export(value, **kwargs):
+                Path(kwargs['output_path']).write_text('exported')
+        ''', upstream=[disabled])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        statuses = {b.block_uuid.replace(f'{self.pipeline.uuid}_', ''): b.status.value
+                    for b in run.block_runs}
+        self.assertEqual(statuses, {
+            'load': 'completed', 'disabled': 'condition_failed', 'export': 'condition_failed',
+        })
+        self.assertFalse(self.output.exists())
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()

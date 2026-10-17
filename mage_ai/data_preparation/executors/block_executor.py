@@ -387,7 +387,12 @@ class BlockExecutor:
                 ):
                     should_run_conditional = False
 
-            if should_run_conditional:
+            # A disabled block and its downstream blocks are skipped as a false condition
+            # skips them (upstream #5470).
+            disabled = bool((self.block.configuration or {}).get('disabled'))
+            if disabled:
+                conditional_result = False
+            elif should_run_conditional:
                 conditional_result = should_run_conditional and self._execute_conditional(
                     dynamic_block_index=dynamic_block_index,
                     dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
@@ -400,8 +405,10 @@ class BlockExecutor:
 
             if not conditional_result:
                 self.logger.info(
-                    f'Conditional block(s) returned false for {self.block.uuid}. '
-                    'This block run and downstream blocks will be set as CONDITION_FAILED.',
+                    (f'Block {self.block.uuid} is disabled. '
+                     if disabled else
+                     f'Conditional block(s) returned false for {self.block.uuid}. ')
+                    + 'This block run and downstream blocks will be set as CONDITION_FAILED.',
                     **merge_dict(
                         tags,
                         dict(

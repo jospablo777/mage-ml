@@ -64,3 +64,18 @@ Here are the keyword arguments that are available in each conditional function:
 | `hr` | Hour string when the trigger run started executing. | `'20'` |
 | `pipeline_run` | Python pipeline run object associated to the current run. | `PipelineRun(id=2357, pipeline_uuid=fire_etl, execution_date=2023-04-26 20:28:17.335254+00:00)` |
 | `pipeline_uuid` | UUID of the current pipeline. | `'fire_etl'` |
+
+## Disable a block
+
+To skip a block without a condition, check **Disable this block** in its settings, or set
+`disabled: true` in its `configuration` in the pipeline's `metadata.yaml`:
+
+```yaml
+blocks:
+- uuid: export_to_warehouse
+  configuration:
+    disabled: true
+```
+
+Runs skip the block and the blocks downstream of it, which end as `condition_failed`, as a
+false condition skips them; the run completes. Uncheck the setting to run the block again.

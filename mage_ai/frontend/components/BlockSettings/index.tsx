@@ -496,6 +496,22 @@ function BlockSettings({
 
           <Spacing mt={PADDING_UNITS}>
             <Checkbox
+              checked={!!blockAttributes?.configuration?.disabled}
+              label="Disable this block: runs skip it and the blocks downstream of it"
+              onClick={() =>
+                setBlockAttributes((prev) => ({
+                  ...prev,
+                  configuration: {
+                    ...prev?.configuration,
+                    disabled: prev?.configuration?.disabled ? null : true,
+                  },
+                }))
+              }
+            />
+          </Spacing>
+
+          <Spacing mt={PADDING_UNITS}>
+            <Checkbox
               checked={!!blockAttributes?.configuration?.disable_output_preview}
               label="Disable output preview on page load"
               onClick={() =>
