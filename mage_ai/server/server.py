@@ -629,6 +629,10 @@ async def main(
 ):
     stop_main_task_on_terminate()
 
+    from mage_ai.server import loop_watch
+
+    loop_watch.start_if_enabled(asyncio.get_running_loop())
+
     if not status_only:
         from mage_ai.server.active_kernel import switch_active_kernel
         from mage_ai.server.kernels import DEFAULT_KERNEL_NAME

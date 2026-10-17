@@ -47,6 +47,27 @@ The above command will remove the data output files for each block in your pipel
 
 ---
 
+## The editor is slow or pages take seconds to load
+
+The web server runs every request on one event loop; code that holds it makes every page,
+API call and block output wait. To find it, start the server with:
+
+```bash
+MAGE_EVENT_LOOP_WATCH=1 mage start your_project
+```
+
+Each time the loop is held longer than 0.2 seconds (`MAGE_EVENT_LOOP_WATCH_SECONDS`), the
+server log gets a warning with the duration and the code that held it, such as:
+
+```
+WARNING:mage_ai.server.loop_watch:The server event loop was blocked for 3.64 s; every request waited.
+```
+
+The stacks hold code paths only, no values. Report them with the MageML version. On
+servers without internet access, also set `MAGE_UPDATE_CHECK_ENABLED=0`.
+
+---
+
 ## Can’t connect to local database from within MageML via Docker
 
 If you’re running MageML via Docker and you’re trying to connect to a local database outside of
