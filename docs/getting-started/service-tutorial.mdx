@@ -35,8 +35,9 @@ Open **Services** in the left menu, then **New service**.
 2. On `live_minute_kpis`, choose **Start after another pipeline**, then `live_traffic` and
    **completes**. Do the same on `live_device_revenue`. Each adds an after-run trigger to
    the pipeline, and the run flow draws both chains.
-3. Name it `my-live` and **Save**. The service is now in `pipeline_services.yaml` in the
-   project, next to the `shop-live` service the playground ships with.
+3. Name it `my-live` and **Save**. The service is now in `services/my-live/service.yaml` in
+   the project, tracked in Git with the pipelines. (A playground image built before
+   MageML 0.2 keeps services in `pipeline_services.yaml`; both are read.)
 
 The triggers belong to the pipelines, so MageML runs them too: open `live_traffic`, run it
 once from its Triggers page, and `live_minute_kpis` and `live_device_revenue` start when it

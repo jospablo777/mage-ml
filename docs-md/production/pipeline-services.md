@@ -42,8 +42,9 @@ service by listing them:
 mage export service path/to/project load_orders score_orders --out ./orders-service --name orders
 ```
 
-A service saved on the Services page, in `pipeline_services.yaml`, exports by name, with
-its after-run triggers and settings:
+A service saved on the Services page or with `mage service new`, in
+`services/<name>/service.yaml`, exports by name, with its after-run triggers and settings
+([Services page](services-page.md)):
 
 ```bash
 mage export service path/to/project --service shop-live --out ./shop-live

@@ -32,7 +32,7 @@ The steps below use the CLI. The app does the same:
   anything that stops the export, before you export. The export shows its progress, then a
   download of the build context and the commands to build, run and call it.
 - **Services**, in the left menu, saves services in the project's
-  `pipeline_services.yaml`, with the pipelines, the [after-run triggers](pipeline-services.md#after-run-triggers)
+  `services/<name>/service.yaml`, with the pipelines, the [after-run triggers](pipeline-services.md#after-run-triggers)
   that start one pipeline when another's run ends, and their settings. It checks the
   configuration as you change it, lists the secrets and variables the container needs, and
   shows how to keep run history, logs and metrics. The CLI exports a saved service with

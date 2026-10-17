@@ -46,6 +46,7 @@ http://localhost:3333.
 | [Rust blocks](docs-md/guides/blocks/rust-blocks.md) and [Rust setup](docs-md/guides/blocks/rust-setup.md) | Blocks in Rust with Polars |
 | [R blocks](docs-md/guides/blocks/r-blocks.md), [R setup](docs-md/guides/blocks/r-setup.md) and [R packages](docs-md/guides/blocks/r-packages.md) | Blocks in R with packages locked by rv |
 | [Export pipelines as a service](docs-md/production/export-a-service.md) and the [service console](docs-md/production/service-console.md) | Run pipelines without MageML |
+| [Stream services](docs-md/production/stream-services.md) | Streaming pipelines as services: connectors, guarantees, throughput |
 | [Pipeline performance](docs-md/production/pipeline-performance.md) | Measurements and good practices |
 | [Pipeline documentation](docs-md/guides/pipelines/documentation.md) | A README for each pipeline |
 | [All pages](docs-md/README.md) | The full index |
@@ -73,6 +74,13 @@ http://localhost:3333.
   [in the app](docs-md/production/services-page.md),
   [tutorial](docs-md/getting-started/service-tutorial.md),
   [platforms](docs-md/production/pipeline-services.md#deploy))
+- **Stream services**: streaming pipelines exported as services that run in a Rust engine,
+  with Python, Rust or R blocks. Kafka, Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM
+  MQ, ActiveMQ, SQS, Pub/Sub, MongoDB change streams and PostgreSQL changes in; Kafka,
+  queues, databases, ClickHouse, object storage, HTTP and Feast out. A source's position
+  moves only after every sink took the batch, and failing messages go to dead letters.
+  Kafka to Kafka through a Rust block runs at about a million messages a second on a
+  laptop. ([guide](docs-md/production/stream-services.md))
 - **ML inference**: score with models in their frameworks' formats (scikit-learn, CatBoost,
   XGBoost, LightGBM, PyTorch, ONNX, R models) in Python, R or Rust blocks, and serve the
   predictions from an exported service. One pipeline reads raw data, turns it into features
