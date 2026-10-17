@@ -82,7 +82,18 @@ type AfterRunTriggerType = {
   status: string;
 };
 
+export type ServiceDeploymentType = {
+  commit?: string;
+  // Whether it runs the repository's version: from the lock in its labels.
+  drift: string;
+  environment: string;
+  image?: string;
+  port?: number;
+  state: string;
+};
+
 export type ServiceDefinitionType = {
+  deployments?: ServiceDeploymentType[];
   description?: string;
   exported_at?: string;
   include: string[];
@@ -1729,6 +1740,18 @@ function Services() {
                   ? `exported ${timeAgo(new Date(service.exported_at).getTime() / 1000)}`
                   : 'not exported'}
               </Text>
+              {(service.deployments || []).map(deployment => (
+                <Text
+                  danger={deployment.state !== 'running'}
+                  key={deployment.environment}
+                  muted={deployment.state === 'running'}
+                  title={[deployment.image, deployment.commit].filter(Boolean).join(' · ')}
+                  warning={deployment.drift === 'behind the repository'}
+                  xsmall
+                >
+                  {deployment.environment}: {deployment.drift}
+                </Text>
+              ))}
             </RailItemStyle>
           ))}
           {data && !services.length && !newDraft && (

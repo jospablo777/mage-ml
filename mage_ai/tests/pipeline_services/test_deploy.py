@@ -203,3 +203,25 @@ class DeployCommandTest(TestCase):
         other, _ = self.invoke('deploy', 'shop', '--env', 'ce')
         self.assertEqual(other.exit_code, 1)
         self.assertIn('supports docker so far', other.output)
+
+
+class ServicesListDeploymentsTest(TestCase):
+    def test_the_services_list_shows_each_deployment_and_its_drift(self):
+        """The Services page could not show what runs where."""
+        from unittest.mock import patch
+
+        from mage_ai.api.resources import PipelineServiceResource as resource
+        from mage_ai.pipeline_services import lifecycle
+
+        docker = FakeDocker()
+        target = deploy.DockerTarget(runner=docker, health=lambda port, timeout: True)
+        target.deploy('shop', 'prod', 'mage-shop:1', 7001, {}, dict(commit='c1', lock='L1'))
+        with patch.object(deploy, 'DockerTarget', return_value=target), \
+                patch('shutil.which', return_value='/usr/bin/docker'), \
+                patch.object(lifecycle, 'read_lock', return_value=dict(manifest_sha256='L2')):
+            found = resource.deployments_by_service(self.repo_path)
+
+        self.assertEqual(found['shop'][0]['environment'], 'prod')
+        self.assertEqual(found['shop'][0]['drift'], 'behind the repository')
+        with patch('shutil.which', return_value=None):
+            self.assertEqual(resource.deployments_by_service(self.repo_path), {})

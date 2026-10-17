@@ -7,8 +7,14 @@ from mage_ai.settings.repo import get_repo_path
 FIELDS = ('description', 'include', 'max_runs', 'model_registry', 'models', 'pipelines')
 
 
-def _with_export(repo_path: str, name: str, value: Dict, exports_by_name: Dict = None) -> Dict:
-    """A saved service with its latest export from the app, if any."""
+def _with_export(
+    repo_path: str,
+    name: str,
+    value: Dict,
+    exports_by_name: Dict = None,
+    deployments: Dict = None,
+) -> Dict:
+    """A saved service with its latest export from the app, if any, and its deployments."""
     from mage_ai.pipeline_services.exports import list_exports
 
     if exports_by_name is None:
@@ -17,9 +23,43 @@ def _with_export(repo_path: str, name: str, value: Dict, exports_by_name: Dict =
     return dict(
         name=name,
         **value,
+        deployments=(deployments or {}).get(name, []),
         exported_at=latest['exported_at'] if latest else None,
         path=_definitions().location(repo_path, name),
     )
+
+
+def deployments_by_service(repo_path: str) -> Dict[str, list]:
+    """
+    Each service's Docker deployments with their drift from the repository's lock, for the
+    Services list. Without Docker, none.
+    """
+    import shutil
+
+    from mage_ai.pipeline_services import deploy, lifecycle
+
+    if shutil.which('docker') is None:
+        return {}
+    try:
+        found = deploy.DockerTarget().status()
+    except (deploy.DeployError, OSError, ValueError):
+        return {}
+    locks = {}
+    result = {}
+    for item in found:
+        if item.service not in locks:
+            locks[item.service] = (lifecycle.read_lock(repo_path, item.service) or {}).get(
+                'manifest_sha256',
+            )
+        result.setdefault(item.service, []).append(dict(
+            commit=item.commit,
+            drift=item.drift(locks[item.service]),
+            environment=item.environment,
+            image=item.image,
+            port=item.port,
+            state=item.state,
+        ))
+    return result
 
 
 def _definitions():
@@ -52,8 +92,13 @@ class PipelineServiceResource(GenericResource):
         if pipeline:
             saved = {n: v for n, v in saved.items() if pipeline in v['pipelines']}
         exports_by_name = {e['name']: e for e in list_exports(repo_path)}
+        # Docker is asked off the event loop: a slow daemon held every request.
+        import asyncio
+
+        deployments = await asyncio.to_thread(deployments_by_service, repo_path)
         return cls.build_result_set(
-            [_with_export(repo_path, n, v, exports_by_name) for n, v in sorted(saved.items())],
+            [_with_export(repo_path, n, v, exports_by_name, deployments)
+             for n, v in sorted(saved.items())],
             user,
             **kwargs,
         )

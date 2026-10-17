@@ -113,6 +113,9 @@ in the volume `mage-shop-live-prod-data`.
 - The previous deployment is kept, stopped, as `mage-shop-live-prod-previous`:
   `mage service rollback shop-live --env prod` swaps them.
 
+The Services page lists each service's deployments under its name: the environment and
+whether it runs the repository's version, is behind it, or is stopped.
+
 Kubernetes and IBM Code Engine deploy from the build context's `deploy/` files for now.
 
 ### Check the services a change touches
