@@ -169,6 +169,8 @@ pub enum ConnectorKind {
     Activemq,
     /// Sink: Elasticsearch or OpenSearch through the bulk API.
     Search,
+    /// Sink: InfluxDB 2 as line protocol.
+    Influxdb,
 }
 
 impl ConnectorKind {
@@ -189,6 +191,7 @@ impl ConnectorKind {
             ConnectorKind::Pubsub => "pubsub",
             ConnectorKind::Activemq => "activemq",
             ConnectorKind::Search => "search",
+            ConnectorKind::Influxdb => "influxdb",
         }
     }
 
@@ -225,6 +228,7 @@ impl ConnectorKind {
                 | ConnectorKind::Pubsub
                 | ConnectorKind::Activemq
                 | ConnectorKind::Search
+                | ConnectorKind::Influxdb
         )
     }
 }

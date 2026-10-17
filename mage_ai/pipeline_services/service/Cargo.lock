@@ -2766,6 +2766,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-connector-influxdb"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "mage-stream-ports",
+ "object_store",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mage-connector-kafka"
 version = "0.1.0"
 dependencies = [
@@ -2940,6 +2952,7 @@ dependencies = [
  "mage-connector-clickhouse",
  "mage-connector-http",
  "mage-connector-ibmmq",
+ "mage-connector-influxdb",
  "mage-connector-kafka",
  "mage-connector-local",
  "mage-connector-mongodb",

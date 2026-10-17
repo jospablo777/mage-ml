@@ -26,6 +26,7 @@ mage-connector-sqs = { path = "../connector-sqs", optional = true }
 mage-connector-pubsub = { path = "../connector-pubsub", optional = true }
 mage-connector-activemq = { path = "../connector-activemq", optional = true }
 mage-connector-search = { path = "../connector-search", optional = true }
+mage-connector-influxdb = { path = "../connector-influxdb", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -65,6 +66,7 @@ sqs = ["dep:mage-connector-sqs"]
 pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
 search = ["dep:mage-connector-search"]
+influxdb = ["dep:mage-connector-influxdb"]
 
 [dev-dependencies]
 tempfile = "3"

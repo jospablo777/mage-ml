@@ -570,14 +570,14 @@ STREAM_SINKS = {
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
     'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
     'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
-    'elasticsearch': 'search', 'opensearch': 'search',
+    'elasticsearch': 'search', 'opensearch': 'search', 'influxdb': 'influxdb',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
-    'pubsub': 'pubsub', 'activemq': 'activemq', 'search': 'search',
+    'pubsub': 'pubsub', 'activemq': 'activemq', 'search': 'search', 'influxdb': 'influxdb',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -1091,6 +1091,29 @@ def _search_connector(block, connector_type: str, config: Dict, where: str,
     return dict(name=block.uuid, kind='search', config=settings)
 
 
+INFLUXDB_SETTINGS = {'url', 'token', 'org', 'bucket', 'measurement', 'batch_size', 'timeout_ms'}
+
+
+def _influxdb_connector(block, config: Dict, where: str, problems: List[str]) -> Dict:
+    """MageML's InfluxDB sink, as line protocol; batch_size and timeout_ms are not used."""
+    unknown = sorted(set(config) - INFLUXDB_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown InfluxDB settings {", ".join(unknown)}.')
+    for key in ('url', 'token', 'org'):
+        if not config.get(key):
+            problems.append(f'{where}: InfluxDB settings need {key}.')
+    if _literal(config.get('token')):
+        problems.append(
+            f"{where}: token is written in the file; use \"{{{{ env_var('NAME') }}}}\" and "
+            "set NAME in the service's environment."
+        )
+    settings = {
+        k: v for k, v in config.items()
+        if k in INFLUXDB_SETTINGS and k not in ('batch_size', 'timeout_ms')
+    }
+    return dict(name=block.uuid, kind='influxdb', config=settings)
+
+
 def _activemq_connector(block, role: str, config: Dict, where: str,
                         problems: List[str]) -> Dict:
     """MageML's ActiveMQ source and sink, over STOMP."""
@@ -1343,6 +1366,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _object_storage_connector(block, connector_type, config, where, problems)
     if kind == 'search':
         return _search_connector(block, connector_type, config, where, problems)
+    if kind == 'influxdb':
+        return _influxdb_connector(block, config, where, problems)
     if kind == 'activemq':
         return _activemq_connector(block, role, config, where, problems)
     if kind == 'pubsub':

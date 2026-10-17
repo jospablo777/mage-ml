@@ -16,7 +16,7 @@ the batch. The engine is written in Rust; blocks run in Python, Rust or R.
 | --- | --- |
 | Source | Kafka, Azure Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication) |
 | Transformers | Python, [Rust](/guides/blocks/rust-blocks#stream-transformers) or [R](/guides/blocks/r-blocks#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, InfluxDB, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
 
 The export stops, with the reason, on what a service can't run the same way as MageML yet:
 Python sources and sinks, other connectors (Kinesis, Pulsar, InfluxDB, Elasticsearch,
@@ -44,6 +44,7 @@ absorbed" names how a sink writes a repeated batch only once, where it can.
 | [`postgres`](#postgresql) (sink) | | | Transaction committed | Upserts with `unique_constraints` | |
 | [`clickhouse`](#clickhouse) | | | Insert answered | Insert tokens | |
 | [`elasticsearch`, `opensearch`](#elasticsearch-and-opensearch) | | | Bulk answer, every document written | Same `_id` replaces the document | Messages are the documents (0.2) |
+| [`influxdb`](#influxdb) | | | Write answered | Same measurement, tags and time replace the point | Each batch is one request; messages without a time get distinct nanoseconds |
 | [`object_storage`](#object-storage), `amazon_s3`, `google_cloud_storage` | | | Object written | Same object name | Buffers acknowledged after writing |
 | [`http`](#http-and-feast-sinks) | | | `2xx` | `Idempotency-Key`, for receivers that dedupe | |
 | [`feast`](#http-and-feast-sinks) | | | `2xx` | Online pushes are upserts | |
@@ -525,6 +526,29 @@ _id: event_id
   `verify_certs: false` turns off certificate checks.
 - Busy (`429`) and server errors are retried. A document the index refuses, such as a value
   that does not fit its field's mapping, stops the stream with the cluster's reason.
+
+### InfluxDB
+
+The `influxdb` sink writes each batch to InfluxDB 2 as line protocol, in requests of up to
+5,000 points or 8 MB, and confirms it once InfluxDB accepted every request.
+
+```yaml
+connector_type: influxdb
+url: https://influx.example.com
+token: "{{ env_var('INFLUX_TOKEN') }}"
+org: analytics
+bucket: events
+measurement: orders
+```
+
+- A message is a point: `{"data": ..., "metadata": {"measurement", "time", "tags"}}`, or
+  the message itself as its fields. A list's items and a scalar are `_value` fields.
+- Integers keep every digit (past 64 bits they are written as text), lists and objects are
+  JSON text, and nulls are left out; a message with no field left stops the stream.
+- `time` is in milliseconds. Messages without one get the batch's time in nanoseconds plus
+  their position, so messages with the same measurement and tags do not overwrite each other.
+- The token comes from the environment: a token written in the file stops the export. Busy
+  (`429`) and server errors are retried; a refused write stops the stream with the reason.
 
 ### Object storage
 

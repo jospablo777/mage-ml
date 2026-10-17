@@ -88,4 +88,6 @@ of each write.
 
 ## In an exported service
 
-[Exported services](../../../production/stream-services.md) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.
+[Exported services](../../../production/stream-services.md#influxdb) run this sink in Rust, as line
+protocol, with the same message format. The token comes from the environment, as
+`"{{ env_var('NAME') }}"`.

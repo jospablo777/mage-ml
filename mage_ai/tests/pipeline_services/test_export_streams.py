@@ -727,6 +727,35 @@ class SearchSinkExportTest(StreamExportTestCase):
         self.assertIn('_op_type is index, create or update', problems)
 
 
+class InfluxDbSinkExportTest(StreamExportTestCase):
+    def test_influxdb_sinks_export_to_the_influxdb_sink(self):
+        """Exporting a stream with an InfluxDB sink stopped: the engine had none."""
+        self.stream(sink=textwrap.dedent('''
+            connector_type: influxdb
+            url: https://influx.example.com
+            token: "{{ env_var('INFLUX_TOKEN') }}"
+            org: analytics
+            bucket: events
+            measurement: orders
+            batch_size: 100
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['kind'], 'influxdb')
+        self.assertEqual(sink['config']['bucket'], 'events')
+        self.assertNotIn('batch_size', sink['config'])
+        self.assertIn('influxdb', captured.engine_features)
+
+    def test_a_written_token_is_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: influxdb
+            url: https://influx.example.com
+            token: plain-token-value
+            org: analytics
+        '''))  # pragma: allowlist secret
+        self.assertIn('token is written in the file', self.problems())
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''
