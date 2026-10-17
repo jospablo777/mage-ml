@@ -25,6 +25,7 @@ mage-connector-clickhouse = { path = "../connector-clickhouse", optional = true 
 mage-connector-sqs = { path = "../connector-sqs", optional = true }
 mage-connector-pubsub = { path = "../connector-pubsub", optional = true }
 mage-connector-activemq = { path = "../connector-activemq", optional = true }
+mage-connector-search = { path = "../connector-search", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -63,6 +64,7 @@ clickhouse = ["dep:mage-connector-clickhouse"]
 sqs = ["dep:mage-connector-sqs"]
 pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
+search = ["dep:mage-connector-search"]
 
 [dev-dependencies]
 tempfile = "3"

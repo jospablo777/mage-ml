@@ -31,7 +31,7 @@ def service_binary() -> Path:
 # tests build it without them, and test workers build at the same time. CI builds it first.
 STREAM_TARGET = SERVICE / 'target' / 'streams'
 STREAM_FEATURES = ('kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb,sqs,pubsub,'
-                   'activemq')
+                   'activemq,search')
 
 
 def stream_service_binary(release: bool = False) -> Path:

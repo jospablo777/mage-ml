@@ -237,9 +237,9 @@ jobs:
             warm: ""
           - id: streaming
             name: "Integration: streaming and storage"
-            services: kafka rabbitmq ibm-mq nats sqs pubsub activemq minio postgres mongodb mysql clickhouse
+            services: kafka rabbitmq ibm-mq nats sqs pubsub opensearch activemq minio postgres mongodb mysql clickhouse
             # The stream benchmark needs this group's systems; in CI it runs smaller, as a check.
-            tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/ibm_mq integration_tests/nats integration_tests/sqs integration_tests/pubsub integration_tests/activemq integration_tests/streaming integration_tests/s3 integration_tests/benchmark/test_stream_benchmark.py
+            tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/ibm_mq integration_tests/nats integration_tests/sqs integration_tests/pubsub integration_tests/opensearch integration_tests/activemq integration_tests/streaming integration_tests/s3 integration_tests/benchmark/test_stream_benchmark.py
             r: false
             # Rust stream blocks build Polars: warmed first, so no test pays for it.
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
@@ -329,7 +329,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
-          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb,sqs,pubsub,activemq
+          CARGO_TARGET_DIR=target/streams cargo build -q --release -p mage-service --features kafka,rabbitmq,ibm-mq,object-store,postgres,clickhouse,nats,mongodb,sqs,pubsub,activemq,search
           echo "MAGE_TEST_STREAM_RELEASE=1" >> "$GITHUB_ENV"
       # The IBM MQ connector loads IBM's MQ client at run time: the redistributable client,
       # the version and checksum exported images pin.

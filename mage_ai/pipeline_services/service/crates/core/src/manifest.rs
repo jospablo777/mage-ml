@@ -167,6 +167,8 @@ pub enum ConnectorKind {
     Pubsub,
     /// ActiveMQ over STOMP: a queue, acknowledged after the sinks, and persistent sends.
     Activemq,
+    /// Sink: Elasticsearch or OpenSearch through the bulk API.
+    Search,
 }
 
 impl ConnectorKind {
@@ -186,6 +188,7 @@ impl ConnectorKind {
             ConnectorKind::Sqs => "sqs",
             ConnectorKind::Pubsub => "pubsub",
             ConnectorKind::Activemq => "activemq",
+            ConnectorKind::Search => "search",
         }
     }
 
@@ -221,6 +224,7 @@ impl ConnectorKind {
                 | ConnectorKind::Clickhouse
                 | ConnectorKind::Pubsub
                 | ConnectorKind::Activemq
+                | ConnectorKind::Search
         )
     }
 }

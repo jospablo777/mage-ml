@@ -2885,6 +2885,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-connector-search"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "http",
+ "mage-stream-core",
+ "mage-stream-ports",
+ "object_store",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mage-connector-sqs"
 version = "0.1.0"
 dependencies = [
@@ -2935,6 +2948,7 @@ dependencies = [
  "mage-connector-postgres",
  "mage-connector-pubsub",
  "mage-connector-rabbitmq",
+ "mage-connector-search",
  "mage-connector-sqs",
  "mage-service-core",
  "mage-stream-core",

@@ -25,4 +25,6 @@ http_auth: "@awsauth"
 
 ## In an exported service
 
-[Exported services](/production/stream-services) do not run this connector yet: exporting a pipeline that uses it stops and says so. It runs in MageML as described above.
+[Exported services](/production/stream-services#elasticsearch-and-opensearch) run this sink
+in Rust through the bulk API, with the same settings. Secrets (`http_auth`) come from the
+environment, as `"{{ env_var('NAME') }}"`, and `ca_cert` is the PEM text, not a file path.

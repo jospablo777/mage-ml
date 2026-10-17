@@ -308,6 +308,8 @@ fn sink(
         ConnectorKind::Mongodb => Ok(Arc::new(mage_connector_mongodb::MongoSink::new(&_config)?)),
         #[cfg(feature = "pubsub")]
         ConnectorKind::Pubsub => Ok(Arc::new(mage_connector_pubsub::PubSubSink::new(&_config)?)),
+        #[cfg(feature = "search")]
+        ConnectorKind::Search => Ok(Arc::new(mage_connector_search::SearchSink::new(&_config)?)),
         #[cfg(feature = "activemq")]
         ConnectorKind::Activemq => Ok(Arc::new(mage_connector_activemq::ActiveMqSink::new(
             &_config,
@@ -352,6 +354,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
         ConnectorKind::Pubsub => "it was built without Pub/Sub; build it with the pubsub feature",
         ConnectorKind::Activemq => {
             "it was built without ActiveMQ; build it with the activemq feature"
+        }
+        ConnectorKind::Search => {
+            "it was built without Elasticsearch and OpenSearch; build it with the search feature"
         }
         ConnectorKind::Http => "HTTP is built in",
         ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",

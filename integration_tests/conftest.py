@@ -356,6 +356,14 @@ def pubsub_host():
 
 
 @pytest.fixture(scope='session')
+def opensearch_url():
+    url = os.getenv('MAGE_TEST_OPENSEARCH_URL')
+    if not url:
+        pytest.skip('OpenSearch is not configured: MAGE_TEST_OPENSEARCH_URL unset')
+    return url
+
+
+@pytest.fixture(scope='session')
 def mongodb_url():
     url = os.getenv('MAGE_TEST_MONGODB_URL')
     if not url:

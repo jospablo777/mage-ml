@@ -570,13 +570,14 @@ STREAM_SINKS = {
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
     'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
     'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
+    'elasticsearch': 'search', 'opensearch': 'search',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
     'kafka': 'kafka', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm-mq',
     'object_storage': 'object-store', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
     'nats': 'nats', 'mongodb': 'mongodb', 'sqs': 'sqs',
-    'pubsub': 'pubsub', 'activemq': 'activemq',
+    'pubsub': 'pubsub', 'activemq': 'activemq', 'search': 'search',
 }
 # What the ClickHouse sink takes from the export config of MageML's sink, besides its
 # io_config.yaml profile.
@@ -1047,6 +1048,49 @@ ACTIVEMQ_SOURCE_SETTINGS = ACTIVEMQ_SETTINGS | {
 }
 
 
+SEARCH_SETTINGS = {
+    'elasticsearch': {'host', 'index_name', 'verify_certs', 'api_key', 'ca_cert', '_id',
+                      '_op_type', '_source'},
+    'opensearch': {'host', 'index_name', 'verify_certs', 'http_auth', 'ca_cert', '_id',
+                   '_op_type', '_source', 'region', 'aws_service'},
+}
+
+
+def _search_connector(block, connector_type: str, config: Dict, where: str,
+                      problems: List[str]) -> Dict:
+    """MageML's Elasticsearch and OpenSearch sinks, through the bulk API."""
+    allowed = SEARCH_SETTINGS[connector_type]
+    label = 'OpenSearch' if connector_type == 'opensearch' else 'Elasticsearch'
+    unknown = sorted(set(config) - allowed)
+    if unknown:
+        problems.append(f'{where}: unknown {label} settings {", ".join(unknown)}.')
+    for key in ('host', 'index_name'):
+        if not config.get(key):
+            problems.append(f'{where}: {label} settings need {key}.')
+    if _literal(config.get('api_key')):
+        problems.append(
+            f"{where}: api_key is written in the file; use \"{{{{ env_var('NAME') }}}}\" and "
+            "set NAME in the service's environment."
+        )
+    auth = config.get('http_auth')
+    if _literal(auth) and isinstance(auth, str) and auth != '@awsauth':
+        problems.append(
+            f"{where}: http_auth holds a password written in the file; use "
+            f"\"{{{{ env_var('NAME') }}}}\" and set NAME in the service's environment."
+        )
+    ca_cert = config.get('ca_cert')
+    if _literal(ca_cert) and isinstance(ca_cert, str) and '-----BEGIN' not in ca_cert:
+        problems.append(
+            f'{where}: ca_cert names a file on this machine; pass the PEM through an '
+            "environment variable (\"{{{{ env_var('NAME') }}}}\") instead."
+        )
+    if str(config.get('_op_type') or 'index') not in ('index', 'create', 'update'):
+        problems.append(f'{where}: _op_type is index, create or update.')
+    settings = {k: v for k, v in config.items() if k in allowed}
+    settings['engine'] = connector_type
+    return dict(name=block.uuid, kind='search', config=settings)
+
+
 def _activemq_connector(block, role: str, config: Dict, where: str,
                         problems: List[str]) -> Dict:
     """MageML's ActiveMQ source and sink, over STOMP."""
@@ -1297,6 +1341,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
         return _ibm_mq_connector(block, role, config, where, problems)
     if kind == 'object_storage':
         return _object_storage_connector(block, connector_type, config, where, problems)
+    if kind == 'search':
+        return _search_connector(block, connector_type, config, where, problems)
     if kind == 'activemq':
         return _activemq_connector(block, role, config, where, problems)
     if kind == 'pubsub':

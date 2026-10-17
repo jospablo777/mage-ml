@@ -690,6 +690,43 @@ class ActiveMqExportTest(StreamExportTestCase):
         self.assertIn('password is written in the file', self.problems())
 
 
+class SearchSinkExportTest(StreamExportTestCase):
+    def export_search(self, connector_type, auth):
+        self.stream(sink=textwrap.dedent(f'''
+            connector_type: {connector_type}
+            host: https://search.example.com
+            index_name: orders
+            _id: order_id
+            {auth}
+        '''))
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        sink = captured.manifest['pipelines'][0]['stream']['sinks'][0]
+        self.assertEqual(sink['kind'], 'search')
+        self.assertEqual(sink['config']['engine'], connector_type)
+        self.assertEqual(sink['config']['_id'], 'order_id')
+        self.assertIn('search', captured.engine_features)
+
+    def test_elasticsearch_sinks_export_to_the_search_sink(self):
+        self.export_search('elasticsearch', "api_key: \"{{ env_var('ES_KEY') }}\"")
+
+    def test_opensearch_sinks_export_to_the_search_sink(self):
+        self.export_search('opensearch', 'http_auth: "@awsauth"')
+
+    def test_written_secrets_and_local_files_are_refused(self):
+        self.stream(sink=textwrap.dedent('''
+            connector_type: opensearch
+            host: https://search.example.com
+            index_name: orders
+            http_auth: admin:hunter2
+            ca_cert: ./ca.pem
+            _op_type: upsert
+        '''))  # pragma: allowlist secret
+        problems = self.problems()
+        self.assertIn('http_auth holds a password written in the file', problems)
+        self.assertIn('ca_cert names a file on this machine', problems)
+        self.assertIn('_op_type is index, create or update', problems)
+
+
 class ClickHouseSinkExportTest(StreamExportTestCase):
     def test_the_profile_and_table_become_the_engines_settings(self):
         (Path(self.repo_path) / 'io_config.yaml').write_text(textwrap.dedent('''

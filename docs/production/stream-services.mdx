@@ -16,7 +16,7 @@ the batch. The engine is written in Rust; blocks run in Python, Rust or R.
 | --- | --- |
 | Source | Kafka, Azure Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication) |
 | Transformers | Python, [Rust](/guides/blocks/rust-blocks#stream-transformers) or [R](/guides/blocks/r-blocks#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
 
 The export stops, with the reason, on what a service can't run the same way as MageML yet:
 Python sources and sinks, other connectors (Kinesis, Pulsar, InfluxDB, Elasticsearch,
@@ -43,6 +43,7 @@ absorbed" names how a sink writes a repeated batch only once, where it can.
 | [`postgres`](#postgresql-changes) (source) | End LSN confirmed to the slot | One | | | Position kept in the slot |
 | [`postgres`](#postgresql) (sink) | | | Transaction committed | Upserts with `unique_constraints` | |
 | [`clickhouse`](#clickhouse) | | | Insert answered | Insert tokens | |
+| [`elasticsearch`, `opensearch`](#elasticsearch-and-opensearch) | | | Bulk answer, every document written | Same `_id` replaces the document | Messages are the documents (0.2) |
 | [`object_storage`](#object-storage), `amazon_s3`, `google_cloud_storage` | | | Object written | Same object name | Buffers acknowledged after writing |
 | [`http`](#http-and-feast-sinks) | | | `2xx` | `Idempotency-Key`, for receivers that dedupe | |
 | [`feast`](#http-and-feast-sinks) | | | `2xx` | Online pushes are upserts | |
@@ -496,6 +497,34 @@ config:
   Kafka.
 - A missing table is made from the first batch (MergeTree, nullable columns, objects and lists
   as JSON text), with MageML's column names; a new field adds a column.
+
+### Elasticsearch and OpenSearch
+
+The `elasticsearch` and `opensearch` sinks write each batch through the bulk API, in requests
+of up to 5,000 messages or 8 MB. A batch is confirmed once the cluster wrote every message.
+
+```yaml
+connector_type: opensearch
+host: https://search.example.com
+index_name: events
+http_auth: "{{ env_var('OPENSEARCH_AUTH') }}"   # user:password, or @awsauth (the default)
+_id: event_id
+```
+
+- Each message is the document, with its numbers as the blocks made them. With `_id`, the
+  named field is the document id, so a batch written again replaces its documents instead
+  of adding them.
+- `_op_type` is `index` (the default), `create` (for data streams; a document that already
+  exists counts as written) or `update` (the message's fields update the document).
+  `_source: <key>` wraps each message under that key.
+- Elasticsearch takes `api_key`. OpenSearch takes `http_auth`: `@awsauth` signs requests
+  with the AWS credentials of the environment (`region` or `AWS_REGION`; `aws_service: aoss`
+  for OpenSearch Serverless), `user:password` uses basic authentication.
+- Secrets come from the environment: an `api_key` or a password written in the file stops
+  the export. `ca_cert` is the PEM text (from an environment variable), not a file path;
+  `verify_certs: false` turns off certificate checks.
+- Busy (`429`) and server errors are retried. A document the index refuses, such as a value
+  that does not fit its field's mapping, stops the stream with the cluster's reason.
 
 ### Object storage
 

@@ -36,7 +36,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, and PostgreSQL changes
   by logical replication.
 - Sinks: Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB,
-  PostgreSQL (COPY, upserts), ClickHouse (deduplicated inserts), object storage (S3, GCS,
+  PostgreSQL (COPY, upserts), ClickHouse (deduplicated inserts), Elasticsearch and OpenSearch
+  (bulk API, `_id` replaces documents, SigV4 for AWS), object storage (S3, GCS,
   Azure Blob, disk; Parquet or JSON lines), HTTP and Feast.
 - At least once everywhere: a source's position moves only after every sink took the batch.
   Dead letters take the messages a block fails on, found by splitting the batch.
