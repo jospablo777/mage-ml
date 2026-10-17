@@ -88,6 +88,9 @@ from mage_ai.shared.yaml import load_yaml, yaml
 
 CYCLE_DETECTION_ERR_MESSAGE = 'A cycle was detected in this pipeline'
 
+# Block statuses of a pipeline on this machine, beside its outputs (without_run_state).
+BLOCK_STATUS_FILE = '.block_status.json'
+
 
 def normalized_environment(environment) -> Optional[Dict]:
     """The environment setting with empty fields left out; None when nothing is set."""
@@ -265,6 +268,68 @@ class Pipeline:
             self.uuid,
         )
 
+    def __status_path(self) -> Optional[str]:
+        """Where block statuses are kept: beside the pipeline's outputs on this machine,
+        not in metadata.yaml, which is shared in Git."""
+        directory = self.pipeline_variables_dir
+        if not directory or '://' in str(directory):
+            return None
+        return os.path.join(directory, BLOCK_STATUS_FILE)
+
+    def saved_block_statuses(self) -> Dict[str, str]:
+        path = self.__status_path()
+        if not path or not os.path.isfile(path):
+            return {}
+        try:
+            with open(path) as file:
+                statuses = json.load(file)
+            return statuses if isinstance(statuses, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def without_run_state(self, pipeline_dict: Dict) -> Dict:
+        """
+        The metadata to write to metadata.yaml: without each block's status and
+        all_upstream_blocks_executed (run state, which churned the file in Git), and without
+        the project's variables_dir (a path on this machine, such as /Users/<name>/...).
+        The statuses go to a file beside the pipeline's outputs.
+        """
+        pipeline_dict = dict(pipeline_dict)
+        for key in ('variables_dir', 'remote_variables_dir'):
+            pipeline_dict.pop(key, None)
+        statuses = {}
+
+        def strip(blocks):
+            cleaned = []
+            for block in blocks or []:
+                if isinstance(block, dict):
+                    block = dict(block)
+                    status = block.pop('status', None)
+                    block.pop('all_upstream_blocks_executed', None)
+                    if status and block.get('uuid'):
+                        statuses[block['uuid']] = status
+                cleaned.append(block)
+            return cleaned
+
+        for key in ('blocks', 'callbacks', 'conditionals', 'widgets'):
+            if key in pipeline_dict:
+                pipeline_dict[key] = strip(pipeline_dict[key])
+        extensions = pipeline_dict.get('extensions')
+        if isinstance(extensions, dict):
+            pipeline_dict['extensions'] = {
+                name: dict(extension, blocks=strip(extension.get('blocks')))
+                if isinstance(extension, dict) and 'blocks' in extension else extension
+                for name, extension in extensions.items()
+            }
+        path = self.__status_path()
+        if path and statuses:
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                safe_write(path, json.dumps(statuses, sort_keys=True))
+            except OSError:
+                pass
+        return pipeline_dict
+
     @property
     def project(self):
         if self._project is not None:
@@ -437,7 +502,7 @@ class Pipeline:
         duplicate_pipeline_dict['name'] = duplicate_pipeline_uuid
         safe_write(
             duplicate_pipeline.config_path,
-            yaml.dump(duplicate_pipeline_dict),
+            yaml.dump(duplicate_pipeline.without_run_state(duplicate_pipeline_dict)),
         )
 
         tags = duplicate_pipeline_dict.get('tags')
@@ -923,6 +988,8 @@ class Pipeline:
         self.execution_framework = config.get('execution_framework')
         self.variables = config.get('variables')
 
+        saved_statuses = self.saved_block_statuses()
+
         def build_shared_args_kwargs(c):
             block_type = c.get('type')
 
@@ -952,7 +1019,7 @@ class Pipeline:
                 replicated_block=c.get('replicated_block'),
                 repo_config=self.repo_config,
                 retry_config=c.get('retry_config'),
-                status=c.get('status'),
+                status=c.get('status') or saved_statuses.get(c.get('uuid')),
                 timeout=c.get('timeout'),
             )
 
@@ -2420,7 +2487,7 @@ class Pipeline:
                 'Blocks cannot be added or removed when saving content, please try again.',
             )
 
-        content = yaml.dump(pipeline_dict, allow_unicode=True)
+        content = yaml.dump(self.without_run_state(pipeline_dict), allow_unicode=True)
 
         safe_write(self.config_path, content)
         file_cache.pop(self.config_path, None)
@@ -2497,7 +2564,7 @@ class Pipeline:
                 'Blocks cannot be added or removed when saving content, please try again.',
             )
 
-        content = yaml.dump(pipeline_dict, allow_unicode=True)
+        content = yaml.dump(self.without_run_state(pipeline_dict), allow_unicode=True)
 
         test_path = f'{self.config_path}.test'
         async with aiofiles.open(test_path, mode='w', encoding='utf-8') as fp:
