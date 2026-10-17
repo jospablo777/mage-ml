@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Dict, List, Tuple
 
@@ -119,13 +120,17 @@ class GitBranchResource(GenericResource):
         setup_repo = False
         if preferences.is_git_integration_enabled():
             setup_repo = True
-        git_manager = self.get_git_manager(
+        # Setting up the manager writes keys and git config and runs git; the header asks
+        # on every page and run, so it runs in a thread instead of holding the event loop.
+        git_manager = await asyncio.to_thread(
+            self.get_git_manager,
             user=user,
             context_data=context_data,
             preferences=preferences,
             repo_path=repo_path,
             setup_repo=setup_repo,
         )
+        branch = await asyncio.to_thread(lambda: git_manager.current_branch)
 
         display_format = kwargs.get('meta', {}).get('_format')
         if 'with_basic_details' == display_format:
@@ -134,7 +139,7 @@ class GitBranchResource(GenericResource):
                     files={},
                     is_git_integration_enabled=preferences.is_git_integration_enabled(),
                     modified_files=[],
-                    name=git_manager.current_branch,
+                    name=branch,
                     staged_files=[],
                     sync_config=preferences.sync_config,
                     untracked_files=[],
@@ -143,7 +148,7 @@ class GitBranchResource(GenericResource):
                 **kwargs,
             )
 
-        modified_files = git_manager.modified_files
+        modified_files = await asyncio.to_thread(lambda: git_manager.modified_files)
         staged_files = await git_manager.staged_files()
         untracked_files = await git_manager.untracked_files()
 
@@ -152,7 +157,7 @@ class GitBranchResource(GenericResource):
                 files={},
                 is_git_integration_enabled=preferences.is_git_integration_enabled(),
                 modified_files=modified_files,
-                name=git_manager.current_branch,
+                name=branch,
                 staged_files=staged_files,
                 sync_config=preferences.sync_config,
                 untracked_files=untracked_files,

@@ -1,9 +1,9 @@
+import asyncio
 import json
 import os
 import re
 
 import terminado
-from tornado import gen
 from tornado.websocket import WebSocketClosedError
 
 from mage_ai.api.utils import authenticate_client_and_token, has_at_least_editor_role
@@ -20,7 +20,37 @@ from mage_ai.settings import (
 from mage_ai.shared.array import find_index
 
 
-class MageTermManager(terminado.NamedTermManager):
+class AsyncSpawnMixin:
+    """
+    Starts a terminal's shell in a thread: forking the server took about a second, all of
+    it on the event loop, while every other request waited. Reading its output is set up
+    on the loop, as terminado needs.
+    """
+
+    async def spawn(self, **kwargs):
+        term = await asyncio.to_thread(self.new_terminal, **kwargs)
+        return term
+
+
+class MageTermManager(AsyncSpawnMixin, terminado.NamedTermManager):
+    async def get_terminal_async(self, term_name: str, **kwargs):
+        assert term_name is not None
+        if term_name in self.terminals:
+            return self.terminals[term_name]
+        if self.max_terminals and len(self.terminals) >= self.max_terminals:
+            raise terminado.management.MaxTerminalsReached(self.max_terminals)
+
+        self.log.info("New terminal with specified name: %s", term_name)
+        term = await self.spawn(**kwargs)
+        if term_name in self.terminals:
+            # Another connection started it meanwhile.
+            term.kill()
+            return self.terminals[term_name]
+        term.term_name = term_name
+        self.terminals[term_name] = term
+        self.start_reading(term)
+        return term
+
     def get_terminal(self, term_name: str, **kwargs):
         assert term_name is not None
 
@@ -39,7 +69,14 @@ class MageTermManager(terminado.NamedTermManager):
         return term
 
 
-class MageUniqueTermManager(terminado.UniqueTermManager):
+class MageUniqueTermManager(AsyncSpawnMixin, terminado.UniqueTermManager):
+    async def get_terminal_async(self, term_name: str = None, **kwargs):
+        if self.max_terminals and len(self.ptys_by_fd) >= self.max_terminals:
+            raise terminado.management.MaxTerminalsReached(self.max_terminals)
+        term = await self.spawn(**kwargs)
+        self.start_reading(term)
+        return term
+
     def get_terminal(self, url_component=None, **kwargs):
         if self.max_terminals and len(self.ptys_by_fd) >= self.max_terminals:
             raise terminado.management.MaxTerminalsReached(self.max_terminals)
@@ -70,7 +107,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
             # This is an expected race during tab closes and network interruptions.
             pass
 
-    def open(self, url_component=None):
+    async def open(self, url_component=None):
         """Websocket connection opened.
 
         Call our terminal manager to get a terminal, and connect to it as a
@@ -107,7 +144,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
             return
         if not (REQUIRE_USER_AUTHENTICATION or is_disable_pipeline_edit_access()) or \
                 self.__editor_by_cookie():
-            self.__attach()
+            await self.__attach()
 
     def __editor_by_cookie(self) -> bool:
         from mage_ai.api.middleware import user_from_cookie
@@ -122,14 +159,19 @@ class TerminalWebsocketServer(terminado.TermSocket):
         except Exception:
             return False
 
-    def __attach(self):
-        if getattr(self, 'terminal', None) is None and self.__pending is not None:
+    async def __attach(self):
+        # open and the first message both attach; the second waits for the first.
+        if getattr(self, '_attaching', None) is None:
+            if getattr(self, 'terminal', None) is not None or self.__pending is None:
+                return
             term_name, cwd = self.__pending
             self.__pending = None
-            self.__initialize_terminal(term_name, cwd=cwd)
+            self._attaching = asyncio.ensure_future(
+                self.__initialize_terminal(term_name, cwd=cwd),
+            )
+        await self._attaching
 
-    @gen.coroutine
-    def on_message(self, raw_message):
+    async def on_message(self, raw_message):
         message = json.loads(raw_message)
 
         api_key = message.get('api_key')
@@ -167,11 +209,13 @@ class TerminalWebsocketServer(terminado.TermSocket):
                 return self.send_json_message(
                     ['stdout', f'{command[1]}\nUnauthorized access to the terminal.'])
 
-        self.__attach()
+        await self.__attach()
+        if getattr(self, 'terminal', None) is None:
+            return
         return terminado.TermSocket.on_message(self, json.dumps(command))
 
-    def __initialize_terminal(self, term_name: str, cwd: str = None):
-        self.terminal = self.term_manager.get_terminal(term_name, cwd=cwd)
+    async def __initialize_terminal(self, term_name: str, cwd: str = None):
+        self.terminal = await self.term_manager.get_terminal_async(term_name, cwd=cwd)
         self.terminal.clients.append(self)
 
         self.send_json_message(["setup", {}])
