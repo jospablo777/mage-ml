@@ -2494,18 +2494,28 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             'mage_ai.shared.processes', 'mage_ai.io.config',
             'mage_ai.data_preparation.shared.utils',
         ]
+    # Modules loaded before the imports came from start-up (.pth files such as ibm_db's DLL
+    # hook): they count only when a candidate names them.
     script = textwrap.dedent('''
         import importlib, json, os, sys
+        names = sys.argv[1:]
+        preloaded = set(sys.modules)
         failed = []
-        for name in sys.argv[1:]:
+        for name in names:
             try:
                 importlib.import_module(name)
             except Exception as error:
                 failed.append([name, f"{type(error).__name__}: {error}"])
+        wanted = set(names)
+        for name in names:
+            parts = name.split('.')
+            wanted.update('.'.join(parts[:i]) for i in range(1, len(parts)))
         files = sorted({
             os.path.abspath(module.__file__)
-            for module in list(sys.modules.values())
+            for key, module in list(sys.modules.items())
             if getattr(module, '__file__', None)
+            and (key not in preloaded or key in wanted
+                 or any(key.startswith(name + '.') for name in names))
         })
         print(json.dumps(dict(files=files, failed=failed)))
     ''')

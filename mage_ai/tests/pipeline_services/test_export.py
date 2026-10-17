@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import polars as pl
@@ -414,6 +415,44 @@ class CaptureTest(ExportTestCase):
 
 
 @unittest.skipUnless(SERVICE_BINARY.is_file(), 'needs the mage-service binary (cargo build)')
+class StartupImportsTest(ExportTestCase):
+    def setUp(self):
+        super().setUp()
+        # Python imports sitecustomize at start-up, as it runs .pth files such as ibm_db's.
+        hooks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, hooks, True)
+        (hooks / 'sitecustomize.py').write_text('import tabulate\n')
+        path = os.pathsep.join(filter(None, [str(hooks), os.environ.get('PYTHONPATH')]))
+        patcher = unittest.mock.patch.dict(os.environ, PYTHONPATH=path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_package_loaded_at_start_up_is_not_a_requirement(self):
+        self.add('load', 'data_loader', '''
+            @data_loader
+            def load(*args, **kwargs):
+                return {'n': 1}
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        self.assertNotIn('tabulate', captured.requirements)
+        self.assertIn('pyarrow', captured.requirements)
+
+    def test_a_block_importing_a_preloaded_package_still_requires_it(self):
+        self.add('load', 'data_loader', '''
+            from tabulate import tabulate
+
+            @data_loader
+            def load(*args, **kwargs):
+                return {'table': tabulate([[1]])}
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        self.assertIn('tabulate', captured.requirements)
+
+
 class ExportedRunTest(ExportTestCase):
     def test_io_config_profiles_resolve_from_the_container_environment_like_mage(self):
         """
