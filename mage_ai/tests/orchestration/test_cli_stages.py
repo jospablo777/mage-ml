@@ -37,7 +37,7 @@ class Recorder:
         self.partitions = []
 
     def __call__(self, pipeline, stage, global_vars, run_tests, update_status, partition=None,
-                 tracking=None):
+                 tracking=None, summary=None):
         with self.lock:
             self.events.append(('start', stage[0]))
             self.running += 1

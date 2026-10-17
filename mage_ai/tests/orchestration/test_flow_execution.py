@@ -225,6 +225,42 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(fusion.fusion_plan(self.pipeline), [[load.uuid]])
         PipelineExecutor(self.pipeline).execute(global_vars={}, update_status=False)
 
+    def test_mage_run_ends_with_each_blocks_time_and_tests(self):
+        # Tests are off by default in mage run; a pipeline of @test functions passed
+        # without saying none ran.
+        import contextlib
+        import io
+
+        self.block('load', 'data_loader', '''
+            import pandas as pd
+            @data_loader
+            def load(**kwargs):
+                return pd.DataFrame({'n': [1]})
+
+            @test
+            def has_rows(frame, *args):
+                assert len(frame) == 1
+
+            @test
+            def has_n(frame, *args):
+                assert 'n' in frame
+        ''')
+
+        def run(tests):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                PipelineExecutor(self.pipeline).execute(
+                    global_vars={}, run_tests=tests, update_status=False,
+                )
+            return out.getvalue()
+
+        skipped = run(False)
+        self.assertIn('2 not run', skipped)
+        self.assertIn('2 block tests were not run: run with --test to run them.', skipped)
+        ran = run(True)
+        self.assertIn('2/2 passed', ran)
+        self.assertIn('2 tests in 1 blocks, all passed.', ran)
+
     def test_async_execution_awaits_all_blocks(self):
         self.branched_flow()
         run = trigger_pipeline(self.pipeline.uuid, variables={

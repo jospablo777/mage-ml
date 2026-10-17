@@ -130,6 +130,10 @@ process holds more memory than `MAGE_STAGE_MAX_MEMORY_SHARE` (0.5) of the machin
 another stage runs. When a stage fails, no other stage starts; the run waits for the stages
 already running and fails with the first error, noting the others.
 
+The run ends with each block's time and tests, such as `2/2 passed`, or `2 not run` with a
+reminder to pass `--test`: data contracts are always checked, block tests only with
+`--test`.
+
 **Examples:**
 ```bash
 # Run entire pipeline

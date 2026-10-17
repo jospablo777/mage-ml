@@ -3484,6 +3484,12 @@ class Block(
         elif not contracts_only:
             test_functions = self.test_functions
 
+        # What ran, for the summary mage run prints (fusion.print_run_summary).
+        self.test_summary = dict(
+            defined=len(getattr(self, 'test_functions', None) or test_functions or []),
+            ran=len(test_functions), passed=0,
+        )
+
         # Reading the outputs back loads the whole data; only test functions use them.
         if outputs is None and test_functions:
             outputs = self.get_raw_outputs(
@@ -3546,6 +3552,7 @@ class Block(
                             print('--------------------------------------------------------------')
                             print(stacktrace)
 
+                self.test_summary['passed'] = tests_passed
                 message = f'{tests_passed}/{len(test_functions)} tests passed.'
                 if from_notebook:
                     if len(test_functions) >= 1:

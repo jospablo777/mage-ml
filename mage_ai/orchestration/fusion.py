@@ -8,6 +8,7 @@ import gc
 import os
 import sys
 import threading
+import time
 import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -480,7 +481,8 @@ def cli_tracking(pipeline, execution_partition: Optional[str] = None) -> Optiona
 
 def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tests: bool,
                           update_status: bool, execution_partition: Optional[str] = None,
-                          tracking: Optional[Dict] = None) -> None:
+                          tracking: Optional[Dict] = None,
+                          summary: Optional[List] = None) -> None:
     """Runs a stage's blocks in order, each taking the previous block's output in memory;
     a Rust or R block followed by one of its language may plan (block/plans.py)."""
     from mage_ai.data_preparation.models.block import plans
@@ -495,6 +497,11 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
             next_block = following.uuid
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
+        started = time.monotonic()
+        row = dict(block=uuid, seconds=None, tests=None, failed=True)
+        if summary is not None:
+            summary.append(row)
+        block.test_summary = None
         with _block_tracking(tracking, uuid), plans.stage_context(next_block, None):
             result = block.execute_sync(
                 block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
@@ -504,10 +511,15 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
                 update_status=update_status,
             )
             # Without tests the data contract is still checked (contracts_only).
-            block.run_tests(
-                contracts_only=not run_tests, execution_partition=execution_partition,
-                global_vars=variables, update_tests=False,
-            )
+            try:
+                block.run_tests(
+                    contracts_only=not run_tests, execution_partition=execution_partition,
+                    global_vars=variables, update_tests=False,
+                )
+            finally:
+                row.update(seconds=time.monotonic() - started,
+                           tests=getattr(block, 'test_summary', None))
+        row['failed'] = False
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
         release_block(block)
@@ -534,6 +546,38 @@ def stages_apply_to_cli(pipeline) -> bool:
         block_can_fuse(pipeline, block)
         for block in pipeline.blocks_by_uuid.values() if executable(block)
     )
+
+
+def print_run_summary(rows: List[Dict], run_tests: bool) -> None:
+    """Each block's time and tests, then the tests in total: tests are off by default in
+    mage run, so a pipeline full of @test functions passed without running one, silently."""
+    if not rows:
+        return
+    width = max(len(r['block']) for r in rows)
+    lines = [f'{"Block":<{width}}  {"Seconds":>8}  Tests']
+    defined = ran = passed = 0
+    for row in rows:
+        tests = row.get('tests') or {}
+        defined += tests.get('defined', 0)
+        ran += tests.get('ran', 0)
+        passed += tests.get('passed', 0)
+        if tests.get('ran'):
+            text = f'{tests["passed"]}/{tests["ran"]} passed'
+        elif tests.get('defined'):
+            text = f'{tests["defined"]} not run'
+        else:
+            text = '-'
+        seconds = '' if row.get('seconds') is None else f'{row["seconds"]:.2f}'
+        if row.get('failed'):
+            text += ' (failed)' if text != '-' else 'failed'
+        lines.append(f'{row["block"]:<{width}}  {seconds:>8}  {text}')
+    blocks = len(rows)
+    if ran:
+        outcome = 'all passed' if passed == ran else f'{ran - passed} failed'
+        lines.append(f'{ran} tests in {blocks} blocks, {outcome}.')
+    if defined > ran and not run_tests:
+        lines.append(f'{defined - ran} block tests were not run: run with --test to run them.')
+    print('\n'.join(lines))
 
 
 def _block_tracking(tracking: Optional[Dict], block_uuid: str):
@@ -581,6 +625,7 @@ async def execute_in_stages(
     pending = [list(stage) for stage in fusion_plan(pipeline)]
     limit = stage_limit(pipeline, max_parallel)
     tracking = await asyncio.to_thread(cli_tracking, pipeline, execution_partition)
+    summary: List[Dict] = []
     done: set = set()
     running: Dict = {}
     failures: List = []
@@ -601,7 +646,7 @@ async def execute_in_stages(
                     break
                 task = asyncio.ensure_future(asyncio.to_thread(
                     _run_stage_in_process, pipeline, stage, global_vars, run_tests,
-                    update_status, execution_partition, tracking,
+                    update_status, execution_partition, tracking, summary,
                 ))
                 running[task] = stage
                 pending.remove(stage)
@@ -620,6 +665,7 @@ async def execute_in_stages(
                 failures.append((stage, error))
             else:
                 done.update(stage)
+    print_run_summary(summary, run_tests)
     if failures:
         error = failures[0][1]
         for stage, other in failures[1:]:
