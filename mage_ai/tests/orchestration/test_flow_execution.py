@@ -611,6 +611,57 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(PipelineRun.query.filter_by(pipeline_schedule_id=schedule.id).count(), 1)
 
     @freeze_time('2026-09-10 12:00:10')
+    def test_an_empty_cron_leaves_other_triggers_running(self):
+        """An active TIME trigger saved with "" broke each scheduler pass (upstream #5769)."""
+        self.branched_flow()
+        start = datetime(2026, 9, 10, 11, 0, tzinfo=timezone.utc)
+        empty = PipelineSchedule.create(
+            name='empty', pipeline_uuid=self.pipeline.uuid, schedule_type=ScheduleType.TIME,
+            status=ScheduleStatus.ACTIVE, schedule_interval='', start_time=start,
+        )
+        valid = PipelineSchedule.create(
+            name='minute', pipeline_uuid=self.pipeline.uuid, schedule_type=ScheduleType.TIME,
+            status=ScheduleStatus.ACTIVE, schedule_interval='* * * * *', start_time=start,
+        )
+
+        with patch.object(PipelineScheduler, 'schedule'):
+            schedule_all()
+
+        self.assertIsNone(empty.schedule_interval)
+        self.assertEqual(PipelineRun.query.filter_by(pipeline_schedule_id=empty.id).count(), 0)
+        self.assertEqual(PipelineRun.query.filter_by(pipeline_schedule_id=valid.id).count(), 1)
+
+    @freeze_time('2026-09-10 12:00:10')
+    def test_a_stored_empty_cron_and_a_failing_trigger_leave_the_others_running(self):
+        self.branched_flow()
+        start = datetime(2026, 9, 10, 11, 0, tzinfo=timezone.utc)
+        schedules = [
+            PipelineSchedule.create(
+                name=name, pipeline_uuid=self.pipeline.uuid, schedule_type=ScheduleType.TIME,
+                status=ScheduleStatus.ACTIVE, schedule_interval='* * * * *', start_time=start,
+            )
+            for name in ('stored_empty', 'failing', 'valid')
+        ]
+        # Saved before empty crons were refused: the validator does not run on this update.
+        PipelineSchedule.query.filter_by(id=schedules[0].id).update({'schedule_interval': ''})
+        PipelineSchedule.query.session.commit()
+        should_schedule = PipelineSchedule.should_schedule
+
+        def failing_for_one(schedule, *args, **kwargs):
+            if schedule.name == 'failing':
+                raise RuntimeError('broken trigger')
+            return should_schedule(schedule, *args, **kwargs)
+
+        with patch.object(PipelineScheduler, 'schedule'), \
+                patch.object(PipelineSchedule, 'should_schedule', failing_for_one):
+            schedule_all()
+
+        counts = [
+            PipelineRun.query.filter_by(pipeline_schedule_id=s.id).count() for s in schedules
+        ]
+        self.assertEqual(counts, [0, 0, 1])
+
+    @freeze_time('2026-09-10 12:00:10')
     def test_time_trigger_runs_once_per_cron_interval(self):
         self.branched_flow()
         schedule = PipelineSchedule.create(

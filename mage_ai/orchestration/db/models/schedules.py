@@ -240,6 +240,9 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
 
     @validates('schedule_interval')
     def validate_schedule_interval(self, key, schedule_interval):
+        # An empty cron is no schedule: "" was stored and broke the scheduler (#5769).
+        if isinstance(schedule_interval, str):
+            schedule_interval = schedule_interval.strip() or None
         if schedule_interval and schedule_interval not in [e.value for e in ScheduleInterval]:
             if not croniter.is_valid(schedule_interval):
                 names = ', '.join(e.value for e in ScheduleInterval)
@@ -457,7 +460,8 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
         now = datetime.now(timezone.utc)
         current_execution_date = None
 
-        if self.schedule_interval is None:
+        # Also "", saved before empty crons were refused.
+        if not self.schedule_interval:
             return None
 
         if (

@@ -2368,6 +2368,14 @@ def schedule_all():
                     pipeline_runs_excluded_by_limit.extend(
                         initial_pipeline_runs[pipeline_run_quota:]
                     )
+            except Exception:
+                # One trigger that fails, such as one saved with an invalid cron, stopped the
+                # whole pass: no other trigger ran (upstream #5769).
+                logger.exception(
+                    f'Failed to schedule trigger {pipeline_schedule.id} '
+                    f'({pipeline_schedule.name}) of pipeline {pipeline_uuid}; '
+                    'the other triggers continue.',
+                )
             finally:
                 lock.release_lock(lock_key)
 

@@ -115,6 +115,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - MySQL and Snowflake SQL blocks with query preprocessing off run every statement of the
   block and return the last one's rows. MySQL failed with "Commands out of sync" and
   Snowflake with "Actual statement count did not match" (upstream #5695, #5696).
+- An active schedule trigger saved with an empty cron stopped every scheduler pass, so no
+  other trigger ran (upstream #5769). An empty cron is now no schedule, and a trigger that
+  fails to schedule is logged while the others run.
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).
