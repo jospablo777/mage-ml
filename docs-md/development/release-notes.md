@@ -77,6 +77,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - IBM Db2: io class, templates and SQL blocks (the `db2` extra), values exact.
 - IBM MQ sources and sinks in streams; IBM Event Streams from its service credentials.
 
+### Pipeline logs
+
+- A search box on the logs page, and `text` in the logs API, return only the log lines that
+  contain the text, over up to 200 log files (upstream #6105).
+
 ### Fixes
 
 - Restarted streams: sinks named objects and deduplication keys by position, and only

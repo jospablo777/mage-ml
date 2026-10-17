@@ -20,6 +20,20 @@ from mage_ai.orchestration.db.models.schedules import (
 from mage_ai.server.logger import Logger
 
 MAX_LOG_FILES = 20
+# A text search reads more files, and returns only those with a matching line.
+MAX_SEARCH_LOG_FILES = 200
+
+
+def matching_lines(logs_item: Dict, text: str) -> Dict:
+    """The log file with only the lines that contain text, ignoring case, or None."""
+    needle = text.lower()
+    lines = [
+        line for line in (logs_item.get('content') or '').splitlines()
+        if needle in line.lower()
+    ]
+    if not lines:
+        return None
+    return dict(logs_item, content='\n'.join(lines))
 server_logger = Logger().new_server_logger(__name__)
 
 
@@ -45,6 +59,12 @@ class LogResource(GenericResource):
     @safe_db_query
     async def __pipeline_logs(self, pipeline: Pipeline, query_arg, meta) -> List[Dict]:
         pipeline_uuid = pipeline.uuid
+        # Text search over the logs (upstream #6105).
+        text = ((query_arg.get('text') or [None])[0] or '').strip()
+        max_files = MAX_SEARCH_LOG_FILES if text else MAX_LOG_FILES
+
+        def keep(logs_item: Dict):
+            return matching_lines(logs_item, text) if text else logs_item
 
         start_timestamp, end_timestamp = get_query_timestamps(query_arg)
         pipeline_schedule_ids = query_arg.get('pipeline_schedule_id[]', [None])
@@ -153,9 +173,11 @@ class LogResource(GenericResource):
                 for logs_item in logs:
                     pipeline_log_file_path = logs_item.get('path')
                     if pipeline_log_file_path not in processed_pipeline_run_log_files:
-                        pipeline_run_logs.append(logs_item)
                         processed_pipeline_run_log_files.add(pipeline_log_file_path)
-                if len(pipeline_run_logs) >= MAX_LOG_FILES:
+                        logs_item = keep(logs_item)
+                        if logs_item:
+                            pipeline_run_logs.append(logs_item)
+                if len(pipeline_run_logs) >= max_files:
                     break
 
         @safe_db_query
@@ -243,10 +265,12 @@ class LogResource(GenericResource):
             logs = await model2.logs_async(repo_path=pipeline.repo_path if pipeline else None)
             block_log_file_path = logs.get('path')
             if block_log_file_path not in processed_block_run_log_files:
-                block_run_logs.append(logs)
                 processed_block_run_log_files.add(block_log_file_path)
+                logs = keep(logs)
+                if logs:
+                    block_run_logs.append(logs)
 
-            if len(block_run_logs) >= MAX_LOG_FILES:
+            if len(block_run_logs) >= max_files:
                 break
 
         for block in pipeline.blocks_by_uuid.values():
@@ -272,7 +296,8 @@ class LogResource(GenericResource):
 
                 return should_add
 
-            block_run_logs += await logger.get_logs_in_subpartition_async(filter_func=__filter)
+            edit_logs = await logger.get_logs_in_subpartition_async(filter_func=__filter)
+            block_run_logs += [item for item in (keep(i) for i in edit_logs) if item]
 
         return [
             {

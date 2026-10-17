@@ -80,6 +80,8 @@ function LogToolbar({
   const router = useRouter();
   const { pipeline: pipelineUUID }: any = router.query;
   const q = queryFromUrl();
+  // Text search over the logs: the server returns the matching lines (upstream #6105).
+  const [searchText, setSearchText] = useState<string>(q?.text || '');
   const qPrev = usePrevious(q);
   useEffect(() => {
     if (!isEqual(q, qPrev)) {
@@ -160,6 +162,26 @@ function LogToolbar({
         >
           Load newer logs
         </KeyboardShortcutButton>
+
+        <Spacing mr={2} />
+
+        <TextInput
+          compact
+          defaultColor
+          onChange={e => setSearchText(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              resetLogScrollPosition();
+              goToWithQuery({
+                text: searchText.trim() || null,
+                ...SHARED_LOG_QUERY_PARAMS,
+              });
+            }
+          }}
+          paddingRight={0}
+          placeholder="Search logs, press Enter"
+          value={searchText}
+        />
 
         <Spacing mr={2} />
 

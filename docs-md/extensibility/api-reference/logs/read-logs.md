@@ -26,6 +26,14 @@ Read logs on or after a specified timestamp.
 
 Example: `1677648116`
 
+**`text`** (string)
+
+Return only the log lines that contain this text, ignoring case. Up to 200 log files are
+searched, and files without a matching line are left out. The logs page's search box
+sets it.
+
+Example: `timeout`
+
 **Request**
 
 ```curl

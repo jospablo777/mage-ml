@@ -37,6 +37,7 @@ export type FilterQueryType = {
   [FilterQueryParamEnum.PIPELINE_SCHEDULE_ID]?: string[];
   end_timestamp?: string;
   start_timestamp?: string;
+  text?: string;
 };
 
 type FilterProps = {

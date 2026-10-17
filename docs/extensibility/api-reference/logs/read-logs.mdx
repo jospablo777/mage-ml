@@ -28,6 +28,14 @@ api: "GET /api/pipelines/:pipeline_uuid/logs"
   Example: `1677648116`
 </ParamField>
 
+<ParamField query="text" type="string">
+  Return only the log lines that contain this text, ignoring case. Up to 200 log files are
+  searched, and files without a matching line are left out. The logs page's search box
+  sets it.
+
+  Example: `timeout`
+</ParamField>
+
 <RequestExample>
 ```curl cURL
 curl --request GET \
