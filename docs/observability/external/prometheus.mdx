@@ -15,3 +15,24 @@ built from the repository's Dockerfile includes.
 
 When enabled, MageML publishes metrics for the HTTP server (Tornado) as well as for
 the Python runtime. The /metrics route will be updated on-demand to respond to scrape requests.
+
+## Pipeline and block runs
+
+Each scrape reads the project's runs from MageML's database, so runs that ran in the
+scheduler, in workers or on other replicas count.
+
+| Metric | Labels | Value |
+| --- | --- | --- |
+| `mage_pipeline_runs` | `pipeline`, `status` | Pipeline runs by status |
+| `mage_block_runs` | `pipeline`, `block`, `status` | Block runs by status |
+| `mage_pipeline_run_last_duration_seconds` | `pipeline` | Seconds the last completed run took |
+| `mage_pipeline_run_last_success_timestamp_seconds` | `pipeline` | When the last completed run ended (Unix time) |
+
+An alert on a pipeline that stopped succeeding:
+
+```yaml
+- alert: PipelineNotSucceeding
+  expr: time() - mage_pipeline_run_last_success_timestamp_seconds{pipeline="orders"} > 2 * 3600
+```
+
+Exported services publish their own metrics on their `/metrics` route.

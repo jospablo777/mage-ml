@@ -493,6 +493,10 @@ def make_app(
         reader = PrometheusMetricReader()
         provider = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(provider)
+        # Pipeline and block runs, from the database at each scrape.
+        from mage_ai.server import run_metrics
+
+        run_metrics.register()
         routes += [(r'/metrics', PrometheusMetricsHandler)]
 
     if update_routes:
