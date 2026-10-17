@@ -71,13 +71,22 @@ pipeline's folder. Links to images on the web work too.
 When the server has [Quarto](https://quarto.org) installed (or `MAGE_QUARTO` set to its
 path), MageML renders `README.qmd` with it into one page with its images embedded. Code
 cells are shown, not run. The rendered page opens in a sandboxed frame that cannot run
-scripts, and renders are cached until the document or its images change.
+scripts, and renders are cached until a file of the pipeline folder or the Quarto version
+changes.
+
+The render reads the files of the pipeline folder, so includes (`{{< include _part.qmd >}}`),
+stylesheets, bibliographies and a `_quarto.yml` there work. Files outside the pipeline
+folder, such as a project-level `_quarto.yml`, are not read. An error names the pipeline's
+files. When Quarto's own cache folder is not writable (a common macOS case), MageML renders
+with a private one.
 
 Without Quarto, a `.qmd` file shows as Markdown, which covers most documents.
 
 ## Limits
 
-- One README per pipeline, up to 1 MB.
+- One README per pipeline, up to 1 MB. With two (`README.md` and `README.qmd`), the
+  Markdown one shows; the API lists the other under `ignored`, and saving one format
+  removes the others.
 - Rendering Quarto stops after 120 seconds.
 - The documentation is plain files: edit them in any editor or in Git, and MageML shows
   the change.
