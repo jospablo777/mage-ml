@@ -2,6 +2,7 @@ import os
 from typing import List, Union
 
 import pandas as pd
+import polars as pl
 from pandas import DataFrame
 
 from mage_ai.io.base import BaseFile, FileFormat
@@ -39,17 +40,32 @@ class FileIO(BaseFile):
 
                 return self._read(filepath, format, **kwargs)
 
-            file_paths = []
-            for file_directory in file_directories:
-                file_paths += files_in_path(file_directory)
+            # Each file is read in its own format unless one is given; it reused the first
+            # file's (upstream #6160). Hidden and _-prefixed files, such as _SUCCESS and
+            # .crc files next to Spark output, are skipped, as Arrow datasets skip them.
+            file_paths = sorted(
+                fp
+                for file_directory in file_directories
+                for fp in files_in_path(file_directory)
+                if not os.path.basename(fp).startswith(('.', '_'))
+            )
+            if not file_paths:
+                raise FileNotFoundError(
+                    f'No data files in {", ".join(map(str, file_directories))}.'
+                )
 
             dfs = []
             for fp in file_paths:
-                if format is None:
-                    format = self._get_file_format(fp)
-                df = self._read(fp, format, **kwargs)
-                dfs.append(df)
+                try:
+                    file_format = format or self._get_file_format(fp)
+                except ValueError as error:
+                    raise ValueError(
+                        f'{fp}: {error}. Pass format= to read every file in one format.'
+                    ) from error
+                dfs.append(self._read(fp, file_format, **kwargs))
 
+            if all(isinstance(df, pl.DataFrame) for df in dfs):
+                return pl.concat(dfs, how='diagonal_relaxed')
             return pd.concat(dfs, axis=0, ignore_index=True)
 
     def export(

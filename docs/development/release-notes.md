@@ -87,6 +87,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Object columns with missing values keep their values between blocks: ints came back as
   floats (integers past 2**53 lost digits, also in Rust blocks reading the file), and None
   as NaN or NaT, in a column of another dtype (upstream #5913).
+- `FileIO.load(file_directories=...)` reads each file in its own format (it used the first
+  file's), in name order, skips hidden and `_` files such as `_SUCCESS`, and concatenates
+  Polars frames with Polars (upstream #6160).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

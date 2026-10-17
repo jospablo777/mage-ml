@@ -41,3 +41,36 @@ class FileExportTest(TestCase):
 
         with open(path) as f:
             self.assertIn('<id>2</id>', f.read())
+
+
+class FileDirectoriesLoadTest(TestCase):
+    def directory(self) -> str:
+        directory = tempfile.mkdtemp()
+        pd.DataFrame({'id': [1, 2]}).to_csv(os.path.join(directory, 'a.csv'), index=False)
+        pd.DataFrame({'id': [3]}).to_parquet(os.path.join(directory, 'b.parquet'))
+        open(os.path.join(directory, '_SUCCESS'), 'w').close()
+        open(os.path.join(directory, '.part-0.crc'), 'w').close()
+        return directory
+
+    def test_each_file_is_read_in_its_own_format(self):
+        """The first file's format was used for every file (upstream #6160)."""
+        df = FileIO(verbose=False).load(file_directories=[self.directory()])
+
+        self.assertEqual(df['id'].tolist(), [1, 2, 3])
+
+    def test_polars_frames_are_concatenated_with_polars(self):
+        df = FileIO(verbose=False).load(file_directories=[self.directory()], polars=True)
+
+        self.assertIsInstance(df, pl.DataFrame)
+        self.assertEqual(df['id'].to_list(), [1, 2, 3])
+
+    def test_an_unknown_file_is_named(self):
+        directory = self.directory()
+        open(os.path.join(directory, 'notes.txt'), 'w').close()
+
+        with self.assertRaisesRegex(ValueError, 'notes.txt'):
+            FileIO(verbose=False).load(file_directories=[directory])
+
+    def test_an_empty_directory_says_so(self):
+        with self.assertRaisesRegex(FileNotFoundError, 'No data files'):
+            FileIO(verbose=False).load(file_directories=[tempfile.mkdtemp()])
