@@ -79,6 +79,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Blocks
 
+- A block that returns a matplotlib figure, a PIL image or PNG or JPEG bytes shows the image
+  in the editor (upstream #6073).
 - A block can be disabled in its settings (`configuration.disabled`): runs skip it and its
   downstream blocks, as a false condition does (upstream #5470).
 - R blocks read MageML secrets with `get_secret_value("name")`; only the secrets the code

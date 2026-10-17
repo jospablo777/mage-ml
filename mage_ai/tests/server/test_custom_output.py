@@ -33,6 +33,12 @@ class CustomOutputTemplateTests(TestCase):
         self.assertNotIn('pd.__version__', template)
         self.assertIn('ignore_setting_with_copy_warning()', template)
 
+    def test_image_outputs_are_shown_as_images(self):
+        # A returned figure or image showed as text (upstream #6073).
+        template = read_template()
+        self.assertIn('image_png_base64(_internal_output_return)', template)
+        self.assertIn('type=DataType.IMAGE_PNG', template)
+
     def test_outputs_are_shown_with_the_display_encoder(self):
         # encode_complex returned a user's object unchanged: "Circular reference detected".
         self.assertIn('encode_complex_for_display as encode_complex', read_template())

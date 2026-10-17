@@ -18,6 +18,7 @@ def __custom_output():
     from mage_ai.data_preparation.models.variable import VariableType
     from mage_ai.presenters.utils import render_output_tags
     from mage_ai.server.kernel_output_parser import DataType
+    from mage_ai.shared.images import image_png_base64
     from mage_ai.shared.pandas_utils import ignore_setting_with_copy_warning
 
     # Shows other objects, such as a user's class, as text (upstream #5850).
@@ -109,6 +110,16 @@ def __custom_output():
             for list_of_items in _internal_output_return:
                 list_of_lists.append([encode_complex(item) for item in list_of_items])
             _internal_output_return = list_of_lists
+
+    # Figures, PIL images and PNG or JPEG bytes show as images (upstream #6073).
+    image = None if is_dynamic or is_dynamic_child else image_png_base64(_internal_output_return)
+    if image:
+        _json_string = simplejson.dumps(dict(
+            text_data=image,
+            type=DataType.IMAGE_PNG,
+            variable_uuid='output_0',
+        ))
+        return print(f'[{INTERNAL_PREFIX}]{_json_string}')
 
     if VariableType.MATRIX_SPARSE == variable_type:
         if basic_iterable:

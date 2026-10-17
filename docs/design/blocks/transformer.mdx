@@ -88,6 +88,22 @@ async def load(**kwargs):
     return [item for page in pages for item in page.json()]
 ```
 
+## Images
+
+A block that returns a matplotlib figure, a PIL image or PNG or JPEG bytes shows the image
+under the block in the editor:
+
+```python
+import matplotlib.pyplot as plt
+
+
+@transformer
+def plot(df, **kwargs):
+    figure, axes = plt.subplots()
+    df['amount'].hist(ax=axes)
+    return figure
+```
+
 ## Handling column renames in data integration pipeline
 
 Since data passed to transform blocks is a pandas DataFrame, many operations are available on each row of your data.
