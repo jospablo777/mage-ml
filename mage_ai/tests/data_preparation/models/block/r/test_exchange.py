@@ -5,6 +5,7 @@ import math
 import os
 import tempfile
 import uuid
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ import polars as pl
 import pyarrow as pa
 
 from mage_ai.data_preparation.models.block.r import exchange
-from mage_ai.tests.base_test import TestCase
+from mage_ai.tests.base_test import DBTestCase, TestCase
 
 
 class ExchangeTestCase(TestCase):
@@ -298,3 +299,23 @@ class ReadOutputTest(ExchangeTestCase):
         self.assertEqual(exchange.read_output(self.job_dir), (False, None))
         self.write_output(kind='none')
         self.assertEqual(exchange.read_output(self.job_dir), (False, None))
+
+
+class SecretValuesTest(DBTestCase):
+    @patch('mage_ai.data_preparation.shared.secrets.get_data_dir')
+    def test_only_the_secrets_the_code_names_are_passed(self, mock_data_dir):
+        """R blocks had no get_secret_value (upstream #4265)."""
+        import os
+
+        from mage_ai.data_preparation.models.block.r.exchange import secret_values
+        from mage_ai.data_preparation.shared.secrets import create_secret
+
+        mock_data_dir.return_value = os.path.join(self.repo_path, 'data')
+        create_secret('api_token', 's3cr3t')
+        create_secret('unrelated', 'keep out')
+
+        code = 'transformer(function(...) get_secret_value("api_token"))\n'
+
+        self.assertEqual(secret_values(code), {'api_token': 's3cr3t'})
+        self.assertEqual(secret_values("get_secret_value(name = 'missing')"), {})
+        self.assertEqual(secret_values('transformer(function(...) 1)'), {})

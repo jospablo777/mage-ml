@@ -28,6 +28,7 @@ arguments of its function. Data frames arrive as tibbles.
 \item \code{globals.json}: the pipeline's variables, which the block reads from
 \code{global_vars}.
 \item \code{io_config.json}: the database settings that \code{\link[=db_connect]{db_connect()}} uses.
+\item \code{secrets.json}: the secrets the block reads with \code{\link[=get_secret_value]{get_secret_value()}}.
 \item \code{block.R}: the block's code, whose function and tests are marked with
 \link{annotations}, such as \verb{#* @transformer} and \verb{#* @test}.
 }

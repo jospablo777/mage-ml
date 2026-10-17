@@ -79,6 +79,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Blocks
 
+- R blocks read MageML secrets with `get_secret_value("name")`; only the secrets the code
+  names are passed to R (upstream #4265).
 - Block functions can be `async def`; they ran nothing and returned the coroutine
   (upstream #5164).
 

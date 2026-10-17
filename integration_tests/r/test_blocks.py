@@ -376,3 +376,25 @@ def test_custom_blocks():
         input_vars=[pd.DataFrame({'x': [1, 2, 3]})],
     )
     assert run.outputs[0]['rows'].tolist() == [3]
+
+
+def test_an_r_block_reads_the_secrets_it_names(monkeypatch):
+    """R blocks had no get_secret_value (upstream #4265)."""
+    from mage_ai.data_preparation.models.block.r import exchange
+
+    seen = []
+
+    def secret_values(code):
+        seen.append(code)
+        return {'api_token': 's3cr3t'}
+
+    monkeypatch.setattr(exchange, 'secret_values', secret_values)
+
+    frame = output(
+        'transformer(function(df_1, ...) '
+        'data.frame(token = mageml::get_secret_value("api_token")))',
+        pd.DataFrame({'a': [1]}),
+    )
+
+    assert frame['token'].tolist() == ['s3cr3t']
+    assert 'get_secret_value("api_token")' in seen[0]

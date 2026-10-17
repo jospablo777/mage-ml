@@ -105,6 +105,10 @@ execute_block <- function(job_dir) {
   state$io_config <- if (file.exists(config_path)) {
     read_json("io_config.json", simplifyVector = TRUE)
   }
+  secrets_path <- file.path(job_dir, "secrets.json")
+  state$secrets <- if (file.exists(secrets_path)) {
+    read_json("secrets.json", simplifyVector = TRUE)
+  }
   state$globals <- globals
   state$block_type <- block_type
   state$block_function <- NULL
@@ -215,6 +219,10 @@ run_chain <- function(job_dir, quit_on_error = TRUE) {
           state$io_config <- if (file.exists(config_path)) {
             jsonlite::read_json(config_path, simplifyVector = TRUE)
           }
+          secrets_path <- file.path(job_dir, "secrets.json")
+          state$secrets <- if (file.exists(secrets_path)) {
+            jsonlite::read_json(secrets_path, simplifyVector = TRUE)
+          }
           state$globals <- globals
           tests <- list()
           timings <- list()
@@ -324,6 +332,7 @@ write_lines <- function(lines, path) {
 #' * `globals.json`: the pipeline's variables, which the block reads from
 #'   `global_vars`.
 #' * `io_config.json`: the database settings that [db_connect()] uses.
+#' * `secrets.json`: the secrets the block reads with [get_secret_value()].
 #' * `block.R`: the block's code, whose function and tests are marked with
 #'   [annotations], such as `#* @transformer` and `#* @test`.
 #'

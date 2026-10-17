@@ -105,11 +105,13 @@ def execute_r_chain(
         _write_json(job_dir, 'globals.json', values or {})
         chain = []
         databases = {}
+        secrets = {}
         for position, step in enumerate(steps):
             name = f'block_{position + 1}.R'
             with open(os.path.join(job_dir, name), 'w', encoding='utf-8') as file:
                 file.write(step['code'])
             databases.update(exchange.database_settings(step['code'], repo_path) or {})
+            secrets.update(exchange.secret_values(step['code']))
             chain.append(dict(
                 block_uuid=step['block_uuid'],
                 block_type=str(step['block_type']),
@@ -126,6 +128,8 @@ def execute_r_chain(
         ))
         if databases:
             _write_json(job_dir, 'io_config.json', databases, private=True)
+        if secrets:
+            _write_json(job_dir, 'secrets.json', secrets, private=True)
 
         env = dict(os.environ)
         env.pop('MAGE_R_LIBRARY', None)
@@ -211,8 +215,11 @@ def execute_r_code(
         with open(os.path.join(job_dir, 'block.R'), 'w', encoding='utf-8') as file:
             file.write(code)
         databases = exchange.database_settings(code, repo_path)
+        secrets = exchange.secret_values(code)
         if databases:
             _write_json(job_dir, 'io_config.json', databases, private=True)
+        if secrets:
+            _write_json(job_dir, 'secrets.json', secrets, private=True)
 
         env = dict(os.environ)
         env.pop('MAGE_R_LIBRARY', None)

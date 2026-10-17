@@ -267,10 +267,28 @@ the block runs.
 
 ### Secrets
 
-Keep credentials in `io_config.yaml` with `env_var()`, `mage_secret_var()` or
-`aws_secret_var()`; Mage resolves them before passing the settings to R. See
-[Secrets](../../development/variables/secrets.md). The R process inherits Mage's environment, so
-`Sys.getenv("API_TOKEN")` reads an environment variable.
+`get_secret_value()` reads a secret saved in MageML's secrets, as in Python blocks:
+
+```r
+#* @data_loader
+load <- function(...) {
+  token <- get_secret_value("api_token")
+  httr2::request("https://api.example.com/items") |>
+    httr2::req_auth_bearer_token(token) |>
+    httr2::req_perform() |>
+    httr2::resp_body_json(simplifyVector = TRUE)
+}
+```
+
+Mage passes only the secrets whose names the block's code writes as text in the call, in a
+file readable by its owner only and removed after the block runs; a name built at run time
+is not passed. In an exported service, read secrets from the service's environment with
+`Sys.getenv()`.
+
+Database settings keep their credentials in `io_config.yaml` with `env_var()`,
+`mage_secret_var()` or `aws_secret_var()`; Mage resolves them before passing the settings
+to R. See [Secrets](../../development/variables/secrets.md). The R process inherits Mage's
+environment, so `Sys.getenv("API_TOKEN")` reads an environment variable.
 
 ## Packages
 

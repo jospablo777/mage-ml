@@ -366,6 +366,27 @@ IO_CONFIG_FUNCTIONS = re.compile(
 STRING_LITERALS = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
 
 
+SECRET_CALLS = re.compile(r"""get_secret_value\(\s*(?:name\s*=\s*)?["']([^"']+)["']""")
+
+
+def secret_values(code: str) -> Dict[str, str]:
+    """
+    The secrets that code reads with mageml's get_secret_value("name"): only those, so a
+    block never receives the project's other secrets (upstream #4265).
+    """
+    names = sorted(set(SECRET_CALLS.findall(code)))
+    if not names:
+        return {}
+    from mage_ai.data_preparation.shared.secrets import get_secret_value
+
+    values = {}
+    for name in names:
+        value = get_secret_value(name, suppress_warning=True)
+        if value is not None:
+            values[name] = value
+    return values
+
+
 def database_settings(code: str, repo_path: Optional[str]) -> Dict[str, Dict]:
     """
     The database and AWS settings of the io_config.yaml profiles that code names, for
