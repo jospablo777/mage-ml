@@ -26,6 +26,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `_source: _doc` keeps the old shape for an existing index.
 - **Pipeline `metadata.yaml` no longer stores block statuses or `variables_dir`**; statuses
   are kept beside the pipeline's outputs on each machine.
+- **A block downstream of several children of one dynamic block pairs their items**: with
+  `B` and `C` both downstream of dynamic `A`, `D` runs once per item with `B:i` and `C:i`. It
+  ran once per combination, n * n times (upstream #5980). Dynamic upstream blocks from
+  different dynamic blocks still make every combination.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
 

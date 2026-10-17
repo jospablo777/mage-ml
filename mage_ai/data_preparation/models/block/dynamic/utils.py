@@ -511,6 +511,41 @@ def transform_output_for_display_dynamic_child(
     )
 
 
+def dynamic_origin(block) -> Optional[str]:
+    """
+    The dynamic block whose items index this block's outputs: itself for a dynamic block,
+    and for a dynamic child the origin its dynamic upstream blocks share, or None.
+    """
+    if is_dynamic_block(block):
+        return block.uuid
+    if not is_dynamic_block_child(block):
+        return None
+    origins = {
+        dynamic_origin(upstream)
+        for upstream in block.upstream_blocks
+        if (is_dynamic_block(upstream) or is_dynamic_block_child(upstream))
+        and not should_reduce_output(upstream)
+    }
+    return origins.pop() if len(origins) == 1 else None
+
+
+def pairs_dynamic_upstreams(block) -> bool:
+    """
+    Whether the block's dynamic upstream blocks pair item by item (B:i with C:i) instead of
+    making every combination: they come from one dynamic block (upstream #5980).
+    """
+    if getattr(block, 'is_dynamic_v2', False):
+        return False
+    upstreams = [
+        upstream
+        for upstream in block.upstream_blocks
+        if (is_dynamic_block(upstream) or is_dynamic_block_child(upstream))
+        and not should_reduce_output(upstream)
+    ]
+    origins = {dynamic_origin(upstream) for upstream in upstreams}
+    return len(upstreams) >= 2 and len(origins) == 1 and None not in origins
+
+
 def create_combinations(combinations: List[Any]) -> List[Any]:
     if not combinations:
         return []
@@ -611,6 +646,18 @@ def build_combinations_for_dynamic_child(
 
     # [[0], [1], [2]]
     combinations = create_combinations(dynamic_counts)
+
+    # Dynamic upstream blocks fed by the same dynamic block pair item by item: B:i with C:i,
+    # instead of n * n children (upstream #5980).
+    if pairs_dynamic_upstreams(block):
+        lengths = {
+            len(dynamic_counts[idx])
+            for idx, upstream_block in enumerate(block.upstream_blocks)
+            if (is_dynamic_block(upstream_block) or is_dynamic_block_child(upstream_block))
+            and not should_reduce_output(upstream_block)
+        }
+        if len(lengths) == 1:
+            combinations = [[index] for index in range(lengths.pop())]
 
     settings = []
     for dynamic_block_index, _arr in enumerate(combinations):

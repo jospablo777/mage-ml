@@ -281,6 +281,12 @@ dynamically created:
 → compute_engagement_score:for_user_3
 ```
 
+A block downstream of two dynamically created blocks of the same dynamic block, such as
+`clean_column_names` and `compute_engagement_score` together, is created once per item:
+the block for user 1 gets `clean_column_names:for_user_1` and
+`compute_engagement_score:for_user_1`. Upstream blocks created from different dynamic blocks
+make one block per combination of their items.
+
 The data that is passed into each of these downstream blocks
 (e.g. `clean_column_names`, `compute_engagement_score`) will come from its upstream block
 (e.g. `anonymize_user_data:for_user_1`, `anonymize_user_data:for_user_2`, `anonymize_user_data:for_user_3`).

@@ -546,6 +546,45 @@ class FlowExecutionTest(DBTestCase):
 
         self.assertFalse(any(':' in b.block_uuid for b in run.block_runs))
 
+    def test_children_of_one_dynamic_block_pair_item_by_item(self):
+        """Upstream #5980: a block fed by B and C, both children of A, got n * n children."""
+        load = self.block('dynamic', 'data_loader', '''
+            @data_loader
+            def load(**kwargs):
+                return [[1, 2, 3], [{'block_uuid': str(i)} for i in range(3)]]
+        ''', configuration={'dynamic': True})
+        tens = self.block('tens', 'transformer', '''
+            @transformer
+            def transform(value, **kwargs):
+                return value * 10
+        ''', upstream=[load])
+        hundreds = self.block('hundreds', 'transformer', '''
+            @transformer
+            def transform(value, **kwargs):
+                return value * 100
+        ''', upstream=[load])
+        pair = self.block('pair', 'transformer', '''
+            @transformer
+            def transform(tens, hundreds, **kwargs):
+                return dict(tens=tens, hundreds=hundreds)
+        ''', upstream=[tens, hundreds], configuration={'reduce_output': True})
+        self.block('collect', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            def export(pairs, **kwargs):
+                Path(kwargs['output_path']).write_text(
+                    repr(sorted((p['tens'], p['hundreds']) for p in pairs)),
+                )
+        ''', upstream=[pair])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        children = [b for b in run.block_runs if b.block_uuid.startswith(f'{pair.uuid}:')]
+        self.assertEqual(len(children), 3)
+        self.assertEqual(self.output.read_text(), '[(10, 100), (20, 200), (30, 300)]')
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()

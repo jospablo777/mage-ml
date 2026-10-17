@@ -634,6 +634,7 @@ def fetch_input_variables_for_dynamic_upstream_blocks(
     from mage_ai.data_preparation.models.block.dynamic.utils import (
         is_dynamic_block,
         is_dynamic_block_child,
+        pairs_dynamic_upstreams,
         should_reduce_output,
     )
 
@@ -643,6 +644,10 @@ def fetch_input_variables_for_dynamic_upstream_blocks(
     dynamic_upstream_item_counts = dynamic_upstream_block_item_counts(
         block, partition=execution_partition
     )
+    if pairs_dynamic_upstreams(block):
+        # Child i takes item i of each upstream, as build_combinations_for_dynamic_child
+        # made one child per item: a step of 1 for every upstream.
+        dynamic_upstream_item_counts = [1 for _ in dynamic_upstream_item_counts]
 
     for upstream_position_index, upstream_block in enumerate(block.upstream_blocks):
         if block.is_dynamic_v2:
