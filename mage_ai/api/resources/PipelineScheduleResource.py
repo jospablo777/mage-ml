@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 import pytz
-from sqlalchemy import case
+from sqlalchemy import case, or_
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.expression import func
 
@@ -117,6 +117,15 @@ class PipelineScheduleResource(DatabaseResource):
             query = query.filter(
                 PipelineSchedule.id.in_([ta.taggable_id for ta in tag_associations]),
             )
+
+        # Triggers whose name or pipeline contains the text, ignoring case (upstream #5697).
+        search = ((query_arg.get('search') or [None])[0] or '').strip()
+        if search:
+            pattern = f'%{search}%'
+            query = query.filter(or_(
+                PipelineSchedule.name.ilike(pattern),
+                PipelineSchedule.pipeline_uuid.ilike(pattern),
+            ))
 
         if schedule_types:
             query = query.filter(

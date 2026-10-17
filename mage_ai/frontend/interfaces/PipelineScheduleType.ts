@@ -96,6 +96,7 @@ export interface PipelineScheduleReqQueryParamsType {
   _limit?: number;
   _offset?: number;
   order_by?: SortQueryParamEnum;
+  search?: string;
 }
 
 export default interface PipelineScheduleType {

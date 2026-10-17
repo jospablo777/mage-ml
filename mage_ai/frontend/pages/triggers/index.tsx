@@ -10,6 +10,7 @@ import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
+import TextInput from '@oracle/elements/Inputs/TextInput';
 import TriggersTable from '@components/Triggers/Table';
 import api from '@api';
 import {
@@ -37,10 +38,13 @@ function TriggerListPage() {
     [project?.features],
   );
 
+  // Triggers whose name or pipeline contains the text (upstream #5697).
+  const [searchText, setSearchText] = useState<string>(q?.search || '');
   const pipelineSchedulesRequestQuery: PipelineScheduleReqQueryParamsType = {
     _limit: ROW_LIMIT,
     _offset: page * ROW_LIMIT,
     order_by: orderByQuery,
+    ...(q?.search ? { search: q.search } : {}),
   };
 
   const {
@@ -97,6 +101,22 @@ function TriggerListPage() {
               </option>
             ))}
           </Select>
+          <Spacing mr={2} />
+          <TextInput
+            compact
+            defaultColor
+            onChange={e => setSearchText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                goToWithQuery({
+                  page: 0,
+                  search: searchText.trim() || null,
+                });
+              }
+            }}
+            placeholder="Search triggers or pipelines, press Enter"
+            value={searchText}
+          />
         </FlexContainer>
       </Spacing>
 
