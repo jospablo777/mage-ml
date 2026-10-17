@@ -75,6 +75,8 @@ class PipelineExecutor:
                     global_vars=global_vars,
                     run_tests=run_tests,
                     update_status=update_status,
+                    execution_partition=self.execution_partition,
+                    max_parallel=kwargs.get('max_parallel'),
                 )
             elif pipeline_run_id is None:
                 await self.pipeline.execute(
@@ -83,6 +85,7 @@ class PipelineExecutor:
                     run_sensors=run_sensors,
                     run_tests=run_tests,
                     update_status=update_status,
+                    execution_partition=self.execution_partition,
                 )
             else:
                 pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
@@ -215,6 +218,8 @@ class PipelineExecutor:
                 '--execution-partition',
                 f'{self.execution_partition}',
             ]
+        if kwargs.get('max_parallel') is not None:
+            options += ['--max-parallel', f'{kwargs["max_parallel"]}']
         if pipeline_run_id is not None:
             options += [
                 '--pipeline-run-id',

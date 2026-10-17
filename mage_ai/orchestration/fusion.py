@@ -453,7 +453,7 @@ def member_variables(variables: Optional[Dict]) -> Dict:
 
 
 def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tests: bool,
-                          update_status: bool) -> None:
+                          update_status: bool, execution_partition: Optional[str] = None) -> None:
     """Runs a stage's blocks in order, each taking the previous block's output in memory;
     a Rust or R block followed by one of its language may plan (block/plans.py)."""
     from mage_ai.data_preparation.models.block import plans
@@ -466,16 +466,20 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
         if following is not None and block.language in (BlockLanguage.RUST, BlockLanguage.R) \
                 and following.language == block.language:
             next_block = following.uuid
+        # Each block gets its own copy of the run's variables, as in a scheduled run.
+        variables = member_variables(global_vars)
         with plans.stage_context(next_block, None):
             result = block.execute_sync(
                 block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
-                global_vars=global_vars,
+                execution_partition=execution_partition,
+                global_vars=variables,
                 run_all_blocks=True,
                 update_status=update_status,
             )
         # Without tests the data contract is still checked (contracts_only).
         block.run_tests(
-            contracts_only=not run_tests, global_vars=global_vars, update_tests=False,
+            contracts_only=not run_tests, execution_partition=execution_partition,
+            global_vars=variables, update_tests=False,
         )
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
@@ -492,37 +496,82 @@ def stages_apply_to_cli(pipeline) -> bool:
     return all(block_can_fuse(pipeline, block) for block in pipeline.blocks_by_uuid.values())
 
 
+def stage_limit(pipeline, max_parallel: Optional[int] = None) -> Optional[int]:
+    """How many stages `mage run` runs at once: `--max-parallel`, else the pipeline's
+    `concurrency_config.block_run_limit` (a stage runs one block at a time), else no limit."""
+    configured = (getattr(pipeline, 'concurrency_config', None) or {}).get('block_run_limit')
+    for value in (max_parallel, configured):
+        try:
+            if value is not None and int(value) > 0:
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 async def execute_in_stages(
     pipeline,
     global_vars: Optional[Dict] = None,
     run_tests: bool = True,
     update_status: bool = False,
+    execution_partition: Optional[str] = None,
+    max_parallel: Optional[int] = None,
 ) -> None:
     """
     `mage run` with block fusion: the pipeline's stages in this process, as a fused run
-    runs them, stages whose upstream blocks are done at the same time.
+    runs them. A stage starts as soon as its upstream blocks are done, up to the stage
+    limit (stage_limit), and not while the process holds more memory than
+    MAGE_STAGE_MAX_MEMORY_SHARE allows and another stage runs. After a stage fails, no
+    stage starts; the run waits for the stages already running (a thread cannot be
+    stopped) and raises the first failure, with the others noted.
     """
     import asyncio
 
     global_vars = global_vars or {}
     pending = [list(stage) for stage in fusion_plan(pipeline)]
+    limit = stage_limit(pipeline, max_parallel)
     done: set = set()
-    while pending:
-        ready = [
-            stage for stage in pending
-            if all(u.uuid in done for u in (pipeline.get_block(stage[0]).upstream_blocks or []))
-        ]
-        if not ready:
+    running: Dict = {}
+    failures: List = []
+
+    def ready(stage: List[str]) -> bool:
+        head = pipeline.get_block(stage[0])
+        return all(u.uuid in done for u in (head.upstream_blocks or []))
+
+    while pending or running:
+        if not failures:
+            for stage in [s for s in pending if ready(s)]:
+                if limit is not None and len(running) >= limit:
+                    break
+                if running and over_memory_limit():
+                    break
+                task = asyncio.ensure_future(asyncio.to_thread(
+                    _run_stage_in_process, pipeline, stage, global_vars, run_tests,
+                    update_status, execution_partition,
+                ))
+                running[task] = stage
+                pending.remove(stage)
+        if not running:
+            if failures:
+                break
             raise RuntimeError(
                 'The pipeline has blocks whose upstream blocks never run: '
                 + ', '.join(s[0] for s in pending),
             )
-        await asyncio.gather(*[
-            asyncio.to_thread(
-                _run_stage_in_process, pipeline, stage, global_vars, run_tests, update_status,
+        finished, _ = await asyncio.wait(list(running), return_when=asyncio.FIRST_COMPLETED)
+        for task in finished:
+            stage = running.pop(task)
+            error = task.exception()
+            if error is not None:
+                failures.append((stage, error))
+            else:
+                done.update(stage)
+    if failures:
+        error = failures[0][1]
+        for stage, other in failures[1:]:
+            error.add_note(f'The stage starting at {stage[0]} failed too: {other}')
+        if pending:
+            error.add_note(
+                'Not started after the failure: ' + ', '.join(s[0] for s in pending),
             )
-            for stage in ready
-        ])
-        for stage in ready:
-            done.update(stage)
-            pending.remove(stage)
+        raise error

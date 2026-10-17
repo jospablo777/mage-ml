@@ -178,6 +178,35 @@ class FlowExecutionTest(DBTestCase):
         self.assertNotIn('load', cached_after_wave[-2])
         self.assertEqual(cached_after_wave[-1], [])
 
+    def test_cli_runs_keep_their_outputs_under_their_partition(self):
+        # mage run dropped --execution-partition: concurrent CLI runs shared one output
+        # path (I-111). Each run reads its own block outputs back from its partition.
+        from mage_ai.data_preparation.variable_manager import VariableManager
+        from mage_ai.orchestration import fusion
+
+        load = self.block('load', 'data_loader', '''
+            import pandas as pd
+            @data_loader
+            def load(**kwargs):
+                return pd.DataFrame({'n': pd.Series([kwargs['n']], dtype='Int64')})
+        ''')
+        double = self.block('double', 'transformer', '''
+            @transformer
+            def double(frame, **kwargs):
+                return frame.assign(n=frame['n'] * 2)
+        ''', upstream=[load])
+        self.assertTrue(fusion.stages_apply_to_cli(self.pipeline))
+        for partition, n in (('cli_a', 1), ('cli_b', 5)):
+            PipelineExecutor(self.pipeline, execution_partition=partition).execute(
+                global_vars=dict(n=n), update_status=False,
+            )
+        manager = VariableManager.get_manager(self.repo_path, self.pipeline.variables_dir)
+        for partition, expected in (('cli_a', 2), ('cli_b', 10)):
+            frame = manager.get_variable(
+                self.pipeline.uuid, double.uuid, 'output_0', partition=partition,
+            )
+            self.assertEqual(int(frame['n'].iloc[0]), expected)
+
     def test_async_execution_awaits_all_blocks(self):
         self.branched_flow()
         run = trigger_pipeline(self.pipeline.uuid, variables={

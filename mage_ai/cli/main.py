@@ -85,6 +85,10 @@ RUN_RUNTIME_VARS_DEFAULT = typer.Option(
     None, help='specify runtime variables. These will overwrite the pipeline global variables.'
 )
 RUN_SKIP_SENSORS_DEFAULT = typer.Option(False, help='specify if the sensors should be skipped.')
+RUN_MAX_PARALLEL_DEFAULT = typer.Option(
+    None, help='most stages that run at once (default: the pipeline\'s block_run_limit, '
+    'else no limit).',
+)
 RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT = typer.Option(
     None, help='runtime configuration of data integration block runs.'
 )
@@ -177,6 +181,7 @@ def run(
     runtime_vars: Union[str, None] = RUN_RUNTIME_VARS_DEFAULT,
     skip_sensors: bool = RUN_SKIP_SENSORS_DEFAULT,
     template_runtime_configuration: Union[str, None] = RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT,
+    max_parallel: Union[int, None] = RUN_MAX_PARALLEL_DEFAULT,
 ):
     """
     Run pipeline.
@@ -278,6 +283,7 @@ def run(
                 ).execute(
                     analyze_outputs=False,
                     global_vars=global_vars,
+                    max_parallel=max_parallel,
                     pipeline_run_id=pipeline_run_id,
                     run_sensors=not skip_sensors,
                     run_tests=test,

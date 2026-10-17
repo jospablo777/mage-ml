@@ -782,6 +782,7 @@ class Pipeline:
         run_sensors: bool = True,
         run_tests: bool = True,
         update_status: bool = True,
+        execution_partition: str = None,
     ) -> None:
         """
         Async function for parallel processing
@@ -803,6 +804,7 @@ class Pipeline:
                 run_sensors=run_sensors,
                 run_tests=run_tests,
                 update_status=update_status,
+                execution_partition=execution_partition,
             )
         )
         await execution_task

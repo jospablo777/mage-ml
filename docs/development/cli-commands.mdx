@@ -113,7 +113,7 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 - `pipeline_uuid` (required): UUID of the pipeline to be run
 - `--test` (optional): Run the blocks' tests (default: `False`). Data contracts are checked either way; a broken contract stops the run with exit code 1
 - `--block-uuid` (optional): UUID of the block to be run (if not specified, runs entire pipeline)
-- `--execution-partition` (optional): Execution partition identifier
+- `--execution-partition` (optional): Where the run keeps its block outputs, so runs at the same time do not share them
 - `--executor-type` (optional): Executor type to use
 - `--callback-url` (optional): Callback URL for block execution
 - `--block-run-id` (optional): Block run ID
@@ -121,6 +121,16 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 - `--runtime-vars` (optional): Runtime variables in JSON format. These will overwrite the pipeline global variables
 - `--skip-sensors` (optional): Specify if the sensors should be skipped (default: `False`)
 - `--template-runtime-configuration` (optional): Runtime configuration of data integration block runs (JSON format)
+- `--max-parallel` (optional): Most stages that run at once (default: the pipeline's `concurrency_config.block_run_limit`, else no limit)
+
+With block fusion (the default), `mage run` runs the pipeline in stages: each chain of blocks
+runs as one stage, and a stage starts as soon as the blocks it waits for are done. Stages
+run in threads of one process, so blocks that change process-wide settings (environment
+variables, an MLflow tracking URI) or need every core should not run beside others: set
+`--max-parallel 1` or the pipeline's `block_run_limit`. No new stage starts while the
+process holds more memory than `MAGE_STAGE_MAX_MEMORY_SHARE` (0.5) of the machine and
+another stage runs. When a stage fails, no other stage starts; the run waits for the stages
+already running and fails with the first error, noting the others.
 
 **Examples:**
 ```bash
@@ -135,6 +145,9 @@ mage run /path/to/project my_pipeline_uuid --runtime-vars '{"key": "value"}'
 
 # Run with tests
 mage run /path/to/project my_pipeline_uuid --test
+
+# One stage at a time, outputs under their own partition
+mage run /path/to/project my_pipeline_uuid --max-parallel 1 --execution-partition run_42
 ```
 
 ---

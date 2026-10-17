@@ -178,6 +178,7 @@ async def run_blocks(
     run_tests: bool = True,
     selected_blocks: Set[str] = None,
     update_status: bool = True,
+    execution_partition: str = None,
 ) -> None:
     tries_by_block_uuid = {}
     tasks = dict()
@@ -209,11 +210,13 @@ async def run_blocks(
                     run_sensors=run_sensors,
                     update_status=update_status,
                     parallel=parallel,
+                    execution_partition=execution_partition,
                 )
 
                 block.run_tests(
                     build_block_output_stdout=build_block_output_stdout,
                     contracts_only=not run_tests,
+                    execution_partition=execution_partition,
                     global_vars=global_vars,
                     update_tests=False,
                 )
@@ -1714,6 +1717,7 @@ class Block(
         run_sensors: bool = True,
         update_status: bool = True,
         parallel: bool = True,
+        execution_partition: str = None,
     ) -> None:
         if parallel:
             loop = asyncio.get_event_loop()
@@ -1724,6 +1728,7 @@ class Block(
                     analyze_outputs=analyze_outputs,
                     build_block_output_stdout=build_block_output_stdout,
                     custom_code=custom_code,
+                    execution_partition=execution_partition,
                     from_notebook=not run_sensors,
                     global_vars=global_vars,
                     run_all_blocks=run_all_blocks,
@@ -1735,6 +1740,7 @@ class Block(
                 analyze_outputs=analyze_outputs,
                 build_block_output_stdout=build_block_output_stdout,
                 custom_code=custom_code,
+                execution_partition=execution_partition,
                 from_notebook=not run_sensors,
                 global_vars=global_vars,
                 run_all_blocks=run_all_blocks,

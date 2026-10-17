@@ -49,6 +49,7 @@ class RunTests(TestCase):
         mock_executor_factory.get_pipeline_executor.return_value.execute.assert_called_once_with(
             analyze_outputs=mock.ANY,
             global_vars=mock.ANY,
+            max_parallel=None,
             run_sensors=mock.ANY,
             run_tests=True,
             pipeline_run_id=None,
@@ -56,6 +57,17 @@ class RunTests(TestCase):
         )
         assert result.exit_code == 0
         assert 'Pipeline run completed.' in result.output
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_max_parallel_reaches_the_executor(self, mock_executor_factory, mock_pipeline):
+        mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
+        result = runner.invoke(
+            app, ['run', 'my_mage_project', 'load_titanic', '--max-parallel', '2'],
+        )
+        assert result.exit_code == 0, result.output
+        execute = mock_executor_factory.get_pipeline_executor.return_value.execute
+        assert execute.call_args.kwargs['max_parallel'] == 2
 
     @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
     @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
