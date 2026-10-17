@@ -7,6 +7,7 @@ import dateutil.parser
 import simplejson
 import tornado.web
 
+from mage_ai.api.errors import ApiError
 from mage_ai.api.middleware import OAuthMiddleware
 from mage_ai.server.api.constants import PATH_TRAVERSAL_PATTERN
 from mage_ai.shared.parsers import encode_complex
@@ -62,6 +63,11 @@ class BaseHandler(tornado.web.RequestHandler):
         if status_code == 500:
             self.set_status(200)
             exception = kwargs['exc_info'][1]
+            if isinstance(exception, ApiError):
+                # A refused request: its code and reason, without the server's traceback.
+                error = dict(exception.to_dict(), exception=exception.message)
+                self.write(dict(error=error, url_parameters=self.path_kwargs))
+                return
             # The exception's traceback, with its notes. format_stack() here gave the stack
             # of this error handler, which said nothing about the failure.
             message = ''.join(traceback.format_exception(exception))

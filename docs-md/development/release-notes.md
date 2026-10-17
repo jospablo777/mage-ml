@@ -96,6 +96,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
   Polars frames with Polars (upstream #6160).
 - A dynamic block that returns no items creates no children. The scheduler waited 2 minutes
   for items, then ran one child without input, which failed the run (upstream #6045).
+- API triggers accept a JSON list or scalar body, as webhooks such as HubSpot's send, as
+  `kwargs['body']`; it failed with a 500 (upstream #5414). A body that is not JSON gets a 400
+  with the reason, refused API requests no longer return the server's traceback, and the
+  trigger token is compared in constant time.
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

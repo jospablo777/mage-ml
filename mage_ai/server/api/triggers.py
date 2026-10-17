@@ -1,3 +1,4 @@
+import hmac
 import json
 
 from mage_ai.api.errors import ApiError
@@ -32,25 +33,31 @@ class ApiTriggerPipelineHandler(BaseHandler):
                 'The token of the API trigger cannot be empty.',
             )
 
-        if ScheduleType.API == pipeline_schedule.schedule_type and \
-            pipeline_schedule.token and \
-                pipeline_schedule.token != token:
+        if not hmac.compare_digest(str(pipeline_schedule.token), str(token or '')):
             raise UnauthenticatedRequestException(
                 f'Invalid token for pipeline schedule ID {pipeline_schedule_id}.',
             )
 
-        payload = self.get_payload()
+        payload = {}
+        if self.request.body:
+            try:
+                body = json.loads(self.request.body)
+            except ValueError as error:
+                raise ApiError(dict(
+                    ApiError.RESOURCE_INVALID,
+                    message=f'The request body is not JSON: {error}.',
+                ))
+            if isinstance(body, dict):
+                payload = body.get('pipeline_run') or {}
+                payload['event_variables'] = {
+                    k: v for k, v in body.items() if k != 'pipeline_run'
+                }
+            else:
+                # Webhooks such as HubSpot's send a list; it failed with a 500. Blocks get
+                # it as kwargs['body'] (upstream #5414).
+                payload['event_variables'] = dict(body=body)
         if 'variables' not in payload:
             payload['variables'] = {}
-
-        body = self.request.body
-        if body:
-            payload['event_variables'] = {}
-
-            for k, v in json.loads(body).items():
-                if k == 'pipeline_run':
-                    continue
-                payload['event_variables'][k] = v
 
         pipeline = Pipeline.get(
             pipeline_schedule.pipeline_uuid, repo_path=pipeline_schedule.repo_path

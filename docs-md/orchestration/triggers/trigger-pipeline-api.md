@@ -77,6 +77,10 @@ def load_data(**kwargs) -> DataFrame:
     # ...other code
 ```
 
+A body that is not a JSON object, such as the list of events HubSpot webhooks send, reaches
+the blocks as `kwargs['body']` (also `kwargs['event']['body']`). A body that is not JSON is
+refused with a 400 error that gives the reason.
+
 You can include as many key value pairs within the variables object in the
 request payload as you want. Do not use `env` as a variable name: pipeline runs always set
 it to `prod`.
