@@ -366,7 +366,9 @@ class PipelineScheduler:
             elif PipelineType.INTEGRATION == self.pipeline.type:
                 self.__schedule_integration_streams(block_runs)
             elif self.pipeline.run_pipeline_in_one_process:
-                self.__schedule_pipeline()
+                # Block timeouts were checked only for block-by-block runs (upstream #5133).
+                if not self.__check_block_run_timeout(kill_pipeline_run=True):
+                    self.__schedule_pipeline()
             else:
                 if not self.__check_block_run_timeout():
                     self.__schedule_blocks(block_runs)
@@ -605,11 +607,12 @@ class PipelineScheduler:
         return False
 
     @safe_db_query
-    def __check_block_run_timeout(self) -> bool:
+    def __check_block_run_timeout(self, kill_pipeline_run: bool = False) -> bool:
         """
-        Check run timeout block runs. Currently only works for batch pipelines that are run
-        using the `__schedule_blocks` method. This method checks if a block run has exceeded
-        its timeout and puts the block run into a failed state and cancels the block run job.
+        Check run timeout block runs. This method checks if a block run has exceeded its
+        timeout and puts the block run into a failed state and cancels its job: the block
+        run's, or with kill_pipeline_run the pipeline run's, which runs every block of a
+        pipeline that runs in one process.
 
         Returns:
             bool: True if any block runs have timed out, False otherwise.
@@ -643,7 +646,10 @@ class PipelineScheduler:
                         )
                         self.on_block_failure(block_run.block_uuid)
                         job_manager = get_job_manager()
-                        job_manager.kill_block_run_job(block_run.id)
+                        if kill_pipeline_run:
+                            job_manager.kill_pipeline_run_job(self.pipeline_run.id)
+                        else:
+                            job_manager.kill_block_run_job(block_run.id)
                         any_block_run_timed_out = True
             except Exception:
                 pass

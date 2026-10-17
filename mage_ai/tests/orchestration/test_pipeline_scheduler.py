@@ -1587,6 +1587,33 @@ class PipelineSchedulerTests(DBTestCase):
         block_run.refresh()
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
 
+    @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')
+    def test_block_run_timeout_in_a_pipeline_run_in_one_process(self, mock_get_job_manager):
+        """Block timeouts were checked only for block-by-block runs (upstream #5133)."""
+        from mage_ai.orchestration.db import db_connection
+
+        job_manager = mock_get_job_manager()
+        job_manager.add_job = MagicMock()
+        pipeline = create_pipeline_with_blocks('test block timeout one process', self.repo_path)
+        pipeline.run_pipeline_in_one_process = True
+        pipeline.save()
+        pipeline.get_block('block1').update(data=dict(timeout=60))
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid=pipeline.uuid)
+        block_run = find(lambda br: br.block_uuid == 'block1', pipeline_run.block_runs)
+        block_run.update(
+            status=BlockRun.BlockRunStatus.RUNNING,
+            started_at=datetime.now(tz=pytz.UTC) - timedelta(seconds=120),
+        )
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        db_connection.session.expire_all()
+
+        PipelineScheduler(pipeline_run=PipelineRun.get_by_id(pipeline_run.id)).schedule()
+
+        block_run.refresh()
+        self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
+        # The pipeline run's job runs every block, so it is the one stopped.
+        job_manager.kill_pipeline_run_job.assert_any_call(pipeline_run.id)
+
     @freeze_time('2023-05-01 01:20:33')
     @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')
     def test_block_run_timeout(self, mock_get_job_manager):

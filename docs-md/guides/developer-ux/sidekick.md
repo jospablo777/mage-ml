@@ -60,7 +60,8 @@ Store credentials as secrets instead of writing them in your code.
 1. Rename a block
 1. Set what execution engine the block should use
 1. Configure how the block should retry itself in case of failure
-1. Set a timeout limit for how long the block can run before it should fail
+1. Set a timeout limit for how long the block can run before it should fail (in a pipeline
+   that runs in one process, a block past its timeout stops the whole run)
 1. Configure variables specific to a block
 1. View which pipelines are currently using a block
 
