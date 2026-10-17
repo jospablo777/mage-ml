@@ -9,7 +9,6 @@ import stat
 import traceback
 import webbrowser
 from datetime import datetime
-from time import sleep
 from typing import List, Optional, Union
 
 import pytz
@@ -547,9 +546,6 @@ def default_password_warning(users: List) -> Optional[str]:
 @safe_db_query
 def initialize_user_authentication(project_type: ProjectType) -> Oauth2Application:
     logger.info('User authentication is enabled.')
-    # We need to sleep for a few seconds after creating all the tables or else there
-    # may be an error trying to create users.
-    sleep(5)
 
     # Create new roles on existing users. This should only need to be run once.
     if project_type == ProjectType.SUB:
@@ -889,6 +885,13 @@ def start_server(
             except Exception:
                 traceback.print_exc()
         elif instance_type == InstanceType.SERVER_AND_SCHEDULER:
+            # The tables must exist before the server makes the owner user. The scheduler
+            # subprocess migrated them while the server waited a fixed 5 seconds; under the
+            # migrations lock its own run is now a no-op.
+            try:
+                database_manager.run_migrations()
+            except Exception:
+                traceback.print_exc()
             # Start a subprocess for scheduler
             scheduler_manager.start_scheduler()
         elif instance_type == InstanceType.SCHEDULER:

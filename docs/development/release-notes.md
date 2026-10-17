@@ -84,6 +84,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - The kernel restart, switch and interrupt no longer block the server: they run off its
   event loop with a time limit, and a replaced kernel client is closed.
 - The first export on a fresh server is fast (secret clients made on first use).
+- The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
+  event loop for the scheduler process to make the database tables. It now migrates the
+  database itself before starting the scheduler (0.01 s when already up to date).
 
 ## MageML 0.1.1 (2026-10-13)
 

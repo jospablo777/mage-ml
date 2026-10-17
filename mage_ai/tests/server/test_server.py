@@ -216,6 +216,46 @@ class ServerTests(AsyncDBTestCase):
         owner_user = User.query.filter(User.email == 'admin@admin.com').one_or_none()
         self.assertIsNotNone(owner_user)
 
+    def test_making_the_owner_user_does_not_wait(self):
+        # It slept 5 seconds on the event loop, in case the tables did not exist yet.
+        from time import monotonic
+
+        start = monotonic()
+        initialize_user_authentication(ProjectType.STANDALONE)
+        self.assertLess(monotonic() - start, 3)
+
+
+class StartServerTest(unittest.TestCase):
+    def test_the_server_and_scheduler_migrate_before_the_scheduler_starts(self):
+        """The server makes users at once, so the tables must exist before main runs."""
+        from unittest.mock import MagicMock
+
+        from mage_ai.shared.constants import InstanceType
+
+        calls = MagicMock()
+        with tempfile.TemporaryDirectory() as project, \
+                patch.object(server_module, 'init_project_uuid'), \
+                patch.object(server_module, 'set_repo_path'), \
+                patch.object(server_module, 'set_db_schema'), \
+                patch.object(server_module, 'get_project_type',
+                             return_value=ProjectType.STANDALONE), \
+                patch.object(server_module.signal, 'signal'), \
+                patch.object(server_module, 'main', MagicMock()), \
+                patch.object(server_module.asyncio, 'run', calls.main), \
+                patch.object(server_module.database_manager, 'run_migrations',
+                             calls.run_migrations), \
+                patch.object(server_module.scheduler_manager, 'start_scheduler',
+                             calls.start_scheduler), \
+                patch.object(server_module.scheduler_manager, 'stop_scheduler'):
+            server_module.start_server(
+                project=project, instance_type=InstanceType.SERVER_AND_SCHEDULER,
+            )
+
+        self.assertEqual(
+            [name for name, _, _ in calls.mock_calls],
+            ['run_migrations', 'start_scheduler', 'main'],
+        )
+
 
 class PageRoutesTest(unittest.TestCase):
     def test_every_top_level_page_has_a_route(self):
