@@ -1,4 +1,3 @@
-import time
 from datetime import datetime, timedelta
 from functools import reduce
 from typing import Callable, Dict, List, Union
@@ -65,6 +64,14 @@ class MonitorStats:
         elif stats_type == MonitorStatsType.BLOCK_RUN_TIME:
             return self.get_block_run_time(**new_kwargs)
 
+    def __project_schedule_ids(self):
+        # Runs of this project's triggers. Projects that share a database saw each other's
+        # runs (upstream #6036).
+        # The ids, not a subquery: next to the join on pipeline_schedule, the subquery was
+        # correlated with it.
+        query = PipelineSchedule.repo_query.with_entities(PipelineSchedule.id)
+        return [schedule_id for (schedule_id,) in query.all()]
+
     def __filter(
         self,
         query,
@@ -73,7 +80,7 @@ class MonitorStats:
         pipeline_uuid: str = None,
         start_time: datetime = None,
     ) -> List:
-        filter_statement = []
+        filter_statement = [PipelineRun.pipeline_schedule_id.in_(self.__project_schedule_ids())]
 
         if pipeline_uuid is not None:
             filter_statement.append(PipelineRun.pipeline_uuid == pipeline_uuid)
@@ -87,10 +94,7 @@ class MonitorStats:
         if pipeline_schedule_id is not None:
             filter_statement.append(PipelineRun.pipeline_schedule_id == int(pipeline_schedule_id))
 
-        if filter_statement:
-            return query.filter(*filter_statement)
-
-        return query
+        return query.filter(*filter_statement)
 
     def get_pipeline_run_count(
         self,
@@ -101,8 +105,6 @@ class MonitorStats:
         pipeline_schedule_id: int = None,
         **kwargs,
     ) -> Dict:
-        now = time.time()
-
         query = (
             PipelineRun.
             select(
@@ -129,11 +131,7 @@ class MonitorStats:
         )
 
         pipeline_runs = query.all()
-        # Query: 11.1094
-        # Query: 2.7102 (after optimization)
-        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
 
-        now = time.time()
         stats_by_schedule_id = dict()
         pipelines_mapping = {}
         for uuid in set([p.pipeline_uuid for p in pipeline_runs]):
@@ -147,10 +145,7 @@ class MonitorStats:
                 pipelines_mapping[pipeline.uuid] = pipeline
             except Exception as err:
                 print(f'[ERROR] MonitorStats.get_pipeline_run_count: {err}.')
-        # 0.2497
-        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
-        now = time.time()
         for p in pipeline_runs:
             if p.pipeline_schedule_id is None:
                 pipeline_schedule_id = NO_PIPELINE_SCHEDULE_ID
@@ -163,15 +158,12 @@ class MonitorStats:
                     name=pipeline_schedule_name,
                     data=dict(),
                 )
-            # p.created_at.strftime >= 1000 ms
-            # Loop: 0.5338
             created_at_formatted = p.ds_created_at  # Negligible time
             data = stats_by_schedule_id[pipeline_schedule_id]['data']
             if created_at_formatted not in data:
                 data[created_at_formatted] = dict()
 
             if group_by_pipeline_type:
-                # Loop: 0.734
                 if p.pipeline_uuid in pipelines_mapping:
                     pipeline_type = pipelines_mapping[p.pipeline_uuid].type
                     if pipeline_type not in data[created_at_formatted]:
@@ -185,9 +177,6 @@ class MonitorStats:
                     data[created_at_formatted][p.status] = 1
                 else:
                     data[created_at_formatted][p.status] += 1
-        # Loop: 2.4017
-        # Loop: 1.0568 (optimized)
-        print(f'Loop: {round((time.time() - now) * 10000) / 10000}')
 
         return stats_by_schedule_id
 
@@ -198,8 +187,6 @@ class MonitorStats:
         end_time: datetime = None,
         **kwargs,
     ) -> Dict:
-        now = time.time()
-
         select = [
             PipelineRun.completed_at,
             PipelineRun.created_at,
@@ -224,11 +211,7 @@ class MonitorStats:
         ).filter(PipelineRun.completed_at != None, PipelineRun.created_at != None)  # noqa: E711
 
         pipeline_runs = query.all()
-        # v1: 11.4428
-        # v2: 2.2877
-        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
 
-        now = time.time()
         pipeline_run_by_date = group_by(lambda p: p.ds_created_at, pipeline_runs)
 
         def __mean_runtime(pipeline_runs):
@@ -238,8 +221,6 @@ class MonitorStats:
                 return 0
             return sum(runtime_list) / len(runtime_list)
         pipeline_run_time_by_date = {k: __mean_runtime(v) for k, v in pipeline_run_by_date.items()}
-        # v1: 0.7857
-        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
         return {pipeline_uuid: dict(name=pipeline_uuid, data=pipeline_run_time_by_date)}
 
@@ -251,8 +232,6 @@ class MonitorStats:
         start_time: datetime = None,
         **kwargs,
     ) -> Dict:
-        now = time.time()
-
         select_query = [
             BlockRun.block_uuid.label('name'),
             BlockRun.status,
@@ -263,7 +242,7 @@ class MonitorStats:
                 'day',
             ]).label('ds_created_at'),
         ]
-        filter_query = []
+        filter_query = [PipelineRun.pipeline_schedule_id.in_(self.__project_schedule_ids())]
 
         if end_time is not None or start_time is not None:
             if start_time is not None:
@@ -275,30 +254,23 @@ class MonitorStats:
             filter_query.append(PipelineRun.pipeline_schedule_id == int(pipeline_schedule_id))
             select_query.append(PipelineRun.pipeline_schedule_id)
 
-        if pipeline_uuid is None:
-            query = BlockRun.select(*select_query)
-        else:
-            select_query += [BlockRun.pipeline_run_id, PipelineRun.pipeline_uuid]
-            query = (
-                BlockRun.
-                select(*select_query).
-                join(PipelineRun, PipelineRun.id == BlockRun.pipeline_run_id).
-                filter(PipelineRun.pipeline_uuid == pipeline_uuid)
-            )
-
-        if filter_query:
-            query = query.filter(*filter_query)
+        # Joined always: a trigger filter without the join counted each block run once per
+        # pipeline run.
+        if pipeline_uuid is not None:
+            # Not grouped by run: one row per run, each overwriting the count, gave 1.
+            filter_query.append(PipelineRun.pipeline_uuid == pipeline_uuid)
+        query = (
+            BlockRun.
+            select(*select_query).
+            join(PipelineRun, PipelineRun.id == BlockRun.pipeline_run_id).
+            filter(*filter_query)
+        )
 
         block_runs = (
             query.
             group_by('name', BlockRun.status, 'ds_created_at', *select_query[4:]).
             all()
         )
-        # v1: 21.6741
-        # v2: 1.24
-        print(f'Query: {round((time.time() - now) * 10000) / 10000}')
-
-        now = time.time()
 
         def _reduce(obj, tup):
             name, status, count, ds_created_at = tup[:4]
@@ -310,9 +282,6 @@ class MonitorStats:
             return obj
         mapping = reduce(_reduce, block_runs, {})
 
-        # v1: <= 1
-        # v2: 0
-        print(f'Mapping: {round((time.time() - now) * 10000) / 10000}')
 
         return mapping
 
@@ -347,18 +316,13 @@ class MonitorStats:
         end_time: datetime = None,
         **kwargs,
     ) -> Dict:
-        block_runs = BlockRun.query
+        block_runs = (
+            BlockRun.query.
+            join(PipelineRun, PipelineRun.id == BlockRun.pipeline_run_id).
+            filter(PipelineRun.pipeline_schedule_id.in_(self.__project_schedule_ids()))
+        )
         if pipeline_uuid is not None:
-            block_runs = (
-                block_runs.
-                join(
-                    PipelineRun,
-                    PipelineRun.id == BlockRun.pipeline_run_id,
-                ).
-                filter(
-                    PipelineRun.pipeline_uuid == pipeline_uuid,
-                )
-            )
+            block_runs = block_runs.filter(PipelineRun.pipeline_uuid == pipeline_uuid)
         if start_time is not None:
             block_runs = block_runs.filter(BlockRun.created_at >= start_time)
         if end_time is not None:

@@ -105,6 +105,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
   seconds instead of 5 minutes (upstream #5748).
 - The example pipeline writes `titanic_clean.csv` into the project instead of the folder the
   server started in (upstream #6137).
+- Monitor statistics count only the project's runs (projects sharing a database saw each
+  other's), block runs filtered by trigger are counted once instead of once per pipeline
+  run, a block's runs in one pipeline are summed instead of showing 1, and the timing prints
+  in the server log are gone (upstream #6036).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).
