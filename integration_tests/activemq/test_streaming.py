@@ -49,10 +49,17 @@ def drain(port, queue, wait=2.0):
     connection.set_listener('collector', collector)
     connection.subscribe(destination=f'/queue/{queue}', id='drain', ack='client-individual')
     time.sleep(wait)
-    for frame in collector.frames:
+    # Ack exactly the frames returned. A frame that arrived while the acks went out was
+    # returned unacked, went back to the queue, and the next drain returned it again: a
+    # message counted twice (I-102). One that arrives after the snapshot is not returned
+    # and goes back to the queue. Acks must precede UNSUBSCRIBE, which releases the
+    # subscription's unacked messages and makes later acks void.
+    frames = list(collector.frames)
+    for frame in frames:
         connection.ack(frame.headers['message-id'], 'drain')
+    connection.unsubscribe(id='drain')
     connection.disconnect()
-    return collector.frames
+    return frames
 
 
 def config(port, queue, **extra):
