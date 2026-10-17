@@ -109,6 +109,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   other's), block runs filtered by trigger are counted once instead of once per pipeline
   run, a block's runs in one pipeline are summed instead of showing 1, and the timing prints
   in the server log are gone (upstream #6036).
+- A block output holding an object of the user's own class shows as the object's text; it
+  raised "Circular reference detected" (upstream #5850). Storage still refuses values it
+  cannot encode.
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

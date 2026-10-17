@@ -33,6 +33,10 @@ class CustomOutputTemplateTests(TestCase):
         self.assertNotIn('pd.__version__', template)
         self.assertIn('ignore_setting_with_copy_warning()', template)
 
+    def test_outputs_are_shown_with_the_display_encoder(self):
+        # encode_complex returned a user's object unchanged: "Circular reference detected".
+        self.assertIn('encode_complex_for_display as encode_complex', read_template())
+
     def test_interpolated_code_is_valid_python(self):
         code = interpolate_code_content(
             'custom_output.py',

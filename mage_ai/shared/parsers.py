@@ -1,4 +1,5 @@
 import base64
+import decimal
 import inspect
 import io
 import sys
@@ -65,6 +66,10 @@ def has_to_dict(obj) -> bool:
     return hasattr(obj, 'to_dict')
 
 
+# Values JSON encoders write themselves.
+JSON_NATIVE_TYPES = (str, int, float, bool, type(None), dict, list, tuple, decimal.Decimal)
+
+
 def encode_complex(obj):
     from mage_ai.shared.models import BaseDataClass
 
@@ -129,6 +134,19 @@ def encode_complex(obj):
         }
 
     return obj
+
+
+def encode_complex_for_display(obj):
+    """
+    encode_complex for showing outputs: other objects, such as instances of a user's class,
+    as their text. Returned as they were, JSON encoders saw them again and raised "Circular
+    reference detected" (upstream #5850). Storage keeps encode_complex, which fails instead
+    of writing text in place of the value.
+    """
+    encoded = encode_complex(obj)
+    if encoded is obj and not isinstance(obj, JSON_NATIVE_TYPES):
+        return str(obj)
+    return encoded
 
 
 def _encode_bson(obj):

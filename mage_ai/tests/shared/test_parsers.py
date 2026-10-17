@@ -183,3 +183,32 @@ class SparseMatrixTests(TestCase):
         self.assertEqual((deserialize_matrix(encoded) != matrix).nnz, 0)
         self.assertEqual(convert_matrix_to_dataframe(matrix).values.tolist(), [[0, 1], [2, 0]])
         self.assertEqual(convert_matrix_to_dataframe([1]), [1])
+
+
+class UnknownObjectTests(TestCase):
+    def test_an_object_of_a_users_class_is_written_as_its_text(self):
+        """It raised "Circular reference detected" in block outputs (upstream #5850)."""
+        class Model:
+            def __init__(self):
+                self.parent = self
+
+            def __str__(self):
+                return 'Model(trained)'
+
+        from mage_ai.shared.parsers import encode_complex_for_display
+
+        text = simplejson.dumps({'model': Model(), 'n': 1}, default=encode_complex_for_display)
+
+        self.assertEqual(simplejson.loads(text), {'model': 'Model(trained)', 'n': 1})
+
+    def test_json_values_pass_through(self):
+        import decimal
+
+        from mage_ai.shared.parsers import encode_complex_for_display
+
+        for value in ('x', 1, 1.5, True, None, {'a': 1}, [1], (1,), decimal.Decimal('1.10')):
+            self.assertIs(encode_complex_for_display(value), value)
+
+    def test_storage_still_refuses_what_it_cannot_encode(self):
+        with self.assertRaises((TypeError, ValueError)):
+            simplejson.dumps({'x': object()}, default=encode_complex)

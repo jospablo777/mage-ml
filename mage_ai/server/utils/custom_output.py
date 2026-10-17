@@ -19,12 +19,13 @@ def __custom_output():
     from mage_ai.presenters.utils import render_output_tags
     from mage_ai.server.kernel_output_parser import DataType
     from mage_ai.shared.pandas_utils import ignore_setting_with_copy_warning
+
+    # Shows other objects, such as a user's class, as text (upstream #5850).
     from mage_ai.shared.parsers import (
         convert_matrix_to_dataframe,
-        encode_complex,
-        polars_to_dict_split,
-        sample_output,
     )
+    from mage_ai.shared.parsers import encode_complex_for_display as encode_complex
+    from mage_ai.shared.parsers import polars_to_dict_split, sample_output
     from mage_ai.shared.xgboost import create_tree_visualization
 
     ignore_setting_with_copy_warning()
