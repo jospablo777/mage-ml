@@ -116,6 +116,7 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 - `--block-run-id` (optional): Block run ID
 - `--pipeline-run-id` (optional): Pipeline run ID
 - `--runtime-vars` (optional): Runtime variables in JSON format. These will overwrite the pipeline global variables
+- `--var` (optional, repeatable): One runtime variable as `key=value`; values that read as JSON keep their type (`2`, `true`, `[1, 2]`), others are text. Overrides `--runtime-vars`
 - `--skip-sensors` (optional): Specify if the sensors should be skipped (default: `False`)
 - `--template-runtime-configuration` (optional): Runtime configuration of data integration block runs (JSON format)
 - `--clean-after-success` (optional): Remove the outputs the run stored once it succeeds; a failed run keeps them for debugging
@@ -144,6 +145,7 @@ mage run /path/to/project my_pipeline_uuid --block-uuid my_block_uuid
 
 # Run with runtime variables
 mage run /path/to/project my_pipeline_uuid --runtime-vars '{"key": "value"}'
+mage run /path/to/project my_pipeline_uuid --var date=2026-01-31 --var limit=1000
 
 # Run with tests
 mage run /path/to/project my_pipeline_uuid --test

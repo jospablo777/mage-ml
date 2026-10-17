@@ -207,3 +207,31 @@ class RunCleanupTests(TestCase):
         )
         assert result.exit_code == 2, result.output
         assert 'not a duration' in result.output
+
+
+class VarOptionTests(TestCase):
+    def test_var_options_parse_with_their_json_types(self):
+        from mage_ai.cli.utils import parse_var_options
+
+        self.assertEqual(
+            parse_var_options(['date=2026-01-31', 'n=2', 'on=true', 'ids=[1, 2]', 'eq=a=b']),
+            {'date': '2026-01-31', 'n': 2, 'on': True, 'ids': [1, 2], 'eq': 'a=b'},
+        )
+        with self.assertRaises(ValueError):
+            parse_var_options(['no_equals'])
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_var_overrides_runtime_vars(self, mock_executor_factory, mock_pipeline):
+        project = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, project, True)
+        mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
+        mock_pipeline.get.return_value.variables = {}
+        result = runner.invoke(app, [
+            'run', project, 'load_titanic', '--runtime-vars', '{"a": 1, "b": 1}',
+            '--var', 'b=2', '--var', 'c=text',
+        ])
+        assert result.exit_code == 0, result.output
+        variables = mock_executor_factory.get_pipeline_executor.return_value.execute.call_args \
+            .kwargs['global_vars']
+        assert variables['a'] == 1 and variables['b'] == 2 and variables['c'] == 'text'

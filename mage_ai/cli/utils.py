@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 def parse_runtime_variables(variables_str: str) -> Dict[str, Any]:
@@ -44,3 +44,19 @@ def get_value(value: Union[str, None]) -> Any:
         except json.decoder.JSONDecodeError:
             pass
     return value
+
+
+def parse_var_options(options: Optional[List[str]]) -> Dict[str, Any]:
+    """
+    The variables of repeated --var key=value options. A value that reads as JSON keeps
+    its type (2, 0.5, true, null, [1, 2]); anything else is text, so --var date=2026-01-31
+    needs no quotes.
+    """
+    variables = {}
+    for option in options or []:
+        key, separator, value = option.partition('=')
+        key = key.strip()
+        if not separator or not key:
+            raise ValueError(f'--var takes key=value, not {option!r}.')
+        variables[key] = get_value(value)
+    return variables

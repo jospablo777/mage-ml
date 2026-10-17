@@ -9,7 +9,7 @@ from rich import print
 from rich.markup import escape
 from typer.core import TyperGroup
 
-from mage_ai.cli.utils import parse_runtime_variables
+from mage_ai.cli.utils import parse_runtime_variables, parse_var_options
 from mage_ai.data_preparation.repo_manager import ProjectType
 from mage_ai.services.newrelic import initialize_new_relic
 from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
@@ -85,6 +85,10 @@ RUN_RUNTIME_VARS_DEFAULT = typer.Option(
     None, help='specify runtime variables. These will overwrite the pipeline global variables.'
 )
 RUN_SKIP_SENSORS_DEFAULT = typer.Option(False, help='specify if the sensors should be skipped.')
+RUN_VAR_DEFAULT = typer.Option(
+    None, '--var', help='a runtime variable, key=value; repeat for more. Values that read as '
+    'JSON keep their type (2, true, [1, 2]); others are text. Overrides --runtime-vars.',
+)
 RUN_CLEAN_AFTER_SUCCESS_DEFAULT = typer.Option(
     False, help='remove the outputs the run stored once it succeeds (a failed run keeps them '
     'for debugging).',
@@ -194,6 +198,7 @@ def run(
     template_runtime_configuration: Union[str, None] = RUN_TEMPLATE_RUNTIME_CONFIGURATION_DEFAULT,
     max_parallel: Union[int, None] = RUN_MAX_PARALLEL_DEFAULT,
     clean_after_success: bool = RUN_CLEAN_AFTER_SUCCESS_DEFAULT,
+    var: Union[List[str], None] = RUN_VAR_DEFAULT,
 ):
     """
     Run pipeline.
@@ -255,12 +260,13 @@ def run(
             log_git_sync(result, logger)
 
         runtime_variables = dict()
-        if runtime_vars is not None:
-            try:
+        try:
+            if runtime_vars is not None:
                 runtime_variables = parse_runtime_variables(runtime_vars)
-            except ValueError as error:
-                print(f'[red]{_e(error)}[/red]')
-                raise typer.Exit(code=2)
+            runtime_variables.update(parse_var_options(var))
+        except ValueError as error:
+            print(f'[red]{_e(error)}[/red]')
+            raise typer.Exit(code=2)
 
         sys.path.append(os.path.dirname(project_path))
         # Initialize db_connection session before getting the pipeline in case
