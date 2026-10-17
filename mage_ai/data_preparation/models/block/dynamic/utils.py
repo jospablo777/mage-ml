@@ -601,6 +601,9 @@ def build_combinations_for_dynamic_child(
                         arr = [0]
             if arr is not None and hasattr(arr, '__len__') and len(arr) > 0:
                 dynamic_counts.append([idx for idx in range(len(arr))])
+            elif arr is not None and hasattr(arr, '__len__'):
+                # No items: no children, instead of one child without input (#6045).
+                dynamic_counts.append([])
             else:
                 dynamic_counts.append([0])
         else:

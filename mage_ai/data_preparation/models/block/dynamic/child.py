@@ -45,8 +45,11 @@ class DynamicChildController(DynamicBlockWrapperBase):
 
                 tries = 0
                 count = 0
-                while tries < 12 and count == 0:
-                    # If this block tries to get the data too soon, it’ll return empty.
+                lazy_variable_controller = None
+                # Outputs read too soon are missing (None); an empty output means no items.
+                # Waiting on empty outputs too held each run 2 minutes, then ran one child
+                # with no input (upstream #6045).
+                while tries < 12 and lazy_variable_controller is None:
                     lazy_variable_controller = get_outputs_for_dynamic_child(
                         upstream_block,
                         execution_partition=execution_partition,
@@ -55,8 +58,7 @@ class DynamicChildController(DynamicBlockWrapperBase):
 
                     if lazy_variable_controller is not None:
                         count = len(lazy_variable_controller)
-
-                    if count == 0:
+                    else:
                         time.sleep(10)
                         tries += 1
 
@@ -69,8 +71,8 @@ class DynamicChildController(DynamicBlockWrapperBase):
             elif is_dynamic:
                 tries = 0
                 count = 0
-                while tries < 12 and count == 0:
-                    # If this block tries to get the data too soon, it’ll return empty.
+                values = metadata = None
+                while tries < 12 and values is None:
                     values, metadata = get_outputs_for_dynamic_block(
                         upstream_block,
                         execution_partition=execution_partition,
@@ -80,8 +82,7 @@ class DynamicChildController(DynamicBlockWrapperBase):
                             count = len(values.index)
                         else:
                             count = len(values)
-
-                    if count == 0:
+                    else:
                         time.sleep(10)
                         tries += 1
 

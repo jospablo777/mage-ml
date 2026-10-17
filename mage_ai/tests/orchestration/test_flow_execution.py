@@ -1,5 +1,6 @@
 import asyncio
 import textwrap
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -505,6 +506,45 @@ class FlowExecutionTest(DBTestCase):
         self.execute_run(run)
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
         self.assertEqual(self.output.read_text(), '60')
+
+    def empty_dynamic_flow(self, reduce_output: bool):
+        load = self.block('dynamic', 'data_loader', '''
+            @data_loader
+            def load(**kwargs):
+                return [[], []]
+        ''', configuration={'dynamic': True})
+        mapped = self.block('map', 'transformer', '''
+            @transformer
+            def transform(value, **kwargs):
+                with open(kwargs['output_path'] + '.calls', 'a') as f:
+                    f.write(repr(value))
+                return value
+        ''', upstream=[load], configuration={'reduce_output': reduce_output})
+        self.block('reduce', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            def export(values, **kwargs):
+                Path(kwargs['output_path']).write_text(repr(values))
+        ''', upstream=[mapped])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+        start = time.monotonic()
+        self.execute_run(run)
+        # It waited 12 times 10 seconds for items, then ran one child without input.
+        self.assertLess(time.monotonic() - start, 60)
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertFalse(Path(str(self.output) + '.calls').exists())
+        return run
+
+    def test_a_dynamic_block_without_items_runs_no_children(self):
+        """Upstream #6045: a child ran as :0 and failed for missing input."""
+        self.empty_dynamic_flow(reduce_output=True)
+
+        self.assertEqual(self.output.read_text(), '[]')
+
+    def test_children_of_an_empty_dynamic_block_have_no_children(self):
+        run = self.empty_dynamic_flow(reduce_output=False)
+
+        self.assertFalse(any(':' in b.block_uuid for b in run.block_runs))
 
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'

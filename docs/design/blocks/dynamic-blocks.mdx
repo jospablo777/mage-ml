@@ -186,6 +186,9 @@ Every downstream block from a dynamic block is referred to as a dynamically crea
 
 The number of these blocks created are determined by the return output data of a dynamic block.
 
+A dynamic block that returns no items (an empty list or DataFrame) creates no blocks: the run
+completes, and a block downstream of a reduced output receives an empty list.
+
 For example, if a dynamic block returns the following data:
 
 ```json
