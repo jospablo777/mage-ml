@@ -6,6 +6,7 @@ from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import ScheduleStatus, ScheduleType
 from mage_ai.data_preparation.models.utils import warn_for_repo_path
 from mage_ai.orchestration.db.models.schedules import PipelineRun, PipelineSchedule
+from mage_ai.orchestration.run_lineage import PARENT_KEY, current_pipeline_run_id
 from mage_ai.orchestration.triggers.constants import (
     DEFAULT_POLL_INTERVAL,
     TRIGGER_NAME_FOR_TRIGGER_CREATED_FROM_CODE,
@@ -56,10 +57,15 @@ def trigger_pipeline(
 
     pipeline_schedule = __fetch_or_create_pipeline_schedule(pipeline, schedule_name=schedule_name)
 
+    payload = dict(variables=variables)
+    # Started from a block: the block's run is the parent, so cancelling it cancels this.
+    parent_pipeline_run_id = current_pipeline_run_id.get()
+    if parent_pipeline_run_id is not None:
+        payload['metrics'] = {PARENT_KEY: parent_pipeline_run_id}
     pipeline_run = create_and_start_pipeline_run(
         pipeline,
         pipeline_schedule,
-        dict(variables=variables),
+        payload,
         should_schedule=_should_schedule,
     )
 

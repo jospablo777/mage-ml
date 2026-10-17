@@ -1947,6 +1947,15 @@ def stop_pipeline_run(
     # Cancel all the block runs
     cancel_block_runs_and_jobs(pipeline_run, pipeline)
 
+    # And the runs its blocks started with trigger_pipeline, which ran on (#5641).
+    from mage_ai.orchestration.run_lineage import active_children
+
+    for child in active_children(pipeline_run.id):
+        try:
+            stop_pipeline_run(child, child.pipeline, status=status)
+        except Exception as error:
+            print(f'[WARNING] Could not stop pipeline run {child.id}: {error}')
+
 
 def cancel_block_runs_and_jobs(
     pipeline_run: PipelineRun,

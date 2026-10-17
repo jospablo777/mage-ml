@@ -43,3 +43,8 @@ trigger_pipeline(
 | `poll_timeout` | After N seconds have elapsed, raise an exception if the triggered pipeline hasn’t finished running successful. | `None` | `3600` | |
 | `schedule_name` | Specify the trigger name. If the trigger doesn't exist, it'll get created with the trigger name | `None` | `trigger_name` | |
 | `verbose` | Print status of triggered pipeline run. | `True` | `False` or `True` | |
+
+## Cancelling
+
+A run started from a block records the block's run as its parent. Cancelling the parent run
+cancels the runs its blocks started that are still waiting or running, and theirs in turn.

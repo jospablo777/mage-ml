@@ -84,6 +84,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Triggers
 
+- Cancelling a pipeline run cancels the runs its blocks started with `trigger_pipeline` that
+  are still waiting or running; they ran on (upstream #5641).
 - API triggers honor **Skip run if previous run still in progress**: a call while a run is
   queued or running answers with a cancelled run (upstream PR 5961).
 

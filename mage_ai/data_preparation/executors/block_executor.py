@@ -44,6 +44,7 @@ from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleT
 from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
 from mage_ai.orchestration.db import end_transaction
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
+from mage_ai.orchestration.run_lineage import current_pipeline_run_id
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.utils import clean_name
@@ -1172,25 +1173,30 @@ class BlockExecutor:
         # (upstream #6030). Commit keeps any pending status write.
         end_transaction()
 
-        result = self.block.execute_sync(
-            analyze_outputs=analyze_outputs,
-            block_run_outputs_cache=block_run_outputs_cache,
-            execution_partition=self.execution_partition,
-            global_vars=global_vars,
-            logger=self.logger,
-            logging_tags=logging_tags,
-            run_all_blocks=True,
-            update_status=update_status,
-            input_from_output=input_from_output,
-            verify_output=verify_output,
-            runtime_arguments=runtime_arguments,
-            dynamic_block_index=dynamic_block_index,
-            dynamic_block_indexes=dynamic_block_indexes,
-            dynamic_block_uuid=dynamic_block_uuid,
-            dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
-            store_variables=store_variables,
-            **extra_options,
-        )
+        # trigger_pipeline in the block records this run as the new run's parent.
+        lineage = current_pipeline_run_id.set((global_vars or {}).get('pipeline_run_id'))
+        try:
+            result = self.block.execute_sync(
+                analyze_outputs=analyze_outputs,
+                block_run_outputs_cache=block_run_outputs_cache,
+                execution_partition=self.execution_partition,
+                global_vars=global_vars,
+                logger=self.logger,
+                logging_tags=logging_tags,
+                run_all_blocks=True,
+                update_status=update_status,
+                input_from_output=input_from_output,
+                verify_output=verify_output,
+                runtime_arguments=runtime_arguments,
+                dynamic_block_index=dynamic_block_index,
+                dynamic_block_indexes=dynamic_block_indexes,
+                dynamic_block_uuid=dynamic_block_uuid,
+                dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                store_variables=store_variables,
+                **extra_options,
+            )
+        finally:
+            current_pipeline_run_id.reset(lineage)
 
         # execute_sync returns dict(output=[...]); tests take the outputs as arguments.
         outputs = None

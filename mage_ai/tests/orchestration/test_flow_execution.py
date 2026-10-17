@@ -627,6 +627,36 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
         self.assertEqual(self.output.read_text(), '6')
 
+    def test_cancelling_a_run_cancels_the_runs_its_blocks_started(self):
+        """A child run kept running after its parent was cancelled (upstream #5641)."""
+        from mage_ai.orchestration.pipeline_scheduler_original import stop_pipeline_run
+
+        child = Pipeline.create(f'{self.pipeline.uuid}_child', repo_path=self.repo_path)
+        self.addCleanup(child.delete)
+        self.block('start_child', 'data_loader', f'''
+            from mage_ai.orchestration.triggers.api import trigger_pipeline
+            @data_loader
+            def load(**kwargs):
+                return trigger_pipeline('{child.uuid}').id
+        ''')
+        parent = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(parent)
+
+        child_run = PipelineRun.query.filter_by(pipeline_uuid=child.uuid).one()
+        self.assertEqual(child_run.metrics['parent_pipeline_run_id'], parent.id)
+
+        # The parent is still running when it is cancelled.
+        parent.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        child_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        with patch(
+            'mage_ai.orchestration.pipeline_scheduler_original.cancel_block_runs_and_jobs',
+        ):
+            stop_pipeline_run(parent)
+
+        child_run.refresh()
+        self.assertEqual(child_run.status, PipelineRun.PipelineRunStatus.CANCELLED)
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()
