@@ -103,6 +103,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Single sign-on (OIDC, Active Directory, Google, GitHub Enterprise, GitLab, Bitbucket) and
   the update check use `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, and give up after 30
   seconds instead of 5 minutes (upstream #5748).
+- The example pipeline writes `titanic_clean.csv` into the project instead of the folder the
+  server started in (upstream #6137).
 - The server answers 5 seconds sooner after starting: it waited a fixed 5 seconds on its
   event loop for the scheduler process to make the database tables. It now migrates the
   database itself before starting the scheduler (0.01 s when already up to date).

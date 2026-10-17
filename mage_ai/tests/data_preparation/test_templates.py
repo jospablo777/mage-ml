@@ -724,3 +724,34 @@ def test_output(output, *args) -> None:
                                        pipeline_type=PipelineType.STREAMING)
         self.assertIn('transform <- function(messages, ...)', stream)
         self.assertIn('variable("minimum", 0)', stream)
+
+
+class ExampleTemplateOutputTest(TestCase):
+    def test_the_titanic_example_writes_into_the_project(self):
+        """It wrote titanic_clean.csv to the folder the server started in (upstream #6137)."""
+        import os
+        import runpy
+        import tempfile
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        import mage_ai.data_preparation.templates as templates
+
+        path = os.path.join(
+            os.path.dirname(templates.__file__), 'repo', 'data_exporters',
+            'export_titanic_clean.py',
+        )
+        project, elsewhere = tempfile.mkdtemp(), tempfile.mkdtemp()
+        module = runpy.run_path(path, init_globals={'data_exporter': lambda f: f})
+        with patch.dict(module['export_data_to_file'].__globals__,
+                        get_repo_path=lambda: project):
+            cwd = os.getcwd()
+            os.chdir(elsewhere)
+            try:
+                module['export_data_to_file'](pd.DataFrame({'a': [1]}))
+            finally:
+                os.chdir(cwd)
+
+        self.assertTrue(os.path.exists(os.path.join(project, 'titanic_clean.csv')))
+        self.assertEqual(os.listdir(elsewhere), [])
