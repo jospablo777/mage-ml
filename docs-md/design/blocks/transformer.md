@@ -42,6 +42,29 @@ def transform_df(df1, df2, df3, **kwargs) -> DataFrame:
     return pd.concat([df1, df2, df3])
 ```
 
+Positional arguments follow the order of the block's upstream blocks in the pipeline's
+`metadata.yaml`, so reordering that list swaps two inputs of the same type without an
+error.
+
+### Named inputs
+
+To receive inputs by name, use keyword-only parameters (after `*`) named after the upstream
+blocks:
+
+```python
+@transformer
+def join(*, load_orders, load_customers, **kwargs) -> DataFrame:
+    return load_orders.merge(load_customers, on='customer_id')
+```
+
+- A parameter takes the output of the upstream block whose uuid, last path part (for a block
+  in a subfolder) or uuid with other characters as underscores matches its name.
+- Upstream outputs not named arrive by position, in order, so named and positional inputs
+  mix.
+- A required keyword-only parameter that names no upstream block takes the run's variable
+  of that name; otherwise the block fails and the error lists its upstream blocks.
+- Functions without keyword-only parameters receive their inputs as before.
+
 ## Handling column renames in data integration pipeline
 
 Since data passed to transform blocks is a pandas DataFrame, many operations are available on each row of your data.

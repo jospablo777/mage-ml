@@ -2188,6 +2188,27 @@ class Block(
                 if global_vars:
                     global_vars.update(part_index=part_index)
 
+        # Keyword-only parameters named after upstream blocks get their outputs by name
+        # (inputs.py); without them, inputs arrive by position as before.
+        from mage_ai.data_preparation.models.block.inputs import bind_inputs
+
+        named_inputs = any(
+            p.kind == p.KEYWORD_ONLY for p in sig.parameters.values()
+        )
+        call_args, call_kwargs = list(input_vars), (
+            global_vars if has_kwargs and global_vars is not None and len(global_vars) != 0
+            else None
+        )
+        if named_inputs:
+            call_args, call_kwargs = bind_inputs(
+                block_function,
+                input_vars,
+                self.upstream_block_uuids,
+                global_vars,
+                block_uuid=self.uuid,
+            )
+            call_kwargs = call_kwargs or None
+
         if MEMORY_MANAGER_V2:
             log_message_prefix = self.uuid
             if self.pipeline:
@@ -2196,18 +2217,16 @@ class Block(
 
             output, self.resource_usage = execute_with_memory_tracking(
                 block_function_updated,
-                args=input_vars,
-                kwargs=global_vars
-                if has_kwargs and global_vars is not None and len(global_vars) != 0
-                else None,
+                args=call_args,
+                kwargs=call_kwargs,
                 logger=logger,
                 logging_tags=logging_tags,
                 log_message_prefix=log_message_prefix,
             )
-        elif has_kwargs and global_vars is not None and len(global_vars) != 0:
-            output = block_function_updated(*input_vars, **global_vars)
+        elif call_kwargs:
+            output = block_function_updated(*call_args, **call_kwargs)
         else:
-            output = block_function_updated(*input_vars)
+            output = block_function_updated(*call_args)
 
         if MEMORY_MANAGER_V2 and inspect.isgeneratorfunction(block_function_updated):
             variable_types = []
