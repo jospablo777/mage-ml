@@ -167,6 +167,12 @@ def load_data():
     return df
 ```
 
+`from utils.data_processing import ...` works too: the editor, `mage run`, scheduled runs
+and exported services put both the project folder and its parent on Python's path. Both go
+after installed packages, so a project folder named like an installed package (such as
+`transformers/` with Hugging Face's package installed) does not hide it; import such code
+through the project's name (`from default_repo.transformers...`).
+
 Learn more about [importing custom Python code](/development/dependencies/custom-files#importing-custom-python-code).
 
 ### Use block templates

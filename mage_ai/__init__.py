@@ -13,7 +13,9 @@ def run(
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
     project_path = os.getcwd() if project_path is None else os.path.abspath(project_path)
-    sys.path.append(os.path.dirname(project_path))
+    from mage_ai.settings.repo import add_project_to_sys_path
+
+    add_project_to_sys_path(project_path)
     pipeline = Pipeline(pipeline_uuid, project_path)
     if block_uuid is None:
         ExecutorFactory.get_pipeline_executor(pipeline).execute(

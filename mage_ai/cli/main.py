@@ -12,6 +12,7 @@ from typer.core import TyperGroup
 from mage_ai.cli.utils import parse_runtime_variables, parse_var_options
 from mage_ai.data_preparation.repo_manager import ProjectType
 from mage_ai.services.newrelic import initialize_new_relic
+from mage_ai.settings.repo import add_project_to_sys_path
 from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
 
 
@@ -268,7 +269,7 @@ def run(
             print(f'[red]{_e(error)}[/red]')
             raise typer.Exit(code=2)
 
-        sys.path.append(os.path.dirname(project_path))
+        add_project_to_sys_path(project_path)
         # Initialize db_connection session before getting the pipeline in case
         # "mage_secret_var" syntax is used in the project's metadata.yaml
         db_connection.start_session()
@@ -412,7 +413,7 @@ def _contract_block(project_path: str, pipeline_uuid: str, block_uuid: str):
     from mage_ai.settings.repo import set_repo_path
 
     set_repo_path(project_path)
-    sys.path.append(os.path.dirname(project_path))
+    add_project_to_sys_path(project_path)
 
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
@@ -495,7 +496,7 @@ def _run_records_setup(project_path: str, pipeline_uuid: str):
     from mage_ai.settings.repo import set_repo_path
 
     set_repo_path(project_path)
-    sys.path.append(os.path.dirname(project_path))
+    add_project_to_sys_path(project_path)
 
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.orchestration.db import db_connection
@@ -596,6 +597,7 @@ def reproduce_run(
     project_path = os.path.abspath(project_path)
     # The restored code, not a project of the same name in the working folder.
     sys.path.insert(0, os.path.dirname(project_path))
+    add_project_to_sys_path(project_path)
     try:
         pipeline = _run_records_setup(project_path, pipeline_uuid)
         original = PipelineRun.get(run_id)
@@ -748,7 +750,7 @@ def verify_fusion(
 
     project_path = os.path.abspath(project_path)
     set_repo_path(project_path)
-    sys.path.append(os.path.dirname(project_path))
+    add_project_to_sys_path(project_path)
 
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.data_preparation.variable_manager import get_global_variables

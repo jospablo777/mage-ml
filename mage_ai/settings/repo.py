@@ -110,9 +110,22 @@ def get_repo_path(
         return None
 
 
+def add_project_to_sys_path(repo_path: str) -> None:
+    """
+    Makes the project's code importable: as `<project>.utils...` (the project's parent)
+    and as `utils...` (the project folder), the way the notebook kernel (which starts in
+    the project folder) and exported services already import it. Both go last on the
+    path, so an installed package keeps its name: a project folder called transformers/
+    does not hide the installed transformers package.
+    """
+    for path in (os.path.dirname(repo_path), repo_path):
+        if path and path not in sys.path:
+            sys.path.append(path)
+
+
 def set_repo_path(repo_path: str) -> None:
     os.environ[REPO_PATH_ENV_VAR] = repo_path
-    sys.path.append(os.path.dirname(repo_path))
+    add_project_to_sys_path(repo_path)
     set_project_platform_activated_flag()
 
 
