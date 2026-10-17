@@ -18,6 +18,7 @@ import importlib.machinery
 import json
 import os
 import sys
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, Iterator, List, Optional
@@ -45,27 +46,45 @@ def current_tags() -> Dict[str, str]:
         return {}
 
 
+_env_lock = threading.Lock()
+# The contexts open in this process, in order, and the environment value before the first.
+_env_active: Dict[int, str] = {}
+_env_before: List[Optional[str]] = [None]
+
+
 @contextmanager
 def block_context(tags: Dict[str, Any]) -> Iterator[None]:
     """
     Tags MLflow runs started inside as runs of this block. The tags also go to the
-    environment, for processes the block starts.
+    environment, for processes the block starts. Blocks that run at once in threads
+    (mage run's stages) share the environment: it holds the latest open context's tags, and
+    the value from before once the last one closes. Each block restoring what it saw left
+    a finished block's tags behind when contexts closed out of order.
     """
     values = {
         f'{TAG_PREFIX}{key}': str(value) for key, value in tags.items() if value is not None
     }
     token = _tags.set(values)
-    previous = os.environ.get(ENV_TAGS)
-    os.environ[ENV_TAGS] = json.dumps(values)
+    text = json.dumps(values)
+    key = id(token)
+    with _env_lock:
+        if not _env_active:
+            _env_before[0] = os.environ.get(ENV_TAGS)
+        _env_active[key] = text
+        os.environ[ENV_TAGS] = text
     _register_if_imported()
     try:
         yield
     finally:
         _tags.reset(token)
-        if previous is None:
-            os.environ.pop(ENV_TAGS, None)
-        else:
-            os.environ[ENV_TAGS] = previous
+        with _env_lock:
+            _env_active.pop(key, None)
+            if _env_active:
+                os.environ[ENV_TAGS] = next(reversed(_env_active.values()))
+            elif _env_before[0] is None:
+                os.environ.pop(ENV_TAGS, None)
+            else:
+                os.environ[ENV_TAGS] = _env_before[0]
 
 
 REGISTRY_MODULE = 'mlflow.tracking.context.registry'

@@ -46,6 +46,38 @@ def train(*args, **kwargs):
 '''
 
 
+class BlockContextTest(unittest.TestCase):
+    def test_contexts_closing_out_of_order_leave_no_tags_behind(self):
+        # Parallel stages of mage run closed their contexts out of order and left a
+        # finished block's tags in the environment for everything after.
+        import os
+        import threading
+
+        a_entered, b_entered, a_closed = threading.Event(), threading.Event(), threading.Event()
+
+        def block_a():
+            with experiments.block_context(dict(block_uuid='a')):
+                a_entered.set()
+                b_entered.wait(5)
+            a_closed.set()
+
+        def block_b():
+            a_entered.wait(5)
+            with experiments.block_context(dict(block_uuid='b')):
+                b_entered.set()
+                a_closed.wait(5)
+                self.assertIn('"b"', os.environ[experiments.ENV_TAGS])
+
+        os.environ.pop(experiments.ENV_TAGS, None)
+        threads = [threading.Thread(target=block_a), threading.Thread(target=block_b)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        self.assertNotIn(experiments.ENV_TAGS, os.environ)
+        self.assertEqual(experiments.current_tags(), {})
+
+
 @unittest.skipIf(mlflow is None, 'MLflow is not installed')
 class ExperimentsTest(DBTestCase):
     def setUp(self):
