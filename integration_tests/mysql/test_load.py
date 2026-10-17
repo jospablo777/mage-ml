@@ -118,6 +118,17 @@ def test_params(mage_mysql, mysql_source):
     assert frame['id'].tolist() == [2, 3]
 
 
+@pytest.mark.parametrize('options', [{}, {'exact_types': True}, {'nullable_integers': True}])
+def test_a_placeholder_in_a_comment_does_not_break_binding(mage_mysql, mysql_source, options):
+    # PyMySQL read %s inside a comment as a placeholder: not enough arguments (I-109).
+    frame = mage_mysql.load(
+        'SELECT id FROM src -- the id, %s\nWHERE id = %s /* %s */',
+        verbose=False, params=(2,), **options,
+    )
+
+    assert frame['id'].tolist() == [2]
+
+
 def test_repeated_column_names_raise(mage_mysql, mysql_source):
     """The limit wraps the query in a derived table, whose columns MySQL requires unique."""
     with pytest.raises(Exception, match='Duplicate column'):

@@ -1,3 +1,5 @@
+import unittest
+
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
     extract_create_statement_table_name,
@@ -359,3 +361,24 @@ FROM "mage"."account_v6" AS "on"
 ) "on"
 ON 1 = 1
 """.strip())
+
+
+class StripCommentsTest(unittest.TestCase):
+    def test_comments_go_and_quoted_text_stays(self):
+        from mage_ai.data_preparation.models.block.sql.utils.statements import (
+            strip_comments,
+        )
+
+        sql = (
+            "SELECT '-- not a comment', $$ /* kept */ $$, \"a--b\" -- uses %(path)s\n"
+            "FROM t /* block\n%(x)s */ WHERE a = %(a)s"
+        )
+        stripped = strip_comments(sql)
+        self.assertNotIn('%(path)s', stripped)
+        self.assertNotIn('%(x)s', stripped)
+        self.assertIn("'-- not a comment'", stripped)
+        self.assertIn('$$ /* kept */ $$', stripped)
+        self.assertIn('"a--b"', stripped)
+        self.assertIn('%(a)s', stripped)
+        # Line breaks stay, so error line numbers match.
+        self.assertEqual(stripped.count('\n'), sql.count('\n'))

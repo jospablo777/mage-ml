@@ -15,7 +15,7 @@ from mage_ai.io.base import checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import PandasTypes, insert_rows, to_pandas_frame
-from mage_ai.io.sql import BaseSQL
+from mage_ai.io.sql import BaseSQL, strip_bound_comments
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.utils import clean_name
 
@@ -215,6 +215,8 @@ class MySQL(BaseSQL):
         nullable_integers: bool = False,
         **kwargs,
     ) -> Union[DataFrame, pl.DataFrame]:
+        if kwargs.get('params') is not None:
+            query_string = strip_bound_comments(query_string)
         if nullable_integers and not (exact_types or polars):
             query = self._enforce_limit(self._clean_query(query_string), limit)
 

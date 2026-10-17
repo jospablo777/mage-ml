@@ -269,6 +269,23 @@ def test_query_parameters_are_bound(mage_postgres, schema, source_table, mode):
 
 
 @pytest.mark.parametrize('mode', ['default', 'exact_types', 'polars'])
+def test_a_placeholder_in_a_comment_does_not_break_binding(
+    mage_postgres, schema, source_table, mode,
+):
+    # psycopg2 filled %(name)s inside comments too, a KeyError (I-109).
+    options = {mode: True} if mode != 'default' else {}
+    frame = mage_postgres.load(
+        f'SELECT id FROM {schema}.src -- filters by %(path_N)s\n'
+        f'WHERE id = %(id)s /* %(other)s */',
+        verbose=False,
+        params={'id': 2},
+        **options,
+    )
+
+    assert len(frame) == 1
+
+
+@pytest.mark.parametrize('mode', ['default', 'exact_types', 'polars'])
 def test_client_is_usable_after_a_failed_query(mage_postgres, schema, source_table, mode):
     options = {mode: True} if mode != 'default' else {}
     with pytest.raises(psycopg2.errors.UndefinedTable):

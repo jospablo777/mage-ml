@@ -86,3 +86,12 @@ class RowLimitTest(TestCase):
         self.assertEqual(calls, [6])
         self.assertEqual(len(frame), 5)
         self.assertEqual(out.getvalue().count('Warning'), 1)
+
+
+class BoundCommentsTest(TestCase):
+    def test_a_placeholder_in_a_comment_does_not_break_a_bound_load(self):
+        # psycopg2 and PyMySQL fill %(name)s inside comments too: KeyError (I-109).
+        from mage_ai.io.sql import strip_bound_comments
+
+        query = 'SELECT 1 AS n -- uses %(path_N)s\nWHERE 1 = %(one)s'
+        self.assertEqual(strip_bound_comments(query) % dict(one=1), 'SELECT 1 AS n  \nWHERE 1 = 1')

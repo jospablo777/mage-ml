@@ -23,6 +23,19 @@ from mage_ai.io.export_utils import (
 from mage_ai.shared.pandas_utils import timedelta_to_nanoseconds
 
 
+def strip_bound_comments(query: str) -> str:
+    """
+    The query without its SQL comments, for loads with params: drivers that bind
+    %(name)s or %s placeholders (psycopg2, PyMySQL) read them inside comments too, so a
+    comment such as `-- uses %(path)s` failed with a KeyError.
+    """
+    from mage_ai.data_preparation.models.block.sql.utils.statements import (
+        strip_comments,
+    )
+
+    return strip_comments(query)
+
+
 @contextmanager
 def ignore_dbapi_connection_warning():
     """
@@ -232,6 +245,8 @@ class BaseSQL(BaseSQLConnection):
                 print_message += f'\n\n{query_string}\n\n'
 
         query_string = self._clean_query(query_string)
+        if kwargs.get('params') is not None:
+            query_string = strip_bound_comments(query_string)
 
         with self.printer.print_msg(print_message), ignore_dbapi_connection_warning():
             return read_sql(

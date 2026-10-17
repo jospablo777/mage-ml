@@ -543,6 +543,9 @@ When a select query is provided, this function will load at maximum 10,000,000 r
 > [!NOTE]
 > SQL loads, and file loads from Google Cloud Storage and Azure Blob Storage, ask for one row more than `limit`, so MageML knows when the limit cut a result. A cut result keeps `limit` rows and prints a warning that names the limit. Set `MAGE_SQL_ROW_LIMIT_POLICY=error` to make a cut result fail the block instead (`allow` cuts silently, as before). A result of exactly `limit` rows is complete and prints nothing.
 
+> [!NOTE]
+> With `params=`, PostgreSQL, Redshift and MySQL loads remove SQL comments before binding, since the drivers read `%(name)s` and `%s` inside comments as placeholders too. Inside quoted text they still do: write a literal `%` as `%%` there.
+
 -   **Args**:
     -   `query_string (str)`: Query to fetch a table or subset of a table.
     -   `limit (int, Optional)`: The number of rows to limit the loaded data frame to. Defaults to 10,000,000.

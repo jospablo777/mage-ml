@@ -22,7 +22,7 @@ from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
-from mage_ai.io.sql import BaseSQL
+from mage_ai.io.sql import BaseSQL, strip_bound_comments
 from mage_ai.shared.utils import clean_name
 
 # Rows per INSERT statement when a unique constraint rules out COPY.
@@ -382,7 +382,10 @@ class Postgres(BaseSQL):
         polars: bool,
         params=None,
     ) -> Union[DataFrame, pl.DataFrame]:
-        query = self._enforce_limit(self._clean_query(query_string), limit)
+        query = self._clean_query(query_string)
+        if params is not None:
+            query = strip_bound_comments(query)
+        query = self._enforce_limit(query, limit)
 
         def __load():
             with self.conn.cursor() as cursor:

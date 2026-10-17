@@ -4,7 +4,7 @@ CREATE, INSERT, UPDATE or DROP statement names. They use only the standard libra
 exported pipeline services load this module on its own.
 """
 import re
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 MAGE_SEMI_COLON = '__MAGE_SEMI_COLON__'
 
@@ -128,20 +128,21 @@ def has_update_statement(text: str) -> bool:
 _DOLLAR_TAG = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)?\$')
 
 
-def _statement_ends(text: str) -> List[int]:
+def _spans(text: str) -> Iterator[Tuple[str, int, int]]:
     """
-    The positions of the semicolons that end statements: not inside a quoted string
-    ('...', E'...'), a quoted identifier ("..."), a dollar-quoted string ($$...$$,
-    $tag$...$tag$), a line comment (-- ...) or a block comment (/* ... */, nested).
+    The parts of SQL text the lexer tells apart, as (kind, start, end): 'comment' (-- ...
+    to the end of the line, or /* ... */ nested), 'quoted' ('...', E'...', "..." and
+    dollar-quoted $$...$$ or $tag$...$tag$) and 'semicolon'. Everything else is code.
     """
-    ends = []
     i, length = 0, len(text)
     while i < length:
         char = text[i]
         pair = text[i:i + 2]
+        start = i
         if pair == '--':
             newline = text.find('\n', i)
-            i = length if newline < 0 else newline + 1
+            i = length if newline < 0 else newline
+            yield 'comment', start, i
         elif pair == '/*':
             depth, i = 1, i + 2
             while i < length and depth:
@@ -151,6 +152,7 @@ def _statement_ends(text: str) -> List[int]:
                     depth, i = depth - 1, i + 2
                 else:
                     i += 1
+            yield 'comment', start, i
         elif char == "'":
             escaped = i > 0 and text[i - 1] in 'eE' and (i < 2 or not text[i - 2].isalnum())
             i += 1
@@ -165,6 +167,7 @@ def _statement_ends(text: str) -> List[int]:
                         break
                 else:
                     i += 1
+            yield 'quoted', start, i
         elif char == '"':
             i += 1
             while i < length:
@@ -176,19 +179,46 @@ def _statement_ends(text: str) -> List[int]:
                         break
                 else:
                     i += 1
+            yield 'quoted', start, i
         elif char == '$' and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == '_')):
             match = _DOLLAR_TAG.match(text, i)
             if match:
                 closing = text.find(match.group(0), match.end())
                 i = length if closing < 0 else closing + len(match.group(0))
+                yield 'quoted', start, i
             else:
                 i += 1
         elif char == ';':
-            ends.append(i)
             i += 1
+            yield 'semicolon', start, i
         else:
             i += 1
-    return ends
+
+
+def _statement_ends(text: str) -> List[int]:
+    """
+    The positions of the semicolons that end statements: not inside a quoted string
+    ('...', E'...'), a quoted identifier ("..."), a dollar-quoted string ($$...$$,
+    $tag$...$tag$), a line comment (-- ...) or a block comment (/* ... */, nested).
+    """
+    return [start for kind, start, _ in _spans(text) if kind == 'semicolon']
+
+
+def strip_comments(text: str) -> str:
+    """
+    The SQL without its comments, quoted text untouched. A comment becomes one space (a
+    block comment keeps its line breaks), so line numbers in errors still match. Drivers
+    that bind %(name)s placeholders, such as psycopg2, read them inside comments too.
+    """
+    parts, last = [], 0
+    for kind, start, end in _spans(text):
+        if kind != 'comment':
+            continue
+        parts.append(text[last:start])
+        parts.append(' ' + '\n' * text.count('\n', start, end))
+        last = end
+    parts.append(text[last:])
+    return ''.join(parts)
 
 
 def _only_comments(statement: str) -> bool:
