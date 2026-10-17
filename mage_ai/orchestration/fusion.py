@@ -187,7 +187,8 @@ def fusion_plan(pipeline) -> List[List[str]]:
     """
     if pipeline is None or pipeline.type != PipelineType.PYTHON:
         return []
-    blocks = list(pipeline.blocks_by_uuid.values())
+    # Markdown, charts and scratchpads are not run.
+    blocks = [b for b in pipeline.blocks_by_uuid.values() if executable(b)]
     continues = {
         following.uuid for following in (next_in_chain(pipeline, b) for b in blocks)
         if following is not None
@@ -486,14 +487,27 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
         release_block(block)
 
 
+def executable(block) -> bool:
+    """Whether a run runs the block: markdown, charts and scratchpads document a pipeline."""
+    from mage_ai.data_preparation.models.constants import (
+        NON_PIPELINE_EXECUTABLE_BLOCK_TYPES,
+    )
+
+    return block is not None and block.type not in NON_PIPELINE_EXECUTABLE_BLOCK_TYPES
+
+
 def stages_apply_to_cli(pipeline) -> bool:
     """Whether `mage run` runs the pipeline in stages: fusion on, and only blocks a stage
-    can hold (no dynamic, integration or replicated blocks, conditionals or callbacks)."""
+    can hold (no dynamic, integration or replicated blocks, conditionals or callbacks).
+    Markdown, charts and scratchpads are not run, so they do not count."""
     if not fusion_enabled(pipeline):
         return False
     if getattr(pipeline, 'conditionals', None) or getattr(pipeline, 'callbacks', None):
         return False
-    return all(block_can_fuse(pipeline, block) for block in pipeline.blocks_by_uuid.values())
+    return all(
+        block_can_fuse(pipeline, block)
+        for block in pipeline.blocks_by_uuid.values() if executable(block)
+    )
 
 
 def stage_limit(pipeline, max_parallel: Optional[int] = None) -> Optional[int]:
@@ -536,7 +550,10 @@ async def execute_in_stages(
 
     def ready(stage: List[str]) -> bool:
         head = pipeline.get_block(stage[0])
-        return all(u.uuid in done for u in (head.upstream_blocks or []))
+        return all(
+            u.uuid in done for u in (head.upstream_blocks or [])
+            if getattr(u, 'type', None) is None or executable(u)
+        )
 
     while pending or running:
         if not failures:

@@ -207,6 +207,24 @@ class FlowExecutionTest(DBTestCase):
             )
             self.assertEqual(int(frame['n'].iloc[0]), expected)
 
+    def test_a_markdown_block_keeps_the_pipeline_in_stages(self):
+        # A Markdown block made the whole pipeline ineligible for mage run's stages (I-115).
+        from mage_ai.orchestration import fusion
+
+        load = self.block('load', 'data_loader', '''
+            import pandas as pd
+            @data_loader
+            def load(**kwargs):
+                return pd.DataFrame({'n': [1]})
+        ''')
+        notes = Block.create(
+            f'{self.pipeline.uuid}_notes', 'markdown', self.repo_path, language='markdown',
+        )
+        self.pipeline.add_block(notes)
+        self.assertTrue(fusion.stages_apply_to_cli(self.pipeline))
+        self.assertEqual(fusion.fusion_plan(self.pipeline), [[load.uuid]])
+        PipelineExecutor(self.pipeline).execute(global_vars={}, update_status=False)
+
     def test_async_execution_awaits_all_blocks(self):
         self.branched_flow()
         run = trigger_pipeline(self.pipeline.uuid, variables={
