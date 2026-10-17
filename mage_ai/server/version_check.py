@@ -7,7 +7,9 @@ MageML's. The badge appears only for a strictly newer version (PEP 440). MageML 
 own versions, starting at 0.1.0, independent of the Mage release it is based on
 (constants.UPSTREAM_MAGE_VERSION).
 """
+import asyncio
 import os
+import time
 from typing import Optional
 
 import aiohttp
@@ -70,9 +72,35 @@ def release_url(version: str, repository: str = UPDATE_CHECK_REPOSITORY) -> str:
     return f'https://github.com/{repository}/releases/tag/v{version}'
 
 
+# A known release is checked again after 6 hours; a failed check (no network, rate limit)
+# after an hour.
+FRESH_SECONDS = 6 * 3600
+RETRY_SECONDS = 3600
+_latest = dict(version=None, checked=0.0, task=None)
+
+
+async def refresh_latest_version() -> Optional[str]:
+    """Asks GitHub for the latest release and keeps it for get_latest_version."""
+    version = await fetch_published_version()
+    if version is not None:
+        _latest['version'] = version
+    _latest['checked'] = time.monotonic()
+    return version
+
+
 async def get_latest_version() -> str:
-    """The version the header should offer, which is the installed one when current."""
+    """
+    The version the header should offer, which is the installed one when current. It
+    answers at once from the last check and refreshes that check in the background: asking
+    GitHub on every request held each page that reads the project for up to 3 seconds,
+    and for the full timeout on servers without internet access.
+    """
     if not update_check_enabled():
         return VERSION
 
-    return newer_version(VERSION, await fetch_published_version())
+    checked = _latest['checked']
+    wait = FRESH_SECONDS if _latest['version'] else RETRY_SECONDS
+    task = _latest['task']
+    if (not checked or time.monotonic() - checked > wait) and (task is None or task.done()):
+        _latest['task'] = asyncio.ensure_future(refresh_latest_version())
+    return newer_version(VERSION, _latest['version'])

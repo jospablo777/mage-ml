@@ -1,3 +1,4 @@
+import asyncio
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BaseResource import BaseResource
@@ -127,7 +128,8 @@ class SessionResource(BaseResource):
         if not user:
             raise ApiError(error)
 
-        if verify_password(password, user.password_hash):
+        # bcrypt takes most of a second by design; off the event loop, other requests go on.
+        if await asyncio.to_thread(verify_password, password, user.password_hash):
             oauth_token = generate_access_token(user, kwargs['oauth_client'])
             return self(oauth_token, user, **kwargs)
         else:

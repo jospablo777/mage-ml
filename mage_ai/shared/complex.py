@@ -1,4 +1,5 @@
 import inspect
+import sys
 from typing import Any
 
 
@@ -6,17 +7,17 @@ def is_model_sklearn(data: Any) -> bool:
     if inspect.isclass(data):
         return False
 
-    try:
-        from sklearn.base import BaseEstimator, is_classifier, is_regressor
-
-        if isinstance(data, BaseEstimator):
-            return True
-        if callable(getattr(data, '__sklearn_tags__', None)):
-            return is_classifier(data) or is_regressor(data)
+    # An estimator's class imports scikit-learn, so without it imported none exists here.
+    # Importing it to check took 0.7 s of the server's event loop on the first pipeline
+    # the editor opened.
+    base = sys.modules.get('sklearn.base')
+    if base is None:
         return getattr(data, '_estimator_type', None) in ('classifier', 'regressor')
-    except ImportError as err:
-        print(f"Error importing sklearn: {err}")
-        return False
+    if isinstance(data, base.BaseEstimator):
+        return True
+    if callable(getattr(data, '__sklearn_tags__', None)):
+        return base.is_classifier(data) or base.is_regressor(data)
+    return getattr(data, '_estimator_type', None) in ('classifier', 'regressor')
 
 
 def is_model_xgboost(data: Any) -> bool:

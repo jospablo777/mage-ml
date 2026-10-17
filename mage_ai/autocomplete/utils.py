@@ -1,4 +1,5 @@
-import importlib
+import ast
+import asyncio
 import os
 import pathlib
 import re
@@ -80,6 +81,38 @@ def extract_all_imports(file_content, ignore_nesting=False):
 autocomplete_file_cache = MemorySizeLRUCache(maxsize=100_000)
 
 
+def class_members(file_content: str) -> dict:
+    """
+    Each class's public methods and attributes, and its bases, read from the source
+    without importing it: importing ran the module's code (a user's block, or an io module
+    that imports a heavy SDK) on the server, and held every request for seconds.
+    """
+    try:
+        tree = ast.parse(file_content)
+    except (SyntaxError, ValueError):
+        return {}
+    members = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        names = []
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names.append(item.name)
+            elif isinstance(item, ast.Assign):
+                names += [t.id for t in item.targets if isinstance(t, ast.Name)]
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                names.append(item.target.id)
+        bases = [
+            b.id if isinstance(b, ast.Name) else b.attr
+            for b in node.bases if isinstance(b, (ast.Name, ast.Attribute))
+        ]
+        members[node.name] = dict(
+            names=[n for n in names if not n.startswith('_')], bases=bases,
+        )
+    return members
+
+
 @async_cache_file_read(autocomplete_file_cache)
 async def extract_classes_from_file(file_path: str, cwd: str = None, mode: str = 'r'):
     cwd = cwd or os.getcwd()
@@ -89,37 +122,32 @@ async def extract_classes_from_file(file_path: str, cwd: str = None, mode: str =
     file_name = file_path.replace(f'{cwd}/', '').replace(f'{root_path}/', '')
     files = []
     parts = file_name.split('/')
-    module_name = '.'.join(parts).replace('.py', '')
 
     if '__init__.py' == parts[-1]:
         path_sub = '/'.join(parts[: len(parts) - 1])
         files += [fn for fn in reduce(add_file, [path_sub], []) if fn != file_name]
-        module_name = module_name.replace('.__init__', '')
 
-    methods_for_class = {}
-    all_classes = extract_all_classes(file_content)
-    for class_name in all_classes:
-        try:
-            klass = getattr(
-                importlib.import_module(module_name),
-                class_name,
-            )
-            methods_for_class[class_name] = list(
-                filter(
-                    lambda x: not re.match('^_', x),
-                    dir(klass),
-                )
-            )
-        except ImportError as err:
-            print(err)
+    members = await asyncio.to_thread(class_members, file_content)
     return dict(
-        classes=all_classes,
+        classes=extract_all_classes(file_content),
         constants=extract_all_constants(file_content),
         files=files,
         functions=extract_all_functions(file_content),
         imports=extract_all_imports(file_content),
-        methods_for_class=methods_for_class,
+        class_members=members,
     )
+
+
+def _methods_for_class(class_name: str, index: dict, seen=None) -> list:
+    """A class's public names with those of its bases found among the files read."""
+    seen = seen or set()
+    if class_name in seen or class_name not in index:
+        return []
+    seen.add(class_name)
+    names = list(index[class_name]['names'])
+    for base in index[class_name]['bases']:
+        names += _methods_for_class(base, index, seen)
+    return sorted(set(names))
 
 
 async def build_file_content_mapping(paths, files):
@@ -128,6 +156,18 @@ async def build_file_content_mapping(paths, files):
 
     cwd = os.getcwd()
     for file_name in file_names:
-        file_content_mapping[file_name] = await extract_classes_from_file(file_name, cwd=cwd)
+        file_content_mapping[file_name] = dict(
+            await extract_classes_from_file(file_name, cwd=cwd),
+        )
+
+    index = {}
+    for info in file_content_mapping.values():
+        for class_name, members in (info.get('class_members') or {}).items():
+            index.setdefault(class_name, members)
+    for info in file_content_mapping.values():
+        members = info.pop('class_members', None) or {}
+        info['methods_for_class'] = {
+            class_name: _methods_for_class(class_name, index) for class_name in members
+        }
 
     return file_content_mapping

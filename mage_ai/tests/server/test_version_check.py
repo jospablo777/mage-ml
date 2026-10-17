@@ -6,11 +6,13 @@ release it was forked from, so the reported version has to account for that.
 import unittest
 from unittest.mock import patch
 
+from mage_ai.server import version_check
 from mage_ai.server.constants import VERSION
 from mage_ai.server.version_check import (
     fetch_published_version,
     get_latest_version,
     newer_version,
+    refresh_latest_version,
     update_check_enabled,
 )
 
@@ -47,23 +49,74 @@ class NewerVersionTests(unittest.TestCase):
 
 
 class GetLatestVersionTests(unittest.TestCase):
+    def setUp(self):
+        version_check._latest.update(version=None, checked=0.0, task=None)
+
     def published(self, version):
         return patch(
             'mage_ai.server.version_check.fetch_published_version',
             return_value=version,
         )
 
+    def latest_after_refresh(self):
+        async def check():
+            await refresh_latest_version()
+            return await get_latest_version()
+
+        return run(check())
+
     def test_returns_the_installed_version_when_nothing_newer_is_published(self):
         with self.published('0.0.9'):
-            self.assertEqual(run(get_latest_version()), VERSION)
+            self.assertEqual(self.latest_after_refresh(), VERSION)
 
     def test_returns_a_newer_published_version(self):
         with self.published('99.0.0'):
-            self.assertEqual(run(get_latest_version()), '99.0.0')
+            self.assertEqual(self.latest_after_refresh(), '99.0.0')
 
     def test_returns_the_installed_version_when_the_lookup_fails(self):
         with self.published(None):
-            self.assertEqual(run(get_latest_version()), VERSION)
+            self.assertEqual(self.latest_after_refresh(), VERSION)
+
+    def test_a_failed_lookup_keeps_the_release_found_before(self):
+        with self.published('99.0.0'):
+            self.latest_after_refresh()
+        with self.published(None):
+            self.assertEqual(self.latest_after_refresh(), '99.0.0')
+
+    def test_a_request_never_waits_for_github(self):
+        # Every request that read the project waited for GitHub, up to 3 s each, and the
+        # whole timeout without internet access.
+        import asyncio
+        import time
+
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(5)
+            return '99.0.0'
+
+        async def check():
+            with patch('mage_ai.server.version_check.fetch_published_version', slow):
+                started = time.monotonic()
+                first = await get_latest_version()
+                second = await get_latest_version()
+                elapsed = time.monotonic() - started
+                version_check._latest['task'].cancel()
+                return first, second, elapsed
+
+        first, second, elapsed = run(check())
+        self.assertEqual((first, second), (VERSION, VERSION))
+        self.assertLess(elapsed, 0.5)
+
+    def test_the_check_runs_again_only_when_due(self):
+        async def check():
+            await get_latest_version()
+            first = version_check._latest['task']
+            await first
+            await get_latest_version()
+            return first, version_check._latest['task']
+
+        with self.published('99.0.0'):
+            first, second = run(check())
+        self.assertIs(first, second)
 
     def test_the_check_can_be_turned_off(self):
         with patch('mage_ai.server.version_check.update_check_enabled', return_value=False):

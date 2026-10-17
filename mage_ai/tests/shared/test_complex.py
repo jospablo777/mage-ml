@@ -37,3 +37,22 @@ class SklearnModelDetectionTest(unittest.TestCase):
                 return LogisticRegression().__sklearn_tags__()
 
         self.assertTrue(is_model_sklearn(TaggedClassifier()))
+
+
+class SklearnCheckImportTest(unittest.TestCase):
+    def test_checking_a_value_does_not_import_scikit_learn(self):
+        # Serializing a pipeline imported scikit-learn on the server's event loop (0.7 s).
+        import subprocess
+        import sys
+
+        script = (
+            'import sys\n'
+            'from mage_ai.shared.complex import is_model_sklearn\n'
+            'from mage_ai.shared.parsers import encode_complex\n'
+            'print(is_model_sklearn(object()), encode_complex({1, 2}) is not None,\n'
+            "      'sklearn' in sys.modules)\n"
+        )
+        out = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True,
+                             check=True).stdout.split()
+        self.assertEqual(out[0], 'False')
+        self.assertEqual(out[-1], 'False')
