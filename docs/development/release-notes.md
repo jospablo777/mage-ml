@@ -77,6 +77,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - IBM Db2: io class, templates and SQL blocks (the `db2` extra), values exact.
 - IBM MQ sources and sinks in streams; IBM Event Streams from its service credentials.
 
+### Blocks
+
+- Block functions can be `async def`; they ran nothing and returned the coroutine
+  (upstream #5164).
+
 ### Observability
 
 - `/metrics` (with `ENABLE_PROMETHEUS`) exposes pipeline and block runs by status, the last

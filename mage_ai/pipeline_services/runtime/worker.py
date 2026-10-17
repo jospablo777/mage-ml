@@ -18,6 +18,7 @@ as .npy and anything else pickled.
 This module imports only the standard library at start; pandas, Polars, pyarrow and NumPy
 load when a block's values need them.
 """
+import asyncio
 import io
 import json
 import logging
@@ -290,8 +291,13 @@ def _accepts_kwargs(function: Callable) -> bool:
 
 def _call(function: Callable, args: List, kwargs: Dict) -> Any:
     if kwargs and _accepts_kwargs(function):
-        return function(*args, **kwargs)
-    return function(*args)
+        result = function(*args, **kwargs)
+    else:
+        result = function(*args)
+    # An async def block returns a coroutine; the worker runs no event loop of its own.
+    if asyncio.iscoroutine(result):
+        result = asyncio.run(result)
+    return result
 
 
 def _kwargs(request: Dict, block: Dict) -> Dict:

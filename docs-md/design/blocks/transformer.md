@@ -65,6 +65,25 @@ def join(*, load_orders, load_customers, **kwargs) -> DataFrame:
   of that name; otherwise the block fails and the error lists its upstream blocks.
 - Functions without keyword-only parameters receive their inputs as before.
 
+## Async functions
+
+A block function can be `async def`, for clients such as `httpx.AsyncClient` or `aiohttp`.
+MageML runs it to completion, in the editor, in scheduled runs and in exported services:
+
+```python
+import asyncio
+
+import httpx
+
+@data_loader
+async def load(**kwargs):
+    async with httpx.AsyncClient() as client:
+        pages = await asyncio.gather(*[
+            client.get(f'https://api.example.com/items?page={page}') for page in range(1, 6)
+        ])
+    return [item for page in pages for item in page.json()]
+```
+
 ## Handling column renames in data integration pipeline
 
 Since data passed to transform blocks is a pandas DataFrame, many operations are available on each row of your data.

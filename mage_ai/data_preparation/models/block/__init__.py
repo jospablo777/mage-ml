@@ -2228,6 +2228,12 @@ class Block(
         else:
             output = block_function_updated(*call_args)
 
+        if inspect.iscoroutine(output):
+            # async def block functions returned their coroutine unrun (upstream #5164).
+            from mage_ai.shared.async_utils import run_sync
+
+            output = run_sync(output)
+
         if MEMORY_MANAGER_V2 and inspect.isgeneratorfunction(block_function_updated):
             variable_types = []
             dynamic_child = is_dynamic_block_child(self)

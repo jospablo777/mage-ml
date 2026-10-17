@@ -118,6 +118,20 @@ class OutputsTest(WorkerTestCase):
             self.assertEqual(json.load(file), {'got': [1, 'two']})
 
 
+class AsyncBlockTest(WorkerTestCase):
+    def test_an_async_block_function_runs_in_a_service(self):
+        """An async def block returned its coroutine unrun (upstream #5164)."""
+        result = self.run_block('''
+            import asyncio
+            @transformer
+            async def f():
+                await asyncio.sleep(0)
+                return {'n': 42}
+        ''')
+        with open(result['outputs'][0]['path']) as file:
+            self.assertEqual(json.load(file), {'n': 42})
+
+
 class ArgumentsTest(WorkerTestCase):
     def test_kwargs_reach_only_functions_that_take_them(self):
         result = self.run_block('''

@@ -605,6 +605,28 @@ class FlowExecutionTest(DBTestCase):
         self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
         self.assertEqual(self.output.read_text(), 'False')
 
+    def test_async_block_functions_run(self):
+        """An async def block returned its coroutine unrun (upstream #5164)."""
+        load = self.block('load', 'data_loader', '''
+            import asyncio
+            @data_loader
+            async def load(**kwargs):
+                await asyncio.sleep(0)
+                return [1, 2, 3]
+        ''')
+        self.block('export', 'data_exporter', '''
+            from pathlib import Path
+            @data_exporter
+            async def export(values, **kwargs):
+                Path(kwargs['output_path']).write_text(str(sum(values)))
+        ''', upstream=[load])
+        run = trigger_pipeline(self.pipeline.uuid, variables={'output_path': str(self.output)})
+
+        self.execute_run(run)
+
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.COMPLETED)
+        self.assertEqual(self.output.read_text(), '6')
+
     def test_command_preserves_spaces_in_project_path(self):
         self.pipeline.repo_config.repo_path = '/tmp/project with spaces'
         command = PipelineExecutor(self.pipeline)._run_commands()
