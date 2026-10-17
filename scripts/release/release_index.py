@@ -29,7 +29,9 @@ from email.policy import compat32
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
-PROJECTS = frozenset({'mage-ml', 'column-atlas-native', 'mage-integrations', 'singer-python'})
+PROJECTS = frozenset({
+    'mage-ml', 'column-atlas-native', 'mage-integrations', 'singer-python', 'mageml-engine',
+})
 VERSION = re.compile(
     r'[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?(?:\+[a-z0-9]+(?:\.[a-z0-9]+)*)?\Z'
 )
