@@ -15,14 +15,16 @@ from mage_ai.orchestration import fusion
 class FakePipeline:
     """Stages of single blocks; `upstream` maps a block to the blocks it waits for."""
 
-    def __init__(self, upstream, concurrency_config=None):
+    def __init__(self, upstream, concurrency_config=None, exclusive=()):
         self.upstream = upstream
         self.concurrency_config = concurrency_config or {}
+        self.exclusive = set(exclusive)
 
     def get_block(self, uuid):
         return SimpleNamespace(
             uuid=uuid,
             upstream_blocks=[SimpleNamespace(uuid=u) for u in self.upstream[uuid]],
+            configuration=dict(exclusive=True) if uuid in self.exclusive else {},
         )
 
 
@@ -80,6 +82,23 @@ class CliStagesTest(TestCase):
         recorder = Recorder(seconds={'a': 0.2, 'b': 0.2, 'c': 0.2})
         run(FakePipeline(upstream), recorder)
         self.assertEqual(recorder.peak, 3)
+
+    def test_an_exclusive_block_runs_with_no_other_stage_beside_it(self):
+        # Stages share the process: a block setting the environment or MLflow's tracking
+        # URI affected the blocks running beside it (I-110).
+        upstream = {'a': [], 'b': [], 'c': [], 'd': []}
+        recorder = Recorder(seconds={'a': 0.1, 'b': 0.1, 'c': 0.1, 'd': 0.1})
+        run(FakePipeline(upstream, exclusive={'b'}), recorder)
+        events = recorder.events
+        start, end = events.index(('start', 'b')), events.index(('end', 'b'))
+        self.assertEqual(events[start + 1], ('end', 'b'))
+        # Nothing was running when b started.
+        before = events[:start]
+        self.assertEqual(
+            sum(1 for e in before if e[0] == 'start'), sum(1 for e in before if e[0] == 'end'),
+        )
+        self.assertGreater(end, start)
+        self.assertEqual(recorder.peak, 2)
 
     def test_after_a_failure_no_stage_starts_and_running_ones_finish_first(self):
         # A sibling kept running after the failure was reported (I-112).

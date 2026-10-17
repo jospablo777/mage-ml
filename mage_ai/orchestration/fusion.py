@@ -642,12 +642,24 @@ async def execute_in_stages(
             if getattr(u, 'type', None) is None or executable(u)
         )
 
+    def exclusive(stage: List[str]) -> bool:
+        # Blocks that change process-wide state (environment, MLflow's tracking URI,
+        # global settings) run with no other stage beside them (I-110).
+        return any(
+            (getattr(pipeline.get_block(uuid), 'configuration', None) or {}).get('exclusive')
+            for uuid in stage
+        )
+
     while pending or running:
         if not failures:
             for stage in [s for s in pending if ready(s)]:
                 if limit is not None and len(running) >= limit:
                     break
                 if running and over_memory_limit():
+                    break
+                # An exclusive stage starts when nothing runs, and nothing starts beside
+                # it; admission stops while it waits, so it is not starved.
+                if running and (exclusive(stage) or any(map(exclusive, running.values()))):
                     break
                 task = asyncio.ensure_future(asyncio.to_thread(
                     _run_stage_in_process, pipeline, stage, global_vars, run_tests,

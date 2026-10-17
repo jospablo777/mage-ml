@@ -81,6 +81,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Blocks
 
+- `exclusive: true` in a block's configuration runs its stage alone in `mage run`, for blocks
+  that change process-wide settings such as environment variables.
 - Pipeline callbacks: a callback block attached to no block runs once when a run completes or
   fails, with its status and failed blocks (upstream #5438). `@callback('success', 'failure')`
   runs for both statuses; it ran for the first only, and stacked `@callback` decorators work.

@@ -126,7 +126,9 @@ With block fusion (the default), `mage run` runs the pipeline in stages: each ch
 runs as one stage, and a stage starts as soon as the blocks it waits for are done. Stages
 run in threads of one process, so blocks that change process-wide settings (environment
 variables, an MLflow tracking URI) or need every core should not run beside others: set
-`--max-parallel 1` or the pipeline's `block_run_limit`. No new stage starts while the
+`exclusive: true` in such a block's `configuration`, and its stage starts when no other
+stage runs and none starts beside it; `--max-parallel 1` or the pipeline's
+`block_run_limit` runs every stage alone. No new stage starts while the
 process holds more memory than `MAGE_STAGE_MAX_MEMORY_SHARE` (0.5) of the machine and
 another stage runs. When a stage fails, no other stage starts; the run waits for the stages
 already running and fails with the first error, noting the others.
