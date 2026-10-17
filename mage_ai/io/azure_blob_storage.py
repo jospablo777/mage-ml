@@ -1,11 +1,13 @@
-from azure.identity import DefaultAzureCredential, ClientSecretCredential
-from azure.storage.blob import BlobServiceClient
 from io import BytesIO
-from mage_ai.io.base import BaseFile, FileFormat, QUERY_ROW_LIMIT
+from typing import Union
+
+from azure.identity import ClientSecretCredential, DefaultAzureCredential
+from azure.storage.blob import BlobServiceClient
+from pandas import DataFrame
+
+from mage_ai.io.base import QUERY_ROW_LIMIT, BaseFile, FileFormat, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.shared.hash import extract, merge_dict
-from pandas import DataFrame
-from typing import Union
 
 
 class AzureBlobStorage(BaseFile):
@@ -46,6 +48,7 @@ class AzureBlobStorage(BaseFile):
             credential=self.creds,
         )
 
+    @checks_row_limit
     def load(
         self,
         container_name: str,

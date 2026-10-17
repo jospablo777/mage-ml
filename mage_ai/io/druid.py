@@ -4,7 +4,7 @@ from pandas import DataFrame, Series
 from pydruid.db.api import Connection
 from pydruid.db.api import Cursor as CursorParent
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.sql import BaseSQL
 
@@ -114,6 +114,7 @@ class Druid(BaseSQL):
     def fetch_query(self, cursor, query: str) -> Any:
         return super().fetch_query(cursor, query)
 
+    @checks_row_limit
     def load(self,
              query_string: str,
              limit: int = QUERY_ROW_LIMIT,

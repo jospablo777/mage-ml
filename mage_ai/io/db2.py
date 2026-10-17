@@ -16,7 +16,7 @@ from typing import IO, Any, Dict, List, Mapping, Optional, Union
 import numpy as np
 from pandas import DataFrame, Series, Timestamp, isna
 
-from mage_ai.io.base import QUERY_ROW_LIMIT
+from mage_ai.io.base import QUERY_ROW_LIMIT, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import PandasTypes
@@ -246,6 +246,7 @@ class Db2(BaseSQL):
         query = query.strip().rstrip(';')
         return f'SELECT * FROM (\n{query}\n) AS mage_query FETCH FIRST {int(limit)} ROWS ONLY'
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

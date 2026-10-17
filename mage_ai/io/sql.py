@@ -6,7 +6,12 @@ from typing import IO, Any, Dict, List, Mapping, Optional, Union
 import polars as pl
 from pandas import DataFrame, Series, read_sql
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLConnection, ExportWritePolicy
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    BaseSQLConnection,
+    ExportWritePolicy,
+    checks_row_limit,
+)
 from mage_ai.io.config import BaseConfigLoader
 from mage_ai.io.export_utils import (
     PandasTypes,
@@ -192,6 +197,7 @@ class BaseSQL(BaseSQLConnection):
     def fetch_query(self, cursor, query: str) -> Any:
         return read_sql(query, self.conn)
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

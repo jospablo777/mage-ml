@@ -4,7 +4,12 @@ import clickhouse_connect
 from pandas import DataFrame, Series
 
 from mage_ai.io import clickhouse_types
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    BaseSQLDatabase,
+    ExportWritePolicy,
+    checks_row_limit,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import to_pandas_frame
 
@@ -116,6 +121,7 @@ class ClickHouse(BaseSQLDatabase):
 
         return results
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

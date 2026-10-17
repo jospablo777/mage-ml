@@ -9,7 +9,12 @@ from snowflake.connector.pandas_tools import write_pandas
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
     table_name_parts_from_query,
 )
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLConnection, ExportWritePolicy
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    BaseSQLConnection,
+    ExportWritePolicy,
+    checks_row_limit,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import to_pandas_frame
@@ -133,6 +138,7 @@ class Snowflake(BaseSQLConnection):
 
         return columns
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

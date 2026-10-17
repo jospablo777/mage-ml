@@ -15,7 +15,12 @@ from google.oauth2 import service_account
 from pandas import DataFrame
 from sqlglot import exp, parse_one
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    BaseSQLDatabase,
+    ExportWritePolicy,
+    checks_row_limit,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import infer_dtypes, to_pandas_frame
@@ -154,6 +159,7 @@ WHERE TABLE_NAME = '{table_name}'
         else:
             __process(database=database)
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

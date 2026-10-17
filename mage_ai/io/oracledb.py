@@ -5,7 +5,7 @@ import oracledb
 import simplejson
 from pandas import DataFrame, Series, read_sql
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import PandasTypes
 from mage_ai.io.sql import BaseSQL, ignore_dbapi_connection_warning
@@ -59,6 +59,7 @@ class OracleDB(BaseSQL):
             self._ctx = oracledb.connect(
                 user=self.settings['user'], password=self.settings['password'], dsn=connection_dsn)
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

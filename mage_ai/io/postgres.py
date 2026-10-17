@@ -16,7 +16,7 @@ from psycopg2.extras import (
 )
 
 from mage_ai.io import postgres_types
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
@@ -316,6 +316,7 @@ class Postgres(BaseSQL):
             and connection.info.transaction_status == TRANSACTION_STATUS_IDLE
         )
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

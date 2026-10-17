@@ -11,7 +11,7 @@ from trino.exceptions import TrinoUserError
 from trino.transaction import IsolationLevel
 
 from mage_ai.io import trino_types
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.io.sql import BaseSQL, ignore_dbapi_connection_warning
@@ -142,6 +142,7 @@ class Trino(BaseSQL):
 
         return f'CREATE TABLE {full_table_name} (' + ','.join(query) + ')'
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

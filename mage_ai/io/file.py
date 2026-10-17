@@ -1,9 +1,11 @@
+import os
+from typing import List, Union
+
+import pandas as pd
+from pandas import DataFrame
+
 from mage_ai.io.base import BaseFile, FileFormat
 from mage_ai.shared.utils import files_in_path
-from pandas import DataFrame
-from typing import List, Union
-import os
-import pandas as pd
 
 
 class FileIO(BaseFile):

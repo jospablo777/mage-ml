@@ -6,7 +6,7 @@ from google.cloud import storage
 from google.oauth2 import service_account
 from pandas import DataFrame
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseFile, FileFormat
+from mage_ai.io.base import QUERY_ROW_LIMIT, BaseFile, FileFormat, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 
 
@@ -67,6 +67,7 @@ class GoogleCloudStorage(BaseFile):
                 kwargs.pop('credentials')
         self.client = storage.Client(credentials=credentials, **kwargs)
 
+    @checks_row_limit
     def load(
         self,
         bucket_name: str,

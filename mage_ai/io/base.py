@@ -1,6 +1,9 @@
+import functools
+import inspect
 import io
 import json
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import IO, Any, Callable, Dict, Union
@@ -16,6 +19,71 @@ from mage_ai.shared.models import BaseEnum
 from mage_ai.shared.utils import clean_name
 
 QUERY_ROW_LIMIT = 10_000_000
+# What a load does when the query returns more rows than its limit: warn (cut the result at
+# the limit and say so), error (raise RowLimitReached) or allow (cut it silently).
+ROW_LIMIT_POLICY_ENV = 'MAGE_SQL_ROW_LIMIT_POLICY'
+_row_limit = threading.local()
+
+
+class RowLimitReached(RuntimeError):
+    """A load returned more rows than its limit, with MAGE_SQL_ROW_LIMIT_POLICY=error."""
+
+
+def row_limit_policy() -> str:
+    policy = (os.getenv(ROW_LIMIT_POLICY_ENV) or 'warn').strip().lower()
+    return policy if policy in ('warn', 'error', 'allow') else 'warn'
+
+
+def _cut_at_limit(result, limit: int, source: str):
+    if isinstance(result, pd.DataFrame):
+        rows, cut = len(result), lambda: result.iloc[:limit]
+    elif isinstance(result, pl.DataFrame):
+        rows, cut = result.height, lambda: result.head(limit)
+    else:
+        return result
+    if rows <= limit:
+        return result
+    message = (
+        f'{source}.load returned more than its limit of {limit:,} rows, so the result is '
+        f'incomplete. Pass a larger limit= to load every row, or set '
+        f'{ROW_LIMIT_POLICY_ENV}=error to make a cut result fail the block.'
+    )
+    policy = row_limit_policy()
+    if policy == 'error':
+        raise RowLimitReached(message)
+    if policy == 'warn':
+        print(f'Warning: {message} The first {limit:,} rows are kept.')
+    return cut()
+
+
+def checks_row_limit(load: Callable) -> Callable:
+    """
+    Makes a load with a row limit say when the limit cut its result: the query asks for
+    one row more than the limit, so a complete result of exactly `limit` rows is told apart
+    from a cut one. A load that calls another checked load is checked once.
+    """
+    signature = inspect.signature(load)
+    if 'limit' not in signature.parameters:
+        return load
+    default = signature.parameters['limit'].default
+
+    @functools.wraps(load)
+    def wrapper(self, *args, **kwargs):
+        if getattr(_row_limit, 'active', False):
+            return load(self, *args, **kwargs)
+        bound = signature.bind(self, *args, **kwargs)
+        limit = bound.arguments.get('limit', default)
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            return load(self, *args, **kwargs)
+        bound.arguments['limit'] = limit + 1
+        _row_limit.active = True
+        try:
+            result = load(*bound.args, **bound.kwargs)
+        finally:
+            _row_limit.active = False
+        return _cut_at_limit(result, limit, type(self).__name__)
+
+    return wrapper
 
 
 class DataSource(StrEnum):

@@ -6,7 +6,7 @@ from pandas import DataFrame
 from redshift_connector import connect
 
 from mage_ai.data_preparation.models.block.sql.utils.shared import split_query_string
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import clean_df_for_export, infer_dtypes, to_pandas_frame
 from mage_ai.io.sql import BaseSQL
@@ -83,6 +83,7 @@ class Redshift(BaseSQL):
         self.conn.commit()
         return results
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

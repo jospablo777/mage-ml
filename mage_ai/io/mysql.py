@@ -11,6 +11,7 @@ from mysql.connector.cursor import MySQLCursor
 from pandas import DataFrame, Series
 
 from mage_ai.io import mysql_types
+from mage_ai.io.base import checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import PandasTypes, insert_rows, to_pandas_frame
@@ -152,6 +153,7 @@ class MySQL(BaseSQL):
             )
             return len(cur.fetchall()) >= 1
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,

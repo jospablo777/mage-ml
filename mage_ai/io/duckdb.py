@@ -14,7 +14,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pandas import DataFrame, Series
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy
+from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
@@ -126,6 +126,7 @@ class DuckDB(BaseSQL):
         """
         return f'INSERT INTO {full_table_name} BY NAME\n{query_string}'
 
+    @checks_row_limit
     def load(
         self,
         query_string: str,
