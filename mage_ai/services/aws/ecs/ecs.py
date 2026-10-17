@@ -19,6 +19,8 @@ def run_task(
     wait_for_completion = False if ecs_config.wait_timeout == -1 else wait_for_completion
 
     if wait_for_completion:
+        if not response.get('tasks'):
+            raise Exception(f'ECS did not start the task: {response.get("failures")}')
         arn = response['tasks'][0]['taskArn']
         waiter = client.get_waiter('tasks_stopped')
         wait_kwargs = dict(
@@ -30,7 +32,25 @@ def run_task(
                 'Delay': 15,
                 'MaxAttempts': int(ecs_config.wait_timeout / 15),
             }
-        waiter.wait(**wait_kwargs)
+        try:
+            waiter.wait(**wait_kwargs)
+        except BaseException as error:
+            # The task kept running when the wait timed out or the run was cancelled: it
+            # used resources unseen, and a retry ran the block twice (upstream #4655).
+            try:
+                client.stop_task(
+                    cluster=ecs_config.cluster,
+                    task=arn,
+                    reason='The MageML block run stopped waiting for it.',
+                )
+            except Exception as stop_error:
+                print(f'[WARNING] Could not stop ECS task {arn}: {stop_error}')
+            if isinstance(error, Exception):
+                raise Exception(
+                    f'ECS task {arn} did not finish within the wait timeout '
+                    f'({ecs_config.wait_timeout} seconds) and was stopped: {error}',
+                ) from error
+            raise
 
         tasks = client.describe_tasks(
             cluster=ecs_config.cluster,
@@ -44,10 +64,13 @@ def run_task(
         if not containers:
             raise Exception(f'Failed to get status from container {ecs_config.container_name}')
 
-        exit_code = containers[0]['exitCode']
+        # A container that never started has no exit code, only a reason.
+        exit_code = containers[0].get('exitCode')
         if exit_code != 0:
+            reason = containers[0].get('reason') or tasks[0].get('stoppedReason')
             raise Exception(f'Container {ecs_config.container_name}'
-                            f' returns non-zero exit code: {exit_code}')
+                            f' returns non-zero exit code: {exit_code}'
+                            + (f' ({reason})' if reason else ''))
 
     return response
 
