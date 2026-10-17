@@ -156,6 +156,15 @@ class DockerTarget:
             self._run('rename', swap, n['previous'])
         return self.inspect(service, environment)
 
+    def log_command(self, service: str, environment: str, tail: int = 200,
+                    follow: bool = False) -> List[str]:
+        """The docker command that prints the engine's own log (start-up, schedules, streams)."""
+        current = names(service, environment)['current']
+        if not self._exists(current):
+            raise DeployError(f'{service} is not deployed in {environment}.')
+        return ['docker', 'logs', '--tail', str(tail), *(['--follow'] if follow else []),
+                current]
+
     def inspect(self, service: str, environment: str) -> Optional[Deployment]:
         result = self._run('container', 'inspect', names(service, environment)['current'],
                            check=False)

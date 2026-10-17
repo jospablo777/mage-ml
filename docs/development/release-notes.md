@@ -70,6 +70,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   containers, health waits with automatic rollback, drift from the repository, and the
   previous deployment kept for rollback. A deploy with uncommitted changes to the service's
   inputs stops unless `--allow-uncommitted "<reason>"` records why.
+- `mage service runs` and `mage service logs` list a service's runs and print a run's log
+  or the engine's own log, for a local run or a deployment.
 - `mage service check --affected` checks the services that the changes since a Git ref touch
   (their pipelines, imported code, stream settings and `io_config.yaml`), for CI.
 - `mage service run` runs a service on this machine's engine without Docker, with the

@@ -92,6 +92,9 @@ class LocalRunTest(ExportTestCase):
                                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         try:
             answer = _post_run(run.port, token, self.pipeline.uuid)
+            listed = _cli(self.repo_path, 'runs', 'sales')
+            log = _cli(self.repo_path, 'logs', 'sales', '--run', answer['id'])
+            latest = _cli(self.repo_path, 'logs', 'sales')
         finally:
             process.terminate()
             process.wait(timeout=60)
@@ -99,6 +102,10 @@ class LocalRunTest(ExportTestCase):
         # The run's fields are at the top of the answer (RunDetail flattens them).
         self.assertEqual(answer['status'], 'completed', answer)
         self.assertEqual({b['status'] for b in answer['blocks']}, {'completed'})
+        # mage service runs and logs find the local run's port and token.
+        self.assertIn(answer['id'], listed)
+        self.assertIn('completed', listed)
+        self.assertEqual(log, latest)
         # A second local run keeps the token and the run history.
         again = local_run.prepare(self.repo_path, 'sales', engine_binary=SERVICE_BINARY)
         self.assertEqual(again.token_file.read_text(), token)
@@ -108,6 +115,16 @@ class LocalRunTest(ExportTestCase):
         with self.assertRaisesRegex(local_run.LocalRunError, 'no environment prod'):
             local_run.prepare(self.repo_path, 'sales', environment='prod',
                               engine_binary=SERVICE_BINARY)
+
+
+def _cli(project: str, *arguments: str) -> str:
+    from typer.testing import CliRunner
+
+    from mage_ai.cli.main import app
+
+    result = CliRunner().invoke(app, ['service', *arguments, '--project', project])
+    assert result.exit_code == 0, result.output
+    return result.output
 
 
 def _free_port() -> int:

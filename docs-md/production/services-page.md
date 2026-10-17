@@ -120,6 +120,23 @@ whether it runs the repository's version, is behind it, or is stopped.
 
 Kubernetes and IBM Code Engine deploy from the build context's `deploy/` files for now.
 
+### Runs and logs
+
+`mage service runs` and `mage service logs` read a running service's API, with its token.
+Without `--env` they talk to the service that `mage service run` started; with `--env`, to
+that environment's deployment.
+
+```bash
+mage service runs shop-live --env prod --status failed   # the latest failed runs
+mage service logs shop-live --env prod                   # the latest run's log
+mage service logs shop-live --env prod --run <id> --block load --tail 50
+mage service logs shop-live --env prod --engine -f       # the engine's own log, followed
+```
+
+`runs` shows each run's pipeline, status, source (`api`, `schedule:<trigger>`), start,
+duration and the first line of its error. `--engine` prints the container's log: start-up,
+schedules and stream errors, which belong to no run.
+
 ### Check the services a change touches
 
 In CI, `mage service check --affected --base origin/main` lists the services that the

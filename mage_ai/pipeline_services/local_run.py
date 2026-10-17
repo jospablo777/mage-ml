@@ -154,6 +154,8 @@ def prepare(
     data = folder / 'data'
     data.mkdir(parents=True, exist_ok=True)
     token_file = folder / 'token'
+    # For `mage service runs` and `logs`.
+    (folder / 'port').write_text(str(port))
     python_dir = box / 'python'
     env = dict(
         os.environ,

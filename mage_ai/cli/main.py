@@ -1428,6 +1428,84 @@ def service_status(
                    f'{item.image}  {commit}{reason}')
 
 
+SERVICE_ENV = typer.Option(
+    None, '--env', help='a deployed environment; without it, the local `mage service run`.',
+)
+
+
+def _service_endpoint(project: str, name: str, env: Union[str, None]):
+    from mage_ai.pipeline_services import client, deploy
+
+    try:
+        return client.endpoint(project, name, env)
+    except (client.ClientError, deploy.DeployError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+
+
+@service_app.command('runs')
+def service_runs(
+    name: str = typer.Argument(...),
+    env: Union[str, None] = SERVICE_ENV,
+    project: str = SERVICE_PROJECT,
+    pipeline: Union[str, None] = typer.Option(None, help='only this pipeline\'s runs.'),
+    status: Union[str, None] = typer.Option(
+        None, help='queued, running, completed, failed or cancelled.'),
+    limit: int = typer.Option(20, help='the most recent runs to show.'),
+):
+    """The service's latest runs: status, source, duration and error."""
+    from mage_ai.pipeline_services import client
+
+    api = _service_endpoint(project, name, env)
+    try:
+        items = client.runs(api, pipeline=pipeline, status=status, limit=limit)
+    except client.ClientError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(client.runs_table(items) if items else 'No runs.')
+
+
+@service_app.command('logs')
+def service_logs(
+    name: str = typer.Argument(...),
+    env: Union[str, None] = SERVICE_ENV,
+    project: str = SERVICE_PROJECT,
+    run: Union[str, None] = typer.Option(None, '--run', help='the run; the latest by default.'),
+    block: Union[str, None] = typer.Option(None, help='only this block\'s lines.'),
+    tail: Union[int, None] = typer.Option(None, help='only the last lines.'),
+    engine_log: bool = typer.Option(
+        False, '--engine', help='the engine\'s own log (start-up, schedules, streams).'),
+    follow: bool = typer.Option(False, '--follow', '-f', help='with --engine, keep printing.'),
+):
+    """A run's log, or with --engine the deployed engine's own log."""
+    import subprocess
+
+    from mage_ai.pipeline_services import client, deploy
+
+    if engine_log:
+        if env is None:
+            typer.echo('The engine of `mage service run` logs to its terminal; --engine needs '
+                       '--env.', err=True)
+            raise typer.Exit(code=1)
+        try:
+            command = deploy.DockerTarget().log_command(name, env, tail=tail or 200,
+                                                        follow=follow)
+        except deploy.DeployError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1)
+        try:
+            raise typer.Exit(code=subprocess.run(command).returncode)
+        except KeyboardInterrupt:
+            raise typer.Exit(code=0)
+    api = _service_endpoint(project, name, env)
+    try:
+        text = client.run_log(api, run_id=run, block=block, tail=tail)
+    except client.ClientError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(text.rstrip('\n') if text.strip() else 'The run logged nothing.')
+
+
 @service_app.command('diff')
 def service_diff(
     name: str = typer.Argument(...),
