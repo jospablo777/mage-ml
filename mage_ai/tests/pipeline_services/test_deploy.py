@@ -231,7 +231,7 @@ class DeployCommandTest(TestCase):
         (environments / 'ce.yaml').write_text('target: code_engine\n')
         other, _ = self.invoke('deploy', 'shop', '--env', 'ce')
         self.assertEqual(other.exit_code, 1)
-        self.assertIn('supports docker so far', other.output)
+        self.assertIn('supports docker and kubernetes so far', other.output)
 
 
 class ServicesListDeploymentsTest(TestCase):

@@ -1307,24 +1307,27 @@ def service_run(
 DEPLOY_ENV = typer.Option(..., '--env', help='the environment to deploy to.')
 
 
-def _docker_target(project: str, name: str, env: str):
-    """The deploy target of the environment; Docker is the one supported so far."""
-    from mage_ai.pipeline_services import deploy, local_run
+def _deploy_target(project: str, name: str, env: str):
+    """The environment's deploy target: Docker (the default) or Kubernetes."""
+    from mage_ai.pipeline_services import deploy, kubernetes, local_run
 
     try:
         settings = local_run.environment_settings(project, name, env)
-    except local_run.LocalRunError as error:
+        target = settings.get('target', 'docker')
+        if target == 'docker':
+            return deploy.DockerTarget(), settings
+        if target == 'kubernetes':
+            return kubernetes.KubernetesTarget(settings, environment=env), settings
+    except (local_run.LocalRunError, deploy.DeployError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
-    target = settings.get('target', 'docker')
-    if target != 'docker':
-        typer.echo(
-            f'Environment {env} deploys to {target}; mage service deploy supports docker so '
-            f'far. Use the build context (mage service export {name}) and its deploy/ files.',
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    return deploy.DockerTarget(), settings
+    typer.echo(
+        f'Environment {env} deploys to {target}; mage service deploy supports docker and '
+        f'kubernetes so far. Use the build context (mage service export {name}) and its '
+        'deploy/ files.',
+        err=True,
+    )
+    raise typer.Exit(code=1)
 
 
 @service_app.command('deploy')
@@ -1347,37 +1350,48 @@ def service_deploy(
         local_run,
     )
 
-    target, settings = _docker_target(project, name, env)
+    target, settings = _deploy_target(project, name, env)
     result = lifecycle.check(project, name)
     if not result.ok:
         typer.echo(f'{name} cannot be built:', err=True)
         for problem in result.problems:
             typer.echo(f'  - {problem}', err=True)
         raise typer.Exit(code=1)
+    on_cluster = settings.get('target') == 'kubernetes'
     try:
         box = lifecycle.build(project, name)
         _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
         lock = lifecycle.read_lock(project, name) or {}
         digest = str(lock.get('manifest_sha256', ''))[:12] or 'latest'
-        image = f'mage-{name}:{digest}'
-        export.build_image(box, image)
+        if on_cluster:
+            image = target.image(name, digest)
+            for note in target.publish(box, image, export.build_image):
+                typer.echo(note, err=True)
+        else:
+            image = f'mage-{name}:{digest}'
+            export.build_image(box, image)
         values = local_run.environment_values(project, name, env)
     except (definitions.DefinitionError, export.ExportError, local_run.LocalRunError) as error:
         _service_error(error)
-    values['MAGE_SERVICE_TOKEN'] = local_run.service_token(deploy.token_file(project, name, env))
-    port = int(settings.get('port') or 6800)
-    try:
-        deployment = target.deploy(
-            name, env, image, port, values,
-            labels=dict(commit=deploy.git_commit(project),
-                        lock=str(lock.get('manifest_sha256', '')),
-                        **({'reason': allow_uncommitted} if allow_uncommitted else {})),
-            timeout=timeout,
-        )
     except deploy.DeployError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
-    typer.echo(f'{name} runs in {env} on http://127.0.0.1:{port} ({deployment.image}).')
+    values['MAGE_SERVICE_TOKEN'] = local_run.service_token(deploy.token_file(project, name, env))
+    labels = dict(commit=deploy.git_commit(project), lock=str(lock.get('manifest_sha256', '')),
+                  **({'reason': allow_uncommitted} if allow_uncommitted else {}))
+    port = int(settings.get('port') or 6800)
+    try:
+        if on_cluster:
+            deployment = target.deploy(name, env, image, values, labels, timeout=timeout)
+        else:
+            deployment = target.deploy(name, env, image, port, values, labels=labels,
+                                       timeout=timeout)
+    except deploy.DeployError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    where = (f'deployment/mage-{name}-{env} in {target.context}, namespace {target.namespace}'
+             if on_cluster else f'http://127.0.0.1:{port}')
+    typer.echo(f'{name} runs in {env} on {where} ({deployment.image}).')
     typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
 
 
@@ -1412,11 +1426,9 @@ def service_status(
     """Per environment: what runs, its health, and whether it is the repository version."""
     from mage_ai.pipeline_services import deploy, lifecycle
 
-    try:
-        deployments = deploy.DockerTarget().status(name)
-    except deploy.DeployError as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1)
+    deployments, problems = deploy.deployments(project, name)
+    for problem in problems:
+        typer.echo(f'Could not read {problem}', err=True)
     if not deployments:
         typer.echo('No deployment found.' if not name else f'{name} is not deployed.')
         return
@@ -1436,8 +1448,9 @@ SERVICE_ENV = typer.Option(
 def _service_endpoint(project: str, name: str, env: Union[str, None]):
     from mage_ai.pipeline_services import client, deploy
 
+    target = _deploy_target(project, name, env)[0] if env else None
     try:
-        return client.endpoint(project, name, env)
+        return client.endpoint(project, name, env, target=target)
     except (client.ClientError, deploy.DeployError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
@@ -1462,6 +1475,8 @@ def service_runs(
     except client.ClientError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
+    finally:
+        api.close()
     typer.echo(client.runs_table(items) if items else 'No runs.')
 
 
@@ -1488,8 +1503,8 @@ def service_logs(
                        '--env.', err=True)
             raise typer.Exit(code=1)
         try:
-            command = deploy.DockerTarget().log_command(name, env, tail=tail or 200,
-                                                        follow=follow)
+            command = _deploy_target(project, name, env)[0].log_command(
+                name, env, tail=tail or 200, follow=follow)
         except deploy.DeployError as error:
             typer.echo(str(error), err=True)
             raise typer.Exit(code=1)
@@ -1503,6 +1518,8 @@ def service_logs(
     except client.ClientError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
+    finally:
+        api.close()
     typer.echo(text.rstrip('\n') if text.strip() else 'The run logged nothing.')
 
 
@@ -1517,7 +1534,7 @@ def service_diff(
 
     from mage_ai.pipeline_services import lifecycle
 
-    target, _ = _docker_target(project, name, env)
+    target, _ = _deploy_target(project, name, env)
     deployment = target.inspect(name, env)
     if deployment is None:
         typer.echo(f'{name} is not deployed in {env}.', err=True)
@@ -1555,7 +1572,7 @@ def service_rollback(
     """Runs the previous deployment of the environment again."""
     from mage_ai.pipeline_services import deploy
 
-    target, _ = _docker_target(project, name, env)
+    target, _ = _deploy_target(project, name, env)
     try:
         deployment = target.rollback(name, env)
     except deploy.DeployError as error:

@@ -31,17 +31,14 @@ def _with_export(
 
 def deployments_by_service(repo_path: str) -> Dict[str, list]:
     """
-    Each service's Docker deployments with their drift from the repository's lock, for the
-    Services list. Without Docker, none.
+    Each service's deployments (Docker, and Kubernetes environments asked in parallel with a
+    short timeout, so an unreachable cluster delays the list by seconds at most) with their
+    drift from the repository's lock, for the Services list.
     """
-    import shutil
-
     from mage_ai.pipeline_services import deploy, lifecycle
 
-    if shutil.which('docker') is None:
-        return {}
     try:
-        found = deploy.DockerTarget().status()
+        found, _ = deploy.deployments(repo_path, request_timeout='3s')
     except (deploy.DeployError, OSError, ValueError):
         return {}
     locks = {}

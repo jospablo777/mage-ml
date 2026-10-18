@@ -19,7 +19,7 @@ import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 LABEL = 'ai.mageml'
 CONTAINER_PORT = 8080
@@ -212,6 +212,62 @@ def _healthy(port: int, timeout: float) -> bool:
             pass
         time.sleep(1)
     return False
+
+
+def deployments(
+    repo_path: str,
+    service: Optional[str] = None,
+    docker: Optional['DockerTarget'] = None,
+    kubernetes_runner=None,
+    request_timeout: str = '30s',
+) -> Tuple[List[Deployment], List[str]]:
+    """
+    Every deployment of the project's services, or of one: Docker's from their labels, and
+    each Kubernetes environment's, asked in parallel. Returns them and what could not be read.
+    """
+    import shutil
+    from concurrent.futures import ThreadPoolExecutor
+
+    import yaml
+
+    from mage_ai.pipeline_services import definitions, kubernetes
+
+    found: List[Deployment] = []
+    problems: List[str] = []
+    if docker is not None or shutil.which('docker'):
+        try:
+            found += (docker or DockerTarget()).status(service)
+        except (DeployError, OSError, ValueError) as error:
+            problems.append(f'Docker: {error}')
+    clusters = []
+    for name in [service] if service else definitions.names(repo_path):
+        folder = definitions.service_path(repo_path, name) / definitions.ENVIRONMENTS_DIR
+        for path in sorted(folder.glob('*.yaml')) if folder.is_dir() else []:
+            try:
+                settings = yaml.safe_load(path.read_text()) or {}
+            except yaml.YAMLError:
+                continue
+            if isinstance(settings, dict) and settings.get('target') == 'kubernetes':
+                clusters.append((name, path.stem, settings))
+
+    def inspect(item):
+        name, environment, settings = item
+        options = dict(environment=environment, request_timeout=request_timeout)
+        if kubernetes_runner is not None:
+            options['runner'] = kubernetes_runner
+        return kubernetes.KubernetesTarget(settings, **options).inspect(name, environment)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(8, len(clusters)))) as pool:
+        futures = [(item, pool.submit(inspect, item)) for item in clusters]
+        for (name, environment, _), future in futures:
+            try:
+                deployment = future.result()
+            except (DeployError, OSError, ValueError) as error:
+                problems.append(f'{name} {environment}: {error}')
+                continue
+            if deployment is not None:
+                found.append(deployment)
+    return sorted(found, key=lambda d: (d.service, d.environment)), problems
 
 
 def git_commit(repo_path: str) -> str:

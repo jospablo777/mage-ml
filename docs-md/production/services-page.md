@@ -118,7 +118,47 @@ in the volume `mage-shop-live-prod-data`.
 The Services page lists each service's deployments under its name: the environment and
 whether it runs the repository's version, is behind it, or is stopped.
 
-Kubernetes and IBM Code Engine deploy from the build context's `deploy/` files for now.
+### Deploy to Kubernetes
+
+An environment with `target: kubernetes` deploys with kubectl. The context is required, so
+a deploy never goes to whichever cluster happens to be current:
+
+```yaml
+# services/shop-live/environments/prod.yaml
+target: kubernetes
+context: prod-cluster          # the kubectl context
+namespace: shop                # default: default; it must exist
+image: icr.io/team/shop-live   # pushed as icr.io/team/shop-live:<lock digest>
+platforms: [linux/amd64]       # optional: the cluster's platform
+image_pull_secret: icr         # optional
+storage: 5Gi                   # optional: the run history volume
+storage_class: ibmc-block-gold # optional
+resources:                     # optional, as in a pod spec
+  limits: {memory: 1Gi}
+schedules: on
+variables:
+  REGION: eu
+```
+
+`mage service deploy shop-live --env prod` builds and pushes the image, then applies the
+Deployment, Service and volume claim `mage-shop-live-prod` and a Secret with the variables,
+the secrets of `.env.prod` and the API token (sent on stdin, never on the command line). It
+waits for the rollout; when the new pod does not become ready, its last log lines are shown
+and `kubectl rollout undo` brings the previous revision back.
+
+- The Secret is named by its content (`mage-shop-live-prod-env-<digest>`), so an undo also
+  brings back the previous variables. Secrets older than the kept revisions are deleted.
+- The commit, the lock and the image are annotations of the pod template, so `status` reads
+  what runs after an undo too. `rollback` runs `kubectl rollout undo`.
+- One replica, replaced with the Recreate strategy: the run history is a SQLite file on a
+  ReadWriteOnce volume. `MAGE_SERVICE_INSTANCE_ID` is the pod name, for Kafka's static
+  membership.
+- Without `image`, the image stays in this Docker: Rancher Desktop and Docker Desktop
+  clusters use it as it is, and `kind_cluster: <name>` loads it into kind.
+- `runs` and `logs` reach the service through a `kubectl port-forward` that they stop
+  afterwards; `logs --engine` runs `kubectl logs`.
+
+IBM Code Engine deploys from the build context's `deploy/ibm/code-engine.sh` for now.
 
 ### Runs and logs
 

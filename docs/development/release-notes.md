@@ -66,6 +66,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Services
 
+- `mage service deploy`, `status`, `diff` and `rollback` for Kubernetes targets: images
+  pushed by lock digest, Secrets named by content so a rollout undo restores the variables,
+  rollout waits with automatic undo, and status from the pod template's annotations.
 - `mage service deploy`, `status`, `diff` and `rollback` for Docker targets: labeled
   containers, health waits with automatic rollback, drift from the repository, and the
   previous deployment kept for rollback. A deploy with uncommitted changes to the service's

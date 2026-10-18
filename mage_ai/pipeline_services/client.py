@@ -2,14 +2,14 @@
 The API of a running service, for `mage service runs` and `mage service logs`.
 
 Without an environment the service is the local `mage service run` (its port and token in
-.mage/run/<name>/); with one, it is the environment's deployment (the port from its labels,
-the token in .mage/deploy/<name>/<env>/token).
+.mage/run/<name>/); with one, it is the environment's deployment (the port from its Docker
+labels, or a kubectl port-forward; the token in .mage/deploy/<name>/<env>/token).
 """
 import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from mage_ai.pipeline_services import deploy, local_run
@@ -23,6 +23,14 @@ class ClientError(RuntimeError):
 class Endpoint:
     url: str
     token: str
+    # A port-forward to stop once done.
+    process: Optional[object] = field(default=None, compare=False, repr=False)
+
+    def close(self) -> None:
+        if self.process is not None:
+            self.process.terminate()
+            self.process.wait(timeout=10)
+            self.process = None
 
     def get(self, path: str, params: Optional[Dict] = None, timeout: float = 30) -> bytes:
         query = urllib.parse.urlencode({k: v for k, v in (params or {}).items()
@@ -62,10 +70,16 @@ def endpoint(repo_path: str, name: str, environment: Optional[str] = None,
             )
         port = port_file.read_text().strip()
         return Endpoint(f'http://127.0.0.1:{port}', token_file.read_text().strip())
-    deployment = (target or deploy.DockerTarget()).inspect(name, environment)
+    target = target or deploy.DockerTarget()
+    token_file = deploy.token_file(repo_path, name, environment)
+    if hasattr(target, 'port_forward'):
+        if not token_file.is_file():
+            raise ClientError(f'No API token for {name} in {environment} ({token_file}).')
+        port, process = target.port_forward(name, environment)
+        return Endpoint(f'http://127.0.0.1:{port}', token_file.read_text().strip(), process)
+    deployment = target.inspect(name, environment)
     if deployment is None or deployment.port is None:
         raise ClientError(f'{name} is not deployed in {environment}.')
-    token_file = deploy.token_file(repo_path, name, environment)
     if not token_file.is_file():
         raise ClientError(f'No API token for {name} in {environment} ({token_file}).')
     return Endpoint(f'http://127.0.0.1:{deployment.port}', token_file.read_text().strip())
