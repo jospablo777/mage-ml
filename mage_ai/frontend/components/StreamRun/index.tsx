@@ -15,9 +15,20 @@ import { UNIT } from '@oracle/styles/units/spacing';
 // A stream on the local engine, from the editor: start it (naming its sinks), see what it
 // does (state, rates, lag, totals, the engine's log), pause, resume and stop it.
 
+export type StreamRunBlockType = {
+  batches: number;
+  block: string;
+  errors: number;
+  messages_in: number;
+  messages_out: number;
+  p50_ms: number;
+  p95_ms: number;
+};
+
 export type StreamRunType = {
   alerts?: number;
   batches?: number;
+  blocks?: StreamRunBlockType[];
   dead_lettered_messages?: number;
   error?: string;
   exit_code?: number;
@@ -52,6 +63,13 @@ const NumbersStyle = styled.div`
   display: grid;
   gap: ${UNIT}px;
   grid-template-columns: repeat(auto-fill, minmax(${UNIT * 13}px, 1fr));
+`;
+
+const BlocksStyle = styled.div`
+  display: grid;
+  gap: ${UNIT * 0.5}px ${UNIT * 1.5}px;
+  grid-template-columns: minmax(0, 1fr) repeat(5, auto);
+  overflow-x: auto;
 `;
 
 const LogStyle = styled.pre`
@@ -273,6 +291,32 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
               </div>
             ))}
           </NumbersStyle>
+        </PanelStyle>
+      )}
+
+      {!!run?.blocks?.length && (
+        <PanelStyle>
+          <Text bold small>Blocks</Text>
+          <Spacing mt={1} />
+          <BlocksStyle>
+            {['Block', 'In', 'Out', 'p50', 'p95', 'Errors'].map(label => (
+              <Text key={label} muted xsmall>{label}</Text>
+            ))}
+            {run.blocks.map(block => [
+              <Text key={`${block.block}-name`} monospace small title={block.block}>
+                {block.block}
+              </Text>,
+              <Text key={`${block.block}-in`} small>{block.messages_in.toLocaleString()}</Text>,
+              <Text key={`${block.block}-out`} small>
+                {block.messages_out.toLocaleString()}
+              </Text>,
+              <Text key={`${block.block}-p50`} small>{block.p50_ms.toFixed(1)} ms</Text>,
+              <Text key={`${block.block}-p95`} small>{block.p95_ms.toFixed(1)} ms</Text>,
+              <Text danger={block.errors > 0} key={`${block.block}-errors`} small>
+                {block.errors.toLocaleString()}
+              </Text>,
+            ])}
+          </BlocksStyle>
         </PanelStyle>
       )}
 

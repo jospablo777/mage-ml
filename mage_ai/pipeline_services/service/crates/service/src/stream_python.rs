@@ -282,6 +282,20 @@ struct StreamReply {
     /// Messages that failed on their own, by their row in the batch.
     #[serde(default)]
     failures: Vec<Failure>,
+    /// Each block's time and messages in and out.
+    #[serde(default)]
+    blocks: Vec<ReplyBlock>,
+}
+
+#[derive(Deserialize)]
+struct ReplyBlock {
+    block_uuid: String,
+    #[serde(default)]
+    seconds: f64,
+    #[serde(default)]
+    messages_in: u64,
+    #[serde(default)]
+    messages_out: u64,
 }
 
 #[derive(Deserialize)]
@@ -422,9 +436,20 @@ impl TransformSession for PythonStreamSession {
                 .collect();
             row_errors.extend(undecoded);
             row_errors.sort_by_key(|e| e.row);
+            let blocks = reply
+                .blocks
+                .iter()
+                .map(|b| mage_stream_ports::BlockStats {
+                    block: b.block_uuid.clone(),
+                    messages_in: b.messages_in,
+                    messages_out: b.messages_out,
+                    micros: (b.seconds * 1_000_000.0).round() as u64,
+                })
+                .collect();
             Ok(TransformOutput {
                 outputs,
                 row_errors,
+                blocks,
             })
         })
     }

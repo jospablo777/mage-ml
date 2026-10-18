@@ -37,7 +37,10 @@ impl TransformSession for ChainedSession {
             let mut input = batch;
             let mut outputs = BTreeMap::new();
             let mut row_errors = Vec::new();
+            let mut blocks = Vec::new();
             for (index, (session, last)) in self.runs.iter_mut().enumerate() {
+                let rows_in = input.num_rows() as u64;
+                let started = std::time::Instant::now();
                 let output = session.transform(input).await?;
                 if index == 0 {
                     row_errors = output.row_errors;
@@ -47,6 +50,17 @@ impl TransformSession for ChainedSession {
                     .get(last.as_str())
                     .cloned()
                     .unwrap_or_else(|| RecordBatch::new_empty(envelope_schema()));
+                if output.blocks.is_empty() {
+                    // A run that times no block on its own (Rust, R) counts as its last block.
+                    blocks.push(mage_stream_ports::BlockStats {
+                        block: last.clone(),
+                        messages_in: rows_in,
+                        messages_out: next.num_rows() as u64,
+                        micros: started.elapsed().as_micros() as u64,
+                    });
+                } else {
+                    blocks.extend(output.blocks);
+                }
                 for (block, messages) in output.outputs {
                     if self.wanted.contains(&block) {
                         outputs.insert(block, messages);
@@ -61,6 +75,7 @@ impl TransformSession for ChainedSession {
             Ok(TransformOutput {
                 outputs,
                 row_errors,
+                blocks,
             })
         })
     }
@@ -118,6 +133,7 @@ mod tests {
                     } else {
                         Vec::new()
                     },
+                    blocks: Vec::new(),
                 })
             })
         }

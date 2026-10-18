@@ -172,6 +172,7 @@ service answers [inference requests](../guides/pipelines/model-inference.md).
 | `POST /v1/control` | Pause, resume, change a pipeline's concurrency |
 | `POST /v1/streams/{pipeline}/messages` | Messages for a stream with a webhook source; answered once its sinks took them ([webhooks](stream-services.md#webhooks)) |
 | `GET /v1/streams` | Each stream's state, message counts, acknowledged positions, lag per partition and last error |
+| `GET /v1/streams/{pipeline}` | One stream's status, with the last minute of rates and lag, and each block's messages in and out, batches, errors and p50 and p95 time per batch |
 | `GET /metrics` | Prometheus metrics, including `mage_service_stream_lag_messages` per stream and partition (scale on it); no token needed |
 | `GET /healthz` | Health; no token needed |
 

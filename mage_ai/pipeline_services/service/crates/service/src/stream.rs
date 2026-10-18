@@ -48,6 +48,60 @@ pub struct StreamStatus {
     pub rate_in: VecDeque<u64>,
     pub rate_out: VecDeque<u64>,
     pub lag_history: VecDeque<i64>,
+    /// Each block's numbers, in the order the blocks first ran.
+    pub blocks: Vec<BlockStatus>,
+}
+
+/// What one block did since the stream started: messages in and out, batches, batch errors,
+/// and the median and 95th percentile of its time on a batch over the last batches.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BlockStatus {
+    pub block: String,
+    pub messages_in: u64,
+    pub messages_out: u64,
+    pub batches: u64,
+    pub errors: u64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    #[serde(skip)]
+    recent_micros: VecDeque<u64>,
+}
+
+/// Batches each block's percentiles cover.
+const BLOCK_WINDOW: usize = 200;
+
+impl BlockStatus {
+    fn record(&mut self, stats: &mage_stream_ports::BlockStats) {
+        self.messages_in += stats.messages_in;
+        self.messages_out += stats.messages_out;
+        self.batches += 1;
+        if self.recent_micros.len() == BLOCK_WINDOW {
+            self.recent_micros.pop_front();
+        }
+        self.recent_micros.push_back(stats.micros);
+        let mut sorted: Vec<u64> = self.recent_micros.iter().copied().collect();
+        sorted.sort_unstable();
+        let at = |q: f64| {
+            let index = ((sorted.len() as f64 - 1.0) * q).round() as usize;
+            sorted[index.min(sorted.len() - 1)] as f64 / 1000.0
+        };
+        self.p50_ms = at(0.5);
+        self.p95_ms = at(0.95);
+    }
+}
+
+fn block_status<'a>(status: &'a mut StreamStatus, block: &str) -> &'a mut BlockStatus {
+    let index = match status.blocks.iter().position(|b| b.block == block) {
+        Some(index) => index,
+        None => {
+            status.blocks.push(BlockStatus {
+                block: block.to_string(),
+                ..BlockStatus::default()
+            });
+            status.blocks.len() - 1
+        }
+    };
+    &mut status.blocks[index]
 }
 
 /// Seconds of history a stream's status keeps.
@@ -328,6 +382,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 None => Ok(TransformOutput {
                     outputs: Default::default(),
                     row_errors: Vec::new(),
+                    blocks: Vec::new(),
                 }),
             };
             if lane_events.send(Internal::Transformed(id, result)).is_err() {
@@ -379,7 +434,12 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 Internal::Event(event) => events.push(event),
                 Internal::Transformed(id, Ok(output)) => {
                     let rows: usize = output.outputs.values().map(RecordBatch::num_rows).sum();
-                    count(&status, |s| s.messages_out += rows as u64);
+                    count(&status, |s| {
+                        s.messages_out += rows as u64;
+                        for stats in &output.blocks {
+                            block_status(s, &stats.block).record(stats);
+                        }
+                    });
                     outputs.insert(id, output.outputs);
                     if !output.row_errors.is_empty() {
                         let first = output.row_errors[0].error.clone();
@@ -399,6 +459,16 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         TransformError::Timeout(_) => FailureKind::Timeout,
                     };
                     record_error(&status, &error.to_string());
+                    // A block's error reads "<block>: <message>".
+                    if let TransformError::User(message) = &error
+                        && let Some((block, _)) = message.split_once(": ")
+                    {
+                        count(&status, |s| {
+                            if s.blocks.iter().any(|b| b.block == block) {
+                                block_status(s, block).errors += 1;
+                            }
+                        });
+                    }
                     events.push(Event::TransformFailed { id, kind, error: error.to_string() });
                 }
                 Internal::RetryNow(operation) => {
@@ -872,6 +942,7 @@ mod tests {
                     Ok(TransformOutput {
                         outputs: [("t".to_string(), batch)].into(),
                         row_errors: vec![],
+                        blocks: Vec::new(),
                     })
                 }
             })
@@ -880,6 +951,80 @@ mod tests {
         fn close(&mut self) -> BoxFuture<'_, ()> {
             Box::pin(async {})
         }
+    }
+
+    /// Two timed blocks: `parse` passes every message, `keep` drops the odd ones.
+    struct Timed;
+
+    impl TransformSession for Timed {
+        fn transform(
+            &mut self,
+            batch: RecordBatch,
+        ) -> BoxFuture<'_, Result<TransformOutput, TransformError>> {
+            let messages = read_envelope(&batch).unwrap();
+            let mut kept = EnvelopeBuilder::new();
+            for message in &messages {
+                let value: serde_json::Value = serde_json::from_slice(&message.value).unwrap();
+                if value["n"].as_u64().unwrap().is_multiple_of(2) {
+                    kept.push(message);
+                }
+            }
+            let kept = kept.finish().unwrap();
+            let count = messages.len() as u64;
+            Box::pin(async move {
+                let kept_rows = kept.num_rows() as u64;
+                Ok(TransformOutput {
+                    outputs: [("keep".to_string(), kept)].into(),
+                    row_errors: vec![],
+                    blocks: vec![
+                        mage_stream_ports::BlockStats {
+                            block: "parse".into(),
+                            messages_in: count,
+                            messages_out: count,
+                            micros: 1_000,
+                        },
+                        mage_stream_ports::BlockStats {
+                            block: "keep".into(),
+                            messages_in: count,
+                            messages_out: kept_rows,
+                            micros: 3_000,
+                        },
+                    ],
+                })
+            })
+        }
+
+        fn close(&mut self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn each_block_reports_its_messages_and_times() {
+        let source = MemorySource::new(vec![messages(20)], 4, true);
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(MemorySink::new()), Some("keep".into()))],
+            dead_letter: None,
+            transform: Some(Box::new(Timed)),
+            config: config(1, false, PoisonPolicy::Stop),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+        })
+        .await;
+
+        let blocks: Vec<(&str, u64, u64)> = status
+            .blocks
+            .iter()
+            .map(|b| (b.block.as_str(), b.messages_in, b.messages_out))
+            .collect();
+        assert_eq!(blocks, vec![("parse", 20, 20), ("keep", 20, 10)]);
+        assert!(status.blocks.iter().all(|b| b.batches >= 1));
+        assert_eq!(
+            (status.blocks[0].p50_ms, status.blocks[1].p95_ms),
+            (1.0, 3.0)
+        );
     }
 
     /// Rejects messages whose n is a multiple of self.0, on their own; passes the others.
@@ -911,6 +1056,7 @@ mod tests {
                 Ok(TransformOutput {
                     outputs: [("t".to_string(), kept)].into(),
                     row_errors,
+                    blocks: Vec::new(),
                 })
             })
         }

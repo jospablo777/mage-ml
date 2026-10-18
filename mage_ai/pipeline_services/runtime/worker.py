@@ -996,7 +996,9 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
                              block_uuid=block['uuid'])
         results[block['uuid']] = _stream_messages(result, block['uuid'])
         timings.append(dict(block_uuid=block['uuid'],
-                            seconds=round(time.monotonic() - started, 6)))
+                            seconds=round(time.monotonic() - started, 6),
+                            messages_in=len(block_messages),
+                            messages_out=len(results[block['uuid']])))
     last = blocks[-1]['uuid'] if blocks else None
     wanted = request.get('outputs') or ([last] if last else [])
     outputs = {uuid: results.get(uuid, []) for uuid in wanted}

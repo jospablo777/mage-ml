@@ -97,6 +97,10 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
             dev_run.status(mage_project, pipeline.uuid)))
         assert status['state'] == 'running'
         assert len(status['rate_in']) >= 1
+        # Each block's numbers: the transformer saw the 10 messages and kept them.
+        [block] = [b for b in status['blocks'] if b['block'] == double.uuid]
+        assert (block['messages_in'], block['messages_out']) == (10, 10)
+        assert block['batches'] >= 1 and block['p95_ms'] >= block['p50_ms'] >= 0
         assert any('serves' in line or 'stream' in line for line in status['logs'])
 
         paused = dev_run.control(mage_project, pipeline.uuid, 'pause')

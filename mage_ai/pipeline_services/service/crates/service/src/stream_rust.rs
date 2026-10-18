@@ -637,6 +637,8 @@ impl TransformSession for RustStreamSession {
             self.next_id += 1;
             let id = self.next_id;
             let limit = self.timeout;
+            let started = std::time::Instant::now();
+            let messages_in = values.len() as u64;
             let cancel = self.cancel.clone();
             let exchanged = tokio::select! {
                 result = async {
@@ -683,10 +685,22 @@ impl TransformSession for RustStreamSession {
                     error.block_uuid, error.message
                 )));
             }
+            let micros = started.elapsed().as_micros() as u64;
             let mut outputs = BTreeMap::new();
             for (output, messages) in reply.outputs.iter().zip(reply.messages) {
                 outputs.insert(output.block_uuid.clone(), to_batch(messages, partition)?);
             }
+            // The program times its blocks together: the run counts as its last block.
+            let last = reply
+                .outputs
+                .last()
+                .map_or(self.first_block.clone(), |o| o.block_uuid.clone());
+            let blocks = vec![mage_stream_ports::BlockStats {
+                messages_out: outputs.get(&last).map_or(0, |b| b.num_rows() as u64),
+                block: last,
+                messages_in,
+                micros,
+            }];
             let mut row_errors: Vec<RowError> = reply
                 .failures
                 .into_iter()
@@ -702,6 +716,7 @@ impl TransformSession for RustStreamSession {
             Ok(TransformOutput {
                 outputs,
                 row_errors,
+                blocks,
             })
         })
     }

@@ -177,10 +177,21 @@ pub struct RowError {
 
 /// What a stream's blocks made of one batch: each block's output that a sink writes, by block
 /// uuid (streams branch, and sinks follow different blocks).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct TransformOutput {
     pub outputs: std::collections::BTreeMap<String, RecordBatch>,
     pub row_errors: Vec<RowError>,
+    /// What each block did with the batch, for the stream's status.
+    pub blocks: Vec<BlockStats>,
+}
+
+/// One block's work on one batch.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BlockStats {
+    pub block: String,
+    pub messages_in: u64,
+    pub messages_out: u64,
+    pub micros: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -121,7 +121,8 @@ The **Run** tab of a streaming pipeline starts it on the local engine, the one e
 services run on, without a trigger: **Start on the local engine** names the sinks the run
 writes and asks first, then the panel shows the state, messages read and written per second
 and the lag over the last minute, the totals (batches, retries, dead-lettered messages,
-alerts), errors and the engine's log. **Pause** stops reading and lets the work in flight
+alerts), each block's messages in and out, median and 95th percentile time per batch and
+errors, and the engine's log. **Pause** stops reading and lets the work in flight
 finish; **Resume** and **Stop** do what they say.
 
 The run reads with development positions (a `<group>-dev-<user>` consumer group, see above),
