@@ -220,12 +220,17 @@ def capture_sample(
         )
     config = streaming_config(source.content or '', variables or pipeline.variables or {})
     connector = (config or {}).get('connector_type')
-    if connector != 'kafka':
+    if connector == 'kafka':
+        messages, partitions = _capture_kafka(config, int(count), start,
+                                              float(timeout_seconds))
+    elif connector in ('nats', 'nats_js'):
+        messages, partitions = _capture_nats(config, int(count), start,
+                                             float(timeout_seconds))
+    else:
         raise SampleError(
-            f'Capturing from {connector or "this"} sources comes with their connectors; write '
-            'or paste a sample for now.'
+            f'Capturing reads Kafka and NATS JetStream sources; {connector or "this"} sources '
+            'take messages away from other consumers when read, so write or paste a sample.'
         )
-    messages, partitions = _capture_kafka(config, int(count), start, float(timeout_seconds))
     messages, redacted = redact(messages, config.get('secret_fields'))
     summary = write_sample(repo_path, pipeline_uuid, name, messages)
     summary['partitions'] = partitions
@@ -246,6 +251,59 @@ def _shares(count: int, available: Dict[Any, int]) -> Dict[Any, int]:
         shares[partition] = max(share, 0)
         remaining -= shares[partition]
     return shares
+
+
+def _capture_nats(config: Dict, count: int, start: str, timeout_seconds: float):
+    """
+    The newest (or first) messages of a JetStream stream, read by an ephemeral consumer that
+    acknowledges nothing, so no durable consumer moves. Returns them and {subject: count}.
+    """
+    import asyncio
+
+    return asyncio.run(_capture_nats_async(config, count, start, timeout_seconds))
+
+
+async def _capture_nats_async(config: Dict, count: int, start: str, timeout_seconds: float):
+    import nats
+    from nats.errors import TimeoutError as NatsTimeout
+    from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
+
+    from mage_ai.streaming.sources.nats_js import NATSConfig, connect_options
+
+    settings = {k: v for k, v in config.items() if k not in ('connector_type', 'secret_fields')}
+    nats_config = NATSConfig.load(config=settings)
+    connection = await nats.connect(**connect_options(nats_config))
+    try:
+        js = connection.jetstream()
+        state = (await js.stream_info(nats_config.stream_name)).state
+        if not state.messages:
+            return [], {}
+        first = state.first_seq
+        begin = max(first, state.last_seq - count + 1) if start == 'latest' else first
+        subscription = await js.pull_subscribe(
+            nats_config.subject or '>', stream=nats_config.stream_name,
+            config=ConsumerConfig(
+                deliver_policy=DeliverPolicy.BY_START_SEQUENCE, opt_start_seq=begin,
+                ack_policy=AckPolicy.NONE, inactive_threshold=60,
+            ),
+        )
+        messages, subjects = [], {}
+        try:
+            deadline = time.monotonic() + timeout_seconds
+            while len(messages) < count and time.monotonic() < deadline:
+                try:
+                    batch = await subscription.fetch(min(256, count - len(messages)),
+                                                     timeout=1)
+                except NatsTimeout:
+                    break
+                for message in batch:
+                    messages.append(message_value(message.data))
+                    subjects[message.subject] = subjects.get(message.subject, 0) + 1
+        finally:
+            await subscription.unsubscribe()
+        return messages, subjects
+    finally:
+        await connection.close()
 
 
 def _capture_kafka(config: Dict, count: int, start: str, timeout_seconds: float):

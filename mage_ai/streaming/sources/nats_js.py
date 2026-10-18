@@ -56,6 +56,31 @@ class NATSConfig(BaseConfig):
         return config
 
 
+def connect_options(config: NATSConfig) -> Dict:
+    """nats.connect settings for a NATS source: the server, TLS and sign-in."""
+    connect_opts = {
+        'servers': [config.server_url],
+        # Fail once instead of retrying the first connection forever.
+        'allow_reconnect': True,
+        'max_reconnect_attempts': 3,
+    }
+    if config.use_tls and config.ssl_config:
+        ssl_ctx = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+        if config.ssl_config.cafile:
+            ssl_ctx.load_verify_locations(config.ssl_config.cafile)
+        if config.ssl_config.certfile and config.ssl_config.keyfile:
+            ssl_ctx.load_cert_chain(
+                certfile=config.ssl_config.certfile,
+                keyfile=config.ssl_config.keyfile
+            )
+        connect_opts['tls'] = ssl_ctx
+    if config.nkeys_seed_str:
+        connect_opts['nkeys_seed_str'] = config.nkeys_seed_str
+    if config.user_credentials:
+        connect_opts['user_credentials'] = config.user_credentials
+    return connect_opts
+
+
 def decode(data: bytes):
     """A message's JSON value, or its text when it is not JSON."""
     try:
@@ -111,33 +136,13 @@ class NATSSource(BaseSource):
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout)
 
     async def ainit_client(self):
-        connect_opts = {
-            'servers': [self.config.server_url],
-            'error_cb': self.error_cb,
-            'reconnected_cb': self.reconnected_cb,
-            'disconnected_cb': self.disconnected_cb,
-            'closed_cb': self.closed_cb,
-            # Fail once instead of retrying the first connection forever.
-            'allow_reconnect': True,
-            'max_reconnect_attempts': 3,
-        }
-
-        if self.config.use_tls and self.config.ssl_config:
-            ssl_ctx = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
-            if self.config.ssl_config.cafile:
-                ssl_ctx.load_verify_locations(self.config.ssl_config.cafile)
-            if self.config.ssl_config.certfile and self.config.ssl_config.keyfile:
-                ssl_ctx.load_cert_chain(
-                    certfile=self.config.ssl_config.certfile,
-                    keyfile=self.config.ssl_config.keyfile
-                )
-            connect_opts['tls'] = ssl_ctx
-
-        if self.config.nkeys_seed_str:
-            connect_opts['nkeys_seed_str'] = self.config.nkeys_seed_str
-        if self.config.user_credentials:
-            connect_opts['user_credentials'] = self.config.user_credentials
-
+        connect_opts = dict(
+            connect_options(self.config),
+            error_cb=self.error_cb,
+            reconnected_cb=self.reconnected_cb,
+            disconnected_cb=self.disconnected_cb,
+            closed_cb=self.closed_cb,
+        )
         self.nc = await nats.connect(**connect_opts)
         self._print(f'Connected to NATS server at {self.nc.connected_url.netloc}')
         self.js = self.nc.jetstream()
