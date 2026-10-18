@@ -414,7 +414,6 @@ class CaptureTest(ExportTestCase):
             export.write(captured, str(other))
 
 
-@unittest.skipUnless(SERVICE_BINARY.is_file(), 'needs the mage-service binary (cargo build)')
 class StartupImportsTest(ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -453,6 +452,7 @@ class StartupImportsTest(ExportTestCase):
         self.assertIn('tabulate', captured.requirements)
 
 
+@unittest.skipUnless(SERVICE_BINARY.is_file(), 'needs the mage-service binary (cargo build)')
 class ExportedRunTest(ExportTestCase):
     def test_io_config_profiles_resolve_from_the_container_environment_like_mage(self):
         """
