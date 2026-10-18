@@ -63,6 +63,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- Run on sample works for Rust and R transformers too, and shows what the block changed:
+  fields added, removed and changed, with how many messages each.
 - Check connection on a Kafka source reports partitions, retained messages, retention and the
   consumer group's lag, or what a group with no committed offsets would read first.
 - A Samples tab captures the newest or first messages of a Kafka source without a consumer
@@ -164,6 +166,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - The kernel restart, switch and interrupt no longer block the server: they run off its
   event loop with a time limit, and a replaced kernel client is closed.
 - The first export on a fresh server is fast (secret clients made on first use).
+- A page opened at `localhost` on a port other than 6789 talks to its own server. It sent
+  every call to port 6789, so with two servers it edited the other project.
 - Exported services no longer require packages that a `.pth` file loads when Python starts
   (such as `ibm-db`, which has no Linux arm64 wheel and broke image builds there).
 - `mage service check --affected` finds a new service whose folder is not yet in Git.

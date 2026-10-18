@@ -63,10 +63,11 @@ Write and test a transformer on real messages without starting the stream.
    messages from a Kafka source without joining its consumer group, so a running stream keeps
    its position. **Keep samples out of Git** is on by default, since captured messages can hold
    real data. You can also paste messages, as JSON lines or a JSON array, or edit a sample.
-2. In a transformer, press **⌘↵** (Ctrl+Enter), or the play button **Run on sample**. The blocks
-   from the source down to it run on the chosen sample, with the same Python worker an exported
-   service uses. Below the block you see the input and output messages side by side, each
-   block's time and what the blocks printed.
+2. In a transformer (Python, Rust or R), press **⌘↵** (Ctrl+Enter), or the play button **Run on
+   sample**. The blocks from the source down to it run on the chosen sample, with the same
+   workers an exported service uses. Below the block you see what it changed (fields added,
+   removed and changed, with how many messages each, or how many messages it dropped), the
+   input and output messages side by side, each block's time and what the blocks printed.
 3. When a block fails, the error and its traceback show in full, and the first message that
    fails on its own is marked in the input.
 

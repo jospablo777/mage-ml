@@ -10,6 +10,7 @@ import { BORDER_RADIUS } from '@oracle/styles/units/borders';
 import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { StreamSampleRunType } from '@interfaces/StreamSampleType';
 import { UNIT } from '@oracle/styles/units/spacing';
+import { fieldList, messageDiff } from './diff';
 
 const PAGE = 50;
 
@@ -143,6 +144,7 @@ function SampleRunResult({ result }: SampleRunResultProps) {
   }, [result]);
   const failing = result?.failing_message;
   const logs = result?.logs || [];
+  const diff = useMemo(() => messageDiff(input, output), [input, output]);
 
   return (
     <PanelStyle>
@@ -176,6 +178,34 @@ function SampleRunResult({ result }: SampleRunResultProps) {
             <Spacing mt={1}>
               <CodeStyle>{result.error.details}</CodeStyle>
             </Spacing>
+          )}
+        </Spacing>
+      )}
+
+      {!result.error && (
+        <Spacing mt={1}>
+          {diff.paired ? (
+            <>
+              {fieldList(diff.added).map(field => (
+                <ChipStyle key={`a${field}`}>+ {field}</ChipStyle>
+              ))}
+              {fieldList(diff.removed).map(field => (
+                <ChipStyle key={`r${field}`}>− {field}</ChipStyle>
+              ))}
+              {fieldList(diff.changed).map(field => (
+                <ChipStyle key={`c${field}`}>~ {field}</ChipStyle>
+              ))}
+              <Text inline muted small>
+                {diff.unchanged.toLocaleString()} of {input.length.toLocaleString()} unchanged
+              </Text>
+            </>
+          ) : (
+            <Text muted small>
+              {diff.dropped
+                ? `${diff.dropped.toLocaleString()} message${diff.dropped === 1 ? '' : 's'} dropped`
+                : `${diff.extra.toLocaleString()} message${diff.extra === 1 ? '' : 's'} added`}
+              ; messages are compared field by field when the counts match.
+            </Text>
           )}
         </Spacing>
       )}

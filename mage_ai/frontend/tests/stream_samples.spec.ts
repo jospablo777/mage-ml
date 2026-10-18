@@ -74,6 +74,7 @@ test('a stream transformer runs on a pasted sample and shows input and output', 
 
   await expect(page.getByText('3 in → 2 out')).toBeVisible({ timeout: 60000 });
   await expect(page.getByText('{"n":2,"twice":50}')).toBeVisible();
+  await expect(page.getByText('1 message dropped', { exact: false })).toBeVisible();
   await expect(page.getByText(`${TRANSFORMER}: doubling 3`)).toBeVisible();
 });
 

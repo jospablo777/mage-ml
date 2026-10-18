@@ -644,11 +644,15 @@ function CodeBlock(
     () => PipelineTypeEnum.STREAMING === pipelineType,
     [pipelineType],
   );
-  // A stream's Python transformers run on a sample of messages, with the service engine's
-  // worker, instead of in the kernel.
+  // A stream's transformers (Python, Rust and R) run on a sample of messages, with the
+  // service engine's workers, instead of in the kernel.
   const isStreamingTransformer = isStreamingPipeline
     && BlockTypeEnum.TRANSFORMER === blockType
-    && BlockLanguageEnum.PYTHON === blockLanguage;
+    && [
+      BlockLanguageEnum.PYTHON,
+      BlockLanguageEnum.R,
+      BlockLanguageEnum.RUST,
+    ].includes(blockLanguage);
   const [selectedSample] = useStreamSample(isStreamingTransformer ? pipelineUUID : null);
   const [sampleRun, setSampleRun] = useState<StreamSampleRunType>(null);
   const [sampleRunning, setSampleRunning] = useState<boolean>(false);
