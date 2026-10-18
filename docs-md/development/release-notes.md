@@ -63,6 +63,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- The **Run** tab starts a streaming pipeline on the local engine with development positions
+  and the sinks it writes named first; it shows state, rates, lag, totals and the engine's
+  log, and pauses, resumes and stops the stream.
+- Captured samples redact secret fields: names such as `password`, `access_token` or
+  `card_number`, and the fields a source lists in `secret_fields`.
 - Run on sample works for Rust and R transformers too, and shows what the block changed:
   fields added, removed and changed, with how many messages each.
 - Check connection on a Kafka source reports partitions, retained messages, retention and the

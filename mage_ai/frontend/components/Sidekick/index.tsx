@@ -38,6 +38,7 @@ import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Secrets from './GlobalVariables/Secrets';
 import SecretType from '@interfaces/SecretType';
 import Spacing from '@oracle/elements/Spacing';
+import StreamRun from '@components/StreamRun';
 import StreamSamples from '@components/StreamSamples';
 import Text from '@oracle/elements/Text';
 import Terminal from '@components/Terminal';
@@ -662,6 +663,9 @@ function Sidekick({
 
         {activeView === ViewKeyEnum.DATA && dataMemo}
 
+        {ViewKeyEnum.STREAM_RUN === activeView && pipeline?.uuid && (
+          <StreamRun blocks={pipeline.blocks} pipelineUUID={pipeline.uuid} />
+        )}
         {ViewKeyEnum.SAMPLES === activeView && pipeline?.uuid && (
           <StreamSamples pipelineUUID={pipeline.uuid} />
         )}

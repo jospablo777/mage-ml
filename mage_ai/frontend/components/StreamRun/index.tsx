@@ -1,0 +1,290 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import styled from 'styled-components';
+
+import BlockType, { BlockTypeEnum } from '@interfaces/BlockType';
+import Button from '@oracle/elements/Button';
+import FlexContainer from '@oracle/components/FlexContainer';
+import Spacing from '@oracle/elements/Spacing';
+import Text from '@oracle/elements/Text';
+import api from '@api';
+import dark from '@oracle/styles/themes/dark';
+import { BORDER_RADIUS } from '@oracle/styles/units/borders';
+import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
+import { UNIT } from '@oracle/styles/units/spacing';
+
+// A stream on the local engine, from the editor: start it (naming its sinks), see what it
+// does (state, rates, lag, totals, the engine's log), pause, resume and stop it.
+
+export type StreamRunType = {
+  alerts?: number;
+  batches?: number;
+  dead_lettered_messages?: number;
+  error?: string;
+  exit_code?: number;
+  lag?: { [partition: string]: number };
+  lag_history?: number[];
+  last_error?: string;
+  logs?: string[];
+  messages_in?: number;
+  messages_out?: number;
+  notes?: string[];
+  paused?: boolean;
+  pipeline_uuid: string;
+  rate_in?: number[];
+  rate_out?: number[];
+  retries?: number;
+  running?: boolean;
+  state?: string;
+};
+
+const PanelStyle = styled.div`
+  border-radius: ${BORDER_RADIUS}px;
+  margin-bottom: ${UNIT * 1.5}px;
+  padding: ${UNIT * 1.5}px;
+
+  ${props => `
+    background-color: ${(props.theme.background || dark.background).panel};
+    border: 1px solid ${(props.theme.borders || dark.borders).light};
+  `}
+`;
+
+const NumbersStyle = styled.div`
+  display: grid;
+  gap: ${UNIT}px;
+  grid-template-columns: repeat(auto-fill, minmax(${UNIT * 13}px, 1fr));
+`;
+
+const LogStyle = styled.pre`
+  font-family: ${MONO_FONT_FAMILY_REGULAR};
+  font-size: 12px;
+  margin: 0;
+  max-height: ${UNIT * 50}px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+function body(response: any) {
+  return response?.data || response;
+}
+
+function last(series?: number[]): number {
+  return series?.length ? series[series.length - 1] : 0;
+}
+
+export function sinksOf(blocks: BlockType[]): string[] {
+  return (blocks || [])
+    .filter(({ type }) => BlockTypeEnum.DATA_EXPORTER === type)
+    .map(({ uuid }) => uuid);
+}
+
+// One line per series over the last minute; the scale is the larger series' maximum.
+function Sparkline({ label, series }: {
+  label: string;
+  series: { color: string; values: number[] }[];
+}) {
+  const width = 240;
+  const height = 40;
+  const max = Math.max(1, ...series.flatMap(({ values }) => values || []));
+  return (
+    <div>
+      <Text muted xsmall>{label}</Text>
+      <svg height={height} viewBox={`0 0 ${width} ${height}`} width="100%">
+        {series.map(({ color, values }) => {
+          const points = (values || []).map((value, index) => {
+            const x = values.length > 1 ? (index / (values.length - 1)) * width : 0;
+            const y = height - 2 - (value / max) * (height - 4);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          });
+          return points.length ? (
+            <polyline fill="none" key={color} points={points.join(' ')} stroke={color}
+              strokeWidth={1.5} />
+          ) : null;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function headline(run: StreamRunType): string {
+  if (!run || !run.running) {
+    if (run?.state === 'exited') {
+      return `Stopped on its own: the engine exited with code ${run.exit_code}`;
+    }
+    return run?.state === 'stopped' ? 'Stopped' : 'Not running';
+  }
+  const lag = Object.values(run.lag || {}).reduce((sum, value) => sum + value, 0);
+  const state = run.paused ? 'Paused' : (run.state || 'running')
+    .replace(/^./, c => c.toUpperCase());
+  return `${state} · ${last(run.rate_in).toLocaleString()} in/s · `
+    + `${last(run.rate_out).toLocaleString()} out/s · lag ${lag.toLocaleString()}`;
+}
+
+type StreamRunProps = {
+  blocks: BlockType[];
+  pipelineUUID: string;
+};
+
+function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
+  const [run, setRun] = useState<StreamRunType>(null);
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(null);
+  const sinks = useMemo(() => sinksOf(blocks), [blocks]);
+
+  const load = useCallback(async () => {
+    const response = await api.stream_runs.pipelines.detailAsync(pipelineUUID, 'current');
+    const found = body(response)?.stream_run;
+    if (found) {
+      setRun(found);
+    }
+    return found;
+  }, [pipelineUUID]);
+
+  // Every second while the engine runs.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const found = await load();
+      if (!cancelled && found?.running) {
+        timer.current = setTimeout(tick, 1000);
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer.current);
+    };
+  }, [load, run?.running]);
+
+  const act = useCallback(async (request: () => Promise<any>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = body(await request());
+      if (result?.error) {
+        setError(result.error.message);
+      } else if (result?.stream_run) {
+        setRun(result.stream_run);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const start = useCallback(() => {
+    // The sources read with development positions; the sinks are real (SAFETY.md section 3).
+    if (sinks.length >= 1 && typeof window !== 'undefined' && !window.confirm(
+      'The stream reads with a development consumer group, so production keeps its position. '
+        + `It writes to the sinks of ${sinks.join(', ')}. Start it?`,
+    )) {
+      return;
+    }
+    act(() => api.stream_runs.pipelines.useCreate(pipelineUUID)({
+      stream_run: { confirmed_sinks: sinks },
+    }));
+  }, [act, pipelineUUID, sinks]);
+
+  const control = useCallback((action: 'pause' | 'resume') => act(
+    () => api.stream_runs.pipelines.useUpdate(pipelineUUID, 'current')({
+      stream_run: { action },
+    }),
+  ), [act, pipelineUUID]);
+
+  const stop = useCallback(() => act(
+    () => api.stream_runs.pipelines.useDelete(pipelineUUID, 'current')(),
+  ), [act, pipelineUUID]);
+
+  const running = !!run?.running;
+  const numbers = [
+    ['Messages in', run?.messages_in],
+    ['Messages out', run?.messages_out],
+    ['Batches', run?.batches],
+    ['Retries', run?.retries],
+    ['Dead-lettered', run?.dead_lettered_messages],
+    ['Alerts', run?.alerts],
+  ];
+
+  return (
+    <Spacing p={2}>
+      <PanelStyle>
+        <Text bold large>{headline(run)}</Text>
+        <Spacing mt={1}>
+          <FlexContainer alignItems="center" flexWrap="wrap">
+            {!running && (
+              <Button disabled={busy} loading={busy} onClick={start} primary>
+                Start on the local engine
+              </Button>
+            )}
+            {running && (
+              <Button disabled={busy} onClick={() => control(run.paused ? 'resume' : 'pause')}>
+                {run.paused ? 'Resume' : 'Pause'}
+              </Button>
+            )}
+            {running && (
+              <Spacing ml={1}>
+                <Button disabled={busy} onClick={stop}>Stop</Button>
+              </Spacing>
+            )}
+          </FlexContainer>
+        </Spacing>
+        {error && (
+          <Spacing mt={1}>
+            <LogStyle><Text danger small>{error}</Text></LogStyle>
+          </Spacing>
+        )}
+        {(run?.notes || []).map(note => (
+          <Spacing key={note} mt={1}>
+            <Text muted small>{note}</Text>
+          </Spacing>
+        ))}
+        {run?.last_error && (
+          <Spacing mt={1}>
+            <LogStyle><Text danger small>{run.last_error}</Text></LogStyle>
+          </Spacing>
+        )}
+      </PanelStyle>
+
+      {(running || !!run?.messages_in) && (
+        <PanelStyle>
+          <Sparkline
+            label="Messages per second, last minute"
+            series={[
+              { color: dark.accent.info, values: run?.rate_in },
+              { color: dark.accent.positive, values: run?.rate_out },
+            ]}
+          />
+          <Text xsmall>
+            <span style={{ color: dark.accent.info }}>read</span>
+            {' · '}
+            <span style={{ color: dark.accent.positive }}>written</span>
+          </Text>
+          <Spacing mt={1} />
+          <Sparkline
+            label="Messages behind the end of the source, last minute"
+            series={[{ color: dark.accent.warning, values: run?.lag_history }]}
+          />
+          <Spacing mt={2} />
+          <NumbersStyle>
+            {numbers.map(([label, value]) => (
+              <div key={label as string}>
+                <Text muted xsmall>{label}</Text>
+                <Text bold>{(value as number || 0).toLocaleString()}</Text>
+              </div>
+            ))}
+          </NumbersStyle>
+        </PanelStyle>
+      )}
+
+      {!!run?.logs?.length && (
+        <PanelStyle>
+          <Text bold small>Engine log</Text>
+          <Spacing mt={1} />
+          <LogStyle>{run.logs.join('\n')}</LogStyle>
+        </PanelStyle>
+      )}
+    </Spacing>
+  );
+}
+
+export default StreamRun;

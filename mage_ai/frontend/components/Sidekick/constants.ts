@@ -6,6 +6,7 @@ import {
   Interactions,
   Lightning,
   NavReport,
+  PlayButton,
   Secrets,
   Settings,
   SettingsWithKnobs,
@@ -33,6 +34,7 @@ export enum ViewKeyEnum {
   INTERACTIONS = 'interactions',
   REPORTS = 'reports',
   SAMPLES = 'samples',
+  STREAM_RUN = 'stream_run',
   SECRETS = 'secrets',
   SETTINGS = 'settings',
   TERMINAL = 'terminal',
@@ -159,6 +161,9 @@ export function SIDEKICK_VIEWS(opts?: {
     arr.unshift({
       key: ViewKeyEnum.SAMPLES,
       label: 'Samples',
+    }, {
+      key: ViewKeyEnum.STREAM_RUN,
+      label: 'Run',
     });
   }
 
@@ -201,6 +206,7 @@ export const NAV_ICON_MAPPING = {
   [ViewKeyEnum.CHARTS]: Charts,
   [ViewKeyEnum.DATA]: Table,
   [ViewKeyEnum.SAMPLES]: NavReport,
+  [ViewKeyEnum.STREAM_RUN]: PlayButton,
   [ViewKeyEnum.EXTENSIONS]: Lightning,
   [ViewKeyEnum.INTERACTIONS]: Interactions,
   [ViewKeyEnum.SECRETS]: Secrets,

@@ -176,14 +176,27 @@ def prepare(
     token_file = folder / 'token'
     # For `mage service runs` and `logs`.
     (folder / 'port').write_text(str(port))
+    env = engine_environment(box, data, port, service_token(token_file), values)
+    _validate(binary, env)
+    return LocalRun(
+        name=name, box=box, data=data, token_file=token_file, port=port,
+        command=[str(binary), 'serve'], env=env, missing=_missing(box, env), notes=notes,
+        inputs=lifecycle.service_inputs(repo_path, name, captured)
+        + [f'{definitions.SERVICES_DIR}/{name}/.env.{environment}'],
+    )
+
+
+def engine_environment(box: Path, data: Path, port: int, token: str,
+                       values: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """The engine's environment for a box on this machine: blocks run with this Python."""
     python_dir = box / 'python'
-    env = dict(
+    return dict(
         os.environ,
-        **values,
+        **(values or {}),
         MAGE_SERVICE_DIR=str(box),
         MAGE_SERVICE_DATA=str(data),
         MAGE_SERVICE_PORT=str(port),
-        MAGE_SERVICE_TOKEN=service_token(token_file),
+        MAGE_SERVICE_TOKEN=token,
         MAGE_SERVICE_PYTHON=sys.executable,
         MAGE_SERVICE_WORKER=str(python_dir / 'mage_ai' / 'pipeline_services' / 'runtime'
                                 / 'worker.py'),
@@ -191,13 +204,6 @@ def prepare(
             [str(python_dir)] + ([os.environ['PYTHONPATH']] if os.environ.get('PYTHONPATH')
                                  else []),
         ),
-    )
-    _validate(binary, env)
-    return LocalRun(
-        name=name, box=box, data=data, token_file=token_file, port=port,
-        command=[str(binary), 'serve'], env=env, missing=_missing(box, env), notes=notes,
-        inputs=lifecycle.service_inputs(repo_path, name, captured)
-        + [f'{definitions.SERVICES_DIR}/{name}/.env.{environment}'],
     )
 
 

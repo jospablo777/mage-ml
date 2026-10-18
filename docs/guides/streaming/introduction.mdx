@@ -73,6 +73,20 @@ Write and test a transformer on real messages without starting the stream.
 3. When a block fails, the error and its traceback show in full, and the first message that
    fails on its own is marked in the input.
 
+A capture replaces secret fields with `<redacted>` before the sample is written: fields whose
+name or last part says so (`password`, `access_token`, `api_key`, `card_number`, `ssn` and the
+like; `token_count` is kept), and the fields the source lists:
+
+```yaml
+connector_type: kafka
+topic: orders
+consumer_group: scoring
+secret_fields: [customer.email, customer.phone]   # dotted paths, or a field name anywhere
+```
+
+The capture says which fields it redacted. `secret_fields` is read by capture only; the
+pipeline and the exported service read the messages as they are.
+
 Samples are JSON lines files in `pipelines/<pipeline>/samples/`. A block's top-level code, such
 as loading a model, runs again only when its file changes, so repeat runs are fast.
 
@@ -93,6 +107,20 @@ A run from the editor is a development run, and it never moves production's posi
 
 `mage service run` reads with the same development positions. Triggers and deployed services
 use the configured ones.
+
+## Run on the local engine
+
+The **Run** tab of a streaming pipeline starts it on the local engine, the one exported
+services run on, without a trigger: **Start on the local engine** names the sinks the run
+writes and asks first, then the panel shows the state, messages read and written per second
+and the lag over the last minute, the totals (batches, retries, dead-lettered messages,
+alerts), errors and the engine's log. **Pause** stops reading and lets the work in flight
+finish; **Resume** and **Stop** do what they say.
+
+The run reads with development positions (a `<group>-dev-<user>` consumer group, see above),
+from a build of the pipeline in `.mage/dev/<pipeline>/`, with the server's environment. The
+engine needs the connectors the pipeline uses: the `mageml-engine` wheel has them all. It
+stops with the server.
 
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
