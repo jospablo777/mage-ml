@@ -368,7 +368,7 @@ class KafkaSource(BaseSource):
         try:
             try:
                 committed = {tp: meta.offset for tp, meta in
-                             admin.list_consumer_group_offsets(group).items()
+                             _group_offsets(admin, group).items()
                              if meta.offset is not None and meta.offset >= 0}
             except Exception as error:  # noqa: BLE001 - reported, the rest still helps
                 committed = None
@@ -438,6 +438,20 @@ class KafkaSource(BaseSource):
             f'Receive message {message.partition}:{message.offset}: '
             f'key={message.key}, value={message.value}, time={time.time()}'
         )
+
+
+def _group_offsets(admin, group: str, attempts: int = 10):
+    """
+    The group's committed offsets. A broker answers NotCoordinator while it elects the group's
+    coordinator, as a fresh one does for a new group: such errors are tried again.
+    """
+    for attempt in range(attempts):
+        try:
+            return admin.list_consumer_group_offsets(group)
+        except Exception as error:  # noqa: BLE001 - kafka-python marks the retriable ones
+            if not getattr(error, 'retriable', False) or attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
 
 
 def _retention(admin, topic: str) -> str:

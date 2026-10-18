@@ -385,3 +385,22 @@ class RedactTest(unittest.TestCase):
 
         self.assertEqual(counts, {})
         self.assertEqual(messages[0]['tokenizer'], 'bpe')
+
+
+class GroupOffsetsTest(unittest.TestCase):
+    def test_a_coordinator_being_elected_is_waited_for(self):
+        """A fresh broker answered NotCoordinator for a new group, and the report said so."""
+        from unittest.mock import MagicMock, patch
+
+        from kafka.errors import NotCoordinatorError, UnknownError
+
+        from mage_ai.streaming.sources import kafka
+
+        admin = MagicMock()
+        admin.list_consumer_group_offsets.side_effect = [NotCoordinatorError(), {'tp': 1}]
+        with patch.object(kafka.time, 'sleep'):
+            self.assertEqual(kafka._group_offsets(admin, 'g'), {'tp': 1})
+
+        admin.list_consumer_group_offsets.side_effect = UnknownError()
+        with self.assertRaises(UnknownError):
+            kafka._group_offsets(admin, 'g')
