@@ -421,6 +421,13 @@ fn sink_scope(pipeline: &str, durable_positions: bool) -> String {
     }
 }
 
+/// A sink's own scope: two sinks writing to one place (a NATS stream, a ClickHouse table, a
+/// bucket) after different blocks share the source's positions, so keys made from the stream
+/// alone collided and the second sink's messages were dropped as duplicates.
+fn own_scope(scope: &str, connector: &Connector) -> String {
+    format!("{scope}.{}", connector.name)
+}
+
 fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<StreamParts, String> {
     let stream = pipeline.stream.as_ref().expect("a stream");
     let source = source(service, pipeline, &stream.source).map_err(|e| e.message)?;
@@ -428,12 +435,14 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
     let mut sinks = Vec::new();
     for connector in &stream.sinks {
         sinks.push((
-            sink(service, &scope, connector).map_err(|e| e.message)?,
+            sink(service, &own_scope(&scope, connector), connector).map_err(|e| e.message)?,
             connector.after.clone(),
         ));
     }
     let dead_letter = match &stream.errors.dead_letter {
-        Some(connector) => Some(sink(service, &scope, connector).map_err(|e| e.message)?),
+        Some(connector) => {
+            Some(sink(service, &own_scope(&scope, connector), connector).map_err(|e| e.message)?)
+        }
         None => None,
     };
     let transform = transform_session(service, pipeline, log)?;
@@ -694,6 +703,20 @@ mod tests {
             after: None,
             config: config.as_object().cloned().unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn each_sink_keys_its_messages_by_its_own_name() {
+        // Two sinks writing to one NATS stream after different blocks made the same message
+        // ids, and JetStream dropped the second sink's messages (I-189).
+        let (mut clean, mut alerts) = (
+            connector(ConnectorKind::Stdout, serde_json::json!({})),
+            connector(ConnectorKind::Stdout, serde_json::json!({})),
+        );
+        clean.name = "readings_clean".into();
+        alerts.name = "readings_alerts".into();
+        assert_eq!(own_scope("iot", &clean), "iot.readings_clean");
+        assert_ne!(own_scope("iot", &clean), own_scope("iot", &alerts));
     }
 
     #[test]
