@@ -212,3 +212,29 @@ def _missing(box: Path, env: Dict[str, str]) -> List[str]:
         # The engine fetches these at start-up, from the provider the reference names.
         and not variable.get('source')
     )
+
+
+def supervise(command: List[str], env: Dict[str, str]) -> int:
+    """
+    Runs the engine until it exits and returns its code. SIGTERM and SIGHUP to this process
+    reach the engine, which stops cleanly; without that, a process manager or an editor's
+    stop button left the engine serving, with the port and the run history held.
+    """
+    import signal
+
+    process = subprocess.Popen(command, env=env)
+
+    def forward(signum, frame):
+        process.send_signal(signal.SIGTERM)
+
+    previous = {sig: signal.signal(sig, forward) for sig in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+        while True:
+            try:
+                return process.wait()
+            except KeyboardInterrupt:
+                # The terminal sent SIGINT to the engine too; wait for it to stop.
+                process.send_signal(signal.SIGTERM)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)

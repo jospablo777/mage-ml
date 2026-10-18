@@ -218,3 +218,38 @@ def _post_run(port: int, token: str, pipeline: str) -> dict:
             if time.time() > deadline:
                 raise
             time.sleep(0.5)
+
+
+class SuperviseTest(TestCase):
+    def test_sigterm_to_the_command_stops_the_engine(self):
+        """SIGTERM to mage service run left the engine serving, port and run history held."""
+        import signal
+        import sys
+
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        pid_file = folder / 'engine.pid'
+        engine_script = folder / 'engine.py'
+        engine_script.write_text(textwrap.dedent(f'''
+            import os, signal, sys, time
+            open({str(pid_file)!r}, 'w').write(str(os.getpid()))
+            signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+            time.sleep(120)
+        '''))
+        parent = subprocess.Popen([sys.executable, '-c', textwrap.dedent(f'''
+            import sys
+            from mage_ai.pipeline_services import local_run
+            sys.exit(local_run.supervise([sys.executable, {str(engine_script)!r}], None))
+        ''')])
+        deadline = time.time() + 30
+        while not (pid_file.is_file() and pid_file.read_text()) and time.time() < deadline:
+            time.sleep(0.1)
+        engine_pid = int(pid_file.read_text())
+
+        parent.send_signal(signal.SIGTERM)
+
+        self.assertEqual(parent.wait(timeout=30), 0)
+        with self.assertRaises(ProcessLookupError):
+            for _ in range(50):
+                os.kill(engine_pid, 0)
+                time.sleep(0.1)

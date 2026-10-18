@@ -1313,9 +1313,7 @@ def service_run(
     port: int = typer.Option(6790, help='the port of the service API.'),
 ):
     """Runs the service on this machine's engine, without Docker, until Ctrl+C."""
-    import signal
     import socket
-    import subprocess
 
     from mage_ai.pipeline_services import definitions, engine, export, local_run
 
@@ -1342,13 +1340,7 @@ def service_run(
     typer.echo(f'Service {name} on http://127.0.0.1:{run.port} (environment {env}).')
     typer.echo(f'API token: in {os.path.relpath(run.token_file, project)}, readable by you only.')
     typer.echo('Stop with Ctrl+C.')
-    process = subprocess.Popen(run.command, env=run.env)
-    try:
-        code = process.wait()
-    except KeyboardInterrupt:
-        process.send_signal(signal.SIGTERM)
-        code = process.wait()
-    raise typer.Exit(code=code)
+    raise typer.Exit(code=local_run.supervise(run.command, run.env))
 
 
 DEPLOY_ENV = typer.Option(..., '--env', help='the environment to deploy to.')

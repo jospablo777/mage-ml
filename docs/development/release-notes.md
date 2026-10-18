@@ -164,6 +164,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - `mage service run` checks the box with the engine before serving, so a stale engine says
   to update itself, and in a source checkout it uses the newer of cargo's builds. It names a
   port in use before building anything.
+- SIGTERM or SIGHUP to `mage service run` stops the engine; it was left serving, holding the
+  port and the run history.
 - Object columns with missing values keep their values between blocks: ints came back as
   floats (integers past 2**53 lost digits, also in Rust blocks reading the file), and None
   as NaN or NaT, in a column of another dtype (upstream #5913).
