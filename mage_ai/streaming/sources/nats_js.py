@@ -3,7 +3,7 @@ import json
 import ssl
 import threading
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import nats
 from nats.errors import NoServersError, TimeoutError
@@ -211,6 +211,26 @@ class NATSSource(BaseSource):
                 self._run(self.aclose_client(), timeout=5)
             except Exception as error:
                 self._print(f'Error closing the connection: {error}')
+
+    async def adescribe_setup(self) -> List[str]:
+        from nats.js.errors import NotFoundError as JetStreamNotFound
+
+        name = self.config.stream_name
+        state = (await self.js.stream_info(name)).state
+        lines = [f'Stream {name}: {state.messages:,} messages kept, sequences '
+                 f'{state.first_seq} to {state.last_seq}, {state.consumer_count} consumers.']
+        consumer = self.config.consumer_name or name
+        try:
+            info = await self.js.consumer_info(name, consumer)
+            lines.append(f'Consumer {consumer}: {info.num_pending:,} messages to read, '
+                         f'{info.num_ack_pending:,} delivered and not acknowledged.')
+        except JetStreamNotFound:
+            lines.append(f'Consumer {consumer}: missing, created when the pipeline starts.')
+        return lines
+
+    def describe_setup(self) -> List[str]:
+        """The stream's messages and consumers, and where the durable consumer stands."""
+        return self._run(self.adescribe_setup(), timeout=30)
 
     def destroy(self):
         self.close_client()

@@ -24,6 +24,11 @@ Each message is its JSON value, or its text when it is not JSON. Messages are ac
 the transformer returns. When the transformer raises, its messages are nacked and
 JetStream delivers them again.
 
+## Check connection
+
+The block's **Check connection** reports the stream's kept messages, sequences and consumers,
+and how many messages the durable consumer has left to read and has not acknowledged.
+
 ## All settings
 
 ```yaml

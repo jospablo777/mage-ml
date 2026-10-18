@@ -1,6 +1,6 @@
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 from urllib.parse import quote
 
 import pika
@@ -135,6 +135,27 @@ class RabbitMQSource(BaseSource):
         self.channel = self.create_connection.channel()
         if self.config.prefetch_count:
             self.channel.basic_qos(prefetch_count=self.config.prefetch_count)
+
+    def describe_setup(self) -> List[str]:
+        """Whether the queue exists, with its ready messages and consumers."""
+        from pika.exceptions import ChannelClosedByBroker
+
+        queue = self.config.queue_name
+        # A passive declare of a missing queue closes its channel: a channel of its own.
+        channel = self.create_connection.channel()
+        try:
+            found = channel.queue_declare(queue=queue, passive=True).method
+        except ChannelClosedByBroker as error:
+            if error.reply_code == 404:
+                return [f'Queue {queue}: missing on the broker; create it, or the stream '
+                        'reads nothing.']
+            raise
+        finally:
+            if channel.is_open:
+                channel.close()
+        return [f'Queue {queue}: {found.message_count:,} messages ready, '
+                f'{found.consumer_count} consumers. A development run takes messages from it '
+                'as the stream does.']
 
     def read(self, handler: Callable):
         pass

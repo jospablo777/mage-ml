@@ -82,6 +82,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   `card_number`, and the fields a source lists in `secret_fields`.
 - Run on sample works for Rust and R transformers too, and shows what the block changed:
   fields added, removed and changed, with how many messages each.
+- Check connection on RabbitMQ and NATS JetStream sources reports the queue's or stream's
+  messages and consumers, and where the NATS durable consumer stands.
 - Check connection on a Kafka source reports partitions, retained messages, retention and the
   consumer group's lag, or what a group with no committed offsets would read first.
 - A Samples tab captures the newest or first messages of a Kafka source without a consumer

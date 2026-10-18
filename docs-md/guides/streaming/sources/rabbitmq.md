@@ -41,6 +41,11 @@ consume_config:
   inactivity_timeout: 10.0
 ```
 
+## Check connection
+
+The block's **Check connection** reports whether the queue exists, with its ready messages and
+consumers, read with a passive declare that takes nothing from the queue.
+
 ## In an exported service
 
 [Exported services](../../../production/stream-services.md#rabbitmq) run this source in the Rust engine, which acknowledges deliveries after the sinks; blocks must not ack them.
