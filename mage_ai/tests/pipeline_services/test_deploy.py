@@ -142,6 +142,8 @@ class DeployCommandTest(TestCase):
 
     def setUp(self):
         super().setUp()
+        # The service's tests pass unless a test says otherwise.
+        self.tests = []
         import shutil
         from pathlib import Path
 
@@ -169,6 +171,7 @@ class DeployCommandTest(TestCase):
         check = MagicMock(ok=True, problems=[])
         with patch.object(deploy, 'DockerTarget', return_value=target), \
                 patch.object(lifecycle, 'check', return_value=check), \
+                patch.object(lifecycle, 'test', return_value=self.tests), \
                 patch.object(lifecycle, 'build', return_value=self.project / '.mage' / 'b'), \
                 patch.object(lifecycle, 'read_lock',
                              return_value=dict(manifest_sha256='a' * 64)), \
@@ -195,6 +198,27 @@ class DeployCommandTest(TestCase):
 
         status, _ = self.invoke('status', 'shop')
         self.assertIn('shop  prod  running the repository version', status.output)
+
+    def test_failing_service_tests_stop_the_deploy_unless_skipped_with_a_reason(self):
+        from mage_ai.pipeline_services import lifecycle
+
+        self.tests = [lifecycle.SampleTest(
+            pipeline='orders', sample='example', block='orders_parse', messages=3,
+            error='orders_parse: KeyError: amount',
+        )]
+
+        refused, build_image = self.invoke('deploy', 'shop', '--env', 'prod')
+
+        self.assertEqual(refused.exit_code, 1)
+        build_image.assert_not_called()
+        self.assertIn('orders_parse: KeyError: amount', refused.output)
+        self.assertIn('--skip-tests', refused.output)
+
+        skipped, _ = self.invoke('deploy', 'shop', '--env', 'prod',
+                                 '--skip-tests', 'the sample is out of date')
+        self.assertEqual(skipped.exit_code, 0, skipped.output)
+        labels = self.docker.containers['mage-shop-prod']['labels']
+        self.assertEqual(labels['ai.mageml.tests_skipped'], 'the sample is out of date')
 
     def test_the_token_survives_a_deploy_from_another_machine(self):
         """CI has no token file: every deploy from it made a new token, breaking clients."""

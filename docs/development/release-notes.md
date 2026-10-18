@@ -38,6 +38,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   completes or fails. Such blocks ran nothing before.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
+- **`mage service deploy` runs the service tests first** (each stream sample through the
+  blocks a sink follows) and stops when one fails; `--skip-tests "<reason>"` deploys anyway
+  and records the reason on the deployment.
 
 ### Stream services
 
@@ -111,6 +114,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   building; `mage service ci --promote prod=staging` does it in CI.
 - `service.lock` records the columns each data contract of a service declares; a rebuild
   that would break their readers stops unless `--allow-breaking "<reason>"` records why.
+- `mage service test` runs each stream sample of a service through the blocks a sink
+  follows, as Run on sample does; `deploy` runs it first, and `check --tests` (in the
+  pull request check of `mage service ci`) too.
 - `mage service ci` writes a GitHub Actions workflow: pull requests check the services they
   change and their locks; rules deploy each environment on a branch or tag, building nothing
   when the deployment already runs the lock (`mage service deploy --if-changed`).

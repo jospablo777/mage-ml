@@ -361,7 +361,48 @@ jobs:
           echo "${{ steps.mq.outputs.sha }}  $archive" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/mqm" && tar -xzf "$archive" -C "$RUNNER_TEMP/mqm"
           echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
-      # Registries time out now and then (icr.io for Db2): three tries before failing.
+      # icr.io (Db2, IBM MQ) times out for minutes at a time, which failed the job. Its images
+      # are cached by tag and loaded from the cache; the registry is contacted only when a tag
+      # changes, with longer waits between tries.
+      - name: Find the group's icr.io images
+        id: icr
+        if: matrix.services != ''
+        run: |
+          images=$(docker compose -f integration_tests/compose.yaml config --images ${{ matrix.services }} | grep '^icr\.io/' | sort | tr '\n' ' ' || true)
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "key=icr-images-$(echo "$images" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Restore the icr.io images
+        id: icr-cache
+        if: steps.icr.outputs.images != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/icr-images
+          key: ${{ steps.icr.outputs.key }}
+      - name: Load or pull the icr.io images
+        if: steps.icr.outputs.images != ''
+        run: |
+          archive=~/.cache/icr-images/images.tar.zst
+          if [ -f "$archive" ]; then
+            zstd -dc "$archive" | docker load
+            exit 0
+          fi
+          for image in ${{ steps.icr.outputs.images }}; do
+            for attempt in 1 2 3 4 5 6; do
+              docker pull -q "$image" && break
+              [ "$attempt" = 6 ] && exit 1
+              echo "Pulling $image failed (attempt $attempt); trying again."
+              sleep $((attempt * 30))
+            done
+          done
+          mkdir -p ~/.cache/icr-images
+          docker save ${{ steps.icr.outputs.images }} | zstd -q -T0 -3 -o "$archive"
+      - name: Save the icr.io images
+        if: steps.icr.outputs.images != '' && steps.icr-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/icr-images
+          key: ${{ steps.icr.outputs.key }}
+      # Registries time out now and then: three tries before failing.
       - name: Start the group's services
         if: matrix.services != ''
         run: |

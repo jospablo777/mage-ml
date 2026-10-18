@@ -1277,6 +1277,9 @@ def service_check(
     locked: bool = typer.Option(
         False, '--locked', help='also fail when service.lock is not the build\'s, for CI.',
     ),
+    tests: bool = typer.Option(
+        False, '--tests', help='also run the service tests, as deploy does first.',
+    ),
 ):
     """What would stop the service from building, and what to know about it."""
     import subprocess
@@ -1311,6 +1314,9 @@ def service_check(
                 typer.echo(f'  - {problem}', err=True)
             continue
         typer.echo(result.report)
+        if tests and not _run_service_tests(project, service):
+            failed = True
+            continue
         if locked:
             before = lifecycle.read_lock(project, service)
             try:
@@ -1339,6 +1345,41 @@ ALLOW_BREAKING = typer.Option(
     help='accept a change to a declared output that breaks its consumers; the reason is '
          'recorded in service.lock.',
 )
+
+
+def _run_service_tests(project: str, name: str) -> bool:
+    """Prints each sample test; True when all pass."""
+    from mage_ai.pipeline_services import lifecycle
+
+    results = lifecycle.test(project, name)
+    if not results:
+        typer.echo(f'{name} has no tests: save samples for its streams (the Samples tab).')
+        return True
+    for result in results:
+        mark = 'passed' if result.ok else 'failed'
+        typer.echo(f'{result.pipeline} · {result.sample} ({result.messages} messages) → '
+                   f'{result.block}: {mark} in {result.seconds * 1000:.0f} ms')
+        if not result.ok:
+            typer.echo(f'  {result.error}', err=True)
+    failed = sum(1 for r in results if not r.ok)
+    typer.echo(f'{len(results) - failed} of {len(results)} tests passed.')
+    return failed == 0
+
+
+@service_app.command('test')
+def service_test(
+    name: str = typer.Argument(...),
+    project: str = SERVICE_PROJECT,
+):
+    """Runs the service's stream samples through its blocks, as deploy does first."""
+    from mage_ai.pipeline_services import definitions
+
+    try:
+        passed = _run_service_tests(project, name)
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    if not passed:
+        raise typer.Exit(code=1)
 
 
 @service_app.command('build')
@@ -1478,6 +1519,10 @@ def service_deploy(
         help='promote: deploy the image ENV runs, tested there, without building.',
     ),
     allow_breaking: Union[str, None] = ALLOW_BREAKING,
+    skip_tests: Union[str, None] = typer.Option(
+        None, '--skip-tests', metavar='REASON',
+        help='deploy without running the service tests; the reason is recorded.',
+    ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
     from mage_ai.pipeline_services import (
@@ -1509,11 +1554,18 @@ def service_deploy(
                 for problem in result.problems:
                     typer.echo(f'  - {problem}', err=True)
                 raise typer.Exit(code=1)
+            # Nothing unchecked ships: the tests first, or a recorded reason.
+            if not skip_tests and not _run_service_tests(project, name):
+                typer.echo(f'{name} is not deployed: fix the failing tests, or deploy with '
+                           '--skip-tests "<reason>".', err=True)
+                raise typer.Exit(code=1)
             box = lifecycle.build(project, name, allow_breaking=allow_breaking)
             _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
             lock_sha = str((lifecycle.read_lock(project, name) or {}).get('manifest_sha256', ''))
             commit = deploy.git_commit(project)
             recorded = {'reason': allow_uncommitted} if allow_uncommitted else {}
+            if skip_tests:
+                recorded['tests_skipped'] = skip_tests
         values = local_run.environment_values(project, name, env)
         # The token stays the same across deploys from any machine: the environment's, this
         # machine's, or the one the deployment runs with.

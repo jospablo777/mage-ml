@@ -221,6 +221,8 @@ class CodeEngineCommandTest(TestCase):
 
     def setUp(self):
         super().setUp()
+        # The service's tests pass unless a test says otherwise.
+        self.tests = []
         import shutil
         from pathlib import Path
 
@@ -248,6 +250,7 @@ class CodeEngineCommandTest(TestCase):
                 patch.object(code_engine, '_token', lambda: 't0ken'), \
                 patch.object(code_engine.time, 'sleep', lambda s: None), \
                 patch.object(lifecycle, 'check', return_value=check), \
+                patch.object(lifecycle, 'test', return_value=self.tests), \
                 patch.object(lifecycle, 'build', return_value=self.project / '.mage' / 'b'), \
                 patch.object(lifecycle, 'read_lock',
                              return_value=dict(manifest_sha256='a' * 64)), \

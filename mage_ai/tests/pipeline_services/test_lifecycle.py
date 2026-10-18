@@ -177,6 +177,43 @@ class BreakingOutputTest(ExportTestCase):
         lifecycle.build(self.repo_path, 'sales')
 
 
+class ServiceTestsTest(ExportTestCase):
+    """A stream service's samples are its tests, run before a deploy."""
+
+    def test_samples_run_through_the_blocks_a_sink_follows(self):
+        from mage_ai.data_preparation.models.constants import PipelineType
+        from mage_ai.data_preparation.models.pipeline import Pipeline
+        from mage_ai.streaming import templates
+
+        root = Path(self.repo_path)
+        for path in (root / 'services', root / '.mage'):
+            self.addCleanup(shutil.rmtree, path, True)
+        stream = Pipeline.create(f'{self._testMethodName}_stream', repo_path=self.repo_path,
+                                 pipeline_type=PipelineType.STREAMING)
+        self.addCleanup(stream.delete)
+        templates.apply(stream, 'kafka')
+        lifecycle.new(self.repo_path, 'live', [stream.uuid, self.pipeline.uuid])
+
+        [passed] = lifecycle.test(self.repo_path, 'live')
+
+        self.assertTrue(passed.ok, passed.error)
+        self.assertEqual((passed.sample, passed.block, passed.messages),
+                         ('example', f'{stream.uuid}_transform', 5))
+
+        transformer = Pipeline.get(stream.uuid, repo_path=self.repo_path).get_block(
+            f'{stream.uuid}_transform')
+        Path(transformer.file_path).write_text(
+            "@transformer\ndef t(messages, *a, **k):\n    return [m['nope'] for m in messages]\n")
+        [failed] = lifecycle.test(self.repo_path, 'live')
+
+        self.assertFalse(failed.ok)
+        self.assertIn("KeyError: 'nope'", failed.error)
+        checked = CliRunner().invoke(
+            app, ['service', 'check', 'live', '--tests', '--project', self.repo_path])
+        self.assertEqual(checked.exit_code, 1, checked.output)
+        self.assertIn('0 of 1 tests passed.', checked.output)
+
+
 class AffectedServicesTest(ExportTestCase):
     def setUp(self):
         super().setUp()

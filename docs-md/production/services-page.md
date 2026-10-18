@@ -67,6 +67,7 @@ The same services from the command line, in the project folder:
 | `mage service list` | The services, their pipelines and where each is saved |
 | `mage service check shop-live` | What would stop the service from building, and what to know |
 | `mage service check --affected [--base origin/main]` | Checks the services that the changes since `--base` touch, for CI ([below](#check-the-services-a-change-touches)) |
+| `mage service test shop-live` | Runs each stream sample through the blocks a sink follows ([below](#test-before-deploying)) |
 | `mage service run shop-live [--env dev] [--port 6790]` | Runs the service on this machine's engine, without Docker, until Ctrl+C ([below](#run-a-service-locally)) |
 | `mage service build shop-live [--image]` | Writes the build to `.mage/build/shop-live/` (kept out of Git) and updates `service.lock` |
 | `mage service deploy shop-live --env prod` | Builds the image, runs it in the environment's target, waits for health and brings the previous deployment back on failure ([below](#deploy-with-docker)) |
@@ -246,7 +247,8 @@ request cannot merge a lock that a deploy would refuse.
 mage service ci --deploy dev=main --deploy 'prod=tag:v*'
 ```
 
-- Pull requests run `mage service check --affected --locked` against their base branch.
+- Pull requests run `mage service check --affected --locked --tests` against their base
+  branch.
 - Each `--deploy ENV=BRANCH` or `ENV=tag:PREFIX*` rule deploys the services that define the
   environment, one job per service, with the GitHub environment `ENV` (for its secrets and
   required reviewers). `mage service deploy --if-changed` builds nothing when the
@@ -287,6 +289,29 @@ mage service build shop-live --allow-breaking "order ids become strings"
 
 The reason and the changes go into `service.lock`, so the pull request that makes the change
 shows them; `deploy` takes the same option.
+
+### Test before deploying
+
+A stream's [samples](../guides/streaming/introduction.md) are the service's tests. `mage service
+test shop-live` runs each sample of each stream pipeline through the blocks whose output a
+sink writes (and any transformer nothing follows), as Run on sample does, and lists each
+result with its time:
+
+```text
+live_traffic · example (5 messages) → live_traffic_parse: passed in 12 ms
+1 of 1 tests passed.
+```
+
+`deploy` runs them before it builds and stops when one fails. To deploy anyway, give the
+reason; it is recorded on the deployment:
+
+```bash
+mage service deploy shop-live --env prod --skip-tests "the sample predates the new schema"
+```
+
+A stream without samples has no tests; batch pipelines have none yet. Samples are kept out
+of Git by default, since captured messages can hold real data, so CI runs only the samples
+committed: write the ones that should guard a deploy, and commit them.
 
 ### Run a service locally
 

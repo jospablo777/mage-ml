@@ -178,10 +178,10 @@ def workflow(project: str, rules: List[Rule], mage_version: str) -> str:
         '        with:',
         '          fetch-depth: 0',
         *install,
-        '      - name: Check the services the pull request changes, and their locks',
+        '      - name: Check and test the services the pull request changes, and their locks',
         '        env:',
         '          BASE: origin/${{ github.base_ref }}',
-        '        run: mage service check --affected --locked --base "$BASE" '
+        '        run: mage service check --affected --locked --tests --base "$BASE" '
         '--project "$MAGE_PROJECT"',
     ]
     for rule in rules:

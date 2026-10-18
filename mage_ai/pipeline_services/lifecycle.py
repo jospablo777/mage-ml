@@ -124,6 +124,57 @@ def build(repo_path: str, name: str, allow_breaking: Optional[str] = None) -> Pa
     return box
 
 
+@dataclass
+class SampleTest:
+    pipeline: str
+    sample: str
+    block: str
+    messages: int
+    error: Optional[str] = None
+    seconds: float = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+
+def test(repo_path: str, name: str) -> List[SampleTest]:
+    """
+    The service's tests: each sample of each stream pipeline run through the blocks whose
+    output a sink writes, as Run on sample runs them. A stream without samples has none.
+    """
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.streaming import sample_runner, samples
+
+    results = []
+    for pipeline_uuid in definitions.load_definition(repo_path, name)['pipelines']:
+        pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+        if str(getattr(pipeline.type, 'value', pipeline.type)) != 'streaming':
+            continue
+        # The blocks a sink follows; a transformer nothing follows is checked too.
+        ends = sorted({
+            up.uuid for block in pipeline.blocks_by_uuid.values()
+            if str(block.type) == 'data_exporter'
+            for up in block.upstream_blocks or [] if str(up.type) == 'transformer'
+        } | {
+            block.uuid for block in pipeline.blocks_by_uuid.values()
+            if str(block.type) == 'transformer' and not block.downstream_blocks
+        })
+        for sample in samples.list_samples(repo_path, pipeline_uuid):
+            messages = samples.read_sample(repo_path, pipeline_uuid, sample['name'])
+            for block_uuid in ends:
+                result = sample_runner.run_on_sample(repo_path, pipeline_uuid, block_uuid,
+                                                     messages)
+                error = result.get('error')
+                results.append(SampleTest(
+                    pipeline=pipeline_uuid, sample=sample['name'], block=block_uuid,
+                    messages=len(messages), seconds=float(result.get('seconds') or 0),
+                    error=f"{error.get('block_uuid') or block_uuid}: {error.get('message')}"
+                    if error else None,
+                ))
+    return results
+
+
 def output_schemas(repo_path: str, captured: export.Capture) -> Dict[str, Dict]:
     """The columns each block of the service declares in its data contract."""
     from mage_ai.data_preparation import contracts

@@ -249,6 +249,8 @@ class KubernetesCommandTest(TestCase):
 
     def setUp(self):
         super().setUp()
+        # The service's tests pass unless a test says otherwise.
+        self.tests = []
         import shutil
         from pathlib import Path
 
@@ -280,6 +282,7 @@ class KubernetesCommandTest(TestCase):
         check = MagicMock(ok=True, problems=[])
         with patch.object(kubernetes, 'KubernetesTarget', side_effect=target), \
                 patch.object(lifecycle, 'check', return_value=check), \
+                patch.object(lifecycle, 'test', return_value=self.tests), \
                 patch.object(lifecycle, 'build', return_value=self.project / '.mage' / 'b'), \
                 patch.object(lifecycle, 'read_lock',
                              return_value=dict(manifest_sha256='a' * 64)), \

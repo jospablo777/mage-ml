@@ -50,7 +50,7 @@ class CiWorkflowTest(TestCase):
         self.assertEqual(set(flow['jobs']),
                          {'check', 'plan-dev', 'deploy-dev', 'plan-prod', 'deploy-prod'})
         check = flow['jobs']['check']['steps'][-1]['run']
-        self.assertIn('mage service check --affected --locked', check)
+        self.assertIn('mage service check --affected --locked --tests', check)
         self.assertIn("refs/heads/main", flow['jobs']['plan-dev']['if'])
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", flow['jobs']['plan-prod']['if'])
         deploy = flow['jobs']['deploy-prod']
