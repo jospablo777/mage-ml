@@ -132,6 +132,18 @@ from a build of the pipeline in `.mage/dev/<pipeline>/`, with the server's envir
 engine needs the connectors the pipeline uses: the `mageml-engine` wheel has them all. It
 stops with the server.
 
+## Dead letters
+
+With a dead-letter sink (a data exporter with `dead_letter: true`), a message a block fails on
+goes there with its error instead of stopping the stream. The **Dead letters** tab reads a
+Kafka dead-letter sink without a consumer group: the newest messages, newest first, each with
+its error, partition, offset and time (secret fields redacted, as in samples).
+
+- **Open as sample** saves them as a sample: Run on sample shows the failure again, and the
+  fix can be checked on the very messages that failed.
+- **Replay to <topic>** writes them back to the source's topic as they were received, once the
+  block is fixed. It is a write to production, so you type the topic's name to confirm.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

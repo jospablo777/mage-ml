@@ -68,6 +68,7 @@ export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_serv
 export const STREAM_SAMPLES: 'stream_samples' = 'stream_samples';
 export const STREAM_SAMPLE_RUNS: 'stream_sample_runs' = 'stream_sample_runs';
 export const STREAM_RUNS: 'stream_runs' = 'stream_runs';
+export const STREAM_DEAD_LETTERS: 'stream_dead_letters' = 'stream_dead_letters';
 export const FILE_CONTENTS: 'file_contents' = 'file_contents';
 export const FILE_VERSIONS: 'file_versions' = 'file_versions';
 export const FOLDERS: 'folders' = 'folders';
@@ -180,6 +181,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [STREAM_SAMPLES, PIPELINES],
   [STREAM_SAMPLE_RUNS, PIPELINES],
   [STREAM_RUNS, PIPELINES],
+  [STREAM_DEAD_LETTERS, PIPELINES],
   [FILE_CONTENTS],
   [FILE_VERSIONS, BLOCKS],
   [FILE_VERSIONS, FILES],

@@ -63,6 +63,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- The **Dead letters** tab reads a Kafka dead-letter sink with each message's error, opens
+  the messages as a sample to reproduce the failure, and replays them to the source once
+  fixed, after the topic's name is typed.
 - New streaming pipelines can start from a template per source (Kafka, RabbitMQ, NATS,
   webhook, PostgreSQL changes) with a transformer, a printing sink and a sample.
 - A stream service's `/v1/streams/<pipeline>` reports each block's messages in and out,

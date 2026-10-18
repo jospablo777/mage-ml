@@ -1,6 +1,7 @@
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import {
+  AlertTriangle,
   Callback,
   Charts,
   Interactions,
@@ -35,6 +36,7 @@ export enum ViewKeyEnum {
   REPORTS = 'reports',
   SAMPLES = 'samples',
   STREAM_RUN = 'stream_run',
+  DEAD_LETTERS = 'dead_letters',
   SECRETS = 'secrets',
   SETTINGS = 'settings',
   TERMINAL = 'terminal',
@@ -164,6 +166,9 @@ export function SIDEKICK_VIEWS(opts?: {
     }, {
       key: ViewKeyEnum.STREAM_RUN,
       label: 'Run',
+    }, {
+      key: ViewKeyEnum.DEAD_LETTERS,
+      label: 'Dead letters',
     });
   }
 
@@ -207,6 +212,7 @@ export const NAV_ICON_MAPPING = {
   [ViewKeyEnum.DATA]: Table,
   [ViewKeyEnum.SAMPLES]: NavReport,
   [ViewKeyEnum.STREAM_RUN]: PlayButton,
+  [ViewKeyEnum.DEAD_LETTERS]: AlertTriangle,
   [ViewKeyEnum.EXTENSIONS]: Lightning,
   [ViewKeyEnum.INTERACTIONS]: Interactions,
   [ViewKeyEnum.SECRETS]: Secrets,
