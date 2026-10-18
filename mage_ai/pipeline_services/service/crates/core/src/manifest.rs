@@ -486,11 +486,18 @@ impl Manifest {
         }
         let manifest: Manifest = serde_json::from_str(text)
             .map_err(|error| ManifestError(format!("service.json is invalid: {error}")))?;
-        if !(OLDEST_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&manifest.schema_version) {
+        if manifest.schema_version > SCHEMA_VERSION {
             return Err(ManifestError(format!(
-                "service.json has schema version {}; this service reads versions \
-                 {OLDEST_SCHEMA_VERSION} to {SCHEMA_VERSION}. Export the pipelines again with \
-                 the matching MageML version.",
+                "service.json has schema version {}, newer than this engine reads \
+                 ({OLDEST_SCHEMA_VERSION} to {SCHEMA_VERSION}): update the engine to the \
+                 MageML version that exported the service.",
+                manifest.schema_version
+            )));
+        }
+        if manifest.schema_version < OLDEST_SCHEMA_VERSION {
+            return Err(ManifestError(format!(
+                "service.json has schema version {}, older than this engine reads \
+                 ({OLDEST_SCHEMA_VERSION} to {SCHEMA_VERSION}): export the pipelines again.",
                 manifest.schema_version
             )));
         }
@@ -1293,7 +1300,11 @@ mod tests {
         }
         value["schema_version"] = json!(3);
         let error = Manifest::parse(&value.to_string()).unwrap_err().0;
-        assert!(error.contains("reads versions 1 to 2"), "{error}");
+        assert!(error.contains("newer than this engine reads (1 to 2)"), "{error}");
+        assert!(error.contains("update the engine"), "{error}");
+        value["schema_version"] = json!(0);
+        let error = Manifest::parse(&value.to_string()).unwrap_err().0;
+        assert!(error.contains("export the pipelines again"), "{error}");
 
         let mut stream = serde_json::to_value(stream_manifest(json!([]), kafka_to_http())).unwrap();
         stream["schema_version"] = json!(1);

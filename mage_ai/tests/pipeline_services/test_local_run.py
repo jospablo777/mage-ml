@@ -7,6 +7,8 @@ import os
 import shutil
 import stat
 import subprocess
+import tempfile
+import textwrap
 import time
 import unittest
 import urllib.request
@@ -48,6 +50,48 @@ class EngineLookupTest(TestCase):
                 engine.engine_path()
 
 
+    def test_the_newer_of_the_source_builds_is_used(self):
+        from unittest.mock import patch
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        for profile, mtime in (('release', 1_000), ('debug', 2_000)):
+            binary = root / profile / engine.ENGINE_NAME
+            binary.parent.mkdir()
+            binary.write_text('#!/bin/sh\n')
+            binary.chmod(0o755)
+            os.utime(binary, (mtime, mtime))
+
+        with patch.object(engine, 'SOURCE_ENGINE', root), \
+                patch.object(engine.shutil, 'which', return_value=None), \
+                patch.object(engine.sys, 'executable', str(root / 'none' / 'python')):
+            found = [p for p in engine._candidates() if p is not None]
+
+        self.assertEqual(found[-2:], [root / 'debug' / engine.ENGINE_NAME,
+                                      root / 'release' / engine.ENGINE_NAME])
+
+    def test_an_engine_that_cannot_read_the_service_fails_before_serving(self):
+        """A stale engine started, printed a schema error and left a dead server."""
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        stale = root / engine.ENGINE_NAME
+        stale.write_text(textwrap.dedent('''\
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then echo "mage-service 0.0.9"; exit 0; fi
+            echo "error service.json has schema version 2, newer than this engine reads" >&2
+            exit 1
+        '''))
+        stale.chmod(0o755)
+
+        with self.assertRaises(local_run.LocalRunError) as raised:
+            local_run._validate(stale, dict(os.environ))
+
+        message = str(raised.exception)
+        self.assertIn('mage-service 0.0.9', message)
+        self.assertIn('newer than this engine reads', message)
+        self.assertIn('uv pip install -U mageml-engine', message)
+
+
 class RunCommandTest(TestCase):
     def test_without_an_engine_the_command_says_how_to_get_one(self):
         from unittest.mock import patch
@@ -59,10 +103,30 @@ class RunCommandTest(TestCase):
         with patch.object(local_run, 'prepare',
                           side_effect=engine.EngineNotFound('install mageml-engine')):
             result = CliRunner().invoke(app, ['service', 'run', 'sales',
+                                              '--port', str(_free_port()),
                                               '--project', self.repo_path])
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn('install mageml-engine', result.output)
+
+    def test_a_port_in_use_is_named_before_anything_is_built(self):
+        import socket
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        with socket.socket() as taken, patch.object(local_run, 'prepare') as prepare:
+            taken.bind(('127.0.0.1', 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            result = CliRunner().invoke(app, ['service', 'run', 'sales', '--port', str(port),
+                                              '--project', self.repo_path])
+
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn(f'Port {port} is in use', result.output)
+        prepare.assert_not_called()
 
 
 @unittest.skipUnless(SERVICE_BINARY.is_file(), 'needs the mage-service binary (cargo build)')
@@ -95,6 +159,7 @@ class LocalRunTest(ExportTestCase):
             listed = _cli(self.repo_path, 'runs', 'sales')
             log = _cli(self.repo_path, 'logs', 'sales', '--run', answer['id'])
             latest = _cli(self.repo_path, 'logs', 'sales')
+            called = _cli(self.repo_path, 'call', 'sales')
         finally:
             process.terminate()
             process.wait(timeout=60)
@@ -106,6 +171,8 @@ class LocalRunTest(ExportTestCase):
         self.assertIn(answer['id'], listed)
         self.assertIn('completed', listed)
         self.assertEqual(log, latest)
+        self.assertIn('completed.', called)
+        self.assertIn('Output of', called)
         # A second local run keeps the token and the run history.
         again = local_run.prepare(self.repo_path, 'sales', engine_binary=SERVICE_BINARY)
         self.assertEqual(again.token_file.read_text(), token)

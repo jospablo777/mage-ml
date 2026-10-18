@@ -47,8 +47,10 @@ def _candidates():
     yield Path(sys.executable).parent / ENGINE_NAME
     found = shutil.which(ENGINE_NAME)
     yield Path(found) if found else None
-    for profile in ('release', 'debug'):
-        yield SOURCE_ENGINE / profile / ENGINE_NAME
+    # The newer of cargo's builds: a stale release build must not win over today's debug one.
+    built = [SOURCE_ENGINE / profile / ENGINE_NAME for profile in ('release', 'debug')]
+    yield from sorted((p for p in built if p.is_file()), key=lambda p: p.stat().st_mtime,
+                      reverse=True)
 
 
 def engine_version(path: Optional[Path] = None) -> Optional[str]:

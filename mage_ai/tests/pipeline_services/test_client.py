@@ -33,10 +33,28 @@ class FakeApi(BaseHTTPRequestHandler):
             return self._send(401, {'error': 'a valid token is required'})
         if url.path == '/v1/runs':
             return self._send(200, {'runs': RUNS[:int(query.get('limit', 50))]})
+        if url.path == '/v1/pipelines':
+            return self._send(200, {'pipelines': [{'id': 'orders'}]})
+        if url.path == '/v1/runs/r3/output':
+            return self._send(200, {'orders': 3, 'block': query['block']})
         if url.path == '/v1/runs/r2/logs':
             body = '2026-10-17T10:00:01Z [load] reading\n2026-10-17T10:00:02Z [load] failed\n'
             return self._send(200, body, 'text/plain')
         return self._send(404, {'error': f'no run {url.path.split("/")[3]}'})
+
+    def do_POST(self):
+        url = urlparse(self.path)
+        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        FakeApi.requests.append((url.path, body))
+        if url.path != '/v1/pipelines/orders/runs':
+            return self._send(404, {'error': 'the service has no pipeline'})
+        failed = body['variables'].get('fail')
+        blocks = [dict(block='load', status='completed', duration_ms=12, outputs=[{}]),
+                  dict(block='total', status='failed' if failed else 'completed',
+                       duration_ms=3, outputs=[] if failed else [{}],
+                       error='ValueError: bad row' if failed else None)]
+        return self._send(200, dict(id='r3', status='failed' if failed else 'completed',
+                                    blocks=blocks, error='total failed' if failed else None))
 
     def _send(self, code, body, kind='application/json'):
         data = (json.dumps(body) if kind == 'application/json' else body).encode()
@@ -118,3 +136,31 @@ class ClientTest(TestCase):
                          ['docker', 'logs', '--tail', '50', '--follow', 'mage-shop-prod'])
         with self.assertRaisesRegex(deploy.DeployError, 'not deployed in dev'):
             target.log_command('shop', 'dev')
+
+    def test_call_runs_the_only_pipeline_and_prints_the_result(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        folder = Path(self.repo_path) / '.mage' / 'run' / 'shop'
+        folder.mkdir(parents=True)
+        self.addCleanup(__import__('shutil').rmtree, Path(self.repo_path) / '.mage', True)
+        (folder / 'port').write_text(str(self.port))
+        (folder / 'token').write_text('t0ken')
+        runner = CliRunner()
+
+        ok = runner.invoke(app, ['service', 'call', 'shop', '--var', 'day=2026-10-17',
+                                 '--var', 'limit=5', '--project', self.repo_path])
+
+        self.assertEqual(ok.exit_code, 0, ok.output)
+        self.assertIn(('/v1/pipelines/orders/runs',
+                       {'variables': {'day': '2026-10-17', 'limit': 5}}), FakeApi.requests)
+        self.assertIn('total: completed in 0.00 s', ok.output)
+        self.assertIn('Output of total:', ok.output)
+        self.assertIn('"orders": 3', ok.output)
+
+        failed = runner.invoke(app, ['service', 'call', 'shop', 'orders', '--var', 'fail=true',
+                                     '--project', self.repo_path])
+        self.assertEqual(failed.exit_code, 1)
+        self.assertIn('ValueError: bad row', failed.output)
+        self.assertIn('mage service logs shop --run r3', failed.output)

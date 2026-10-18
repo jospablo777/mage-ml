@@ -32,12 +32,17 @@ class Endpoint:
             self.process.wait(timeout=10)
             self.process = None
 
-    def get(self, path: str, params: Optional[Dict] = None, timeout: float = 30) -> bytes:
+    def get(self, path: str, params: Optional[Dict] = None, timeout: float = 30,
+            body: Optional[Dict] = None) -> bytes:
         query = urllib.parse.urlencode({k: v for k, v in (params or {}).items()
                                         if v is not None})
+        headers = {'Authorization': f'Bearer {self.token}'}
+        if body is not None:
+            headers['Content-Type'] = 'application/json'
         request = urllib.request.Request(
-            f'{self.url}{path}' + (f'?{query}' if query else ''),
-            headers={'Authorization': f'Bearer {self.token}'},
+            f'{self.url}{path}' + (f'?{query}' if query else ''), headers=headers,
+            data=None if body is None else json.dumps(body).encode(),
+            method='GET' if body is None else 'POST',
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -104,6 +109,31 @@ def run_log(api: Endpoint, run_id: Optional[str] = None, block: Optional[str] = 
         run_id = latest[0]['id']
     path = f'/v1/runs/{urllib.parse.quote(run_id, safe="")}/logs'
     return api.get(path, dict(format='text', block=block, tail=tail)).decode()
+
+
+def call(api: Endpoint, pipeline: Optional[str] = None, variables: Optional[Dict] = None,
+         wait: int = 120) -> Dict:
+    """Starts a run and waits for it; the pipeline may be left out when there is one."""
+    if pipeline is None:
+        names = [p['id'] if isinstance(p, dict) else p
+                 for p in api.json('/v1/pipelines').get('pipelines') or []]
+        if len(names) != 1:
+            raise ClientError(f'Name the pipeline: the service has {", ".join(names)}.')
+        pipeline = names[0]
+    path = f'/v1/pipelines/{urllib.parse.quote(pipeline, safe="")}/runs'
+    return json.loads(api.get(path, dict(wait=wait), timeout=wait + 30,
+                              body=dict(variables=variables or {})))
+
+
+def result(api: Endpoint, run: Dict, block: Optional[str] = None):
+    """The output of the block named, or of the last block that has one, as JSON."""
+    with_outputs = [b['block'] for b in run.get('blocks') or [] if b.get('outputs')]
+    if block is None:
+        if not with_outputs:
+            return None
+        block = with_outputs[-1]
+    path = f'/v1/runs/{urllib.parse.quote(run["id"], safe="")}/output'
+    return block, json.loads(api.get(path, dict(block=block, format='json')))
 
 
 def runs_table(items: List[Dict]) -> str:

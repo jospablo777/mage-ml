@@ -83,6 +83,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
   when the deployment already runs the lock (`mage service deploy --if-changed`).
 - A deploy keeps the running deployment's API token, so deploys from CI, which has no
   token file, no longer replace it.
+- `mage service call` runs a service's pipeline and prints each block's status and the result.
 - `mage service runs` and `mage service logs` list a service's runs and print a run's log
   or the engine's own log, for a local run or a deployment.
 - `mage service check --affected` checks the services that the changes since a Git ref touch
@@ -160,6 +161,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   (such as `ibm-db`, which has no Linux arm64 wheel and broke image builds there).
 - `mage service check --affected` finds a new service whose folder is not yet in Git.
 - Deploy API tokens in `.mage/deploy/` are kept out of Git.
+- `mage service run` checks the box with the engine before serving, so a stale engine says
+  to update itself, and in a source checkout it uses the newer of cargo's builds. It names a
+  port in use before building anything.
 - Object columns with missing values keep their values between blocks: ints came back as
   floats (integers past 2**53 lost digits, also in Rust blocks reading the file), and None
   as NaN or NaT, in a column of another dtype (upstream #5913).

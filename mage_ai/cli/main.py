@@ -1267,7 +1267,9 @@ def service_check(
                 continue
             typer.echo(f'{service} is ready to build, with its lock committed.')
             continue
-        typer.echo(f'{service} is ready to build: mage service build {service}')
+        typer.echo(f'{service} is ready to build. Try it here with mage service run '
+                   f'{service} and mage service call {service}; deploy it with mage service '
+                   f'deploy {service} --env <env>.')
     if failed:
         raise typer.Exit(code=1)
 
@@ -1312,10 +1314,18 @@ def service_run(
 ):
     """Runs the service on this machine's engine, without Docker, until Ctrl+C."""
     import signal
+    import socket
     import subprocess
 
     from mage_ai.pipeline_services import definitions, engine, export, local_run
 
+    with socket.socket() as probe:
+        try:
+            probe.bind(('127.0.0.1', port))
+        except OSError:
+            typer.echo(f'Port {port} is in use on this machine; pass another with --port.',
+                       err=True)
+            raise typer.Exit(code=1)
     try:
         run = local_run.prepare(project, name, environment=env, port=port)
     except (definitions.DefinitionError, export.ExportError) as error:
@@ -1560,6 +1570,64 @@ def service_runs(
     finally:
         api.close()
     typer.echo(client.runs_table(items) if items else 'No runs.')
+
+
+CALL_VARIABLES = typer.Option(
+    [], '--var', metavar='KEY=VALUE', help='a run variable (JSON values allowed); repeatable.')
+
+
+@service_app.command('call')
+def service_call(
+    name: str = typer.Argument(...),
+    pipeline: Union[str, None] = typer.Argument(
+        None, help='the pipeline; optional when the service has one.'),
+    env: Union[str, None] = SERVICE_ENV,
+    project: str = SERVICE_PROJECT,
+    variables: List[str] = CALL_VARIABLES,
+    block: Union[str, None] = typer.Option(
+        None, help='the block whose output to print; the last one with an output by default.'),
+    wait: int = typer.Option(120, help='seconds to wait for the run.'),
+):
+    """Runs a pipeline of the service and prints each block's status and the result."""
+    import json
+
+    from mage_ai.pipeline_services import client
+
+    values = {}
+    for item in variables:
+        key, separator, text = item.partition('=')
+        if not separator or not key:
+            typer.echo(f'--var {item}: write KEY=VALUE.', err=True)
+            raise typer.Exit(code=1)
+        try:
+            values[key] = json.loads(text)
+        except ValueError:
+            values[key] = text
+    api = _service_endpoint(project, name, env)
+    try:
+        run = client.call(api, pipeline, values, wait=wait)
+        for item in run.get('blocks') or []:
+            duration = item.get('duration_ms')
+            took = f' in {duration / 1000:.2f} s' if duration is not None else ''
+            typer.echo(f'{item["block"]}: {item["status"]}{took}')
+            if item.get('error'):
+                typer.echo(f'  {item["error"]}', err=True)
+        typer.echo(f'Run {run["id"]} {run["status"]}.')
+        if run['status'] != 'completed':
+            if run.get('error'):
+                typer.echo(run['error'], err=True)
+            typer.echo(f'Its log: mage service logs {name} --run {run["id"]}'
+                       + (f' --env {env}' if env else ''), err=True)
+            raise typer.Exit(code=1)
+        found = client.result(api, run, block)
+        if found is not None:
+            typer.echo(f'Output of {found[0]}:')
+            typer.echo(json.dumps(found[1], indent=2, default=str))
+    except client.ClientError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    finally:
+        api.close()
 
 
 @service_app.command('logs')

@@ -196,6 +196,19 @@ waits for a new revision to be ready; when it is not, the app is patched back as
 `deploy/ibm/code-engine.sh` in the build context remains for building from source in Code
 Engine.
 
+### Call a service
+
+`mage service call shop-live` runs the service's pipeline (name it when there are several)
+and prints each block's status and the output of the last block that has one:
+
+```bash
+mage service call shop-live --var day=2026-10-17 --var limit=500   # the local run
+mage service call shop-live orders --env prod --block score        # a deployment
+```
+
+`--var` values are JSON when they parse as JSON, text otherwise. A failed run exits with 1
+and names the command that prints its log.
+
 ### Runs and logs
 
 `mage service runs` and `mage service logs` read a running service's API, with its token.

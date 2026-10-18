@@ -177,10 +177,30 @@ def prepare(
                                  else []),
         ),
     )
+    _validate(binary, env)
     return LocalRun(
         name=name, box=box, data=data, token_file=token_file, port=port,
         command=[str(binary), 'serve'], env=env, missing=_missing(box, env),
     )
+
+
+def _validate(binary: Path, env: Dict[str, str]) -> None:
+    """The engine reads the box before it serves, so a stale engine fails here, clearly."""
+    try:
+        result = subprocess.run([str(binary), 'validate'], env=env, capture_output=True,
+                                text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise LocalRunError(f'The engine {binary} did not start: {error}') from None
+    if result.returncode != 0:
+        output = '\n'.join(
+            line for line in (result.stdout + result.stderr).splitlines() if line.strip()
+        )
+        version = engine.engine_version(binary) or 'unknown version'
+        raise LocalRunError(
+            f'The engine {binary} ({version}) cannot run this service:\n{output}\n'
+            'When the engine is older than this MageML, update it: uv pip install -U '
+            'mageml-engine, or in a source checkout cargo build --release -p mage-service.'
+        )
 
 
 def _missing(box: Path, env: Dict[str, str]) -> List[str]:
