@@ -392,10 +392,17 @@ jobs:
         with:
           path: ~/.cache/mage/rust/target
           key: ${{ steps.rust-blocks.outputs.cache-primary-key }}
+      # The Kubernetes deploy test deploys to a kind cluster of its own.
+      - name: Start a kind cluster
+        if: matrix.id == 'ml'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: mage-deploy-test
       - name: Run the group's tests
         if: matrix.tests != ''
         env:
           MAGE_BENCHMARK_MESSAGES: "50000"
+          MAGE_TEST_KIND_CLUSTER: ${{ matrix.id == 'ml' && 'mage-deploy-test' || '' }}
         run: >-
           make -C integration_tests ci-tests TESTS="${{ matrix.tests }}"
           REPORT=results-${{ matrix.id }}.xml
