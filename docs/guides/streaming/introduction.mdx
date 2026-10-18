@@ -78,6 +78,21 @@ as loading a model, runs again only when its file changes, so repeat runs are fa
 ## Test pipeline execution
 After finishing configuring the streaming pipeline, you can click the button `Execute pipeline` to test streaming pipeline execution.
 
+A run from the editor is a development run, and it never moves production's position:
+
+- A Kafka source reads with the consumer group `<group>-dev-<user>`, a PostgreSQL change
+  source with the slot `<slot>_dev_<user>` (drop it when you are done: a slot keeps the
+  server's log until it is read), and a NATS source with the consumer `<name>-dev-<user>`.
+  Python checkpoints (Kinesis, MongoDB) go to a folder of their own.
+- Queues (RabbitMQ, SQS, ActiveMQ, Pub/Sub, IBM MQ) have no position to fork: what the run
+  acknowledges leaves the queue, and the run says so. Point the source at a development
+  queue to keep production's messages.
+- The sinks are real, so the editor names them and asks before the run starts; the server
+  refuses a run whose sinks were not confirmed.
+
+`mage service run` reads with the same development positions. Triggers and deployed services
+use the configured ones.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

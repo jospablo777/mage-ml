@@ -883,6 +883,7 @@ class Pipeline:
         run_sensors: bool = True,
         run_tests: bool = True,
         update_status: bool = True,
+        development_user: str = None,
     ) -> None:
         """
         Function for synchronous block processing.
@@ -894,7 +895,10 @@ class Pipeline:
                 StreamingPipelineExecutor,
             )
 
-            StreamingPipelineExecutor(self).execute(
+            # execute_sync runs from the editor; triggers use the executor factory.
+            StreamingPipelineExecutor(
+                self, development=True, development_user=development_user,
+            ).execute(
                 build_block_output_stdout=build_block_output_stdout,
                 global_vars=global_vars,
                 retry_config=retry_config,

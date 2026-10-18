@@ -2533,17 +2533,31 @@ function PipelineDetailPage({
   });
 
   const executePipeline = useCallback(() => {
+    // A development run reads with a consumer group of its own, but its sinks are real:
+    // the server runs it only with each sink named here (SAFETY.md section 3).
+    const sinks = (pipeline?.blocks || [])
+      .filter(({ type }) => BlockTypeEnum.DATA_EXPORTER === type)
+      .map(({ uuid }) => uuid);
+    if (sinks.length >= 1 && typeof window !== 'undefined' && !window.confirm(
+      'This run reads with a development consumer group, so production keeps its position. '
+        + `It writes to the sinks of ${sinks.join(', ')}. Run it?`,
+    )) {
+      return;
+    }
+
     savePipelineContent().then(() => {
       setIsPipelineExecuting(true);
       setPipelineMessages([]);
 
       sendMessage(JSON.stringify({
         ...sharedWebsocketData,
+        confirmed_sinks: sinks,
         execute_pipeline: true,
         pipeline_uuid: pipelineUUID,
       }));
     });
   }, [
+    pipeline?.blocks,
     pipelineUUID,
     savePipelineContent,
     sendMessage,

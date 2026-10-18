@@ -1335,6 +1335,8 @@ def service_run(
 
         def start():
             run = local_run.prepare(project, name, environment=env, port=port)
+            for note in run.notes:
+                typer.echo(note, err=True)
             typer.echo(f'Service {name} on http://127.0.0.1:{port} (environment {env}); '
                        'it starts again when its files change.')
             return run
@@ -1347,6 +1349,8 @@ def service_run(
     except (engine.EngineNotFound, local_run.LocalRunError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
+    for note in run.notes:
+        typer.echo(note, err=True)
     if run.missing:
         typer.echo(
             f'Not set: {", ".join(run.missing)}. Add them to '

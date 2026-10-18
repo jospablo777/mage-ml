@@ -43,6 +43,8 @@ class LocalRun:
     missing: List[str] = field(default_factory=list)
     # The project paths the service reads, for --reload.
     inputs: List[str] = field(default_factory=list)
+    # What the run does differently from a deploy (development positions).
+    notes: List[str] = field(default_factory=list)
 
 
 def run_dir(repo_path: str, name: str) -> Path:
@@ -160,6 +162,14 @@ def prepare(
     folder = run_dir(repo_path, name)
     captured = lifecycle.capture(repo_path, name)
     box = Path(export.write(captured, str(folder / 'box'), force=True))
+    # A local run is a development run: positions of its own (SAFETY.md section 3).
+    from mage_ai.streaming.development import for_development_manifest
+
+    manifest_path = box / 'service.json'
+    manifest = json.loads(manifest_path.read_text())
+    notes = for_development_manifest(manifest)
+    if notes:
+        manifest_path.write_text(json.dumps(manifest, indent=2))
     _build_rust_blocks(box)
     data = folder / 'data'
     data.mkdir(parents=True, exist_ok=True)
@@ -185,7 +195,7 @@ def prepare(
     _validate(binary, env)
     return LocalRun(
         name=name, box=box, data=data, token_file=token_file, port=port,
-        command=[str(binary), 'serve'], env=env, missing=_missing(box, env),
+        command=[str(binary), 'serve'], env=env, missing=_missing(box, env), notes=notes,
         inputs=lifecycle.service_inputs(repo_path, name, captured)
         + [f'{definitions.SERVICES_DIR}/{name}/.env.{environment}'],
     )

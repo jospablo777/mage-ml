@@ -76,6 +76,7 @@ def run_pipeline(
     config_copy_path: str,
     global_vars: Dict[str, any],
     queue: multiprocessing.Queue,
+    development_user: str = None,
 ) -> None:
     """
     Execute pipeline synchronously. This function is meant to be run in a separate process,
@@ -121,6 +122,7 @@ def run_pipeline(
             build_block_output_stdout=build_block_output_stdout,
             retry_config=dict(),
             run_sensors=False,
+            development_user=development_user,
         )
         add_pipeline_message(
             f'Pipeline {pipeline.uuid} execution complete.\n'
@@ -313,11 +315,23 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             msg_id = client.execute(code)
             value = dict(block_uuid=message.get('uuid'))
             WebSocketServer.running_executions_mapping[msg_id] = value
+        elif execute_pipeline and pipeline.type == PipelineType.STREAMING and \
+                self.__unconfirmed_sinks(pipeline, message):
+            unconfirmed = self.__unconfirmed_sinks(pipeline, message)
+            publish_pipeline_message(
+                'This run writes to sinks: '
+                + ', '.join(f'{uuid} ({where})' for uuid, where in unconfirmed)
+                + '. Confirm them in the editor to run it (SAFETY: a development run writes '
+                'to a sink only when you name it).',
+                execution_state='idle',
+                metadata=dict(pipeline_uuid=pipeline.uuid),
+            )
         elif execute_pipeline:
             self.__execute_pipeline(
                 pipeline,
                 kernel_name,
                 global_vars,
+                development_user=getattr(user, 'username', None),
             )
         else:
             await self.__execute_block(
@@ -580,11 +594,19 @@ db_connection.start_session()
                         )
                     )
 
+    def __unconfirmed_sinks(self, pipeline: Pipeline, message: Dict):
+        from mage_ai.streaming.development import sinks_written
+
+        confirmed = set(message.get('confirmed_sinks') or [])
+        return [(uuid, where) for uuid, where in sinks_written(pipeline)
+                if uuid not in confirmed]
+
     def __execute_pipeline(
         self,
         pipeline: Pipeline,
         kernel_name: str,
         global_vars: Dict[str, any],
+        development_user: str = None,
     ) -> None:
         pipeline_uuid = pipeline.uuid
 
@@ -636,7 +658,8 @@ db_connection.start_session()
 
             queue = PROCESS_CONTEXT.Queue()
             proc = PROCESS_CONTEXT.Process(
-                target=run_pipeline, args=(pipeline, config_copy_path, global_vars, queue)
+                target=run_pipeline,
+                args=(pipeline, config_copy_path, global_vars, queue, development_user),
             )
             proc.start()
             set_current_pipeline_process(proc)

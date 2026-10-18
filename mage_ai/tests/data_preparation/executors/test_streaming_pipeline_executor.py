@@ -210,3 +210,84 @@ class StreamingPipelineExecutorTest(DBTestCase):
         _, sinks = self.run_pipeline(['sink'])
 
         self.assertEqual(sinks['sink'].batches, [[dict(id=1, r=True), dict(id=2, r=True)]])
+
+
+class DevelopmentRunTest(DBTestCase):
+    """A stream run from the editor never moves production's consumer group (SAFETY.md 3)."""
+
+    def setUp(self):
+        super().setUp()
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = Block.create(f'{self.pipeline.uuid}_source', 'data_loader', self.repo_path,
+                              language=BlockLanguage.YAML)
+        Path(source.file_path).write_text(
+            'connector_type: kafka\nbootstrap_server: localhost:9092\ntopic: orders\n'
+            'consumer_group: scoring\n')
+        self.pipeline.add_block(source)
+        sink = Block.create(f'{self.pipeline.uuid}_sink', 'data_exporter', self.repo_path,
+                            language=BlockLanguage.YAML)
+        Path(sink.file_path).write_text('connector_type: dummy\nname: sink\n')
+        self.pipeline.add_block(sink, upstream_block_uuids=[source.uuid])
+
+    def run_with(self, run):
+        seen = {}
+
+        def get_source(config, **kwargs):
+            seen.update(config=config, **kwargs)
+            return FakeSource()
+
+        with patch('mage_ai.streaming.sources.source_factory.SourceFactory.get_source',
+                   side_effect=get_source), \
+                patch('mage_ai.streaming.sinks.sink_factory.SinkFactory.get_sink',
+                      return_value=FakeSink()):
+            run(Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path))
+        return seen
+
+    def test_the_editor_reads_with_a_development_group_and_checkpoints(self):
+        printed = []
+
+        # As the notebook's StreamBlockOutputToQueue: write, and nothing else.
+        class Output:
+            def write(self, text):
+                printed.append(text)
+
+        seen = self.run_with(lambda p: p.execute_sync(
+            build_block_output_stdout=lambda block_uuid, **kwargs: Output(),
+            retry_config=dict(), development_user='Ada Lovelace',
+        ))
+
+        self.assertEqual(seen['config']['consumer_group'], 'scoring-dev-ada-lovelace')
+        self.assertTrue(seen['checkpoint_path'].endswith('streaming_checkpoint_dev'))
+        self.assertIn('the group scoring keeps its position', ''.join(printed))
+
+    def test_a_trigger_run_keeps_the_production_group(self):
+        seen = self.run_with(
+            lambda p: StreamingPipelineExecutor(p).execute(retry_config=dict(retries=0)))
+
+        self.assertEqual(seen['config']['consumer_group'], 'scoring')
+        self.assertTrue(seen['checkpoint_path'].endswith('streaming_checkpoint'))
+
+    def test_the_sinks_a_run_writes_are_named_for_confirmation(self):
+        from mage_ai.streaming.development import sinks_written
+
+        source = self.pipeline.get_block(f'{self.pipeline.uuid}_source')
+        for name, language, content in (
+            ('scored', BlockLanguage.YAML, 'connector_type: kafka\ntopic: scored\n'),
+            ('failures', BlockLanguage.YAML,
+             'connector_type: kafka\ntopic: failed\ndead_letter: true\n'),
+            ('custom', BlockLanguage.PYTHON, '@streaming_sink\nclass Sink:\n    pass\n'),
+        ):
+            block = Block.create(f'{self.pipeline.uuid}_{name}', 'data_exporter',
+                                 self.repo_path, language=language)
+            Path(block.file_path).write_text(content)
+            self.pipeline.add_block(block, upstream_block_uuids=[source.uuid])
+
+        found = sinks_written(Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path))
+
+        self.assertEqual(sorted(found), sorted([
+            (f'{self.pipeline.uuid}_scored', 'kafka scored'),
+            (f'{self.pipeline.uuid}_custom', 'a Python sink'),
+        ]))

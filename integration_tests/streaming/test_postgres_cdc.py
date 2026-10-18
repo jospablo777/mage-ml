@@ -35,25 +35,28 @@ def cdc_table(pg, schema):
         slot=f'it_{uuid.uuid4().hex[:12]}', publication=f'it_{uuid.uuid4().hex[:12]}',
     )
     yield names
+    from mage_ai.streaming.development import development_slot
+
+    # A notebook run reads with a development slot of its own.
+    slots = [names['slot'], development_slot(names['slot'])]
     with pg.cursor() as cursor:
         # The source's walsender can still hold the slot for a moment after the test;
         # dropping an active slot fails.
         cursor.execute(
             'SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots '
-            'WHERE slot_name = %s AND active_pid IS NOT NULL', (names['slot'],),
+            'WHERE slot_name = ANY(%s) AND active_pid IS NOT NULL', (slots,),
         )
         for _ in range(50):
             cursor.execute(
-                'SELECT active FROM pg_replication_slots WHERE slot_name = %s',
-                (names['slot'],),
+                'SELECT 1 FROM pg_replication_slots WHERE slot_name = ANY(%s) AND active',
+                (slots,),
             )
-            row = cursor.fetchone()
-            if row is None or not row[0]:
+            if cursor.fetchone() is None:
                 break
             time.sleep(0.1)
         cursor.execute(
             'SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots '
-            'WHERE slot_name = %s', (names['slot'],),
+            'WHERE slot_name = ANY(%s)', (slots,),
         )
         cursor.execute(f"DROP PUBLICATION IF EXISTS {names['publication']}")
     pg.commit()
@@ -223,11 +226,16 @@ def test_postgres_changes_to_kafka(
         'stream_postgres', mode, tables=f'{schema}.events', slot=cdc_table['slot'],
         publication=cdc_table['publication'], out_topic=kafka_topic,
     ) as run:
-        # The source creates the slot when it starts; changes before that are not read.
+        from mage_ai.streaming.development import development_slot
+
+        # The source creates the slot when it starts; changes before that are not read. A
+        # notebook run reads with a development slot, so production's keeps its position.
+        slot = development_slot(cdc_table['slot']) if mode == 'notebook' else cdc_table['slot']
+
         def slot_exists():
             with pg.cursor() as cursor:
                 cursor.execute('SELECT 1 FROM pg_replication_slots WHERE slot_name = %s',
-                               (cdc_table['slot'],))
+                               (slot,))
                 found = cursor.fetchone()
             pg.rollback()
             return found

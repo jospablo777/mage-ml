@@ -8,6 +8,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Behavior changes to check before upgrading
 
+- **Stream runs from the editor and `mage service run` no longer move production's
+  position.** Kafka reads with `<group>-dev-<user>`, PostgreSQL change capture with
+  `<slot>_dev_<user>`, NATS with `<name>-dev-<user>`; the editor asks before a run writes to
+  real sinks. Triggers and deployed services are unchanged.
 - **Services live in `services/<name>/service.yaml`.** `pipeline_services.yaml` is still
   read; a saved service moves to its folder, and `mage service migrate` moves them all. A
   build writes `services/<name>/service.lock`, which pins the manifest, files,

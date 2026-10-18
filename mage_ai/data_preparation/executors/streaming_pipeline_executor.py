@@ -35,8 +35,12 @@ def copy_messages(data):
 
 
 class StreamingPipelineExecutor(PipelineExecutor):
-    def __init__(self, pipeline: Pipeline, **kwargs):
+    def __init__(self, pipeline: Pipeline, development: bool = False,
+                 development_user: str = None, **kwargs):
         super().__init__(pipeline, **kwargs)
+        # A run from the editor: positions of its own (mage_ai/streaming/development.py).
+        self.development = development
+        self.development_user = development_user
         # TODO: Support custom log destination for streaming pipelines
         self.parse_and_validate_blocks()
         self.retry_metadata = dict(attempts=0)
@@ -144,6 +148,12 @@ class StreamingPipelineExecutor(PipelineExecutor):
 
             raise e
 
+    def __tell(self, build_block_output_stdout, block_uuid: str, message: str) -> None:
+        if build_block_output_stdout:
+            build_block_output_stdout(block_uuid).write(message + '\n')
+        else:
+            self.logger.info(message, **(getattr(self, 'logging_tags', None) or {}))
+
     def __execute_in_python(
         self,
         build_block_output_stdout: Callable[..., object] = None,
@@ -170,11 +180,17 @@ class StreamingPipelineExecutor(PipelineExecutor):
                 self.source_block.content,
                 global_vars=global_vars,
             )
+            if self.development:
+                from mage_ai.streaming.development import for_development
+
+                source_config, notes = for_development(source_config, self.development_user)
+                for note in notes:
+                    self.__tell(build_block_output_stdout, self.source_block.uuid, note)
             source = SourceFactory.get_source(
                 source_config,
                 checkpoint_path=os.path.join(
                     self.pipeline.pipeline_variables_dir,
-                    'streaming_checkpoint',
+                    'streaming_checkpoint_dev' if self.development else 'streaming_checkpoint',
                 ),
             )
 
