@@ -25,11 +25,13 @@ with a development consumer group.
 | `payments` | Kafka `payments` to Kafka `payment_scores` | A model (`models/payments_risk.joblib`, trained on synthetic payments when the example is written) loaded once per worker with `load_artifact`, scoring each batch in one call |
 | `clickstream` | Kafka `clicks` to PostgreSQL `click_events` | Upserts by `event_id`: a replayed batch writes no row twice, so the sink is idempotent; set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` |
 | `cdc` | PostgreSQL `public.shop_orders` changes to Kafka `order_changes` | Logical replication: transactions kept whole, the slot holding the position; `generate` inserts rows (set the `PG*` variables); a development run reads with its own slot, drop it when done |
+| `webhooks` | HTTP webhooks to RabbitMQ `events` | A sender is answered once the queue took its events, an `Idempotency-Key` makes a retry write nothing twice, and senders hold a send-only token. Start the stream from its Run tab, then `mage examples generate webhooks` posts to it (set the `RABBITMQ_*` variables) |
 | `multilang` | Kafka `orders_multi` to Kafka `orders_priced` | A Python block then a Rust block: two runs of one language, one boundary where messages cross as JSON (the Compile panel shows it); the Rust block is built with cargo on the first run |
 
 `generate` options: `--rate` messages per second, `--seconds` how long, `--count` how many,
 `--seed` to send the same messages again, `--target` another topic or subject, and
-`--bootstrap` or `--nats-url` instead of the environment.
+`--bootstrap` or `--nats-url` instead of the environment, and for `webhooks` `--project` and
+`--pipeline` to find the running stream.
 
 Each example exports as a service as it stands: `mage service new orders-svc --pipelines
 orders_stream`, then `mage service run orders-svc`.

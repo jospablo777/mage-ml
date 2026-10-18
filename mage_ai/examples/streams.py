@@ -328,6 +328,52 @@ create_slot: true
 """
 
 
+# Webhooks to a queue.
+
+EVENT_TYPES = ['signup', 'login', 'purchase', 'refund', 'logout']
+
+
+def _webhook_event(rng: random.Random, n: int) -> Dict:
+    event = dict(event_id=f'evt-{n}', type=rng.choice(EVENT_TYPES),
+                 user=f'u-{rng.randint(1, 1000)}', at=int(time.time() * 1000))
+    if rng.random() < 0.03:
+        del event['type']
+    return event
+
+
+ROUTE_EVENTS = """
+import time
+from typing import Dict, List
+
+
+@transformer
+def route_events(messages: List[Dict], *args, **kwargs) -> List[Dict]:
+    \"\"\"
+    Events with a type, with the time they were routed. A sender is answered only once the
+    queue took its batch, and its Idempotency-Key makes a retry write nothing twice.
+    \"\"\"
+    now = int(time.time() * 1000)
+    return [dict(m, routed_at=now) for m in messages if m.get('type')]
+"""
+
+WEBHOOK_SOURCE = """
+# Senders POST JSON events to /v1/streams/<pipeline>/messages with the ingest token,
+# which can only send messages.
+connector_type: webhook
+answer_within_seconds: 30
+dedupe_window_seconds: 86400
+"""
+
+RABBIT_SINK = """
+connector_type: rabbitmq
+connection_host: "{{ env_var('RABBITMQ_HOST') }}"
+connection_port: "{{ env_var('RABBITMQ_PORT') }}"
+username: "{{ env_var('RABBITMQ_USER') }}"
+password: "{{ env_var('RABBITMQ_PASSWORD') }}"
+queue_name: events
+"""
+
+
 EXAMPLES: Dict[str, Example] = {
     'orders': Example(
         title='Order events to clean facts',
@@ -412,6 +458,19 @@ EXAMPLES: Dict[str, Example] = {
         target=('postgres', 'public.shop_orders'),
         variables=['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'KAFKA_BOOTSTRAP'],
     ),
+    'webhooks': Example(
+        title='Webhooks to a queue',
+        teaches='Senders answered once the queue took their events; an Idempotency-Key makes '
+                'a retry safe; a send-only token.',
+        blocks=[
+            ('events', 'data_loader', 'yaml', WEBHOOK_SOURCE, []),
+            ('route_events', 'transformer', 'python', ROUTE_EVENTS, ['events']),
+            ('queue', 'data_exporter', 'yaml', RABBIT_SINK, ['route_events']),
+        ],
+        message=_webhook_event,
+        target=('http', 'events'),
+        variables=['RABBITMQ_HOST', 'RABBITMQ_PORT', 'RABBITMQ_USER', 'RABBITMQ_PASSWORD'],
+    ),
     'multilang': Example(
         title='Multi-language stream',
         teaches='A Python block and a Rust block: two runs of one language each, one boundary '
@@ -481,7 +540,8 @@ def messages(name: str, count: int, seed: Optional[int] = None) -> Iterator[Dict
 def generate(name: str, rate: float = 50, seconds: float = 60, count: Optional[int] = None,
              seed: Optional[int] = None, bootstrap: Optional[str] = None,
              nats_url: Optional[str] = None, on_sent: Callable[[int], None] = None,
-             target: Optional[str] = None) -> int:
+             target: Optional[str] = None, project: Optional[str] = None,
+             pipeline: Optional[str] = None) -> int:
     """
     Sends synthetic messages to the example's source at `rate` per second; returns how many.
     `target` names another topic or subject.
@@ -495,6 +555,9 @@ def generate(name: str, rate: float = 50, seconds: float = 60, count: Optional[i
     total = count if count is not None else max(1, int(rate * seconds))
     if kind == 'postgres':
         return _insert_rows(name, where, total, rate, seed, on_sent)
+    if kind == 'http':
+        return _post_events(name, project or '.', pipeline or f'{name}_stream', total, rate,
+                            seed, on_sent)
     if kind == 'kafka':
         from kafka import KafkaProducer
 
@@ -522,6 +585,57 @@ def generate(name: str, rate: float = 50, seconds: float = 60, count: Optional[i
         flush()
     finally:
         close()
+    return sent
+
+
+def _post_events(name: str, project: str, pipeline: str, total: int, rate: float,
+                 seed: Optional[int], on_sent: Optional[Callable[[int], None]]) -> int:
+    """
+    Posts the example's events to the stream running on the local engine (the Run tab), in
+    batches of up to 50, each with its Idempotency-Key and the run's send-only token.
+    """
+    import os
+    import urllib.request
+
+    folder = os.path.join(project, '.mage', 'dev', pipeline)
+    try:
+        port = open(os.path.join(folder, 'port')).read().strip()
+        token = open(os.path.join(folder, 'ingest_token')).read().strip()
+    except FileNotFoundError:
+        raise ExampleError(f'{pipeline} is not running on the local engine: start it from '
+                           'its Run tab.') from None
+    url = f'http://127.0.0.1:{port}/v1/streams/{pipeline}/messages'
+    batch, sent, started = [], 0, time.monotonic()
+
+    def post(events):
+        request = urllib.request.Request(url, data=json.dumps(events).encode(), headers={
+            'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
+            'Idempotency-Key': f"{events[0]['event_id']}..{events[-1]['event_id']}",
+        }, method='POST')
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=60):
+                    return
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(1 + attempt)
+
+    for event in messages(name, total, seed):
+        batch.append(event)
+        if len(batch) == 50:
+            post(batch)
+            sent += len(batch)
+            batch = []
+            if on_sent:
+                on_sent(sent)
+            if rate:
+                ahead = sent / rate - (time.monotonic() - started)
+                if ahead > 0:
+                    time.sleep(ahead)
+    if batch:
+        post(batch)
+        sent += len(batch)
     return sent
 
 

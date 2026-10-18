@@ -63,7 +63,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
-- Stream examples: `mage examples stream orders|iot|payments|clickstream|cdc|multilang` writes a runnable stream with a
+- Stream examples: `mage examples stream orders|iot|payments|clickstream|cdc|webhooks|multilang` writes a runnable stream with a
   sample, and `mage examples generate` sends synthetic messages to its source.
 - The Compile panel of a streaming pipeline shows how it runs on the engine (runs of one
   language, boundaries, sinks, batches, dead letters) and the problems that would stop it.

@@ -1052,13 +1052,17 @@ def examples_generate(
     bootstrap: Union[str, None] = typer.Option(None, help='Kafka servers; KAFKA_BOOTSTRAP.'),
     nats_url: Union[str, None] = typer.Option(None, help='the NATS server; NATS_URL.'),
     target: Union[str, None] = typer.Option(None, help='another topic or subject.'),
+    project: str = typer.Option('.', help='the project, for a webhook example.'),
+    pipeline: Union[str, None] = typer.Option(
+        None, help='the running pipeline, for a webhook example; <name>_stream.'),
 ):
     """Send synthetic messages to a stream example's source."""
     from mage_ai.examples import streams
 
     try:
         sent = streams.generate(name, rate=rate, seconds=seconds, count=count, seed=seed,
-                                bootstrap=bootstrap, nats_url=nats_url, target=target)
+                                bootstrap=bootstrap, nats_url=nats_url, target=target,
+                                project=os.path.abspath(project), pipeline=pipeline)
     except streams.ExampleError as error:
         print(f'[red]{_e(error)}[/red]')
         raise typer.Exit(code=1)

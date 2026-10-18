@@ -348,3 +348,44 @@ def test_table_changes_become_kafka_events(
         pg.commit()
         admin.delete_topics([topic])
         admin.close()
+
+
+def test_webhook_events_reach_the_queue_once(
+    mage_project, rabbitmq_settings, rabbitmq_channel, rabbitmq_queue, engine, monkeypatch,
+):
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.examples import streams
+    from mage_ai.streaming import dev_run
+
+    for key, variable in (('connection_host', 'RABBITMQ_HOST'),
+                          ('connection_port', 'RABBITMQ_PORT'),
+                          ('username', 'RABBITMQ_USER'), ('password', 'RABBITMQ_PASSWORD')):
+        monkeypatch.setenv(variable, str(rabbitmq_settings[key]))
+    pipeline = f'webhooks_{uuid.uuid4().hex[:8]}'
+    typed = sum(1 for e in streams.messages('webhooks', 200, seed=1) if e.get('type'))
+
+    def queued():
+        return rabbitmq_channel.queue_declare(rabbitmq_queue, passive=True).method \
+            .message_count
+
+    try:
+        streams.write(mage_project, 'webhooks', pipeline)
+        rename(mage_project, pipeline, {'queue_name: events\n': f'queue_name: {rabbitmq_queue}\n'})
+        sinks = [b.uuid for b in
+                 Pipeline.get(pipeline, repo_path=mage_project).blocks_by_uuid.values()
+                 if str(b.type) == 'data_exporter']
+        dev_run.start(mage_project, pipeline, sinks, user='ex')
+
+        streams.generate('webhooks', count=200, rate=0, seed=1, project=mage_project,
+                         pipeline=pipeline)
+
+        # Each request was answered once the queue took its events.
+        assert queued() == typed
+        # The same requests again: their Idempotency-Keys write nothing twice.
+        streams.generate('webhooks', count=200, rate=0, seed=1, project=mage_project,
+                         pipeline=pipeline)
+        assert queued() == typed
+    finally:
+        dev_run.stop(mage_project, pipeline)
+        if Pipeline.get(pipeline, repo_path=mage_project, check_if_exists=True):
+            Pipeline.get(pipeline, repo_path=mage_project).delete()
