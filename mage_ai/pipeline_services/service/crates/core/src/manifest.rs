@@ -1300,7 +1300,10 @@ mod tests {
         }
         value["schema_version"] = json!(3);
         let error = Manifest::parse(&value.to_string()).unwrap_err().0;
-        assert!(error.contains("newer than this engine reads (1 to 2)"), "{error}");
+        assert!(
+            error.contains("newer than this engine reads (1 to 2)"),
+            "{error}"
+        );
         assert!(error.contains("update the engine"), "{error}");
         value["schema_version"] = json!(0);
         let error = Manifest::parse(&value.to_string()).unwrap_err().0;
