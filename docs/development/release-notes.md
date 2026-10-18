@@ -63,6 +63,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- Check connection on a Kafka source reports partitions, retained messages, retention and the
+  consumer group's lag, or what a group with no committed offsets would read first.
 - A Samples tab captures the newest or first messages of a Kafka source without a consumer
   group (no position moves), or takes pasted ones, and Cmd+Enter runs a stream transformer and the blocks before it on a sample, showing input
   and output side by side, each block's time and output. Rust stream blocks run the same

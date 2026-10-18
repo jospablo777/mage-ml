@@ -107,6 +107,16 @@ With `int`, the consumer reads from the given offset, the numeric position insid
 With `timestamp`, the consumer reads from the first message at or after the given timestamp
 (milliseconds since the epoch).
 
+## Check connection
+
+The block's **Check connection** connects without joining the consumer group and reports:
+
+- each topic's partitions, retained messages and retention;
+- how far the consumer group is behind, or, when it has no committed offsets, what its first
+  run reads: every retained message with `auto_offset_reset: earliest`, or nothing before the
+  start with `latest`. A renamed group reprocesses the whole topic with `earliest`; this is
+  where you see how much.
+
 ## SSL authentication
 
 ```yaml

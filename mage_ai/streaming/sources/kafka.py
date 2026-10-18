@@ -350,6 +350,63 @@ class KafkaSource(BaseSource):
         self.consumer._client.check_version(timeout=5)
         self._print('Test connection successfully.')
 
+    def describe_setup(self) -> List[str]:
+        """
+        Each topic's partitions, retained messages and retention, and where the consumer group
+        stands: behind by how many messages, or with no committed offsets and what its first
+        run would read. Read with a consumer outside the group, which joins nothing.
+        """
+        from kafka import KafkaAdminClient
+
+        settings = consumer_settings(self.config, self._print)
+        group = settings.pop('group_id')
+        probe = KafkaConsumer(**settings)
+        admin_settings = {k: v for k, v in settings.items() if k not in (
+            'auto_offset_reset', 'max_partition_fetch_bytes', 'enable_auto_commit')}
+        admin = KafkaAdminClient(**admin_settings)
+        lines = []
+        try:
+            try:
+                committed = {tp: meta.offset for tp, meta in
+                             admin.list_consumer_group_offsets(group).items()
+                             if meta.offset is not None and meta.offset >= 0}
+            except Exception as error:  # noqa: BLE001 - reported, the rest still helps
+                committed = None
+                lines.append(f'Consumer group {group}: its offsets cannot be read ({error}).')
+            for topic in self.config.topics or [self.config.topic]:
+                partitions = probe.partitions_for_topic(topic)
+                if not partitions:
+                    lines.append(f'Topic {topic}: missing, or this user cannot see it.')
+                    continue
+                tps = [TopicPartition(topic, p) for p in sorted(partitions)]
+                ends = probe.end_offsets(tps)
+                starts = probe.beginning_offsets(tps)
+                retained = sum(ends[tp] - starts[tp] for tp in tps)
+                lines.append(f'Topic {topic}: {len(tps)} partitions, {retained:,} messages '
+                             f'retained{_retention(admin, topic)}.')
+                if committed is None:
+                    continue
+                mine = {tp: committed[tp] for tp in tps if tp in committed}
+                if mine:
+                    behind = sum(max(0, ends[tp] - mine[tp]) for tp in mine)
+                    lines.append(
+                        f'Consumer group {group}: committed on {len(mine)} of {len(tps)} '
+                        f'partitions, {behind:,} messages behind.')
+                elif self.config.auto_offset_reset == 'earliest':
+                    lines.append(
+                        f'Consumer group {group} has no committed offsets on {topic}: with '
+                        f'auto_offset_reset earliest, its first run reads all {retained:,} '
+                        'retained messages.')
+                else:
+                    lines.append(
+                        f'Consumer group {group} has no committed offsets on {topic}: with '
+                        f'auto_offset_reset {self.config.auto_offset_reset}, its first run '
+                        f'starts at the end and skips the {retained:,} retained messages.')
+        finally:
+            probe.close()
+            admin.close()
+        return lines
+
     def __deserialize_message(self, message):
         if self.config.serde_config is None:
             return self.__deserialize_json(message)
@@ -381,3 +438,20 @@ class KafkaSource(BaseSource):
             f'Receive message {message.partition}:{message.offset}: '
             f'key={message.key}, value={message.value}, time={time.time()}'
         )
+
+
+def _retention(admin, topic: str) -> str:
+    """", kept 7 days" from the topic's retention.ms; nothing when it cannot be read."""
+    from kafka.admin import ConfigResource, ConfigResourceType
+
+    try:
+        response = admin.describe_configs([ConfigResource(ConfigResourceType.TOPIC, topic)])
+        entries = response[0].to_object()['resources'][0]['config_entries']
+        value = next(e['config_value'] for e in entries if e['config_names'] == 'retention.ms')
+        milliseconds = int(value)
+    except Exception:  # noqa: BLE001 - retention is a detail of the report
+        return ''
+    if milliseconds < 0:
+        return ', kept forever'
+    hours = milliseconds / 3_600_000
+    return f', kept {hours / 24:g} days' if hours >= 24 else f', kept {hours:g} hours'
