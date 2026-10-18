@@ -1334,6 +1334,13 @@ def service_check(
         raise typer.Exit(code=1)
 
 
+ALLOW_BREAKING = typer.Option(
+    None, '--allow-breaking', metavar='REASON',
+    help='accept a change to a declared output that breaks its consumers; the reason is '
+         'recorded in service.lock.',
+)
+
+
 @service_app.command('build')
 def service_build(
     name: str = typer.Argument(...),
@@ -1342,12 +1349,13 @@ def service_build(
     tag: Union[str, None] = typer.Option(None, help='image tag; defaults to the service name.'),
     platform: Union[str, None] = EXPORT_PLATFORM,
     push: bool = EXPORT_PUSH,
+    allow_breaking: Union[str, None] = ALLOW_BREAKING,
 ):
     """Writes the build to .mage/build/<name>/ and updates services/<name>/service.lock."""
     from mage_ai.pipeline_services import definitions, export, lifecycle
 
     try:
-        box = lifecycle.build(project, name)
+        box = lifecycle.build(project, name, allow_breaking=allow_breaking)
     except (definitions.DefinitionError, export.ExportError) as error:
         _service_error(error)
     typer.echo(f'Build: {os.path.relpath(box, project)}')
@@ -1469,6 +1477,7 @@ def service_deploy(
         None, '--from', metavar='ENV',
         help='promote: deploy the image ENV runs, tested there, without building.',
     ),
+    allow_breaking: Union[str, None] = ALLOW_BREAKING,
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
     from mage_ai.pipeline_services import (
@@ -1500,7 +1509,7 @@ def service_deploy(
                 for problem in result.problems:
                     typer.echo(f'  - {problem}', err=True)
                 raise typer.Exit(code=1)
-            box = lifecycle.build(project, name)
+            box = lifecycle.build(project, name, allow_breaking=allow_breaking)
             _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
             lock_sha = str((lifecycle.read_lock(project, name) or {}).get('manifest_sha256', ''))
             commit = deploy.git_commit(project)

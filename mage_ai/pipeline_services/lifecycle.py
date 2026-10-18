@@ -92,12 +92,83 @@ def build_dir(repo_path: str, name: str) -> Path:
     return Path(repo_path) / BUILD_DIR / name
 
 
-def build(repo_path: str, name: str) -> Path:
-    """Writes the box to .mage/build/<name>/ and the lock; returns the box folder."""
+class BreakingChange(definitions.DefinitionError):
+    """A build would change a declared output in a way its consumers cannot read."""
+
+
+def build(repo_path: str, name: str, allow_breaking: Optional[str] = None) -> Path:
+    """
+    Writes the box to .mage/build/<name>/ and the lock; returns the box folder. A change to a
+    declared output that breaks its consumers (a column removed, a type changed, a column
+    that may now be missing) raises BreakingChange unless allow_breaking gives the reason,
+    which the lock records.
+    """
     captured = capture(repo_path, name)
+    previous = read_lock(repo_path, name) or {}
+    schemas = output_schemas(repo_path, captured)
+    breaks = schema_breaks(previous.get('outputs'), schemas)
+    if breaks and not allow_breaking:
+        raise BreakingChange(
+            f'{name} changes outputs its consumers read:\n'
+            + '\n'.join(f'  - {b}' for b in breaks)
+            + '\nKeep the old columns, or accept the change with --allow-breaking "<reason>"; '
+            'the reason is recorded in service.lock.'
+        )
     box = export.write(captured, str(build_dir(repo_path, name)), force=True)
-    write_lock(repo_path, name, lock(captured, box))
+    value = lock(captured, box)
+    if schemas:
+        value['outputs'] = schemas
+    if breaks:
+        value['accepted_breaks'] = dict(reason=allow_breaking, changes=breaks)
+    write_lock(repo_path, name, value)
     return box
+
+
+def output_schemas(repo_path: str, captured: export.Capture) -> Dict[str, Dict]:
+    """The columns each block of the service declares in its data contract."""
+    from mage_ai.data_preparation import contracts
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    schemas = {}
+    for entry in captured.manifest.get('pipelines') or []:
+        pipeline = Pipeline.get(entry['uuid'], repo_path=repo_path)
+        for block in pipeline.blocks_by_uuid.values():
+            try:
+                binding = contracts.binding_of(block)
+                contract = contracts.load_contract(binding.name, repo_path) if binding else None
+            except contracts.ContractError:
+                continue
+            if not contract:
+                continue
+            schemas[block.uuid] = dict(
+                contract=binding.name,
+                version=contract.get('version'),
+                columns={
+                    c['name']: dict(type=c.get('type'), nullable=bool(c.get('nullable', True)))
+                    for c in contract.get('columns') or []
+                },
+            )
+    return schemas
+
+
+def schema_breaks(before: Optional[Dict], after: Dict) -> List[str]:
+    """What would break a consumer of the previous outputs; new columns break nothing."""
+    breaks = []
+    for block, old in sorted((before or {}).items()):
+        new = after.get(block)
+        if new is None:
+            breaks.append(f'{block} no longer declares its output (contract {old["contract"]})')
+            continue
+        for column, spec in old['columns'].items():
+            now = new['columns'].get(column)
+            if now is None:
+                breaks.append(f'{block}: column {column} is removed')
+            elif now['type'] != spec['type']:
+                breaks.append(f'{block}: column {column} becomes {now["type"]} '
+                              f'(was {spec["type"]})')
+            elif now['nullable'] and not spec['nullable']:
+                breaks.append(f'{block}: column {column} may now be missing')
+    return breaks
 
 
 def export_to(repo_path: str, name: str, out: str, force: bool = False) -> Path:

@@ -126,6 +126,57 @@ class LifecycleTest(ExportTestCase):
         self.assertEqual(failed.exit_code, 1)
 
 
+class BreakingOutputTest(ExportTestCase):
+    """A rebuild that would break the consumers of a declared output needs a reason."""
+
+    def setUp(self):
+        super().setUp()
+        root = Path(self.repo_path)
+        for path in (root / 'services', root / '.mage', root / 'contracts'):
+            self.addCleanup(shutil.rmtree, path, True)
+        self.load, self.summary, _ = self.chain()
+        self.contract = root / 'contracts' / 'sales_summary.yaml'
+        self.contract.parent.mkdir(exist_ok=True)
+        self.write_contract({'region': {'type': 'string', 'nullable': False},
+                             'total': 'float'})
+        self.pipeline.get_block(self.summary.uuid).configuration = dict(
+            contract='sales_summary')
+        self.pipeline.save()
+        lifecycle.new(self.repo_path, 'sales', [self.pipeline.uuid])
+
+    def write_contract(self, columns):
+        import yaml
+
+        self.contract.write_text(yaml.safe_dump(dict(version='1.0.0', columns=columns)))
+
+    def test_a_breaking_change_stops_the_build_until_a_reason_is_given(self):
+        lifecycle.build(self.repo_path, 'sales')
+        outputs = lifecycle.read_lock(self.repo_path, 'sales')['outputs']
+        self.assertEqual(outputs[self.summary.uuid]['columns']['region'],
+                         dict(type='string', nullable=False))
+
+        # A new column breaks nothing.
+        self.write_contract({'region': {'type': 'string', 'nullable': False},
+                             'total': 'float', 'orders': 'integer'})
+        lifecycle.build(self.repo_path, 'sales')
+
+        self.write_contract({'region': {'type': 'string'}, 'orders': 'string'})
+        with self.assertRaises(lifecycle.BreakingChange) as raised:
+            lifecycle.build(self.repo_path, 'sales')
+        message = str(raised.exception)
+        self.assertIn('column total is removed', message)
+        self.assertIn('column orders becomes string (was integer)', message)
+        self.assertIn('column region may now be missing', message)
+        self.assertIn('--allow-breaking', message)
+
+        lifecycle.build(self.repo_path, 'sales', allow_breaking='orders ids are strings now')
+        lock = lifecycle.read_lock(self.repo_path, 'sales')
+        self.assertEqual(lock['accepted_breaks']['reason'], 'orders ids are strings now')
+        self.assertEqual(len(lock['accepted_breaks']['changes']), 3)
+        # The accepted outputs are the new baseline.
+        lifecycle.build(self.repo_path, 'sales')
+
+
 class AffectedServicesTest(ExportTestCase):
     def setUp(self):
         super().setUp()

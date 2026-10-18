@@ -277,6 +277,20 @@ staging`. When prod pulls from another repository, the image is tagged and pushe
 first (so this machine or the CI job needs access to both registries). Staging must be
 running.
 
+### Outputs that consumers read
+
+When a block of the service has a [data contract](/guides/blocks/data-contracts), `service.lock`
+records the columns it declares. A rebuild that would break the readers of that output stops,
+with the changes listed: a column removed, a column whose type changed, or a column that may
+now be missing. Adding a column breaks nothing. To make the change anyway, give the reason:
+
+```bash
+mage service build shop-live --allow-breaking "order ids become strings"
+```
+
+The reason and the changes go into `service.lock`, so the pull request that makes the change
+shows them; `deploy` takes the same option.
+
 ### Run a service locally
 
 `mage service run shop-live` builds the service into `.mage/run/shop-live/` and runs it on

@@ -109,6 +109,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   inputs stops unless `--allow-uncommitted "<reason>"` records why.
 - `mage service deploy --from staging` promotes the image another environment runs, without
   building; `mage service ci --promote prod=staging` does it in CI.
+- `service.lock` records the columns each data contract of a service declares; a rebuild
+  that would break their readers stops unless `--allow-breaking "<reason>"` records why.
 - `mage service ci` writes a GitHub Actions workflow: pull requests check the services they
   change and their locks; rules deploy each environment on a branch or tag, building nothing
   when the deployment already runs the lock (`mage service deploy --if-changed`).
