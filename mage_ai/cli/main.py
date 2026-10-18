@@ -1010,6 +1010,62 @@ def examples_retail(
     )
 
 
+@examples_app.command('streams')
+def examples_streams():
+    """The stream examples there are, and what each teaches."""
+    from mage_ai.examples import streams
+
+    for name, example in streams.EXAMPLES.items():
+        print(f'[bold]{name}[/bold]  {_e(example.title)}: {_e(example.teaches)}')
+
+
+@examples_app.command('stream')
+def examples_stream(
+    name: str = typer.Argument(..., help='the example; mage examples streams lists them.'),
+    project_path: str = typer.Argument('.', help='path of the MageML project.'),
+    pipeline: Union[str, None] = typer.Option(None, help='the pipeline name; <name>_stream.'),
+):
+    """Write a stream example into a project: its pipeline, files and a sample."""
+    from mage_ai.examples import streams
+
+    try:
+        written = streams.write(os.path.abspath(project_path), name, pipeline)
+    except streams.ExampleError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    print(f'Wrote the pipeline {written["pipeline"]} with {len(written["blocks"])} blocks and '
+          'a sample named example.')
+    for path in written['files']:
+        print(f'Wrote {_e(path)}.')
+    if written['variables']:
+        print(f'Set {", ".join(written["variables"])}, then send messages with: mage '
+              f'examples generate {name} --rate 50')
+
+
+@examples_app.command('generate')
+def examples_generate(
+    name: str = typer.Argument(..., help='the example; mage examples streams lists them.'),
+    rate: float = typer.Option(50, help='messages per second.'),
+    seconds: float = typer.Option(60, help='how long to send.'),
+    count: Union[int, None] = typer.Option(None, help='send this many, at the rate.'),
+    seed: Union[int, None] = typer.Option(None, help='repeat the same messages.'),
+    bootstrap: Union[str, None] = typer.Option(None, help='Kafka servers; KAFKA_BOOTSTRAP.'),
+    nats_url: Union[str, None] = typer.Option(None, help='the NATS server; NATS_URL.'),
+    target: Union[str, None] = typer.Option(None, help='another topic or subject.'),
+):
+    """Send synthetic messages to a stream example's source."""
+    from mage_ai.examples import streams
+
+    try:
+        sent = streams.generate(name, rate=rate, seconds=seconds, count=count, seed=seed,
+                                bootstrap=bootstrap, nats_url=nats_url, target=target)
+    except streams.ExampleError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    kind, where = streams.EXAMPLES[name].target
+    print(f'Sent {sent:,} messages to {kind} {target or where}.')
+
+
 export_app = typer.Typer(
     cls=OrderCommands,
     help='Export pipelines to run without MageML.',

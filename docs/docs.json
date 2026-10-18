@@ -457,6 +457,7 @@
                   {
                     "group": "Tutorials",
                     "pages": [
+                      "guides/streaming/tutorials/stream-examples",
                       "guides/streaming/tutorials/streaming-pipeline",
                       "guides/streaming/tutorials/magic-devcontainer",
                       "guides/streaming/tutorials/streaming-pipeline-rabbitmq"

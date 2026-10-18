@@ -1,0 +1,33 @@
+# Stream examples
+
+*Runnable streaming pipelines with synthetic traffic: dead letters, branches, model scoring, idempotent upserts and a Python plus Rust stream.*
+
+Each example writes a streaming pipeline into your project, with a sample to develop its
+blocks on, and comes with a generator that sends synthetic messages to its source, so it runs
+without real data.
+
+```bash
+mage examples streams                    # the examples and what each teaches
+mage examples stream orders .            # write the orders example into this project
+export KAFKA_BOOTSTRAP=localhost:9092
+mage examples generate orders --rate 50 --seconds 60
+```
+
+Open the pipeline in the editor: **Run on sample** works at once on the `example` sample, the
+**Compile** panel shows how the stream runs, and the **Run** tab starts it on the local engine
+with a development consumer group.
+
+| Example | Source and sinks | What it teaches |
+| --- | --- | --- |
+| `orders` | Kafka `orders` to Kafka `orders_clean` and `orders_dead_letters` | Parse and validate; a broken order (about one in fifty) goes to dead letters with its error while the others flow; open the dead letters as a sample, fix the block, replay |
+| `iot` | NATS JetStream `telemetry.readings` to `telemetry_out.clean` and `telemetry_out.alerts` | Two branches after one block, a sink on each; set `NATS_URL`; `generate` makes the streams |
+| `payments` | Kafka `payments` to Kafka `payment_scores` | A model (`models/payments_risk.joblib`, trained on synthetic payments when the example is written) loaded once per worker with `load_artifact`, scoring each batch in one call |
+| `clickstream` | Kafka `clicks` to PostgreSQL `click_events` | Upserts by `event_id`: a replayed batch writes no row twice, so the sink is idempotent; set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` |
+| `multilang` | Kafka `orders_multi` to Kafka `orders_priced` | A Python block then a Rust block: two runs of one language, one boundary where messages cross as JSON (the Compile panel shows it); the Rust block is built with cargo on the first run |
+
+`generate` options: `--rate` messages per second, `--seconds` how long, `--count` how many,
+`--seed` to send the same messages again, `--target` another topic or subject, and
+`--bootstrap` or `--nats-url` instead of the environment.
+
+Each example exports as a service as it stands: `mage service new orders-svc --pipelines
+orders_stream`, then `mage service run orders-svc`.

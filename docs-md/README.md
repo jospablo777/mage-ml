@@ -288,6 +288,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
     - [Trino](guides/streaming/destinations/trino.md)
     - [Azure Data Lake](guides/streaming/destinations/azure_data_lake.md)
   - **Tutorials**
+    - [Stream examples](guides/streaming/tutorials/stream-examples.md)
     - [Kafka streaming pipeline](guides/streaming/tutorials/streaming-pipeline.md)
     - [Local stream to dbt transform](guides/streaming/tutorials/magic-devcontainer.md)
     - [RabbitMQ streaming pipeline](guides/streaming/tutorials/streaming-pipeline-rabbitmq.md)

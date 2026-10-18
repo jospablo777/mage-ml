@@ -63,6 +63,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- Stream examples: `mage examples stream orders|iot|payments|clickstream|multilang` writes a runnable stream with a
+  sample, and `mage examples generate` sends synthetic messages to its source.
 - The Compile panel of a streaming pipeline shows how it runs on the engine (runs of one
   language, boundaries, sinks, batches, dead letters) and the problems that would stop it.
 - The **Dead letters** tab reads a Kafka dead-letter sink with each message's error, opens
@@ -189,6 +191,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - The first export on a fresh server is fast (secret clients made on first use).
 - A page opened at `localhost` on a port other than 6789 talks to its own server. It sent
   every call to port 6789, so with two servers it edited the other project.
+- Two sinks of one stream writing to the same place (a NATS stream, a ClickHouse table, a
+  queue, a bucket) after different blocks made the same deduplication keys or object names,
+  and the second sink's messages were dropped; each sink keys its messages by its own name.
 - A NATS stream exports as a service with `connector_type: nats`, the name Mage runs; only
   `nats_js` was accepted.
 - Exported services no longer require packages that a `.pth` file loads when Python starts
