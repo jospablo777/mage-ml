@@ -28,6 +28,9 @@ class Example:
     # Files the example writes besides its blocks, by path in the project.
     files: Dict[str, Callable[[str], None]] = field(default_factory=dict)
     variables: List[str] = field(default_factory=list)
+    # The sample's messages when they differ from what `generate` sends (a change source
+    # turns rows into changes).
+    sample_message: Optional[Callable[[random.Random, int], Dict]] = None
 
 
 def _kafka_source(topic: str, group: str) -> str:
@@ -277,6 +280,54 @@ fn transform(messages: Vec<Value>, _vars: Vars) -> Result<Vec<Value>> {
 """
 
 
+# Database change capture to Kafka.
+
+def _shop_order(rng: random.Random, n: int) -> Dict:
+    return dict(id=n, customer=f'c-{rng.randint(1, 500)}', status=rng.choice(
+        ['placed', 'paid', 'shipped']), amount=round(rng.uniform(5, 300), 2))
+
+
+def _shop_order_change(rng: random.Random, n: int) -> Dict:
+    """A row inserted into public.shop_orders, as the change source hands it over."""
+    return dict(_shop_order(rng, n), _mage_operation='insert', _mage_schema='public',
+                _mage_table='shop_orders', _mage_lsn=f'0/16B{3740 + n:04X}',
+                _mage_commit_time='2026-10-18T10:00:00Z')
+
+
+CHANGES_TO_EVENTS = """
+from typing import Dict, List
+
+
+@transformer
+def to_events(messages: List[Dict], *args, **kwargs) -> List[Dict]:
+    \"\"\"
+    One event per changed row: the operation, the row's columns and where in the log it
+    happened. A transaction's changes arrive whole, in commit order.
+    \"\"\"
+    return [
+        dict(op=m['_mage_operation'], table=f"{m['_mage_schema']}.{m['_mage_table']}",
+             id=m['id'], status=m.get('status'), amount=m.get('amount'),
+             lsn=m['_mage_lsn'], committed_at=m['_mage_commit_time'])
+        for m in messages
+    ]
+"""
+
+CDC_SOURCE = """
+connector_type: postgres
+host: "{{ env_var('PGHOST') }}"
+port: "{{ env_var('PGPORT') }}"
+database: "{{ env_var('PGDATABASE') }}"
+user: "{{ env_var('PGUSER') }}"
+password: "{{ env_var('PGPASSWORD') }}"
+# Runs from the editor read with <slot>_dev_<user>; drop it when done, it holds WAL.
+replication_slot: shop_orders_cdc
+publication_name: shop_orders_cdc
+tables:
+  - public.shop_orders
+create_slot: true
+"""
+
+
 EXAMPLES: Dict[str, Example] = {
     'orders': Example(
         title='Order events to clean facts',
@@ -346,6 +397,21 @@ EXAMPLES: Dict[str, Example] = {
         variables=['KAFKA_BOOTSTRAP', 'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER',
                    'PGPASSWORD'],
     ),
+    'cdc': Example(
+        title='Database change capture to Kafka',
+        teaches='Changes of a PostgreSQL table by logical replication, transactions kept '
+                'whole, the slot holding the position.',
+        blocks=[
+            ('shop_orders', 'data_loader', 'yaml', CDC_SOURCE, []),
+            ('to_events', 'transformer', 'python', CHANGES_TO_EVENTS, ['shop_orders']),
+            ('order_changes', 'data_exporter', 'yaml', _kafka_sink('order_changes'),
+             ['to_events']),
+        ],
+        message=_shop_order,
+        sample_message=_shop_order_change,
+        target=('postgres', 'public.shop_orders'),
+        variables=['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'KAFKA_BOOTSTRAP'],
+    ),
     'multilang': Example(
         title='Multi-language stream',
         teaches='A Python block and a Rust block: two runs of one language each, one boundary '
@@ -399,7 +465,8 @@ def write(repo_path: str, name: str, pipeline_name: Optional[str] = None) -> Dic
         pipeline.add_block(block, upstream_block_uuids=[uuids[u] for u in upstream])
         uuids[block_name] = block.uuid
     rng = random.Random(42)
-    sample = [example.message(rng, n) for n in range(1, example.sample_size + 1)]
+    make = example.sample_message or example.message
+    sample = [make(rng, n) for n in range(1, example.sample_size + 1)]
     write_sample(repo_path, pipeline_uuid, 'example', sample)
     return dict(pipeline=pipeline_uuid, blocks=list(uuids.values()),
                 files=list(example.files), variables=example.variables)
@@ -426,6 +493,8 @@ def generate(name: str, rate: float = 50, seconds: float = 60, count: Optional[i
     kind, where = EXAMPLES[name].target
     where = target or where
     total = count if count is not None else max(1, int(rate * seconds))
+    if kind == 'postgres':
+        return _insert_rows(name, where, total, rate, seed, on_sent)
     if kind == 'kafka':
         from kafka import KafkaProducer
 
@@ -454,6 +523,47 @@ def generate(name: str, rate: float = 50, seconds: float = 60, count: Optional[i
     finally:
         close()
     return sent
+
+
+def _insert_rows(name: str, table: str, total: int, rate: float, seed: Optional[int],
+                 on_sent: Optional[Callable[[int], None]]) -> int:
+    """Inserts the example's rows into a PostgreSQL table (PG* variables), one commit each."""
+    import os
+
+    import psycopg2
+
+    missing = [v for v in ('PGHOST', 'PGDATABASE', 'PGUSER') if not os.environ.get(v)]
+    if missing:
+        raise ExampleError(f'Set {", ".join(missing)} (and PGPORT, PGPASSWORD).')
+    connection = psycopg2.connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'CREATE TABLE IF NOT EXISTS {table} (id bigint PRIMARY KEY, customer text, '
+                'status text, amount numeric(12, 2))'
+            )
+        connection.commit()
+        started = time.monotonic()
+        sent = 0
+        for row in messages(name, total, seed):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'INSERT INTO {table} (id, customer, status, amount) '
+                    'VALUES (%(id)s, %(customer)s, %(status)s, %(amount)s) '
+                    'ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, '
+                    'amount = EXCLUDED.amount', row,
+                )
+            connection.commit()
+            sent += 1
+            if on_sent:
+                on_sent(sent)
+            if rate:
+                ahead = sent / rate - (time.monotonic() - started)
+                if ahead > 0:
+                    time.sleep(ahead)
+        return sent
+    finally:
+        connection.close()
 
 
 def _nats_sender(url: Optional[str], subject: str):

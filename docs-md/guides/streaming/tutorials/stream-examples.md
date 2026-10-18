@@ -23,6 +23,7 @@ with a development consumer group.
 | `iot` | NATS JetStream `telemetry.readings` to `telemetry_out.clean` and `telemetry_out.alerts` | Two branches after one block, a sink on each; set `NATS_URL`; `generate` makes the streams |
 | `payments` | Kafka `payments` to Kafka `payment_scores` | A model (`models/payments_risk.joblib`, trained on synthetic payments when the example is written) loaded once per worker with `load_artifact`, scoring each batch in one call |
 | `clickstream` | Kafka `clicks` to PostgreSQL `click_events` | Upserts by `event_id`: a replayed batch writes no row twice, so the sink is idempotent; set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` |
+| `cdc` | PostgreSQL `public.shop_orders` changes to Kafka `order_changes` | Logical replication: transactions kept whole, the slot holding the position; `generate` inserts rows (set the `PG*` variables); a development run reads with its own slot, drop it when done |
 | `multilang` | Kafka `orders_multi` to Kafka `orders_priced` | A Python block then a Rust block: two runs of one language, one boundary where messages cross as JSON (the Compile panel shows it); the Rust block is built with cargo on the first run |
 
 `generate` options: `--rate` messages per second, `--seconds` how long, `--count` how many,

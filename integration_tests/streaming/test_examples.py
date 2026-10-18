@@ -279,3 +279,72 @@ def test_a_python_and_a_rust_block_run_as_two_runs(
             Pipeline.get(pipeline, repo_path=mage_project).delete()
         admin.delete_topics(list(topics.values()))
         admin.close()
+
+
+def test_table_changes_become_kafka_events(
+    mage_project, kafka_bootstrap, postgres_settings, pg, engine, monkeypatch,
+):
+    from kafka.admin import KafkaAdminClient, NewTopic
+
+    from integration_tests.streaming.test_pipelines import read_topic
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.examples import streams
+    from mage_ai.streaming import dev_run
+    from mage_ai.streaming.development import development_slot
+
+    monkeypatch.setenv('KAFKA_BOOTSTRAP', kafka_bootstrap)
+    for key, variable in (('host', 'PGHOST'), ('port', 'PGPORT'), ('dbname', 'PGDATABASE'),
+                          ('user', 'PGUSER'), ('password', 'PGPASSWORD')):
+        monkeypatch.setenv(variable, str(postgres_settings[key]))
+    suffix = uuid.uuid4().hex[:8]
+    table, slot, topic = f'shop_orders_{suffix}', f'cdc_{suffix}', f'order_changes_{suffix}'
+    admin = KafkaAdminClient(bootstrap_servers=kafka_bootstrap)
+    admin.create_topics([NewTopic(topic, num_partitions=1, replication_factor=1)])
+    with pg.cursor() as cursor:
+        cursor.execute(f'CREATE TABLE public.{table} (id bigint PRIMARY KEY, customer text, '
+                       'status text, amount numeric(12, 2))')
+    pg.commit()
+    pipeline = f'cdc_{suffix}'
+    dev_slot = development_slot(slot, 'ex')
+    try:
+        streams.write(mage_project, 'cdc', pipeline)
+        rename(mage_project, pipeline, {
+            'public.shop_orders': f'public.{table}', 'shop_orders_cdc': slot,
+            'topic: order_changes\n': f'topic: {topic}\n',
+        })
+        sinks = [b.uuid for b in
+                 Pipeline.get(pipeline, repo_path=mage_project).blocks_by_uuid.values()
+                 if str(b.type) == 'data_exporter']
+        dev_run.start(mage_project, pipeline, sinks, user='ex')
+
+        def slot_ready():
+            with pg.cursor() as cursor:
+                cursor.execute('SELECT 1 FROM pg_replication_slots WHERE slot_name = %s',
+                               (dev_slot,))
+                found = cursor.fetchone()
+            pg.rollback()
+            return found
+
+        # Changes before the slot exists are not in it: rows go in once it does.
+        wait_for(slot_ready)
+        streams.generate('cdc', count=50, rate=0, seed=1, target=f'public.{table}')
+
+        events = wait_for(lambda: read_topic(kafka_bootstrap, topic, 50))
+        assert sorted(e['id'] for e in events) == list(range(1, 51))
+        assert {e['op'] for e in events} == {'insert'}
+        assert all(e['table'] == f'public.{table}' for e in events)
+    finally:
+        dev_run.stop(mage_project, pipeline)
+        if Pipeline.get(pipeline, repo_path=mage_project, check_if_exists=True):
+            Pipeline.get(pipeline, repo_path=mage_project).delete()
+        with pg.cursor() as cursor:
+            cursor.execute('SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots '
+                           'WHERE slot_name = %s AND active_pid IS NOT NULL', (dev_slot,))
+            time.sleep(1)
+            cursor.execute('SELECT pg_drop_replication_slot(slot_name) FROM '
+                           'pg_replication_slots WHERE slot_name = %s', (dev_slot,))
+            cursor.execute(f'DROP PUBLICATION IF EXISTS {slot}')
+            cursor.execute(f'DROP TABLE IF EXISTS public.{table}')
+        pg.commit()
+        admin.delete_topics([topic])
+        admin.close()
