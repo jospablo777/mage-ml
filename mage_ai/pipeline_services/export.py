@@ -2778,18 +2778,22 @@ def _write_deploy_files(capture_: Capture, out_dir: Path) -> None:
 
 
 def _copy_mage_python(target: Path) -> None:
-    for path in MAGE_ROOT.rglob('*'):
-        relative = path.relative_to(MAGE_ROOT)
-        if any(part in MAGE_EXCLUDED_DIRS for part in relative.parts):
-            continue
-        if any(relative.is_relative_to(excluded) for excluded in MAGE_EXCLUDED_PATHS):
-            continue
-        r_runner = relative.is_relative_to(R_RUNNER)
-        if not path.is_file() or (path.suffix not in MAGE_DATA_SUFFIXES and not r_runner):
-            continue
-        destination = target / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, destination)
+    # Excluded folders are pruned, not walked: in a source checkout they hold the Rust target
+    # and the frontend, half a million files.
+    excluded = {p.as_posix() for p in MAGE_EXCLUDED_PATHS}
+    for folder, directories, files in os.walk(MAGE_ROOT):
+        relative_folder = Path(folder).relative_to(MAGE_ROOT)
+        directories[:] = [
+            d for d in directories
+            if d not in MAGE_EXCLUDED_DIRS and (relative_folder / d).as_posix() not in excluded
+        ]
+        r_runner = relative_folder.is_relative_to(R_RUNNER)
+        for name in files:
+            if not r_runner and not name.endswith(MAGE_DATA_SUFFIXES):
+                continue
+            destination = target / relative_folder / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(Path(folder) / name, destination)
 
 
 def _copy_tree(source: Path, target: Path, skip: Iterable[str]) -> None:
