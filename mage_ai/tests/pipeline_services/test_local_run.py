@@ -253,3 +253,73 @@ class SuperviseTest(TestCase):
             for _ in range(50):
                 os.kill(engine_pid, 0)
                 time.sleep(0.1)
+
+
+class ReloadTest(TestCase):
+    def test_a_change_starts_the_service_again_and_a_failed_build_waits(self):
+        import sys
+        import threading
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / 'blocks').mkdir()
+        block = root / 'blocks' / 'load.py'
+        block.write_text('x = 1\n')
+        (root / '.git').mkdir()
+        pids = root / 'pids'
+        engine_script = root / 'engine.py'
+        engine_script.write_text(textwrap.dedent(f'''
+            import os, time
+            with open({str(pids)!r}, 'a') as f:
+                f.write(str(os.getpid()) + '\\n')
+            time.sleep(120)
+        '''))
+        starts = []
+
+        def start():
+            starts.append(block.read_text())
+            if 'broken' in block.read_text():
+                raise local_run.LocalRunError('SyntaxError in blocks/load.py')
+            return local_run.LocalRun(
+                name='s', box=root, data=root, token_file=root / 't', port=0,
+                command=[sys.executable, str(engine_script)], env=dict(os.environ),
+                inputs=['blocks'],
+            )
+
+        said = []
+        stop = threading.Event()
+        loop = threading.Thread(target=local_run.run_with_reload,
+                                args=(str(root), start, said.append),
+                                kwargs=dict(interval=0.05, stop=stop))
+        loop.start()
+
+        def wait_for(condition):
+            deadline = time.time() + 20
+            while not condition() and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(condition(), said)
+
+        def engines():
+            return pids.read_text().split() if pids.is_file() else []
+
+        try:
+            wait_for(lambda: len(engines()) == 1)
+            (root / '.git' / 'index').write_text('ignored')
+            time.sleep(0.3)
+            self.assertEqual(len(starts), 1)
+
+            block.write_text('broken = (\n')
+            wait_for(lambda: any('does not build' in s for s in said))
+            block.write_text('x = 2\n')
+            wait_for(lambda: len(engines()) == 2)
+        finally:
+            stop.set()
+            loop.join(timeout=30)
+
+        self.assertFalse(loop.is_alive())
+        self.assertIn('Changed: blocks/load.py. Starting the service again.', said)
+        for pid in engines():
+            with self.assertRaises(ProcessLookupError):
+                for _ in range(50):
+                    os.kill(int(pid), 0)
+                    time.sleep(0.1)

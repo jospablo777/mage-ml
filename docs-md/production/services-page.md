@@ -83,6 +83,10 @@ changed, and its diff in a pull request says what moved.
 Projects that still have `pipeline_services.yaml` keep working: its services are read, and
 saving one on the Services page moves it to its folder.
 
+`mage service run shop-live --reload` starts the service again, from a new build, when a
+file it reads changes (its blocks, shared code, `io_config.yaml`, the service folder and
+`.env.<env>`). A build that fails is shown and waits for the next change.
+
 ### Deploy with Docker
 
 An environment with `target: docker` deploys to the Docker of this machine:

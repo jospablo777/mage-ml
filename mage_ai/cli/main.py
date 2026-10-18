@@ -1311,6 +1311,8 @@ def service_run(
     project: str = SERVICE_PROJECT,
     env: str = typer.Option('dev', '--env', help='the environment whose values to use.'),
     port: int = typer.Option(6790, help='the port of the service API.'),
+    reload: bool = typer.Option(
+        False, '--reload', help='start it again, from a new build, when its files change.'),
 ):
     """Runs the service on this machine's engine, without Docker, until Ctrl+C."""
     import socket
@@ -1324,6 +1326,20 @@ def service_run(
             typer.echo(f'Port {port} is in use on this machine; pass another with --port.',
                        err=True)
             raise typer.Exit(code=1)
+    if reload:
+        try:
+            engine.engine_path()
+        except engine.EngineNotFound as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=1)
+
+        def start():
+            run = local_run.prepare(project, name, environment=env, port=port)
+            typer.echo(f'Service {name} on http://127.0.0.1:{port} (environment {env}); '
+                       'it starts again when its files change.')
+            return run
+
+        raise typer.Exit(code=local_run.run_with_reload(project, start, typer.echo))
     try:
         run = local_run.prepare(project, name, environment=env, port=port)
     except (definitions.DefinitionError, export.ExportError) as error:

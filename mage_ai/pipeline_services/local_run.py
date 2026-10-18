@@ -12,15 +12,18 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import yaml
 
 from mage_ai.pipeline_services import definitions, engine, export, lifecycle
 
 RUN_DIR = Path('.mage') / 'run'
+# Never watched for --reload.
+SKIPPED = {'__pycache__', '.git', '.mage', 'node_modules'}
 DEFAULT_PORT = 6790
 
 
@@ -38,6 +41,8 @@ class LocalRun:
     command: List[str]
     env: Dict[str, str] = field(default_factory=dict)
     missing: List[str] = field(default_factory=list)
+    # The project paths the service reads, for --reload.
+    inputs: List[str] = field(default_factory=list)
 
 
 def run_dir(repo_path: str, name: str) -> Path:
@@ -181,6 +186,8 @@ def prepare(
     return LocalRun(
         name=name, box=box, data=data, token_file=token_file, port=port,
         command=[str(binary), 'serve'], env=env, missing=_missing(box, env),
+        inputs=lifecycle.service_inputs(repo_path, name, captured)
+        + [f'{definitions.SERVICES_DIR}/{name}/.env.{environment}'],
     )
 
 
@@ -236,5 +243,89 @@ def supervise(command: List[str], env: Dict[str, str]) -> int:
                 # The terminal sent SIGINT to the engine too; wait for it to stop.
                 process.send_signal(signal.SIGTERM)
     finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def snapshot(repo_path: str, inputs: List[str]) -> Dict[str, tuple]:
+    """Modification time and size of every file under the inputs."""
+    root = Path(repo_path)
+    files: Dict[str, tuple] = {}
+    for item in inputs:
+        path = root / item
+        found = [path] if path.is_file() else (path.rglob('*') if path.is_dir() else [])
+        for file in found:
+            if file.is_file() and not (SKIPPED & set(file.relative_to(root).parts)):
+                stat = file.stat()
+                files[file.relative_to(root).as_posix()] = (stat.st_mtime_ns, stat.st_size)
+    return files
+
+
+def _within(files: Dict[str, tuple], inputs: List[str]) -> Dict[str, tuple]:
+    if '.' in inputs:
+        return dict(files)
+    return {k: v for k, v in files.items()
+            if any(k == item or k.startswith(item.rstrip('/') + '/') for item in inputs)}
+
+
+def changes(before: Dict[str, tuple], after: Dict[str, tuple]) -> List[str]:
+    return sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+
+
+def run_with_reload(repo_path: str, start: Callable[[], 'LocalRun'], echo: Callable[[str], None],
+                    interval: float = 1.0, stop: Optional[threading.Event] = None) -> int:
+    """
+    Runs the service and starts it again, from a new box, whenever a file it reads changes.
+    A build that fails waits for the next change. SIGTERM, SIGHUP and Ctrl+C stop it.
+    """
+    import signal
+
+    stop = stop or threading.Event()
+    in_main = threading.current_thread() is threading.main_thread()
+    previous = {}
+    if in_main:
+        previous = {sig: signal.signal(sig, lambda *a: stop.set())
+                    for sig in (signal.SIGTERM, signal.SIGHUP)}
+    process = None
+    try:
+        while not stop.is_set():
+            # Taken before the build, so an edit saved while it builds starts another.
+            before = snapshot(repo_path, ['.'])
+            try:
+                run = start()
+            except Exception as error:  # noqa: BLE001 - shown, then the next change retries
+                echo(f'The service does not build: {error}')
+                run = None
+            # Without a build, any change in the project may fix it.
+            inputs = run.inputs if run is not None else ['.']
+            if run is not None:
+                process = subprocess.Popen(run.command, env=run.env)
+            watched = _within(before, inputs)
+            while not stop.is_set():
+                try:
+                    stop.wait(interval)
+                except KeyboardInterrupt:
+                    stop.set()
+                    break
+                changed = changes(watched, snapshot(repo_path, inputs))
+                if changed:
+                    shown = ', '.join(changed[:5]) + (' and more' if len(changed) > 5 else '')
+                    echo(f'Changed: {shown}. Starting the service again.')
+                    break
+                if process is not None and process.poll() is not None:
+                    echo(f'The engine stopped with code {process.returncode}; waiting for a '
+                         'change.')
+                    process = None
+            if process is not None:
+                process.terminate()
+                process.wait()
+                process = None
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        if process is not None:
+            process.terminate()
+            process.wait()
         for sig, handler in previous.items():
             signal.signal(sig, handler)

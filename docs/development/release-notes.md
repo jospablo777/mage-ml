@@ -83,6 +83,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
   when the deployment already runs the lock (`mage service deploy --if-changed`).
 - A deploy keeps the running deployment's API token, so deploys from CI, which has no
   token file, no longer replace it.
+- `mage service run --reload` starts the service again when a file it reads changes.
 - `mage service call` runs a service's pipeline and prints each block's status and the result.
 - `mage service runs` and `mage service logs` list a service's runs and print a run's log
   or the engine's own log, for a local run or a deployment.
@@ -164,6 +165,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - `mage service run` checks the box with the engine before serving, so a stale engine says
   to update itself, and in a source checkout it uses the newer of cargo's builds. It names a
   port in use before building anything.
+- Building a service box takes half a second instead of 18 in a source checkout: copying
+  MageML's Python no longer walks the Rust build folder and the frontend.
 - SIGTERM or SIGHUP to `mage service run` stops the engine; it was left serving, holding the
   port and the run history.
 - Object columns with missing values keep their values between blocks: ints came back as
