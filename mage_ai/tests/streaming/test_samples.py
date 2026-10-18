@@ -355,3 +355,33 @@ class RSampleRunTest(StreamSampleTestCase):
 
         self.assertIn('an amount is missing', result['error']['message'])
         self.assertEqual(result['failing_message'], dict(index=1, message={'id': 7}))
+
+
+class RedactTest(unittest.TestCase):
+    def test_listed_fields_and_secret_names_are_redacted_anywhere(self):
+        from mage_ai.streaming.samples import redact
+
+        messages, counts = redact([
+            {'id': 1, 'user': {'email': 'a@b.c', 'password': 'p'},
+             'items': [{'card_number': '4111', 'sku': 'x'}], 'token_count': 3,
+             'accessToken': 't'},
+            'plain text',
+        ], ['user.email'])
+
+        self.assertEqual(messages[0], {
+            'id': 1, 'user': {'email': '<redacted>', 'password': '<redacted>'},
+            'items': [{'card_number': '<redacted>', 'sku': 'x'}], 'token_count': 3,
+            'accessToken': '<redacted>',
+        })
+        self.assertEqual(messages[1], 'plain text')
+        self.assertEqual(counts, {'user.email': 1, 'user.password': 1,
+                                  'items.card_number': 1, 'accessToken': 1})
+
+    def test_ordinary_names_are_kept(self):
+        from mage_ai.streaming.samples import redact
+
+        messages, counts = redact([{'tokenizer': 'bpe', 'keyword': 'x', 'author': 'y',
+                                    'primary_key': 1, 'token_count': 9}])
+
+        self.assertEqual(counts, {})
+        self.assertEqual(messages[0]['tokenizer'], 'bpe')

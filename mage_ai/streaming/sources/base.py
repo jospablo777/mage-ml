@@ -20,6 +20,8 @@ class BaseSource(ABC):
         if self.config_class is not None:
             if 'connector_type' in config:
                 config.pop('connector_type')
+            # Read by sample capture, which redacts them; not a connector setting.
+            config.pop('secret_fields', None)
             self.config = self.config_class.load(config=config)
         self.checkpoint_path = kwargs.get('checkpoint_path')
         self.checkpoint = self.read_checkpoint()

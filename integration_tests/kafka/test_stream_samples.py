@@ -55,3 +55,45 @@ def test_a_capture_reads_the_newest_or_first_messages_and_commits_nothing(
         assert group not in groups
     finally:
         pipeline.delete()
+
+
+def test_a_capture_redacts_secret_fields(mage_project, kafka_bootstrap, kafka_topic):
+    """Captured samples can be committed; fields marked secret never reach them."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    pipeline = Pipeline.create(f'redact_stream_{uuid.uuid4().hex[:8]}',
+                               pipeline_type=PipelineType.STREAMING, repo_path=mage_project)
+    try:
+        block = Block.create(f'{pipeline.uuid}_source', 'data_loader', mage_project,
+                             language='yaml', pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(f'''
+            connector_type: kafka
+            bootstrap_server: {kafka_bootstrap}
+            topic: {kafka_topic}
+            consumer_group: redact
+            secret_fields: [customer.email]
+        '''))
+        pipeline.add_block(block)
+        producer = KafkaProducer(bootstrap_servers=kafka_bootstrap)
+        for i in range(3):
+            producer.send(kafka_topic, json.dumps({
+                'id': i, 'customer': {'email': f'c{i}@example.com', 'country': 'CR'},
+                'api_key': 'k-123',
+            }).encode(), partition=0)
+        producer.flush()
+        producer.close()
+
+        summary = samples.capture_sample(mage_project, pipeline.uuid, 'redacted', count=3,
+                                         start='earliest')
+
+        assert summary['redacted'] == {'customer.email': 3, 'api_key': 3}
+        text = Path(samples.samples_dir(mage_project, pipeline.uuid), 'redacted.jsonl') \
+            .read_text()
+        assert 'example.com' not in text and 'k-123' not in text
+        first = json.loads(text.splitlines()[0])
+        assert first == {'id': 0, 'customer': {'email': '<redacted>', 'country': 'CR'},
+                         'api_key': '<redacted>'}
+    finally:
+        pipeline.delete()

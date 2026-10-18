@@ -1334,6 +1334,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     connector_type = config.pop('connector_type', None)
     # Read by _marked_dead_letter; not a connector setting.
     config.pop('dead_letter', None)
+    # Read by sample capture, which redacts them; not a connector setting.
+    config.pop('secret_fields', None)
     if connector_type not in kinds:
         problems.append(
             f'{where} uses the {connector_type or "unnamed"} connector; services run '

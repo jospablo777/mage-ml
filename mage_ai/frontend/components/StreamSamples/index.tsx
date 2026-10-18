@@ -119,7 +119,9 @@ function StreamSamples({ pipelineUUID }: StreamSamplesProps) {
     sample => {
       const parts = Object.entries(sample.partitions || {})
         .map(([partition, read]) => `${partition}: ${read}`).join(', ');
-      return `Captured ${sample.message_count} messages${parts ? ` (${parts})` : ''}.`;
+      const redacted = Object.keys(sample.redacted || {});
+      return `Captured ${sample.message_count} messages${parts ? ` (${parts})` : ''}.`
+        + (redacted.length ? ` Redacted ${redacted.join(', ')}.` : '');
     },
   ), [count, keepOutOfGit, name, save, start]);
 

@@ -141,6 +141,53 @@ def message_value(raw: Optional[bytes]) -> Any:
         return text
 
 
+# Field names that hold secrets or personal data, redacted on capture whatever the source
+# says: the name or its last part (access_token, user_password, api_key). token_count and
+# primary_key are kept.
+SECRET_NAMES = (
+    'password', 'passwd', 'pwd', 'secret', 'token', 'api_key', 'apikey', 'authorization',
+    'credential', 'credentials', 'private_key', 'secret_key', 'access_key', 'ssn',
+    'card_number', 'cvv', 'cvc', 'iban',
+)
+
+
+def secret_name(key: str) -> bool:
+    # accessToken and access-token read as access_token.
+    name = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', str(key))
+    name = re.sub(r'[-.\s]+', '_', name).lower()
+    return any(name == n or name.endswith('_' + n) for n in SECRET_NAMES)
+
+
+REDACTED = '<redacted>'
+
+
+def redact(messages: List[Any], secret_fields: Optional[List[str]] = None):
+    """
+    The messages with secret fields replaced by <redacted>: those the source lists in
+    `secret_fields` (dotted paths into nested objects, or a field name anywhere) and those
+    whose names say they are secret. Returns them and the count per redacted path.
+    """
+    listed = {str(f) for f in secret_fields or []}
+    counts: Dict[str, int] = {}
+
+    def walk(value, path: str):
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                child = f'{path}.{key}' if path else str(key)
+                if child in listed or str(key) in listed or secret_name(key):
+                    result[key] = REDACTED
+                    counts[child] = counts.get(child, 0) + 1
+                else:
+                    result[key] = walk(item, child)
+            return result
+        if isinstance(value, list):
+            return [walk(item, path) for item in value]
+        return value
+
+    return [walk(m, '') for m in messages], counts
+
+
 def capture_sample(
     repo_path: str,
     pipeline_uuid: str,
@@ -179,8 +226,10 @@ def capture_sample(
             'or paste a sample for now.'
         )
     messages, partitions = _capture_kafka(config, int(count), start, float(timeout_seconds))
+    messages, redacted = redact(messages, config.get('secret_fields'))
     summary = write_sample(repo_path, pipeline_uuid, name, messages)
     summary['partitions'] = partitions
+    summary['redacted'] = redacted
     return summary
 
 
@@ -206,6 +255,7 @@ def _capture_kafka(config: Dict, count: int, start: str, timeout_seconds: float)
 
     settings = dict(config)
     settings.pop('connector_type', None)
+    settings.pop('secret_fields', None)
     kafka_config = KafkaConfig.load(config=settings)
     consumer_kwargs = consumer_settings(kafka_config, lambda message: None)
     # No group: nothing is committed and the stream's group is not touched.

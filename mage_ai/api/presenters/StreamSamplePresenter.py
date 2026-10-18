@@ -7,6 +7,7 @@ class StreamSamplePresenter(BasePresenter):
         'messages',
         'name',
         'partitions',
+        'redacted',
         'pipeline_uuid',
         'size_bytes',
         'updated_at',

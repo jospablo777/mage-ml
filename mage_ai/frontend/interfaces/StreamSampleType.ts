@@ -5,6 +5,8 @@ interface StreamSampleType {
   name: string;
   // Messages read per topic partition, after a capture.
   partitions?: { [partition: string]: number };
+  // Fields replaced by <redacted> on capture, with the messages each was in.
+  redacted?: { [path: string]: number };
   size_bytes?: number;
   updated_at?: string;
 }

@@ -116,6 +116,15 @@ class StreamManifestTest(StreamExportTestCase):
         ))
         self.assertTrue(captured.needs_kafka)
 
+    def test_secret_fields_are_for_sample_capture_and_not_a_connector_setting(self):
+        self.stream(source=SOURCE + '    secret_fields: [customer.email]\n')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        source = captured.manifest['pipelines'][0]['stream']['source']['config']
+        self.assertNotIn('secret_fields', source)
+        self.assertEqual(source['topic'], 'orders')
+
     def test_the_app_summary_shows_what_the_stream_reads_and_writes(self):
         from mage_ai.pipeline_services.exports import summary
 
