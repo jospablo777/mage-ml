@@ -119,6 +119,15 @@ A run from the editor is a development run, and it never moves production's posi
 `mage service run` reads with the same development positions. Triggers and deployed services
 use the configured ones.
 
+## How the stream runs
+
+The **Compile** panel of a streaming pipeline shows how the engine runs it: the source, the
+runs of blocks in one language (each run handles a batch in one process: one call to the
+Python worker, or one Rust program or R session kept running), the language boundaries where
+messages cross as JSON, the sinks, the batch size, the dead-letter sink, and the positions a
+development run reads with. Problems that would stop the stream, such as a connector the
+engine does not run or a missing setting, show there before Start.
+
 ## Run on the local engine
 
 The **Run** tab of a streaming pipeline starts it on the local engine, the one exported

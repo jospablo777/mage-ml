@@ -25,6 +25,7 @@ import {
   CompilationUnitType,
   LANGUAGE_NAMES,
   PipelineCompilationType,
+  StreamPlanType,
   compileStatus,
   polyglotHint,
   progressPercent,
@@ -156,6 +157,76 @@ function statusIcon(status: CompileStatusType) {
       success={status === 'up_to_date' || status === 'nothing'}
       warning={status === 'outdated'}
     />
+  );
+}
+
+// How a stream runs on the engine: problems first, then source → runs → sinks.
+function StreamPlan({ plan }: { plan: StreamPlanType }) {
+  if (plan.problems?.length) {
+    return (
+      <Spacing mt={2}>
+        <Text bold danger>
+          The stream stops before it starts: {plan.problems.length}{' '}
+          {plan.problems.length === 1 ? 'problem' : 'problems'}
+        </Text>
+        {plan.problems.map(problem => (
+          <Spacing key={problem} mt={1}><Text danger small>{problem}</Text></Spacing>
+        ))}
+      </Spacing>
+    );
+  }
+  const boundaries = plan.boundaries || 0;
+  return (
+    <Spacing mt={2}>
+      <Text bold>
+        {`How the stream runs: ${(plan.runs || []).length} `
+          + `${(plan.runs || []).length === 1 ? 'run' : 'runs'} of blocks, `
+          + `${boundaries} language ${boundaries === 1 ? 'boundary' : 'boundaries'}`}
+      </Text>
+      <Spacing my={1}>
+        <FlexContainer alignItems="center" flexWrap="wrap">
+          <LanguagePillStyle>{plan.source?.kind} source</LanguagePillStyle>
+          {(plan.runs || []).map(run => (
+            <FlexContainer alignItems="center" key={run.blocks.join(',')}>
+              <SwitchStyle>→</SwitchStyle>
+              <LanguagePillStyle title={`${run.blocks.join(', ')}: ${run.runs_in}`}>
+                {LANGUAGE_NAMES[run.language] || run.language}
+                {run.blocks.length > 1 ? ` ×${run.blocks.length}` : ''}
+              </LanguagePillStyle>
+            </FlexContainer>
+          ))}
+          <SwitchStyle>→</SwitchStyle>
+          <LanguagePillStyle>
+            {(plan.sinks || []).map(sink => sink.kind).join(', ') || 'no sink'}
+          </LanguagePillStyle>
+        </FlexContainer>
+      </Spacing>
+      {(plan.runs || []).map(run => (
+        <Text key={run.blocks.join(',')} muted small>
+          {run.blocks.join(' → ')}: {run.runs_in}.
+        </Text>
+      ))}
+      {boundaries > 0 && (
+        <Text muted small>
+          Messages cross each language boundary as JSON; one language runs the batch in one
+          process.
+        </Text>
+      )}
+      {plan.batch?.max_records && (
+        <Text muted small>
+          Batches of up to {plan.batch.max_records.toLocaleString()} messages
+          {plan.batch.max_wait_ms ? ` or ${plan.batch.max_wait_ms} ms` : ''}.
+        </Text>
+      )}
+      {plan.dead_letter && (
+        <Text muted small>
+          Messages a block fails on go to {plan.dead_letter.block} ({plan.dead_letter.kind}).
+        </Text>
+      )}
+      {(plan.development || []).map(note => (
+        <Text key={note} muted small>{note}</Text>
+      ))}
+    </Spacing>
   );
 }
 
@@ -420,7 +491,9 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
           </Spacing>
             )}
 
-          {summary && !summary.fusion && (
+          {summary?.stream && <StreamPlan plan={summary.stream} />}
+
+          {summary && !summary.fusion && !summary.stream && (
           <Spacing mt={1}>
             <Text small warning>
               Chains are turned off in this pipeline&apos;s settings, so production runs

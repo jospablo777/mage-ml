@@ -224,7 +224,7 @@ def summary_for(pipeline) -> Dict:
             flow[-1]['blocks'] += 1
         else:
             flow.append(dict(language=language, blocks=1))
-    return dict(
+    summary = dict(
         blocks=len(blocks),
         chains=chains,
         flow=flow,
@@ -232,6 +232,11 @@ def summary_for(pipeline) -> Dict:
         languages=languages,
         language_switches=switches,
     )
+    if str(getattr(pipeline.type, 'value', pipeline.type)) == 'streaming':
+        from mage_ai.streaming.plan import stream_plan
+
+        summary['stream'] = stream_plan(pipeline)
+    return summary
 
 
 def _check_python(pipeline, unit: Unit) -> None:

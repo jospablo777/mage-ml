@@ -63,6 +63,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- The Compile panel of a streaming pipeline shows how it runs on the engine (runs of one
+  language, boundaries, sinks, batches, dead letters) and the problems that would stop it.
 - The **Dead letters** tab reads a Kafka dead-letter sink with each message's error, opens
   the messages as a sample to reproduce the failure, and replays them to the source once
   fixed, after the topic's name is typed.

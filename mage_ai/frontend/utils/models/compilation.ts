@@ -28,6 +28,19 @@ export type CompilationSummaryType = {
   fusion: boolean;
   language_switches: number;
   languages: string[];
+  // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
+  stream?: StreamPlanType;
+};
+
+export type StreamPlanType = {
+  batch?: { max_records?: number; max_wait_ms?: number };
+  boundaries?: number;
+  dead_letter?: { block: string; kind: string } | null;
+  development?: string[];
+  problems: string[];
+  runs?: { blocks: string[]; language: string; runs_in: string }[];
+  sinks?: { after: string; block: string; kind: string }[];
+  source?: { block: string; kind: string };
 };
 
 export type PipelineCompilationType = {

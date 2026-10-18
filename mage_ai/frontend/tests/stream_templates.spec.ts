@@ -24,7 +24,7 @@ test('a stream from the Kafka template runs on its sample', async ({ page }) => 
   await page.goto('/pipelines');
   await expect(page.getByText('Name', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New' }).click();
-  await page.getByText('Streaming', { exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Streaming' }).click();
   await page.getByPlaceholder('Pipeline name...').fill(NAME);
   await page.getByLabel('Start from').selectOption('kafka');
   await page.getByRole('button', { name: 'Create' }).click();
@@ -32,6 +32,11 @@ test('a stream from the Kafka template runs on its sample', async ({ page }) => 
   await page.waitForURL(new RegExp(`/pipelines/${NAME}/edit`));
   await expect(page.getByText(`${NAME}_kafka`).first()).toBeVisible();
   await expect(page.getByText(`${NAME}_print`).first()).toBeVisible();
+  // The compile panel shows how the stream runs on the engine.
+  await page.getByRole('button', { name: 'Compile' }).first().click();
+  await expect(page.getByText('How the stream runs: 1 run of blocks, 0 language boundaries'))
+    .toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.goto(`/pipelines/${NAME}/edit?sideview=samples`);
   await expect(page.getByText('example', { exact: true })).toBeVisible();
