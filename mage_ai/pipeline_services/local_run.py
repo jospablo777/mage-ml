@@ -122,13 +122,18 @@ def _build_rust_blocks(box: Path) -> None:
         shutil.copy2(target / 'release' / binary, box / 'bin' / binary)
 
 
-def service_token(token_file: Path) -> str:
-    """The run's API token, kept in a file readable by its owner only."""
-    if token_file.is_file():
+def service_token(token_file: Path, token: Optional[str] = None) -> str:
+    """
+    The API token, kept in a file readable by its owner only: the one given, else the file's,
+    else a new one.
+    """
+    if not token and token_file.is_file():
         token = token_file.read_text().strip()
         if token:
             return token
-    token = secrets.token_urlsafe(32)
+    token = token or secrets.token_urlsafe(32)
+    if token_file.is_file() and token_file.read_text().strip() == token:
+        return token
     token_file.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, 'w') as file:

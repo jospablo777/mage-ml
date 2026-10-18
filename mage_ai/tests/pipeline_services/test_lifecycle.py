@@ -112,6 +112,16 @@ class LifecycleTest(ExportTestCase):
         self.assertEqual(built.exit_code, 0, built.output)
         self.assertIn('services/sales/service.lock (commit it)', built.output)
 
+        locked = runner.invoke(app, ['service', 'check', 'sales', '--locked', *project])
+        self.assertEqual(locked.exit_code, 0, locked.output)
+        self.assertIn('with its lock committed', locked.output)
+        # A committed lock that is not the build's: CI says to build and commit it.
+        lock = lifecycle.lock_path(self.repo_path, 'sales')
+        lock.write_text(lock.read_text().replace('manifest_sha256: ', 'manifest_sha256: 0'))
+        stale = runner.invoke(app, ['service', 'check', 'sales', '--locked', *project])
+        self.assertEqual(stale.exit_code, 1)
+        self.assertIn('service.lock is not the build', stale.output)
+
         failed = runner.invoke(app, ['service', 'check', 'nope', *project])
         self.assertEqual(failed.exit_code, 1)
 

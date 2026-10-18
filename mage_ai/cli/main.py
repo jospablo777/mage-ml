@@ -1147,10 +1147,28 @@ def _service_error(error: Exception) -> None:
 
 
 @service_app.command('list')
-def service_list(project: str = SERVICE_PROJECT):
+def service_list(
+    project: str = SERVICE_PROJECT,
+    env: Union[str, None] = typer.Option(
+        None, '--env', help='only the services that define this environment.'),
+    as_json: bool = typer.Option(False, '--json', help='as JSON, for CI.'),
+):
     """The project's services, their pipelines and where each is saved."""
-    from mage_ai.pipeline_services import definitions
+    import json
 
+    from mage_ai.pipeline_services import ci, definitions
+
+    if env:
+        try:
+            plan = ci.environment_plan(project, env)
+        except definitions.DefinitionError as error:
+            _service_error(error)
+        if as_json:
+            typer.echo(json.dumps(plan))
+        else:
+            for item in plan:
+                typer.echo(f'{item["service"]}  {env}  {item["target"]}')
+        return
     try:
         saved = definitions.load_definitions(project)
     except definitions.DefinitionError as error:
@@ -1196,11 +1214,14 @@ def service_check(
     base: str = typer.Option(
         'origin/main', '--base', help='with --affected, the Git ref the changes are against.',
     ),
+    locked: bool = typer.Option(
+        False, '--locked', help='also fail when service.lock is not the build\'s, for CI.',
+    ),
 ):
     """What would stop the service from building, and what to know about it."""
     import subprocess
 
-    from mage_ai.pipeline_services import lifecycle
+    from mage_ai.pipeline_services import definitions, export, lifecycle
 
     if affected:
         try:
@@ -1230,6 +1251,22 @@ def service_check(
                 typer.echo(f'  - {problem}', err=True)
             continue
         typer.echo(result.report)
+        if locked:
+            before = lifecycle.read_lock(project, service)
+            try:
+                lifecycle.build(project, service)
+            except (definitions.DefinitionError, export.ExportError) as error:
+                failed = True
+                typer.echo(f'{service} does not build: {error}', err=True)
+                continue
+            if lifecycle.read_lock(project, service) != before:
+                failed = True
+                typer.echo(f'{service}: service.lock is not the build\'s. Run mage service '
+                           f'build {service} and commit services/{service}/service.lock.',
+                           err=True)
+                continue
+            typer.echo(f'{service} is ready to build, with its lock committed.')
+            continue
         typer.echo(f'{service} is ready to build: mage service build {service}')
     if failed:
         raise typer.Exit(code=1)
@@ -1340,6 +1377,10 @@ def service_deploy(
         None, '--allow-uncommitted', metavar='REASON',
         help='deploy uncommitted changes; the reason is recorded on the deployment.',
     ),
+    if_changed: bool = typer.Option(
+        False, '--if-changed',
+        help='do nothing when the environment already runs this lock with these values.',
+    ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
     from mage_ai.pipeline_services import (
@@ -1362,7 +1403,25 @@ def service_deploy(
         box = lifecycle.build(project, name)
         _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
         lock = lifecycle.read_lock(project, name) or {}
-        digest = str(lock.get('manifest_sha256', ''))[:12] or 'latest'
+        lock_sha = str(lock.get('manifest_sha256', ''))
+        values = local_run.environment_values(project, name, env)
+        # The token stays the same across deploys from any machine: the environment's, this
+        # machine's, or the one the deployment runs with.
+        token_path = deploy.token_file(project, name, env)
+        given = values.get('MAGE_SERVICE_TOKEN')
+        if not given and not (token_path.is_file() and token_path.read_text().strip()):
+            given = target.current_token(name, env)
+        values['MAGE_SERVICE_TOKEN'] = local_run.service_token(token_path, given)
+        labels = dict(commit=deploy.git_commit(project), lock=lock_sha,
+                      values=deploy.values_digest(values),
+                      **({'reason': allow_uncommitted} if allow_uncommitted else {}))
+        if if_changed:
+            current = target.inspect(name, env)
+            if current is not None and current.state == 'running' \
+                    and current.lock == lock_sha and current.values == labels['values']:
+                typer.echo(f'{name} in {env} already runs this lock with these values.')
+                return
+        digest = lock_sha[:12] or 'latest'
         if on_cluster:
             image = target.image(name, digest)
             for note in target.publish(box, image, export.build_image):
@@ -1370,15 +1429,11 @@ def service_deploy(
         else:
             image = f'mage-{name}:{digest}'
             export.build_image(box, image)
-        values = local_run.environment_values(project, name, env)
     except (definitions.DefinitionError, export.ExportError, local_run.LocalRunError) as error:
         _service_error(error)
     except deploy.DeployError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
-    values['MAGE_SERVICE_TOKEN'] = local_run.service_token(deploy.token_file(project, name, env))
-    labels = dict(commit=deploy.git_commit(project), lock=str(lock.get('manifest_sha256', '')),
-                  **({'reason': allow_uncommitted} if allow_uncommitted else {}))
     port = int(settings.get('port') or 6800)
     try:
         if on_cluster:
@@ -1579,6 +1634,34 @@ def service_rollback(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     typer.echo(f'{name} in {env} runs {deployment.image} again.')
+
+
+CI_DEPLOY_RULES = typer.Option(
+    [], '--deploy', metavar='ENV=BRANCH|ENV=tag:PREFIX*',
+    help='deploy the services that define ENV on a push to BRANCH or a tag; repeatable.',
+)
+
+
+@service_app.command('ci')
+def service_ci(
+    project: str = SERVICE_PROJECT,
+    deploy_rules: List[str] = CI_DEPLOY_RULES,
+    force: bool = typer.Option(False, help='replace the workflow.'),
+):
+    """Writes a GitHub Actions workflow that checks pull requests and deploys by rule."""
+    from mage_ai.pipeline_services import ci
+
+    try:
+        rules = [ci.parse_rule(text) for text in deploy_rules]
+        path = ci.write(project, rules, force=force)
+    except ci.CiError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f'Wrote {path}.')
+    typer.echo('Pull requests check the services they change.')
+    for rule in rules:
+        typer.echo(f'{rule.environment}: deploys {rule.when}; set its secrets in Settings > '
+                   f'Environments > {rule.environment} (see the comments in the workflow).')
 
 
 @service_app.command('export')

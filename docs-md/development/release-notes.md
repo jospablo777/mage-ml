@@ -73,6 +73,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
   containers, health waits with automatic rollback, drift from the repository, and the
   previous deployment kept for rollback. A deploy with uncommitted changes to the service's
   inputs stops unless `--allow-uncommitted "<reason>"` records why.
+- `mage service ci` writes a GitHub Actions workflow: pull requests check the services they
+  change and their locks; rules deploy each environment on a branch or tag, building nothing
+  when the deployment already runs the lock (`mage service deploy --if-changed`).
+- A deploy keeps the running deployment's API token, so deploys from CI, which has no
+  token file, no longer replace it.
 - `mage service runs` and `mage service logs` list a service's runs and print a run's log
   or the engine's own log, for a local run or a deployment.
 - `mage service check --affected` checks the services that the changes since a Git ref touch
@@ -149,6 +154,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Exported services no longer require packages that a `.pth` file loads when Python starts
   (such as `ibm-db`, which has no Linux arm64 wheel and broke image builds there).
 - `mage service check --affected` finds a new service whose folder is not yet in Git.
+- Deploy API tokens in `.mage/deploy/` are kept out of Git.
 - Object columns with missing values keep their values between blocks: ints came back as
   floats (integers past 2**53 lost digits, also in Rust blocks reading the file), and None
   as NaN or NaT, in a column of another dtype (upstream #5913).

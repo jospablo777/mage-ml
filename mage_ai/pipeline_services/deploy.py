@@ -41,6 +41,8 @@ class Deployment:
     port: Optional[int] = None
     # Why uncommitted changes were deployed (--allow-uncommitted).
     reason: str = ''
+    # values_digest of the environment's values.
+    values: str = ''
 
     def drift(self, lock: Optional[str]) -> str:
         if self.state != 'running':
@@ -156,6 +158,18 @@ class DockerTarget:
             self._run('rename', swap, n['previous'])
         return self.inspect(service, environment)
 
+    def current_token(self, service: str, environment: str) -> Optional[str]:
+        """The API token the deployment runs with, so a deploy from elsewhere keeps it."""
+        result = self._run('container', 'inspect', names(service, environment)['current'],
+                           check=False)
+        if result.returncode != 0:
+            return None
+        for item in (json.loads(result.stdout)[0].get('Config') or {}).get('Env') or []:
+            key, _, value = item.partition('=')
+            if key == 'MAGE_SERVICE_TOKEN' and value:
+                return value
+        return None
+
     def log_command(self, service: str, environment: str, tail: int = 200,
                     follow: bool = False) -> List[str]:
         """The docker command that prints the engine's own log (start-up, schedules, streams)."""
@@ -198,6 +212,7 @@ def _deployment(item: Dict) -> Deployment:
         lock=labels.get(f'{LABEL}.lock', ''),
         port=int(port) if port and port.isdigit() else None,
         reason=labels.get(f'{LABEL}.reason', ''),
+        values=labels.get(f'{LABEL}.values', ''),
     )
 
 
@@ -283,4 +298,20 @@ def git_commit(repo_path: str) -> str:
 
 
 def token_file(repo_path: str, service: str, environment: str) -> Path:
-    return Path(repo_path) / '.mage' / 'deploy' / service / environment / 'token'
+    root = Path(repo_path) / '.mage' / 'deploy'
+    # The tokens stay out of Git whatever the project's .gitignore says.
+    ignore = root / '.gitignore'
+    if not ignore.is_file():
+        root.mkdir(parents=True, exist_ok=True)
+        ignore.write_text('*\n')
+    return root / service / environment / 'token'
+
+
+def values_digest(values: Dict[str, str]) -> str:
+    """
+    What the environment's values were, to tell a deploy that changes nothing. It covers the
+    random API token, so it says nothing about the other values.
+    """
+    import hashlib
+
+    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()[:16]

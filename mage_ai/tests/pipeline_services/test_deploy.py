@@ -61,7 +61,9 @@ class FakeDocker:
 
     def _inspect(self, name):
         container = self.containers[name]
-        return dict(Name=f'/{name}', Config=dict(Labels=container['labels']),
+        return dict(Name=f'/{name}', Config=dict(
+                        Labels=container['labels'],
+                        Env=[f'{k}={v}' for k, v in container['env'].items()]),
                     State=dict(Status='running' if container['running'] else 'exited'))
 
 
@@ -193,6 +195,45 @@ class DeployCommandTest(TestCase):
 
         status, _ = self.invoke('status', 'shop')
         self.assertIn('shop  prod  running the repository version', status.output)
+
+    def test_the_token_survives_a_deploy_from_another_machine(self):
+        """CI has no token file: every deploy from it made a new token, breaking clients."""
+        self.invoke('deploy', 'shop', '--env', 'prod')
+        token = self.docker.containers['mage-shop-prod']['env']['MAGE_SERVICE_TOKEN']
+        token_file = deploy.token_file(self.repo_path, 'shop', 'prod')
+        self.assertEqual((token_file.parent.parent.parent / '.gitignore').read_text(), '*\n')
+        token_file.unlink()
+
+        result, _ = self.invoke('deploy', 'shop', '--env', 'prod')
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(self.docker.containers['mage-shop-prod']['env']['MAGE_SERVICE_TOKEN'],
+                         token)
+        self.assertEqual(token_file.read_text(), token)
+
+        # A token the environment sets wins.
+        (self.project / 'services' / 'shop' / '.env.prod').write_text(
+            'API_KEY=k3y\nMAGE_SERVICE_TOKEN=from-ci\n')
+        self.invoke('deploy', 'shop', '--env', 'prod')
+        self.assertEqual(self.docker.containers['mage-shop-prod']['env']['MAGE_SERVICE_TOKEN'],
+                         'from-ci')
+        self.assertEqual(token_file.read_text(), 'from-ci')
+
+    def test_if_changed_skips_only_when_the_lock_and_values_are_deployed(self):
+        self.invoke('deploy', 'shop', '--env', 'prod')
+
+        same, build_image = self.invoke('deploy', 'shop', '--env', 'prod', '--if-changed')
+
+        self.assertEqual(same.exit_code, 0, same.output)
+        self.assertIn('already runs this lock with these values', same.output)
+        build_image.assert_not_called()
+
+        prod = self.project / 'services' / 'shop' / 'environments' / 'prod.yaml'
+        prod.write_text(prod.read_text().replace('REGION: eu', 'REGION: us'))
+        changed, build_image = self.invoke('deploy', 'shop', '--env', 'prod', '--if-changed')
+        self.assertEqual(changed.exit_code, 0, changed.output)
+        build_image.assert_called_once()
+        self.assertEqual(self.docker.containers['mage-shop-prod']['env']['REGION'], 'us')
 
     def test_uncommitted_changes_need_a_reason_which_the_deployment_records(self):
         self.uncommitted = ['services/shop/service.lock', 'data_loaders/load.py']

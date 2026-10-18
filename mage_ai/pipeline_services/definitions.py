@@ -52,7 +52,7 @@ schedules: off        # on runs the time triggers; keep off where MageML runs th
 variables: {}
 secrets: {}
 """
-GITIGNORE_LINES = ('.mage/build/', '.mage/run/', 'services/*/.env*')
+GITIGNORE_LINES = ('.mage/build/', '.mage/run/', '.mage/deploy/', 'services/*/.env*')
 _NAME = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 
@@ -284,7 +284,7 @@ def _write_service(repo_path: str, name: str, value: Dict) -> None:
         dict(name=name, **_compact(value)), sort_keys=False, default_flow_style=False,
     )
     _atomic_write(service_file(repo_path, name), SERVICE_HEADER + body)
-    _ensure_gitignore(repo_path)
+    ensure_gitignore(repo_path)
 
 
 def _remove_legacy(repo_path: str, names: List[str]) -> bool:
@@ -312,7 +312,7 @@ def _remove_legacy(repo_path: str, names: List[str]) -> bool:
     return True
 
 
-def _ensure_gitignore(repo_path: str) -> None:
+def ensure_gitignore(repo_path: str) -> None:
     """Generated builds and local secret files stay out of Git."""
     path = Path(repo_path) / '.gitignore'
     existing = path.read_text().splitlines() if path.is_file() else []

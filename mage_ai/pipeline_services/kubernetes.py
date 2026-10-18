@@ -250,6 +250,22 @@ class KubernetesTarget:
         item = self._get('deployment', names(service, environment)['current'])
         return None if item is None else deployment_of(item, service, environment)
 
+    def current_token(self, service: str, environment: str) -> Optional[str]:
+        """The API token the deployment runs with, from its Secret."""
+        import base64
+
+        item = self._get('deployment', names(service, environment)['current'])
+        if item is None:
+            return None
+        try:
+            secret = item['spec']['template']['spec']['containers'][0]['envFrom'][0][
+                'secretRef']['name']
+        except (KeyError, IndexError):
+            return None
+        found = self._get('secret', secret)
+        value = ((found or {}).get('data') or {}).get('MAGE_SERVICE_TOKEN')
+        return base64.b64decode(value).decode() if value else None
+
     def log_command(self, service: str, environment: str, tail: int = 200,
                     follow: bool = False) -> List[str]:
         name = names(service, environment)['current']
@@ -312,4 +328,5 @@ def deployment_of(item: Dict, service: str, environment: str) -> Deployment:
         commit=annotations.get(f'{GROUP}/commit', ''),
         lock=annotations.get(f'{GROUP}/lock', ''),
         reason=annotations.get(f'{GROUP}/reason', ''),
+        values=annotations.get(f'{GROUP}/values', ''),
     )

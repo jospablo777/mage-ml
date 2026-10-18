@@ -40,6 +40,15 @@ class FakeKubectl:
             if item is None:
                 return done(code=1, stderr=f'Error from server (NotFound): "{args[2]}" not found')
             return done(json.dumps(item))
+        if args[:2] == ['get', 'secret']:
+            import base64
+
+            item = self.secrets.get(args[2])
+            if item is None:
+                return done(code=1, stderr=f'Error from server (NotFound): "{args[2]}" not found')
+            data = {k: base64.b64encode(v.encode()).decode()
+                    for k, v in item['stringData'].items()}
+            return done(json.dumps(dict(item, data=data)))
         if args[:2] == ['get', 'secrets']:
             return done(json.dumps(dict(items=list(self.secrets.values()))))
         if args[:2] == ['delete', 'secret']:
@@ -298,3 +307,16 @@ class KubernetesCommandTest(TestCase):
 
         status, _ = self.invoke('status', 'shop')
         self.assertIn('shop  prod  running the repository version', status.output)
+
+    def test_a_deploy_from_ci_keeps_the_token_and_skips_an_unchanged_service(self):
+        self.invoke('deploy', 'shop', '--env', 'prod')
+        token_file = deploy.token_file(self.repo_path, 'shop', 'prod')
+        token = token_file.read_text()
+        token_file.unlink()
+
+        result, build_image = self.invoke('deploy', 'shop', '--env', 'prod', '--if-changed')
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('already runs this lock with these values', result.output)
+        build_image.assert_not_called()
+        self.assertEqual(token_file.read_text(), token)

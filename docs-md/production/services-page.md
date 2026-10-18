@@ -185,20 +185,32 @@ service's folder, its pipelines, the code its blocks import, its stream settings
 `io_config.yaml`, `requirements.txt` or the project's `metadata.yaml` counts. It exits with 1
 when a check fails, and does nothing when no service is affected.
 
-```yaml
-# .github/workflows/services.yml
-on: pull_request
-jobs:
-  services:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system mage-ml
-      - run: mage service check --affected --base origin/${{ github.base_ref }}
+`--locked` also fails when a build would change the committed `service.lock`, so a pull
+request cannot merge a lock that a deploy would refuse.
+
+### CI and CD workflow
+
+`mage service ci` writes `.github/workflows/mage-services.yml` at the repository's root:
+
+```bash
+mage service ci --deploy dev=main --deploy 'prod=tag:v*'
 ```
+
+- Pull requests run `mage service check --affected --locked` against their base branch.
+- Each `--deploy ENV=BRANCH` or `ENV=tag:PREFIX*` rule deploys the services that define the
+  environment, one job per service, with the GitHub environment `ENV` (for its secrets and
+  required reviewers). `mage service deploy --if-changed` builds nothing when the
+  environment already runs the lock with the same values.
+- A service's secrets come from the environment secret `<SERVICE>_<ENV>_ENV` (for example
+  `SHOP_LIVE_PROD_ENV`), its `.env.<env>` as `KEY=value` lines. `KUBECONFIG` holds the
+  contexts the environments name, and `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` push the
+  images.
+- The rules deploy Kubernetes environments; an environment that deploys to Docker is
+  refused, since in CI that is the runner's Docker.
+- A deploy keeps the API token of the running deployment, so clients keep working; set
+  `MAGE_SERVICE_TOKEN` in the environment secret to choose it.
+
+The workflow is yours to edit; `mage service ci --force` writes it again.
 
 ### Run a service locally
 
