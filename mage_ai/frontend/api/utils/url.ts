@@ -16,7 +16,11 @@ function getHostCore(
   if (windowDefined) {
     host = window.location.hostname;
   }
-  if ((host === defaultHost && !opts?.forceCurrentPort) || opts?.forceDefaultPort) {
+  // Only Next's dev server (the page on its own port, the API on 6789) needs the default
+  // port. A built page talks to the server that served it: on localhost:6799 it called the
+  // API on 6789, another server and project.
+  const devServer = process.env.NODE_ENV === 'development';
+  if ((host === defaultHost && devServer && !opts?.forceCurrentPort) || opts?.forceDefaultPort) {
     host = `${host}:${defaultPort}`;
   } else if (windowDefined && !!window.location.port) {
     host = `${host}:${window.location.port}`;
