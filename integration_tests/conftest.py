@@ -651,6 +651,14 @@ def ibm_mq():
 
 
 @pytest.fixture(scope='session')
+def toxiproxy_url():
+    url = os.getenv('MAGE_TEST_TOXIPROXY_URL')
+    if not url:
+        pytest.skip('Toxiproxy is not configured: MAGE_TEST_TOXIPROXY_URL unset')
+    return url
+
+
+@pytest.fixture(scope='session')
 def nats_url():
     url = os.getenv('MAGE_TEST_NATS_URL')
     if not url:

@@ -237,7 +237,7 @@ jobs:
             warm: ""
           - id: streaming
             name: "Integration: streaming and storage"
-            services: kafka rabbitmq ibm-mq nats sqs pubsub opensearch influxdb activemq minio postgres mongodb mysql clickhouse
+            services: kafka rabbitmq ibm-mq nats toxiproxy sqs pubsub opensearch influxdb activemq minio postgres mongodb mysql clickhouse
             # The stream benchmark needs this group's systems; in CI it runs smaller, as a check.
             tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/ibm_mq integration_tests/nats integration_tests/sqs integration_tests/pubsub integration_tests/opensearch integration_tests/influxdb integration_tests/activemq integration_tests/streaming integration_tests/s3 integration_tests/benchmark/test_stream_benchmark.py
             r: false

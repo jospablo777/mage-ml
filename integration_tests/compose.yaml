@@ -224,6 +224,20 @@ services:
       retries: 60
 
   # NATS 2.15 with JetStream, data in memory.
+  # Network faults between a stream and its broker: proxies made by the tests, cut and
+  # restored through its API.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    mem_limit: 64m
+    ports:
+      - "${MAGE_TEST_TOXIPROXY_PORT:-18474}:8474"
+      - "${MAGE_TEST_TOXIPROXY_PROXY_PORT:-18666}:8666"
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   nats:
     image: nats:2.15-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]
