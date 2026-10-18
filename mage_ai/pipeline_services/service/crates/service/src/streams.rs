@@ -446,6 +446,8 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         config: runner_config(stream),
         shutdown_deadline: Duration::from_secs(20),
         pause: None,
+        // Message data in memory, for the editor's tap: development runs only.
+        tap: std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1"),
     })
 }
 

@@ -69,11 +69,15 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - New streaming pipelines can start from a template per source (Kafka, RabbitMQ, NATS,
   webhook, PostgreSQL changes) with a transformer, a printing sink and a sample.
 - While a stream runs on the local engine, the dependency graph shows each block's numbers.
+- The Run tab's tap shows the last messages at the source or a block of a running stream
+  (development runs only: `MAGE_SERVICE_TAP=on`, `GET /v1/streams/<pipeline>/tap`).
 - A stream service's `/v1/streams/<pipeline>` reports each block's messages in and out,
   batches, errors and median and 95th percentile time per batch; the Run tab shows them.
 - The **Run** tab starts a streaming pipeline on the local engine with development positions
   and the sinks it writes named first; it shows state, rates, lag, totals and the engine's
   log, and pauses, resumes and stops the stream.
+- Samples can be captured from NATS JetStream sources too, with an ephemeral consumer that
+  acknowledges nothing.
 - Captured samples redact secret fields: names such as `password`, `access_token` or
   `card_number`, and the fields a source lists in `secret_fields`.
 - Run on sample works for Rust and R transformers too, and shows what the block changed:

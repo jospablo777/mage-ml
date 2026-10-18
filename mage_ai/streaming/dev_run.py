@@ -117,8 +117,9 @@ def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
     data.mkdir(parents=True, exist_ok=True)
     port, token = _free_port(), secrets.token_urlsafe(24)
     # A variable the blocks need that is not set stops the start, with its name.
+    # MAGE_SERVICE_TAP keeps the last messages at each block for the editor's tap.
     env = dict(local_run.engine_environment(box, data, port, token),
-               MAGE_SERVICE_STRICT_ENV='on')
+               MAGE_SERVICE_STRICT_ENV='on', MAGE_SERVICE_TAP='on')
     local_run._validate(binary, env)
     log_path = folder / 'engine.log'
     log = open(log_path, 'w')
@@ -170,6 +171,41 @@ def status(repo_path: str, pipeline_uuid: str) -> Dict:
         result['error'] = str(error)
     result['pipeline_uuid'] = pipeline_uuid
     return result
+
+
+def tap(repo_path: str, pipeline_uuid: str, point: Optional[str] = None,
+        limit: int = 50) -> Dict:
+    """
+    The last messages at a tap point of the running stream (`source`, or a block whose output
+    the stream sees), with the source's secret fields redacted, and the points there are.
+    """
+    import urllib.parse
+
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.streaming.samples import redact
+
+    run = _run(repo_path, pipeline_uuid)
+    if run is None or not run.alive:
+        raise DevRunError(f'{pipeline_uuid} is not running on the local engine.')
+    query = urllib.parse.urlencode({k: v for k, v in dict(point=point, limit=limit).items()
+                                    if v is not None})
+    found = run.call('GET', f'/v1/streams/{pipeline_uuid}/tap?{query}')
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
+    secret_fields = []
+    for block in pipeline.blocks_by_uuid.values():
+        if str(block.type) == 'data_loader' and \
+                str(getattr(block.language, 'value', block.language)) == 'yaml':
+            from mage_ai.data_preparation.models.block.streaming import streaming_config
+
+            config = streaming_config(block.content or '', pipeline.variables or {})
+            if isinstance(config, dict):
+                secret_fields = config.get('secret_fields') or []
+    values, redacted = redact([m.get('value') for m in found.get('messages') or []],
+                              secret_fields)
+    for message, value in zip(found.get('messages') or [], values):
+        message['value'] = value
+    found['redacted'] = redacted
+    return found
 
 
 def control(repo_path: str, pipeline_uuid: str, action: str) -> Dict:

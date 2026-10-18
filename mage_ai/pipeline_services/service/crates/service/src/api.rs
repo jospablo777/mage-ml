@@ -58,6 +58,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/models", get(models))
         .route("/v1/streams", get(streams))
         .route("/v1/streams/{pipeline}", get(stream_detail))
+        .route("/v1/streams/{pipeline}/tap", get(stream_tap))
         .route(
             "/v1/streams/{pipeline}/messages",
             post(ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BODY)),
@@ -830,6 +831,60 @@ fn parse_messages(
     }
     let message: Box<RawValue> = serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
     Ok(vec![message])
+}
+
+#[derive(Deserialize)]
+struct TapQuery {
+    point: Option<String>,
+    limit: Option<usize>,
+}
+
+/// The last messages at a tap point of a stream (`source` by default), oldest first, and the
+/// points there are. Only with MAGE_SERVICE_TAP=on, as development runs set it.
+async fn stream_tap(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(pipeline): Path<String>,
+    Query(query): Query<TapQuery>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let streams = state
+        .service
+        .streams
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let status = streams
+        .get(&pipeline)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                format!("The service has no stream {pipeline}."),
+            )
+        })?
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    if !status.tap_enabled {
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "The tap is off: development runs turn it on (MAGE_SERVICE_TAP=on), since it \
+             keeps message data."
+                .into(),
+        ));
+    }
+    let point = query.point.unwrap_or_else(|| "source".into());
+    let limit = query
+        .limit
+        .unwrap_or(crate::stream::TAP_SIZE)
+        .min(crate::stream::TAP_SIZE);
+    let kept = status.taps.get(&point).cloned().unwrap_or_default();
+    let messages: Vec<_> = kept.iter().skip(kept.len().saturating_sub(limit)).collect();
+    Ok(Json(json!({
+        "pipeline": pipeline,
+        "point": point,
+        "points": status.taps.keys().collect::<Vec<_>>(),
+        "messages": messages,
+    })))
 }
 
 async fn stream_detail(

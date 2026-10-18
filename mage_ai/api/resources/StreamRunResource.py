@@ -30,7 +30,15 @@ class StreamRunResource(GenericResource):
         from mage_ai.streaming import dev_run
 
         pipeline = _pipeline(kwargs)
-        found = await asyncio.to_thread(dev_run.status, get_repo_path(user=user), pipeline)
+        repo_path = get_repo_path(user=user)
+        found = await asyncio.to_thread(dev_run.status, repo_path, pipeline)
+        # ?tap=<point>: the last messages there, while the stream runs.
+        point = ((kwargs.get('query') or {}).get('tap') or [None])[0]
+        if point and found.get('running'):
+            try:
+                found['tap'] = await asyncio.to_thread(dev_run.tap, repo_path, pipeline, point)
+            except dev_run.DevRunError as error:
+                found['tap'] = dict(error=str(error))
         return cls(found, user, **kwargs)
 
     @classmethod

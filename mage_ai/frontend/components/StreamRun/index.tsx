@@ -3,6 +3,7 @@ import styled from 'styled-components';
 
 import BlockType, { BlockTypeEnum } from '@interfaces/BlockType';
 import Button from '@oracle/elements/Button';
+import Select from '@oracle/elements/Inputs/Select';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
@@ -47,6 +48,15 @@ export type StreamRunType = {
   retries?: number;
   running?: boolean;
   state?: string;
+  tap?: StreamTapType;
+};
+
+export type StreamTapType = {
+  error?: string;
+  messages?: { partition: number; position?: number; value: any }[];
+  point?: string;
+  points?: string[];
+  redacted?: { [path: string]: number };
 };
 
 const PanelStyle = styled.div`
@@ -137,6 +147,11 @@ function Sparkline({ label, series }: {
   );
 }
 
+// The blocks the status already names, offered as tap points before the tap answers.
+function sinkFeeders(run: StreamRunType): string[] {
+  return (run?.blocks || []).map(({ block }) => block);
+}
+
 function headline(run: StreamRunType): string {
   if (!run || !run.running) {
     if (run?.state === 'exited') {
@@ -161,10 +176,14 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(null);
+  // The tap point whose last messages the panel shows; none until chosen.
+  const [tapPoint, setTapPoint] = useState<string>(null);
   const sinks = useMemo(() => sinksOf(blocks), [blocks]);
 
   const load = useCallback(async () => {
-    const response = await api.stream_runs.pipelines.detailAsync(pipelineUUID, 'current');
+    const response = await api.stream_runs.pipelines.detailAsync(
+      pipelineUUID, 'current', tapPoint ? { tap: tapPoint } : {},
+    );
     const found = body(response)?.stream_run;
     if (found) {
       setRun(found);
@@ -172,7 +191,7 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
       publishStreamBlocks(pipelineUUID, found.running ? (found.blocks || []) : []);
     }
     return found;
-  }, [pipelineUUID]);
+  }, [pipelineUUID, tapPoint]);
 
   // Every second while the engine runs.
   useEffect(() => {
@@ -332,6 +351,43 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
               </Text>,
             ])}
           </BlocksStyle>
+        </PanelStyle>
+      )}
+
+      {running && (
+        <PanelStyle>
+          <FlexContainer alignItems="center" justifyContent="space-between">
+            <Text bold small>Tap: the last messages at a block</Text>
+            <Select
+              aria-label="Tap point"
+              compact
+              onChange={e => setTapPoint(e.target.value || null)}
+              value={tapPoint || ''}
+            >
+              <option value="">Off</option>
+              {(run?.tap?.points?.length ? run.tap.points : ['source', ...sinkFeeders(run)])
+                .map(point => <option key={point} value={point}>{point}</option>)}
+            </Select>
+          </FlexContainer>
+          {tapPoint && run?.tap?.error && (
+            <Spacing mt={1}><Text danger small>{run.tap.error}</Text></Spacing>
+          )}
+          {tapPoint && !run?.tap?.error && (
+            <Spacing mt={1}>
+              {!run?.tap?.messages?.length && <Text muted small>No message yet.</Text>}
+              {!!Object.keys(run?.tap?.redacted || {}).length && (
+                <Text muted small>
+                  Shown with {Object.keys(run.tap.redacted).join(', ')} redacted.
+                </Text>
+              )}
+              <LogStyle>
+                {[...(run?.tap?.messages || [])].reverse()
+                  .map(m => `${m.partition}:${m.position ?? ''}  ${
+                    typeof m.value === 'string' ? m.value : JSON.stringify(m.value)
+                  }`).join('\n')}
+              </LogStyle>
+            </Spacing>
+          )}
         </PanelStyle>
       )}
 

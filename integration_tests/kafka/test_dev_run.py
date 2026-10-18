@@ -103,6 +103,15 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
         assert block['batches'] >= 1 and block['p95_ms'] >= block['p50_ms'] >= 0
         assert any('serves' in line or 'stream' in line for line in status['logs'])
 
+        # The tap: the last messages at the source and at the transformer.
+        at_source = dev_run.tap(mage_project, pipeline.uuid)
+        assert {'source', double.uuid} <= set(at_source['points'])
+        # Two partitions: the order across them is the order of arrival.
+        assert sorted(m['value']['n'] for m in at_source['messages']) == list(range(10))
+        at_double = dev_run.tap(mage_project, pipeline.uuid, double.uuid, limit=3)
+        assert len(at_double['messages']) == 3
+        assert all(m['value']['twice'] == m['value']['n'] * 2 for m in at_double['messages'])
+
         paused = dev_run.control(mage_project, pipeline.uuid, 'pause')
         assert paused['paused'] is True
         produce(kafka_bootstrap, kafka_topic, 10, 5)

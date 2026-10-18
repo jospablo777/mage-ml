@@ -27,4 +27,5 @@ class StreamRunPresenter(BasePresenter):
         'running',
         'started_at',
         'state',
+        'tap',
     ]

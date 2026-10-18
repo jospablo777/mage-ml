@@ -50,6 +50,47 @@ pub struct StreamStatus {
     pub lag_history: VecDeque<i64>,
     /// Each block's numbers, in the order the blocks first ran.
     pub blocks: Vec<BlockStatus>,
+    /// The last messages at each tap point (`source`, and each block whose output the stream
+    /// sees), when MAGE_SERVICE_TAP=on: development runs only, since they hold message data.
+    #[serde(skip)]
+    pub taps: BTreeMap<String, VecDeque<TapMessage>>,
+    #[serde(skip)]
+    pub tap_enabled: bool,
+}
+
+/// A message seen at a tap point.
+#[derive(Debug, Clone, Serialize)]
+pub struct TapMessage {
+    pub partition: u32,
+    pub position: Option<i64>,
+    pub value: serde_json::Value,
+}
+
+/// Messages kept per tap point.
+pub const TAP_SIZE: usize = 50;
+
+/// Keeps the last messages of a batch at a tap point; only those are decoded.
+fn tap(status: &SharedStatus, point: &str, batch: &RecordBatch) {
+    let Ok(messages) = read_envelope(batch) else {
+        return;
+    };
+    let start = messages.len().saturating_sub(TAP_SIZE);
+    if let Ok(mut s) = status.lock() {
+        let kept = s.taps.entry(point.to_string()).or_default();
+        for message in &messages[start..] {
+            let value = serde_json::from_slice(&message.value).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&message.value).into_owned())
+            });
+            if kept.len() == TAP_SIZE {
+                kept.pop_front();
+            }
+            kept.push_back(TapMessage {
+                partition: message.partition,
+                position: message.position,
+                value,
+            });
+        }
+    }
 }
 
 /// What one block did since the stream started: messages in and out, batches, batch errors,
@@ -143,6 +184,8 @@ pub struct StreamParts {
     /// Paused from the API or the console: the source stops fetching while batches in flight
     /// finish and commit. None for a stream nobody pauses.
     pub pause: Option<tokio::sync::watch::Receiver<bool>>,
+    /// Keep the last messages at each tap point (MAGE_SERVICE_TAP=on, development runs).
+    pub tap: bool,
 }
 
 enum Internal {
@@ -352,6 +395,8 @@ const IDLE_WARNING_AFTER: Duration = Duration::from_secs(60);
 
 /// Runs the stream until it finishes (a finite source, a shutdown) or stops on an error.
 pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: CancellationToken) {
+    let tapping = parts.tap;
+    count(&status, |s| s.tap_enabled = tapping);
     let (tx, mut rx) = mpsc::unbounded_channel::<Internal>();
     let mut machine = RunnerMachine::new(parts.config.clone());
 
@@ -433,6 +478,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
             Some(message) = rx.recv() => match message {
                 Internal::Event(event) => events.push(event),
                 Internal::Transformed(id, Ok(output)) => {
+                    if tapping {
+                        for (block, batch) in &output.outputs {
+                            tap(&status, block, batch);
+                        }
+                    }
                     let rows: usize = output.outputs.values().map(RecordBatch::num_rows).sum();
                     count(&status, |s| {
                         s.messages_out += rows as u64;
@@ -561,6 +611,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         s.batches += 1;
                         s.messages_in += meta.records as u64;
                     });
+                    if tapping {
+                        tap(&status, "source", &batch);
+                    }
                     inputs.insert(meta.id, (batch, meta.clone()));
                     events.push(Event::BatchRead(meta));
                 }
@@ -862,6 +915,7 @@ mod tests {
             config: config(2, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -901,6 +955,7 @@ mod tests {
                 config: config(1, false, PoisonPolicy::Stop),
                 shutdown_deadline: Duration::from_secs(5),
                 pause: Some(receiver),
+                tap: false,
             },
             status.clone(),
             CancellationToken::new(),
@@ -1011,6 +1066,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1025,6 +1081,49 @@ mod tests {
             (status.blocks[0].p50_ms, status.blocks[1].p95_ms),
             (1.0, 3.0)
         );
+    }
+
+    #[tokio::test]
+    async fn the_tap_keeps_the_last_messages_at_the_source_and_each_output() {
+        let source = MemorySource::new(vec![messages(80)], 4, true);
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(MemorySink::new()), Some("keep".into()))],
+            dead_letter: None,
+            transform: Some(Box::new(Timed)),
+            config: config(1, false, PoisonPolicy::Stop),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+            tap: true,
+        })
+        .await;
+
+        assert!(status.tap_enabled);
+        let source = &status.taps["source"];
+        assert_eq!(source.len(), TAP_SIZE);
+        assert_eq!(source.back().unwrap().value["n"], 79);
+        let kept = &status.taps["keep"];
+        assert!(kept.iter().all(|m| m.value["n"].as_u64().unwrap() % 2 == 0));
+    }
+
+    #[tokio::test]
+    async fn without_the_tap_no_message_is_kept() {
+        let source = MemorySource::new(vec![messages(10)], 4, true);
+        let status = drive(StreamParts {
+            name: "orders".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(MemorySink::new()), None)],
+            dead_letter: None,
+            transform: None,
+            config: config(1, false, PoisonPolicy::Stop),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+            tap: false,
+        })
+        .await;
+
+        assert!(status.taps.is_empty());
     }
 
     /// Rejects messages whose n is a multiple of self.0, on their own; passes the others.
@@ -1083,6 +1182,7 @@ mod tests {
             config: config(1, true, PoisonPolicy::DeadLetter),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1213,6 +1313,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1248,6 +1349,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1281,6 +1383,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::DeadLetter),
             shutdown_deadline: Duration::from_millis(200),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1304,6 +1407,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::DeadLetter),
             shutdown_deadline: Duration::from_millis(200),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1327,6 +1431,7 @@ mod tests {
             config: config(1, true, PoisonPolicy::DeadLetter),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1357,6 +1462,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1381,6 +1487,7 @@ mod tests {
             config: config(1, false, PoisonPolicy::Stop),
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
+            tap: false,
         })
         .await;
 
@@ -1412,6 +1519,7 @@ mod tests {
                 config: config(1, false, PoisonPolicy::Stop),
                 shutdown_deadline: Duration::from_millis(50),
                 pause: None,
+                tap: false,
             },
             status.clone(),
             shutdown.clone(),
@@ -1440,6 +1548,7 @@ mod tests {
                 config: config(1, false, PoisonPolicy::Stop),
                 shutdown_deadline: Duration::from_secs(5),
                 pause: None,
+                tap: false,
             },
             SharedStatus::default(),
             shutdown,

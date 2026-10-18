@@ -64,6 +64,8 @@ test('a stream starts on the local engine, pauses, resumes and stops', async ({ 
   expect(asked[0]).toContain(`run_sink_${SUFFIX}`);
   await expect(page.getByText('run_panel-dev-', { exact: false })).toBeVisible();
   await expect(page.getByText('Engine log')).toBeVisible();
+  await page.getByLabel('Tap point').selectOption('source');
+  await expect(page.getByText('No message yet.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Pause' }).click();
   await expect(page.getByText(/^Paused · /)).toBeVisible();
