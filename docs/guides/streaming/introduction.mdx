@@ -57,6 +57,15 @@ pipeline:
 - [Snowflake](/guides/streaming/destinations/snowflake)
 - [Trino](/guides/streaming/destinations/trino)
 
+## Start from a template
+
+**New > Streaming** asks where the pipeline starts from: Kafka, RabbitMQ, NATS JetStream, a
+webhook (HTTP) or PostgreSQL changes, or empty. A template adds the source, with its
+connection settings read from the environment (`KAFKA_BOOTSTRAP`, `PGHOST` and so on), a
+Python transformer, a sink that prints, and a sample named `example`, so the transformer runs
+on the sample with the first ⌘↵. Fill in the variables to run the stream, and replace the
+printing sink with a real one when the output looks right.
+
 ## Develop blocks on sample messages
 
 Write and test a transformer on real messages without starting the stream.

@@ -263,11 +263,12 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
     ({ pipelineType }: { pipelineType: PipelineTypeEnum }) => (
       <ConfigurePipeline
         onClose={hideCreatePipelineModal}
-        onSave={({ name, description, tags }) => {
+        onSave={({ name, description, stream_template: streamTemplate, tags }) => {
           createPipeline({
             pipeline: {
               description,
               name,
+              stream_template: streamTemplate,
               tags,
               type: pipelineType,
             },

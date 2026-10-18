@@ -4,6 +4,7 @@ import Button from '@oracle/elements/Button';
 import Flex from '@oracle/components/Flex';
 import FlexContainer from '@oracle/components/FlexContainer';
 import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButton';
+import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import TextArea from '@oracle/elements/Inputs/TextArea';
@@ -24,11 +25,23 @@ import {
 import { UNIT } from '@oracle/styles/units/spacing';
 import { randomNameGenerator } from '@utils/string';
 
+// A new streaming pipeline can start from a source with a transformer, a printing sink and
+// a sample (mage_ai/streaming/templates.py).
+const STREAM_TEMPLATES = [
+  ['', 'Empty'],
+  ['kafka', 'Kafka'],
+  ['rabbitmq', 'RabbitMQ'],
+  ['nats', 'NATS JetStream'],
+  ['webhook', 'Webhook (HTTP)'],
+  ['postgres', 'PostgreSQL changes'],
+];
+
 type ConfigurePipelineProps = {
   onClose: () => void;
   onSave: (opts: {
     name: string;
     description?: string;
+    stream_template?: string;
     tags?: string[];
     type?: PipelineTypeEnum;
   }) => void;
@@ -45,6 +58,7 @@ function ConfigurePipeline({
   const [pipelineAttributes, setPipelineAttributes] = useState<{
     name: string;
     description?: string;
+    stream_template?: string;
     tags?: string;
   }>({
     name: randomNameGenerator(),
@@ -126,6 +140,30 @@ function ConfigurePipeline({
           value={pipelineAttributes?.name || ''}
         />
       </RowStyle>
+
+      {PipelineTypeEnum.STREAMING === pipelineType && (
+        <RowStyle lightBackground>
+          <Text default>
+            Start from
+          </Text>
+          <Select
+            aria-label="Start from"
+            compact
+            onChange={e => {
+              const value = e.target.value;
+              setPipelineAttributes((prev) => ({
+                ...prev,
+                stream_template: value || undefined,
+              }));
+            }}
+            value={pipelineAttributes?.stream_template || ''}
+          >
+            {STREAM_TEMPLATES.map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </Select>
+        </RowStyle>
+      )}
 
       <RowStyle lightBackground>
         <Text default>

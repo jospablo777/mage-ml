@@ -63,6 +63,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Stream development in the editor
 
+- New streaming pipelines can start from a template per source (Kafka, RabbitMQ, NATS,
+  webhook, PostgreSQL changes) with a transformer, a printing sink and a sample.
 - The **Run** tab starts a streaming pipeline on the local engine with development positions
   and the sinks it writes named first; it shows state, rates, lag, totals and the engine's
   log, and pauses, resumes and stops the stream.

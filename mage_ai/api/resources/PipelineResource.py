@@ -6,6 +6,7 @@ from typing import Dict, List
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 
+from mage_ai.api.errors import ApiError
 from mage_ai.api.operations.constants import (
     DELETE,
     DETAIL,
@@ -24,6 +25,7 @@ from mage_ai.data_preparation.models.constants import (
     BlockLanguage,
     BlockType,
     PipelineStatus,
+    PipelineType,
 )
 from mage_ai.data_preparation.models.custom_templates.custom_pipeline_template import (
     CustomPipelineTemplate,
@@ -423,6 +425,15 @@ class PipelineResource(BaseResource):
             source = Pipeline.get(clone_pipeline_uuid, repo_path=repo_path)
             pipeline = await Pipeline.duplicate(source, name)
         else:
+            stream_template = payload.get('stream_template')
+            if stream_template:
+                from mage_ai.streaming.templates import SOURCES
+
+                if stream_template not in SOURCES:
+                    raise ApiError(dict(code=400, message=(
+                        f'No stream template {stream_template}; there are '
+                        f'{", ".join(SOURCES)}.')))
+                pipeline_type = PipelineType.STREAMING
             pipeline = Pipeline.create(
                 name,
                 description=description,
@@ -431,6 +442,11 @@ class PipelineResource(BaseResource):
                 tags=tags,
                 execution_framework=payload.get('execution_framework'),
             )
+            if stream_template:
+                from mage_ai.streaming.templates import apply
+
+                apply(pipeline, stream_template)
+                pipeline = Pipeline.get(pipeline.uuid, repo_path=repo_path)
 
         record_create_pipeline(
             resource_uuid=pipeline.uuid,

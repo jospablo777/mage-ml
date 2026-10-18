@@ -530,12 +530,14 @@ function PipelineListPage() {
       onSave={({
         name,
         description,
+        stream_template: streamTemplate,
         tags,
       }) => {
         createPipeline({
           pipeline: {
             description,
             name,
+            stream_template: streamTemplate,
             tags,
             type: pipelineType,
           },

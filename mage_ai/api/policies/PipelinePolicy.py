@@ -131,6 +131,7 @@ PipelinePolicy.allow_write(
         'description',
         'extensions',
         'name',
+        'stream_template',
         'tags',
         'type',
     ],
