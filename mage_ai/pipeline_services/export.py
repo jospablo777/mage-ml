@@ -559,7 +559,8 @@ STREAM_SOURCES = {
     'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
     # Read through Event Hubs' Kafka endpoint.
     'azure_event_hub': 'kafka',
-    'nats_js': 'nats', 'mongodb': 'mongodb',
+    # nats is Mage's name (the block templates, the executor); nats_js an older alias.
+    'nats': 'nats', 'nats_js': 'nats', 'mongodb': 'mongodb',
     # Changes by logical replication.
     'postgres': 'postgres',
     'amazon_sqs': 'sqs', 'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
@@ -568,7 +569,7 @@ STREAM_SINKS = {
     'kafka': 'kafka', 'dummy': 'stdout', 'http': 'http', 'feast': 'feast', 'rabbitmq': 'rabbitmq',
     'ibm_mq': 'ibm_mq', 'object_storage': 'object_storage', 'amazon_s3': 'object_storage',
     'google_cloud_storage': 'object_storage', 'postgres': 'postgres',
-    'clickhouse': 'clickhouse', 'nats_js': 'nats', 'mongodb': 'mongodb',
+    'clickhouse': 'clickhouse', 'nats': 'nats', 'nats_js': 'nats', 'mongodb': 'mongodb',
     'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
     'elasticsearch': 'search', 'opensearch': 'search', 'influxdb': 'influxdb',
 }

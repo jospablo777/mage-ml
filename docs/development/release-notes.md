@@ -173,6 +173,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - The first export on a fresh server is fast (secret clients made on first use).
 - A page opened at `localhost` on a port other than 6789 talks to its own server. It sent
   every call to port 6789, so with two servers it edited the other project.
+- A NATS stream exports as a service with `connector_type: nats`, the name Mage runs; only
+  `nats_js` was accepted.
 - Exported services no longer require packages that a `.pth` file loads when Python starts
   (such as `ibm-db`, which has no Linux arm64 wheel and broke image builds there).
 - `mage service check --affected` finds a new service whose folder is not yet in Git.

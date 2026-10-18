@@ -807,7 +807,8 @@ class StreamRefusalTest(StreamExportTestCase):
         problems = self.problems()
         self.assertIn(
             'uses the kinesis connector; services run activemq, amazon_sqs, azure_event_hub, '
-            'google_cloud_pubsub, ibm_mq, kafka, mongodb, nats_js, postgres, rabbitmq, webhook '
+            'google_cloud_pubsub, ibm_mq, kafka, mongodb, nats, nats_js, postgres, rabbitmq, '
+            'webhook '
             'sources now',
             problems,
         )
@@ -883,9 +884,10 @@ class StreamRefusalTest(StreamExportTestCase):
         self.assertIn('Azure Event Hubs needs eventhub_name', problems)
 
     def test_nats_jetstream_streams_keep_their_settings(self):
+        """nats is the name Mage runs; the export refused it and took only nats_js."""
         self.stream(
             source=textwrap.dedent('''
-                connector_type: nats_js
+                connector_type: nats
                 server_url: nats://nats:4222
                 stream_name: orders
                 subject: orders.new
@@ -901,6 +903,7 @@ class StreamRefusalTest(StreamExportTestCase):
                 subject: scores.new
             '''),
         )
+        # nats_js stays an alias.
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
         stream = captured.manifest['pipelines'][0]['stream']
         self.assertEqual(stream['source']['kind'], 'nats')
