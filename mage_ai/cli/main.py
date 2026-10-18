@@ -1345,8 +1345,8 @@ DEPLOY_ENV = typer.Option(..., '--env', help='the environment to deploy to.')
 
 
 def _deploy_target(project: str, name: str, env: str):
-    """The environment's deploy target: Docker (the default) or Kubernetes."""
-    from mage_ai.pipeline_services import deploy, kubernetes, local_run
+    """The environment's deploy target: Docker (the default), Kubernetes or Code Engine."""
+    from mage_ai.pipeline_services import code_engine, deploy, kubernetes, local_run
 
     try:
         settings = local_run.environment_settings(project, name, env)
@@ -1355,13 +1355,15 @@ def _deploy_target(project: str, name: str, env: str):
             return deploy.DockerTarget(), settings
         if target == 'kubernetes':
             return kubernetes.KubernetesTarget(settings, environment=env), settings
+        if target == 'code_engine':
+            return code_engine.CodeEngineTarget(settings, environment=env), settings
     except (local_run.LocalRunError, deploy.DeployError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
     typer.echo(
-        f'Environment {env} deploys to {target}; mage service deploy supports docker and '
-        f'kubernetes so far. Use the build context (mage service export {name}) and its '
-        'deploy/ files.',
+        f'Environment {env} deploys to {target}; mage service deploy supports docker, '
+        f'kubernetes and code_engine. Use the build context (mage service export {name}) '
+        'and its deploy/ files.',
         err=True,
     )
     raise typer.Exit(code=1)
@@ -1398,7 +1400,7 @@ def service_deploy(
         for problem in result.problems:
             typer.echo(f'  - {problem}', err=True)
         raise typer.Exit(code=1)
-    on_cluster = settings.get('target') == 'kubernetes'
+    on_cluster = settings.get('target') in ('kubernetes', 'code_engine')
     try:
         box = lifecycle.build(project, name)
         _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
@@ -1444,8 +1446,12 @@ def service_deploy(
     except deploy.DeployError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1)
-    where = (f'deployment/mage-{name}-{env} in {target.context}, namespace {target.namespace}'
-             if on_cluster else f'http://127.0.0.1:{port}')
+    if settings.get('target') == 'kubernetes':
+        where = f'deployment/mage-{name}-{env} in {target.context}, namespace {target.namespace}'
+    elif settings.get('target') == 'code_engine':
+        where = target.api_url(name, env)
+    else:
+        where = f'http://127.0.0.1:{port}'
     typer.echo(f'{name} runs in {env} on {where} ({deployment.image}).')
     typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
 

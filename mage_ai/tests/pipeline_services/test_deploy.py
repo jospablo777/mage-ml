@@ -270,9 +270,13 @@ class DeployCommandTest(TestCase):
 
         environments = self.project / 'services' / 'shop' / 'environments'
         (environments / 'ce.yaml').write_text('target: code_engine\n')
-        other, _ = self.invoke('deploy', 'shop', '--env', 'ce')
+        unset, _ = self.invoke('deploy', 'shop', '--env', 'ce')
+        self.assertEqual(unset.exit_code, 1)
+        self.assertIn('Set region, project_id, image in environments/ce.yaml', unset.output)
+        (environments / 'nomad.yaml').write_text('target: nomad\n')
+        other, _ = self.invoke('deploy', 'shop', '--env', 'nomad')
         self.assertEqual(other.exit_code, 1)
-        self.assertIn('supports docker and kubernetes so far', other.output)
+        self.assertIn('supports docker, kubernetes and code_engine', other.output)
 
 
 class ServicesListDeploymentsTest(TestCase):

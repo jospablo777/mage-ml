@@ -127,6 +127,7 @@ def workflow(project: str, rules: List[Rule], mage_version: str) -> str:
         '#   <SERVICE>_<ENV>_ENV   the service\'s .env.<env>: KEY=value lines with its secrets;',
         '#                         MAGE_SERVICE_TOKEN=<token> pins the API token',
         '#   KUBECONFIG            a kubeconfig with the contexts the environments name',
+        '#   IBM_CLOUD_API_KEY     for Code Engine environments',
         '#   REGISTRY_USERNAME and REGISTRY_PASSWORD   to push images',
         '# Pin the actions to commit SHAs if your organization requires it.',
         'name: MageML services',
@@ -230,6 +231,8 @@ def workflow(project: str, rules: List[Rule], mage_version: str) -> str:
             '          username: ${{ secrets.REGISTRY_USERNAME }}',
             '          password: ${{ secrets.REGISTRY_PASSWORD }}',
             '      - name: Deploy',
+            '        env:',
+            '          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}',
             f'        run: mage service deploy "$SERVICE" --env {env} --if-changed '
             '--timeout 600 --project "$MAGE_PROJECT"',
         ]
@@ -251,8 +254,8 @@ def write(repo_path: str, rules: List[Rule], force: bool = False,
         if local:
             raise CiError(
                 f'{", ".join(local)} deploy {rule.environment} to Docker, which in CI is the '
-                'runner\'s and ends with the job: set target: kubernetes in their '
-                f'environments/{rule.environment}.yaml.'
+                'runner\'s and ends with the job: set target: kubernetes or code_engine in '
+                f'their environments/{rule.environment}.yaml.'
             )
     if len({r.environment for r in rules}) != len(rules):
         raise CiError('Each environment takes one rule.')

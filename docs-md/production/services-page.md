@@ -158,7 +158,40 @@ and `kubectl rollout undo` brings the previous revision back.
 - `runs` and `logs` reach the service through a `kubectl port-forward` that they stop
   afterwards; `logs --engine` runs `kubectl logs`.
 
-IBM Code Engine deploys from the build context's `deploy/ibm/code-engine.sh` for now.
+### Deploy to IBM Cloud Code Engine
+
+An environment with `target: code_engine` deploys through the Code Engine API with an IAM
+token from `IBM_CLOUD_API_KEY` (or a trusted profile):
+
+```yaml
+# services/shop-live/environments/prod.yaml
+target: code_engine
+region: eu-de
+project_id: 0f9c1e3a-...          # the Code Engine project's ID
+image: icr.io/team/shop-live      # pushed as icr.io/team/shop-live:<lock digest>, for amd64
+image_secret: icr-secret          # optional: the project's registry access secret
+cpu: "1"                          # optional
+memory: 2G                        # optional
+visibility: public                # public (default), private or project
+variables:
+  REGION: eu
+```
+
+`mage service deploy shop-live --env prod` pushes the image, creates the Secret
+`mage-shop-live-prod-env-<digest>` with the variables, the secrets of `.env.prod` and the API
+token, and creates or updates the app `mage-shop-live-prod` with one instance, always on. It
+waits for a new revision to be ready; when it is not, the app is patched back as it was.
+
+- Code Engine keeps only one inactive revision, so the app records the previous image and
+  Secret itself: `rollback` swaps them, and a second `rollback` swaps them back.
+- `status`, `runs` and `logs` use the app's URL; `logs --engine` runs
+  `ibmcloud ce app logs` with the API key, in a CLI home of its own.
+- Code Engine apps have no persistent volume: run history, and the positions of sources the
+  engine keeps itself, start empty when the instance is replaced. Kafka keeps its offsets in
+  Kafka, so Kafka streams resume.
+
+`deploy/ibm/code-engine.sh` in the build context remains for building from source in Code
+Engine.
 
 ### Runs and logs
 

@@ -66,6 +66,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Services
 
+- `mage service deploy`, `status`, `diff` and `rollback` for IBM Cloud Code Engine through
+  its API: content-named Secrets, a wait for the new revision with the app patched back on
+  failure, and rollback from the previous deployment the app records.
 - `mage service deploy`, `status`, `diff` and `rollback` for Kubernetes targets: images
   pushed by lock digest, Secrets named by content so a rollout undo restores the variables,
   rollout waits with automatic undo, and status from the pod template's annotations.

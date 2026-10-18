@@ -72,6 +72,10 @@ def endpoint(repo_path: str, name: str, environment: Optional[str] = None,
         return Endpoint(f'http://127.0.0.1:{port}', token_file.read_text().strip())
     target = target or deploy.DockerTarget()
     token_file = deploy.token_file(repo_path, name, environment)
+    if hasattr(target, 'api_url'):
+        if not token_file.is_file():
+            raise ClientError(f'No API token for {name} in {environment} ({token_file}).')
+        return Endpoint(target.api_url(name, environment), token_file.read_text().strip())
     if hasattr(target, 'port_forward'):
         if not token_file.is_file():
             raise ClientError(f'No API token for {name} in {environment} ({token_file}).')

@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 LABEL = 'ai.mageml'
+# Targets whose deployments status asks for remotely.
+REMOTE_TARGETS = ('kubernetes', 'code_engine')
 CONTAINER_PORT = 8080
 DATA_PATH = '/var/lib/mage-service'
 
@@ -238,7 +240,8 @@ def deployments(
 ) -> Tuple[List[Deployment], List[str]]:
     """
     Every deployment of the project's services, or of one: Docker's from their labels, and
-    each Kubernetes environment's, asked in parallel. Returns them and what could not be read.
+    each Kubernetes and Code Engine environment's, asked in parallel. Returns them and what
+    could not be read.
     """
     import shutil
     from concurrent.futures import ThreadPoolExecutor
@@ -262,11 +265,16 @@ def deployments(
                 settings = yaml.safe_load(path.read_text()) or {}
             except yaml.YAMLError:
                 continue
-            if isinstance(settings, dict) and settings.get('target') == 'kubernetes':
+            if isinstance(settings, dict) and settings.get('target') in REMOTE_TARGETS:
                 clusters.append((name, path.stem, settings))
 
     def inspect(item):
         name, environment, settings = item
+        if settings['target'] == 'code_engine':
+            from mage_ai.pipeline_services import code_engine
+
+            return code_engine.CodeEngineTarget(settings, environment=environment) \
+                .inspect(name, environment)
         options = dict(environment=environment, request_timeout=request_timeout)
         if kubernetes_runner is not None:
             options['runner'] = kubernetes_runner
