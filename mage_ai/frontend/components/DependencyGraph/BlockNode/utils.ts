@@ -167,6 +167,7 @@ export function getBlockNodeHeight(block: BlockType, pipeline: PipelineType, opt
   blockStatus: {
     [uuid: string]: {
       runtime?: number,
+      streamBadge?: string,
     };
   };
   callbackBlocks: BlockType[];
@@ -216,7 +217,8 @@ export function getBlockNodeHeight(block: BlockType, pipeline: PipelineType, opt
     }
   });
 
-  if (typeof blockStatus?.[block.uuid]?.runtime !== 'undefined') {
+  if (typeof blockStatus?.[block.uuid]?.runtime !== 'undefined'
+    || blockStatus?.[block.uuid]?.streamBadge) {
     height += TAG_HEIGHT;
     spacingBetweenRowsCount += 1;
   }
@@ -233,6 +235,7 @@ export function getBlockNodeWidth(block: BlockType, pipeline: PipelineType, opts
   blockStatus: {
     [uuid: string]: {
       runtime?: number,
+      streamBadge?: string,
     };
   };
   callbackBlocks: BlockType[];

@@ -7,6 +7,7 @@ import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
+import { publishStreamBlocks } from './badges';
 import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS } from '@oracle/styles/units/borders';
 import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
@@ -70,6 +71,18 @@ const BlocksStyle = styled.div`
   gap: ${UNIT * 0.5}px ${UNIT * 1.5}px;
   grid-template-columns: minmax(0, 1fr) repeat(5, auto);
   overflow-x: auto;
+`;
+
+// Long block names end with an ellipsis; the full name is the tooltip.
+const NameStyle = styled.div`
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  p {
+    display: inline;
+  }
 `;
 
 const LogStyle = styled.pre`
@@ -155,6 +168,8 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
     const found = body(response)?.stream_run;
     if (found) {
       setRun(found);
+      // The graph shows each block's numbers while the stream runs.
+      publishStreamBlocks(pipelineUUID, found.running ? (found.blocks || []) : []);
     }
     return found;
   }, [pipelineUUID]);
@@ -303,9 +318,9 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
               <Text key={label} muted xsmall>{label}</Text>
             ))}
             {run.blocks.map(block => [
-              <Text key={`${block.block}-name`} monospace small title={block.block}>
-                {block.block}
-              </Text>,
+              <NameStyle key={`${block.block}-name`} title={block.block}>
+                <Text monospace small>{block.block}</Text>
+              </NameStyle>,
               <Text key={`${block.block}-in`} small>{block.messages_in.toLocaleString()}</Text>,
               <Text key={`${block.block}-out`} small>
                 {block.messages_out.toLocaleString()}

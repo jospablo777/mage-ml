@@ -63,6 +63,7 @@ import {
 } from './utils';
 import { find, indexBy, removeAtIndex, sortByKey } from '@utils/array';
 import { getBlockNodeHeight, getBlockNodeWidth } from './BlockNode/utils';
+import { useStreamBadges } from '@components/StreamRun/badges';
 import { getBlockRunBlockUUID } from '@utils/models/blockRun';
 import { getColorsForBlockType } from '@components/CodeBlock/index.style';
 import {
@@ -162,6 +163,7 @@ export type DependencyGraphProps = {
     [uuid: string]: {
       status: RunStatus,
       runtime?: number,
+      streamBadge?: string,
     };
   };
   blocksOverride?: BlockType[];
@@ -226,7 +228,7 @@ export type DependencyGraphProps = {
 function DependencyGraph({
   addNewBlockAtIndex,
   blockRefs,
-  blockStatus,
+  blockStatus: blockStatusProp,
   blocksOverride,
   blocks: allBlocksProp,
   contentByBlockUUID,
@@ -257,6 +259,21 @@ function DependencyGraph({
   treeRef,
   zoomable = true,
 }: DependencyGraphProps) {
+  // A stream running on the local engine: each block's numbers on its node.
+  const streamBadges = useStreamBadges(
+    pipeline?.uuid,
+    PipelineTypeEnum.STREAMING === pipeline?.type,
+  );
+  const blockStatus = useMemo(() => {
+    if (!Object.keys(streamBadges).length) {
+      return blockStatusProp;
+    }
+    const merged = { ...(blockStatusProp || {}) };
+    Object.entries(streamBadges).forEach(([uuid, badge]) => {
+      merged[uuid] = { ...(merged[uuid] || {}), streamBadge: badge } as any;
+    });
+    return merged;
+  }, [blockStatusProp, streamBadges]);
   const { featureEnabled, featureUUIDs } = useProject();
   const themeContext: ThemeType = useContext(ThemeContext);
   const colorsInverse = useMemo(() => inverseColorsMapping(themeContext), [themeContext]);
@@ -1113,6 +1130,7 @@ function DependencyGraph({
             opacity={opacity}
             pipeline={pipeline}
             selected={selected}
+            streamBadge={blockStatus?.[downstreamBlock?.uuid]?.streamBadge}
           />,
         );
       });
@@ -1194,6 +1212,7 @@ function DependencyGraph({
         opacity={opacity}
         pipeline={pipeline}
         selected={selected}
+        streamBadge={blockStatus?.[block?.uuid]?.streamBadge}
       >
         {blockNodeChildrenEl}
       </BlockNode>
@@ -2157,6 +2176,7 @@ function DependencyGraph({
                         pipeline={pipeline}
                         selected={selected}
                         selectedBlock={selectedBlock}
+                        streamBadge={blockStatus?.[block?.uuid]?.streamBadge}
                       />
                     </foreignObject>
                   );

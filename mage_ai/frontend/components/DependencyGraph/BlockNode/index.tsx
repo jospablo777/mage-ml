@@ -78,6 +78,8 @@ type BlockNodeProps = {
   runtime?: number;
   selected?: boolean;
   selectedBlock?: BlockType;
+  // A running stream's numbers for the block (messages in and out, p95 time).
+  streamBadge?: string;
 };
 
 function BlockNode({
@@ -105,6 +107,7 @@ function BlockNode({
   runtime: runtimeFromBlockRun,
   selected,
   selectedBlock,
+  streamBadge,
 }: BlockNodeProps) {
   const themeContext: ThemeType = useContext(ThemeContext);
 
@@ -414,7 +417,15 @@ function BlockNode({
                 return;
               })}
 
-              {(runtimeFromBlock || runtimeFromBlockRun) && (
+              {streamBadge && (
+                <Spacing mt={1}>
+                  <Text monospace small>
+                    {streamBadge}
+                  </Text>
+                </Spacing>
+              )}
+
+              {!streamBadge && (runtimeFromBlock || runtimeFromBlockRun) && (
                 <Spacing mt={1}>
                   <Text
                     monospace

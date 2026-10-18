@@ -68,6 +68,7 @@ services that run in the Rust engine, with Python, Rust or R blocks
   fixed, after the topic's name is typed.
 - New streaming pipelines can start from a template per source (Kafka, RabbitMQ, NATS,
   webhook, PostgreSQL changes) with a transformer, a printing sink and a sample.
+- While a stream runs on the local engine, the dependency graph shows each block's numbers.
 - A stream service's `/v1/streams/<pipeline>` reports each block's messages in and out,
   batches, errors and median and 95th percentile time per batch; the Run tab shows them.
 - The **Run** tab starts a streaming pipeline on the local engine with development positions

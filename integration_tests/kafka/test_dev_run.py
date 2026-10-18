@@ -122,3 +122,24 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
     finally:
         dev_run.stop(mage_project, pipeline.uuid)
         pipeline.delete()
+
+
+def test_a_variable_the_stream_needs_stops_the_start_with_its_name(mage_project, monkeypatch):
+    """The engine started, warned, and served a stream that could not run."""
+    from integration_tests.exported_services import stream_service_binary
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.streaming import dev_run, templates
+
+    monkeypatch.setenv('MAGE_ENGINE_PATH', str(stream_service_binary()))
+    monkeypatch.delenv('KAFKA_BOOTSTRAP', raising=False)
+    pipeline = Pipeline.create(f'dev_strict_{uuid.uuid4().hex[:8]}',
+                               pipeline_type=PipelineType.STREAMING, repo_path=mage_project)
+    try:
+        templates.apply(pipeline, 'kafka')
+        with pytest.raises(dev_run.DevRunError, match='KAFKA_BOOTSTRAP'):
+            dev_run.start(mage_project, pipeline.uuid, [], user='ada')
+        assert dev_run.status(mage_project, pipeline.uuid)['state'] == 'not_started'
+    finally:
+        dev_run.stop(mage_project, pipeline.uuid)
+        pipeline.delete()

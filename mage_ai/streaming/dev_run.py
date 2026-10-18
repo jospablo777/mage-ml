@@ -116,7 +116,9 @@ def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
     data = folder / 'data'
     data.mkdir(parents=True, exist_ok=True)
     port, token = _free_port(), secrets.token_urlsafe(24)
-    env = local_run.engine_environment(box, data, port, token)
+    # A variable the blocks need that is not set stops the start, with its name.
+    env = dict(local_run.engine_environment(box, data, port, token),
+               MAGE_SERVICE_STRICT_ENV='on')
     local_run._validate(binary, env)
     log_path = folder / 'engine.log'
     log = open(log_path, 'w')
