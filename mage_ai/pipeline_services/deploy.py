@@ -45,6 +45,8 @@ class Deployment:
     reason: str = ''
     # values_digest of the environment's values.
     values: str = ''
+    # The environment whose image a promotion deployed (deploy --from).
+    promoted_from: str = ''
 
     def drift(self, lock: Optional[str]) -> str:
         if self.state != 'running':
@@ -215,6 +217,7 @@ def _deployment(item: Dict) -> Deployment:
         port=int(port) if port and port.isdigit() else None,
         reason=labels.get(f'{LABEL}.reason', ''),
         values=labels.get(f'{LABEL}.values', ''),
+        promoted_from=labels.get(f'{LABEL}.promoted_from', ''),
     )
 
 
@@ -229,6 +232,20 @@ def _healthy(port: int, timeout: float) -> bool:
             pass
         time.sleep(1)
     return False
+
+
+def copy_image(source: str, destination: str, push: bool, runner: Runner = _docker) -> None:
+    """Tags the image another environment runs for this one, pulling and pushing as needed."""
+    def run(*arguments):
+        result = runner(list(arguments))
+        if result.returncode != 0:
+            raise DeployError(f'docker {arguments[0]} failed: {(result.stderr or "").strip()}')
+
+    if runner(['image', 'inspect', source]).returncode != 0:
+        run('pull', source)
+    run('tag', source, destination)
+    if push:
+        run('push', destination)
 
 
 def deployments(

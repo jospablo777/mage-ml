@@ -243,7 +243,19 @@ mage service ci --deploy dev=main --deploy 'prod=tag:v*'
 - A deploy keeps the API token of the running deployment, so clients keep working; set
   `MAGE_SERVICE_TOKEN` in the environment secret to choose it.
 
+- `--promote prod=staging` makes the `prod` rule deploy the image `staging` runs instead of
+  a new build (see below).
+
 The workflow is yours to edit; `mage service ci --force` writes it again.
+
+### Promote from one environment to the next
+
+`mage service deploy shop-live --env prod --from staging` deploys the image that staging runs,
+with its lock and commit, so production runs exactly what staging tested. Nothing is built;
+prod keeps its own variables, secrets and API token, and `status` shows `promoted from
+staging`. When prod pulls from another repository, the image is tagged and pushed there
+first (so this machine or the CI job needs access to both registries). Staging must be
+running.
 
 ### Run a service locally
 

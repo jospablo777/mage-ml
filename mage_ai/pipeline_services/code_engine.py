@@ -263,6 +263,7 @@ class CodeEngineTarget:
             image=app.get('image_reference', ''), commit=recorded.get('commit', ''),
             lock=recorded.get('lock', ''), reason=recorded.get('reason', ''),
             values=recorded.get('values', ''),
+            promoted_from=recorded.get('promoted_from', ''),
         )
 
     def current_token(self, service: str, environment: str) -> Optional[str]:

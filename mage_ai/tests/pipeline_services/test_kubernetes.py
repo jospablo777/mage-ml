@@ -320,3 +320,43 @@ class KubernetesCommandTest(TestCase):
         self.assertIn('already runs this lock with these values', result.output)
         build_image.assert_not_called()
         self.assertEqual(token_file.read_text(), token)
+
+    def test_promote_deploys_the_image_staging_runs_without_building(self):
+        environments = self.project / 'services' / 'shop' / 'environments'
+        (environments / 'staging.yaml').write_text(
+            (environments / 'prod.yaml').read_text().replace('REGION: eu', 'REGION: test'))
+        self.invoke('deploy', 'shop', '--env', 'staging')
+        staging = self.kubectl.deployments['mage-shop-staging']['spec']['template']
+
+        missing, _ = self.invoke('deploy', 'shop', '--env', 'prod', '--from', 'qa')
+        self.assertEqual(missing.exit_code, 1)
+        result, build_image = self.invoke('deploy', 'shop', '--env', 'prod', '--from', 'staging')
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('promoted from staging', result.output)
+        build_image.assert_not_called()
+        prod = self.kubectl.deployments['mage-shop-prod']['spec']['template']
+        self.assertEqual(prod['spec']['containers'][0]['image'],
+                         staging['spec']['containers'][0]['image'])
+        self.assertEqual(prod['metadata']['annotations']['ai.mageml/promoted_from'], 'staging')
+        secret = prod['spec']['containers'][0]['envFrom'][0]['secretRef']['name']
+        self.assertEqual(self.kubectl.secrets[secret]['stringData']['REGION'], 'eu')
+        status, _ = self.invoke('status', 'shop')
+        self.assertIn('promoted from staging', status.output)
+
+
+class CopyImageTest(TestCase):
+    def test_an_image_is_pulled_when_missing_tagged_and_pushed(self):
+        commands = []
+
+        def runner(arguments):
+            commands.append(arguments)
+            code = 1 if arguments[:2] == ['image', 'inspect'] else 0
+            return subprocess.CompletedProcess(arguments, code, '', '')
+
+        deploy.copy_image('mage-shop:abc', 'icr.io/t/shop:abc', push=True, runner=runner)
+
+        self.assertEqual(commands, [
+            ['image', 'inspect', 'mage-shop:abc'], ['pull', 'mage-shop:abc'],
+            ['tag', 'mage-shop:abc', 'icr.io/t/shop:abc'], ['push', 'icr.io/t/shop:abc'],
+        ])

@@ -329,4 +329,5 @@ def deployment_of(item: Dict, service: str, environment: str) -> Deployment:
         lock=annotations.get(f'{GROUP}/lock', ''),
         reason=annotations.get(f'{GROUP}/reason', ''),
         values=annotations.get(f'{GROUP}/values', ''),
+        promoted_from=annotations.get(f'{GROUP}/promoted_from', ''),
     )

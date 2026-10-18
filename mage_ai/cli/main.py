@@ -1383,6 +1383,10 @@ def service_deploy(
         False, '--if-changed',
         help='do nothing when the environment already runs this lock with these values.',
     ),
+    from_env: Union[str, None] = typer.Option(
+        None, '--from', metavar='ENV',
+        help='promote: deploy the image ENV runs, tested there, without building.',
+    ),
 ):
     """Builds, deploys to the environment's target, waits for health, rolls back on failure."""
     from mage_ai.pipeline_services import (
@@ -1393,19 +1397,32 @@ def service_deploy(
         local_run,
     )
 
-    target, settings = _deploy_target(project, name, env)
-    result = lifecycle.check(project, name)
-    if not result.ok:
-        typer.echo(f'{name} cannot be built:', err=True)
-        for problem in result.problems:
-            typer.echo(f'  - {problem}', err=True)
+    if from_env == env:
+        typer.echo('--from names another environment than --env.', err=True)
         raise typer.Exit(code=1)
+    target, settings = _deploy_target(project, name, env)
     on_cluster = settings.get('target') in ('kubernetes', 'code_engine')
     try:
-        box = lifecycle.build(project, name)
-        _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
-        lock = lifecycle.read_lock(project, name) or {}
-        lock_sha = str(lock.get('manifest_sha256', ''))
+        if from_env:
+            source_target, _ = _deploy_target(project, name, from_env)
+            source = source_target.inspect(name, from_env)
+            if source is None or source.state != 'running' or not source.image:
+                raise deploy.DeployError(
+                    f'{name} is not running in {from_env}, so there is nothing to promote.')
+            box, lock_sha, commit = None, source.lock, source.commit
+            recorded = dict(promoted_from=from_env)
+        else:
+            result = lifecycle.check(project, name)
+            if not result.ok:
+                typer.echo(f'{name} cannot be built:', err=True)
+                for problem in result.problems:
+                    typer.echo(f'  - {problem}', err=True)
+                raise typer.Exit(code=1)
+            box = lifecycle.build(project, name)
+            _refuse_uncommitted(project, name, result.capture, allow_uncommitted)
+            lock_sha = str((lifecycle.read_lock(project, name) or {}).get('manifest_sha256', ''))
+            commit = deploy.git_commit(project)
+            recorded = {'reason': allow_uncommitted} if allow_uncommitted else {}
         values = local_run.environment_values(project, name, env)
         # The token stays the same across deploys from any machine: the environment's, this
         # machine's, or the one the deployment runs with.
@@ -1414,9 +1431,8 @@ def service_deploy(
         if not given and not (token_path.is_file() and token_path.read_text().strip()):
             given = target.current_token(name, env)
         values['MAGE_SERVICE_TOKEN'] = local_run.service_token(token_path, given)
-        labels = dict(commit=deploy.git_commit(project), lock=lock_sha,
-                      values=deploy.values_digest(values),
-                      **({'reason': allow_uncommitted} if allow_uncommitted else {}))
+        labels = dict(commit=commit, lock=lock_sha, values=deploy.values_digest(values),
+                      **recorded)
         if if_changed:
             current = target.inspect(name, env)
             if current is not None and current.state == 'running' \
@@ -1424,12 +1440,14 @@ def service_deploy(
                 typer.echo(f'{name} in {env} already runs this lock with these values.')
                 return
         digest = lock_sha[:12] or 'latest'
-        if on_cluster:
-            image = target.image(name, digest)
+        image = target.image(name, digest) if on_cluster else f'mage-{name}:{digest}'
+        if from_env:
+            if image != source.image:
+                deploy.copy_image(source.image, image, push=on_cluster)
+        elif on_cluster:
             for note in target.publish(box, image, export.build_image):
                 typer.echo(note, err=True)
         else:
-            image = f'mage-{name}:{digest}'
             export.build_image(box, image)
     except (definitions.DefinitionError, export.ExportError, local_run.LocalRunError) as error:
         _service_error(error)
@@ -1452,7 +1470,8 @@ def service_deploy(
         where = target.api_url(name, env)
     else:
         where = f'http://127.0.0.1:{port}'
-    typer.echo(f'{name} runs in {env} on {where} ({deployment.image}).')
+    promoted = f', promoted from {from_env}' if from_env else ''
+    typer.echo(f'{name} runs in {env} on {where} ({deployment.image}{promoted}).')
     typer.echo(f'API token: in {os.path.relpath(deploy.token_file(project, name, env), project)}.')
 
 
@@ -1497,6 +1516,8 @@ def service_status(
         lock = (lifecycle.read_lock(project, item.service) or {}).get('manifest_sha256')
         commit = item.commit[:12] if item.commit else 'unknown commit'
         reason = f'  uncommitted: {item.reason}' if item.reason else ''
+        if item.promoted_from:
+            reason += f'  promoted from {item.promoted_from}'
         typer.echo(f'{item.service}  {item.environment}  {item.drift(lock)}  '
                    f'{item.image}  {commit}{reason}')
 
@@ -1646,12 +1667,17 @@ CI_DEPLOY_RULES = typer.Option(
     [], '--deploy', metavar='ENV=BRANCH|ENV=tag:PREFIX*',
     help='deploy the services that define ENV on a push to BRANCH or a tag; repeatable.',
 )
+CI_PROMOTIONS = typer.Option(
+    [], '--promote', metavar='ENV=SOURCE',
+    help='ENV\'s rule deploys the image SOURCE runs instead of building; repeatable.',
+)
 
 
 @service_app.command('ci')
 def service_ci(
     project: str = SERVICE_PROJECT,
     deploy_rules: List[str] = CI_DEPLOY_RULES,
+    promotions: List[str] = CI_PROMOTIONS,
     force: bool = typer.Option(False, help='replace the workflow.'),
 ):
     """Writes a GitHub Actions workflow that checks pull requests and deploys by rule."""
@@ -1659,6 +1685,7 @@ def service_ci(
 
     try:
         rules = [ci.parse_rule(text) for text in deploy_rules]
+        ci.apply_promotions(rules, promotions)
         path = ci.write(project, rules, force=force)
     except ci.CiError as error:
         typer.echo(str(error), err=True)
@@ -1666,8 +1693,10 @@ def service_ci(
     typer.echo(f'Wrote {path}.')
     typer.echo('Pull requests check the services they change.')
     for rule in rules:
-        typer.echo(f'{rule.environment}: deploys {rule.when}; set its secrets in Settings > '
-                   f'Environments > {rule.environment} (see the comments in the workflow).')
+        what = f'the image {rule.source} runs' if rule.source else 'a build'
+        typer.echo(f'{rule.environment}: deploys {what} {rule.when}; set its secrets in '
+                   f'Settings > Environments > {rule.environment} (see the comments in the '
+                   'workflow).')
 
 
 @service_app.command('export')

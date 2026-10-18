@@ -98,9 +98,25 @@ class CiWorkflowTest(TestCase):
         written = runner.invoke(app, ['service', 'ci', '--deploy', 'dev=main',
                                       '--project', str(self.project)])
         self.assertEqual(written.exit_code, 0, written.output)
-        self.assertIn('dev: deploys on a push to main', written.output)
+        self.assertIn('dev: deploys a build on a push to main', written.output)
 
         listed = runner.invoke(app, ['service', 'list', '--env', 'prod', '--json',
                                      '--project', str(self.project)])
         self.assertEqual(listed.exit_code, 0, listed.output)
         self.assertEqual([p['service'] for p in json.loads(listed.output)], ['shop-live'])
+
+    def test_a_promotion_rule_deploys_the_image_another_environment_runs(self):
+        rules = [ci.parse_rule('dev=main'), ci.parse_rule('prod=tag:v*')]
+        ci.apply_promotions(rules, ['prod=dev'])
+
+        flow = yaml.safe_load(ci.write(str(self.project), rules, mage_version='0.2.0')
+                              .read_text())
+
+        steps = {s.get('name'): s for s in flow['jobs']['deploy-prod']['steps']}
+        self.assertIn('--env prod --if-changed --from dev', steps['Deploy']['run'])
+        dev = {s.get('name'): s for s in flow['jobs']['deploy-dev']['steps']}
+        self.assertNotIn('--from', dev['Deploy']['run'])
+        with self.assertRaisesRegex(ci.CiError, 'needs a --deploy rule for qa'):
+            ci.apply_promotions(rules, ['qa=dev'])
+        with self.assertRaisesRegex(ci.CiError, 'ENV=SOURCE'):
+            ci.apply_promotions(rules, ['prod'])

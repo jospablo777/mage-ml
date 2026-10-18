@@ -30,6 +30,8 @@ class Rule:
     environment: str
     branch: Optional[str] = None
     tag_prefix: Optional[str] = None
+    # Promote: deploy the image this environment runs instead of building.
+    source: Optional[str] = None
 
     @property
     def condition(self) -> str:
@@ -61,6 +63,20 @@ def parse_rule(text: str) -> Rule:
     if not re.match(r'^[A-Za-z0-9._/-]+$', when):
         raise CiError(f'{when} is not a branch name.')
     return Rule(environment, branch=when)
+
+
+def apply_promotions(rules: List[Rule], promotions: List[str]) -> None:
+    """ENV=SOURCE: the rule for ENV deploys the image SOURCE runs."""
+    by_environment = {r.environment: r for r in rules}
+    for text in promotions:
+        environment, separator, source = text.partition('=')
+        if not separator or not source:
+            raise CiError(f'{text}: write ENV=SOURCE, such as prod=staging.')
+        if environment not in by_environment:
+            raise CiError(f'--promote {text} needs a --deploy rule for {environment}.')
+        if source == environment:
+            raise CiError(f'{environment} cannot be promoted from itself.')
+        by_environment[environment].source = source
 
 
 def secret_name(service: str, environment: str) -> str:
@@ -172,7 +188,8 @@ def workflow(project: str, rules: List[Rule], mage_version: str) -> str:
         env = rule.environment
         lines += [
             '',
-            f'  # {env}: {rule.when}.',
+            f'  # {env}: {rule.when}'
+            + (f', the image {rule.source} runs.' if rule.source else '.'),
             f'  plan-{env}:',
             f'    if: {rule.condition}',
             '    runs-on: ubuntu-latest',
@@ -234,7 +251,8 @@ def workflow(project: str, rules: List[Rule], mage_version: str) -> str:
             '        env:',
             '          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}',
             f'        run: mage service deploy "$SERVICE" --env {env} --if-changed '
-            '--timeout 600 --project "$MAGE_PROJECT"',
+            + (f'--from {rule.source} ' if rule.source else '')
+            + '--timeout 600 --project "$MAGE_PROJECT"',
         ]
     return '\n'.join(lines) + '\n'
 

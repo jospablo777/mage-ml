@@ -76,6 +76,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   containers, health waits with automatic rollback, drift from the repository, and the
   previous deployment kept for rollback. A deploy with uncommitted changes to the service's
   inputs stops unless `--allow-uncommitted "<reason>"` records why.
+- `mage service deploy --from staging` promotes the image another environment runs, without
+  building; `mage service ci --promote prod=staging` does it in CI.
 - `mage service ci` writes a GitHub Actions workflow: pull requests check the services they
   change and their locks; rules deploy each environment on a branch or tag, building nothing
   when the deployment already runs the lock (`mage service deploy --if-changed`).
