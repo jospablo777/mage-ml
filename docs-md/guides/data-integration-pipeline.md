@@ -18,7 +18,7 @@ repository's Dockerfile includes it. Otherwise add it:
 uv add "mage-ml[integrations,postgres]"
 ```
 ```bash
-python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.1.1/integrations.txt
+python -m pip install -r https://jospablo777.github.io/mage-ml/install/v0.2.0/integrations.txt
 ```
 ```bash
 uv sync --locked --no-default-groups --extra postgres --extra integrations

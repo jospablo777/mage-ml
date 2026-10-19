@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased (next: MageML 0.2.0)
+## MageML 0.2.0 (2026-10-19)
 
 Changes since 0.1.1. The main addition is stream services: streaming pipelines exported as
 services that run in the Rust engine, with Python, Rust or R blocks

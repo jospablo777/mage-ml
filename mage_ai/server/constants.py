@@ -15,4 +15,4 @@ UPSTREAM_MAGE_VERSION = '0.9.79'
 # Dockerfiles depend on it because install steps use
 # the last line to determine the version to install.
 VERSION = \
-'0.1.1'
+'0.2.0'
