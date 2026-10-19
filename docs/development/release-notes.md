@@ -72,14 +72,14 @@ services that run in the Rust engine, with Python, Rust or R blocks
   sample, and `mage examples generate` sends synthetic messages to its source.
 - The Compile panel of a streaming pipeline shows how it runs on the engine (runs of one
   language, boundaries, sinks, batches, dead letters) and the problems that would stop it.
-- The **Dead letters** tab reads a Kafka dead-letter sink with each message's error, opens
-  the messages as a sample to reproduce the failure, and replays them to the source once
-  fixed, after the topic's name is typed.
+- The **Dead letters** tab reads a Kafka or NATS JetStream dead-letter sink with each
+  message's error, opens the messages as a sample to reproduce the failure, and replays them
+  to the source's topic or subject once fixed, after its name is typed.
 - New streaming pipelines can start from a template per source (Kafka, RabbitMQ, NATS,
   webhook, PostgreSQL changes) with a transformer, a printing sink and a sample.
 - While a stream runs on the local engine, the dependency graph shows each block's numbers.
-- The Run tab's tap shows the last messages at the source or a block of a running stream
-  (development runs only: `MAGE_SERVICE_TAP=on`, `GET /v1/streams/<pipeline>/tap`).
+- The Run tab's tap shows the last messages at the source or at any block of a running
+  stream (development runs only: `MAGE_SERVICE_TAP=on`, `GET /v1/streams/<pipeline>/tap`).
 - A stream service's `/v1/streams/<pipeline>` reports each block's messages in and out,
   batches, errors and median and 95th percentile time per batch; the Run tab shows them.
 - The **Run** tab starts a streaming pipeline on the local engine with development positions
@@ -102,10 +102,6 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Tutorials: [Kafka to PostgreSQL](/guides/streaming/tutorials/kafka-to-postgres) and
   [PostgreSQL changes to Kafka](/guides/streaming/tutorials/postgres-changes-to-kafka), from
   the first sample to a service.
-- The Dead letters tab reads NATS JetStream dead-letter sinks too, opens them as a sample,
-  and replays them to a NATS source subject.
-- The Run tab's tap shows any block of a development run, also one in the middle of a run
-  of blocks; it showed only the source and the blocks a sink follows.
 - The playground has three stream pipelines (`orders_stream`, `clickstream_stream`,
   `cdc_stream`): `make playground-streams` starts Kafka, builds the stream engine and sends
   synthetic traffic, so the Samples, Run and Dead letters tabs work on live data.
