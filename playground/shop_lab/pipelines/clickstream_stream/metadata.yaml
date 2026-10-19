@@ -1,0 +1,66 @@
+blocks:
+- color: null
+  configuration: {}
+  downstream_blocks:
+  - clickstream_stream_sessionize
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: yaml
+  name: clickstream_stream_clicks
+  retry_config: null
+  timeout: null
+  type: data_loader
+  upstream_blocks: []
+  uuid: clickstream_stream_clicks
+- color: null
+  configuration: {}
+  downstream_blocks:
+  - clickstream_stream_click_events
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: clickstream_stream_sessionize
+  retry_config: null
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - clickstream_stream_clicks
+  uuid: clickstream_stream_sessionize
+- color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: yaml
+  name: clickstream_stream_click_events
+  retry_config: null
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - clickstream_stream_sessionize
+  uuid: clickstream_stream_click_events
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: '2026-10-19 16:58:51.130898+00:00'
+data_integration: null
+description: Clickstream to PostgreSQL
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
+name: clickstream_stream
+notification_config: {}
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
+type: streaming
+uuid: clickstream_stream
+widgets: []

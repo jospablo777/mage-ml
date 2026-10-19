@@ -1,0 +1,81 @@
+blocks:
+- color: null
+  configuration: {}
+  downstream_blocks:
+  - orders_stream_parse_orders
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: yaml
+  name: orders_stream_orders
+  retry_config: null
+  timeout: null
+  type: data_loader
+  upstream_blocks: []
+  uuid: orders_stream_orders
+- color: null
+  configuration: {}
+  downstream_blocks:
+  - orders_stream_orders_clean
+  - orders_stream_orders_dead_letters
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: python
+  name: orders_stream_parse_orders
+  retry_config: null
+  timeout: null
+  type: transformer
+  upstream_blocks:
+  - orders_stream_orders
+  uuid: orders_stream_parse_orders
+- color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: yaml
+  name: orders_stream_orders_clean
+  retry_config: null
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - orders_stream_parse_orders
+  uuid: orders_stream_orders_clean
+- color: null
+  configuration: {}
+  downstream_blocks: []
+  executor_config: null
+  executor_type: local_python
+  has_callback: false
+  language: yaml
+  name: orders_stream_orders_dead_letters
+  retry_config: null
+  timeout: null
+  type: data_exporter
+  upstream_blocks:
+  - orders_stream_parse_orders
+  uuid: orders_stream_orders_dead_letters
+cache_block_output_in_memory: false
+callbacks: []
+concurrency_config: {}
+conditionals: []
+created_at: '2026-10-19 16:58:49.194442+00:00'
+data_integration: null
+description: Order events to clean facts
+executor_config: {}
+executor_count: 1
+executor_type: null
+extensions: {}
+name: orders_stream
+notification_config: {}
+retry_config: {}
+run_pipeline_in_one_process: false
+settings:
+  triggers: null
+spark_config: {}
+tags: []
+type: streaming
+uuid: orders_stream
+widgets: []

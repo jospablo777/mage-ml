@@ -1,0 +1,12 @@
+connector_type: postgres
+host: "{{ env_var('PGHOST') }}"
+port: "{{ env_var('PGPORT') }}"
+database: "{{ env_var('PGDATABASE') }}"
+user: "{{ env_var('PGUSER') }}"
+password: "{{ env_var('PGPASSWORD') }}"
+# Runs from the editor read with <slot>_dev_<user>; drop it when done, it holds WAL.
+replication_slot: shop_orders_cdc
+publication_name: shop_orders_cdc
+tables:
+  - public.shop_orders
+create_slot: true

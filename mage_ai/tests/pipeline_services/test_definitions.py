@@ -98,6 +98,21 @@ class DefinitionsTest(ExportTestCase):
         self.assertEqual(lines.count('.mage/build/'), 1)
         self.assertEqual(lines.count('services/*/.env*'), 1)
 
+    def test_a_project_with_its_own_ignores_gets_only_what_it_misses(self):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / '.gitignore').write_text('secrets/\n.mage/build/')
+
+        definitions.ensure_gitignore(str(folder))
+        definitions.ensure_gitignore(str(folder))
+
+        lines = (folder / '.gitignore').read_text().splitlines()
+        self.assertEqual(lines[:2], ['secrets/', '.mage/build/'])
+        # Development runs from the editor write under .mage/dev/ (I-204).
+        for line in definitions.GITIGNORE_LINES:
+            self.assertEqual(lines.count(line), 1, line)
+        self.assertIn('.mage/dev/', lines)
+
     def test_a_delete_keeps_files_the_user_added(self):
         definitions.save_definition(self.repo_path, 'keep', dict(pipelines=['a']))
         definitions.scaffold(self.repo_path, 'keep')

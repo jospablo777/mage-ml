@@ -24,6 +24,39 @@ class StreamExamplesTest(DBTestCase):
                 captured = export.capture(self.repo_path, [pipeline.uuid])
                 self.assertTrue(captured.manifest['pipelines'][0]['stream'])
 
+    def test_the_cli_writes_an_example_into_a_project_elsewhere(self):
+        import os
+        import shutil
+        import tempfile
+
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+        from mage_ai.data_preparation.repo_manager import init_repo
+        from mage_ai.settings.repo import set_repo_path
+
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        project = os.path.join(folder, 'elsewhere')
+        init_repo(project)
+        self.addCleanup(set_repo_path, self.repo_path)
+
+        result = CliRunner().invoke(app, ['examples', 'stream', 'orders', project])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        for path in ('pipelines/orders_stream/metadata.yaml',
+                     'data_loaders/orders_stream_orders.yaml',
+                     'transformers/orders_stream_parse_orders.py'):
+            self.assertTrue(os.path.isfile(os.path.join(project, path)), path)
+        self.assertIn('connector_type: kafka', open(
+            os.path.join(project, 'data_loaders/orders_stream_orders.yaml')).read())
+        # As MageML writes its own blocks: the decorator imported outside MageML.
+        code = open(os.path.join(project, 'transformers/orders_stream_parse_orders.py')).read()
+        compile(code, 'parse_orders', 'exec')
+        namespace = {}
+        exec(code, namespace)
+        self.assertTrue(callable(namespace['parse_orders']))
+
     def test_scores_come_from_the_trained_model(self):
         written = streams.write(self.repo_path, 'payments', 'payments_scores')
         pipeline = Pipeline.get(written['pipeline'], repo_path=self.repo_path)

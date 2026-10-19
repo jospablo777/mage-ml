@@ -1,0 +1,4 @@
+# The engine build reads the engine's sources only; its target directory is large.
+*
+!mage_ai/pipeline_services/service
+mage_ai/pipeline_services/service/target

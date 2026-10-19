@@ -1,0 +1,4 @@
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders_dead_letters
+dead_letter: true

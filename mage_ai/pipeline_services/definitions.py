@@ -52,7 +52,10 @@ schedules: off        # on runs the time triggers; keep off where MageML runs th
 variables: {}
 secrets: {}
 """
-GITIGNORE_LINES = ('.mage/build/', '.mage/run/', '.mage/deploy/', 'services/*/.env*')
+# Generated builds, local runs, development runs from the editor (I-204), deploy state and
+# local secret files.
+GITIGNORE_LINES = ('.mage/build/', '.mage/run/', '.mage/dev/', '.mage/deploy/',
+                   'services/*/.env*')
 _NAME = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 
@@ -321,7 +324,7 @@ def ensure_gitignore(repo_path: str) -> None:
         text = path.read_text() if path.is_file() else ''
         if text and not text.endswith('\n'):
             text += '\n'
-        path.write_text(text + '# MageML services: generated builds and local secrets\n'
+        path.write_text(text + '# MageML services and streams: generated files and local secrets\n'
                         + '\n'.join(missing) + '\n')
 
 

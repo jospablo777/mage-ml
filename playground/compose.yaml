@@ -1,7 +1,8 @@
 # Mage built from this repository, a PostgreSQL database with a seeded shop, and a
 # project with pipelines in pandas, Polars, R, Python with R, and geopandas.
 #
-#   make playground     # from the repository root; http://localhost:6789
+#   make playground           # from the repository root; http://localhost:6789
+#   make playground-streams   # adds Kafka, the stream engine and synthetic traffic
 #
 # See README.md for the other make targets.
 name: mage-playground
@@ -20,6 +21,8 @@ services:
       POSTGRES_USER: mage
       POSTGRES_PASSWORD: mage
       POSTGRES_DB: playground
+    # Logical replication, for the cdc_stream pipeline's change capture.
+    command: ["postgres", "-c", "wal_level=logical"]
     ports:
       - "${PLAYGROUND_POSTGRES_PORT:-55432}:5432"
     volumes:
@@ -59,11 +62,15 @@ services:
       MAGE_DATA_DIR: /home/src/mage_data
       DISABLE_USAGE_STATISTICS: "1"
       DISABLE_AUTO_BROWSER_OPEN: "1"
+      # The stream pipelines' broker and engine (make playground-streams).
+      KAFKA_BOOTSTRAP: kafka:9092
+      MAGE_ENGINE_PATH: /opt/mage-engine/mage-service
     ports:
       - "${PLAYGROUND_MAGE_PORT:-6789}:6789"
     volumes:
       - ./shop_lab:/home/src/shop_lab
       - mage_data:/home/src/mage_data
+      - engine:/opt/mage-engine:ro
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -95,7 +102,71 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Streams (make playground-streams). Kafka 4.1 in KRaft mode, one node; the host reaches
+  # it on localhost:${PLAYGROUND_KAFKA_PORT:-59092}.
+  kafka:
+    profiles: [streams]
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:${PLAYGROUND_KAFKA_PORT:-59092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 2
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+    ports:
+      - "${PLAYGROUND_KAFKA_PORT:-59092}:19092"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 3s
+      timeout: 10s
+      retries: 60
+
+  # Builds the stream engine and puts it in the engine volume, which the mage service reads.
+  engine:
+    profiles: [streams]
+    image: mage-playground-engine:local
+    build:
+      context: ..
+      dockerfile: playground/engine/Dockerfile
+    volumes:
+      - engine:/engine
+    restart: "no"
+
+  # Synthetic traffic for the three stream pipelines, for as long as it runs: clicks and
+  # orders to Kafka, and order rows into public.shop_orders for the change capture.
+  traffic:
+    profiles: [streams]
+    # The image the mage service runs, so it is always there.
+    image: mage-playground:local
+    environment:
+      <<: *database
+      KAFKA_BOOTSTRAP: kafka:9092
+    command:
+      - sh
+      - -c
+      - |
+        mage examples generate clickstream --rate 10 --seconds 31536000 &
+        mage examples generate orders --rate 10 --seconds 31536000 &
+        mage examples generate cdc --rate 1 --seconds 31536000 &
+        wait
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres:
   mage_data:
+  engine:
   service_data:

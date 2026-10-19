@@ -1027,7 +1027,11 @@ def examples_stream(
 ):
     """Write a stream example into a project: its pipeline, files and a sample."""
     from mage_ai.examples import streams
+    from mage_ai.settings.repo import set_repo_path
 
+    # Block files resolve against the project in use: without it they went to the current
+    # folder's, which failed for a project elsewhere (I-203).
+    set_repo_path(os.path.abspath(project_path))
     try:
         written = streams.write(os.path.abspath(project_path), name, pipeline)
     except streams.ExampleError as error:

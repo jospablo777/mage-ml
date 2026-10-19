@@ -32,14 +32,16 @@ requirements:
 #   make playground-check      run every pipeline once
 #   make playground-service    export the live pipelines as a service and start it
 #   make playground-console    the service's terminal dashboard
-# SEED_SCALE, PLAYGROUND_MAGE_PORT, PLAYGROUND_POSTGRES_PORT and PLAYGROUND_SERVICE_PORT
-# pass through.
+#   make playground-streams    Kafka, the stream engine and traffic for the stream pipelines
+# SEED_SCALE, PLAYGROUND_MAGE_PORT, PLAYGROUND_POSTGRES_PORT, PLAYGROUND_SERVICE_PORT and
+# PLAYGROUND_KAFKA_PORT pass through.
 PLAYGROUND := docker compose -f playground/compose.yaml
 # The builder of the current Docker context, which `docker build` uses too, so builds
 # share one cache. Another buildx builder would compile everything again.
 PLAYGROUND_BUILDER ?= $(shell docker context show 2>/dev/null)
 PLAYGROUND_URL = http://localhost:$(or $(PLAYGROUND_MAGE_PORT),6789)
-export SEED_SCALE PLAYGROUND_MAGE_PORT PLAYGROUND_POSTGRES_PORT PLAYGROUND_SERVICE_PORT
+export SEED_SCALE PLAYGROUND_MAGE_PORT PLAYGROUND_POSTGRES_PORT PLAYGROUND_SERVICE_PORT \
+	PLAYGROUND_KAFKA_PORT
 
 playground: playground-build playground-up
 
@@ -71,7 +73,7 @@ playground-psql:
 	$(PLAYGROUND) exec postgres psql -U mage -d playground
 
 playground-stop:
-	$(PLAYGROUND) stop
+	$(PLAYGROUND) --profile streams --profile service stop
 
 playground-start: playground-up
 
@@ -80,12 +82,13 @@ playground-restart:
 
 # Removes the containers; the database and Mage's data stay.
 playground-down:
-	$(PLAYGROUND) down
+	$(PLAYGROUND) --profile streams --profile service down
 
 # Deletes the database and Mage's data.
 playground-reset:
 	@read -p "Delete the playground database and Mage data? [y/N] " answer; \
-	if [ "$$answer" = y ] || [ "$$answer" = Y ]; then $(PLAYGROUND) down -v; else echo "Kept."; fi
+	if [ "$$answer" = y ] || [ "$$answer" = Y ]; then $(PLAYGROUND) --profile streams --profile service down -v; \
+	else echo "Kept."; fi
 
 playground-reseed:
 	$(PLAYGROUND) run --rm seed python /home/src/seed/seed.py --force
@@ -102,6 +105,19 @@ playground-service:
 	$(PLAYGROUND) --profile service up -d live-service
 	@echo "live_traffic runs every minute and starts the other two; make playground-console shows them."
 
+# Kafka, the stream engine (built from this repository the first time, several minutes) and
+# synthetic traffic for orders_stream, clickstream_stream and cdc_stream; the mage service is
+# recreated if its settings changed. Start a stream from its pipeline's Run tab.
+playground-streams:
+	BUILDX_BUILDER=$(PLAYGROUND_BUILDER) $(PLAYGROUND) --profile streams build engine
+	$(PLAYGROUND) --profile streams up -d kafka traffic
+	$(PLAYGROUND) --profile streams up engine
+	$(PLAYGROUND) up -d mage
+	@echo "Streams are ready: open orders_stream, clickstream_stream or cdc_stream at $(PLAYGROUND_URL)."
+
+playground-streams-stop:
+	$(PLAYGROUND) --profile streams stop kafka traffic
+
 # The service's terminal dashboard.
 playground-console:
 	$(PLAYGROUND) --profile service exec live-service mage-console --allow-control
@@ -113,4 +129,5 @@ playground-service-stop:
 	playground playground-build playground-up playground-logs playground-ps \
 	playground-check playground-psql playground-stop playground-start \
 	playground-restart playground-down playground-reset playground-reseed \
+	playground-streams playground-streams-stop \
 	playground-service playground-console playground-service-stop

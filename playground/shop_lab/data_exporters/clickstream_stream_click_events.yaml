@@ -1,0 +1,10 @@
+connector_type: postgres
+host: "{{ env_var('PGHOST') }}"
+port: "{{ env_var('PGPORT') }}"
+database: "{{ env_var('PGDATABASE') }}"
+username: "{{ env_var('PGUSER') }}"
+password: "{{ env_var('PGPASSWORD') }}"
+schema: public
+table: click_events
+unique_constraints: [event_id]
+unique_conflict_method: UPDATE

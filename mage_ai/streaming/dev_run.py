@@ -83,7 +83,7 @@ def _log_tail(path: Path, lines: int = LOG_LINES) -> List[str]:
 def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
           user: Optional[str] = None, timeout: float = 90) -> Dict:
     from mage_ai.data_preparation.models.pipeline import Pipeline
-    from mage_ai.pipeline_services import engine, export, local_run
+    from mage_ai.pipeline_services import definitions, engine, export, local_run
     from mage_ai.streaming.development import for_development_manifest, sinks_written
 
     key = (str(Path(repo_path).resolve()), pipeline_uuid)
@@ -101,6 +101,8 @@ def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
             + '. Name them to start it.'
         )
     binary = engine.engine_path()
+    # The run's build, data and logs stay out of Git (I-204).
+    definitions.ensure_gitignore(repo_path)
     folder = Path(repo_path) / DEV_DIR / pipeline_uuid
     try:
         captured = export.capture(repo_path, [pipeline_uuid], name=f'dev-{pipeline_uuid}')

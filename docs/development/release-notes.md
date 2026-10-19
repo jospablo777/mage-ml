@@ -97,6 +97,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   group (no position moves), or takes pasted ones, and Cmd+Enter runs a stream transformer and the blocks before it on a sample, showing input
   and output side by side, each block's time and output. Rust stream blocks run the same
   way, and in Execute pipeline.
+- The playground has three stream pipelines (`orders_stream`, `clickstream_stream`,
+  `cdc_stream`): `make playground-streams` starts Kafka, builds the stream engine and sends
+  synthetic traffic, so the Samples, Run and Dead letters tabs work on live data.
 
 ### Services
 
@@ -188,6 +191,10 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Fixes
 
+- `mage examples stream <name> <project>` failed, or wrote the block code into the
+  current folder's project, for a project other than the current folder.
+- A development run's files under `.mage/dev/` were not kept out of Git; the run adds the
+  line to the project's `.gitignore`, as the service commands do.
 - Kafka streams: a position committed while the broker was down was lost without a word,
   and a partition whose last batch it was kept its old committed offset while the stream
   ran (lag stayed up; a crash read the batch again). The engine commits the positions

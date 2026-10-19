@@ -1,0 +1,6 @@
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: orders
+consumer_group: orders-clean
+auto_offset_reset: earliest
+batch_size: 500

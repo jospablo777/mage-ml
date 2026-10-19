@@ -40,6 +40,8 @@ deployment.
 | `make playground-service` | Export the live pipelines as a service and start it |
 | `make playground-console` | The service's terminal dashboard |
 | `make playground-service-stop` | Stop the service |
+| `make playground-streams` | Start Kafka, the stream engine and synthetic traffic for the stream pipelines |
+| `make playground-streams-stop` | Stop Kafka and the traffic |
 
 The targets wrap `docker compose -f playground/compose.yaml`; use it directly for
 anything else.
@@ -48,6 +50,7 @@ anything else.
 | --- | --- | --- |
 | `PLAYGROUND_MAGE_PORT` | `6789` | MageML |
 | `PLAYGROUND_POSTGRES_PORT` | `55432` | PostgreSQL on the host (user `mage`, password `mage`, database `playground`) |
+| `PLAYGROUND_KAFKA_PORT` | `59092` | Kafka on the host, with `make playground-streams` |
 | `SEED_SCALE` | `1` | Multiplies the row counts; `0.1` for a quick start |
 
 ## The data
@@ -83,6 +86,9 @@ The values are random but the same on every seed.
 | `live_traffic` | New web events every minute, more or fewer as the hour goes on, appended to `analytics.live_events`; keeps six hours |
 | `live_minute_kpis` | Polars: events, purchases, conversion and revenue per minute of the last hour, in `analytics.live_minute_kpis`; starts after each `live_traffic` run |
 | `live_device_revenue` | All Rust: revenue per device over the last 15 minutes, appended to `analytics.live_device_revenue` after each `live_traffic` run |
+| `orders_stream` | Streaming: Kafka `orders` parsed and validated into `orders_clean`; a broken order (about one in fifty) goes to `orders_dead_letters` with its error |
+| `clickstream_stream` | Streaming: Kafka `clicks` with session ids upserted into `public.click_events` by `event_id`, so a replayed batch writes no row twice |
+| `cdc_stream` | Streaming: changes of `public.shop_orders` by logical replication, as events in Kafka `order_changes` |
 
 The `shape_` pipelines are the topology families of the
 [compilation study](../docs/development/compilation-study.md): which blocks fuse into one
@@ -140,6 +146,45 @@ the exported tables with their row counts.
   It writes `analytics.rust_session_scores`, the same rows as the pipeline run in MageML.
   Without `run`, the service starts its HTTP API; see
   [Pipeline services](../docs-md/production/pipeline-services.md).
+
+## Streams
+
+The three stream pipelines need a broker, the stream engine and messages:
+
+```bash
+make playground-streams
+```
+
+It starts Kafka, builds the engine from this repository the first time (several minutes:
+Rust, librdkafka and OpenSSL compile from source; later builds reuse a cache), and starts
+`traffic`, which sends clicks and orders to Kafka (10 a second each) and inserts order
+rows into `public.shop_orders` (1 a second) for as long as it runs. MageML restarts with
+`KAFKA_BOOTSTRAP` and the engine set.
+
+Open `orders_stream` in the editor:
+
+- **Samples** (right panel): the `example` sample came with the pipeline; **Capture**
+  reads the newest messages of `orders` without joining its consumer group.
+- **Run on sample** (play button on `parse_orders`): the block runs on the sample at once,
+  with its output and the difference from its input.
+- **Compile** (header): how the stream runs on the engine, its sinks and dead letters.
+- **Run** tab: starts the stream on the engine with a development consumer group
+  (`orders-clean-dev-<user>`), so production's position never moves; it asks before writing
+  to the real sinks. It shows throughput, lag and per-block numbers, and the graph shows
+  live counts on each block.
+- **Dead letters** tab: the broken orders with their errors; open them as a sample to see
+  the failure with Run on sample, fix the block, and replay them to `orders`.
+
+`clickstream_stream` writes to the playground database (`select * from click_events`);
+`cdc_stream` reads with its own replication slot: a development run uses
+`shop_orders_cdc_dev_<user>` (`shop_orders_cdc_dev_admin` for the default user). Drop it
+when done, since a slot holds WAL: `make playground-psql`, then
+`select pg_drop_replication_slot('shop_orders_cdc_dev_admin');`.
+
+Each one exports as a service as it is: `mage service new orders-svc --pipelines
+orders_stream`, then `mage service test orders-svc` runs its sample through it. The
+[stream examples](../docs-md/guides/streaming/tutorials/stream-examples.md) list the
+others (`mage examples streams`).
 
 ## Reset
 

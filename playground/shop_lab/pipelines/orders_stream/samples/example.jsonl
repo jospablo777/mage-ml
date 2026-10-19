@@ -1,0 +1,20 @@
+{"order_id": 1, "customer": "c-328", "currency": "EUR", "items": [{"sku": "sku-4", "quantity": 3, "unit_price": 30.9}]}
+{"order_id": 2, "customer": "c-53", "currency": "EUR", "items": [{"sku": "sku-70", "quantity": 1, "unit_price": 71.68}, {"sku": "sku-5", "quantity": 1, "unit_price": 13.06}, {"sku": "sku-30", "quantity": 1, "unit_price": 68.23}]}
+{"order_id": 3, "customer": "c-360", "currency": "EUR", "items": [{"sku": "sku-54", "quantity": 2, "unit_price": 55.01}, {"sku": "sku-36", "quantity": 1, "unit_price": 91.54}, {"sku": "sku-21", "quantity": 4, "unit_price": 42.15}]}
+{"order_id": 4, "customer": "c-491", "currency": "EUR", "items": [{"sku": "sku-14", "quantity": 1, "unit_price": 46.83}, {"sku": "sku-46", "quantity": 3, "unit_price": 73.24}]}
+{"order_id": 5, "customer": "c-374", "currency": "EUR", "items": [{"sku": "sku-69", "quantity": 1, "unit_price": 116.83}, {"sku": "sku-49", "quantity": 1, "unit_price": 67.14}]}
+{"order_id": 6, "customer": "c-317", "currency": "EUR", "items": [{"sku": "sku-74", "quantity": 2, "unit_price": 85.14}, {"sku": "sku-6", "quantity": 2, "unit_price": 93.22}]}
+{"order_id": 7, "customer": "c-438", "currency": "EUR", "items": [{"sku": "sku-13", "quantity": 4, "unit_price": 34.8}]}
+{"order_id": 8, "customer": "c-187", "currency": "EUR", "items": [{"sku": "sku-48", "quantity": 3, "unit_price": 26.72}]}
+{"order_id": 9, "customer": "c-480", "currency": "EUR", "items": [{"sku": "sku-10", "quantity": 2, "unit_price": 65.03}, {"sku": "sku-32", "quantity": 2, "unit_price": 56.55}, {"sku": "sku-35", "quantity": 2, "unit_price": 82.78}]}
+{"order_id": 10, "customer": "c-398", "currency": "EUR", "items": [{"sku": "sku-30", "quantity": 1, "unit_price": 97.0}]}
+{"order_id": 11, "customer": "c-34", "currency": "EUR", "items": [{"sku": "sku-73", "quantity": 3, "unit_price": 27.09}]}
+{"order_id": 12, "customer": "c-453", "currency": "EUR", "items": [{"sku": "sku-59", "quantity": 2, "unit_price": 33.26}, {"sku": "sku-32", "quantity": 3, "unit_price": 90.15}, {"sku": "sku-55", "quantity": 4, "unit_price": 44.72}]}
+{"order_id": 13, "customer": "c-71", "currency": "EUR", "items": [{"sku": "sku-64", "quantity": 1, "unit_price": 91.18}, {"sku": "sku-15", "quantity": 2, "unit_price": 76.04}, {"sku": "sku-55", "quantity": 1, "unit_price": 47.4}]}
+{"order_id": 14, "customer": "c-240", "currency": "EUR", "items": [{"sku": "sku-33", "quantity": 1, "unit_price": 82.27}, {"sku": "sku-15", "quantity": 3, "unit_price": 92.69}, {"sku": "sku-44", "quantity": 1, "unit_price": 36.63}]}
+{"order_id": 15, "customer": "c-2", "currency": "EUR", "items": [{"sku": "sku-34", "quantity": 2, "unit_price": 61.91}, {"sku": "sku-14", "quantity": 3, "unit_price": 101.32}, {"sku": "sku-65", "quantity": 2, "unit_price": 20.04}]}
+{"order_id": 16, "customer": "c-277", "currency": "EUR", "items": [{"sku": "sku-1", "quantity": 3, "unit_price": 59.66}, {"sku": "sku-15", "quantity": 3, "unit_price": 105.69}, {"sku": "sku-40", "quantity": 2, "unit_price": 8.84}]}
+{"order_id": 17, "customer": "c-485", "currency": "EUR", "items": [{"sku": "sku-11", "quantity": 4, "unit_price": 98.29}]}
+{"order_id": 18, "customer": "c-273", "currency": "EUR", "items": [{"sku": "sku-17", "quantity": 4, "unit_price": 113.73}]}
+{"order_id": 19, "customer": "c-271", "currency": "EUR", "items": [{"sku": "sku-55", "quantity": 2, "unit_price": 111.61}, {"sku": "sku-26", "quantity": 3, "unit_price": 49.08}, {"sku": "sku-48", "quantity": 4, "unit_price": 108.15}]}
+{"order_id": 20, "customer": "c-127", "currency": "EUR", "items": [{"sku": "sku-9", "quantity": 3, "unit_price": 4.48}]}

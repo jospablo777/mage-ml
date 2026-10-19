@@ -1,0 +1,6 @@
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: clicks
+consumer_group: clickstream
+auto_offset_reset: earliest
+batch_size: 500

@@ -32,5 +32,9 @@ with a development consumer group.
 `--bootstrap` or `--nats-url` instead of the environment, and for `webhooks` `--project` and
 `--pipeline` to find the running stream.
 
+Three of them run in the [playground](https://github.com/jospablo777/mage-ml/tree/master/playground)
+without any setup: `make playground` and then `make playground-streams` start Kafka, build the
+stream engine and send traffic to `orders_stream`, `clickstream_stream` and `cdc_stream`.
+
 Each example exports as a service as it stands: `mage service new orders-svc --pipelines
 orders_stream`, then `mage service run orders-svc`.

@@ -91,6 +91,8 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
 
         assert started['running'] is True
         assert any(f'{group}-dev-ada' in note for note in started['notes'])
+        # The run's files stay out of Git.
+        assert '.mage/dev/' in (Path(mage_project) / '.gitignore').read_text().splitlines()
         values = wait_for(lambda: read_topic(kafka_bootstrap, out_topic, 10))
         assert sorted(v['twice'] for v in values) == [i * 2 for i in range(10)]
         status = wait_for(lambda: (lambda s: s if s.get('messages_in') == 10 else None)(

@@ -492,6 +492,23 @@ class ExampleError(ValueError):
     pass
 
 
+DECORATOR_IMPORT = (
+    "if 'transformer' not in globals():\n"
+    "    from mage_ai.data_preparation.decorators import transformer\n\n\n"
+)
+
+
+def _with_decorator_import(code: str) -> str:
+    """A Python block as MageML writes its own: the decorator imported when the file is not
+    run by MageML, so linters and a plain `python` find it."""
+    if '@transformer' not in code or "'transformer' not in globals()" in code:
+        return code
+    at = code.index('@transformer')
+    # One blank line between the imports (or constants) and the guard, as isort keeps it.
+    head = code[:at].rstrip('\n')
+    return (head + '\n\n' if head else '') + DECORATOR_IMPORT + code[at:]
+
+
 def write(repo_path: str, name: str, pipeline_name: Optional[str] = None) -> Dict:
     """Writes the example's pipeline, its files and a sample into the project."""
     import os
@@ -519,8 +536,11 @@ def write(repo_path: str, name: str, pipeline_name: Optional[str] = None) -> Dic
     for block_name, kind, language, content, upstream in example.blocks:
         block = Block.create(f'{pipeline_uuid}_{block_name}', kind, repo_path,
                              language=language)
+        code = textwrap.dedent(content).lstrip()
+        if language == 'python':
+            code = _with_decorator_import(code)
         with open(block.file_path, 'w') as file:
-            file.write(textwrap.dedent(content).lstrip())
+            file.write(code)
         pipeline.add_block(block, upstream_block_uuids=[uuids[u] for u in upstream])
         uuids[block_name] = block.uuid
     rng = random.Random(42)
