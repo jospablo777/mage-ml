@@ -178,6 +178,15 @@ sasl_config:
   committed position after that. MageML seeks at every start, which in a service would read
   everything again after each restart; to read from the offset again, use a new
   `consumer_group`.
+- A broker restart pauses the stream, which goes on where it was once the broker is back;
+  the restart, graceful or killed, is tested with no message lost or written twice. A
+  broker down longer than the group's session timeout (45 seconds by default) takes the
+  partitions away: the stream gets them back after the restarted broker drops the old
+  member (another session timeout), and reads again the batches it wrote but had not
+  committed when the broker went down.
+- librdkafka's warnings and errors go to the service log, as `Kafka source, librdkafka
+  <facility>: ...` lines. `librdkafka: {debug: cgrp}` adds its consumer group log, for a
+  stream that does not get its partitions.
 - `include_metadata: true` hands blocks Mage's
   `{"data": <value>, "metadata": {"key", "partition", "offset", "time", "topic"}}`; a key
   that is not UTF-8 is its base64 text.

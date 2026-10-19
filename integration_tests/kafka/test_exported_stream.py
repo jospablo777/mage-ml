@@ -108,8 +108,13 @@ def consume(consumer, count, timeout=120):
 
 
 def committed(bootstrap, group, topic) -> int:
+    # Tests poll this several times a second: each client is closed, or their sockets and
+    # threads pile up until the polling itself stalls.
     admin = KafkaAdminClient(bootstrap_servers=bootstrap)
-    offsets = admin.list_consumer_group_offsets(group)
+    try:
+        offsets = admin.list_consumer_group_offsets(group)
+    finally:
+        admin.close()
     return sum(meta.offset for part, meta in offsets.items() if part.topic == topic)
 
 
