@@ -81,7 +81,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -172,6 +172,11 @@ test-r: up r-env
 	cd .. && $(PYTHON) -m pytest integration_tests/r $(PYTEST_ARGS)
 
 # The scheduler with many concurrent pipelines, for MAGE_TEST_SOAK_SECONDS (default 150).
+# A Kafka broker down for six minutes under a running stream (needs Docker and Kafka; the
+# test runs its own broker). Not part of test-soak.
+test-kafka-outage:
+	cd .. && MAGE_TEST_KAFKA_OUTAGE=1 $(PYTHON) -m pytest integration_tests/soak/test_kafka_long_outage.py -p no:xdist -rs $(PYTEST_ARGS)
+
 # It runs on its own: make test-soak MAGE_TEST_SOAK_SECONDS=1800
 test-soak: up
 	cd .. && $(PYTHON) -m pytest integration_tests/soak -p no:xdist -rs $(PYTEST_ARGS)

@@ -260,7 +260,8 @@ async def _publish_nats(config: Dict, subject: str, payloads: List[bytes]) -> No
     try:
         js = connection.jetstream()
         for payload in payloads:
-            await js.publish(subject, payload)
+            # JetStream's acknowledgement; 2 s by default, which a loaded server can pass.
+            await js.publish(subject, payload, timeout=10)
     finally:
         await connection.close()
 

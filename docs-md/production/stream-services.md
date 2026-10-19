@@ -184,7 +184,7 @@ sasl_config:
   partitions away: the stream gets them back after the restarted broker drops the old
   member (another session timeout), and reads again the batches it wrote but had not
   committed when the broker went down. A broker down for minutes is tested too
-  (`make test-soak`).
+  (`make -C integration_tests test-kafka-outage`).
 - librdkafka's warnings and errors go to the service log, as `Kafka source, librdkafka
   <facility>: ...` lines. `librdkafka: {debug: cgrp}` adds its consumer group log, for a
   stream that does not get its partitions.
