@@ -3,6 +3,8 @@ name: Dependency audit
 on:
   pull_request:
     paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
       - pyproject.toml
       - uv.lock
       - mage_integrations/pyproject.toml
@@ -14,6 +16,8 @@ on:
   push:
     branches: [master]
     paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
       - pyproject.toml
       - uv.lock
       - mage_integrations/pyproject.toml
@@ -88,3 +92,26 @@ jobs:
           yarn install --frozen-lockfile --ignore-scripts --non-interactive
           set +o pipefail
           yarn audit --json | python3 ../../scripts/yarn_audit.py
+
+  # RustSec advisories for every Cargo.lock: the engine, ColumnAtlas, the Rust block SDK and
+  # the playground's Rust blocks.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit the Rust dependencies
+        # Accepted until Polars (0.55.2, the newest) updates them: quick-xml through
+        # object_store, only reachable from a cloud storage server that sends crafted XML
+        # (RUSTSEC-2026-0194, RUSTSEC-2026-0195); bincode unmaintained (RUSTSEC-2025-0141).
+        run: |
+          status=0
+          for lock in $(git ls-files '*Cargo.lock'); do
+            echo "== $lock"
+            cargo audit --file "$lock" --deny warnings \
+              --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
+              --ignore RUSTSEC-2025-0141 || status=1
+          done
+          exit $status

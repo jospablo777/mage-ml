@@ -825,7 +825,8 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
                 palette().purple
             }))
             .unfilled_style(style(palette().border))
-            .line_set(symbols::line::THICK)
+            .filled_symbol(symbols::line::THICK.horizontal)
+            .unfilled_symbol(symbols::line::THICK.horizontal)
             .label("")
             .ratio(capacity(p)),
         right[1],
