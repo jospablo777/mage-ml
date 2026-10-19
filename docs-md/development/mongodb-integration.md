@@ -2,7 +2,8 @@
 
 Problems found by `integration_tests/mongodb/` in Mage's MongoDB client
 (`mage_ai/io/mongodb.py`) and in the MongoDB source and destination of
-`mage_integrations`, against MongoDB 8 as a single-node replica set. `mage-ml[mongodb]`
+`mage_integrations`, against MongoDB 7.0 as a single-node replica set (MongoDB 8 does not start on Linux 6.19
+or newer, SERVER-121912). `mage-ml[mongodb]`
 installs the client's driver.
 
 ## Client export

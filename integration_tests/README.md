@@ -71,7 +71,7 @@ test skips. CI runs `make ci` in the `integration` job of `build_and_test.yml`.
 
 | Path | Contents |
 | --- | --- |
-| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 8, ClickHouse 25.8, Kafka 4.1, RabbitMQ 4.3, NATS 2.15, ElasticMQ 1.6 (SQS), Google's Pub/Sub emulator, ActiveMQ Classic 6.2, OpenSearch 2.19, InfluxDB 2.7, Toxiproxy 2.12, Trino 483, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
+| `compose.yaml` | PostgreSQL 16, MySQL 8.4, MongoDB 7.0 (8 does not start on Linux 6.19+), ClickHouse 25.8, Kafka 4.1, RabbitMQ 4.3, NATS 2.15, ElasticMQ 1.6 (SQS), Google's Pub/Sub emulator, ActiveMQ Classic 6.2, OpenSearch 2.19, InfluxDB 2.7, Toxiproxy 2.12, Trino 483, Redis 7, the test API, Feast, MLflow and MinIO, with health checks |
 | `conftest.py` | Connection settings and fixtures. Every test gets its own PostgreSQL schema, dropped afterwards |
 | `data/postgres_dataset.py` | Source table with 32 column types: hand-written edge rows plus seeded Faker rows in 8 locales. Also the SQL comparison used by every test |
 | `postgres/` | Load, export, duplicate handling, column names, values, round trips and pipelines; and the PostgreSQL source and destination of `mage_integrations` run as programs: discovery, full and incremental syncs, upserts, and change data capture through a logical replication slot (`test_cdc.py`) |

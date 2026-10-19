@@ -359,8 +359,10 @@ services:
   # MongoDB 8 as a single-node replica set, which transactions require. Data lives in
   # memory. Clients connect with directConnection=true, since the member's address is
   # the container's.
+  # MongoDB 8 refuses to start on Linux 6.19 or newer (its allocator breaks the rseq ABI,
+  # SERVER-121912), which some CI runners have; 7.0 is not affected and has change streams.
   mongodb:
-    image: mongo:8.0
+    image: mongo:7.0
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     tmpfs:
       - /data/db

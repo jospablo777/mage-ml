@@ -116,6 +116,8 @@ async def _read_nats(sink: Dict, limit: int) -> Tuple[List[Dict], int]:
     by an ephemeral consumer filtered to the subject that acknowledges nothing. The position
     of a letter is its stream sequence (partition 0).
     """
+    import asyncio
+
     import nats
     from nats.errors import TimeoutError as NatsTimeout
     from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
@@ -145,12 +147,18 @@ async def _read_nats(sink: Dict, limit: int) -> Tuple[List[Dict], int]:
         subscription = await js.pull_subscribe(subject, stream=stream, config=config)
         letters = []
         try:
+            # Read until the consumer has nothing pending, or the deadline: an empty wait on a
+            # loaded server is not the end of the letters.
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 try:
-                    batch = await subscription.fetch(256, timeout=1)
-                except NatsTimeout:
-                    break
+                    batch = await subscription.fetch(256, timeout=2)
+                except (NatsTimeout, asyncio.TimeoutError):
+                    # nats-py raises its own TimeoutError or asyncio's, depending on where
+                    # the wait ran out.
+                    if (await subscription.consumer_info()).num_pending == 0:
+                        break
+                    continue
                 for message in batch:
                     headers = message.headers or {}
                     letters.append(dict(
@@ -160,6 +168,8 @@ async def _read_nats(sink: Dict, limit: int) -> Tuple[List[Dict], int]:
                         raw=message.data,
                     ))
                 letters = letters[-limit:]
+                if batch and batch[-1].metadata.num_pending == 0:
+                    break
         finally:
             # The ephemeral consumer goes with the read, not a minute later.
             name = (await subscription.consumer_info()).name

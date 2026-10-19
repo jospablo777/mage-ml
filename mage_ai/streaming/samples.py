@@ -264,6 +264,8 @@ def _capture_nats(config: Dict, count: int, start: str, timeout_seconds: float):
 
 
 async def _capture_nats_async(config: Dict, count: int, start: str, timeout_seconds: float):
+    import asyncio
+
     import nats
     from nats.errors import TimeoutError as NatsTimeout
     from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
@@ -294,7 +296,8 @@ async def _capture_nats_async(config: Dict, count: int, start: str, timeout_seco
                 try:
                     batch = await subscription.fetch(min(256, count - len(messages)),
                                                      timeout=1)
-                except NatsTimeout:
+                except (NatsTimeout, asyncio.TimeoutError):
+                    # nats-py raises its own TimeoutError or asyncio's.
                     break
                 for message in batch:
                     messages.append(message_value(message.data))
