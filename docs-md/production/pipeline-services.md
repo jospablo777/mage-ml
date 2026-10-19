@@ -100,8 +100,9 @@ Python, [R](../guides/blocks/r-blocks.md), [Rust](../guides/blocks/rust-blocks.m
 Blocks the service cannot run stop the export with the block named and the reason, so
 nothing silently disappears: sensors, dynamic blocks, callbacks, conditional blocks written
 in R or Rust, SQL blocks on other databases (BigQuery, Snowflake, Trino, Redshift, SQL
-Server) and SQL blocks that use `block_output()` are not supported yet. Chart and markdown
-blocks are notebook only and are left out.
+Server), SQL blocks that use `block_output()`, and blocks that read their upstream with
+chunk or batch settings are not supported yet. Chart, markdown and scratchpad blocks are
+notebook only and are left out.
 
 A service runs the blocks, not the checks around them: [data
 contracts](../guides/blocks/data-contracts.md) and [monitors](../guides/pipelines/monitoring.md) are
