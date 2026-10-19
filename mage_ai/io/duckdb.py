@@ -14,7 +14,12 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pandas import DataFrame, Series
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    ExportWritePolicy,
+    checks_row_limit,
+    shown_query,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
@@ -169,7 +174,7 @@ class DuckDB(BaseSQL):
         query = self._enforce_limit(self._clean_query(query_string), limit)
         message = 'Loading data'
         if verbose:
-            message += f' with query\n\n{display_query or query}\n\n'
+            message += f' with query\n\n{shown_query(display_query or query)}\n\n'
         params = kwargs.get('params') or None
         with self.printer.print_msg(message):
             relation = self.conn.sql(query, params=params)
@@ -218,7 +223,7 @@ class DuckDB(BaseSQL):
         query = self._enforce_limit(self._clean_query(query_string), limit)
         message = 'Loading data'
         if verbose:
-            message += f' with query\n\n{display_query or query}\n\n'
+            message += f' with query\n\n{shown_query(display_query or query)}\n\n'
         with self.printer.print_msg(message):
             relation = self.conn.sql(query, params=params)
             names, kinds = relation.columns, [str(kind) for kind in relation.types]

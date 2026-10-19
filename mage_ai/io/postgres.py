@@ -16,7 +16,12 @@ from psycopg2.extras import (
 )
 
 from mage_ai.io import postgres_types
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    ExportWritePolicy,
+    checks_row_limit,
+    shown_query,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import (
     UNIQUE_CONFLICT_METHOD_IGNORE,
@@ -399,7 +404,7 @@ class Postgres(BaseSQL):
                 return postgres_types.frame_from_cursor(cursor, polars=polars)
 
         if verbose:
-            message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+            message = f'Loading data with query\n\n{shown_query(display_query or query_string)}\n\n'
             with self.printer.print_msg(message):
                 return __load()
         return __load()
@@ -779,7 +784,7 @@ class Postgres(BaseSQL):
             query_string (str): SQL query string to apply on the connected database.
             query_vars: Variable values to fill in when using format strings in query.
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             try:
                 with self.conn.cursor() as cur:

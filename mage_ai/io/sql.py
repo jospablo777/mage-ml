@@ -11,6 +11,7 @@ from mage_ai.io.base import (
     BaseSQLConnection,
     ExportWritePolicy,
     checks_row_limit,
+    shown_query,
 )
 from mage_ai.io.config import BaseConfigLoader
 from mage_ai.io.export_utils import (
@@ -164,7 +165,7 @@ class BaseSQL(BaseSQLConnection):
             query_string (str): SQL query string to apply on the connected database.
             query_vars: Variable values to fill in when using format strings in query.
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             with self.conn.cursor() as cur:
                 cur.execute(query_string, **query_vars)
@@ -239,10 +240,10 @@ class BaseSQL(BaseSQLConnection):
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n\n{query_string}\n\n'
+                print_message += f'\n\n{shown_query(query_string)}\n\n'
 
         query_string = self._clean_query(query_string)
         if kwargs.get('params') is not None:

@@ -3,7 +3,12 @@ from typing import Dict, List, Union
 from pandas import DataFrame
 from pyspark.sql import SparkSession
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, BaseSQLDatabase, ExportWritePolicy
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    BaseSQLDatabase,
+    ExportWritePolicy,
+    shown_query,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 
 
@@ -61,7 +66,7 @@ class Spark(BaseSQLDatabase):
             query_string (str): Query to execute on the Spark Session.
             **kwargs: Additional arguments to pass to query, such as query configurations
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             self.client.sql(query_string, **kwargs)
 
@@ -82,7 +87,7 @@ class Spark(BaseSQLDatabase):
             **kwargs: Additional arguments to pass to query, such as query configurations
         """
         query = self._clean_query(query)
-        with self.printer.print_msg(f'Executing query \'{query}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query)}\''):
             result = self.client.sql(query, parameters=parameters).toPandas()
 
         return result
@@ -140,10 +145,10 @@ class Spark(BaseSQLDatabase):
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n{query_string}'
+                print_message += f'\n{shown_query(query_string)}'
 
         query_string = self._clean_query(query_string)
 

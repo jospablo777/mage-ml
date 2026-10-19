@@ -14,6 +14,7 @@ from mage_ai.io.base import (
     BaseSQLConnection,
     ExportWritePolicy,
     checks_row_limit,
+    shown_query,
 )
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
@@ -77,7 +78,7 @@ class Snowflake(BaseSQLConnection):
             query_string (str): The query to execute on Snowflake's platform.
             **kwargs: Additional parameters to provide to the query
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             with self.conn.cursor() as cur:
                 return cur.execute(query_string, timeout=self.timeout, **kwargs).fetchall()
@@ -181,10 +182,10 @@ class Snowflake(BaseSQLConnection):
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n{query_string}'
+                print_message += f'\n{shown_query(query_string)}'
 
         query_string = self._clean_query(query_string)
 

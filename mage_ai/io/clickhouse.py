@@ -9,6 +9,7 @@ from mage_ai.io.base import (
     BaseSQLDatabase,
     ExportWritePolicy,
     checks_row_limit,
+    shown_query,
 )
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import to_pandas_frame
@@ -70,7 +71,7 @@ class ClickHouse(BaseSQLDatabase):
             command_string (str): Command to execute on the ClickHouse warehouse.
             **kwargs: Additional arguments to pass to command, such as configurations
         """
-        with self.printer.print_msg(f'Executing query \'{command_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(command_string)}\''):
             command_string = self._clean_query(command_string)
             self.client.command(command_string, **kwargs)
 
@@ -88,7 +89,7 @@ class ClickHouse(BaseSQLDatabase):
             **kwargs: Additional arguments to pass to query, such as query configurations
         """
         query = self._clean_query(query)
-        with self.printer.print_msg(f'Executing query \'{query}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query)}\''):
             result = self.client.query_df(query, parameters=parameters)
 
         return result
@@ -151,10 +152,10 @@ class ClickHouse(BaseSQLDatabase):
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n{query_string}'
+                print_message += f'\n{shown_query(query_string)}'
 
         query_string = self._clean_query(query_string)
 

@@ -36,6 +36,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
   different dynamic blocks still make every combination.
 - **A callback block attached to no block is a pipeline callback**: it runs once when a run
   completes or fails. Such blocks ran nothing before.
+- **SQL loaders mask string literals in the queries they log** (`'…'`), so values written in
+  a query (emails, names, tokens) stay out of run logs; `MAGE_LOG_QUERY_VALUES=on` shows them.
 - **Kafka `offset` in services** applies while the consumer group has committed nothing,
   then the committed position (MageML seeks at every start).
 - **`mage service deploy` runs the service tests first** (each stream sample through the

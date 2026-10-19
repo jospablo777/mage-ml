@@ -16,7 +16,7 @@ from typing import IO, Any, Dict, List, Mapping, Optional, Union
 import numpy as np
 from pandas import DataFrame, Series, Timestamp, isna
 
-from mage_ai.io.base import QUERY_ROW_LIMIT, checks_row_limit
+from mage_ai.io.base import QUERY_ROW_LIMIT, checks_row_limit, shown_query
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import PandasTypes
@@ -258,7 +258,7 @@ class Db2(BaseSQL):
         query_string = self._clean_query(query_string)
         message = 'Loading data'
         if verbose:
-            message += f' with query\n\n{display_query or query_string}\n\n'
+            message += f' with query\n\n{shown_query(display_query or query_string)}\n\n'
         with self.printer.print_msg(message):
             with self.conn.cursor() as cursor:
                 cursor.execute(self._enforce_limit(query_string, limit))

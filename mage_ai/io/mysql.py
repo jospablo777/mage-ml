@@ -11,7 +11,7 @@ from mysql.connector.cursor import MySQLCursor
 from pandas import DataFrame, Series
 
 from mage_ai.io import mysql_types
-from mage_ai.io.base import checks_row_limit
+from mage_ai.io.base import checks_row_limit, shown_query
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
 from mage_ai.io.export_utils import PandasTypes, insert_rows, to_pandas_frame
@@ -243,7 +243,8 @@ class MySQL(BaseSQL):
                     return mysql_types.frame_with_nullable_integers(cursor)
 
             if verbose:
-                message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+                shown = shown_query(display_query or query_string)
+                message = f'Loading data with query\n\n{shown}\n\n'
                 with self.printer.print_msg(message):
                     return __load_nullable()
             return __load_nullable()
@@ -280,7 +281,7 @@ class MySQL(BaseSQL):
             return table.to_pandas(types_mapper=pd.ArrowDtype)
 
         if verbose:
-            message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+            message = f'Loading data with query\n\n{shown_query(display_query or query_string)}\n\n'
             with self.printer.print_msg(message):
                 return __load()
         return __load()

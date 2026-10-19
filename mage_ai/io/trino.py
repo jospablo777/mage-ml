@@ -11,7 +11,12 @@ from trino.exceptions import TrinoUserError
 from trino.transaction import IsolationLevel
 
 from mage_ai.io import trino_types
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    ExportWritePolicy,
+    checks_row_limit,
+    shown_query,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import to_pandas_frame
 from mage_ai.io.sql import BaseSQL, ignore_dbapi_connection_warning
@@ -200,7 +205,7 @@ class Trino(BaseSQL):
             return table.to_pandas(types_mapper=pd.ArrowDtype)
 
         if verbose:
-            message = f'Loading data with query\n\n{display_query or query_string}\n\n'
+            message = f'Loading data with query\n\n{shown_query(display_query or query_string)}\n\n'
             with self.printer.print_msg(message):
                 return __load()
         return __load()

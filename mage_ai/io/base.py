@@ -18,6 +18,73 @@ from mage_ai.shared.logger import VerbosePrintHandler
 from mage_ai.shared.models import BaseEnum
 from mage_ai.shared.utils import clean_name
 
+MASKED_VALUE = "'…'"
+
+
+def shown_query(query: str) -> str:
+    """
+    A query as the run log shows it: its string literals masked, so values written in the
+    query (emails, names, tokens) stay out of the logs while its shape stays readable.
+    Bound parameters never reach the text. Comments and quoted identifiers stay as they are.
+    MAGE_LOG_QUERY_VALUES=on shows the values, for local debugging (I-116).
+    """
+    if not query or os.getenv('MAGE_LOG_QUERY_VALUES', '').lower() in ('on', 'true', '1'):
+        return query
+    out = []
+    i, n = 0, len(query)
+    while i < n:
+        c = query[i]
+        if query.startswith('--', i):
+            end = query.find('\n', i)
+            end = n if end < 0 else end
+            out.append(query[i:end])
+            i = end
+        elif query.startswith('/*', i):
+            end = query.find('*/', i + 2)
+            end = n if end < 0 else end + 2
+            out.append(query[i:end])
+            i = end
+        elif c in '"`':
+            end = query.find(c, i + 1)
+            end = n if end < 0 else end + 1
+            out.append(query[i:end])
+            i = end
+        elif c == '$' and (i == 0 or not (query[i - 1].isalnum() or query[i - 1] == '_')):
+            # PostgreSQL's dollar quoting: $$...$$ or $tag$...$tag$.
+            tag_end = query.find('$', i + 1)
+            tag = query[i:tag_end + 1] if tag_end > 0 else ''
+            if tag and all(ch.isalnum() or ch == '_' for ch in tag[1:-1]) and \
+                    not tag[1:-1][:1].isdigit():
+                end = query.find(tag, tag_end + 1)
+                end = n if end < 0 else end + len(tag)
+                out.append(MASKED_VALUE)
+                i = end
+            else:
+                out.append(c)
+                i += 1
+        elif c == "'":
+            backslash = i > 0 and query[i - 1] in 'eE' and \
+                (i < 2 or not (query[i - 2].isalnum() or query[i - 2] == '_'))
+            j = i + 1
+            while j < n:
+                if backslash and query[j] == '\\':
+                    j += 2
+                    continue
+                if query[j] == "'":
+                    if j + 1 < n and query[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            if backslash:
+                out.pop()  # the E prefix
+            out.append(MASKED_VALUE)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return ''.join(out)
+
 QUERY_ROW_LIMIT = 10_000_000
 # What a load does when the query returns more rows than its limit: warn (cut the result at
 # the limit and say so), error (raise RowLimitReached) or allow (cut it silently).

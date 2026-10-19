@@ -6,7 +6,12 @@ from pandas import DataFrame
 from redshift_connector import connect
 
 from mage_ai.data_preparation.models.block.sql.utils.shared import split_query_string
-from mage_ai.io.base import QUERY_ROW_LIMIT, ExportWritePolicy, checks_row_limit
+from mage_ai.io.base import (
+    QUERY_ROW_LIMIT,
+    ExportWritePolicy,
+    checks_row_limit,
+    shown_query,
+)
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.export_utils import clean_df_for_export, infer_dtypes, to_pandas_frame
 from mage_ai.io.sql import BaseSQL
@@ -66,7 +71,7 @@ class Redshift(BaseSQL):
             query_string (str): The query to execute on the Redshift cluster.
             **kwargs: Additional parameters to pass to the query.
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             with self.conn.cursor() as cur:
                 cur.execute(query_string, **kwargs)
@@ -115,10 +120,10 @@ class Redshift(BaseSQL):
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n\n{query_string}\n\n'
+                print_message += f'\n\n{shown_query(query_string)}\n\n'
 
         query_string = self._clean_query(query_string)
 

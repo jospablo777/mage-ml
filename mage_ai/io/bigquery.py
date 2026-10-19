@@ -20,6 +20,7 @@ from mage_ai.io.base import (
     BaseSQLDatabase,
     ExportWritePolicy,
     checks_row_limit,
+    shown_query,
 )
 from mage_ai.io.config import BaseConfigLoader, ConfigKey
 from mage_ai.io.constants import UNIQUE_CONFLICT_METHOD_UPDATE
@@ -189,10 +190,10 @@ WHERE TABLE_NAME = '{table_name}'
             print_message += ' with query'
 
             if display_query:
-                for line in display_query.split('\n'):
+                for line in shown_query(display_query).split('\n'):
                     print_message += f'\n{line}'
             else:
-                print_message += f'\n{query_string}'
+                print_message += f'\n{shown_query(query_string)}'
 
         query_string = self._clean_query(query_string)
 
@@ -468,7 +469,7 @@ WHERE table_id = '{table_name}'
             query_string (str): Query to execute on the BigQuery warehouse.
             **kwargs: Additional arguments to pass to query, such as query configurations
         """
-        with self.printer.print_msg(f'Executing query \'{query_string}\''):
+        with self.printer.print_msg(f'Executing query \'{shown_query(query_string)}\''):
             query_string = self._clean_query(query_string)
             self.client.query(query_string, **kwargs)
 
@@ -495,7 +496,7 @@ WHERE table_id = '{table_name}'
             query = self._clean_query(query)
 
             if is_debug():
-                print(f'\nExecuting query:\n\n{query}\n')
+                print(f'\nExecuting query:\n\n{shown_query(query)}\n')
 
             result = self.client.query(query, **variables)
 
