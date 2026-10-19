@@ -108,18 +108,10 @@ def committed_now(bootstrap, group, topic) -> int:
         return 0
 
 
-@pytest.mark.parametrize('halt, down, repeats', [
-    (['stop', '-t', '5'], 8, 0),
-    (['kill'], 8, 0),
-    # Longer than the group's session timeout (45 s): the group takes the partitions away,
-    # and the batches written but not yet committed then are read again (at least once).
-    (['kill'], 60, TOTAL // 4),
-], ids=['stopped', 'killed', 'killed-past-session-timeout'])
-def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats):
-    """Down mid-stream for seconds: the engine waits, reconnects, and goes on from where it
-    was; the producer's retries are absorbed, so nothing is lost or written twice. Down past
-    the session timeout, the group gives the partitions back after the restarted broker
-    drops the old member, and nothing is lost."""
+def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recovery=180):
+    """Stops the broker under a running stream for `down` seconds, starts it again, and
+    checks that every message reached the sink within `recovery` seconds of its return,
+    with at most `repeats` written twice."""
     name, bootstrap = broker
     topics = [f'it_in_{uuid.uuid4().hex[:10]}', f'it_out_{uuid.uuid4().hex[:10]}']
     admin = KafkaAdminClient(bootstrap_servers=bootstrap)
@@ -127,11 +119,11 @@ def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, do
     admin.close()
     group = f'g_{uuid.uuid4().hex[:8]}'
     # librdkafka's group log goes to the service log, for a failure to explain itself.
-    pipeline = make_pipeline(mage_project, topics, group, batch_size=100,
+    pipeline = make_pipeline(project, topics, group, batch_size=100,
                              librdkafka={'debug': 'cgrp'})
     service = None
     try:
-        directory = export_service(mage_project, pipeline.uuid, tmp_path)
+        directory = export_service(project, pipeline.uuid, tmp_path)
         produce(bootstrap, topics[0], range(TOTAL))
         service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
                                  KAFKA_BOOTSTRAP=bootstrap)
@@ -144,7 +136,7 @@ def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, do
         subprocess.run(['docker', 'start', name], check=True, capture_output=True)
         wait_for(lambda: admin_ready(bootstrap), timeout=120).close()
 
-        wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=180)
+        wait_for(lambda: committed_now(bootstrap, group, topics[0]) == TOTAL, timeout=recovery)
         out = read_to_end(bootstrap, topics[1])
         ids = [m['id'] for m in out]
 
@@ -156,3 +148,18 @@ def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, do
         if service:
             service.stop()
         pipeline.delete()
+
+
+@pytest.mark.parametrize('halt, down, repeats', [
+    (['stop', '-t', '5'], 8, 0),
+    (['kill'], 8, 0),
+    # Longer than the group's session timeout (45 s): the group takes the partitions away,
+    # and the batches written but not yet committed then are read again (at least once).
+    (['kill'], 60, TOTAL // 4),
+], ids=['stopped', 'killed', 'killed-past-session-timeout'])
+def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats):
+    """Down mid-stream for seconds: the engine waits, reconnects, and goes on from where it
+    was; the producer's retries are absorbed, so nothing is lost or written twice. Down past
+    the session timeout, the group gives the partitions back after the restarted broker
+    drops the old member, and nothing is lost."""
+    restart_under_stream(broker, mage_project, tmp_path, halt, down, repeats)

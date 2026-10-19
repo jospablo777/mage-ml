@@ -56,7 +56,14 @@ pub struct StreamStatus {
     pub taps: BTreeMap<String, VecDeque<TapMessage>>,
     #[serde(skip)]
     pub tap_enabled: bool,
+    /// The last error written to the log, and when: a repeated error is written again only
+    /// every [`ERROR_LOG_EVERY`].
+    #[serde(skip)]
+    pub error_logged: Option<(String, std::time::Instant)>,
 }
+
+/// How often an error that keeps coming back is written to the log again.
+const ERROR_LOG_EVERY: Duration = Duration::from_secs(30);
 
 /// A message seen at a tap point.
 #[derive(Debug, Clone, Serialize)]
@@ -207,10 +214,21 @@ struct WriteJob {
 /// Batches a writer has handed to its sink and awaits the confirmation of.
 const WRITES_IN_FLIGHT: usize = 4;
 
+/// What the stream tells a writer about its batches.
+#[derive(Debug, Clone, Copy)]
+enum WriterControl {
+    /// Write the failed batch again.
+    Retry(BatchId),
+    /// The batch was dropped (its partition went to another owner): not written again.
+    Cancel(BatchId),
+}
+
 /// A sink's writer: hands batches to the sink in order, up to [`WRITES_IN_FLIGHT`] awaiting
 /// their confirmation (a sink that does not split the two confirms each at once), and
 /// reports receipts in order. After a failure it hands over nothing new until the batches in
-/// flight are confirmed, then waits for each failed batch's retry, in order, before going on.
+/// flight are confirmed, then waits for each failed batch's retry, in order, before going on;
+/// a batch the stream dropped is skipped. It waited for the retry of a dropped batch, which
+/// never comes, and every later batch waited behind it (I-202).
 fn spawn_writer(
     sink: Arc<dyn Sink>,
     sink_id: SinkId,
@@ -218,10 +236,10 @@ fn spawn_writer(
     events: mpsc::UnboundedSender<Internal>,
 ) -> (
     mpsc::UnboundedSender<WriteJob>,
-    mpsc::UnboundedSender<BatchId>,
+    mpsc::UnboundedSender<WriterControl>,
 ) {
     let (jobs_tx, mut jobs) = mpsc::unbounded_channel::<WriteJob>();
-    let (retry_tx, mut retries) = mpsc::unbounded_channel::<BatchId>();
+    let (control_tx, mut control) = mpsc::unbounded_channel::<WriterControl>();
     tokio::spawn(async move {
         let report = |job: &WriteJob, result: &Result<(), ConnectorError>| {
             let sink = if job.rows {
@@ -251,6 +269,18 @@ fn spawn_writer(
         )> = Default::default();
         let mut failed: Vec<WriteJob> = Vec::new();
         let mut scheduled: std::collections::HashSet<BatchId> = Default::default();
+        let mut cancelled: std::collections::HashSet<BatchId> = Default::default();
+        let note =
+            |message: WriterControl,
+             scheduled: &mut std::collections::HashSet<BatchId>,
+             cancelled: &mut std::collections::HashSet<BatchId>| match message {
+                WriterControl::Retry(id) => {
+                    scheduled.insert(id);
+                }
+                WriterControl::Cancel(id) => {
+                    cancelled.insert(id);
+                }
+            };
         let mut open = true;
         loop {
             if failed.is_empty() && open && in_flight.len() < WRITES_IN_FLIGHT {
@@ -279,6 +309,13 @@ fn spawn_writer(
                     open = false;
                     continue;
                 };
+                while let Ok(message) = control.try_recv() {
+                    note(message, &mut scheduled, &mut cancelled);
+                }
+                // A dropped batch is not written: its next owner reads it again.
+                if cancelled.remove(&job.id) {
+                    continue;
+                }
                 match sink.queue(&job.batch, &job.meta).await {
                     Ok(confirmation) => {
                         let handle = tokio::spawn(confirmation);
@@ -313,14 +350,15 @@ fn spawn_writer(
             }
             // Each failed batch again, in order, once the machine schedules its retry; a
             // retry writes the batch whole, as before.
-            for job in std::mem::take(&mut failed) {
+            'jobs: for job in std::mem::take(&mut failed) {
                 loop {
                     // A later batch's retry can come first: it is kept for its turn.
                     while !scheduled.remove(&job.id) {
-                        match retries.recv().await {
-                            Some(id) => {
-                                scheduled.insert(id);
-                            }
+                        if cancelled.remove(&job.id) {
+                            continue 'jobs;
+                        }
+                        match control.recv().await {
+                            Some(message) => note(message, &mut scheduled, &mut cancelled),
                             None => return,
                         }
                     }
@@ -335,7 +373,7 @@ fn spawn_writer(
             }
         }
     });
-    (jobs_tx, retry_tx)
+    (jobs_tx, control_tx)
 }
 
 /// The dead-letter copy of a batch's rejected messages, each with its own error.
@@ -508,7 +546,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         TransformError::Crash(_) => FailureKind::Crash,
                         TransformError::Timeout(_) => FailureKind::Timeout,
                     };
-                    record_error(&status, &error.to_string());
+                    record_error(&status, &parts.name, &error.to_string());
                     // A block's error reads "<block>: <message>".
                     if let TransformError::User(message) = &error
                         && let Some((block, _)) = message.split_once(": ")
@@ -531,17 +569,17 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                         Operation::Write(id, SinkId::REJECTED_ROWS) => {
                             if let Some((_, retry)) = &dead_letter_writer {
-                                let _ = retry.send(id);
+                                let _ = retry.send(WriterControl::Retry(id));
                             }
                         }
                         Operation::Write(id, sink) => {
                             if let Some((_, retry)) = writers.get(sink.0 as usize) {
-                                let _ = retry.send(id);
+                                let _ = retry.send(WriterControl::Retry(id));
                             }
                         }
                         Operation::DeadLetter(id) => {
                             if let Some((_, retry)) = &dead_letter_writer {
-                                let _ = retry.send(id);
+                                let _ = retry.send(WriterControl::Retry(id));
                             }
                         }
                     }
@@ -641,7 +679,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     events.push(Event::Shutdown);
                 }
                 Err(error) => {
-                    record_error(&status, &format!("the source failed: {error}"));
+                    record_error(&status, &parts.name, &format!("the source failed: {error}"));
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
             },
@@ -702,7 +740,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                         rows: false,
                                     });
                                 }
-                                Err(e) => record_error(&status, &e.message),
+                                Err(e) => record_error(&status, &parts.name, &e.message),
                             }
                         }
                     }
@@ -720,7 +758,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                         rows: true,
                                     });
                                 }
-                                Err(e) => record_error(&status, &e.message),
+                                Err(e) => record_error(&status, &parts.name, &e.message),
                             }
                         }
                     }
@@ -751,7 +789,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             }
                             CommitOutcome::Stale => {}
                             CommitOutcome::Failed(error) => {
-                                record_error(&status, &format!("acknowledging failed: {error}"));
+                                record_error(
+                                    &status,
+                                    &parts.name,
+                                    &format!("acknowledging failed: {error}"),
+                                );
                             }
                         }
                     }
@@ -765,6 +807,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             inputs.remove(&id);
                             outputs.remove(&id);
                             rejected.remove(&id);
+                            for (_, control) in writers.iter().chain(&dead_letter_writer) {
+                                let _ = control.send(WriterControl::Cancel(id));
+                            }
                         }
                     }
                     Effect::StopReading => {
@@ -775,7 +820,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         count(&status, |s| s.alerts += 1);
                         crate::log::warn(&format!("Stream {}: {message}", parts.name));
                         // A sink retrying without end says why in the stream's status.
-                        record_error(&status, &message);
+                        keep_error(&status, &message);
                     }
                     Effect::Stop(reason) => {
                         let message = match reason {
@@ -788,7 +833,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             }
                         };
                         crate::log::error(&format!("Stream {}: {message}", parts.name));
-                        record_error(&status, &message);
+                        keep_error(&status, &message);
                         set_state(&status, StreamState::Failed);
                         parts.source.failed(&message);
                     }
@@ -834,7 +879,31 @@ fn count(status: &SharedStatus, update: impl FnOnce(&mut StreamStatus)) {
     }
 }
 
-fn record_error(status: &SharedStatus, message: &str) {
+/// Keeps the error in the stream's status and writes it to the log: once when it changes,
+/// then every [`ERROR_LOG_EVERY`] while it repeats. Only the status had it, so a source
+/// reconnecting for minutes left nothing in the log (I-201).
+fn record_error(status: &SharedStatus, name: &str, message: &str) {
+    let write = match status.lock() {
+        Ok(mut s) => {
+            s.last_error = Some(message.to_string());
+            let due = match &s.error_logged {
+                Some((last, at)) => last != message || at.elapsed() >= ERROR_LOG_EVERY,
+                None => true,
+            };
+            if due {
+                s.error_logged = Some((message.to_string(), std::time::Instant::now()));
+            }
+            due
+        }
+        Err(_) => false,
+    };
+    if write {
+        crate::log::warn(&format!("Stream {name}: {message}"));
+    }
+}
+
+/// Keeps the error in the stream's status only, for one the caller already logged.
+fn keep_error(status: &SharedStatus, message: &str) {
     if let Ok(mut s) = status.lock() {
         s.last_error = Some(message.to_string());
     }
@@ -846,6 +915,43 @@ mod tests {
     use mage_connector_local::{MemorySink, MemorySource};
     use mage_stream_core::{PoisonPolicy, RetryPolicy, TrackerConfig};
     use mage_stream_ports::{BoxFuture, Envelope, TransformOutput};
+
+    #[test]
+    fn a_repeated_error_is_logged_once_per_interval_and_a_new_one_at_once() {
+        let status: SharedStatus = Default::default();
+        let logged_at = |status: &SharedStatus| {
+            status
+                .lock()
+                .unwrap()
+                .error_logged
+                .as_ref()
+                .map(|(m, at)| (m.clone(), *at))
+        };
+
+        record_error(&status, "orders", "the source failed: broker down");
+        let (first, at) = logged_at(&status).unwrap();
+        record_error(&status, "orders", "the source failed: broker down");
+        assert_eq!(
+            logged_at(&status).unwrap(),
+            (first.clone(), at),
+            "logged again too soon"
+        );
+
+        record_error(&status, "orders", "acknowledging failed: no coordinator");
+        let (second, _) = logged_at(&status).unwrap();
+        assert_eq!(second, "acknowledging failed: no coordinator");
+        assert_eq!(
+            status.lock().unwrap().last_error.as_deref(),
+            Some(second.as_str())
+        );
+
+        keep_error(&status, "stopped: sink 0 rejected the batch");
+        assert_eq!(
+            logged_at(&status).unwrap().0,
+            second,
+            "keep_error does not log"
+        );
+    }
 
     fn messages(count: usize) -> Vec<Envelope> {
         (0..count)
@@ -1198,6 +1304,53 @@ mod tests {
         assert_eq!(sink.received().len(), 9);
         assert_eq!(status.dead_lettered_messages, 3);
         assert_eq!(status.dead_lettered_batches, 0);
+    }
+
+    #[tokio::test]
+    async fn a_writer_skips_a_failed_batch_the_stream_dropped() {
+        use mage_stream_core::{AssignmentEpoch, BatchId, PartitionId, Position};
+
+        let sink: Arc<dyn Sink> = Arc::new(FlakySink {
+            failures: std::sync::atomic::AtomicUsize::new(1),
+        });
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let (jobs, control) = spawn_writer(sink, SinkId(0), false, events_tx);
+        let job = |seq| {
+            let id = BatchId {
+                partition: PartitionId(0),
+                epoch: AssignmentEpoch(1),
+                seq,
+            };
+            WriteJob {
+                id,
+                batch: RecordBatch::new_empty(mage_stream_ports::envelope_schema()),
+                meta: BatchMeta {
+                    id,
+                    first: Position::Offset(0),
+                    last: Position::Offset(0),
+                    records: 0,
+                    bytes: 0,
+                },
+                rows: false,
+            }
+        };
+        let (first, second) = (job(0), job(1));
+        let (first_id, second_id) = (first.id, second.id);
+        jobs.send(first).unwrap();
+        async fn next(events: &mut mpsc::UnboundedReceiver<Internal>) -> Event {
+            match tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
+                Ok(Some(Internal::Event(event))) => event,
+                _ => panic!("the writer reported nothing within 5 seconds"),
+            }
+        }
+        assert!(matches!(next(&mut events).await, Event::SinkFailed { id, .. } if id == first_id));
+        jobs.send(second).unwrap();
+
+        // The partition went to another owner: the failed batch is dropped, not retried.
+        control.send(WriterControl::Cancel(first_id)).unwrap();
+        assert!(
+            matches!(next(&mut events).await, Event::SinkReceipt { id, .. } if id == second_id)
+        );
     }
 
     /// Fails with a retryable error a number of times, then writes.

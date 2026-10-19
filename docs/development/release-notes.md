@@ -192,12 +192,17 @@ services that run in the Rust engine, with Python, Rust or R blocks
   and a partition whose last batch it was kept its old committed offset while the stream
   ran (lag stayed up; a crash read the batch again). The engine commits the positions
   again every 5 seconds.
-- Kafka streams could stand still for 15 minutes after a broker restart longer than the
-  session timeout: giving up the partitions the group took away waited on a commit that
-  could not succeed, until `max.poll.interval.ms` passed. Lost partitions are now given up
-  at once, and a commit before giving partitions up waits 10 seconds at most.
+- Kafka streams: giving up partitions made a commit that librdkafka waits on without end,
+  even for partitions the group had already taken away, so a coordinator that did not
+  answer held the stream. Lost partitions are now given up at once, and a commit before
+  giving partitions up, or at the stop, waits 10 seconds at most.
 - Kafka streams: a partition paused when the group took it away came back paused and was
   never read again.
+- Streams stood still after a broker outage long enough for the sink's writes to fail
+  after the partitions went to another owner: the writer waited for a retry that never
+  comes. Writes of dropped batches are now skipped.
+- Stream errors (a source reconnecting, a block failing, a commit failing) go to the log,
+  once and every 30 seconds while they repeat; only the status had them.
 - Kafka streams: a paused partition's messages held back the other partitions' messages
   read after them.
 - Kafka sources write librdkafka's warnings and errors to the service log; they went

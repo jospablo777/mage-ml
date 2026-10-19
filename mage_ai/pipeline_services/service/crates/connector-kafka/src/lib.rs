@@ -606,6 +606,30 @@ impl ConsumerContext for RebalanceContext {
 
 type KafkaConsumer = BaseConsumer<RebalanceContext>;
 
+/// Writes a line of librdkafka's log as the service log writes its lines. `level` is
+/// syslog's, as librdkafka gives it.
+fn write_librdkafka_log(side: &str, level: i32, facility: &str, message: &str) {
+    let name = match level {
+        0..=3 => "error",
+        4 => "warn",
+        5 | 6 => "info",
+        _ => "debug",
+    };
+    let time = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    eprintln!("{time} {name:<5} Kafka {side}, librdkafka {facility}: {message}");
+}
+
+/// The sink's producer context: rdkafka serves the producer's log through it, and without
+/// it librdkafka's warnings and errors went nowhere.
+pub struct SinkContext;
+
+impl ClientContext for SinkContext {
+    fn log(&self, level: rdkafka::config::RDKafkaLogLevel, facility: &str, message: &str) {
+        write_librdkafka_log("sink", level as i32, facility, message);
+    }
+}
+
 /// librdkafka's own log, for the service log. rdkafka sends it to the consumer's queue,
 /// whose poll ignores it, so librdkafka's warnings and errors went nowhere: the consumer's
 /// log goes to a queue of its own, which the poll thread drains.
@@ -651,19 +675,11 @@ impl LogQueue {
                     &mut level,
                 ) == 0
                 {
-                    let name = match level {
-                        0..=3 => "error",
-                        4 => "warn",
-                        5 | 6 => "info",
-                        _ => "debug",
-                    };
-                    // As the service log writes its lines.
-                    let time = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
-                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                    eprintln!(
-                        "{time} {name:<5} Kafka source, librdkafka {}: {}",
-                        CStr::from_ptr(facility).to_string_lossy(),
-                        CStr::from_ptr(message).to_string_lossy()
+                    write_librdkafka_log(
+                        "source",
+                        level,
+                        &CStr::from_ptr(facility).to_string_lossy(),
+                        &CStr::from_ptr(message).to_string_lossy(),
                     );
                 }
                 rdkafka::bindings::rd_kafka_event_destroy(event);
@@ -684,9 +700,8 @@ impl Drop for LogQueue {
 }
 
 /// Commits the positions and waits up to `within` for the coordinator's answer. librdkafka's
-/// synchronous commit waits without end: in a revoke after a broker restart it held the poll
-/// thread, and the stream with it, for 15 minutes, until max.poll.interval.ms took the
-/// partitions away (I-196).
+/// synchronous commit waits without end: in a revoke, a coordinator that did not answer
+/// held the poll thread, and the stream with it (I-196).
 fn commit_within(
     consumer: &KafkaConsumer,
     list: &TopicPartitionList,
@@ -1378,7 +1393,7 @@ impl Drop for KafkaSource {
 }
 
 pub struct KafkaSink {
-    producer: FutureProducer,
+    producer: FutureProducer<SinkContext>,
     topic: String,
     timeout: Duration,
 }
@@ -1392,8 +1407,11 @@ impl KafkaSink {
             .set("enable.idempotence", "true")
             .set("acks", "all")
             .set("linger.ms", "5")
-            .set("compression.type", "lz4");
-        let producer: FutureProducer = client.create().map_err(connector_error)?;
+            .set("compression.type", "lz4")
+            .set_log_level(rdkafka::config::RDKafkaLogLevel::Debug);
+        let producer: FutureProducer<SinkContext> = client
+            .create_with_context(SinkContext)
+            .map_err(connector_error)?;
         Ok(KafkaSink {
             producer,
             topic,

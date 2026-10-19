@@ -183,7 +183,8 @@ sasl_config:
   broker down longer than the group's session timeout (45 seconds by default) takes the
   partitions away: the stream gets them back after the restarted broker drops the old
   member (another session timeout), and reads again the batches it wrote but had not
-  committed when the broker went down.
+  committed when the broker went down. A broker down for minutes is tested too
+  (`make test-soak`).
 - librdkafka's warnings and errors go to the service log, as `Kafka source, librdkafka
   <facility>: ...` lines. `librdkafka: {debug: cgrp}` adds its consumer group log, for a
   stream that does not get its partitions.
