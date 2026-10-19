@@ -1,0 +1,31 @@
+name: Docs
+
+# Every page parses and every link inside the docs resolves. A page MDX cannot parse (for
+# example `<topic>` in text, read as an unclosed tag) does not render at all.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: Pages parse and links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Check the docs
+        working-directory: docs
+        run: npx --yes mint@4.2.1065 broken-links

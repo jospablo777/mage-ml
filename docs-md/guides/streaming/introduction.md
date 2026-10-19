@@ -156,7 +156,7 @@ stream sequence) and time, secret fields redacted as in samples.
 
 - **Open as sample** saves them as a sample: Run on sample shows the failure again, and the
   fix can be checked on the very messages that failed.
-- **Replay to <topic>** writes them back to the source's Kafka topic or NATS subject as they
+- **Replay to** (the source's topic or subject) writes them back to the source's Kafka topic or NATS subject as they
   were received, once the block is fixed. It is a write to production, so you type its name
   to confirm. A NATS source subject with wildcards cannot be replayed to.
 
