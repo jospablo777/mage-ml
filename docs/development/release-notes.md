@@ -97,6 +97,9 @@ services that run in the Rust engine, with Python, Rust or R blocks
   group (no position moves), or takes pasted ones, and Cmd+Enter runs a stream transformer and the blocks before it on a sample, showing input
   and output side by side, each block's time and output. Rust stream blocks run the same
   way, and in Execute pipeline.
+- Tutorials: [Kafka to PostgreSQL](/guides/streaming/tutorials/kafka-to-postgres) and
+  [PostgreSQL changes to Kafka](/guides/streaming/tutorials/postgres-changes-to-kafka), from
+  the first sample to a service.
 - The playground has three stream pipelines (`orders_stream`, `clickstream_stream`,
   `cdc_stream`): `make playground-streams` starts Kafka, builds the stream engine and sends
   synthetic traffic, so the Samples, Run and Dead letters tabs work on live data.

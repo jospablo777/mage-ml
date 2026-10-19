@@ -1,0 +1,134 @@
+---
+title: "PostgreSQL changes to Kafka"
+description: "Capture the changes of a PostgreSQL table by logical replication and publish them to Kafka as events, with the replication slot holding the position."
+---
+
+You build a stream that reads every insert, update and delete of a PostgreSQL table by
+logical replication and writes each change to Kafka as an event. A transaction's changes
+arrive whole, in commit order, and the replication slot holds the position, so a restart goes
+on where the stream stopped. It takes about fifteen minutes.
+
+## Before you start
+
+- MageML installed, and the stream engine: `uv pip install mageml-engine` (see
+  [Run a service locally](/production/services-page#run-a-service-locally) for other
+  platforms).
+- Docker, for PostgreSQL and Kafka. With the [playground](https://github.com/jospablo777/mage-ml/tree/master/playground),
+  skip to step 3: `make playground-streams` has both, and the pipeline is `cdc_stream`.
+
+## 1. Start PostgreSQL with logical replication, and Kafka
+
+```bash
+docker run -d --name postgres -e POSTGRES_PASSWORD=mage -p 5432:5432 \
+  postgres:17 -c wal_level=logical
+docker run -d --name kafka -p 9092:9092 apache/kafka:4.1.0
+```
+
+Change capture needs `wal_level=logical`, and a user with the `REPLICATION` attribute (the
+`postgres` superuser has it).
+
+## 2. Write the pipeline and start MageML
+
+```bash
+mage init orders_demo
+cd orders_demo
+mage examples stream cdc .
+export PGHOST=localhost PGPORT=5432 PGDATABASE=postgres PGUSER=postgres PGPASSWORD=mage \
+  KAFKA_BOOTSTRAP=localhost:9092
+mage start .
+```
+
+`cdc_stream` has three blocks:
+
+| Block | What it does |
+| --- | --- |
+| `cdc_stream_shop_orders` | PostgreSQL change source: table `public.shop_orders`, publication and replication slot `shop_orders_cdc`, created at the first start (`create_slot: true`) |
+| `cdc_stream_to_events` | Python transformer: one event per change, with the operation, the row's columns, its position in the log (`lsn`) and the commit time |
+| `cdc_stream_order_changes` | Kafka sink: topic `order_changes` |
+
+Each change reaches the transformer as the row's columns plus `_mage_operation` (`insert`,
+`update` or `delete`), `_mage_schema`, `_mage_table`, `_mage_lsn` and `_mage_commit_time`.
+
+## 3. Develop the block on a sample
+
+Open `cdc_stream` in the editor. Its `example` sample has 20 changes. **Run on sample** on
+`cdc_stream_to_events` shows the events it makes from them, without PostgreSQL or Kafka.
+
+## 4. Make changes, then run the stream
+
+`generate` creates `public.shop_orders` and writes one row at a time, inserting it or updating
+the row with its id:
+
+```bash
+mage examples generate cdc --rate 2 --seconds 300
+```
+
+Open the **Run** tab and press **Start on the local engine**. A development run reads with
+its own replication slot, `shop_orders_cdc_dev_<user>`, so the slot `shop_orders_cdc` keeps
+its position; MageML asks before the run writes to the real sink, `order_changes`.
+
+Logical replication starts where the slot is created: rows written before the first start
+are not read as changes. The events in Kafka look like this:
+
+```json
+{"op": "update", "table": "public.shop_orders", "id": 2, "status": "placed",
+ "amount": 247.28, "lsn": 93684976, "committed_at": "2026-10-19T17:15:18.223738+00:00"}
+```
+
+Read them with:
+
+```bash
+docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic order_changes --from-beginning
+```
+
+**Stop** ends the run. A slot keeps the write-ahead log from the position it holds for as
+long as it exists, so drop the development slot when you are done:
+
+```bash
+docker exec postgres psql -U postgres -c \
+  "select pg_drop_replication_slot('shop_orders_cdc_dev_<user>')"
+```
+
+## 5. Run it as a service
+
+```bash
+mage service new changes --pipelines cdc_stream
+mage service test changes
+```
+
+A service reads its settings from its environment files. Add the non-secret ones to
+`services/changes/environments/dev.yaml`:
+
+```yaml
+variables:
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGDATABASE: postgres
+  PGUSER: postgres
+  KAFKA_BOOTSTRAP: localhost:9092
+```
+
+then the password, and run it:
+
+```bash
+echo PGPASSWORD=mage > services/changes/.env.dev
+mage service run changes
+```
+
+`service run` is a development run as well, with the same `_dev_<user>` slot. A deployed
+service reads with `shop_orders_cdc`, and only one instance at a time can hold a slot; see
+[PostgreSQL changes](/production/stream-services#postgresql-changes) for the source's settings.
+
+## Clean up
+
+```bash
+docker rm -f postgres kafka
+```
+
+## Next
+
+- [Kafka to PostgreSQL](/guides/streaming/tutorials/kafka-to-postgres): the other
+  direction, with upserts.
+- [Stream examples](/guides/streaming/tutorials/stream-examples): dead letters, branches,
+  model scoring and webhooks.

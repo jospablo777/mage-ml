@@ -1,0 +1,133 @@
+---
+title: "Kafka to PostgreSQL"
+description: "Build a stream from Kafka to PostgreSQL: develop its block on a sample, run it on the engine without moving production's position, and run it as a service."
+---
+
+You build a stream that reads click events from Kafka, gives each click a session key, and
+upserts the clicks into a PostgreSQL table by event id, so a batch read twice writes no row
+twice. It takes about fifteen minutes.
+
+## Before you start
+
+- MageML installed, and the stream engine: `uv pip install mageml-engine` (see
+  [Run a service locally](/production/services-page#run-a-service-locally) for other
+  platforms).
+- Docker, for Kafka and PostgreSQL. With the [playground](https://github.com/jospablo777/mage-ml/tree/master/playground),
+  skip to step 3: `make playground-streams` has both, and the pipeline is `clickstream_stream`.
+
+## 1. Start Kafka and PostgreSQL
+
+```bash
+docker run -d --name kafka -p 9092:9092 apache/kafka:4.1.0
+docker run -d --name postgres -e POSTGRES_PASSWORD=mage -p 5432:5432 postgres:17
+```
+
+The Kafka image runs one broker that clients reach on `localhost:9092`.
+
+## 2. Write the pipeline and start MageML
+
+```bash
+mage init clicks_demo
+cd clicks_demo
+mage examples stream clickstream .
+export KAFKA_BOOTSTRAP=localhost:9092 PGHOST=localhost PGPORT=5432 PGDATABASE=postgres \
+  PGUSER=postgres PGPASSWORD=mage
+mage start .
+```
+
+`clickstream_stream` has three blocks:
+
+| Block | What it does |
+| --- | --- |
+| `clickstream_stream_clicks` | Kafka source: topic `clicks`, consumer group `clickstream`, batches of up to 500 |
+| `clickstream_stream_sessionize` | Python transformer: each click's `session_key`, its user and the 30-minute window of its time, kept without state |
+| `clickstream_stream_click_events` | PostgreSQL sink: table `public.click_events`, `unique_constraints: [event_id]` with `unique_conflict_method: UPDATE`, so a repeated click updates its row |
+
+Connection settings come from the environment (`{{ env_var('KAFKA_BOOTSTRAP') }}`): no
+password is written in a block.
+
+## 3. Develop the block on a sample
+
+Open `clickstream_stream` in the editor. The pipeline came with a sample named `example`, 20
+clicks, in the **Samples** tab of the right panel.
+
+Press **Run on sample** (the play button) on `clickstream_stream_sessionize`. The block runs
+on the 20 clicks at once, without Kafka, and shows its output next to its input: each click
+now has a `session_key`. Change the block (for example `SESSION_MS`, the window) and run it
+again; nothing is read from Kafka or written to PostgreSQL.
+
+## 4. Send clicks and capture real ones
+
+In a second terminal, with the same variables:
+
+```bash
+mage examples generate clickstream --rate 50 --seconds 120
+```
+
+In the **Samples** tab, **Capture from the source** reads the newest messages of `clicks`
+without joining the consumer group, so no position moves. Run the block on the captured sample as before.
+
+## 5. Run the stream on the engine
+
+Open the **Run** tab and press **Start on the local engine**. The run reads with a development consumer group,
+`clickstream-dev-<user>`, so the group `clickstream` keeps its position; MageML asks before
+the run writes to the real sink, here `public.click_events`.
+
+The tab shows throughput, lag per partition and each block's numbers, and the graph shows
+live counts on each block. Check the table:
+
+```bash
+docker exec postgres psql -U postgres -c \
+  "select count(*), count(distinct event_id) from public.click_events"
+```
+
+The two counts are equal: the upsert by `event_id` keeps one row per click. **Stop** ends the
+run.
+
+## 6. Run it as a service
+
+A service runs the stream without MageML, on the same engine:
+
+```bash
+mage service new clicks --pipelines clickstream_stream
+mage service test clicks
+```
+
+`service test` runs each sample through the blocks a sink follows; `mage service deploy`
+runs it first and stops on a failure.
+
+A service reads its settings from its environment files, not from your shell. Add the
+non-secret ones to `services/clicks/environments/dev.yaml`:
+
+```yaml
+variables:
+  KAFKA_BOOTSTRAP: localhost:9092
+  PGHOST: localhost
+  PGPORT: "5432"
+  PGDATABASE: postgres
+  PGUSER: postgres
+```
+
+and the password to `services/clicks/.env.dev`, which Git ignores:
+
+```bash
+echo PGPASSWORD=mage > services/clicks/.env.dev
+mage service run clicks
+```
+
+The service starts with a development consumer group too (`clickstream-dev-<user>`), and
+writes to the same table. Ctrl+C stops it. To run it for real, in Docker or Kubernetes, see
+[Services](/production/services-page).
+
+## Clean up
+
+```bash
+docker rm -f kafka postgres
+```
+
+## Next
+
+- [Stream examples](/guides/streaming/tutorials/stream-examples): dead letters, branches,
+  model scoring, change capture and webhooks.
+- [PostgreSQL changes to Kafka](/guides/streaming/tutorials/postgres-changes-to-kafka): the
+  other direction, by logical replication.
