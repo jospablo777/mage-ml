@@ -11,6 +11,7 @@ import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS } from '@oracle/styles/units/borders';
 import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
+import { positionText, targetNoun } from './positions';
 
 // A stream's dead letters: the messages a block failed on, with their errors; opened as a
 // sample to see the failure again with Run on sample, or replayed to the source once fixed.
@@ -26,6 +27,8 @@ type DeadLetterType = {
 type DeadLettersType = {
   letters?: DeadLetterType[];
   redacted?: { [path: string]: number };
+  kind?: string;
+  source_kind?: string;
   source_topic?: string;
   topic?: string;
   total?: number;
@@ -118,10 +121,11 @@ function StreamDeadLetters({ openSamples, pipelineUUID }: StreamDeadLettersProps
   }, [pipelineUUID]);
 
   const replay = useCallback(() => {
-    // A production write: the user types the topic it goes to.
+    // A production write: the user types the topic or subject it goes to.
     const typed = typeof window !== 'undefined' && window.prompt(
       `Replay these ${found?.letters?.length || 0} dead letters to the source. They are written `
-        + `to ${found?.source_topic} as they were received. Type the topic to confirm:`,
+        + `to ${found?.source_topic} as they were received. Type the `
+        + `${targetNoun(found?.source_kind)} to confirm:`,
     );
     if (!typed) {
       return;
@@ -197,7 +201,7 @@ function StreamDeadLetters({ openSamples, pipelineUUID }: StreamDeadLettersProps
           {letters.map(letter => (
             <LetterStyle key={`${letter.partition}-${letter.offset}`}>
               <Text muted xsmall>
-                {when(letter.timestamp)} · partition {letter.partition} · offset {letter.offset}
+                {when(letter.timestamp)} · {positionText(letter, found?.kind)}
               </Text>
               {letter.error && (
                 <CodeStyle><Text danger small>{letter.error}</Text></CodeStyle>

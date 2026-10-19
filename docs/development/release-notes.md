@@ -102,6 +102,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Tutorials: [Kafka to PostgreSQL](/guides/streaming/tutorials/kafka-to-postgres) and
   [PostgreSQL changes to Kafka](/guides/streaming/tutorials/postgres-changes-to-kafka), from
   the first sample to a service.
+- The Dead letters tab reads NATS JetStream dead-letter sinks too, opens them as a sample,
+  and replays them to a NATS source subject.
 - The Run tab's tap shows any block of a development run, also one in the middle of a run
   of blocks; it showed only the source and the blocks a sink follows.
 - The playground has three stream pipelines (`orders_stream`, `clickstream_stream`,

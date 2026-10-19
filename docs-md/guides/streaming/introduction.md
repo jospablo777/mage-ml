@@ -149,13 +149,16 @@ stops with the server.
 
 With a dead-letter sink (a data exporter with `dead_letter: true`), a message a block fails on
 goes there with its error instead of stopping the stream. The **Dead letters** tab reads a
-Kafka dead-letter sink without a consumer group: the newest messages, newest first, each with
-its error, partition, offset and time (secret fields redacted, as in samples).
+Kafka or NATS JetStream dead-letter sink without moving anything (Kafka without a consumer
+group; NATS with a consumer that acknowledges nothing and is deleted after the read): the
+newest messages, newest first, each with its error, its position (partition and offset, or
+stream sequence) and time, secret fields redacted as in samples.
 
 - **Open as sample** saves them as a sample: Run on sample shows the failure again, and the
   fix can be checked on the very messages that failed.
-- **Replay to <topic>** writes them back to the source's topic as they were received, once the
-  block is fixed. It is a write to production, so you type the topic's name to confirm.
+- **Replay to <topic>** writes them back to the source's Kafka topic or NATS subject as they
+  were received, once the block is fixed. It is a write to production, so you type its name
+  to confirm. A NATS source subject with wildcards cannot be replayed to.
 
 ## Run pipeline in production
 Create the trigger in [triggers page](../../design/data-pipeline-management.md#create-trigger) to run streaming pipelines in production.
