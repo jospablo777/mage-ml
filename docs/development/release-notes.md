@@ -196,6 +196,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Fixes
 
+- The overview's run counts and charts refresh every minute, as its failed-run lists do;
+  they changed only after a browser refresh or a change of period tab.
 - `mage examples stream <name> <project>` failed, or wrote the block code into the
   current folder's project, for a project other than the current folder.
 - A development run's files under `.mage/dev/` were not kept out of Git; the run adds the

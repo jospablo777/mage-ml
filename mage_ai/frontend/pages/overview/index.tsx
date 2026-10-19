@@ -76,7 +76,7 @@ import { getAllPipelineRunDataGrouped } from '@components/PipelineRun/shared/uti
 import { getNewPipelineButtonMenuItems } from '@components/Dashboard/utils';
 import { goToWithQuery } from '@utils/routing';
 import { groupBy } from '@utils/array';
-import { onSuccess } from '@api/utils/response';
+import { displayErrorFromReadResponse, onSuccess } from '@api/utils/response';
 import { queryFromUrl } from '@utils/url';
 import { storeLocalTimezoneSetting } from '@components/settings/workspace/utils';
 import { useModal } from '@context/Modal';
@@ -93,8 +93,6 @@ const SHARED_FETCH_OPTIONS = {
 };
 
 function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
-  const abortRef = useRef(null);
-  const mountedRef = useRef(false);
   const refSubheader = useRef(null);
 
   const q = queryFromUrl();
@@ -125,40 +123,31 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
     [startDateString],
   );
 
-  const [monitorStats, setMonitorStats] = useState();
-  const [fetchMonitorStats, { isLoading: isValidatingMonitorStats }] = useMutation(
-    () =>
-      api.monitor_stats?.detailAsync(MonitorStatsEnum.PIPELINE_RUN_COUNT, monitorStatsQueryParams, {
-        signal: abortRef?.current?.signal,
-      }),
-    {
-      onSuccess: (response: any) =>
-        onSuccess(response, {
-          onErrorCallback: (response, errors) => setErrors?.({
-            errors,
-            response,
-          }),
-          callback: ({ monitor_stat: { stats } }) => {
-            setMonitorStats(stats);
-          },
-        }),
-    },
+  // The run counts of the selected period, refreshed every minute like the other widgets:
+  // they were fetched only when the page loaded or a tab changed, so new runs showed after a
+  // browser refresh. The key carries the period: useDetail keys on the URL alone.
+  const { data: dataMonitorStats } = api.monitor_stats.detail(
+    MonitorStatsEnum.PIPELINE_RUN_COUNT,
+    monitorStatsQueryParams,
+    { ...SHARED_FETCH_OPTIONS },
+    { key: `${MonitorStatsEnum.PIPELINE_RUN_COUNT}?start_time=${startDateString}` },
   );
+  const monitorStats = dataMonitorStats?.monitor_stat?.stats;
+  // A spinner until the period has data, not at every refresh.
+  const isValidatingMonitorStats = !dataMonitorStats;
+  useEffect(() => {
+    if (dataMonitorStats?.error) {
+      displayErrorFromReadResponse(dataMonitorStats, setErrors);
+    }
+  }, [dataMonitorStats]);
 
   const setSelectedTab = useCallback(
     (prev: TabType | ((tab: TabType) => TabType)) => {
-      if (abortRef?.current !== null) {
-        abortRef?.current?.abort();
-      }
-      abortRef.current = new AbortController();
-
       setSelectedTabState((current: TabType) => {
         const tab = typeof prev === 'function' ? prev(current) : prev;
 
         if (current?.uuid !== tab?.uuid) {
           goToWithQuery({ [TAB_URL_PARAM]: tab?.uuid }, { replaceParams: true });
-
-          fetchMonitorStats();
         }
 
         set(LOCAL_STORAGE_KEY_OVERVIEW_TAB_SELECTED, tab);
@@ -166,15 +155,10 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
         return tab;
       });
     },
-    [fetchMonitorStats],
+    [],
   );
 
   useEffect(() => {
-    if (!mountedRef?.current) {
-      mountedRef.current = true;
-      fetchMonitorStats();
-    }
-
     if (!tab) {
       goToWithQuery(
         {
@@ -185,7 +169,7 @@ function OverviewPage({ tab }: { tab?: TimePeriodEnum }) {
         },
       );
     }
-  }, [allTabs, fetchMonitorStats, selectedTab, tab]);
+  }, [allTabs, selectedTab, tab]);
 
   const { data: dataPipelineRuns } = api.pipeline_runs.list(
     {
