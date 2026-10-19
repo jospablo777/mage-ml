@@ -179,7 +179,8 @@ sasl_config:
   everything again after each restart; to read from the offset again, use a new
   `consumer_group`.
 - A broker restart pauses the stream, which goes on where it was once the broker is back;
-  the restart, graceful or killed, is tested with no message lost or written twice. A
+  it is tested with no message lost, and after a graceful stop none written twice (a killed
+  broker can make the producer send a batch again under new sequence numbers). A
   broker down longer than the group's session timeout (45 seconds by default) takes the
   partitions away: the stream gets them back after the restarted broker drops the old
   member (another session timeout), and reads again the batches it wrote but had not

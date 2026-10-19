@@ -152,14 +152,17 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
 
 @pytest.mark.parametrize('halt, down, repeats', [
     (['stop', '-t', '5'], 8, 0),
-    (['kill'], 8, 0),
+    # A killed broker leaves produce requests unanswered; the idempotent producer can bump
+    # its epoch and send them again under new sequence numbers, which the broker cannot tell
+    # from new messages (one in 20,000 seen in CI): at least once, a batch at most.
+    (['kill'], 8, 500),
     # Longer than the group's session timeout (45 s): the group takes the partitions away,
     # and the batches written but not yet committed then are read again (at least once).
     (['kill'], 60, TOTAL // 4),
 ], ids=['stopped', 'killed', 'killed-past-session-timeout'])
 def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats):
     """Down mid-stream for seconds: the engine waits, reconnects, and goes on from where it
-    was; the producer's retries are absorbed, so nothing is lost or written twice. Down past
+    was; nothing is lost, and after a graceful stop nothing is written twice. Down past
     the session timeout, the group gives the partitions back after the restarted broker
     drops the old member, and nothing is lost."""
     restart_under_stream(broker, mage_project, tmp_path, halt, down, repeats)
