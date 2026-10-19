@@ -51,11 +51,3 @@ def service_cloud_secret(provider: str, secret_id: str, field: str = None) -> st
             'secrets; check its credentials and the start-up log.'
         )
     return value
-
-
-def ibm_secret_variable_name(secret_id: str, field: str = None) -> str:
-    return cloud_secret_variable_name('ibm', secret_id, field)
-
-
-def ibm_secret_source(secret_id: str, field: str = None) -> str:
-    return cloud_secret_source('ibm', secret_id, field)
