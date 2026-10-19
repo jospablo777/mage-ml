@@ -3,6 +3,11 @@
 
 The output directory must be absent. Historical filenames are immutable: an
 identical wheel retains its first URL, and changed bytes require a new filename.
+With --reuse-published, a wheel rebuilt under a published filename (a package
+whose version did not change; builds are not byte for byte reproducible) keeps the
+published wheel and its URL, and the output's REUSED file lists it so the release
+leaves the rebuilt copy out. The release checks first that such a package's source
+did not change since it was published (unchanged_sources.py).
 Only canonical release versions, unsigned wheels, and explicit numeric Python
 version constraints are supported. Use a new package version for changed code.
 """
@@ -413,14 +418,23 @@ def load_previous(path: Path, repository: str) -> list[dict]:
     return artifacts
 
 
-def merge_artifacts(previous: list[dict], current: list[dict]) -> list[dict]:
+def merge_artifacts(
+    previous: list[dict], current: list[dict], reuse_published: bool = False,
+    reused: list[str] | None = None,
+) -> list[dict]:
     result = {item['filename']: item for item in previous}
     for item in current:
         old = result.get(item['filename'])
         if old:
             identity = MANIFEST_KEYS - {'tag', 'url'}
+            same = all(item[key] == old[key] for key in identity)
+            if not same and reuse_published:
+                # The published wheel stays; the rebuilt one is left out of the release.
+                if reused is not None:
+                    reused.append(item['filename'])
+                continue
             require(
-                all(item[key] == old[key] for key in identity),
+                same,
                 f'published filename changed: {item["filename"]}; bump its package version',
             )
         else:
@@ -451,6 +465,7 @@ def generate(
     tag: str,
     output: Path,
     previous_manifest: Path | None = None,
+    reuse_published: bool = False,
 ) -> dict:
     check_repository(repository)
     check_tag(tag)
@@ -471,7 +486,8 @@ def generate(
     )
     current = [inspect_wheel(path, repository, tag) for path in paths]
     previous = load_previous(previous_manifest, repository) if previous_manifest else []
-    artifacts = merge_artifacts(previous, current)
+    reused: list[str] = []
+    artifacts = merge_artifacts(previous, current, reuse_published, reused)
     manifest = {'schema_version': 1, 'repository': repository, 'artifacts': artifacts}
     stage = Path(tempfile.mkdtemp(prefix=f'.{output.name}.', dir=output.parent))
     try:
@@ -506,6 +522,8 @@ def generate(
             encoding='ascii',
         )
         (stage / '.nojekyll').write_text('', encoding='ascii')
+        (stage / 'REUSED').write_text(''.join(f'{name}\n' for name in sorted(reused)),
+                                      encoding='ascii')
         require(
             not output.exists() and not output.is_symlink(),
             'output appeared while generating the index',
@@ -524,6 +542,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--tag', required=True)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument(
+        '--reuse-published',
+        action='store_true',
+        help='keep the published wheel for a rebuilt filename; REUSED lists them',
+    )
+    parser.add_argument(
         '--previous-manifest',
         type=Path,
         help='merge the trusted published manifest; filenames must retain their bytes and metadata',
@@ -531,7 +554,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         manifest = generate(
-            args.wheel_directory, args.repository, args.tag, args.output, args.previous_manifest
+            args.wheel_directory, args.repository, args.tag, args.output, args.previous_manifest,
+            args.reuse_published,
         )
     except (
         ValidationError,

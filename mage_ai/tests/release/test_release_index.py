@@ -203,6 +203,23 @@ class ReleaseIndexTests(unittest.TestCase):
                 self.output / 'release-manifest.json',
             )
 
+    def test_a_rebuilt_published_wheel_is_reused_when_asked(self) -> None:
+        old = self.published()
+        rebuilt = wheel(self.wheels, payload=b'FIXTURE = True  # rebuilt\n')
+        wheel(self.wheels, project='mageml-engine', version='0.1.0')
+        site = self.root / 'site-next'
+
+        result = index.generate(
+            self.wheels, REPOSITORY, 'v1.1.0', site, self.output / 'release-manifest.json',
+            reuse_published=True,
+        )
+
+        kept = next(item for item in result['artifacts'] if item['project'] == 'mage-ml')
+        self.assertEqual(kept, old['artifacts'][0])
+        self.assertEqual(kept['tag'], 'v1.0.0')
+        self.assertEqual((site / 'REUSED').read_text(), f'{rebuilt.name}\n')
+        self.assertIn('mageml-engine', {item['project'] for item in result['artifacts']})
+
     def test_build_number_cannot_replace_published_compatibility_identity(self) -> None:
         self.published()
         wheel(self.wheels, build='1', payload=b'CHANGED = True\n')

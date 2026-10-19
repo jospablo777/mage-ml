@@ -17,9 +17,18 @@ how to reproduce each check locally.
 
 ## Each release
 
-1. Set the version in `pyproject.toml` (and in `mage_integrations/pyproject.toml` or
-   `rust/column_atlas/pyproject.toml` when their code changed; `mage-ml` pins both
+1. Set the version in `pyproject.toml` (and in `mage_integrations/pyproject.toml`,
+   `rust/column_atlas/pyproject.toml`, `vendor/singer-python/pyproject.toml` or
+   `packages/mageml-engine/pyproject.toml` when their code changed; `mage-ml` pins them
    exactly), run `uv lock`, and move the release notes' "unreleased" section to the date.
+   A package whose version did not change keeps its published wheel: the release refuses
+   to start when such a package's source changed since the release that published it,
+   naming the files, so a forgotten version bump stops it. Check before tagging:
+
+```bash
+   curl -fsSL https://jospablo777.github.io/mage-ml/release-manifest.json -o previous.json
+   python3 scripts/release/unchanged_sources.py previous.json
+   ```
 2. Write `docs/development/releases/vX.Y.Z.md`, the text of the GitHub release.
 3. Check locally: the unit tests, then build and qualify the wheels on this machine:
 

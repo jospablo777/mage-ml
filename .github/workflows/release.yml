@@ -51,6 +51,17 @@ jobs:
         with:
           ref: refs/tags/${{ inputs.tag }}
           persist-credentials: false
+          # The earlier release tags, for the unchanged-sources check.
+          fetch-depth: 0
+      # A package published under its current version is not published again (the index
+      # keeps the published wheel), so its source must not have changed since (I-24).
+      - name: Packages under a published version are unchanged
+        run: |
+          if curl -fsSL "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/release-manifest.json" -o previous-manifest.json; then
+            python3 scripts/release/unchanged_sources.py previous-manifest.json
+          else
+            echo "No published release yet."
+          fi
       - name: Record the commit and versions
         id: contract
         env:
@@ -294,8 +305,14 @@ jobs:
           if curl -fsSL "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/release-manifest.json" -o previous-manifest.json; then
             previous=(--previous-manifest previous-manifest.json)
           fi
+          # A rebuilt wheel of an unchanged package keeps the published one (I-24); the
+          # contract checked that its source did not change.
           python3 scripts/release/release_index.py release-wheels --repository "$REPOSITORY" \
-            --tag "$TAG" --output site "${previous[@]}"
+            --tag "$TAG" --output site --reuse-published "${previous[@]}"
+          while read -r reused; do
+            [ -n "$reused" ] && rm -f "release-wheels/$reused" && echo "Reused the published $reused"
+          done < site/REUSED
+          rm site/REUSED
           mkdir -p site/install
           native=$(python3 -c "import tomllib; print(tomllib.load(open('rust/column_atlas/pyproject.toml','rb'))['project']['version'])")
           integrations=$(python3 -c "import tomllib; print(tomllib.load(open('mage_integrations/pyproject.toml','rb'))['project']['version'])")
