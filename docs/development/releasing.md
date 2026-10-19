@@ -23,7 +23,8 @@ how to reproduce each check locally.
    exactly), run `uv lock`, and move the release notes' "unreleased" section to the date.
    A package whose version did not change keeps its published wheel: the release refuses
    to start when such a package's source changed since the release that published it,
-   naming the files, so a forgotten version bump stops it. Check before tagging:
+   naming the files, so a forgotten version bump stops it. The Packaging job of Build and
+   test runs the same check on every push; to check before tagging:
 
    ```bash
    curl -fsSL https://jospablo777.github.io/mage-ml/release-manifest.json -o previous.json

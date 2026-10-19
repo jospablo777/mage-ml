@@ -49,27 +49,35 @@ def broker(kafka_bootstrap):
     """A one-node broker of the compose image on a free port, removed after the test."""
     if subprocess.run(['docker', 'version'], capture_output=True).returncode != 0:
         pytest.skip('Docker is not available')
-    port = free_port()
-    name = f'it-kafka-restart-{uuid.uuid4().hex[:8]}'
-    subprocess.run([
-        'docker', 'run', '-d', '--name', name, '-p', f'127.0.0.1:{port}:19092',
-        '-e', 'KAFKA_NODE_ID=1',
-        '-e', 'KAFKA_PROCESS_ROLES=broker,controller',
-        '-e', 'KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:19092',
-        '-e', f'KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,'
-              f'EXTERNAL://127.0.0.1:{port}',
-        '-e', 'KAFKA_LISTENER_SECURITY_PROTOCOL_MAP='
-              'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT',
-        '-e', 'KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093',
-        '-e', 'KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER',
-        '-e', 'KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT',
-        '-e', 'KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1',
-        '-e', 'KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1',
-        '-e', 'KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1',
-        '-e', 'KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0',
-        '-e', 'KAFKA_HEAP_OPTS=-Xmx384m -Xms256m',
-        IMAGE,
-    ], check=True, capture_output=True)
+    # The broker advertises its host port, so the port is chosen before it starts; another
+    # process can take it first (bind: address already in use), and then another is tried.
+    for attempt in range(5):
+        port = free_port()
+        name = f'it-kafka-restart-{uuid.uuid4().hex[:8]}'
+        started = subprocess.run([
+            'docker', 'run', '-d', '--name', name, '-p', f'127.0.0.1:{port}:19092',
+            '-e', 'KAFKA_NODE_ID=1',
+            '-e', 'KAFKA_PROCESS_ROLES=broker,controller',
+            '-e', 'KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:19092',
+            '-e', f'KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,'
+                  f'EXTERNAL://127.0.0.1:{port}',
+            '-e', 'KAFKA_LISTENER_SECURITY_PROTOCOL_MAP='
+                  'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT',
+            '-e', 'KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093',
+            '-e', 'KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER',
+            '-e', 'KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT',
+            '-e', 'KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1',
+            '-e', 'KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1',
+            '-e', 'KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1',
+            '-e', 'KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0',
+            '-e', 'KAFKA_HEAP_OPTS=-Xmx384m -Xms256m',
+            IMAGE,
+        ], capture_output=True, text=True)
+        if started.returncode == 0:
+            break
+        subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
+        if 'address already in use' not in started.stderr or attempt == 4:
+            raise AssertionError(f'the broker did not start: {started.stderr}')
     bootstrap = f'127.0.0.1:{port}'
     try:
         wait_for(lambda: admin_ready(bootstrap), timeout=120).close()
@@ -108,6 +116,43 @@ def committed_now(bootstrap, group, topic) -> int:
         return 0
 
 
+def explain(service, bootstrap, group, topic):
+    """What a failed restart test prints: the committed offset of each partition, the
+    stream's status, and the end of the service log with its warnings and errors."""
+    from kafka import KafkaConsumer, TopicPartition
+
+    try:
+        admin = KafkaAdminClient(bootstrap_servers=bootstrap, request_timeout_ms=5000)
+        try:
+            offsets = admin.list_consumer_group_offsets(group)
+        finally:
+            admin.close()
+        consumer = KafkaConsumer(bootstrap_servers=bootstrap)
+        try:
+            parts = [TopicPartition(topic, p) for p in consumer.partitions_for_topic(topic)]
+            ends = consumer.end_offsets(parts)
+        finally:
+            consumer.close()
+        for part in parts:
+            meta = offsets.get(part)
+            print(f'{part.topic}[{part.partition}] committed '
+                  f'{meta.offset if meta else None} of {ends[part]}')
+    except Exception as error:
+        print(f'offsets unavailable: {error!r}')
+    try:
+        print('streams:', json.dumps(service.streams(), indent=1))
+    except Exception as error:
+        print(f'streams unavailable: {error!r}')
+    lines = service.log.read_text(errors='replace').splitlines()
+    notable = [line for line in lines if any(word in line for word in (
+        'WARN', 'ERROR', 'commit', 'COMMIT', 'assign', 'ASSIGN', 'revoke', 'REVOKE', 'lost'))]
+    print(f'service log: {len(lines)} lines; warnings, errors, commits and assignments '
+          '(last 150):')
+    print('\n'.join(notable[-150:]))
+    print('last 80 lines:')
+    print('\n'.join(lines[-80:]))
+
+
 def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recovery=180):
     """Stops the broker under a running stream for `down` seconds, starts it again, and
     checks that every message reached the sink within `recovery` seconds of its return,
@@ -144,6 +189,10 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
         assert len(ids) - TOTAL <= repeats, f'{len(ids) - TOTAL} messages written twice'
         assert service.process.poll() is None
         assert service.streams()[0]['messages_in'] >= TOTAL
+    except AssertionError:
+        if service:
+            explain(service, bootstrap, group, topics[0])
+        raise
     finally:
         if service:
             service.stop()
