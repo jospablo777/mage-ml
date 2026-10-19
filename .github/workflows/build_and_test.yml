@@ -10,7 +10,9 @@ on:
       - "vendor/**"
       - "runtimes/**"
       - "rust/**"
+      - "packages/**"
       - "scripts/run_app.sh"
+      - "scripts/release/unchanged_sources.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/build_and_test.yml"
@@ -22,7 +24,9 @@ on:
       - "vendor/**"
       - "runtimes/**"
       - "rust/**"
+      - "packages/**"
       - "scripts/run_app.sh"
+      - "scripts/release/unchanged_sources.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/build_and_test.yml"
@@ -158,6 +162,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The release tags, for the unchanged-sources check.
+          fetch-depth: 0
       # uv sync compiles the ColumnAtlas extension in rust/column_atlas.
       - name: Set up Rust
         run: rustup toolchain install "$RUST_VERSION" --profile minimal
@@ -174,6 +181,15 @@ jobs:
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Lockfile matches pyproject.toml
         run: uv lock --check
+      # The release refuses changed code under a published package version; this finds it
+      # on the commit that changes the code, not when the release is tagged (I-216).
+      - name: Packages under a published version are unchanged
+        run: |
+          if curl -fsSL "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/release-manifest.json" -o "$RUNNER_TEMP/previous-manifest.json"; then
+            python3 scripts/release/unchanged_sources.py "$RUNNER_TEMP/previous-manifest.json"
+          else
+            echo "No published release yet."
+          fi
       - name: Build sdist and wheel
         run: uv build --all-packages
 

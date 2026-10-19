@@ -194,6 +194,12 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - A search box on the logs page, and `text` in the logs API, return only the log lines that
   contain the text, over up to 200 log files (upstream #6105).
 
+### Security
+
+- `column-atlas-native` 0.1.2 and the stream engine are built with rustls 0.23.46; 0.23.45
+  had four advisories (RUSTSEC-2026-0346 to 0349). CI audits every Rust lock file with
+  cargo-audit.
+
 ### Fixes
 
 - The overview's run counts and charts refresh every minute, as its failed-run lists do;
