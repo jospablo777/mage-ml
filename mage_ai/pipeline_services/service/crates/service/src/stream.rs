@@ -441,6 +441,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     // One writer per sink, plus the dead-letter sink.
     let mut writers = Vec::new();
     let sink_after: Vec<Option<String>> = parts.sinks.iter().map(|(_, a)| a.clone()).collect();
+    let sink_fed: std::collections::BTreeSet<String> =
+        sink_after.iter().flatten().cloned().collect();
     for (index, (sink, _)) in parts.sinks.iter().enumerate() {
         writers.push(spawn_writer(
             sink.clone(),
@@ -521,7 +523,14 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             tap(&status, block, batch);
                         }
                     }
-                    let rows: usize = output.outputs.values().map(RecordBatch::num_rows).sum();
+                    // The messages of the blocks sinks follow: a tapped run returns every
+                    // block's output, and counts the same as one that is not.
+                    let rows: usize = output
+                        .outputs
+                        .iter()
+                        .filter(|(block, _)| sink_fed.contains(block.as_str()))
+                        .map(|(_, batch)| batch.num_rows())
+                        .sum();
                     count(&status, |s| {
                         s.messages_out += rows as u64;
                         for stats in &output.blocks {

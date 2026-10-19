@@ -133,8 +133,8 @@ services run on, without a trigger: **Start on the local engine** names the sink
 writes and asks first, then the panel shows the state, messages read and written per second
 and the lag over the last minute, the totals (batches, retries, dead-lettered messages,
 alerts), each block's messages in and out, median and 95th percentile time per batch and
-errors, and the engine's log. **Tap** shows the last 50 messages at the source or at a block whose output the stream
-writes, refreshed every second, with secret fields redacted; only development runs keep
+errors, and the engine's log. **Tap** shows the last 50 messages at the source or at any
+block, refreshed every second, with secret fields redacted; only development runs keep
 them. While the stream runs, the dependency graph shows each block's
 messages in and out and p95 time on its node. The run refuses to start when a variable the
 blocks need is not set, and names it. **Pause** stops reading and lets the work in flight

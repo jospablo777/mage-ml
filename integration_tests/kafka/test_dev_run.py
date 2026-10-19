@@ -77,11 +77,17 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
         def double(messages, *args, **kwargs):
             return [dict(m, twice=m['n'] * 2) for m in messages]
     ''', upstream=[source], language='python')
+    # A block in the middle of the run: the tap shows it too (I-186).
+    inc = add('inc', 'transformer', '''
+        @transformer
+        def inc(messages, *args, **kwargs):
+            return [dict(m, next=m['n'] + 1) for m in messages]
+    ''', upstream=[double], language='python')
     sink = add('sink', 'data_exporter', f'''
         connector_type: kafka
         bootstrap_server: {kafka_bootstrap}
         topic: {out_topic}
-    ''', upstream=[double])
+    ''', upstream=[inc])
     try:
         produce(kafka_bootstrap, kafka_topic, 0, 10)
         with pytest.raises(dev_run.DevRunError, match='Name them to start it'):
@@ -99,6 +105,8 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
             dev_run.status(mage_project, pipeline.uuid)))
         assert status['state'] == 'running'
         assert len(status['rate_in']) >= 1
+        # Counted from the block the sink follows, though every block's output came back.
+        assert status['messages_out'] == 10
         # Each block's numbers: the transformer saw the 10 messages and kept them.
         [block] = [b for b in status['blocks'] if b['block'] == double.uuid]
         assert (block['messages_in'], block['messages_out']) == (10, 10)
@@ -107,7 +115,7 @@ def test_a_stream_runs_pauses_and_stops_on_the_local_engine(
 
         # The tap: the last messages at the source and at the transformer.
         at_source = dev_run.tap(mage_project, pipeline.uuid)
-        assert {'source', double.uuid} <= set(at_source['points'])
+        assert {'source', double.uuid, inc.uuid} <= set(at_source['points'])
         # Two partitions: the order across them is the order of arrival.
         assert sorted(m['value']['n'] for m in at_source['messages']) == list(range(10))
         at_double = dev_run.tap(mage_project, pipeline.uuid, double.uuid, limit=3)

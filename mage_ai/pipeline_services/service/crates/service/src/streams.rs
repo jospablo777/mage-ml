@@ -445,7 +445,9 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         }
         None => None,
     };
-    let transform = transform_session(service, pipeline, log)?;
+    // Message data in memory, for the editor's tap: development runs only.
+    let tap = std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1");
+    let transform = transform_session(service, pipeline, log, tap)?;
     Ok(StreamParts {
         name: pipeline.uuid.clone(),
         source,
@@ -455,18 +457,20 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         config: runner_config(stream),
         shutdown_deadline: Duration::from_secs(20),
         pause: None,
-        // Message data in memory, for the editor's tap: development runs only.
-        tap: std::env::var("MAGE_SERVICE_TAP").is_ok_and(|v| v == "on" || v == "1"),
+        tap,
     })
 }
 
 /// The session that runs a stream's blocks: one Python or Rust session when they are all in
 /// one language; for a chain that mixes them, one session per run of blocks in a language,
-/// each taking the messages of the run before it.
+/// each taking the messages of the run before it. With `tap` (development runs), every
+/// block's output comes back for the editor's tap, not only those a sink follows: a block in
+/// the middle of a run was not tapped (I-186).
 fn transform_session(
     service: &Arc<Service>,
     pipeline: &Pipeline,
     log: RunLog,
+    tap: bool,
 ) -> Result<Option<Box<dyn TransformSession>>, String> {
     let stream = pipeline.stream.as_ref().expect("a stream");
     if pipeline.blocks.is_empty() {
@@ -487,11 +491,15 @@ fn transform_session(
             block.uuid, block.language
         ));
     }
-    let wanted: BTreeSet<String> = stream
-        .sinks
-        .iter()
-        .filter_map(|s| s.after.clone())
-        .collect();
+    let wanted: BTreeSet<String> = if tap {
+        order.iter().map(|b| b.uuid.clone()).collect()
+    } else {
+        stream
+            .sinks
+            .iter()
+            .filter_map(|s| s.after.clone())
+            .collect()
+    };
     let dead_letters = stream.errors.dead_letter.is_some();
     let source_shape = source_shape(&stream.source);
     let mut regions: Vec<Vec<Block>> = Vec::new();

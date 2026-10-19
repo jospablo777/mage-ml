@@ -100,6 +100,8 @@ services that run in the Rust engine, with Python, Rust or R blocks
 - Tutorials: [Kafka to PostgreSQL](../guides/streaming/tutorials/kafka-to-postgres.md) and
   [PostgreSQL changes to Kafka](../guides/streaming/tutorials/postgres-changes-to-kafka.md), from
   the first sample to a service.
+- The Run tab's tap shows any block of a development run, also one in the middle of a run
+  of blocks; it showed only the source and the blocks a sink follows.
 - The playground has three stream pipelines (`orders_stream`, `clickstream_stream`,
   `cdc_stream`): `make playground-streams` starts Kafka, builds the stream engine and sends
   synthetic traffic, so the Samples, Run and Dead letters tabs work on live data.
