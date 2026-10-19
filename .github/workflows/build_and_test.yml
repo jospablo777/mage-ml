@@ -409,6 +409,11 @@ jobs:
           for attempt in 1 2 3; do
             make -C integration_tests up SERVICES="${{ matrix.services }}" && exit 0
             echo "Starting the services failed (attempt $attempt); trying again."
+            # A service that exited says why in its log.
+            for service in $(docker compose -f integration_tests/compose.yaml ps -a --status exited --services); do
+              echo "--- $service"
+              docker compose -f integration_tests/compose.yaml logs --no-color --tail 40 "$service"
+            done
             sleep 20
           done
           exit 1

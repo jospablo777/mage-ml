@@ -24,7 +24,12 @@ def chmod(path: Union[str, os.PathLike], mode: int, append: bool = True) -> None
         for dirpath, _dirnames, filenames in os.walk(path):
             os.chmod(dirpath, mode)
             for filename in filenames:
-                os.chmod(os.path.join(dirpath, filename), mode)
+                # Files in the folder get the read and write bits and keep their own execute
+                # bits: the folder's mode made every copied file executable (a new pipeline's
+                # metadata.yaml among them).
+                file_path = os.path.join(dirpath, filename)
+                file_mode = os.stat(file_path).st_mode if append else 0
+                os.chmod(file_path, file_mode | (mode & ~0o111))
     except Exception:
         traceback.print_exc()
 

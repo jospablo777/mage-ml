@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import stat
 
 from mage_ai.shared.io import chmod, safe_write, safe_write_async
@@ -26,6 +27,26 @@ class IOTests(TestCase):
 
         os.remove(file_path)
         os.rmdir(path)
+
+    def test_chmod_on_a_folder_leaves_its_files_without_execute_unless_they_had_it(self):
+        import tempfile
+
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        os.makedirs(os.path.join(folder, 'sub'))
+        data = os.path.join(folder, 'sub', 'metadata.yaml')
+        script = os.path.join(folder, 'run.sh')
+        for path in (data, script):
+            with open(path, 'w') as fp:
+                fp.write('x')
+        os.chmod(data, 0o600)
+        os.chmod(script, 0o700)
+
+        chmod(folder, stat.S_IRWXU)
+
+        self.assertEqual(os.stat(data).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(script).st_mode & 0o100, 0o100)
+        self.assertEqual(os.stat(os.path.join(folder, 'sub')).st_mode & 0o700, 0o700)
 
     def test_safe_write(self):
         file_path = 'test_file_write'
