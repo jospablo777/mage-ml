@@ -24,6 +24,8 @@
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
 pub mod context;
+#[cfg(feature = "duckdb")]
+pub mod duckdb;
 pub mod extract;
 #[cfg(feature = "feast")]
 pub mod feast;

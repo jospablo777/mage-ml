@@ -53,6 +53,10 @@
 
 ### Rust blocks
 
+- `mage::duckdb` (feature `duckdb`) reads and writes DuckDB with DuckDB built into the
+  block, frames moving through Parquet with their types; the same DuckDB version as the
+  Python environment's, so both open the same files. See
+  [Rust blocks](/guides/blocks/rust-blocks#duckdb).
 - `mage::mongodb` (feature `mongodb`) reads collections into typed frames (structs, lists,
   exact decimals) and writes frames as documents, with atomic replaces that keep indexes
   and upserts by key. See [Rust blocks](/guides/blocks/rust-blocks#mongodb).

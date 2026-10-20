@@ -373,6 +373,46 @@ fn export_data(totals: DataFrame) -> Result<()> {
 - **Other statements.** `execute(sql)` runs a statement; `describe(sql)` lists a query's
   columns and types.
 
+## DuckDB
+
+The `mage::duckdb` module builds DuckDB into the block's program and moves frames in and
+out through Parquet, column by column with their types. Turn on the `duckdb` feature of
+the `mage` crate in `rust/Cargo.toml` (the first build compiles DuckDB, a few minutes):
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "duckdb"] }
+```
+
+```rust
+use mage::duckdb::{DuckDb, WritePolicy};
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {
+    DuckDb::connect()?.load("SELECT * FROM orders WHERE amount > 10")
+}
+
+fn export_data(totals: DataFrame) -> Result<()> {
+    DuckDb::connect()?.write(&totals, "daily_totals", WritePolicy::Replace)?;
+    Ok(())
+}
+```
+
+- **Connection.** `DuckDb::connect()` uses the profile's `DUCKDB_DATABASE` (a file,
+  relative to the project, `:memory:`, or `md:name` for MotherDuck with
+  `MOTHERDUCK_TOKEN`) and `DUCKDB_SCHEMA` for tables named without a schema (`main` by
+  default). The DuckDB is the version of the Python environment's, so Python and Rust
+  blocks open the same files.
+- **One writer.** DuckDB allows one writing process per file. A block waits for another
+  to close the file, up to `MAGE_DUCKDB_LOCK_TIMEOUT` seconds (300), as Python blocks do.
+- **Reading.** Integers, floats, decimals, text, dates, times, timestamps with their time
+  zone (in microseconds, DuckDB's unit), lists, structs and maps arrive as they are.
+  `HUGEINT`, `UHUGEINT`, `UUID`, `INTERVAL`, enums and `BIT` arrive as their exact text.
+- **Writing.** `WritePolicy::Replace` swaps the table in one statement, so readers see the
+  old rows or the new ones; `WritePolicy::Append` inserts by column name and creates the
+  table if it is missing; `WritePolicy::Fail` stops when the table exists.
+- **Other statements.** `execute(sql)` runs statements; `describe(sql)` lists a query's
+  columns and types; `connection()` gives the DuckDB connection itself.
+
 ## Object storage
 
 The `mage::storage` module reads and writes Parquet and CSV files on Amazon S3 and

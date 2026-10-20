@@ -29,6 +29,9 @@ webpki-roots = { version = "1", optional = true }
 mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring", "buffer-pool"], optional = true }
 # MongoDB for blocks (mage::mongodb), behind the mongodb feature: the driver's sync API.
 mongodb = { version = "3.9", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls", "dns-resolver", "sync"], optional = true }
+# DuckDB for blocks (mage::duckdb), behind the duckdb feature: DuckDB built into the block's
+# program, with its Parquet extension, which carries frames in and out.
+duckdb = { version = "=1.10506.1", features = ["bundled", "parquet"], optional = true }
 # Feast's feature server REST API for blocks (mage::feast), behind the feast feature.
 ureq = { version = "3", features = ["json"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
@@ -44,6 +47,7 @@ storage = ["polars/aws", "polars/gcp", "polars/azure"]
 clickhouse = ["dep:ureq", "polars/ipc_streaming"]
 mysql = ["dep:mysql", "dep:chrono"]
 mongodb = ["dep:mongodb", "dep:chrono"]
+duckdb = ["dep:duckdb"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]
