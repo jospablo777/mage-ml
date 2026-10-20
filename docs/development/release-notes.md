@@ -53,6 +53,9 @@
 
 ### Rust blocks
 
+- `mage::redis` (feature `redis`) writes frames to Redis as one hash per row, replaced
+  whole in transactions with an optional TTL, values as exact text, and reads them back by
+  key with the types asked for. See [Rust blocks](/guides/blocks/rust-blocks#redis).
 - `mage::duckdb` (feature `duckdb`) reads and writes DuckDB with DuckDB built into the
   block, frames moving through Parquet with their types; the same DuckDB version as the
   Python environment's, so both open the same files. See

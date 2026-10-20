@@ -92,3 +92,6 @@ analytics:
 pinot:
   PINOT_HOST: 127.0.0.1
   PINOT_PORT: "{{ env_var('MAGE_TEST_PINOT_BROKER_PORT') }}"
+# The Redis of the Rust Redis tests.
+redis:
+  REDIS_URL: "{{ env_var('MAGE_TEST_REDIS_URL') }}"

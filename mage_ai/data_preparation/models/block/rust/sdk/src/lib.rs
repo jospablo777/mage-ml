@@ -40,6 +40,8 @@ pub mod output;
 pub mod postgres;
 pub mod profile;
 pub mod protocol;
+#[cfg(feature = "redis")]
+pub mod redis;
 pub mod runtime;
 #[cfg(feature = "storage")]
 pub mod storage;

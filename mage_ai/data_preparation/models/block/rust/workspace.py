@@ -38,7 +38,8 @@ members = [".mage/blocks/*"]
 [workspace.dependencies]
 # The postgres feature gives blocks mage::postgres; add "mysql" for mage::mysql, "mongodb"
 # for mage::mongodb, "clickhouse" for mage::clickhouse, "duckdb" for mage::duckdb (DuckDB,
-# compiled at the first build), "storage" for mage::storage (S3, GCS and Azure files),
+# compiled at the first build), "redis" for mage::redis (frames as hashes, features by
+# key), "storage" for mage::storage (S3, GCS and Azure files),
 # "onnx" for mage::onnx (ONNX Runtime, downloaded at the first build and linked into each
 # block's program).
 mage-block = { path = ".mage/sdk", features = ["postgres"] }

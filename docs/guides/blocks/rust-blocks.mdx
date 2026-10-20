@@ -416,6 +416,49 @@ fn export_data(totals: DataFrame) -> Result<()> {
 - **Other statements.** `execute(sql)` runs statements; `describe(sql)` lists a query's
   columns and types; `connection()` gives the DuckDB connection itself.
 
+## Redis
+
+The `mage::redis` module writes frames to Redis as hashes, one per row, and reads them back
+by key: features a service reads in a millisecond. Turn on the `redis` feature of the
+`mage` crate in `rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "redis"] }
+```
+
+```rust
+use mage::prelude::*;
+use mage::redis::Redis;
+use std::time::Duration;
+
+fn export_data(features: DataFrame) -> Result<()> {
+    // customer:42 -> {spend_7d: "120.5", orders_7d: "3", last_seen: "2024-06-01T10:00:00"}
+    Redis::connect()?.write_hashes(&features, "customer", &["customer_id"],
+                                   Some(Duration::from_secs(86_400)))?;
+    Ok(())
+}
+
+fn load_data(customers: DataFrame) -> Result<DataFrame> {
+    Redis::connect()?.read_hashes(&customers, "customer",
+        &[("spend_7d", DataType::Float64), ("orders_7d", DataType::Int64)])
+}
+```
+
+- **Connection.** `Redis::connect()` uses the profile's `REDIS_URL` (`redis://host:6379/0`,
+  or `rediss://` for TLS checked against Mozilla's roots) and `REDIS_PASSWORD` when the
+  URL has none.
+- **Writing.** `write_hashes(frame, prefix, key_columns, ttl)` writes the hash
+  `prefix:key` for each row, where the key joins the key columns' values with `:`. Each
+  hash is replaced whole, in transactions of 1,000 rows, so a field that is null now is not
+  left over from an earlier write; `ttl` sets the keys' expiry.
+- **Values.** Stored as exact text: integers as digits, floats in the shortest form that
+  reads back to the same number (`0.1`, `1e-300`), booleans as `true` and `false`, dates and
+  datetimes in ISO 8601 (UTC ones end in `Z`), decimals with every digit, lists and structs
+  as JSON, binary columns as their bytes. Nulls are not stored.
+- **Reading.** `read_hashes(keys, prefix, fields)` takes a frame of keys and returns it with
+  one column per field, of the type asked for; a missing key or field is null.
+- **Other commands.** `connection()` gives the Redis connection for any other command.
+
 ## Object storage
 
 The `mage::storage` module reads and writes Parquet and CSV files on Amazon S3 and

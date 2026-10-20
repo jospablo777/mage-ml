@@ -32,6 +32,8 @@ mongodb = { version = "3.9", default-features = false, features = ["compat-3-3-0
 # DuckDB for blocks (mage::duckdb), behind the duckdb feature: DuckDB built into the block's
 # program, with its Parquet extension, which carries frames in and out.
 duckdb = { version = "=1.10506.1", features = ["bundled", "parquet"], optional = true }
+# Redis for blocks (mage::redis), behind the redis feature: the sync client, TLS by rustls.
+redis = { version = "=1.7.1", default-features = false, features = ["tls-rustls", "tls-rustls-webpki-roots"], optional = true }
 # Feast's feature server REST API for blocks (mage::feast), behind the feast feature.
 ureq = { version = "3", features = ["json"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
@@ -48,6 +50,7 @@ clickhouse = ["dep:ureq", "polars/ipc_streaming"]
 mysql = ["dep:mysql", "dep:chrono"]
 mongodb = ["dep:mongodb", "dep:chrono"]
 duckdb = ["dep:duckdb"]
+redis = ["dep:redis", "dep:chrono", "dep:rustls"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]
