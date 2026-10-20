@@ -1,13 +1,12 @@
 from typing import Dict, List
 
-from pandas import DataFrame
-
 # from mage_ai.data_preparation.models.block.content import template_render
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
     blocks_in_query,
     interpolate_input,
     should_cache_data_from_upstream,
     table_name_parts,
+    upstream_has_no_data,
 )
 from mage_ai.data_preparation.models.constants import BlockType
 from mage_ai.data_preparation.variable_manager import get_variable
@@ -62,18 +61,7 @@ def create_upstream_block_tables(
                     partition=execution_partition,
                 )
 
-            no_data = False
-            if type(df) is DataFrame:
-                if len(df.index) == 0:
-                    no_data = True
-            elif type(df) is dict and len(df) == 0:
-                no_data = True
-            elif type(df) is list and len(df) == 0:
-                no_data = True
-            elif not df:
-                no_data = True
-
-            if no_data:
+            if upstream_has_no_data(df, empty_frames_have_data=False):
                 print(f'\n\nNo data in upstream block {upstream_block.uuid}.')
                 continue
 

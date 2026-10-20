@@ -374,7 +374,7 @@ def _apply_environment(capture_: Capture) -> None:
     )
 
 
-SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb', 'clickhouse')
+SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb', 'clickhouse', 'trino')
 
 
 def _sql_unsupported(block) -> Optional[str]:
@@ -2490,6 +2490,8 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             candidates += ['duckdb', 'mage_ai.io.duckdb']
         if 'clickhouse' in providers:
             candidates += ['clickhouse_connect', 'mage_ai.io.clickhouse']
+        if 'trino' in providers:
+            candidates += ['trino', 'mage_ai.io.trino', 'mage_ai.io.trino_types']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [

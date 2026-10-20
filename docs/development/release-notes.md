@@ -16,6 +16,21 @@
   the client's connection, or connection settings the Rust client lacks go through psycopg2.
   `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
+### Trino
+
+- Trino SQL blocks run in [pipeline services](/production/pipeline-services), as in a
+  Mage pipeline run.
+- An empty upstream frame was skipped, and the SQL block read the rows of the table an
+  earlier run left. It is now written as a table with no rows. BigQuery and Snowflake still
+  skip it, and no longer fail on an empty Polars frame.
+- Two Trino SQL blocks on the same profile copied the upstream block's table through pandas
+  into a new table before each query; the query now reads the table itself.
+- `unique_upstream_table_name` added its suffix to the tables of SQL upstream blocks too,
+  which were never written under that name, and every run left its tables behind. Only the
+  tables written for the run get the suffix, it now includes a random part (it was the time
+  in seconds, which two runs started in the same second shared), and the tables are dropped
+  when the block ends.
+
 ### Command line runs
 
 - `mage run` records its run when it ends: a pipeline run of the pipeline's "Command

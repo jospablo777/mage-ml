@@ -1,4 +1,3 @@
-import time
 from os import path
 from time import sleep
 from typing import Any, Dict, List
@@ -672,68 +671,112 @@ def execute_sql_code(
     elif DataSource.TRINO.value == data_provider:
         from mage_ai.io.trino import Trino
 
-        unique_table_name_suffix = None
-        if (configuration or block.configuration).get('unique_upstream_table_name', False):
-            unique_table_name_suffix = str(int(time.time()))
+        unique_table_name_suffix = trino.unique_table_name_suffix(
+            configuration or block.configuration,
+        )
 
         with Trino.with_config(config_file_loader) as loader:
             database = database or loader.default_database()
             schema = schema or loader.default_schema()
 
-            not is_dynamic and trino.create_upstream_block_tables(
-                loader,
-                block,
-                unique_table_name_suffix=unique_table_name_suffix,
-                **create_upstream_block_tables_kwargs,
-            )
-
-            query_string = trino.interpolate_input_data(
-                block,
-                query,
-                loader,
-                unique_table_name_suffix=unique_table_name_suffix,
-                **interpolate_input_data_kwargs,
-            )
-            query_string = interpolate_vars(query_string, **interpolate_vars_options)
-
-            if use_raw_sql:
-                return execute_raw_sql(
+            written = {}
+            if not is_dynamic:
+                written = trino.create_upstream_block_tables(
                     loader,
                     block,
-                    query_string,
-                    disable_query_preprocessing=disable_query_preprocessing,
-                    configuration=configuration,
-                    should_query=should_query,
-                    limit=limit,
+                    unique_table_name_suffix=unique_table_name_suffix,
+                    **create_upstream_block_tables_kwargs,
                 )
-            else:
-                loader.export(
-                    None,
+            try:
+                return _execute_trino(
+                    loader,
+                    block,
+                    query,
+                    unique_table_name_suffix,
+                    written,
+                    interpolate_input_data_kwargs,
+                    interpolate_vars_options,
+                    use_raw_sql,
+                    disable_query_preprocessing,
+                    configuration,
+                    should_query,
+                    limit,
+                    database,
                     schema,
                     table_name,
-                    drop_table_on_replace=True,
-                    if_exists=export_write_policy,
-                    query_string=query_string,
-                    verbose=BlockType.DATA_EXPORTER == block.type,
+                    export_write_policy,
                 )
+            finally:
+                if unique_table_name_suffix:
+                    trino.drop_tables(loader, list(written.values()))
 
-                if should_query:
-                    names = list(filter(lambda x: x, [
-                        database,
-                        schema,
-                        table_name,
-                    ]))
-                    full_table_name = '.'.join([f'"{n}"' for n in names])
 
-                    return [
-                        # read_sql turned integer columns with NULLs into float64.
-                        loader.load(
-                            f'SELECT * FROM {full_table_name}',
-                            limit=limit,
-                            verbose=False,
-                            nullable_integers=True,
-                        ),
-                    ]
+def _execute_trino(
+    loader,
+    block,
+    query: str,
+    unique_table_name_suffix: str,
+    written: Dict[str, str],
+    interpolate_input_data_kwargs: Dict,
+    interpolate_vars_options: Dict,
+    use_raw_sql: bool,
+    disable_query_preprocessing: bool,
+    configuration: Dict,
+    should_query: bool,
+    limit: int,
+    database: str,
+    schema: str,
+    table_name: str,
+    export_write_policy: str,
+):
+    query_string = trino.interpolate_input_data(
+        block,
+        query,
+        loader,
+        unique_table_name_suffix=unique_table_name_suffix,
+        written=written,
+        **interpolate_input_data_kwargs,
+    )
+    query_string = interpolate_vars(query_string, **interpolate_vars_options)
+
+    if use_raw_sql:
+        return execute_raw_sql(
+            loader,
+            block,
+            query_string,
+            disable_query_preprocessing=disable_query_preprocessing,
+            configuration=configuration,
+            should_query=should_query,
+            limit=limit,
+        )
+
+    loader.export(
+        None,
+        schema,
+        table_name,
+        drop_table_on_replace=True,
+        if_exists=export_write_policy,
+        query_string=query_string,
+        verbose=BlockType.DATA_EXPORTER == block.type,
+    )
+
+    if should_query:
+        names = list(filter(lambda x: x, [
+            database,
+            schema,
+            table_name,
+        ]))
+        full_table_name = '.'.join([f'"{n}"' for n in names])
+
+        return [
+            # read_sql turned integer columns with NULLs into float64.
+            loader.load(
+                f'SELECT * FROM {full_table_name}',
+                limit=limit,
+                verbose=False,
+                nullable_integers=True,
+            ),
+        ]
 
 
 def execute_raw_sql(

@@ -174,6 +174,7 @@ def interpolate_input(
             table_name = get_table(dict(
                 configuration=configuration,
                 table=table_name,
+                upstream_block_uuid=upstream_block.uuid,
             ))
 
         table_name = build_dynamic_table_name(table_name, dynamic_block_index)
@@ -377,6 +378,24 @@ def build_dynamic_table_name(table_name: str, dynamic_block_index: int = None) -
     return f'{table_name}__dynamic_{dynamic_block_index}'
 
 
+def upstream_has_no_data(df, empty_frames_have_data: bool = True) -> bool:
+    """
+    Whether an upstream output is skipped instead of written to a table.
+
+    An empty frame is written too: its table has the columns and no rows. Skipped, the
+    block read the table an earlier run left, with its rows, or failed on a missing table.
+    BigQuery and Snowflake pass empty_frames_have_data=False: their exports have not been
+    tested with an empty frame.
+    """
+    if isinstance(df, DataFrame) or type(df).__name__ == 'DataFrame':
+        return not empty_frames_have_data and len(df) == 0
+    if hasattr(df, '__len__'):
+        # Covers dicts, lists, Series, arrays and polars frames, whose truthiness raises
+        # instead of answering.
+        return len(df) == 0
+    return not df
+
+
 def create_upstream_block_tables(
     loader,
     block,
@@ -426,19 +445,7 @@ def create_upstream_block_tables(
                     partition=execution_partition,
                 )
 
-            no_data = False
-            if isinstance(df, DataFrame) or type(df).__name__ == 'DataFrame':
-                # An empty frame is exported too: its table has the columns and no rows.
-                # Skipped, the block read the table an earlier run left, with its rows.
-                no_data = False
-            elif hasattr(df, '__len__'):
-                # Covers dicts, lists, Series, arrays and polars frames, whose
-                # truthiness raises instead of answering.
-                no_data = len(df) == 0
-            elif not df:
-                no_data = True
-
-            if no_data:
+            if upstream_has_no_data(df):
                 print(f'\n\nNo data in upstream block {upstream_block.uuid}.')
                 continue
 

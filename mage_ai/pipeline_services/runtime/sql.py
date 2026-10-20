@@ -1,12 +1,12 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
-(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB and
-ClickHouse branches):
+(mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB,
+ClickHouse and Trino branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
-2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL, the table
-   alone on MySQL, DuckDB and ClickHouse.
+2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL,
+   catalog.schema.table on Trino, the table alone on MySQL, DuckDB and ClickHouse.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -22,6 +22,8 @@ import json
 import math
 import os
 import re
+import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 QUERY_ROW_LIMIT = 10_000_000
@@ -50,6 +52,11 @@ PROVIDERS = {
         profile_keys=('CLICKHOUSE_DATABASE', 'CLICKHOUSE_HOST', 'CLICKHOUSE_PORT'),
         no_schema=True,
         full_names=False,
+    ),
+    'trino': dict(
+        profile_keys=('TRINO_CATALOG', 'TRINO_HOST', 'TRINO_PORT', 'TRINO_SCHEMA'),
+        no_schema=False,
+        full_names=True,
     ),
 }
 SUPPORTED_PROVIDERS = tuple(PROVIDERS)
@@ -199,10 +206,15 @@ def _no_data(value: Any) -> bool:
 
 def upload_upstream_tables(
     loader, configuration: Dict, upstreams: List[Dict], inputs: List, query: str, io_config: str,
-    provider: Dict, database: Optional[str] = None,
-) -> None:
+    provider: Dict, database: Optional[str] = None, table_suffix: Optional[str] = None,
+) -> Dict[str, Tuple[Optional[str], str]]:
+    """
+    Writes the upstream outputs the query reads to tables. Returns the (schema, table) of
+    each table written, by upstream block UUID.
+    """
     import inspect
 
+    written = {}
     default_schema = None if provider['no_schema'] else loader.default_schema()
     for index, upstream in enumerate(upstreams):
         if query and not re.findall(variable_pattern(index + 1), query):
@@ -218,6 +230,8 @@ def upload_upstream_tables(
         )
         if not schema and not provider['no_schema']:
             schema = default_schema
+        if table_suffix:
+            table = f'{table}_{table_suffix}'
         full_name = '.'.join(p for p in (schema, table) if p)
         print(f"\n\nExporting data from upstream block {upstream['uuid']} to {full_name}.")
         options = dict(
@@ -238,12 +252,18 @@ def upload_upstream_tables(
         if 'auto_clean_name' in parameters:
             options['auto_clean_name'] = False
         loader.export(value, **options)
+        written[upstream['uuid']] = (schema, table)
+    return written
 
 
 def interpolate_input(
     loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
+    quote_database: bool = True, table_suffix: Optional[str] = None, written: Dict = None,
 ) -> str:
-    """{{ df_N }} becomes the upstream table's name, as Mage's interpolate_input."""
+    """
+    {{ df_N }} becomes the upstream table's name, as Mage's interpolate_input. With
+    table_suffix, the tables in written are named with it.
+    """
     helpers = statements()
     for index, upstream in enumerate(upstreams):
         matcher = '{} df_{} {}'.format('{{', index + 1, '}}')
@@ -265,12 +285,16 @@ def interpolate_input(
             )
         database, schema, table = table_name_parts(configuration, upstream)
         table = table or upstream['table_name']
+        if table_suffix and upstream['uuid'] in (written or {}):
+            table = f'{table}_{table_suffix}'
         if full_names:
             config_to_use = config if same_providers else configuration
             database = database or config_to_use.get('data_provider_database')
             schema = schema or config_to_use.get('data_provider_schema')
             if not database:
-                database = f'"{loader.default_database()}"'
+                database = loader.default_database()
+                if quote_database:
+                    database = f'"{database}"'
             if not schema:
                 schema = loader.default_schema()
             replace_with = '.'.join(p for p in (database, schema, table) if p)
@@ -350,6 +374,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.clickhouse import ClickHouse
 
         return ClickHouse.with_config(config_loader)
+    if provider == 'trino':
+        from mage_ai.io.trino import Trino
+
+        return Trino.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -409,6 +437,10 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
         schema = schema or loader.default_schema()
         return _run_on(loader, name, provider, configuration, upstreams, inputs, query,
                        io_config, variables, schema, table, limit, options)
+    if name == 'trino':
+        with loader:
+            return _run_on_trino(loader, provider, configuration, upstreams, inputs, query,
+                                 io_config, variables, schema, table, limit, options)
     with loader:
         if name == 'postgres':
             upload_upstream_tables(
@@ -450,3 +482,54 @@ def _run_on(loader, name, provider, configuration, upstreams, inputs, query, io_
     if configuration.get('exact_numbers'):
         return [loader.load(f'SELECT * FROM {schema}.{table}', verbose=False, exact_types=True)]
     return [loader.load(f'SELECT * FROM {schema}.{table}', verbose=False, nullable_integers=True)]
+
+
+def unique_table_name_suffix(configuration: Dict) -> Optional[str]:
+    """With unique_upstream_table_name, the suffix of this run's upstream tables on Trino."""
+    if not configuration.get('unique_upstream_table_name', False):
+        return None
+    return f'{int(time.time())}_{uuid.uuid4().hex[:8]}'
+
+
+def _run_on_trino(loader, provider, configuration, upstreams, inputs, query, io_config,
+                  variables, schema, table, limit, options) -> List:
+    """
+    Trino: {{ df_N }} is catalog.schema.table. With unique_upstream_table_name, the upstream
+    tables are written under names of this run and dropped when the block ends.
+    """
+    from mage_ai.io.trino_types import quote
+
+    database = configuration.get('data_provider_database') or loader.default_database()
+    schema = schema or loader.default_schema()
+    suffix = unique_table_name_suffix(configuration)
+    written = upload_upstream_tables(
+        loader, configuration, upstreams, inputs, query, io_config, provider,
+        table_suffix=suffix,
+    )
+    try:
+        query = interpolate_input(
+            loader, configuration, upstreams, query, quote_database=False,
+            table_suffix=suffix, written=written,
+        )
+        query = render(query, variables)
+        if configuration.get('use_raw_sql'):
+            return execute_raw_sql(loader, query, configuration, limit)
+        loader.export(None, schema, table, query_string=query, **options)
+        full_name = '.'.join(f'"{name}"' for name in (database, schema, table) if name)
+        return [loader.load(
+            f'SELECT * FROM {full_name}', limit=limit, verbose=False, nullable_integers=True,
+        )]
+    finally:
+        if suffix:
+            for upstream_schema, upstream_table in written.values():
+                full_name = '.'.join(
+                    quote(name) for name in (loader.default_database(), upstream_schema,
+                                             upstream_table)
+                )
+                cursor = loader.conn.cursor()
+                try:
+                    # A Trino statement finishes when its results are read.
+                    cursor.execute(f'DROP TABLE IF EXISTS {full_name}')
+                    cursor.fetchall()
+                except Exception as error:
+                    print(f'Could not drop the upstream table {full_name}: {error}')

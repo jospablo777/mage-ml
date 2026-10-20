@@ -88,7 +88,7 @@ Python, [R](../guides/blocks/r-blocks.md), [Rust](../guides/blocks/rust-blocks.m
   as on amd64; on arm64 some build from source, which makes the first build slow. An
   image with R blocks is based on Debian trixie and is larger.
 
-- **SQL** blocks on PostgreSQL, MySQL, DuckDB and ClickHouse run as in a Mage pipeline
+- **SQL** blocks on PostgreSQL, MySQL, DuckDB, ClickHouse and Trino run as in a Mage pipeline
   run: upstream outputs that the
   query reads as `{{ df_1 }}` are written to tables first (the table of an upstream SQL
   block on the same database is used directly), the query is rendered with the run's
@@ -99,8 +99,7 @@ Python, [R](../guides/blocks/r-blocks.md), [Rust](../guides/blocks/rust-blocks.m
 
 Blocks the service cannot run stop the export with the block named and the reason, so
 nothing silently disappears: sensors, dynamic blocks, callbacks, conditional blocks written
-in R or Rust, SQL blocks on other databases (BigQuery, Snowflake, Trino, Redshift, SQL
-Server), SQL blocks that use `block_output()`, and blocks that read their upstream with
+in R or Rust, SQL blocks on other databases (BigQuery, Snowflake, Redshift, SQL Server), SQL blocks that use `block_output()`, and blocks that read their upstream with
 chunk or batch settings are not supported yet. Chart, markdown and scratchpad blocks are
 notebook only and are left out.
 

@@ -69,3 +69,18 @@ If you do, read more about [how to use SQL blocks with raw SQL](/guides/blocks/s
 1. Once you’re finished writing your SQL statements,
 click the play button in the top right corner of the block to execute the SQL block and preview
 the results.
+
+## Upstream tables
+
+A query reads an upstream block's output as `{{ df_1 }}`, `{{ df_2 }}` and so on:
+
+- The output of a Python or R block is written to a table in the block's catalog and schema
+  first, replacing the table of the last run. An empty frame is written as a table with its
+  columns and no rows.
+- The table of an upstream Trino SQL block on the same profile (catalog, host, port and
+  schema) is read as it is.
+- With `unique_upstream_table_name: true` in the block's configuration, the tables written
+  for a run have a suffix of that run, so two runs at the same time do not write the same
+  table, and they are dropped when the block ends.
+
+Trino SQL blocks also run in [pipeline services](/production/pipeline-services).
