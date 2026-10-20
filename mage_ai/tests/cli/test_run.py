@@ -50,6 +50,7 @@ class RunTests(TestCase):
             analyze_outputs=mock.ANY,
             global_vars=mock.ANY,
             max_parallel=None,
+            record_run=True,
             run_sensors=mock.ANY,
             run_tests=True,
             pipeline_run_id=None,
@@ -57,6 +58,15 @@ class RunTests(TestCase):
         )
         assert result.exit_code == 0
         assert 'Pipeline run completed.' in result.output
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_no_record_leaves_the_run_unrecorded(self, mock_executor_factory, mock_pipeline):
+        mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic', '--no-record'])
+        assert result.exit_code == 0, result.output
+        kwargs = mock_executor_factory.get_pipeline_executor.return_value.execute.call_args.kwargs
+        assert kwargs['record_run'] is False
 
     @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
     @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')

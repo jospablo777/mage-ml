@@ -123,6 +123,7 @@ mage run <project_path> <pipeline_uuid> [OPTIONS]
 - `--skip-sensors` (optional): Specify if the sensors should be skipped (default: `False`)
 - `--template-runtime-configuration` (optional): Runtime configuration of data integration block runs (JSON format)
 - `--clean-after-success` (optional): Remove the outputs the run stored once it succeeds; a failed run keeps them for debugging
+- `--record/--no-record` (default: record): When the run ends, record it as a pipeline run of the pipeline's "Command line" trigger, with its block runs and [run record](/guides/pipelines/run-records), so `mage run-diff` and `mage reproduce` can use it
 - `--max-parallel` (optional): Most stages that run at once (default: the pipeline's `concurrency_config.block_run_limit`, else no limit)
 
 With block fusion (the default), `mage run` runs the pipeline in stages: each chain of blocks

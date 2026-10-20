@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -499,7 +499,8 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
         started = time.monotonic()
-        row = dict(block=uuid, seconds=None, tests=None, failed=True)
+        row = dict(block=uuid, seconds=None, tests=None, failed=True,
+                   started_at=datetime.now(timezone.utc), completed_at=None)
         if summary is not None:
             summary.append(row)
         block.test_summary = None
@@ -520,11 +521,27 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
                 )
             finally:
                 row.update(seconds=time.monotonic() - started,
-                           tests=getattr(block, 'test_summary', None))
+                           tests=getattr(block, 'test_summary', None),
+                           completed_at=datetime.now(timezone.utc))
         row['failed'] = False
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
         release_block(block)
+
+
+def _record_cli_run(pipeline, prepared, summary, global_vars, started_at, failed,
+                    execution_partition) -> None:
+    """Records the run as a pipeline run (cli_runs.py); a failure to record is reported,
+    not raised: the run itself is done."""
+    from mage_ai.orchestration import cli_runs
+
+    try:
+        pipeline_run = cli_runs.record(
+            pipeline, prepared, summary, global_vars, started_at, failed, execution_partition,
+        )
+        print(f'Recorded as pipeline run {pipeline_run.id} (mage run-diff, mage reproduce).')
+    except Exception as error:
+        print(f'[WARNING] The run could not be recorded: {error}')
 
 
 def executable(block) -> bool:
@@ -615,10 +632,12 @@ async def execute_in_stages(
     update_status: bool = False,
     execution_partition: Optional[str] = None,
     max_parallel: Optional[int] = None,
+    record_run: bool = False,
 ) -> None:
     """
     `mage run` with block fusion: the pipeline's stages in this process, as a fused run
-    runs them. A stage starts as soon as its upstream blocks are done, up to the stage
+    runs them. With record_run, the run is recorded as a pipeline run when it ends
+    (cli_runs.py). A stage starts as soon as its upstream blocks are done, up to the stage
     limit (stage_limit), and not while the process holds more memory than
     MAGE_STAGE_MAX_MEMORY_SHARE allows and another stage runs. After a stage fails, no
     stage starts; the run waits for the stages already running (a thread cannot be
@@ -629,6 +648,15 @@ async def execute_in_stages(
     global_vars = global_vars or {}
     pending = [list(stage) for stage in fusion_plan(pipeline)]
     limit = stage_limit(pipeline, max_parallel)
+    started_at = datetime.now(timezone.utc)
+    prepared = None
+    if record_run:
+        from mage_ai.orchestration import run_records
+
+        try:
+            prepared = await asyncio.to_thread(run_records.prepare, pipeline, global_vars)
+        except Exception as error:
+            print(f'[WARNING] The run record could not be prepared: {error}')
     tracking = await asyncio.to_thread(cli_tracking, pipeline, execution_partition)
     summary: List[Dict] = []
     done: set = set()
@@ -683,6 +711,9 @@ async def execute_in_stages(
             else:
                 done.update(stage)
     print_run_summary(summary, run_tests)
+    if record_run:
+        _record_cli_run(pipeline, prepared, summary, global_vars, started_at, bool(failures),
+                        execution_partition)
     if failures:
         error = failures[0][1]
         for stage, other in failures[1:]:

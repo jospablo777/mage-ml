@@ -90,6 +90,11 @@ RUN_VAR_DEFAULT = typer.Option(
     None, '--var', help='a runtime variable, key=value; repeat for more. Values that read as '
     'JSON keep their type (2, true, [1, 2]); others are text. Overrides --runtime-vars.',
 )
+RUN_RECORD_DEFAULT = typer.Option(
+    True, '--record/--no-record',
+    help='record the run as a pipeline run of the "Command line" trigger when it ends, with '
+    'its run record, for mage run-diff and mage reproduce.',
+)
 RUN_CLEAN_AFTER_SUCCESS_DEFAULT = typer.Option(
     False, help='remove the outputs the run stored once it succeeds (a failed run keeps them '
     'for debugging).',
@@ -200,6 +205,7 @@ def run(
     max_parallel: Union[int, None] = RUN_MAX_PARALLEL_DEFAULT,
     clean_after_success: bool = RUN_CLEAN_AFTER_SUCCESS_DEFAULT,
     var: Union[List[str], None] = RUN_VAR_DEFAULT,
+    record: bool = RUN_RECORD_DEFAULT,
 ):
     """
     Run pipeline.
@@ -310,6 +316,8 @@ def run(
                     global_vars=global_vars,
                     max_parallel=max_parallel,
                     pipeline_run_id=pipeline_run_id,
+                    # A run the scheduler started (pipeline_run_id) has its records already.
+                    record_run=record and pipeline_run_id is None,
                     run_sensors=not skip_sensors,
                     run_tests=test,
                     update_status=False,

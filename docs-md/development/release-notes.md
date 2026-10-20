@@ -16,6 +16,14 @@
   the client's connection, or connection settings the Rust client lacks go through psycopg2.
   `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
+### Command line runs
+
+- `mage run` records its run when it ends: a pipeline run of the pipeline's "Command
+  line" trigger, with its block runs (status, times, output digests) and its run record,
+  so `mage run-diff` and `mage reproduce` work on command line runs. It is recorded with
+  its final status, so a server's scheduler on the same database never runs it again.
+  `--no-record` skips it.
+
 ### Logs
 
 - A block run's log is rotated at 20 MB, and the logs page and API read only the newest

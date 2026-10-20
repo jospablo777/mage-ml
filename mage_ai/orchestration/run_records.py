@@ -274,8 +274,12 @@ def code_digest(pipeline) -> str:
     return _digest({relative: _file_digest(path) for relative, path in files.items()})
 
 
-def capture(pipeline, pipeline_run) -> Dict[str, Any]:
-    """Records the manifest of a run as it starts; returns it."""
+def prepare(pipeline, variables: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The manifest of a run about to start, without its run: the code and environment are
+    hashed, and their contents saved, now, so the record shows what the run started with.
+    A command line run gets its pipeline run when it ends (cli_runs.py).
+    """
     files, truncated = source_files(pipeline)
     code = {relative: _file_digest(path) for relative, path in files.items()}
     code_digest = _digest(code)
@@ -285,15 +289,9 @@ def capture(pipeline, pipeline_run) -> Dict[str, Any]:
     if not truncated:
         _write_once(pipeline, os.path.join(root, 'code', f'{code_digest}.json'), _snapshot(files))
     _write_once(pipeline, os.path.join(root, 'environments', f'{env_digest}.json'), env)
-
-    variables = run_variables(pipeline_run)
-    manifest = dict(
+    return dict(
         version=MANIFEST_VERSION,
         pipeline_uuid=pipeline.uuid,
-        pipeline_run_id=pipeline_run.id,
-        execution_date=(
-            pipeline_run.execution_date.isoformat() if pipeline_run.execution_date else None
-        ),
         captured_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
         code=dict(digest=code_digest, files=code, truncated=truncated),
         environment=dict(
@@ -306,6 +304,17 @@ def capture(pipeline, pipeline_run) -> Dict[str, Any]:
         variables=dict(digest=_digest(variables), names=sorted(variables)),
         git=_git(pipeline.repo_path),
     )
+
+
+def write_manifest(pipeline, pipeline_run, prepared: Dict[str, Any]) -> Dict[str, Any]:
+    """Records a prepared manifest as the next one of the run; returns it."""
+    manifest = dict(
+        prepared,
+        pipeline_run_id=pipeline_run.id,
+        execution_date=(
+            pipeline_run.execution_date.isoformat() if pipeline_run.execution_date else None
+        ),
+    )
     storage = _storage(pipeline)
     directory = _manifest_dir(pipeline, pipeline_run.id)
     storage.makedirs(directory, exist_ok=True)
@@ -313,9 +322,18 @@ def capture(pipeline, pipeline_run) -> Dict[str, Any]:
     storage.write_json_file(os.path.join(directory, f'{number}.json'), manifest)
     pipeline_run.update(metrics=dict(
         pipeline_run.metrics or {},
-        **{METRIC: dict(manifest=number, code=code_digest, environment=env_digest)},
+        **{METRIC: dict(
+            manifest=number,
+            code=manifest['code']['digest'],
+            environment=manifest['environment']['digest'],
+        )},
     ))
     return manifest
+
+
+def capture(pipeline, pipeline_run) -> Dict[str, Any]:
+    """Records the manifest of a run as it starts; returns it."""
+    return write_manifest(pipeline, pipeline_run, prepare(pipeline, run_variables(pipeline_run)))
 
 
 def manifests(pipeline, run_id: int) -> List[Dict[str, Any]]:

@@ -23,6 +23,11 @@ Every pipeline run records what it ran with:
 That answers the usual questions about a model or a report: what produced this number,
 what changed since last week, and can I get the same result again.
 
+Runs started with `mage run` are recorded too, when they end, as pipeline runs of the
+pipeline's **Command line** trigger (inactive: it starts nothing). The code and
+environment are those of the moment the run started. `mage run --no-record` leaves a run
+unrecorded.
+
 ## See a run's record
 
 Open a pipeline run. Below the block runs, **Run record** shows the code (number of

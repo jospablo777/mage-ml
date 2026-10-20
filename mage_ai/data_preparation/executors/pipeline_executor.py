@@ -77,6 +77,7 @@ class PipelineExecutor:
                     update_status=update_status,
                     execution_partition=self.execution_partition,
                     max_parallel=kwargs.get('max_parallel'),
+                    record_run=bool(kwargs.get('record_run')),
                 )
             elif pipeline_run_id is None:
                 await self.pipeline.execute(
