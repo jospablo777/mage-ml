@@ -547,7 +547,21 @@ class Pipeline:
         use_repo_path: bool = False,
     ):
         warn_for_repo_path(repo_path)
+        if repo_config is None and context_data is None:
+            from mage_ai.shared import read_cache
 
+            return read_cache.cached(
+                ('pipeline', cls.__name__, uuid, repo_path, check_if_exists, all_projects,
+                 use_repo_path),
+                lambda: cls._get(uuid, repo_path, None, check_if_exists, all_projects, None,
+                                 use_repo_path),
+            )
+        return cls._get(uuid, repo_path, repo_config, check_if_exists, all_projects,
+                        context_data, use_repo_path)
+
+    @classmethod
+    def _get(cls, uuid, repo_path, repo_config, check_if_exists, all_projects, context_data,
+             use_repo_path):
         config_path, repo_path = cls._get_config_path(
             uuid,
             repo_path=repo_path,

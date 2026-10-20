@@ -295,6 +295,13 @@ def get_repo_config(
     root_project: bool = False,
     user=None,
 ) -> RepoConfig:
+    if context_data is None and user is None:
+        from mage_ai.shared import read_cache
+
+        return read_cache.cached(
+            ('repo_config', repo_path, root_project),
+            lambda: RepoConfig(repo_path=repo_path, root_project=root_project),
+        )
     return RepoConfig(
         repo_path=repo_path,
         context_data=context_data,

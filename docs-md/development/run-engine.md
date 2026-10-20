@@ -99,6 +99,18 @@ the pipeline; a notebook or the server never freezes.
 | Fused run on the run engine | 0.23 to 0.30 s | 0.12 to 0.13 s |
 | `mage run` | 0.95 s | 0.77 s |
 
+## The scheduler
+
+A scheduler in Rust (item 4 of the plan) was measured first. With 50 pipelines whose
+triggers have runs in flight, a pass of `schedule_all` took 0.21 to 0.26 seconds, about 4
+ms per running run, every 1 to 10 seconds. Two fifths of it read each pipeline's files
+about five times and the project's metadata.yaml four times per run; a read cache for one
+pass (`mage_ai/shared/read_cache.py`) brings a pass to 0.17 to 0.18 seconds. The rest is
+database round trips (refreshes, guarded updates, the crashed block run check), which a
+scheduler in Rust would make too. A rewrite would carry the scheduler's rules (triggers,
+backfills, concurrency, resources, retries, locks between replicas) for little gain, so it
+is not planned; batching those round trips is the next step if passes grow.
+
 ## Plan
 
 1. `mage-service jobs` and the job worker, with unit tests in Rust and Python.

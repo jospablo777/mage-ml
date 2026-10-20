@@ -28,6 +28,10 @@
 
 ### Scheduler
 
+- A scheduler pass read each pipeline's files about five times and the project's
+  metadata.yaml four times for each running pipeline run; it now reads them once per pass.
+  With 50 runs in flight a pass took 0.18 seconds instead of 0.22.
+
 - `MAGE_JOB_ENGINE=on` runs the scheduler's jobs in warm Python workers of the Rust run
   engine (`mageml-engine` 0.2.0, `mage-service jobs`) instead of a new process per block
   or stage. A job starts without starting Python or importing MageML: a fused run of a

@@ -2163,6 +2163,15 @@ def check_sla():
 
 
 def schedule_all():
+    """One pass of the scheduler, reading each pipeline and the project config once
+    (read_cache.py)."""
+    from mage_ai.shared import read_cache
+
+    with read_cache.one_pass():
+        return _schedule_all()
+
+
+def _schedule_all():
     """
     This method manages the scheduling and execution of pipeline runs based on specified
     concurrency and pipeline scheduling rules.
