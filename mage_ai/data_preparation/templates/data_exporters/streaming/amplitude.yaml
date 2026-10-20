@@ -1,6 +1,6 @@
 connector_type: amplitude
 # The project's API key: Amplitude > Settings > Projects > your project > General.
-api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+api_key: "{% raw %}{{ env_var('AMPLITUDE_API_KEY') }}{% endraw %}"
 region: US
 # The event's name, unless each row has an event_type column.
 event_type: Order Completed

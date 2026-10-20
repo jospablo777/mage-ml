@@ -755,3 +755,35 @@ class ExampleTemplateOutputTest(TestCase):
 
         self.assertTrue(os.path.exists(os.path.join(project, 'titanic_clean.csv')))
         self.assertEqual(os.listdir(elsewhere), [])
+
+
+class StreamingBlockTemplateTest(TestCase):
+    def test_every_streaming_source_and_sink_template_renders_as_yaml(self):
+        # A template is rendered with Jinja when its block is created: an env_var() in it
+        # must be raw, or creating the block fails (the Amplitude sink's did).
+        from pathlib import Path
+
+        import yaml
+
+        import mage_ai.data_preparation.templates as templates
+
+        root = Path(templates.__file__).parent
+        for block_type, folder in (
+            (BlockType.DATA_LOADER, 'data_loaders/streaming'),
+            (BlockType.DATA_EXPORTER, 'data_exporters/streaming'),
+        ):
+            for path in sorted((root / folder).glob('*.yaml')):
+                with self.subTest(template=f'{folder}/{path.name}'):
+                    code = fetch_template_source(
+                        block_type, dict(data_source=path.stem),
+                        language=BlockLanguage.YAML, pipeline_type=PipelineType.STREAMING,
+                    )
+                    config = yaml.safe_load(code)
+                    self.assertIsInstance(config, dict)
+                    self.assertIn('connector_type', config)
+
+        code = fetch_template_source(
+            BlockType.DATA_EXPORTER, dict(data_source='amplitude'),
+            language=BlockLanguage.YAML, pipeline_type=PipelineType.STREAMING,
+        )
+        self.assertIn("api_key: \"{{ env_var('AMPLITUDE_API_KEY') }}\"", code)
