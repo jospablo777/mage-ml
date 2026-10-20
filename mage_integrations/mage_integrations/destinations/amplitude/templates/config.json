@@ -1,0 +1,5 @@
+{
+  "api_key": "{{ env_var('AMPLITUDE_API_KEY') }}",
+  "region": "US",
+  "streams": {}
+}

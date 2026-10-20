@@ -1059,29 +1059,31 @@ function IntegrationPipeline({
               {dataExporterBlockContent?.destination && (
                 <>
                   <Spacing mb={2}>
-                    <Text default>
-                      For more information on how to configure this destination,
-                      read the <Link
-                        href={`https://github.com/mage-ai/mage-ai/blob/master/mage_integrations/mage_integrations/destinations/${dataExporterBlockContent.destination}/README.md`}
-                        openNewWindow
-                        primary
-                      >
-                        {dataExporterBlockContent.destination} documentation
-                      </Link>.
-
-                      <br />
-                      <br />
-
-                      If your configuration contains a key named <Text inline monospace>
-                        table
-                      </Text>, it’s optional.
-                      <br />
-                      The table that’s created in this destination will have
-                      a name corresponding to the stream’s unique name (by default) or the value you
-                      entered under the input field labeled <Text bold inline>
-                        Table name
-                      </Text> in a previous section.
-                    </Text>
+                    {integrationDestinationsByUUID[dataExporterBlockContent.destination]?.docs ? (
+                      <Accordion>
+                        <AccordionPanel
+                          title={`Documentation: ${dataExporterBlockContent.destination}`}
+                        >
+                          <DocsStyle>
+                            <Markdown>
+                              {integrationDestinationsByUUID[dataExporterBlockContent.destination]
+                                .docs.replace(/\<br \/\>/g, '\n\n')}
+                            </Markdown>
+                          </DocsStyle>
+                        </AccordionPanel>
+                      </Accordion>
+                    ) : (
+                      <Text default>
+                        For more information on how to configure this destination,
+                        read the <Link
+                          href={`https://github.com/jospablo777/mage-ml/blob/master/mage_integrations/mage_integrations/destinations/${dataExporterBlockContent.destination}/README.md`}
+                          openNewWindow
+                          primary
+                        >
+                          {dataExporterBlockContent.destination} documentation
+                        </Link>.
+                      </Text>
+                    )}
 
                     {buildVariablesTable('https://github.com/jospablo777/mage-ml/blob/master/docs-md/guides/data-integration-pipeline.md#configure-destination')}
                   </Spacing>

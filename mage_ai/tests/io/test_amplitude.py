@@ -152,11 +152,13 @@ class AmplitudeClientTest(TestCase):
             self.assertEqual(list(read_export(outer.name)), [{'uuid': 'a'}])
 
     def test_keys_are_required_and_regions_checked(self):
-        with self.assertRaisesRegex(AmplitudeError, 'API key and secret key'):
+        with self.assertRaisesRegex(AmplitudeError, 'API key'):
             Amplitude('', '')
         with self.assertRaisesRegex(AmplitudeError, "'US' or 'EU'"):
             Amplitude('a', 'b', region='APAC')
         self.assertEqual(Amplitude('a', 'b', region='eu').host, 'https://analytics.eu.amplitude.com')
+        self.assertEqual(Amplitude('a', region='eu').upload_host, 'https://api.eu.amplitude.com')
+        self.assertEqual(Amplitude('a').upload_host, 'https://api2.amplitude.com')
         self.assertEqual(json.loads(json.dumps(series_rows({}))), [])
 
 
@@ -202,3 +204,21 @@ class AmplitudeSourceListingTest(TestCase):
             set(info['templates']['config']),
             {'api_key', 'secret_key', 'region', 'start_date', 'cohort_ids'},
         )
+
+    def test_the_editor_gets_the_destinations_readme_and_settings(self):
+        from mage_ai.data_integrations.destinations.constants import DESTINATIONS
+        from mage_ai.server.api.integration_sources import build_integration_module_info
+
+        self.assertIn('Amplitude', [option['name'] for option in DESTINATIONS])
+        info = build_integration_module_info('destinations', dict(name='Amplitude'))
+        self.assertIn('Sent once', info['docs'])
+        self.assertEqual(set(info['templates']['config']), {'api_key', 'region', 'streams'})
+
+    def test_a_readme_of_another_spelling_keeps_the_templates(self):
+        from mage_ai.server.api.integration_sources import build_integration_module_info
+
+        # Airtable's README is Readme.md: on a case-sensitive file system the editor lost
+        # its settings template along with its documentation.
+        info = build_integration_module_info('destinations', dict(name='Airtable'))
+        self.assertIn('Airtable', info['docs'])
+        self.assertEqual(set(info['templates']['config']), {'token', 'base_id'})

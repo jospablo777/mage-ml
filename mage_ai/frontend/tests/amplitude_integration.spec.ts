@@ -11,8 +11,9 @@ import { expect, test } from './base';
  * An Amplitude data integration pipeline set up in the editor, against a local server that
  * answers as Amplitude's APIs do (`mage examples amplitude-server`): pick the source,
  * read its documentation, type the settings, test the connection, pick streams that come
- * with their keys and sync mode, and preview the events. Runs into a destination are
- * tested in integration_tests/postgres/test_amplitude_pipeline.py.
+ * with their keys and sync mode, and preview the events; then pick Amplitude as the
+ * destination and test its API key. Runs are tested in
+ * integration_tests/postgres/test_amplitude_pipeline.py and test_amplitude_destination.py.
  */
 
 const PORT = Number(process.env.MAGE_E2E_AMPLITUDE_PORT || 18766);
@@ -57,9 +58,11 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 });
 
 test.afterAll(async () => {
-  await api.deletePipeline(pipelineUUID);
-  await apiContext.dispose();
   amplitude?.kill();
+  if (pipelineUUID) {
+    await api.deletePipeline(pipelineUUID);
+  }
+  await apiContext?.dispose();
 });
 
 test('an Amplitude source is set up, tested and previewed in the editor', async ({ page }) => {
@@ -149,4 +152,57 @@ test('an Amplitude source is set up, tested and previewed in the editor', async 
   // The newest events, in the Data panel.
   await expect(page.getByText(/^insert-\d+$/).first()).toBeVisible({ timeout: 60_000 });
   await shot(page, '06_sample');
+});
+
+test('an Amplitude destination is set up and its API key tested', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto(`/pipelines/${pipelineUUID}/edit`);
+
+  // The destination list shows once the source is set (the test above).
+  const destinationSelect = page.locator('select')
+    .filter({ has: page.locator('option[value="delta_lake_s3"]') });
+  await expect(destinationSelect).toBeVisible({ timeout: 60_000 });
+  await destinationSelect.selectOption('amplitude');
+  await expect(page.getByText(`${pipelineUUID}_destination: amplitude`).first()).toBeVisible({
+    timeout: 30_000,
+  });
+  const docs = page.getByText('Documentation: amplitude').last();
+  await docs.click();
+  await expect(page.getByText('Sent once')).toBeVisible();
+  await shot(page, '07_destination_docs');
+  await docs.click();
+
+  // The template reads the key from AMPLITUDE_API_KEY, unset here: the test says so.
+  const testButton = page.getByRole('button', { name: 'Test connection' }).last();
+  await testButton.click();
+  await expect(page.getByText(/api_key rendered as None/)).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const editor = page.locator('.monaco-editor').filter({ hasText: 'streams' }).last();
+  await editor.scrollIntoViewIfNeeded();
+  await editor.getByText('streams').click();
+  await page.keyboard.press('End');
+  const template = await editor.locator('.view-lines').innerText();
+  for (let i = 0; i < template.length + 10; i++) {
+    await page.keyboard.press('Backspace');
+  }
+  // Flow style: the editor indents typed new lines by itself.
+  await page.keyboard.type([
+    'api_key: test-api-key',
+    `host: ${AMPLITUDE_URL}`,
+    'streams: {active_users: {user_properties: true}}',
+  ].join('\n'));
+  await testButton.click({ timeout: 10_000 });
+  await expect(page.getByText('Connected successfully!')).toBeVisible({ timeout: 30_000 });
+  await shot(page, '08_destination_connected');
+
+  await expect.poll(async () => {
+    const detail = await api.call('GET', `pipelines/${pipelineUUID}?includes_content=true`);
+    const destination = detail.pipeline.blocks.find(({ type }) => type === 'data_exporter');
+    return parse(destination?.content || '') || {};
+  }, { timeout: 30_000 }).toMatchObject({
+    config: { api_key: 'test-api-key', streams: { active_users: { user_properties: true } } },
+    destination: 'amplitude',
+  });
 });

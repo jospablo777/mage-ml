@@ -13,7 +13,7 @@ the batch. The engine is written in Rust; blocks run in Python, Rust or R.
 | --- | --- |
 | Source | Kafka, Azure Event Hubs, webhooks, RabbitMQ, NATS JetStream, IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB change streams, PostgreSQL changes (logical replication) |
 | Transformers | Python, [Rust](../guides/blocks/rust-blocks.md#stream-transformers) or [R](../guides/blocks/r-blocks.md#stream-transformers), mixed in one chain |
-| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, InfluxDB, object storage (S3, GCS, Azure, disk), HTTP, Feast; `dummy` prints each message |
+| Sinks | Kafka, NATS JetStream, RabbitMQ, IBM MQ, ActiveMQ, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, Elasticsearch, OpenSearch, InfluxDB, object storage (S3, GCS, Azure, disk), HTTP, Feast, Amplitude; `dummy` prints each message |
 
 The export stops, with the reason, on what a service can't run the same way as MageML yet:
 Python sources and sinks, other connectors (Kinesis, Pulsar, InfluxDB, Elasticsearch,
@@ -45,6 +45,7 @@ absorbed" names how a sink writes a repeated batch only once, where it can.
 | [`object_storage`](#object-storage), `amazon_s3`, `google_cloud_storage` | | | Object written | Same object name | Buffers acknowledged after writing |
 | [`http`](#http-and-feast-sinks) | | | `2xx` | `Idempotency-Key`, for receivers that dedupe | |
 | [`feast`](#http-and-feast-sinks) | | | `2xx` | Online pushes are upserts | |
+| [`amplitude`](#amplitude-sink) | | | `2xx` from the Batch Event Upload API | Each event's `insert_id`, kept 7 days | Up to 2,000 events a request |
 
 ## How a stream runs
 
@@ -635,3 +636,34 @@ to: online                 # online, offline or online_and_offline
 - Values are sent exactly as the blocks made them: large integers keep every digit.
 - Headers whose names look like credentials (`Authorization`, tokens, keys) must be
   `env_var()` references.
+
+### Amplitude sink
+
+An `amplitude` sink sends each batch's rows to an Amplitude project with the Batch Event
+Upload API, as events, or with `user_properties: true` as user properties.
+
+```yaml
+connector_type: amplitude
+api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+region: US                       # or EU
+event_type: Order Completed      # unless rows have an event_type
+columns:                         # the row's columns for Amplitude's fields
+  user_id: customer_id
+  time: ordered_at
+key_columns: [order_id]          # what makes an event the same event
+```
+
+- Each row is one event: `user_id` or `device_id`, the event type, and `time` (ISO 8601, or
+  epoch seconds or milliseconds). Amplitude's event fields (`session_id`, `country`,
+  `revenue`, ...) stay; every other column becomes an event property.
+- Each event has an `insert_id`: the row's, else a SHA-256 of `key_columns`, else of the
+  event. Amplitude drops an `insert_id` it took in the last 7 days, so a batch replayed
+  after a crash, however it is batched, adds nothing twice.
+- Requests carry up to 2,000 events; a `413` splits one. A `429` waits 15 seconds, as
+  Amplitude asks, then the batch is retried; server errors are retried.
+- A row without an id or an event type, an event Amplitude refuses (`400`, with the field
+  and the first event at fault), a wrong API key or region, and users over Amplitude's
+  daily quota stop the stream, keeping its position.
+- `min_id_length` lowers Amplitude's 5-character minimum for ids; `url` and
+  `allow_private: true` send to a proxy or `mage examples amplitude-server`.
+- Running the block in the editor checks the API key without sending an event.

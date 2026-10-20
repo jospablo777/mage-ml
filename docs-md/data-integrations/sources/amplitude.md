@@ -10,6 +10,9 @@ MageML reads Amplitude three ways. Pick by what you need:
 | Events or metrics as a frame in a Python block (analysis, features, training) | [Python block](#python-blocks) | Same |
 | Each event as it happens (real-time features, alerts, scoring) | [Stream](#streams) | Seconds |
 
+To send data to Amplitude (orders as events, scores as user properties), see the
+[Amplitude destination](../destinations/amplitude.md).
+
 All three use the project's **API key** and **secret key** (Amplitude > Settings > Projects >
 your project > General) and its **region**: `US` (amplitude.com) or `EU`
 (analytics.eu.amplitude.com).

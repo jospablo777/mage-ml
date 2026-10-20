@@ -99,6 +99,29 @@ class WebhookCheckTest(StreamSampleTestCase):
 
         self.assertIn('/v1/streams/<pipeline>/messages', printed.getvalue())
 
+    def test_an_amplitude_sink_checks_its_api_key(self):
+        import contextlib
+        import io
+
+        from mage_ai.data_preparation.models.block.streaming import check_connection
+        from mage_ai.io.amplitude import AmplitudeError
+        from mage_ai.tests.io.fixtures_amplitude import API_KEY, FakeAmplitude
+
+        with FakeAmplitude() as fake:
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                check_connection(
+                    'data_exporter',
+                    f'connector_type: amplitude\napi_key: {API_KEY}\nurl: {fake.url}\n',
+                )
+            self.assertIn('Amplitude accepts the API key', printed.getvalue())
+            with self.assertRaisesRegex(AmplitudeError, 'refused the API key'):
+                check_connection(
+                    'data_exporter',
+                    f'connector_type: amplitude\napi_key: wrong-key\nurl: {fake.url}\n',
+                )
+            self.assertEqual(fake.uploaded, [])
+
 
 class RunOnSampleTest(StreamSampleTestCase):
     def setUp(self):

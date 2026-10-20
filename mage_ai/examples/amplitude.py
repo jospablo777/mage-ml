@@ -5,7 +5,10 @@ Amplitude without an Amplitude account, for the tutorials and the tests.
 from their documentation: the Export API (a ZIP of gzipped JSON lines, one file per hour;
 404 for no data; 400 past the size limit), the Dashboard REST, Taxonomy, Annotations and
 Behavioral Cohorts APIs, Basic authentication, and 429 with Retry-After. It holds a music
-app's events of the last days: sign-ups, plays, carts, purchases and subscriptions.
+app's events of the last days: sign-ups, plays, carts, purchases and subscriptions. It takes
+events and user properties on /batch as the Batch Event Upload API does: the API key in the
+body, 400 with the fields at fault, insert_id deduplication, and 429 with throttled users;
+events it takes are exported like the others.
 
 `mage examples amplitude-webhook` posts events to a stream as Amplitude's Webhook
 destination does: one event per request, in Amplitude's event format, some sent again as
@@ -76,6 +79,14 @@ class FakeAmplitude:
         self.cohort_polls = 0
         self.cohort_csv = 'amplitude_id,user_id,plan\n111,user-1,pro\n222,,free\n'
         self.truncate_next_export = False
+        # What /batch took: the events, the insert_ids seen, and each user's properties.
+        self.uploaded: List[Dict] = []
+        self.insert_ids = set()
+        self.users: Dict[str, Dict] = {}
+        # Users whose events /batch refuses as over the daily quota.
+        self.over_quota_users: List[str] = []
+        # Called with a line about each request /batch takes; serve() prints it.
+        self.on_batch = None
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -128,6 +139,103 @@ class FakeAmplitude:
         seconds = [(b - a).total_seconds() for a, b in lengths.values()]
         return round(sum(seconds) / len(seconds), 2) if seconds else 0
 
+    def take_batch(self, body: Dict):
+        """The status and answer of the Batch Event Upload API for a request body."""
+        if body.get('api_key') != API_KEY:
+            return 400, {'code': 400, 'error': 'Invalid API key: ' + str(body.get('api_key'))}
+        events = body.get('events')
+        if not events:
+            return 400, {
+                'code': 400, 'error': 'Request missing required field',
+                'missing_field': 'events',
+            }
+        if len(events) > 2000:
+            return 400, {'code': 400, 'error': 'Too many events in the request'}
+        shortest = int((body.get('options') or {}).get('min_id_length') or 5)
+        invalid: Dict[str, List[int]] = {}
+        missing: Dict[str, List[int]] = {}
+        for index, item in enumerate(events):
+            ids = [item.get('user_id'), item.get('device_id')]
+            if not any(ids):
+                missing.setdefault('user_id', []).append(index)
+            for key in ('user_id', 'device_id'):
+                if item.get(key) is not None and len(str(item[key])) < shortest:
+                    invalid.setdefault(key, []).append(index)
+            if not item.get('event_type'):
+                missing.setdefault('event_type', []).append(index)
+            if 'time' in item and not isinstance(item['time'], int):
+                invalid.setdefault('time', []).append(index)
+        if invalid or missing:
+            return 400, {
+                'code': 400, 'error': 'Request missing required field',
+                'events_with_invalid_fields': invalid,
+                'events_with_missing_fields': missing,
+            }
+        over = [e.get('user_id') for e in events if e.get('user_id') in self.over_quota_users]
+        if over:
+            return 429, {
+                'code': 429, 'error': 'Too many requests for some devices and users',
+                'exceeded_daily_quota_users': {user: 500001 for user in over},
+                'exceeded_daily_quota_devices': {},
+                'throttled_events': list(range(len(events))),
+            }
+        now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+        repeated = 0
+        kinds: Dict[str, int] = {}
+        for item in events:
+            insert_id = item.get('insert_id')
+            if insert_id and insert_id in self.insert_ids:
+                repeated += 1
+                continue
+            kinds[item['event_type']] = kinds.get(item['event_type'], 0) + 1
+            if insert_id:
+                self.insert_ids.add(insert_id)
+            self.uploaded.append(item)
+            who = item.get('user_id') or item.get('device_id')
+            operations = item.get('user_properties') or {}
+            properties = self.users.setdefault(who, {})
+            if item['event_type'] == '$identify':
+                properties.update(operations.get('$set') or {})
+                for key, value in (operations.get('$setOnce') or {}).items():
+                    properties.setdefault(key, value)
+                for key, value in (operations.get('$add') or {}).items():
+                    properties[key] = properties.get(key, 0) + value
+                for key in operations.get('$unset') or {}:
+                    properties.pop(key, None)
+                continue
+            properties.update({k: v for k, v in operations.items() if not k.startswith('$')})
+            moment = now
+            if item.get('time') is not None:
+                moment = dt.datetime.fromtimestamp(item['time'] / 1000, dt.timezone.utc)
+                moment = moment.replace(tzinfo=None)
+            exported = event(900000 + len(self.uploaded), now, item['event_type'])
+            exported.update(
+                user_id=item.get('user_id'),
+                device_id=item.get('device_id'),
+                event_properties=item.get('event_properties') or {},
+                user_properties=dict(properties),
+                event_time=moment.strftime('%Y-%m-%d %H:%M:%S.%f'),
+                client_event_time=moment.strftime('%Y-%m-%d %H:%M:%S.%f'),
+                country=item.get('country'),
+                platform=item.get('platform'),
+                session_id=item.get('session_id', -1),
+            )
+            exported['$insert_id'] = insert_id
+            self.events.append(exported)
+        if self.on_batch:
+            taken = ', '.join(
+                f'{count} user property update{"s" * (count != 1)}' if name == '$identify'
+                else f'{count} {name}'
+                for name, count in sorted(kinds.items())
+            ) or 'nothing new'
+            dropped = f'; {repeated} already taken (same insert_id)' if repeated else ''
+            self.on_batch(f'/batch took {taken}{dropped}.')
+        return 200, {
+            'code': 200, 'events_ingested': len(events),
+            'payload_size_bytes': len(json.dumps(body)),
+            'server_upload_time': int(now.timestamp() * 1000),
+        }
+
     def _handler(self):
         fake = self
 
@@ -151,6 +259,28 @@ class FakeAmplitude:
                     self.send_header(key, value)
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_POST(self):
+                path = urlparse(self.path).path
+                fake.requests.append(self.path)
+                length = int(self.headers.get('Content-Length') or 0)
+                if length > 20 * 1024 * 1024:
+                    return self.send(413, {'code': 413, 'error': 'Payload too large'})
+                if path != '/batch':
+                    return self.send(404, 'Not found', 'text/plain')
+                try:
+                    body = json.loads(self.rfile.read(length) or b'{}')
+                except ValueError:
+                    return self.send(400, {'code': 400, 'error': 'Invalid JSON request body'})
+                if fake.rate_limited.get(path):
+                    fake.rate_limited[path] -= 1
+                    return self.send(429, {
+                        'code': 429, 'error': 'Too many requests for some devices and users',
+                        'eps_threshold': 1000, 'throttled_devices': {},
+                        'throttled_users': {'user-1': 1500}, 'throttled_events': [0],
+                    })
+                status, answer = fake.take_batch(body)
+                return self.send(status, answer)
 
             def do_GET(self):
                 parsed = urlparse(self.path)
@@ -330,6 +460,7 @@ def serve(port: int = 18765, days: int = 7, host: str = '127.0.0.1') -> None:
     """Serves the demo app's events of the last days until stopped (Ctrl+C)."""
     events = demo_events(days)
     fake = FakeAmplitude(events)
+    fake.on_batch = lambda line: print(line, flush=True)
     fake.server.server_close()
     fake.server = ThreadingHTTPServer((host, port), fake._handler())
     print(f'A local Amplitude on http://{host}:{port} with {len(events):,} events of the '

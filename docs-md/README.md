@@ -108,6 +108,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
     - [Destinations technical documentation](data-integrations/destinations/overview.md)
     - [Airtable](data-integrations/destinations/airtable.md)
     - [Amazon S3](data-integrations/destinations/amazon_s3.md)
+    - [Amplitude](data-integrations/destinations/amplitude.md)
     - [BigQuery](data-integrations/destinations/bigquery.md)
     - [ClickHouse](data-integrations/destinations/clickhouse.md)
     - [Delta Lake (Azure)](data-integrations/destinations/delta_lake_azure.md)
@@ -254,6 +255,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
   - [Amplitude features in Python blocks](guides/amplitude/python-blocks.md)
   - [Amplitude events as they happen](guides/amplitude/webhook-stream.md)
   - [Amplitude events through Kafka](guides/amplitude/kafka.md)
+  - [Send data to Amplitude](guides/amplitude/send.md)
 - **Streaming**
   - [Overview](guides/streaming/introduction.md)
   - **Sources**

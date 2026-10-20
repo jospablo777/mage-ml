@@ -1,9 +1,11 @@
 # Amplitude
 
-*Every way to bring Amplitude data into MageML: tables kept current, frames in Python blocks, and events as they happen.*
+*Every way to connect MageML and Amplitude: tables kept current, frames in Python blocks, events as they happen, and data sent back to Amplitude.*
 
-MageML reads Amplitude four ways. Each has a tutorial you can follow without an Amplitude
-account, on a local server that answers as Amplitude does.
+MageML reads Amplitude four ways and sends data to it three ways. Each has a tutorial you
+can follow without an Amplitude account, on a local server that answers as Amplitude does.
+
+## Read from Amplitude
 
 | You want | Use | Freshness | Tutorial |
 | --- | --- | --- | --- |
@@ -12,7 +14,18 @@ account, on a local server that answers as Amplitude does.
 | Each event as it happens: real-time features, alerts, scoring | Stream from the Webhook destination | Seconds | [Events as they happen](webhook-stream.md) |
 | Events through Kafka, when Amplitude already writes to Confluent | Stream from a Kafka topic | Seconds | [Events through Kafka](kafka.md) |
 
-The first two read Amplitude's APIs with the project's **API key** and **secret key**
+## Send to Amplitude
+
+| You want | Use | Freshness | Tutorial |
+| --- | --- | --- | --- |
+| Orders, subscriptions or scores from a database as events or user properties | Data integration pipeline, Amplitude destination | On a schedule | [Send data to Amplitude](send.md) |
+| A frame a block computed: model outputs, features | Python block (`send_events`, `set_user_properties`) | When the block runs | [From a Python block](send.md#from-a-python-block) |
+| Each server-side event as it happens | Stream with an Amplitude sink | Seconds | [From a stream](send.md#from-a-stream) |
+
+Sending uses the project's API key only. Every event carries an `insert_id`, so Amplitude
+keeps it once however often it is sent.
+
+Reading Amplitude's APIs takes the project's **API key** and **secret key**
 (Amplitude > Settings > Projects > your project > General) and its **region**, `US` or `EU`.
 The streams receive what Amplitude sends from a destination (Data > Destinations), which
 the Plus, Growth and Enterprise plans have.
@@ -25,8 +38,9 @@ mage examples amplitude-server
 
 The command runs a local Amplitude on `http://127.0.0.1:18765` with a music app's events of
 the last 7 days: sign-ups, plays, skips, carts, purchases and subscriptions. It answers the
-Export, Dashboard REST, Taxonomy, Annotations and Cohorts APIs, refuses wrong keys as
-Amplitude does, and prints the settings to use:
+Export, Dashboard REST, Taxonomy, Annotations and Cohorts APIs, takes events and user
+properties as the Batch Event Upload API does (and shows each request it takes), refuses
+wrong keys as Amplitude does, and prints the settings to use:
 
 ```yaml
 api_key: test-api-key
@@ -44,7 +58,8 @@ does.
   Syncs continue from the last exported hour up to the newest finished one, whatever the
   schedule, and save their position after each request.
 - **No row is repeated.** Amplitude can send an event again; rows are upserted by `uuid`,
-  and a stream writes a retried event once.
+  and a stream writes a retried event once. Events sent to Amplitude carry an `insert_id`
+  made from their key, so a sync that runs again adds nothing.
 - **Errors say what to do.** Wrong keys or the wrong region stop with that message; rate
   limits and server errors are retried as Amplitude asks.
 - **Large projects stream.** Exports go to disk and are read an hour at a time, never held
@@ -53,5 +68,8 @@ does.
 ## Reference
 
 - [Amplitude source](../../data-integrations/sources/amplitude.md): every setting and stream.
-- `mage_ai.io.amplitude.Amplitude`: the client of Python blocks.
+- [Amplitude destination](../../data-integrations/destinations/amplitude.md): sending rows as events
+  or user properties.
+- `mage_ai.io.amplitude.Amplitude`: the client of Python blocks, for reading and sending.
+- [Amplitude sink](../../production/stream-services.md#amplitude-sink) of stream services.
 - [Webhook sources](../../production/stream-services.md#webhooks) of stream services.

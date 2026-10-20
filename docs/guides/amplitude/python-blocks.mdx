@@ -131,6 +131,23 @@ Add a data exporter (PostgreSQL, a feature store, a model training block) after 
 transformer, and a daily trigger. Each run reads the last 7 days again, so the features are
 complete even for events Amplitude received late.
 
+## 6. Send the features back
+
+A user property per customer lets the product team segment and chart on it in Amplitude.
+Add a data exporter after the transformer:
+
+```python
+@data_exporter
+def to_amplitude(features, *args, **kwargs):
+    config = ConfigFileLoader(path.join(get_repo_path(), 'io_config.yaml'), 'default')
+    amplitude = Amplitude.with_config(config)
+    sent = amplitude.set_user_properties(features)    # user_id and its features
+    print(f'{sent} users updated')
+```
+
+The local Amplitude's terminal shows the request it took. `send_events` sends rows as
+events instead; see [Send data to Amplitude](/guides/amplitude/send#from-a-python-block).
+
 ## Next
 
 - [Events in a warehouse](/guides/amplitude/warehouse): every event kept in a table without

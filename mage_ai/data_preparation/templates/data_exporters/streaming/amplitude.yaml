@@ -1,0 +1,14 @@
+connector_type: amplitude
+# The project's API key: Amplitude > Settings > Projects > your project > General.
+api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+region: US
+# The event's name, unless each row has an event_type column.
+event_type: Order Completed
+# The row's columns for Amplitude's fields.
+columns:
+  user_id: user_id
+  time: created_at
+# Columns that identify an event, so one sent again is the same (Amplitude keeps it once).
+key_columns: []
+# true: each row sets its user's properties instead of sending an event.
+user_properties: false

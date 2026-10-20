@@ -191,6 +191,25 @@ impl Client {
         content_type: &'static str,
         key: String,
     ) -> Result<Result<(), (u16, String)>, ConnectorError> {
+        let (status, answer) = self.exchange(body, content_type, key).await?;
+        if (200..300).contains(&status) {
+            return Ok(Ok(()));
+        }
+        let reason: String = answer.chars().take(500).collect();
+        Ok(Err((
+            status,
+            format!("{}: the receiver answered {status}: {reason}", self.label),
+        )))
+    }
+
+    /// POSTs the body and returns the status and the answer's body (its first 64 KiB), for
+    /// sinks that read the receiver's reasons. Err when no answer came, as for `send`.
+    pub(crate) async fn exchange(
+        &self,
+        body: String,
+        content_type: &'static str,
+        key: String,
+    ) -> Result<(u16, String), ConnectorError> {
         let client = self.clone();
         let label = self.label;
         let answer = tokio::task::spawn_blocking(move || {
@@ -202,32 +221,26 @@ impl Client {
             for (name, value) in &client.headers {
                 request = request.header(name, value);
             }
-            request.send(body)
+            request.send(body).map(|mut response| {
+                let status = response.status().as_u16();
+                let text = response
+                    .body_mut()
+                    .with_config()
+                    .limit(64 * 1024)
+                    .read_to_string()
+                    .unwrap_or_default();
+                (status, text)
+            })
         })
         .await
         .map_err(|e| ConnectorError::retryable(e.to_string()))?;
-        let mut response = match answer {
-            Ok(response) => response,
+        match answer {
+            Ok(found) => Ok(found),
             Err(ureq::Error::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Err(ConnectorError::fatal(format!("{label}: {error}")));
+                Err(ConnectorError::fatal(format!("{label}: {error}")))
             }
-            Err(error) => return Err(ConnectorError::retryable(format!("{label}: {error}"))),
-        };
-        let status = response.status().as_u16();
-        if (200..300).contains(&status) {
-            return Ok(Ok(()));
+            Err(error) => Err(ConnectorError::retryable(format!("{label}: {error}"))),
         }
-        let reason: String = response
-            .body_mut()
-            .read_to_string()
-            .unwrap_or_default()
-            .chars()
-            .take(500)
-            .collect();
-        Ok(Err((
-            status,
-            format!("{label}: the receiver answered {status}: {reason}"),
-        )))
     }
 }
 

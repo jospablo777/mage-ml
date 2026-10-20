@@ -39,6 +39,32 @@ class DemoAmplitudeTest(TestCase):
         self.assertEqual(first, amplitude.demo_events(days=1, now=NOW))
 
 
+class SentToTheDemoTest(TestCase):
+    def test_what_is_sent_is_shown_and_read_back(self):
+        lines = []
+        with amplitude.FakeAmplitude() as fake:
+            fake.on_batch = lines.append
+            client = Amplitude(amplitude.API_KEY, host=fake.url, verbose=False)
+            rows = [{'user_id': 'user-1', 'event_type': 'Order Completed',
+                     'time': '2026-10-20T10:00:00Z', 'order_id': 1}]
+            client.send_events(rows)
+            client.send_events(rows)
+            client.set_user_properties([{'user_id': 'user-1', 'churn_risk': 0.4}])
+            reader = Amplitude(amplitude.API_KEY, amplitude.SECRET_KEY, host=fake.url,
+                               verbose=False)
+            now = dt.datetime.now(dt.timezone.utc)
+            # The current hour too: Amplitude would export it two hours after it ends.
+            frame = reader.load_events(now - dt.timedelta(hours=1), now, delay_hours=-1)
+        self.assertEqual(lines, [
+            '/batch took 1 Order Completed.',
+            '/batch took nothing new; 1 already taken (same insert_id).',
+            '/batch took 1 user property update.',
+        ])
+        self.assertEqual(frame['event_type'].tolist(), ['Order Completed'])
+        self.assertEqual(frame['event_properties'][0], {'order_id': 1})
+        self.assertEqual(fake.users['user-1'], {'churn_risk': 0.4})
+
+
 class WebhookSenderTest(TestCase):
     def test_events_go_one_per_request_and_some_twice(self):
         received = []

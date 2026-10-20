@@ -176,6 +176,7 @@
                       "data-integrations/destinations/overview",
                       "data-integrations/destinations/airtable",
                       "data-integrations/destinations/amazon_s3",
+                      "data-integrations/destinations/amplitude",
                       "data-integrations/destinations/bigquery",
                       "data-integrations/destinations/clickhouse",
                       "data-integrations/destinations/delta_lake_azure",
@@ -412,7 +413,8 @@
                   "guides/amplitude/warehouse",
                   "guides/amplitude/python-blocks",
                   "guides/amplitude/webhook-stream",
-                  "guides/amplitude/kafka"
+                  "guides/amplitude/kafka",
+                  "guides/amplitude/send"
                 ]
               },
               {

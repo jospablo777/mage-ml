@@ -11,6 +11,17 @@ from mage_ai.server.logger import Logger
 logger = Logger().new_server_logger(__name__)
 
 
+def read_docs(directory: str, uuid: str) -> str:
+    """The connector's README, shown next to its settings; README.md or Readme.md."""
+    for name in ('README.md', 'Readme.md', 'readme.md'):
+        try:
+            with open(f'{directory}/{name}', encoding='utf8') as f:
+                return f.read()
+        except FileNotFoundError:
+            continue
+    return f'{uuid} documentation'
+
+
 def build_integration_module_info(key: str, option: Dict) -> Dict:
     d = option.copy()
 
@@ -22,10 +33,7 @@ def build_integration_module_info(key: str, option: Dict) -> Dict:
         module = importlib.import_module(f"mage_integrations.{key}.{uuid}")
         absolute_file_path = '/'.join(module.__file__.split('/')[:-2])
         # have the source README available to front-end for inline documentation
-        readme_file_path = f'{absolute_file_path}/{uuid}/README.md'
-        d['docs'] = f"{uuid} documentation"
-        with open(readme_file_path, encoding='utf8') as f:
-            d['docs'] = f.read()
+        d['docs'] = read_docs(f'{absolute_file_path}/{uuid}', uuid)
         mod = getattr(module, module_name)
         d['templates'] = mod.templates()
     except FileNotFoundError:
@@ -35,11 +43,8 @@ def build_integration_module_info(key: str, option: Dict) -> Dict:
             module = importlib.import_module(f"mage_integrations.{key}.{uuid}")
             absolute_file_path = '/'.join(module.__file__.split('/')[:-2])
             # have the source README available to front-end for inline documentation
-            readme_file_path = f'{absolute_file_path}/{uuid}/README.md'
+            d['docs'] = read_docs(f'{absolute_file_path}/{uuid}', uuid)
             absolute_file_path = f'{absolute_file_path}/{uuid}/__init__.py'
-            d['docs'] = f"{uuid} documentation"
-            with open(readme_file_path, encoding='utf8') as f:
-                d['docs'] = f.read()
             proc = subprocess.run([
                 PYTHON_COMMAND,
                 absolute_file_path,

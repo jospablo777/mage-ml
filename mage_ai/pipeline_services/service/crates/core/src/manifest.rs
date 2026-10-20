@@ -148,6 +148,8 @@ pub enum ConnectorKind {
     Kafka,
     /// Sink: a Feast feature server's push endpoint.
     Feast,
+    /// Sink: an Amplitude project's Batch Event Upload API, as events or user properties.
+    Amplitude,
     Rabbitmq,
     IbmMq,
     /// NATS JetStream: a durable pull consumer, and publishes JetStream acknowledges.
@@ -180,6 +182,7 @@ impl ConnectorKind {
             ConnectorKind::Stdout => "stdout",
             ConnectorKind::Kafka => "kafka",
             ConnectorKind::Feast => "feast",
+            ConnectorKind::Amplitude => "amplitude",
             ConnectorKind::Rabbitmq => "rabbitmq",
             ConnectorKind::IbmMq => "ibm_mq",
             ConnectorKind::Nats => "nats",
@@ -218,6 +221,7 @@ impl ConnectorKind {
                 | ConnectorKind::Stdout
                 | ConnectorKind::Kafka
                 | ConnectorKind::Feast
+                | ConnectorKind::Amplitude
                 | ConnectorKind::Rabbitmq
                 | ConnectorKind::IbmMq
                 | ConnectorKind::Nats

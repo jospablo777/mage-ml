@@ -1,6 +1,6 @@
 [package]
 name = "mage-connector-http"
-description = "HTTP stream connectors: a webhook source that answers once the sinks confirm, and an HTTP sink"
+description = "HTTP stream connectors: a webhook source that answers once the sinks confirm, and HTTP, Feast and Amplitude sinks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,8 @@ tokio = { version = "1.47", features = ["rt", "time", "sync", "macros"] }
 ring = "0.17"
 # The HTTP sink's client; already in the tree for secret managers.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# The Amplitude sink's event times; already in the tree.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

@@ -12,10 +12,12 @@
 //! its caller sends it again. Keys are remembered for `dedupe_window` in memory; after a
 //! restart, a retried request is written again.
 
+pub mod amplitude;
 pub mod feast;
 pub mod signature;
 pub mod sink;
 
+pub use amplitude::AmplitudeSink;
 pub use feast::FeastSink;
 pub use sink::HttpSink;
 

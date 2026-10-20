@@ -1,0 +1,91 @@
+# Amplitude
+
+*Send rows from any source to an Amplitude project, as events or as user properties, each event once.*
+
+The Amplitude destination sends rows to an Amplitude project with its Batch Event Upload
+API: orders, subscriptions and refunds from a database as events, or a model's scores and a
+customer's plan as user properties, to segment and build cohorts on.
+
+## Settings
+
+```yaml
+api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+region: US                  # or EU
+streams:
+  orders:                   # a stream (table) of the source
+    event_type: Order Completed
+    time: ordered_at        # the column of the event's time
+    user_id: customer_id    # the column of the user's id
+  customer_scores:
+    user_properties: true   # each row sets its user's properties
+    user_id: customer_id
+```
+
+| Key | What it is |
+| --- | --- |
+| `api_key` | The project's API key: Amplitude > Settings > Projects > your project > General. Sending needs no secret key. |
+| `region` | Where the project's data is stored: `US` or `EU`. |
+| `streams` | How each stream is sent, below. |
+| `min_id_length` | Optional. Amplitude refuses a `user_id` or `device_id` under 5 characters; set it lower for shorter ids. |
+| `host` | Optional. A proxy, or `mage examples amplitude-server`. |
+
+Per stream:
+
+| Key | What it is |
+| --- | --- |
+| `event_type` | The events' name. A stream with an `event_type` column needs none. |
+| `user_properties` | `true`: each row sets its user's properties instead of sending an event. |
+| `user_id`, `device_id`, `time`, `insert_id` | The row's column for that field, when it has another name. |
+
+A stream not listed sends events if it has an `event_type` column; otherwise the sync stops
+and says what to set.
+
+**Test connection** checks the API key and the region without sending an event.
+
+## Events
+
+Each row is one event. It needs a `user_id` or a `device_id`, and an event type. Give it a
+time: a timestamp column, an ISO 8601 string, or epoch seconds or milliseconds. Without
+one, Amplitude uses the time it receives the event.
+
+Amplitude's event fields are sent as they are: `session_id`, `country`, `city`, `platform`,
+`app_version`, `price`, `quantity`, `revenue`, `productId`, `revenueType`, `ip`,
+`user_properties`, `groups` and the others. Every other column becomes an event property.
+
+| Row | Event sent |
+| --- | --- |
+| `order_id: 7, customer_id: c-1001, ordered_at: 2024-06-01 10:00, amount: 19.5` | `user_id: c-1001`, `event_type: Order Completed`, `time: 1717236000000`, `event_properties: {order_id: 7, amount: 19.5}` |
+
+## User properties
+
+A stream with `user_properties: true` sets properties: each row has `user_id` or
+`device_id`, and every other column is a property to set. Empty values leave the property
+as it is. A `user_properties` column of operations, such as `{"$add": {"purchases": 1}}`,
+is sent as it is.
+
+## Each event once
+
+Every event has an `insert_id`, which Amplitude uses to drop an event it took in the last
+7 days:
+
+- the row's `insert_id` column (or `$insert_id`, in events exported from Amplitude);
+- else a hash of the stream's **key properties**, such as `order_id`;
+- else a hash of the event.
+
+So a sync that runs again, a full-table sync, or a request sent again after an error adds
+nothing twice. Set key properties on event streams in the stream settings: then an order
+whose status changed is still the same event, and is not sent as a new one. Amplitude keeps
+the first version.
+
+## Limits and errors
+
+- Requests of up to 2,000 events. A `429` waits 15 seconds or more, as Amplitude asks;
+  server errors are retried.
+- A user or device over 500,000 events in 24 hours stops the sync with its ids.
+- An event Amplitude refuses (`400`) stops the sync with the field at fault and the first
+  event that has it, such as an id under 5 characters.
+- A wrong API key, or a project of the other region, stops the sync with that message.
+
+The bookmark of an incremental sync moves only after Amplitude took the batch.
+
+Tutorial: [Send data to Amplitude](../../guides/amplitude/send.md).

@@ -3,6 +3,7 @@ import { BlockTypeEnum } from './BlockType';
 export enum DataSourceTypeEnum {
   ACTIVEMQ = 'activemq',
   AMAZON_SQS = 'amazon_sqs',
+  AMPLITUDE = 'amplitude',
   API = 'api',
   AZURE_BLOB_STORAGE = 'azure_blob_storage',
   AZURE_DATA_LAKE = 'azure_data_lake',
@@ -39,6 +40,7 @@ export enum DataSourceTypeEnum {
 export const DATA_SOURCE_TYPE_HUMAN_READABLE_NAME_MAPPING = {
   [DataSourceTypeEnum.ACTIVEMQ]: 'ActiveMQ',
   [DataSourceTypeEnum.AMAZON_SQS]: 'Amazon SQS',
+  [DataSourceTypeEnum.AMPLITUDE]: 'Amplitude',
   [DataSourceTypeEnum.API]: 'API',
   [DataSourceTypeEnum.AZURE_BLOB_STORAGE]: 'Azure Blob Storage',
   [DataSourceTypeEnum.AZURE_DATA_LAKE]: 'Azure Data Lake',

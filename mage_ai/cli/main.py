@@ -1096,7 +1096,8 @@ def examples_amplitude_server(
 ):
     """
     Run a local Amplitude with a demo music app's events, for the Amplitude tutorials:
-    the Export, Dashboard REST, Taxonomy, Annotations and Cohorts APIs, without an account.
+    the Export, Dashboard REST, Taxonomy, Annotations and Cohorts APIs, and the Batch Event
+    Upload API that takes events and user properties, without an account.
     """
     from mage_ai.examples import amplitude
 
@@ -1104,6 +1105,8 @@ def examples_amplitude_server(
     print(f'  api_key: {amplitude.API_KEY}')
     print(f'  secret_key: {amplitude.SECRET_KEY}')
     print(f'  host: http://{host}:{port}')
+    print(f'The Amplitude destination and stream sink send to it with host (url for the '
+          f'sink): http://{host}:{port}. Each request it takes is shown here.')
     print('Ctrl+C stops it.')
     amplitude.serve(port=port, days=days, host=host)
 

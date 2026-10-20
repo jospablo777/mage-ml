@@ -324,6 +324,44 @@ class FeastSinkExportTest(StreamExportTestCase):
         self.assertIn('a Feast sink needs push_source_name', self.problems())
 
 
+class AmplitudeSinkExportTest(StreamExportTestCase):
+    def test_an_amplitude_sink_exports_its_key_from_the_environment(self):
+        self.stream(sink='''
+            connector_type: amplitude
+            api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+            region: eu
+            event_type: Order Completed
+            columns:
+              user_id: customer_id
+              time: ordered_at
+            key_columns: [order_id]
+        ''')
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        [sink] = captured.manifest['pipelines'][0]['stream']['sinks']
+
+        self.assertEqual(sink['kind'], 'amplitude')
+        self.assertEqual(sink['config'], dict(
+            api_key={'$parts': [{'env': 'AMPLITUDE_API_KEY'}]}, region='EU',
+            event_type='Order Completed',
+            columns=dict(user_id='customer_id', time='ordered_at'), key_columns=['order_id'],
+        ))
+        self.assertIn('AMPLITUDE_API_KEY', [v['name'] for v in captured.manifest['environment']])
+
+    def test_an_amplitude_sink_refuses_a_written_key_and_unknown_columns(self):
+        self.stream(sink='''
+            connector_type: amplitude
+            api_key: abc123
+            region: APAC
+            columns:
+              email: customer_email
+        ''')
+        problems = self.problems()
+        self.assertIn('api_key is written in the file', problems)
+        self.assertIn('region is US or EU', problems)
+        self.assertIn('columns maps user_id, device_id, time or insert_id', problems)
+
+
 class DeadLetterExportTest(StreamExportTestCase):
     DEAD = '''
         connector_type: kafka

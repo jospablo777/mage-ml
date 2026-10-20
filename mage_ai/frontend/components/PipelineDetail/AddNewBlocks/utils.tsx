@@ -47,6 +47,7 @@ const getDataSourceTypes = (
       [BlockTypeEnum.DATA_EXPORTER]: [
         DataSourceTypeEnum.GENERIC,
         DataSourceTypeEnum.ACTIVEMQ,
+        DataSourceTypeEnum.AMPLITUDE,
         DataSourceTypeEnum.AZURE_DATA_LAKE,
         DataSourceTypeEnum.BIGQUERY,
         DataSourceTypeEnum.CLICKHOUSE,

@@ -49,6 +49,22 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
             'samples (the Samples tab), then export the stream as a service.'
         )
         return
+    if connector_type == 'amplitude' and block_type == BlockType.DATA_EXPORTER:
+        from mage_ai.io.amplitude import Amplitude
+
+        client = Amplitude(
+            api_key=config.get('api_key'),
+            region=config.get('region') or 'US',
+            upload_host=config.get('url') or None,
+            verbose=False,
+        )
+        client.check_api_key()
+        print(
+            f'Amplitude accepts the API key ({client.region}, {client.upload_host}). The sink '
+            'sends each batch from the engine or the exported service; run the transformer '
+            'on samples to see the rows it would send.'
+        )
+        return
     if connector_type in ('http', 'feast') and block_type == BlockType.DATA_EXPORTER:
         print(
             f'The {connector_type} sink posts each batch to {config.get("url")} from the '

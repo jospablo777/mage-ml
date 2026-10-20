@@ -37,6 +37,18 @@
   blocks without asking for a block name, and describes each stream in the stream picker.
 - Kafka streams read topics compressed with Zstandard (the engine's librdkafka had no zstd),
   and a Kafka sink's `librdkafka: {compression.type: ...}` is no longer replaced by lz4.
+- Data goes to Amplitude as well: an **Amplitude** destination for data integration
+  pipelines, `send_events` and `set_user_properties` on the Python client, and an
+  `amplitude` sink for streams, in the engine. Rows become events or user properties
+  through the Batch Event Upload API, with the API key only; each event's `insert_id` comes
+  from the stream's key, so a sync or a batch sent again adds nothing. See
+  [Send data to Amplitude](/guides/amplitude/send).
+- `mage examples amplitude-server` takes events and user properties as Amplitude does and
+  shows each request it took.
+- The editor lost an integration connector's settings template when its README was not
+  named `README.md` (Airtable's is `Readme.md`) on case-sensitive file systems.
+- Destinations show their documentation in the editor next to their settings, as sources
+  do; they had a link to the upstream repository, missing for new destinations.
 
 ### Rust blocks
 

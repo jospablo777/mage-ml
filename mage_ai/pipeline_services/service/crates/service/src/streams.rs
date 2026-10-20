@@ -297,6 +297,9 @@ fn sink(
         ConnectorKind::Feast => Ok(Arc::new(mage_connector_http::FeastSink::new(
             &_config, scope,
         )?)),
+        ConnectorKind::Amplitude => Ok(Arc::new(mage_connector_http::AmplitudeSink::new(
+            &_config, scope,
+        )?)),
         #[cfg(feature = "kafka")]
         ConnectorKind::Kafka => Ok(Arc::new(mage_connector_kafka::KafkaSink::new(&_config)?)),
         #[cfg(feature = "rabbitmq")]
@@ -375,7 +378,9 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
             "it was built without InfluxDB; build it with the influxdb feature"
         }
         ConnectorKind::Http => "HTTP is built in",
-        ConnectorKind::Stdout | ConnectorKind::Feast => "it is a sink only",
+        ConnectorKind::Stdout | ConnectorKind::Feast | ConnectorKind::Amplitude => {
+            "it is a sink only"
+        }
     }
 }
 

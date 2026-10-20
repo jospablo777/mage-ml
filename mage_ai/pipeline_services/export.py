@@ -575,6 +575,8 @@ STREAM_SINKS = {
     'clickhouse': 'clickhouse', 'nats': 'nats', 'nats_js': 'nats', 'mongodb': 'mongodb',
     'google_cloud_pubsub': 'pubsub', 'activemq': 'activemq',
     'elasticsearch': 'search', 'opensearch': 'search', 'influxdb': 'influxdb',
+    # Amplitude's Batch Event Upload API: rows as events or user properties.
+    'amplitude': 'amplitude',
 }
 # Engine features (cargo) by manifest kind, for the connectors that are optional.
 ENGINE_FEATURES = {
@@ -635,6 +637,11 @@ FEAST_SINK_SETTINGS = {
     'url', 'push_source_name', 'to', 'headers', 'timeout_seconds', 'allow_private',
 }
 HTTP_SINK_SETTINGS = {'url', 'headers', 'timeout_seconds', 'format', 'allow_private'}
+AMPLITUDE_SINK_SETTINGS = {
+    'api_key', 'region', 'url', 'event_type', 'user_properties', 'columns', 'key_columns',
+    'min_id_length', 'timeout_seconds', 'allow_private',
+}
+AMPLITUDE_COLUMN_FIELDS = {'user_id', 'device_id', 'time', 'insert_id'}
 # Header names whose values are credentials: written as env_var() references.
 CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNORECASE)
 # What comes next, for the message that names an unsupported connector.
@@ -805,6 +812,34 @@ def _http_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
     if config.get('format') not in (None, 'json', 'ndjson'):
         problems.append(f"{where}: format is json (an array per batch) or ndjson.")
     return {k: v for k, v in config.items() if k in HTTP_SINK_SETTINGS}
+
+
+def _amplitude_sink_settings(config: Dict, where: str, problems: List[str]) -> Dict:
+    unknown = sorted(set(config) - AMPLITUDE_SINK_SETTINGS)
+    if unknown:
+        problems.append(f'{where}: unknown Amplitude sink settings {", ".join(unknown)}.')
+    if not config.get('api_key'):
+        problems.append(f"{where}: an Amplitude sink needs api_key, the project's API key.")
+    elif _literal(config.get('api_key')):
+        problems.append(
+            f"{where}: api_key is written in the file; use "
+            f"\"{{{{ env_var('AMPLITUDE_API_KEY') }}}}\" and set it in the service's "
+            'environment.'
+        )
+    region = config.get('region') or 'US'
+    if isinstance(region, str) and region.upper() not in ('US', 'EU'):
+        problems.append(f'{where}: region is US or EU.')
+    columns = config.get('columns') or {}
+    if not isinstance(columns, dict) or set(columns) - AMPLITUDE_COLUMN_FIELDS:
+        problems.append(
+            f'{where}: columns maps user_id, device_id, time or insert_id to a column, such '
+            'as {user_id: customer_id, time: created_at}.'
+        )
+    if not isinstance(config.get('key_columns') or [], list):
+        problems.append(f'{where}: key_columns is a list of columns.')
+    if isinstance(config.get('region'), str):
+        config = dict(config, region=config['region'].upper())
+    return {k: v for k, v in config.items() if k in AMPLITUDE_SINK_SETTINGS}
 
 
 def _rabbitmq_connector(block, role: str, config: Dict, where: str,
@@ -1369,6 +1404,9 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     if kind == 'feast':
         return dict(name=block.uuid, kind=kind,
                     config=_feast_sink_settings(config, where, problems))
+    if kind == 'amplitude':
+        return dict(name=block.uuid, kind=kind,
+                    config=_amplitude_sink_settings(config, where, problems))
     if connector_type == 'azure_event_hub':
         return _event_hubs_connector(block, config, where, problems)
     if kind == 'rabbitmq':
