@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from typing import Dict, List, Optional, Union
 
@@ -291,6 +292,7 @@ class Postgres(BaseSQL):
         """
         Close the underlying connection to the SQL data source if open. Else will do nothing.
         """
+        self._native = None
         if '_ctx' in self.__dict__:
             self._ctx.close()
             del self._ctx
@@ -393,6 +395,10 @@ class Postgres(BaseSQL):
         query = self._enforce_limit(query, limit)
 
         def __load():
+            if polars and params is None:
+                frame = self.__load_native(query)
+                if frame is not None:
+                    return frame
             with self.conn.cursor() as cursor:
                 # psycopg2 has no reader for uuid[] and returns the array literal as text.
                 register_type(UUID_ARRAY, cursor)
@@ -408,6 +414,34 @@ class Postgres(BaseSQL):
             with self.printer.print_msg(message):
                 return __load()
         return __load()
+
+    def __load_native(self, query: str) -> Union[pl.DataFrame, None]:
+        """
+        The rows through binary COPY on a connection of the Rust client, kept for the next
+        loads (postgres_native.load_polars), when nothing else runs on this client's
+        connection: the other connection would not see its uncommitted changes. None when
+        it does not apply or fails; the psycopg2 load then runs the query.
+        """
+        if not postgres_native.loads_enabled() or not self._transaction_idle():
+            return None
+        try:
+            if getattr(self, '_native', None) is None:
+                host, port = self.settings.get('host'), self.settings.get('port')
+                if self.ssh_tunnel is not None:
+                    host, port = '127.0.0.1', self.ssh_tunnel.local_bind_port
+                profile = postgres_native.connection_settings(self.settings, host, port)
+                if profile is None:
+                    return None
+                import column_atlas_native
+
+                self._native = column_atlas_native.PgConnection(json.dumps(profile))
+            with self.conn.cursor() as cursor:
+                register_type(UUID_ARRAY, cursor)
+                return postgres_native.load_polars(cursor, self._native, query)
+        except Exception:
+            self._rollback()
+            self._native = None
+            return None
 
     def fetch_query(self, cursor, query: str) -> DataFrame:
         """

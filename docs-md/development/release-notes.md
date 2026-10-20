@@ -10,6 +10,11 @@
   columns took about 1 second instead of 7, with the same values and types, in the same
   transaction. `MAGE_POSTGRES_BINARY_COPY=off` keeps COPY text. See
   [PostgreSQL](../integrations/databases/PostgreSQL.md#export-a-dataframe).
+- `load(..., polars=True)` reads through binary `COPY` on a connection of the Rust client,
+  kept for the next loads, with the column types and values of the psycopg2 load: 1 million
+  rows in 0.9 seconds instead of 2.0. Queries with bound parameters, a transaction open on
+  the client's connection, or connection settings the Rust client lacks go through psycopg2.
+  `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
 ### Scheduler
 

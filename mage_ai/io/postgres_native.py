@@ -129,3 +129,103 @@ def copy(
         _, data = _encode(converted.slice(start, CHUNK_ROWS))
         cursor.copy_expert(command, io.BytesIO(data))
     return None
+
+
+# ---- loads ---------------------------------------------------------------------------
+
+# The client settings a native connection reproduces; with any other libpq setting (client
+# certificates, target_session_attrs, ...) loads stay on psycopg2.
+_CONNECTION_KEYS = {
+    'dbname', 'user', 'password', 'host', 'port', 'schema', 'connection_method', 'ssh_host',
+    'ssh_port', 'ssh_username', 'ssh_password', 'ssh_pkey', 'verbose', 'connect_timeout',
+    'sslmode', 'sslrootcert', 'keepalives', 'keepalives_idle', 'options',
+}
+
+
+def loads_enabled() -> bool:
+    if (os.getenv('MAGE_POSTGRES_BINARY_LOAD') or '').strip().lower() in ('off', '0', 'false'):
+        return False
+    try:
+        import column_atlas_native
+    except ImportError:
+        return False
+    return hasattr(column_atlas_native, 'PgConnection')
+
+
+def connection_settings(settings: Dict, host: str, port) -> Optional[Dict[str, str]]:
+    """The client's settings as an io_config profile for the Rust client, or None when the
+    client uses a setting the Rust client does not have."""
+    if any(value is not None and key not in _CONNECTION_KEYS for key, value in settings.items()):
+        return None
+    profile = dict(
+        POSTGRES_HOST=host,
+        POSTGRES_PORT=port,
+        POSTGRES_DBNAME=settings.get('dbname'),
+        POSTGRES_USER=settings.get('user'),
+        POSTGRES_PASSWORD=settings.get('password'),
+        POSTGRES_CONNECT_TIMEOUT=settings.get('connect_timeout'),
+        POSTGRES_SSLMODE=settings.get('sslmode'),
+        POSTGRES_SSLROOTCERT=settings.get('sslrootcert'),
+        POSTGRES_OPTIONS=settings.get('options'),
+    )
+    return {key: str(value) for key, value in profile.items() if value not in (None, '')}
+
+
+def _rebuilt(cursor, name: str, native: pl.Series, oid: int, precision, scale) -> pl.Series:
+    """
+    The column as the psycopg2 load builds it (postgres_types._polars_column). Columns read
+    as text become what psycopg2's typecaster for their type makes of the same text.
+    """
+    import psycopg2.extensions
+
+    from mage_ai.io import postgres_types
+
+    values = native.to_list()
+    # The typecaster psycopg2 would use: the cursor's, the connection's, then the global
+    # one (Mage registers uuid[] on each cursor).
+    caster = ((getattr(cursor, 'string_types', None) or {}).get(oid)
+              or (getattr(cursor.connection, 'string_types', None) or {}).get(oid)
+              or psycopg2.extensions.string_types.get(oid))
+    if caster is not None and native.dtype == pl.String:
+        # The cursor, not None: array typecasters cast their elements through it, and
+        # crashed (a segmentation fault in psycopg2) without one.
+        values = [None if value is None else caster(value, cursor) for value in values]
+    return postgres_types._polars_column(name, oid, values, precision, scale)
+
+
+def _column(cursor, name: str, native: pl.Series, oid: int, precision, scale) -> pl.Series:
+    """The native column where it is what the psycopg2 load returns, rebuilt otherwise."""
+    from mage_ai.io import postgres_types
+
+    if oid == postgres_types.OID_NUMERIC:
+        fits = precision is not None and scale is not None and (
+            precision <= postgres_types.POLARS_MAX_DECIMAL_PRECISION
+        )
+        if fits and isinstance(native.dtype, pl.Decimal):
+            expected = pl.Decimal(precision, scale)
+            return native if native.dtype == expected else native.cast(expected)
+        return _rebuilt(cursor, name, native, oid, precision, scale)
+    nested = isinstance(native.dtype, pl.List) and isinstance(native.dtype.inner, pl.List)
+    expected = postgres_types._polars_column(name, oid, [], precision, scale).dtype
+    if not nested and native.dtype == expected:
+        return native
+    return _rebuilt(cursor, name, native, oid, precision, scale)
+
+
+def load_polars(cursor, connection, query: str) -> Optional[pl.DataFrame]:
+    """
+    The query's rows as the psycopg2 load returns them with polars=True, read through binary
+    COPY on `connection` (column_atlas_native.PgConnection). Column types, precision and
+    scale come from a LIMIT 0 run of the query on `cursor`, the client's psycopg2 cursor.
+    Returns None when the query cannot run this way, for the psycopg2 load to run it.
+    """
+    sql = query.strip().rstrip(';')
+    cursor.execute(f'SELECT * FROM ({sql}) AS mage_probe LIMIT 0')
+    description = cursor.description or []
+    native = pl.read_ipc_stream(io.BytesIO(connection.query(sql)))
+    if native.columns != [d.name for d in description]:
+        return None
+    return pl.DataFrame([
+        _column(cursor, d.name, native[d.name], d.type_code, d.precision, d.scale)
+        for d in description
+    ])

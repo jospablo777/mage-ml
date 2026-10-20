@@ -98,6 +98,16 @@ def load_data_from_postgres(**kwargs) -> DataFrame:
 
 5. Run the block.
 
+`loader.load(query, polars=True)` returns a Polars DataFrame with exact column types. It
+reads the rows in PostgreSQL's binary `COPY` format on a connection of MageML's Rust client,
+kept for the next loads: on 1 million rows of seven columns, 0.9 seconds instead of 2.0.
+The column types and values are those of the psycopg2 load; columns MageML builds in Python
+(`numeric` without precision, `interval`, `timetz`, some arrays) are built the same way. The
+load goes through psycopg2 when the query has bound parameters, when the client's own
+connection has a transaction open (the other connection would not see its changes), and when
+the connection uses a setting the Rust client does not have, such as client certificates.
+`MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
+
 
 ### Export a dataframe
 

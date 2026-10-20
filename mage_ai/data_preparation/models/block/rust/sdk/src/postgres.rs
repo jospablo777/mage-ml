@@ -105,8 +105,9 @@ impl Postgres {
     }
 
     /// Connects with POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DBNAME, POSTGRES_USER,
-    /// POSTGRES_PASSWORD, POSTGRES_SCHEMA, POSTGRES_CONNECT_TIMEOUT, POSTGRES_SSLMODE and
-    /// POSTGRES_SSLROOTCERT. TLS modes are libpq's: see `Tls`.
+    /// POSTGRES_PASSWORD, POSTGRES_SCHEMA, POSTGRES_CONNECT_TIMEOUT, POSTGRES_SSLMODE,
+    /// POSTGRES_SSLROOTCERT and POSTGRES_OPTIONS (libpq's `options`, such as
+    /// `-c search_path=analytics`). TLS modes are libpq's: see `Tls`.
     pub fn connect_settings(settings: &HashMap<String, String>) -> Result<Self> {
         let get = |key: &str| {
             settings
@@ -137,6 +138,9 @@ impl Postgres {
                     .parse::<u64>()
                     .context("POSTGRES_CONNECT_TIMEOUT is not a number")?,
             ));
+        }
+        if let Some(options) = get("POSTGRES_OPTIONS") {
+            config.options(options);
         }
         let tls = Tls::from_settings(get("POSTGRES_SSLMODE"), get("POSTGRES_SSLROOTCERT"))?;
         Self::open(config, &tls, get("POSTGRES_SCHEMA").map(str::to_string))

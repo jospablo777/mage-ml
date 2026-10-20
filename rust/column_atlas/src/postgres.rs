@@ -46,13 +46,30 @@ fn policy(name: &str) -> Result<WritePolicy, AtlasError> {
 
 /// The result of a query as an Arrow IPC stream.
 pub fn query(settings_json: &str, sql: &str) -> Result<Vec<u8>, AtlasError> {
-    let mut client = Postgres::connect_settings(&settings(settings_json)?).map_err(engine)?;
-    let mut frame = client.query(sql).map_err(engine)?;
-    let mut buffer = Vec::new();
-    IpcStreamWriter::new(&mut buffer)
-        .finish(&mut frame)
-        .map_err(engine)?;
-    Ok(buffer)
+    let mut connection = Connection::open(settings_json)?;
+    connection.query(sql)
+}
+
+/// A connection kept for several queries, so a small query does not pay for connecting.
+pub struct Connection {
+    client: Postgres,
+}
+
+impl Connection {
+    pub fn open(settings_json: &str) -> Result<Self, AtlasError> {
+        let client = Postgres::connect_settings(&settings(settings_json)?).map_err(engine)?;
+        Ok(Connection { client })
+    }
+
+    /// The result of a query as an Arrow IPC stream.
+    pub fn query(&mut self, sql: &str) -> Result<Vec<u8>, AtlasError> {
+        let mut frame = self.client.query(sql).map_err(engine)?;
+        let mut buffer = Vec::new();
+        IpcStreamWriter::new(&mut buffer)
+            .finish(&mut frame)
+            .map_err(engine)?;
+        Ok(buffer)
+    }
 }
 
 /// Writes an Arrow IPC stream (or file) into a table; returns the rows written.

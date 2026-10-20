@@ -145,6 +145,44 @@ fn pg_write(
         .map_err(to_python)
 }
 
+/// A PostgreSQL connection for queries through binary COPY; queries release the GIL.
+#[cfg(feature = "postgres")]
+#[pyclass(frozen)]
+struct PgConnection {
+    connection: std::sync::Mutex<crate::postgres::Connection>,
+}
+
+#[cfg(feature = "postgres")]
+#[pymethods]
+impl PgConnection {
+    #[new]
+    fn new(py: Python<'_>, settings: String) -> PyResult<Self> {
+        let connection = py
+            .detach(|| crate::postgres::Connection::open(&settings))
+            .map_err(to_python)?;
+        Ok(PgConnection {
+            connection: std::sync::Mutex::new(connection),
+        })
+    }
+
+    /// The result of a query as an Arrow IPC stream.
+    fn query<'py>(
+        &self,
+        py: Python<'py>,
+        sql: String,
+    ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+        let bytes = py
+            .detach(|| {
+                self.connection
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .query(&sql)
+            })
+            .map_err(to_python)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes))
+    }
+}
+
 /// For a frame as an Arrow IPC stream: the column types binary COPY writes and the COPY data.
 #[cfg(feature = "postgres")]
 #[pyfunction]
@@ -165,6 +203,7 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
         module.add_function(wrap_pyfunction!(pg_query, module)?)?;
         module.add_function(wrap_pyfunction!(pg_write, module)?)?;
         module.add_function(wrap_pyfunction!(pg_copy_binary, module)?)?;
+        module.add_class::<PgConnection>()?;
     }
     module.add_class::<NativeTable>()?;
     module.add_function(wrap_pyfunction!(validate_contract, module)?)?;
