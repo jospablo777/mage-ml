@@ -1088,6 +1088,99 @@ def examples_generate(
     print(f'Sent {sent:,} messages to {kind} {target or where}.')
 
 
+@examples_app.command('amplitude-server')
+def examples_amplitude_server(
+    port: int = typer.Option(18765, help='the port to answer on.'),
+    days: int = typer.Option(7, help='days of events it holds, up to now.'),
+    host: str = typer.Option('127.0.0.1', help='the address to answer on.'),
+):
+    """
+    Run a local Amplitude with a demo music app's events, for the Amplitude tutorials:
+    the Export, Dashboard REST, Taxonomy, Annotations and Cohorts APIs, without an account.
+    """
+    from mage_ai.examples import amplitude
+
+    print('Settings for the Amplitude source, a Python block or io_config.yaml:')
+    print(f'  api_key: {amplitude.API_KEY}')
+    print(f'  secret_key: {amplitude.SECRET_KEY}')
+    print(f'  host: http://{host}:{port}')
+    print('Ctrl+C stops it.')
+    amplitude.serve(port=port, days=days, host=host)
+
+
+@examples_app.command('amplitude-webhook')
+def examples_amplitude_webhook(
+    pipeline: Union[str, None] = typer.Option(
+        None, help='a stream running on the local engine (its Run tab).'),
+    project: str = typer.Option('.', help='the project of that stream.'),
+    url: Union[str, None] = typer.Option(
+        None, help="a service's messages URL: https://<service>/v1/streams/<pipeline>/messages."),
+    token: Union[str, None] = typer.Option(
+        None, help="the service's ingest token; MAGE_SERVICE_INGEST_TOKEN."),
+    count: int = typer.Option(100, help='events to send.'),
+    rate: float = typer.Option(10, help='events per second.'),
+    retry_share: float = typer.Option(
+        0.05, help='share of events sent twice, as Amplitude retries them.'),
+):
+    """
+    Send events to a stream as Amplitude's Webhook destination does: one event per request,
+    in Amplitude's event format, some sent again.
+    """
+    from mage_ai.examples import amplitude
+
+    if pipeline and not url:
+        folder = os.path.join(os.path.abspath(project), '.mage', 'dev', pipeline)
+        try:
+            with open(os.path.join(folder, 'port')) as file:
+                port = file.read().strip()
+            with open(os.path.join(folder, 'ingest_token')) as file:
+                token = token or file.read().strip()
+        except FileNotFoundError:
+            print(f'[red]{_e(pipeline)} is not running on the local engine: start it from '
+                  'its Run tab.[/red]')
+            raise typer.Exit(code=1)
+        url = f'http://127.0.0.1:{port}/v1/streams/{pipeline}/messages'
+    token = token or os.getenv('MAGE_SERVICE_INGEST_TOKEN')
+    if not url or not token:
+        print('[red]Name a running stream (--pipeline) or a service (--url and --token).[/red]')
+        raise typer.Exit(code=1)
+    try:
+        sent = amplitude.send_webhook_events(url, token, count=count, rate=rate,
+                                             retry_share=retry_share)
+    except OSError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    print(f"Sent {sent['events']:,} events and {sent['retries']:,} retries to {_e(url)}.")
+
+
+@examples_app.command('amplitude-kafka')
+def examples_amplitude_kafka(
+    topic: str = typer.Option('amplitude-events', help='the topic to write.'),
+    bootstrap: Union[str, None] = typer.Option(None, help='Kafka servers; KAFKA_BOOTSTRAP.'),
+    count: int = typer.Option(100, help='events to write.'),
+    rate: float = typer.Option(10, help='events per second.'),
+    compression: Union[str, None] = typer.Option(
+        None, help='zstd, lz4 or gzip, for the producer batches.'),
+):
+    """
+    Write events to a Kafka topic as Amplitude's Confluent Kafka REST destination does:
+    each event as JSON, keyed by user_id.
+    """
+    from mage_ai.examples import amplitude
+
+    bootstrap = bootstrap or os.getenv('KAFKA_BOOTSTRAP')
+    if not bootstrap:
+        print('[red]Name the Kafka servers: --bootstrap or KAFKA_BOOTSTRAP.[/red]')
+        raise typer.Exit(code=1)
+    try:
+        sent = amplitude.send_kafka_events(bootstrap, topic, count=count, rate=rate,
+                                           compression=compression)
+    except Exception as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=1)
+    print(f'Wrote {sent:,} events to {_e(topic)}.')
+
+
 export_app = typer.Typer(
     cls=OrderCommands,
     help='Export pipelines to run without MageML.',

@@ -9,7 +9,7 @@ import { expect, test } from './base';
 
 /*
  * An Amplitude data integration pipeline set up in the editor, against a local server that
- * answers as Amplitude's APIs do (mage_ai/tests/io/fixtures_amplitude.py): pick the source,
+ * answers as Amplitude's APIs do (`mage examples amplitude-server`): pick the source,
  * read its documentation, type the settings, test the connection, pick streams that come
  * with their keys and sync mode, and preview the events. Runs into a destination are
  * tested in integration_tests/postgres/test_amplitude_pipeline.py.
@@ -35,7 +35,7 @@ async function shot(page, name: string) {
 test.beforeAll(async ({ playwright }, testInfo) => {
   amplitude = spawn(
     process.env.MAGE_E2E_PYTHON || 'python3',
-    ['-m', 'mage_ai.tests.io.fixtures_amplitude', String(PORT)],
+    ['-m', 'mage_ai.cli.main', 'examples', 'amplitude-server', '--port', String(PORT)],
     { cwd: REPO, stdio: 'ignore' },
   );
   await expect.poll(async () => {

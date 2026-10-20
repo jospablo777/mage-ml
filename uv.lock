@@ -3672,6 +3672,7 @@ all = [
     { name = "sshtunnel" },
     { name = "stomp-py" },
     { name = "trino" },
+    { name = "zstandard" },
 ]
 azure = [
     { name = "azure-eventhub" },
@@ -3785,6 +3786,7 @@ streaming = [
     { name = "pymongo" },
     { name = "requests-aws4auth" },
     { name = "stomp-py" },
+    { name = "zstandard" },
 ]
 trino = [
     { name = "trino" },
@@ -3969,6 +3971,7 @@ requires-dist = [
     { name = "urllib3", specifier = ">=2.8,<3" },
     { name = "watchdog", specifier = ">=6.0" },
     { name = "werkzeug", specifier = ">=3.1.6" },
+    { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
 provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "all"]
 

@@ -154,15 +154,18 @@ class Amplitude(BaseIO):
     @classmethod
     def with_config(cls, config: BaseConfigLoader, **kwargs) -> 'Amplitude':
         """
-        From an io_config profile: AMPLITUDE_API_KEY, AMPLITUDE_SECRET_KEY and
-        AMPLITUDE_REGION (US or EU).
+        From an io_config profile: AMPLITUDE_API_KEY, AMPLITUDE_SECRET_KEY,
+        AMPLITUDE_REGION (US or EU) and, for a proxy or `mage examples amplitude-server`,
+        AMPLITUDE_HOST.
         """
-        return cls(
+        options = dict(
             api_key=config[ConfigKey.AMPLITUDE_API_KEY],
             secret_key=config[ConfigKey.AMPLITUDE_SECRET_KEY],
             region=config[ConfigKey.AMPLITUDE_REGION] or 'US',
-            **kwargs,
+            host=config[ConfigKey.AMPLITUDE_HOST] or None,
         )
+        options.update(kwargs)
+        return cls(**options)
 
     # ---- HTTP ---------------------------------------------------------------------------
 
