@@ -41,7 +41,8 @@
   pipelines, `send_events` and `set_user_properties` on the Python client, and an
   `amplitude` sink for streams, in the engine. Rows become events or user properties
   through the Batch Event Upload API, with the API key only; each event's `insert_id` comes
-  from the stream's key, so a sync or a batch sent again adds nothing. See
+  from the stream's key, so a sync or a batch sent again adds nothing. The Amplitude data
+  exporter template sends a block's output. See
   [Send data to Amplitude](/guides/amplitude/send).
 - `mage examples amplitude-server` takes events and user properties as Amplitude does and
   shows each request it took.

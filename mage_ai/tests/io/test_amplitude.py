@@ -192,6 +192,32 @@ class AmplitudeTemplateTest(TestCase):
             )
         self.assertEqual(len(frame), 24)
 
+    def test_the_data_exporter_template_sets_user_properties(self):
+        import os
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        from mage_ai.data_preparation.models.constants import BlockType
+        from mage_ai.data_preparation.templates.template import fetch_template_source
+
+        code = fetch_template_source(
+            BlockType.DATA_EXPORTER, dict(template_path='data_exporters/amplitude.py'),
+        )
+        io_config = os.path.join(self.repo_path, 'io_config.yaml')
+        with open(io_config, 'w') as file:
+            file.write(f'version: 0.1.1\ndefault:\n  AMPLITUDE_API_KEY: {API_KEY}\n')
+        namespace = dict(data_exporter=lambda function: function)
+        with FakeAmplitude() as fake, \
+                patch.dict('mage_ai.io.amplitude.UPLOAD_HOSTS', US=fake.url):
+            code = code.replace('from mage_ai.settings.repo import get_repo_path\n', '')
+            namespace['get_repo_path'] = lambda: self.repo_path
+            exec(compile(code, 'amplitude.py', 'exec'), namespace)
+            namespace['export_data_to_amplitude'](
+                pd.DataFrame({'user_id': ['user-1'], 'churn_risk': [0.7]}),
+            )
+        self.assertEqual(fake.users, {'user-1': {'churn_risk': 0.7}})
+
 
 
 class AmplitudeSourceListingTest(TestCase):

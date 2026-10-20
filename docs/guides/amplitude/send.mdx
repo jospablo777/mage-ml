@@ -145,7 +145,8 @@ For large tables, set the stream's replication to **Incremental** with a bookmar
 
 ## From a Python block
 
-A data exporter sends a frame with the same rules. Put the key in `io_config.yaml`
+A data exporter sends a frame with the same rules: add one from the **Amplitude** template
+(**Data exporter** > **APIs**). Put the key in `io_config.yaml`
 (`AMPLITUDE_API_KEY`, `AMPLITUDE_REGION`; for the local Amplitude,
 `AMPLITUDE_HOST: http://127.0.0.1:18765`):
 

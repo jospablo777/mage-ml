@@ -635,6 +635,14 @@ TEMPLATES_ONLY_FOR_V2 = [
     ),
     dict(
         block_type=BlockType.DATA_EXPORTER,
+        description='Send rows to Amplitude as user properties or events.',
+        groups=[GROUP_APIS],
+        language=BlockLanguage.PYTHON,
+        name='Amplitude',
+        path='data_exporters/amplitude.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_EXPORTER,
         groups=[GROUP_DATABASES],
         language=BlockLanguage.PYTHON,
         name='Chroma',
