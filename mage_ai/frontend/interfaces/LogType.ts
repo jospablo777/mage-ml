@@ -48,6 +48,16 @@ export default interface LogType {
   content: string;
   createdAt?: string;
   data?: LogDataType;
+  // A window of the file's lines: the index of its first line and the lines in the file.
+  first_line?: number;
+  // Lines of the file not loaded yet, shown as one row the user loads.
+  gap?: {
+    beforeLine: number;
+    lines: number;
+    name: string;
+    path: string;
+  };
   name: string;
   path: string;
+  total_lines?: number;
 }

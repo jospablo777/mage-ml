@@ -38,6 +38,8 @@ type LogsTableProps = {
   blocksByUUID: { [keyof: string]: BlockType };
   tableInnerRef: React.RefObject<any>;
   logs: LogType[];
+  // Loads the lines of a gap: lines of a log file not loaded yet (components/Logs/windows.ts).
+  onLoadGap?: (gap: LogType['gap']) => Promise<void>;
   onRowClick?: (tab?: TabType) => void;
   pipeline: PipelineType;
   query: FilterQueryType;
@@ -51,6 +53,7 @@ function LogsTable({
   blocksByUUID,
   tableInnerRef,
   logs,
+  onLoadGap,
   onRowClick,
   pipeline,
   query,
@@ -140,7 +143,29 @@ function LogsTable({
       logs,
       themeContext,
     } = data;
-    const { content, data: logData, name } = logs[index];
+    const { content, data: logData, gap, name } = logs[index];
+    if (gap) {
+      const shown = Math.min(gap.lines, 5000);
+      return (
+        <TableRowStyle
+          className="table_row"
+          onClick={() => onLoadGap?.(gap)}
+          style={style}
+        >
+          <Flex />
+          <Flex alignItems="center">
+            <Text monospace muted noWrapping>
+              {logData?.message}
+              {' '}
+            </Text>
+            <Spacing mr={1} />
+            <Text bold monospace noWrapping>
+              {shown < gap.lines ? `Load the last ${shown.toLocaleString()}` : 'Load them'}
+            </Text>
+          </Flex>
+        </TableRowStyle>
+      );
+    }
     const {
       block_uuid: blockUUIDProp,
       level,
@@ -304,6 +329,7 @@ function LogsTable({
     blockUUIDColWidth,
     displayLocalTimezone,
     isIntegration,
+    onLoadGap,
     onRowClick,
     query,
     setSelectedLog,

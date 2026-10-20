@@ -44,6 +44,7 @@ import { find, indexBy, sortByKey } from '@utils/array';
 import { get, set } from '@storage/localStorage';
 import { goToWithQuery } from '@utils/routing';
 import { ignoreKeys, isEmptyObject, isEqual } from '@utils/hash';
+import { Gap, LoadedRange, mergeWindows } from '@components/Logs/windows';
 import { initializeLogs } from '@utils/models/log';
 import { numberWithCommas } from '@utils/string';
 import { queryFromUrl } from '@utils/url';
@@ -70,6 +71,8 @@ function PipelineLogsPage({
   const [errors, setErrors] = useState<ErrorsType>(null);
   const [selectedTab, setSelectedTab] = useState<TabType>(TAB_DETAILS);
   const [autoScrollLogs, setAutoScrollLogs] = useState(get(LOCAL_STORAGE_KEY_AUTO_SCROLL_LOGS, true));
+  // Windows of lines loaded before the newest one, per log file (components/Logs/windows.ts).
+  const [earlierLines, setEarlierLines] = useState<Record<string, LoadedRange[]>>({});
 
   const { data: dataPipeline } = api.pipelines.detail(pipelineUUID, {
     includes_content: false,
@@ -178,15 +181,73 @@ function PipelineLogsPage({
   const logsAll: LogType[] = useMemo(() => sortByKey(
       blockRunLogs
         .concat(pipelineRunLogs)
-        .reduce((acc, log) => acc.concat(initializeLogs(log)), []),
+        .reduce((acc, log) => {
+          if (log.first_line === undefined || log.first_line === null) {
+            return acc.concat(initializeLogs(log));
+          }
+          // A window of the file's lines: earlier windows loaded join it, and the lines
+          // not loaded show as gaps to load.
+          const { gaps, ranges } = mergeWindows(
+            log.path,
+            log.name,
+            { content: log.content, start: log.first_line },
+            earlierLines[log.path],
+          );
+          const entriesByStart: Record<number, LogType[]> = {};
+          ranges.forEach((range) => {
+            entriesByStart[range.start] = initializeLogs({
+              ...log,
+              content: range.content,
+            }) as LogType[];
+            acc = acc.concat(entriesByStart[range.start]);
+          });
+          gaps.forEach((gap: Gap) => {
+            const next = entriesByStart[gap.beforeLine]?.find(({ data }) => data?.timestamp);
+            acc.push({
+              content: '',
+              data: {
+                ...(next?.data || {}),
+                level: null,
+                message: `${numberWithCommas(gap.lines)} earlier lines of ${log.name}`,
+                timestamp: (next?.data?.timestamp || 0) - 0.000001,
+                uuid: `gap:${gap.path}:${gap.beforeLine}`,
+              },
+              gap,
+              name: log.name,
+              path: log.path,
+            } as LogType);
+          });
+          return acc;
+        }, []),
       ({ data }) => data?.timestamp || 0,
     ), [
     blockRunLogs,
+    earlierLines,
     pipelineRunLogs,
   ]);
 
+  const loadGap = useCallback(async (gap: Gap) => {
+    const response = await api.logs.pipelines.listAsync(pipelineUUID, {
+      before_line: gap.beforeLine,
+      lines: Math.min(gap.lines, 5000),
+      log_path: gap.path,
+    });
+    // listAsync resolves to the HTTP response; its data is the body.
+    const body = response?.data || response;
+    const item = body?.logs?.[0]?.block_run_logs?.[0];
+    if (item && item.first_line !== undefined) {
+      setEarlierLines(previous => ({
+        ...previous,
+        [gap.path]: (previous[gap.path] || []).concat([
+          { content: item.content, start: item.first_line },
+        ]),
+      }));
+    }
+  }, [pipelineUUID]);
+
   const logsFiltered: LogType[] = useMemo(() => logsAll
-    .filter(({ data }: LogType) => {
+    .filter((log: LogType) => {
+      const { data } = log;
       const evals = [];
 
       if (!query) {
@@ -196,7 +257,8 @@ function PipelineLogsPage({
       // Filter out empty logs
       evals.push(!isEmptyObject(data));
 
-      if (query['level[]']) {
+      // Lines not loaded yet: they may hold any level.
+      if (query['level[]'] && !log.gap) {
         evals.push(query['level[]'].includes(data?.level));
       }
       if (query['block_type[]']) {
@@ -307,6 +369,7 @@ function PipelineLogsPage({
       autoScrollLogs={autoScrollLogs}
       blocksByUUID={blocksByUUID}
       logs={logsFiltered}
+      onLoadGap={loadGap}
       onRowClick={setSelectedTab}
       pipeline={pipeline}
       query={query}
@@ -318,6 +381,7 @@ function PipelineLogsPage({
   ), [
     autoScrollLogs,
     blocksByUUID,
+    loadGap,
     logsFiltered,
     pipeline,
     query,

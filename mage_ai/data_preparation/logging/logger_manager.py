@@ -3,6 +3,7 @@ import io
 import logging
 import logging.handlers
 import os
+import re
 import traceback
 from typing import Callable, Dict, List
 
@@ -17,6 +18,17 @@ from mage_ai.shared.array import find
 from mage_ai.shared.dates import str_to_timedelta, utc_now
 
 MAX_LOG_FILE_SIZE = 20 * 1024 * 1024
+# Segments a log keeps when it rotates: 200 GB at 20 MB each. It was 10, and output past
+# 220 MB was deleted; printed text is never dropped (log_windows.py reads every segment).
+LOG_FILE_SEGMENTS = 10_000
+
+
+def pipeline_logs_dir(pipeline_uuid: str, repo_path: str = None) -> str:
+    """The folder of a pipeline's local logs, as LoggerManager writes them, without the
+    logger and log file a LoggerManager opens."""
+    repo_config = get_repo_config(repo_path=repo_path or get_repo_path())
+    logs_dir = LOGS_DIR_PATH or repo_config.variables_dir
+    return os.path.join(logs_dir, 'pipelines', pipeline_uuid, LOGS_SUBDIR)
 
 
 class LoggerManager:
@@ -89,7 +101,7 @@ class LoggerManager:
                 log_filepath = self.get_log_filepath(create_dir=True)
                 handler = logging.handlers.RotatingFileHandler(
                     log_filepath,
-                    backupCount=10,
+                    backupCount=LOG_FILE_SEGMENTS,
                     maxBytes=MAX_LOG_FILE_SIZE,
                 )
 
@@ -241,23 +253,18 @@ class LoggerManager:
 
     def get_logs(self):
         """
-        Get logs from the current log file.
-
-        Returns:
-            dict: A dictionary containing the logs, including their content.
+        The log as a log item: its last lines over all its rotated segments, with first_line
+        and total_lines for reading the lines before (log_windows.py).
         """
-        file = File.from_path(self.get_log_filepath())
-        return file.to_dict(include_content=True)
+        from mage_ai.data_preparation.logging import log_windows
+
+        return log_windows.window(self.get_log_filepath())
 
     async def get_logs_async(self):
-        """
-        Get logs asynchronously from the current log file.
+        """As get_logs, in a thread."""
+        from mage_ai.data_preparation.logging import log_windows
 
-        Returns:
-            dict: A dictionary containing the logs, including their content.
-        """
-        file = File.from_path(self.get_log_filepath())
-        return await file.to_dict_async(include_content=True)
+        return await asyncio.to_thread(log_windows.window, self.get_log_filepath())
 
     async def get_logs_in_subpartition_async(self, filter_func: Callable = None) -> List[Dict]:
         """
@@ -269,6 +276,8 @@ class LoggerManager:
         Returns:
             List[Dict]: A list of dictionaries containing the logs, including their content.
         """
+        from mage_ai.data_preparation.logging import log_windows
+
         files = []
 
         base_path = self.get_log_filepath_prefix()
@@ -276,6 +285,9 @@ class LoggerManager:
             for filename in os.listdir(base_path):
                 full_path = f'{base_path}/{filename}'
                 if not os.path.isfile(full_path):
+                    continue
+                # A rotated segment (name.log.3) is read with its log.
+                if re.search(r'\.log\.[0-9]+$', filename):
                     continue
 
                 file = File.from_path(full_path)
@@ -287,9 +299,10 @@ class LoggerManager:
                 if should_add:
                     files.append(file)
 
-        return await asyncio.gather(
-            *[file.to_dict_async(include_content=True) for file in files]
-        )
+        return await asyncio.gather(*[
+            asyncio.to_thread(log_windows.window, os.path.join(file.dir_path, file.filename))
+            for file in files
+        ])
 
     def upload_logs(self, key: str, logs: str) -> None:
         """

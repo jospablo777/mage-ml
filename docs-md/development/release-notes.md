@@ -16,6 +16,16 @@
   the client's connection, or connection settings the Rust client lacks go through psycopg2.
   `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
+### Logs
+
+- A block run's log is rotated at 20 MB, and the logs page and API read only the newest
+  segment: whatever a block printed before the last rotation was hidden (a block printing
+  300,000 lines showed 57,408), and output past 220 MB was deleted. Logs now keep every
+  segment; each log item carries its newest 5,000 lines with `first_line` and
+  `total_lines`, the page shows the lines before them as a row that loads them, and search
+  covers every segment. The page also stopped downloading every log whole every five
+  seconds (22 MB each poll for that block).
+
 ### Scheduler
 
 - `MAGE_JOB_ENGINE=on` runs the scheduler's jobs in warm Python workers of the Rust run

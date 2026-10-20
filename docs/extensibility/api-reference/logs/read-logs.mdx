@@ -30,10 +30,20 @@ api: "GET /api/pipelines/:pipeline_uuid/logs"
 
 <ParamField query="text" type="string">
   Return only the log lines that contain this text, ignoring case. Up to 200 log files are
-  searched, and files without a matching line are left out. The logs page's search box
-  sets it.
+  searched, each over all its rotated segments, and files without a matching line are left
+  out. The logs page's search box sets it.
 
   Example: `timeout`
+</ParamField>
+
+<ParamField query="log_path" type="string">
+  Return a window of the lines of one log file, given by the `path` of a log item. Each item
+  carries the newest 5,000 lines of its log (`MAGE_LOG_WINDOW_LINES`), with `first_line`, the
+  index of its first line, and `total_lines`, the lines of the log over all its rotated
+  segments. With `log_path`, `before_line` (default: the end) and `lines` (default 5,000)
+  return the lines before `before_line`. The path must be a log of this pipeline.
+
+  Example: `/home/src/mage_data/default_repo/pipelines/example_pipeline/.logs/54/20230308T045259/load_titanic.log`
 </ParamField>
 
 <RequestExample>
@@ -57,7 +67,10 @@ curl --request GET \
         {
           "name": "load_titanic.log",
           "path": "/home/src/mage_data/default_repo/pipelines/example_pipeline/.logs/54/20230308T045259/load_titanic.log",
-          "content": "very_long_content"
+          "content": "the newest lines",
+          "first_line": 295002,
+          "total_lines": 300002,
+          "segments": 5
         }
       ],
       "pipeline_run_logs": [

@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Dict, List
 
@@ -7,6 +8,7 @@ from sqlalchemy.orm import aliased
 from mage_ai.api.operations.constants import META_KEY_LIMIT
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.api.utils import get_query_timestamps
+from mage_ai.data_preparation.logging import log_windows
 from mage_ai.data_preparation.logging.logger_manager_factory import LoggerManagerFactory
 from mage_ai.data_preparation.models.block.constants import LOG_PARTITION_EDIT_PIPELINE
 from mage_ai.data_preparation.models.file import File
@@ -25,7 +27,13 @@ MAX_SEARCH_LOG_FILES = 200
 
 
 def matching_lines(logs_item: Dict, text: str) -> Dict:
-    """The log file with only the lines that contain text, ignoring case, or None."""
+    """
+    The log file with only the lines that contain text, ignoring case, or None. A local log
+    is searched over all its segments, not only the lines its item carries.
+    """
+    path = logs_item.get('path')
+    if path and 'first_line' in logs_item and os.path.isfile(path):
+        return log_windows.search(path, text)
     needle = text.lower()
     lines = [
         line for line in (logs_item.get('content') or '').splitlines()
@@ -59,6 +67,10 @@ class LogResource(GenericResource):
     @safe_db_query
     async def __pipeline_logs(self, pipeline: Pipeline, query_arg, meta) -> List[Dict]:
         pipeline_uuid = pipeline.uuid
+        # The lines of one log before a line the page shows (log_windows.py).
+        log_path = ((query_arg.get('log_path') or [None])[0] or '').strip()
+        if log_path:
+            return [self.__earlier_lines(pipeline, log_path, query_arg)]
         # Text search over the logs (upstream #6105).
         text = ((query_arg.get('text') or [None])[0] or '').strip()
         max_files = MAX_SEARCH_LOG_FILES if text else MAX_LOG_FILES
@@ -307,3 +319,31 @@ class LogResource(GenericResource):
                 'total_pipeline_run_log_count': total_pipeline_run_log_count,
             },
         ]
+
+    @classmethod
+    def __earlier_lines(self, pipeline: Pipeline, log_path: str, query_arg) -> Dict:
+        """
+        The window of lines of the log at log_path that ends before before_line, for a page
+        that shows a later window. The path must be a log of this pipeline.
+        """
+        from mage_ai.data_preparation.logging.logger_manager import pipeline_logs_dir
+        from mage_ai.data_preparation.models.file import ensure_path_is_in_directory
+
+        logs_root = pipeline_logs_dir(pipeline.uuid, repo_path=pipeline.repo_path)
+        path = ensure_path_is_in_directory(log_path, logs_root)
+
+        def number(key: str, default=None):
+            value = (query_arg.get(key) or [None])[0]
+            return int(value) if value not in (None, '') else default
+
+        item = log_windows.window(
+            path,
+            before_line=number('before_line'),
+            lines=number('lines', log_windows.WINDOW_LINES),
+        )
+        return {
+            'block_run_logs': [item],
+            'pipeline_run_logs': [],
+            'total_block_run_log_count': 1,
+            'total_pipeline_run_log_count': 0,
+        }

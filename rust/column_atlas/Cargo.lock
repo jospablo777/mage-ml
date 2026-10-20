@@ -378,6 +378,7 @@ name = "column_atlas_native"
 version = "0.1.0"
 dependencies = [
  "mage-block",
+ "memchr",
  "polars",
  "pyo3",
  "serde",

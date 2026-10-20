@@ -67,6 +67,14 @@ By default, logs for each pipeline run will be stored in the
 
 Learn more about logs [here](/design/core-abstractions#log).
 
+### Long logs
+A block run's log is written in segments of 20 MB (`block.log`, then `block.log.1`,
+`block.log.2`, ... for the older ones), all kept until the retention period removes the
+run's logs. The logs page loads the newest 5,000 lines of each log (`MAGE_LOG_WINDOW_LINES`)
+and shows the lines before them as a row, such as `120,000 earlier lines of load.log`;
+clicking it loads the 5,000 lines before, until the first line printed. The search box
+searches every line of every segment on the server.
+
 ### Set logging level
 The default logging level is `INFO`. To customize the logging level for logs of block runs and pipeline runs,
 you can set the `level` of `logging_config` in your project's `metadata.yaml` file.

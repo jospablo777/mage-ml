@@ -196,8 +196,39 @@ fn pg_copy_binary<'py>(
     Ok((types, pyo3::types::PyBytes::new(py, &bytes)))
 }
 
+/// A window of a run log's lines over its segments (JSON: text, first_line, total_lines).
+#[pyfunction]
+#[pyo3(signature = (paths, end, count))]
+fn log_window(
+    py: Python<'_>,
+    paths: Vec<String>,
+    end: Option<u64>,
+    count: u64,
+) -> PyResult<String> {
+    let window = py
+        .detach(|| crate::logs::window(&paths, end, count))
+        .map_err(to_python)?;
+    json(&window)
+}
+
+/// Lines of a run log that contain the text, case-insensitive (JSON list of line, text).
+#[pyfunction]
+fn log_search(
+    py: Python<'_>,
+    paths: Vec<String>,
+    needle: String,
+    limit: usize,
+) -> PyResult<String> {
+    let found = py
+        .detach(|| crate::logs::search(&paths, &needle, limit))
+        .map_err(to_python)?;
+    json(&found)
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(log_window, module)?)?;
+    module.add_function(wrap_pyfunction!(log_search, module)?)?;
     #[cfg(feature = "postgres")]
     {
         module.add_function(wrap_pyfunction!(pg_query, module)?)?;

@@ -6,6 +6,7 @@ pub mod contract;
 pub mod engine;
 pub mod error;
 pub mod format;
+pub mod logs;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 pub mod profile;
