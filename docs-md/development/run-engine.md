@@ -57,27 +57,32 @@ option for pipelines that use none of those features, measured against warm work
 
 The pipeline benchmark (`integration_tests/benchmark/pipelines`, `--modes fused warm
 service --repeats 3`), 2026-10-20, Apple M-series laptop with 24 GB, median seconds and
-peak memory of the processes involved. Every run's output matched the pandas reference.
+peak memory of the processes involved, from a git worktree pinned at c07b4c6f6 (after the
+garbage collection and template changes below). Every run's output matched the pandas
+reference.
 
 | Pipeline | Rows | Fused, processes | Fused, run engine | Exported service |
 | --- | --- | --- | --- | --- |
-| pandas | 1,000,000 | 1.28 s, 893 MB | 0.60 s, 1,355 MB | 0.47 s, 390 MB |
-| Polars | 1,000,000 | 1.16 s, 744 MB | 0.52 s, 1,191 MB | 0.26 s, 256 MB |
-| R | 1,000,000 | 2.22 s, 936 MB | 1.66 s, 1,349 MB | 1.66 s, 651 MB |
-| Rust | 1,000,000 | 1.31 s, 649 MB | 0.66 s, 1,137 MB | 0.25 s, 207 MB |
-| pandas | 3,000,000 | 1.84 s, 1,343 MB | 1.17 s, 1,780 MB | 0.71 s, 846 MB |
-| Polars | 3,000,000 | 1.45 s, 1,370 MB | 0.87 s, 1,602 MB | 0.29 s, 856 MB |
-| R | 3,000,000 | 2.93 s, 1,283 MB | 2.36 s, 1,763 MB | 2.30 s, 1,179 MB |
-| Rust | 3,000,000 | 1.34 s, 861 MB | 0.78 s, 1,288 MB | 0.24 s, 420 MB |
+| pandas | 1,000,000 | 1.25 s, 893 MB | 0.40 s, 1,315 MB | 0.47 s, 395 MB |
+| Polars | 1,000,000 | 1.11 s, 775 MB | 0.30 s, 1,146 MB | 0.24 s, 256 MB |
+| R | 1,000,000 | 2.15 s, 943 MB | 1.42 s, 1,526 MB | 1.64 s, 659 MB |
+| Rust | 1,000,000 | 1.24 s, 651 MB | 0.42 s, 986 MB | 0.24 s, 207 MB |
+| pandas | 3,000,000 | 1.75 s, 1,440 MB | 0.93 s, 1,776 MB | 0.69 s, 862 MB |
+| Polars | 3,000,000 | 1.44 s, 1,366 MB | 0.61 s, 1,601 MB | 0.24 s, 794 MB |
+| R | 3,000,000 | 2.93 s, 1,355 MB | 2.17 s, 1,738 MB | 2.29 s, 1,193 MB |
+| Rust | 3,000,000 | 1.27 s, 685 MB | 0.48 s, 1,269 MB | 0.24 s, 417 MB |
 
-On the run engine a run takes about half the time. The memory column counts the engine and
+On the run engine a run takes about a third of the time at 1 million rows. pandas and R
+runs were faster than the exported service here because the benchmark runs the service
+with `mage-service run`, a new process per run that starts its Python or R worker; a
+service that serves runs keeps its workers too. The memory column counts the engine and
 its idle warm worker, about 450 MB that a server holds whether runs happen or not
 (`MAGE_JOBS_WARM` sets how many). Workers started for a burst of jobs end after
 `MAGE_JOBS_IDLE_SECONDS` (60) without a job.
 
-The gap left to an exported service is MageML's work around the blocks; storing each
-output as Parquet, the run records and the scheduler's passes are the candidates, not yet
-profiled one by one. R spends most of its run in R itself, so there the two are equal.
+The gap left to an exported service for Polars and Rust is MageML's work around the
+blocks: a profile of a warm run shows about 56 SQL statements and 14 commits per run and
+writing each output as Parquet.
 
 ## Garbage collection after each block
 

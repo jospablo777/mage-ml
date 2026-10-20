@@ -124,14 +124,14 @@ run of the benchmark (2026-10-20, 3 repeats), median seconds:
 
 | Pipeline | Rows | Scheduler, fused | Scheduler, fused, run engine | Exported service |
 | --- | --- | --- | --- | --- |
-| pandas | 1,000,000 | 1.28 | 0.60 | 0.47 |
-| Polars | 1,000,000 | 1.16 | 0.52 | 0.26 |
-| R | 1,000,000 | 2.22 | 1.66 | 1.66 |
-| Rust | 1,000,000 | 1.31 | 0.66 | 0.25 |
-| pandas | 3,000,000 | 1.84 | 1.17 | 0.71 |
-| Polars | 3,000,000 | 1.45 | 0.87 | 0.29 |
-| R | 3,000,000 | 2.93 | 2.36 | 2.30 |
-| Rust | 3,000,000 | 1.34 | 0.78 | 0.24 |
+| pandas | 1,000,000 | 1.25 | 0.40 | 0.47 |
+| Polars | 1,000,000 | 1.11 | 0.30 | 0.24 |
+| R | 1,000,000 | 2.15 | 1.42 | 1.64 |
+| Rust | 1,000,000 | 1.24 | 0.42 | 0.24 |
+| pandas | 3,000,000 | 1.75 | 0.93 | 0.69 |
+| Polars | 3,000,000 | 1.44 | 0.61 | 0.24 |
+| R | 3,000,000 | 2.93 | 2.17 | 2.29 |
+| Rust | 3,000,000 | 1.27 | 0.48 | 0.24 |
 
 The engine and an idle worker hold about 450 MB more while the server runs. Details in
 [run engine](/development/run-engine).
@@ -189,7 +189,7 @@ and converts the data from one language to the other.
 - **Let MageML compile ahead.** Compilation runs after a save, when a trigger is turned on
   and at server start, so a scheduled run does not wait for a Rust build.
 - **Run the scheduler's jobs on the run engine** (`MAGE_JOB_ENGINE=on`): scheduled runs
-  take about half the time, for about 450 MB held by the engine and its idle worker.
+  take about a third of the time, for about 450 MB held by the engine and its idle worker.
 - **For the lowest latency and memory, export a service.** It runs without the scheduler,
   database and editor.
 - **R: fewer chains.** Each chain of R blocks starts one R session.
