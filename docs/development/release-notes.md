@@ -79,7 +79,8 @@
   read and wrote on, and a lost assignment then repeated everything since the last
   acknowledgement: 5,587 of 20,000 messages in one test. Batches written but not
   acknowledged now count against the in-flight limit (8 batches per partition), so the
-  stream pauses until acknowledgements succeed; the same test repeats under 500.
+  stream pauses until acknowledgements succeed: the same test repeated 2,115 in CI. Writes
+  the broker took but answered too late are still written again (at least once).
 - After a Kafka broker's controlled shutdown, librdkafka could hand a message over twice,
   and the stream wrote it twice. The source now skips an offset it already read under the
   same partition assignment, and logs it.

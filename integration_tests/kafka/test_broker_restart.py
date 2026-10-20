@@ -28,6 +28,9 @@ TOTAL = 20000
 # batches whose commit failed count too, so a broker that refuses commits for a while
 # pauses the stream instead of growing this.
 WINDOW = 2 * (8 + 1) * 100
+# A write the broker took but answered too late (or not at all) is retried, and the batch
+# is written again: at least once, a few batches more. Exactly once needs transactions.
+RETRIED_WRITES = 500
 
 
 def free_port() -> int:
@@ -204,7 +207,7 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
         # partitions away (the log says so): the batches written but not yet committed were
         # read again, at least once.
         if 'Consumer group session timed out' in service.log.read_text(errors='replace'):
-            repeats = max(repeats, WINDOW)
+            repeats = max(repeats, WINDOW + RETRIED_WRITES)
         print(f'{len(ids) - TOTAL} messages written twice, at most {repeats} allowed')
         assert len(ids) - TOTAL <= repeats, f'{len(ids) - TOTAL} messages written twice'
         assert service.process.poll() is None
@@ -224,14 +227,14 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
     # A slow controlled shutdown (a tenth of a CPU): the broker answers metadata with no
     # brokers, and librdkafka drops the one it knew; the broker watch connects to the
     # bootstrap servers again (I-217). The session usually expires meanwhile.
-    (['stop', '-t', '20'], 8, WINDOW, 300, '0.1'),
+    (['stop', '-t', '20'], 8, WINDOW + RETRIED_WRITES, 300, '0.1'),
     # A killed broker leaves produce requests unanswered; the idempotent producer can bump
     # its epoch and send them again under new sequence numbers, which the broker cannot tell
     # from new messages (one in 20,000 seen in CI): at least once, a batch at most.
-    (['kill'], 8, 500, 180, None),
+    (['kill'], 8, RETRIED_WRITES, 180, None),
     # Longer than the group's session timeout (45 s): the group takes the partitions away,
     # and the batches written but not yet committed then are read again (at least once).
-    (['kill'], 60, WINDOW + 500, 180, None),
+    (['kill'], 60, WINDOW + RETRIED_WRITES, 180, None),
 ], ids=['stopped', 'stopped-slow', 'killed', 'killed-past-session-timeout'])
 def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats,
                                         recovery, cpus):
