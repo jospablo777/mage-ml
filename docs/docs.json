@@ -442,6 +442,7 @@
                     "group": "Destinations",
                     "pages": [
                       "guides/streaming/destinations/activemq",
+                      "guides/streaming/destinations/amplitude",
                       "guides/streaming/destinations/amazon-s3",
                       "guides/streaming/destinations/bigquery",
                       "guides/streaming/destinations/clickhouse",

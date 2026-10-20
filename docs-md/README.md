@@ -272,6 +272,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
     - [MongoDB](guides/streaming/sources/mongodb.md)
   - **Destinations**
     - [ActiveMQ](guides/streaming/destinations/activemq.md)
+    - [Amplitude](guides/streaming/destinations/amplitude.md)
     - [Amazon S3](guides/streaming/destinations/amazon-s3.md)
     - [BigQuery](guides/streaming/destinations/bigquery.md)
     - [ClickHouse](guides/streaming/destinations/clickhouse.md)
