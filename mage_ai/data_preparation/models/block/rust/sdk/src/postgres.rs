@@ -32,7 +32,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, bail};
 use polars::prelude::*;
 use postgres::types::{Kind, Type};
 use postgres::{Client, Config, NoTls};
@@ -55,27 +55,6 @@ pub enum WritePolicy {
 pub struct Postgres {
     client: Client,
     schema: Option<String>,
-}
-
-fn settings_from_environment() -> Result<HashMap<String, String>> {
-    let text = std::env::var("MAGE_IO_CONFIG").map_err(|_| {
-        anyhow!(
-            "The block has no io_config profile: set data_provider_profile in its \
-             settings, or use Postgres::connect_url"
-        )
-    })?;
-    let value: serde_json::Value = serde_json::from_str(&text).context("MAGE_IO_CONFIG")?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("MAGE_IO_CONFIG is not an object"))?;
-    Ok(object
-        .iter()
-        .filter_map(|(key, value)| match value {
-            serde_json::Value::Null => None,
-            serde_json::Value::String(text) => Some((key.clone(), text.clone())),
-            other => Some((key.clone(), other.to_string())),
-        })
-        .collect())
 }
 
 /// A schema or table name as written in SQL: plain names stay unquoted (and fold to lower
@@ -101,7 +80,7 @@ fn column_name(name: &str) -> String {
 impl Postgres {
     /// Connects with the block's io_config profile.
     pub fn connect() -> Result<Self> {
-        Self::connect_settings(&settings_from_environment()?)
+        Self::connect_settings(&crate::profile::settings()?)
     }
 
     /// Connects with POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DBNAME, POSTGRES_USER,

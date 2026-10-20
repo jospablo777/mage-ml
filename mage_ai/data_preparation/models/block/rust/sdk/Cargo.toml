@@ -33,6 +33,9 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls"], optional = true }
 
 [features]
+# Object storage for blocks (mage::storage): S3 and S3-compatible stores, Google Cloud Storage
+# and Azure Blob Storage, through Polars' own cloud readers and writers.
+storage = ["polars/aws", "polars/gcp", "polars/azure"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]

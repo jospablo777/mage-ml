@@ -256,6 +256,51 @@ fn export_data(totals: DataFrame) -> Result<()> {
 
 The PostgreSQL loader and exporter templates start from these.
 
+## Object storage
+
+The `mage::storage` module reads and writes Parquet and CSV files on Amazon S3 and
+S3-compatible stores (MinIO, IBM Cloud Object Storage, Cloudflare R2), Google Cloud
+Storage and Azure Blob Storage, with Polars' own cloud readers. Turn on the `storage`
+feature of the `mage` crate in `rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "storage"] }
+```
+
+```rust
+use mage::prelude::*;
+use mage::storage::Storage;
+
+fn load_data(vars: Vars) -> Result<LazyFrame> {
+    let day: String = vars.get("day")?;
+    Ok(Storage::connect()?
+        .scan_parquet("s3://events/*.parquet")?
+        .filter(col("day").eq(lit(day))))
+}
+
+fn export_data(scores: DataFrame) -> Result<()> {
+    Storage::connect()?.write_parquet(&scores, "s3://scores/latest.parquet")
+}
+```
+
+- **Paths** are `s3://`, `gs://`, `az://` or `abfss://` URLs, or local paths, and can
+  hold globs.
+- **Reading.** `scan_parquet` and `scan_csv` return lazy frames: a filter or a column
+  selection after them reaches the files, so a Parquet scan downloads only the row groups
+  and columns it needs. `read_parquet` and `read_csv` read whole.
+- **Writing.** `write_parquet` and `write_csv` replace one file; `sink_parquet` streams a
+  lazy frame to the file without collecting it first. An object appears whole when its
+  upload completes, or not at all.
+- **Credentials** come from the block's io_config profile, with the keys of MageML's
+  Python clients: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+  `AWS_REGION` and `AWS_ENDPOINT` (for S3-compatible stores; `http://` endpoints are
+  allowed); `GOOGLE_SERVICE_ACC_KEY_FILEPATH` or `GOOGLE_SERVICE_ACC_KEY`;
+  `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` and
+  `AZURE_TENANT_ID`. Without them, the provider's environment variables, files
+  (`~/.aws/credentials`) and instance or workload identities apply.
+
+The first build with the feature compiles the cloud clients, about two minutes.
+
 ## ONNX models
 
 The `mage::onnx` module runs ONNX models with ONNX Runtime, linked into the block's

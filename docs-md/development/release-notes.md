@@ -16,6 +16,13 @@
   the client's connection, or connection settings the Rust client lacks go through psycopg2.
   `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
+### Rust blocks
+
+- `mage::storage` (feature `storage`) reads and writes Parquet and CSV on S3 and
+  S3-compatible stores, Google Cloud Storage and Azure Blob Storage, with credentials
+  from the block's io_config profile. Scans are lazy, so filters and column selections
+  reach the files. See [Rust blocks](../guides/blocks/rust-blocks.md#object-storage).
+
 ### Trino
 
 - Trino SQL blocks run in [pipeline services](../production/pipeline-services.md), as in a

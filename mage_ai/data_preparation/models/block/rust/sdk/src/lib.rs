@@ -30,8 +30,11 @@ pub mod onnx;
 pub mod output;
 #[cfg(feature = "postgres")]
 pub mod postgres;
+pub mod profile;
 pub mod protocol;
 pub mod runtime;
+#[cfg(feature = "storage")]
+pub mod storage;
 pub mod stream;
 
 pub use context::{BlockContext, Vars};

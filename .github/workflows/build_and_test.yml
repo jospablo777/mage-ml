@@ -257,8 +257,9 @@ jobs:
             # The stream benchmark needs this group's systems; in CI it runs smaller, as a check.
             tests: integration_tests/kafka integration_tests/rabbitmq integration_tests/ibm_mq integration_tests/nats integration_tests/sqs integration_tests/pubsub integration_tests/opensearch integration_tests/influxdb integration_tests/activemq integration_tests/streaming integration_tests/s3 integration_tests/benchmark/test_stream_benchmark.py
             r: false
-            # Rust stream blocks build Polars: warmed first, so no test pays for it.
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+            # Rust stream blocks build Polars, and mage::storage its cloud clients: warmed
+            # first, so no test pays for it.
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/s3/test_rust_storage.py::test_a_missing_object_names_the_path'"
           - id: ml
             name: "Integration: ML and HTTP services"
             services: feast mlflow api
