@@ -36,10 +36,10 @@ resolver = "3"
 members = [".mage/blocks/*"]
 
 [workspace.dependencies]
-# The postgres feature gives blocks mage::postgres; add "mysql" for mage::mysql,
-# "clickhouse" for mage::clickhouse, "storage" for mage::storage (S3, GCS and Azure files),
-# "onnx" for mage::onnx (ONNX Runtime, downloaded at the first build and linked into each
-# block's program).
+# The postgres feature gives blocks mage::postgres; add "mysql" for mage::mysql, "mongodb"
+# for mage::mongodb, "clickhouse" for mage::clickhouse, "storage" for mage::storage (S3,
+# GCS and Azure files), "onnx" for mage::onnx (ONNX Runtime, downloaded at the first build
+# and linked into each block's program).
 mage-block = { path = ".mage/sdk", features = ["postgres"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

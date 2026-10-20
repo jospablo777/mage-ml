@@ -18,6 +18,9 @@
 
 ### Rust blocks
 
+- `mage::mongodb` (feature `mongodb`) reads collections into typed frames (structs, lists,
+  exact decimals) and writes frames as documents, with atomic replaces that keep indexes
+  and upserts by key. See [Rust blocks](/guides/blocks/rust-blocks#mongodb).
 - `mage::mysql` (feature `mysql`) reads MySQL and MariaDB into typed columns (exact
   decimals, unsigned integers, TIMESTAMP in UTC) and writes frames with prepared
   multi-row inserts in one transaction. See

@@ -27,6 +27,8 @@ pub mod context;
 pub mod extract;
 #[cfg(feature = "feast")]
 pub mod feast;
+#[cfg(feature = "mongodb")]
+pub mod mongodb;
 #[cfg(feature = "mysql")]
 pub mod mysql;
 #[cfg(feature = "onnx")]

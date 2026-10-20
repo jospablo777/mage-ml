@@ -294,6 +294,43 @@ fn export_data(totals: DataFrame) -> Result<()> {
 - **Other statements.** `execute(sql)` runs a statement and returns the rows it changed;
   `conn()` gives the underlying `mysql::Conn`.
 
+## MongoDB
+
+The `mage::mongodb` module reads collections into frames and writes frames as documents,
+with the rules of the Python client. Turn on the `mongodb` feature of the `mage` crate in
+`rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "mongodb"] }
+```
+
+```rust
+use mage::mongodb::{doc, MongoDb, OnConflict, WritePolicy};
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {
+    MongoDb::connect()?.load("orders", doc! { "status": "paid" })
+}
+
+fn export_data(scores: DataFrame) -> Result<()> {
+    MongoDb::connect()?.write_unique(&scores, "scores", WritePolicy::Append, &["id"], OnConflict::Update)?;
+    Ok(())
+}
+```
+
+- **Connection.** `MongoDb::connect()` uses `MONGODB_CONNECTION_STRING`, or `MONGODB_HOST`,
+  `MONGODB_PORT`, `MONGODB_USER` and `MONGODB_PASSWORD`; `MONGODB_DATABASE` names the
+  database and `MONGODB_COLLECTION` the collection used when the name is empty.
+- **Reading.** One column per field; a missing field is null. Integers stay integers,
+  Decimal128 is an exact decimal, dates are UTC datetimes, ObjectId and UUID are text,
+  embedded documents are structs and arrays lists. A field whose values have different
+  types is JSON text. `load_fields` takes a projection.
+- **Writing.** Integers that fit 32 bits are stored as Int32, others as Int64; decimals as
+  Decimal128, dates as midnight UTC, durations as seconds. `WritePolicy::Replace` writes a
+  staging collection with the target's indexes and renames it over the target, so a
+  failed write leaves the target as it was. `write_unique` upserts by key fields:
+  `OnConflict::Update` replaces a stored document, `OnConflict::Ignore` keeps it.
+
 ## ClickHouse
 
 The `mage::clickhouse` module reads and writes ClickHouse over its HTTP interface, with
