@@ -61,8 +61,8 @@ def sync(fake, text: str, **config):
 
 def order(order_id: int, status='paid'):
     return dict(
-        order_id=order_id, customer_id=f'customer-{order_id}', created_at='2024-06-01T10:00:00+00:00',
-        amount=19.5, status=status,
+        order_id=order_id, customer_id=f'customer-{order_id}',
+        created_at='2024-06-01T10:00:00+00:00', amount=19.5, status=status,
     )
 
 
@@ -92,7 +92,8 @@ class AmplitudeDestinationTest(unittest.TestCase):
                 dict(user_id='user-1', churn_risk=0.8, segment='at risk'),
                 dict(user_id='user-2', churn_risk=0.1, segment=None),
             ]
-            sync(fake, messages('scores', SCORES, rows), streams={'scores': {'user_properties': True}})
+            streams = {'scores': {'user_properties': True}}
+            sync(fake, messages('scores', SCORES, rows), streams=streams)
             self.assertEqual(fake.users, {
                 'user-1': {'churn_risk': 0.8, 'segment': 'at risk'},
                 'user-2': {'churn_risk': 0.1},
@@ -100,7 +101,8 @@ class AmplitudeDestinationTest(unittest.TestCase):
 
     def test_a_stream_without_event_type_says_what_to_set(self):
         with FakeAmplitude() as fake:
-            with self.assertRaisesRegex(Exception, 'event_type: Order Completed.*user_properties: true'):
+            expected = 'event_type: Order Completed.*user_properties: true'
+            with self.assertRaisesRegex(Exception, expected):
                 sync(fake, messages('orders', ORDERS, [order(1)], {'order_id': 1}))
             self.assertEqual(fake.uploaded, [])
 

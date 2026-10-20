@@ -486,9 +486,9 @@ class Amplitude(BaseIO):
     ) -> int:
         """
         Sets user properties: each row has user_id or device_id, and every other column is
-        a property to set (columns: {'user_id': 'customer_id'}). A user_properties column of operations ({'$add': {...}},
-        {'$setOnce': {...}}) is sent as it is. Sent as $identify events, 2,000 a request.
-        Returns the rows sent.
+        a property to set (columns: {'user_id': 'customer_id'}). A user_properties column
+        of operations ({'$add': {...}}, {'$setOnce': {...}}) is sent as it is. Sent as
+        $identify events, 2,000 a request. Returns the rows sent.
         """
         events = (
             amplitude_event(row, identify=True, columns=columns) for row in _rows(rows)

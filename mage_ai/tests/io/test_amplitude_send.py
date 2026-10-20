@@ -96,7 +96,8 @@ class AmplitudeEventTest(TestCase):
             amplitude_event({'event_type': 'Play'})
         with self.assertRaisesRegex(AmplitudeError, 'event_type'):
             amplitude_event({'user_id': 'user-1'})
-        self.assertEqual(amplitude_event({'user_id': 123456, 'event_type': 'x'})['user_id'], '123456')
+        item = amplitude_event({'user_id': 123456, 'event_type': 'x'})
+        self.assertEqual(item['user_id'], '123456')
 
     def test_user_properties_are_set_on_an_identify_event(self):
         item = amplitude_event(
