@@ -49,10 +49,14 @@ jobs:
         run: >-
           uv export --locked --extra all --extra integrations --no-default-groups
           --no-hashes --no-emit-workspace --output-file /tmp/mage-runtime-requirements.txt
+      # certifi GHSA-6q48-6c7w-9gw2 (fixed in 2026.10.19) is accepted while dbt-snowflake,
+      # in the all extra, requires certifi<2025.4.26: newer bundles broke Snowflake's
+      # certificate checks. Every dbt-snowflake release still has the bound.
       - name: Check published advisories
         run: >-
           uv run --no-sync pip-audit --disable-pip --no-deps
           --requirement /tmp/mage-runtime-requirements.txt
+          --ignore-vuln GHSA-6q48-6c7w-9gw2
       # The whole lock, every extra included, against OSV, which also has advisories that
       # pip-audit's source lacks.
       # Accepted while no fixed release exists (the audit fails again once one does; a GHSA ID
@@ -67,7 +71,7 @@ jobs:
           uv audit --frozen --preview-features audit-command
           --ignore-until-fixed GHSA-f4j7-r4q5-qw2c --ignore-until-fixed GHSA-36p7-vc44-83pf
           --ignore-until-fixed GHSA-2wm9-hf6c-p5cr --ignore-until-fixed GHSA-xph7-9rjv-w5fr
-          --ignore PYSEC-2023-235
+          --ignore PYSEC-2023-235 --ignore GHSA-6q48-6c7w-9gw2
 
   runtime_helpers:
     runs-on: ubuntu-latest
