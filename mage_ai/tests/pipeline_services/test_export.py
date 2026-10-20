@@ -322,13 +322,25 @@ class CaptureTest(ExportTestCase):
         export.write(captured, str(out))
 
         workflow = yaml.safe_load((out / '.github' / 'workflows' / 'build-image.yml').read_text())
-        build = workflow['jobs']['image']['steps'][-1]['with']
-        self.assertEqual(build['platforms'], 'linux/amd64,linux/arm64')
+        image = workflow['jobs']['image']
+        # Each platform builds on a runner of its own architecture; the Rust engine compiles
+        # many times slower under emulation. A merge job pushes one image for both.
+        self.assertEqual(
+            [entry['platform'] for entry in image['strategy']['matrix']['include']],
+            ['linux/amd64', 'linux/arm64'],
+        )
+        self.assertIn("vars.ARM_RUNNER || 'ubuntu-24.04-arm'", image['runs-on'])
+        steps = {step.get('name', step.get('uses')): step for step in image['steps']}
+        build = steps['Build, and push by digest when a registry is set']['with']
+        self.assertEqual(build['platforms'], '${{ matrix.platform }}')
         self.assertIn("'shop'", build['tags'])
+        self.assertIn('push-by-digest=true', build['outputs'])
+        merge = workflow['jobs']['merge']
+        self.assertIn('imagetools create', merge['steps'][-1]['run'])
         self.assertIn('.github/', (out / '.dockerignore').read_text())
         # GITHUB_TOKEN is issued for each run and cannot be saved as a secret, so pushes to
         # ghcr.io log in with it when the repository sets no registry secrets.
-        login = workflow['jobs']['image']['steps'][4]['with']
+        login = steps['Log in to the registry']['with']
         self.assertEqual(login['username'], '${{ secrets.REGISTRY_USERNAME || github.actor }}')
         self.assertEqual(
             login['password'], '${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}',

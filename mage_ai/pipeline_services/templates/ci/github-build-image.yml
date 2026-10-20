@@ -1,11 +1,18 @@
-# Builds the service image for amd64 and arm64 on every push to main, and pushes it when the
-# repository sets a registry. Settings > Secrets and variables > Actions:
+# Builds the service image for amd64 and arm64 on every push to main, each on a runner of
+# its own architecture (the Rust engine compiles many times slower under emulation), and
+# pushes one multi-platform image when the repository sets a registry.
+# Settings > Secrets and variables > Actions:
 #   variable REGISTRY_IMAGE  for example icr.io/team/$name, docker.io/team/$name,
 #                            ghcr.io/owner/$name
 #   secret REGISTRY_USERNAME and REGISTRY_PASSWORD
 #                            IBM Cloud: iamapikey and an API key; Docker Hub: your user and
 #                            an access token. ghcr.io needs neither: without them the job
 #                            logs in with the workflow's GITHUB_TOKEN.
+#   variable ARM_RUNNER      the arm64 runner, ubuntu-24.04-arm by default; set it to
+#                            ubuntu-latest where arm64 runners are not available, and arm64
+#                            builds there under emulation.
+# Each image is tagged with the commit, and the previous tags stay in the registry: rolling
+# back is deploying the previous commit's tag.
 # Pin the actions to commit SHAs if your organization requires it.
 name: Build $name
 
@@ -18,14 +25,27 @@ permissions:
   contents: read
   packages: write
 
+env:
+  REGISTRY_IMAGE: ${{ vars.REGISTRY_IMAGE }}
+
 jobs:
   image:
-    runs-on: ubuntu-latest
-    env:
-      REGISTRY_IMAGE: ${{ vars.REGISTRY_IMAGE }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: arm
+    runs-on: ${{ matrix.runner == 'arm' && (vars.ARM_RUNNER || 'ubuntu-24.04-arm') || matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
+      - name: Emulate arm64 on a runner of another architecture
+        if: matrix.arch == 'arm64' && runner.arch != 'ARM64'
+        uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Find the registry
         id: registry
@@ -41,13 +61,58 @@ jobs:
           registry: ${{ steps.registry.outputs.host }}
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - name: Build, and push by digest when a registry is set
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ env.REGISTRY_IMAGE != '' }}
-          tags: |
-            ${{ env.REGISTRY_IMAGE || '$name' }}:${{ github.sha }}
-            ${{ env.REGISTRY_IMAGE || '$name' }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: ${{ matrix.platform }}
+          tags: ${{ env.REGISTRY_IMAGE || '$name' }}
+          outputs: ${{ env.REGISTRY_IMAGE != '' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=cacheonly' }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+      - name: Keep the digest for the merge
+        if: env.REGISTRY_IMAGE != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - if: env.REGISTRY_IMAGE != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  # One image for both platforms, tagged with the commit and latest.
+  merge:
+    needs: image
+    if: vars.REGISTRY_IMAGE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - name: Find the registry
+        id: registry
+        run: |
+          host="${REGISTRY_IMAGE%%/*}"
+          case "$host" in *.*|*:*|localhost) ;; *) host=docker.io ;; esac
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.registry.outputs.host }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+      - name: Push the multi-platform image
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            --tag "$REGISTRY_IMAGE:${{ github.sha }}" --tag "$REGISTRY_IMAGE:latest" \
+            $(printf "$REGISTRY_IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$REGISTRY_IMAGE:${{ github.sha }}"

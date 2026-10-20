@@ -22,6 +22,10 @@
   between two exports. The README's runbook gives one command per step (build, deploy,
   check, roll back) for compose, Kubernetes and Code Engine, and `compose.yaml` runs a given
   version with `IMAGE=...:tag`. See [Export a service](../production/export-a-service.md).
+- The export's GitHub workflow builds arm64 on an arm64 runner instead of under emulation,
+  where the Rust engine compiles many times slower, and merges both platforms into one
+  image tagged with the commit. `ARM_RUNNER` names another runner where arm64 ones are not
+  available.
 
 ### PostgreSQL
 
