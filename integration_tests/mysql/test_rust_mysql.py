@@ -68,7 +68,8 @@ def keep(rows, *args, **kwargs):
 def mysql_workspace(mage_project, mysql_database, monkeypatch):
     """The Rust environment with mage::mysql; the mysql profile uses the test's database."""
     monkeypatch.setenv('MAGE_TEST_MYSQL_DATABASE', mysql_database)
-    return rust_features.enable(mage_project, 'mysql')
+    with rust_features.enabled(mage_project, 'mysql') as rust:
+        yield rust
 
 
 def mysql_query(settings, sql):

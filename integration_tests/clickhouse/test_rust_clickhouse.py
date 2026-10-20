@@ -72,7 +72,8 @@ def rows_of(frame):
 
 @pytest.fixture
 def clickhouse_workspace(mage_project):
-    return rust_features.enable(mage_project, 'clickhouse')
+    with rust_features.enabled(mage_project, 'clickhouse') as rust:
+        yield rust
 
 
 @pytest.mark.timeout(1800)

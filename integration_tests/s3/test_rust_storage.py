@@ -54,7 +54,8 @@ fn export_data(events: DataFrame, vars: Vars) -> Result<()> {
 @pytest.fixture
 def storage_workspace(mage_project):
     """The project's Rust environment with mage::storage."""
-    return rust_features.enable(mage_project, 'storage')
+    with rust_features.enabled(mage_project, 'storage') as rust:
+        yield rust
 
 
 def part(first: int, count: int) -> pd.DataFrame:
