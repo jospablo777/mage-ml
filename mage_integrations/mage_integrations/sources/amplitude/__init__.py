@@ -158,9 +158,10 @@ class Amplitude(Source):
         return super().build_catalog_entry(stream_id, schema, **kwargs)
 
     def test_connection(self) -> None:
-        # The editor waits 10 seconds for the answer: one quick try, one retry.
+        # The editor waits 10 seconds for the answer: one try, so an unreachable host is
+        # reported as that instead of the editor's timeout.
         client = self.client
-        client.timeout, client.max_retries = 4, 1
+        client.timeout, client.max_retries = 6, 0
         client.test_connection()
 
     # ---- Sync ---------------------------------------------------------------------------

@@ -208,3 +208,13 @@ class AmplitudeSourceTest(unittest.TestCase):
         # The last hour, then 6 hours, then a day: three requests, not a week of data.
         self.assertEqual(len(exports), 3)
 
+    def test_an_unreachable_host_is_reported_within_the_editors_wait(self):
+        import time
+
+        source = Amplitude(config=dict(
+            api_key='a', secret_key='b', host='http://127.0.0.1:9',
+        ), log_to_stdout=False)
+        started = time.monotonic()
+        with self.assertRaisesRegex(Exception, 'did not answer'):
+            source.test_connection()
+        self.assertLess(time.monotonic() - started, 8)
