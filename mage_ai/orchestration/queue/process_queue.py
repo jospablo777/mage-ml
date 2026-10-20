@@ -27,7 +27,7 @@ from mage_ai.settings import (
 )
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.logger import set_logging_format
-from mage_ai.shared.processes import PROCESS_CONTEXT, exit_with_parent
+from mage_ai.shared.processes import PROCESS_CONTEXT, exit_with_parent, freeze_imports
 
 # Seconds a scheduler process's liveness key lives; its worker pool renews it every
 # second. Another process treats this one's jobs as running while the key exists, so a
@@ -522,6 +522,9 @@ class Worker(PROCESS_CONTEXT.Process):
             redis_client=redis_client,
         )
 
+        # MageML is imported by now (the target came unpickled): out of the collector's
+        # reach, so the collection after each block of a stage scans only the job's objects.
+        freeze_imports()
         try:
             start_session_and_run(target, *args, **kwargs)
         except Exception as e:

@@ -79,6 +79,21 @@ The gap left to an exported service is MageML's work around the blocks; storing 
 output as Parquet, the run records and the scheduler's passes are the candidates, not yet
 profiled one by one. R spends most of its run in R itself, so there the two are equal.
 
+## Garbage collection after each block
+
+A profile of warm runs in one process showed 60% of the time in `gc.collect()`: a stage
+collects garbage after each block to free the block's inputs (`fusion.release_block`), and
+a full collection scanned every object of MageML, 33 ms per block. `freeze_imports`
+(`mage_ai/shared/processes.py`) moves what is loaded before the first job out of the
+collector's reach (`gc.freeze`), so a collection scans only what jobs made. Engine workers
+freeze after their imports, process queue workers before their job, and `mage run` before
+the pipeline; a notebook or the server never freezes.
+
+| Three-block pipeline | Before | After |
+| --- | --- | --- |
+| Fused run on the run engine | 0.23 to 0.30 s | 0.12 to 0.13 s |
+| `mage run` | 0.95 s | 0.77 s |
+
 ## Plan
 
 1. `mage-service jobs` and the job worker, with unit tests in Rust and Python.

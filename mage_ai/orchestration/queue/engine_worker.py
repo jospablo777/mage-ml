@@ -204,6 +204,9 @@ def main() -> None:
     exit_with_parent()
     _set_up()
     _preload()
+    from mage_ai.shared.processes import freeze_imports
+
+    freeze_imports()
     replies.send(dict(ready=True, pid=os.getpid()))
     requests = os.fdopen(REQUEST_FD, 'r')
     for line in requests:

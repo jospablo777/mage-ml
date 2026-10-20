@@ -293,6 +293,12 @@ def run(
         if template_runtime_configuration is not None:
             template_runtime_configuration = json.loads(template_runtime_configuration)
 
+        # This process only runs the pipeline: what it loaded so far stays out of the
+        # garbage collector's reach, so the collection after each block scans only what the
+        # blocks made (freeze_imports).
+        from mage_ai.shared.processes import freeze_imports
+
+        freeze_imports()
         try:
             if block_uuid is None:
                 ExecutorFactory.get_pipeline_executor(

@@ -212,3 +212,31 @@ class SupervisedCommandTest(unittest.TestCase):
         # same group and gets it too.
         self.assertEqual(process.wait(15), 128 + signal.SIGINT)
         self.assertEqual(_wait_gone([command, grandchild]), [])
+
+
+class FreezeImportsTest(unittest.TestCase):
+    def tearDown(self):
+        import gc
+
+        gc.unfreeze()
+
+    def test_what_comes_after_the_freeze_is_still_collected(self):
+        import gc
+        import weakref
+
+        from mage_ai.shared.processes import freeze_imports
+
+        freeze_imports()
+        self.assertGreater(gc.get_freeze_count(), 0)
+
+        class Inputs:
+            pass
+
+        # A block's globals hold its inputs in a cycle with its functions.
+        inputs = Inputs()
+        cycle = {'inputs': inputs}
+        cycle['self'] = cycle
+        alive = weakref.ref(inputs)
+        del inputs, cycle
+        gc.collect()
+        self.assertIsNone(alive())

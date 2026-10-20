@@ -12,6 +12,11 @@
   run records, tests, retries); a worker drops the project's modules after each job and is
   replaced when a job leaves threads or memory behind. Without the engine, jobs run in
   processes as before. See [run engine](/development/run-engine).
+- Runs spend less time collecting garbage. A stage collects garbage after each block to free
+  its inputs, and each collection also scanned all of MageML: 33 ms per block in a warm
+  worker. Job workers and `mage run` now freeze what they imported before the first block
+  (`gc.freeze`): a fused three-block run on the run engine went from 0.25 to 0.12 seconds,
+  and `mage run` of the same pipeline from 0.95 to 0.77.
 
 ## MageML 0.2.0 (2026-10-19)
 

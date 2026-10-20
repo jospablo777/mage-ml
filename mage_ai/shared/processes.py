@@ -136,3 +136,18 @@ def stop_process_group(process: subprocess.Popen) -> None:
     except (ProcessLookupError, PermissionError):
         pass
     process.wait()
+
+
+def freeze_imports() -> None:
+    """
+    Moves what this process has loaded so far (MageML and its libraries) out of the
+    garbage collector's reach. A stage collects garbage after each block to free the
+    block's inputs (fusion.release_block); a full collection also scanned every object
+    of MageML, about 33 ms per block, more than half of a short run. Call it once the
+    imports are done: frozen objects are never collected, which is right for modules
+    that live as long as the process.
+    """
+    import gc
+
+    gc.collect()
+    gc.freeze()
