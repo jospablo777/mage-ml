@@ -419,6 +419,8 @@ impl RunnerMachine {
             }
             Event::Committed(commit) => {
                 self.tracker.confirm(&commit);
+                // Unconfirmed batches hold partitions paused; confirmed, they can read on.
+                self.resumes(&mut effects);
             }
             Event::Tick => self.commits(&mut effects),
             Event::Shutdown => {
@@ -458,6 +460,10 @@ impl RunnerMachine {
         if !commits.is_empty() {
             effects.push(Effect::Commit(commits));
         }
+        self.resumes(effects);
+    }
+
+    fn resumes(&mut self, effects: &mut Vec<Effect>) {
         let resumable: Vec<PartitionId> = self
             .paused
             .iter()
@@ -904,16 +910,23 @@ mod tests {
         for seq in 0..3 {
             m.step(Event::TransformDone(meta(seq).id));
         }
-        let mut resumed = false;
+        let mut commits = Vec::new();
         for seq in 0..3 {
-            resumed |= m
-                .step(Event::SinkReceipt {
-                    id: meta(seq).id,
-                    sink: REQUIRED,
-                })
-                .contains(&Effect::Resume(P));
+            for effect in m.step(Event::SinkReceipt {
+                id: meta(seq).id,
+                sink: REQUIRED,
+            }) {
+                assert_ne!(effect, Effect::Resume(P), "resumed before the commit");
+                if let Effect::Commit(c) = effect {
+                    commits = c;
+                }
+            }
         }
-        assert!(resumed);
+        // The partition reads on once the source confirms the acknowledgement.
+        assert!(
+            m.step(Event::Committed(commits[0].clone()))
+                .contains(&Effect::Resume(P))
+        );
     }
 
     // Simulation: a driver performs effects with random outcomes and order; random

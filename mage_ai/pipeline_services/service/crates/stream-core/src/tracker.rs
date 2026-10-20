@@ -5,6 +5,11 @@
 //! The position to acknowledge is the last position of the longest run of done batches at
 //! the front. A restart reads again from there, so a crash repeats at most the batches that
 //! were in flight.
+//!
+//! Done batches whose acknowledgement the source has not confirmed count against the
+//! in-flight limit too: while acknowledging fails (a Kafka broker shutting down slowly),
+//! the partition pauses instead of reading on, so a lost assignment repeats at most that
+//! many batches.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -72,6 +77,16 @@ struct PartitionState {
     done_through: Option<Position>,
     /// `done_through` advanced and the source has not confirmed acknowledging it.
     unconfirmed: bool,
+    /// The last positions of the done batches whose acknowledgement is not confirmed yet,
+    /// in read order.
+    awaiting: VecDeque<Position>,
+}
+
+impl PartitionState {
+    /// Batches that a lost assignment would read again.
+    fn unacknowledged(&self) -> usize {
+        self.in_flight.len() + self.awaiting.len()
+    }
 }
 
 #[derive(Debug)]
@@ -132,6 +147,7 @@ impl AckTracker {
                 bytes: 0,
                 done_through: None,
                 unconfirmed: false,
+                awaiting: VecDeque::new(),
             },
         );
         Ok(dropped)
@@ -170,7 +186,7 @@ impl AckTracker {
         });
         Admission::Admitted {
             pause: state.bytes > self.config.max_in_flight_bytes
-                || state.in_flight.len() > self.config.max_in_flight_batches,
+                || state.unacknowledged() > self.config.max_in_flight_batches,
         }
     }
 
@@ -232,6 +248,7 @@ impl AckTracker {
             while state.in_flight.front().is_some_and(InFlight::done) {
                 let batch = state.in_flight.pop_front().expect("checked above");
                 state.bytes -= batch.meta.bytes;
+                state.awaiting.push_back(batch.meta.last.clone());
                 state.done_through = Some(batch.meta.last);
                 state.unconfirmed = true;
             }
@@ -250,15 +267,22 @@ impl AckTracker {
 
     /// The source acknowledged a commit. False when the commit is stale or superseded.
     pub fn confirm(&mut self, commit: &Commit) -> bool {
-        match self.partitions.get_mut(&commit.partition) {
-            Some(state)
-                if state.epoch == commit.epoch
-                    && state.done_through.as_ref() == Some(&commit.position) =>
-            {
-                state.unconfirmed = false;
-                true
-            }
-            _ => false,
+        let Some(state) = self.partitions.get_mut(&commit.partition) else {
+            return false;
+        };
+        if state.epoch != commit.epoch {
+            return false;
+        }
+        // Everything read up to the acknowledged position is acknowledged; positions are
+        // matched, not compared, since a source's own tokens need not sort.
+        if let Some(index) = state.awaiting.iter().position(|p| *p == commit.position) {
+            state.awaiting.drain(..=index);
+        }
+        if state.done_through.as_ref() == Some(&commit.position) {
+            state.unconfirmed = false;
+            true
+        } else {
+            false
         }
     }
 
@@ -266,7 +290,7 @@ impl AckTracker {
     pub fn can_resume(&self, partition: PartitionId) -> bool {
         self.partitions.get(&partition).is_some_and(|state| {
             state.bytes <= self.config.max_in_flight_bytes / 2
-                && state.in_flight.len() <= self.config.max_in_flight_batches / 2
+                && state.unacknowledged() <= self.config.max_in_flight_batches / 2
         })
     }
 
@@ -431,7 +455,38 @@ mod tests {
         for seq in 0..4 {
             t.on_receipt(meta(P, E1, seq).id, A);
         }
-        t.committable();
+        let commits = t.committable();
+        // Done, but not acknowledged yet: a lost assignment would read them again.
+        assert!(!t.can_resume(P));
+        assert!(t.confirm(&commits[0]));
+        assert!(t.can_resume(P));
+    }
+
+    #[test]
+    fn while_acknowledging_fails_the_partition_stays_paused() {
+        let mut t = tracker(&[A]);
+        t.assign(P, E1).unwrap();
+        // Batches finish one by one and each acknowledgement fails: the done batches still
+        // count, so the partition pauses after the limit instead of reading on.
+        let mut paused_at = None;
+        for seq in 0..20 {
+            if let Admission::Admitted { pause: true } = t.admit(meta(P, E1, seq)) {
+                paused_at = Some(seq);
+                break;
+            }
+            t.on_receipt(meta(P, E1, seq).id, A);
+            assert_eq!(t.committable().len(), 1);
+        }
+        assert_eq!(paused_at, Some(4));
+        assert!(!t.can_resume(P));
+
+        // An earlier commit confirmed late releases the batches through it.
+        let through_two = Commit {
+            partition: P,
+            epoch: E1,
+            position: meta(P, E1, 2).last,
+        };
+        assert!(!t.confirm(&through_two));
         assert!(t.can_resume(P));
     }
 

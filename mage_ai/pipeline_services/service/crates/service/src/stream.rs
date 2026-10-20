@@ -695,8 +695,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
         }
 
         for event in events {
-            let effects = machine.step(event);
-            for effect in effects {
+            // Effects in order; applying one can step the machine again (a confirmed
+            // commit), and the effects of that step follow.
+            let mut effects: VecDeque<Effect> = machine.step(event).into();
+            while let Some(effect) = effects.pop_front() {
                 match effect {
                     Effect::Transform(id) => {
                         if let Some((batch, _)) = inputs.get(&id) {
@@ -788,12 +790,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                     count(&status, |s| {
                                         s.acknowledged.insert(id_partition, position);
                                     });
-                                    for effect in machine.step(Event::Committed(commit)) {
-                                        if let Effect::Finished { .. } = effect {
-                                            reading = false;
-                                            set_state(&status, StreamState::Finished);
-                                        }
-                                    }
+                                    // A partition paused for unconfirmed batches resumes.
+                                    effects.extend(machine.step(Event::Committed(commit)));
                                 }
                             }
                             CommitOutcome::Stale => {}
@@ -847,6 +845,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         parts.source.failed(&message);
                     }
                     Effect::Finished { unfinished } => {
+                        reading = false;
                         if !unfinished.is_empty() {
                             crate::log::warn(&format!(
                                 "Stream {}: {} batch(es) were in flight at the shutdown \
