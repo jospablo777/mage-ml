@@ -1,5 +1,18 @@
 # Release notes
 
+## Unreleased
+
+### Scheduler
+
+- `MAGE_JOB_ENGINE=on` runs the scheduler's jobs in warm Python workers of the Rust run
+  engine (`mageml-engine` 0.2.0, `mage-service jobs`) instead of a new process per block
+  or stage. A job starts without starting Python or importing MageML: a fused run of a
+  three-block pipeline took 0.23 to 0.30 seconds instead of 1.0, and the same run block by
+  block 0.3 instead of 2.4. Runs keep everything they record (block runs, logs, outputs,
+  run records, tests, retries); a worker drops the project's modules after each job and is
+  replaced when a job leaves threads or memory behind. Without the engine, jobs run in
+  processes as before. See [run engine](/development/run-engine).
+
 ## MageML 0.2.0 (2026-10-19)
 
 Changes since 0.1.1. The main addition is stream services: streaming pipelines exported as

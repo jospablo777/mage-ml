@@ -7,6 +7,7 @@ mod environment;
 mod executor;
 mod gcp;
 mod ibm;
+mod jobs;
 mod ledger;
 mod log;
 mod python;
@@ -60,6 +61,9 @@ enum Command {
     Info,
     /// List the environment variables the blocks read, and whether each is set.
     Env,
+    /// Warm Python workers for the jobs of MageML's scheduler (requests on stdin, events
+    /// on stdout); MageML starts it, see docs/development/run-engine.md.
+    Jobs(jobs::JobsArgs),
     /// Exit 0 when the local service answers /healthz; for Docker's HEALTHCHECK.
     Health {
         #[arg(long, env = "MAGE_SERVICE_PORT", default_value_t = 8080)]
@@ -216,6 +220,10 @@ fn main() -> ExitCode {
             Command::Info => info(&cli.common).map(|_| ExitCode::SUCCESS),
             Command::Health { port } => Ok(health(port)),
             Command::Env => env_report(&cli.common),
+            Command::Jobs(args) => {
+                log::to_stderr();
+                jobs::run(args).await
+            }
         }
     });
     match result {

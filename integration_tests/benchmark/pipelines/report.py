@@ -19,6 +19,7 @@ MODE_LABELS = {
     'cli': 'mage run',
     'scheduler': 'Scheduler, block by block',
     'fused': 'Scheduler, fused',
+    'warm': 'Scheduler, fused, run engine',
     'service': 'Exported service',
 }
 PIPELINE_LABELS = {

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "mageml-engine"
-version = "0.1.0"
+version = "0.2.0"
 description = "The MageML service engine (mage-service): runs exported pipelines and streams, with the standard connectors"
 readme = "README.md"
 requires-python = ">=3.12"

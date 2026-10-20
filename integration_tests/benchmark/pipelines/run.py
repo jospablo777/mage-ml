@@ -4,6 +4,7 @@ Benchmark of whole pipelines, run as in production, outside the editor:
 - cli: `mage run <project> <pipeline>`, a new process that runs every block in it;
 - scheduler: Mage's scheduler, each block run in its own process, as on a worker;
 - fused: the scheduler with block_fusion: chains, each chain of blocks in one process;
+- warm: the same, with the jobs on the Rust run engine's warm workers (MAGE_JOB_ENGINE);
 - service: the pipeline exported with `mage export service`, run by mage-service.
 
 Every pipeline runs the workload of workload.py: pandas, Polars, R (dplyr) and Rust
@@ -41,7 +42,7 @@ REPO = Path(__file__).resolve().parents[3]
 SERVICE_SOURCE = REPO / 'mage_ai' / 'pipeline_services' / 'service'
 SERVICE_BINARY = SERVICE_SOURCE / 'target' / 'release' / 'mage-service'
 R_PROJECT = REPO / 'integration_tests' / 'r_env'
-MODES = ('cli', 'scheduler', 'fused', 'service')
+MODES = ('cli', 'scheduler', 'fused', 'warm', 'service')
 SAMPLE_SECONDS = 0.02
 
 
@@ -160,9 +161,46 @@ from mage_ai.shared.dates import utc_now
 
 db_connection.start_session(force=True)
 pipeline = Pipeline.get(pipeline_uuid, repo_path=project)
-fusion_mode = fusion.BLOCK_FUSION_CHAINS if mode == 'fused' else fusion.BLOCK_FUSION_OFF
+fusion_mode = fusion.BLOCK_FUSION_OFF if mode == 'scheduler' else fusion.BLOCK_FUSION_CHAINS
+manager = None
+if mode == 'warm':
+    # The engine and its workers run all the time in production, as the scheduler does:
+    # started before the measured run.
+    from mage_ai.orchestration import job_manager as job_manager_module
+    from mage_ai.orchestration.queue.config import QueueConfig
+    from mage_ai.orchestration.queue.engine_queue import EngineQueue
+    from mage_ai.pipeline_services.engine import engine_path
+
+    manager = job_manager_module.JobManager.__new__(job_manager_module.JobManager)
+    manager.queue = EngineQueue(QueueConfig(concurrency=4), engine_path())
+    job_manager_module.job_manager = manager
+    manager.start()
+    # The first workers import MageML meanwhile.
+    time.sleep(3)
 run = fusion_verify._create_run(pipeline, fusion_mode, variables, utc_now())
 print('START', flush=True)
+
+
+def run_on_engine(run):
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+    from mage_ai.orchestration.pipeline_scheduler import PipelineScheduler
+
+    done = (PipelineRun.PipelineRunStatus.COMPLETED, PipelineRun.PipelineRunStatus.FAILED,
+            PipelineRun.PipelineRunStatus.CANCELLED)
+    PipelineScheduler(run).start(should_schedule=False)
+    while True:
+        run.refresh()
+        if run.status in done:
+            return run
+        PipelineScheduler(run).schedule()
+        run.refresh()
+        if run.status in done:
+            return run
+        # As LoopTimeTrigger.wait: the scheduler runs again when a job finishes.
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and not manager.jobs_finished():
+            time.sleep(0.01)
+        manager.clean_up_jobs()
 
 
 def cpu():
@@ -172,8 +210,13 @@ def cpu():
 
 
 cpu_start, started = cpu(), time.perf_counter()
-run = fusion_verify.run_in_process(run, log=lambda text: print(text, file=sys.stderr))
+if manager is not None:
+    run = run_on_engine(run)
+else:
+    run = fusion_verify.run_in_process(run, log=lambda text: print(text, file=sys.stderr))
 seconds = time.perf_counter() - started
+if manager is not None:
+    manager.stop()
 print('RESULT ' + json.dumps(dict(
     seconds=seconds, cpu_seconds=cpu() - cpu_start,
     status=str(run.status), failed=[b.block_uuid for b in run.block_runs
@@ -256,7 +299,7 @@ def run_once(
     logs = out / 'logs' / str(rows) / mode
     logs.mkdir(parents=True, exist_ok=True)
     stdout_path, stderr_path = logs / f'{pipeline}.out', logs / f'{pipeline}.err'
-    scheduled = mode in ('scheduler', 'fused')
+    scheduled = mode in ('scheduler', 'fused', 'warm')
     cpu_before = _children_cpu()
     started = time.perf_counter()
     # Files, not pipes, for what is not parsed: a full pipe would block the run.

@@ -561,6 +561,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [v0.2.0](development/releases/v0.2.0.md)
 - [Releasing MageML](development/releasing.md)
 - [Resource-aware scheduling](development/resource-scheduling.md)
+- [Rust run engine for triggered runs](development/run-engine.md)
 - [Run records](development/run-records.md)
 - [Rust pipeline optimization](development/rust-pipeline-optimization.md)
 - [S3 with pandas and Polars](development/s3-integration.md)

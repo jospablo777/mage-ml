@@ -479,7 +479,7 @@ async fn retire(mut worker: Worker) {
 
 /// A pipe whose descriptors close on exec in the service: only the worker's copies, placed
 /// on 3 and 4 before exec, survive.
-fn pipe(name: &str) -> Result<(OwnedFd, OwnedFd), WorkerError> {
+pub(crate) fn pipe(name: &str) -> Result<(OwnedFd, OwnedFd), WorkerError> {
     let mut fds = [0; 2];
     // SAFETY: pipe writes two new descriptors into the array.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {

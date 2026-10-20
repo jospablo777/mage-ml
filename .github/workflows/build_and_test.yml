@@ -477,6 +477,14 @@ jobs:
       - name: Run the scheduler soak test with block fusion
         if: matrix.id == 'soak'
         run: make -C integration_tests test-soak-fusion SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-fusion-results.xml'
+      # The scheduler's jobs on the Rust run engine's warm workers (docs/development/run-engine.md).
+      - name: Build the run engine
+        if: matrix.id == 'soak'
+        working-directory: mage_ai/pipeline_services/service
+        run: cargo build -q --release -p mage-service
+      - name: Run the scheduler soak test on the run engine
+        if: matrix.id == 'soak'
+        run: make -C integration_tests test-soak-engine SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-engine-results.xml'
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml

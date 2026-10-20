@@ -223,13 +223,18 @@ def test_scheduler_runs_every_pipeline_run_once(soak):
         assert (total, run_in_frame) == (expected, run_id), (run_id, completed[run_id])
 
     # With fusion, a chain's loader and exporter ran in the same process, as one stage;
-    # without it, each block ran in its own process.
+    # without it, each block ran as its own job: in its own process with the process queue,
+    # in whichever warm worker was free on the run engine (MAGE_JOB_ENGINE), which may be
+    # the one that ran the loader.
     pids = query(soak['results'], f'''
         SELECT load_pid, export_pid FROM {soak['schema']}.results WHERE load_pid IS NOT NULL
     ''')
     assert pids
     same = [load_pid == export_pid for load_pid, export_pid in pids]
-    assert all(same) if os.getenv('MAGE_TEST_SOAK_FUSION') else not any(same), pids
+    if os.getenv('MAGE_TEST_SOAK_FUSION'):
+        assert all(same), pids
+    elif not os.getenv('MAGE_JOB_ENGINE'):
+        assert not any(same), pids
 
     # The flaky loader failed once per run and passed on its retry.
     attempts = Counter(row[0] for row in query(

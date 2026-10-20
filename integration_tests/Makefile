@@ -186,6 +186,15 @@ test-soak-fusion: up
 	cd .. && MAGE_TEST_SOAK_FUSION=1 $(PYTHON) -m pytest integration_tests/soak -p no:xdist \
 		-rs $(PYTEST_ARGS)
 
+# The same with the scheduler's jobs on the Rust run engine (docs/development/run-engine.md),
+# and the engine queue's own tests. ENGINE is the mage-service binary with the jobs command.
+ENGINE ?= ../mage_ai/pipeline_services/service/target/release/mage-service
+test-soak-engine: up
+	cd .. && MAGE_JOB_ENGINE=on MAGE_ENGINE_PATH=$(abspath $(ENGINE)) $(PYTHON) -m pytest \
+		mage_ai/tests/orchestration/queue/test_engine_queue.py \
+		integration_tests/soak/test_scheduler.py integration_tests/soak/test_worker_crash.py \
+		-p no:xdist -rs $(PYTEST_ARGS)
+
 # DuckDB runs in process; these tests need no service.
 test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)
