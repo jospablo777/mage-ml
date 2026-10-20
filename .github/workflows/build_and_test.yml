@@ -190,6 +190,10 @@ jobs:
           else
             echo "No published release yet."
           fi
+      # The engine (mageml-engine) builds librdkafka with CMake, which includes curl's
+      # header for its OAuth support.
+      - name: Install the engine's build libraries
+        run: sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
       - name: Build sdist and wheel
         run: uv build --all-packages
 
