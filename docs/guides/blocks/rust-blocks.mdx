@@ -256,6 +256,48 @@ fn export_data(totals: DataFrame) -> Result<()> {
 
 The PostgreSQL loader and exporter templates start from these.
 
+## ClickHouse
+
+The `mage::clickhouse` module reads and writes ClickHouse over its HTTP interface, with
+rows in Arrow: results arrive as an Arrow stream that Polars reads into columns, and
+frames are inserted as one. Turn on the `clickhouse` feature of the `mage` crate in
+`rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "clickhouse"] }
+```
+
+```rust
+use mage::clickhouse::{ClickHouse, WritePolicy};
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {
+    ClickHouse::connect()?.query("SELECT * FROM events WHERE day = today()")
+}
+
+fn export_data(totals: DataFrame) -> Result<()> {
+    ClickHouse::connect()?.write(&totals, "daily_totals", WritePolicy::Replace)?;
+    Ok(())
+}
+```
+
+- **Connection.** `ClickHouse::connect()` uses the block's io_config profile, with the
+  keys of MageML's Python client: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT` (the HTTP port,
+  8123 by default), `CLICKHOUSE_INTERFACE` (`http` or `https`), `CLICKHOUSE_USERNAME`,
+  `CLICKHOUSE_PASSWORD` and `CLICKHOUSE_DATABASE`.
+- **Reading.** Integers (`UInt64` included), floats, strings, `Date32`, `DateTime64` with
+  its time zone, decimals up to 38 digits, booleans, arrays, maps and tuples arrive as
+  they are. `Date` and `DateTime` are read as `Date32` and `DateTime64`. Types Arrow
+  cannot carry are read as their exact text: `UUID`, IP addresses, enums, 128 and 256-bit
+  integers, decimals of more than 38 digits, and nested values that hold any of these.
+- **Writing.** `WritePolicy::Replace` recreates the table from the frame's types (each
+  `Nullable`, with the `MergeTree ORDER BY tuple()` engine of the Python client),
+  `WritePolicy::Append` inserts by column name, letting ClickHouse convert each value to
+  its column's type, and `WritePolicy::Fail` stops when the table exists. Lists and
+  structs have no column type here: create the table first, or cast them.
+- **Other statements.** `execute(sql)` runs a statement; `describe(sql)` lists a query's
+  columns and types.
+
 ## Object storage
 
 The `mage::storage` module reads and writes Parquet and CSV files on Amazon S3 and

@@ -21,6 +21,8 @@
 //! Mage generates the binary's `main`, which calls [`main`] with the block function and
 //! its `test_*` functions.
 
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
 pub mod context;
 pub mod extract;
 #[cfg(feature = "feast")]

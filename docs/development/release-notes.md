@@ -18,6 +18,10 @@
 
 ### Rust blocks
 
+- `mage::clickhouse` (feature `clickhouse`) reads and writes ClickHouse over HTTP with rows
+  in Arrow, with the Python client's profile keys and table engine. Types Arrow cannot
+  carry (UUID, IP addresses, enums, wide integers and decimals) read as exact text. See
+  [Rust blocks](/guides/blocks/rust-blocks#clickhouse).
 - `mage::storage` (feature `storage`) reads and writes Parquet and CSV on S3 and
   S3-compatible stores, Google Cloud Storage and Azure Blob Storage, with credentials
   from the block's io_config profile. Scans are lazy, so filters and column selections

@@ -10,6 +10,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
+from integration_tests import rust_features
 from integration_tests.mage_runner import execute_pipeline
 from integration_tests.postgres.test_sql_block_matrix import build, error_of
 
@@ -53,15 +54,7 @@ fn export_data(events: DataFrame, vars: Vars) -> Result<()> {
 @pytest.fixture
 def storage_workspace(mage_project):
     """The project's Rust environment with mage::storage."""
-    from mage_ai.data_preparation.models.block.rust import workspace
-
-    rust = workspace.init(mage_project)
-    text = rust.cargo_toml.read_text()
-    if '"storage"' not in text:
-        rust.cargo_toml.write_text(
-            text.replace('features = ["postgres"]', 'features = ["postgres", "storage"]'),
-        )
-    return rust
+    return rust_features.enable(mage_project, 'storage')
 
 
 def part(first: int, count: int) -> pd.DataFrame:

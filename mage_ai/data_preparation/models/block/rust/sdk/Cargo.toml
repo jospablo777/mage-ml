@@ -36,6 +36,8 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 # Object storage for blocks (mage::storage): S3 and S3-compatible stores, Google Cloud Storage
 # and Azure Blob Storage, through Polars' own cloud readers and writers.
 storage = ["polars/aws", "polars/gcp", "polars/azure"]
+# ClickHouse for blocks (mage::clickhouse), over HTTP with rows in Arrow.
+clickhouse = ["dep:ureq", "polars/ipc_streaming"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]
