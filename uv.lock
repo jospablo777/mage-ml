@@ -974,7 +974,7 @@ wheels = [
 
 [[package]]
 name = "column-atlas-native"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "rust/column_atlas" }
 
 [[package]]

@@ -237,11 +237,7 @@ impl Postgres {
     /// Writes the frame to the table; returns the rows written.
     pub fn write(&mut self, frame: &DataFrame, table: &str, policy: WritePolicy) -> Result<u64> {
         let full = self.full_name(table);
-        let writers: Vec<Writer> = frame
-            .columns()
-            .iter()
-            .map(|c| Writer::of(c.dtype(), c.name()))
-            .collect::<Result<_>>()?;
+        let writers = writers_of(frame)?;
         let mut transaction = self.client.transaction()?;
         let exists: bool = transaction
             .query_one("SELECT to_regclass($1) IS NOT NULL", &[&full])?
@@ -283,36 +279,7 @@ impl Postgres {
         };
         let copy = format!("COPY {target} ({names}) FROM STDIN (FORMAT binary)");
         let mut sink = transaction.copy_in(copy.as_str())?;
-        let mut buffer = Vec::with_capacity(1 << 20);
-        buffer.extend_from_slice(COPY_SIGNATURE);
-        buffer.extend_from_slice(&0i32.to_be_bytes());
-        buffer.extend_from_slice(&0i32.to_be_bytes());
-        let columns: Vec<Series> = frame
-            .columns()
-            .iter()
-            .zip(&writers)
-            .map(|(c, w)| prepared(c, w))
-            .collect::<Result<_>>()?;
-        let mut encoders: Vec<Encoder> = columns
-            .iter()
-            .zip(&writers)
-            .map(|(c, w)| Encoder::new(c, w))
-            .collect::<Result<_>>()?;
-        let field_count = (encoders.len() as i16).to_be_bytes();
-        for _ in 0..frame.height() {
-            buffer.extend_from_slice(&field_count);
-            for (encoder, column) in encoders.iter_mut().zip(&columns) {
-                encoder
-                    .encode_next(&mut buffer)
-                    .with_context(|| format!("Column {}", column.name()))?;
-            }
-            if buffer.len() >= 1 << 20 {
-                sink.write_all(&buffer)?;
-                buffer.clear();
-            }
-        }
-        buffer.extend_from_slice(&(-1i16).to_be_bytes());
-        sink.write_all(&buffer)?;
+        encode_copy(frame, &writers, |piece| Ok(sink.write_all(piece)?))?;
         let written = sink.finish()?;
         if target != full {
             let types: HashMap<String, String> = transaction
@@ -349,6 +316,68 @@ impl Postgres {
         transaction.commit()?;
         Ok(written)
     }
+}
+
+/// Each column's binary COPY writer, from its Polars type.
+fn writers_of(frame: &DataFrame) -> Result<Vec<Writer>> {
+    frame
+        .columns()
+        .iter()
+        .map(|c| Writer::of(c.dtype(), c.name()))
+        .collect()
+}
+
+/// Encodes the frame's rows as binary COPY data (signature, header, rows, trailer), handed
+/// to `out` in pieces of about a megabyte.
+fn encode_copy(
+    frame: &DataFrame,
+    writers: &[Writer],
+    mut out: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    let mut buffer = Vec::with_capacity(1 << 20);
+    buffer.extend_from_slice(COPY_SIGNATURE);
+    buffer.extend_from_slice(&0i32.to_be_bytes());
+    buffer.extend_from_slice(&0i32.to_be_bytes());
+    let columns: Vec<Series> = frame
+        .columns()
+        .iter()
+        .zip(writers)
+        .map(|(c, w)| prepared(c, w))
+        .collect::<Result<_>>()?;
+    let mut encoders: Vec<Encoder> = columns
+        .iter()
+        .zip(writers)
+        .map(|(c, w)| Encoder::new(c, w))
+        .collect::<Result<_>>()?;
+    let field_count = (encoders.len() as i16).to_be_bytes();
+    for _ in 0..frame.height() {
+        buffer.extend_from_slice(&field_count);
+        for (encoder, column) in encoders.iter_mut().zip(&columns) {
+            encoder
+                .encode_next(&mut buffer)
+                .with_context(|| format!("Column {}", column.name()))?;
+        }
+        if buffer.len() >= 1 << 20 {
+            out(&buffer)?;
+            buffer.clear();
+        }
+    }
+    buffer.extend_from_slice(&(-1i16).to_be_bytes());
+    out(&buffer)
+}
+
+/// The column types binary COPY writes for this frame, as `CREATE TABLE` would declare them,
+/// and the COPY data of its rows, for a client that runs the COPY itself: MageML's Python
+/// client sends it in its own transaction, after creating or emptying the table.
+pub fn binary_copy(frame: &DataFrame) -> Result<(Vec<String>, Vec<u8>)> {
+    let writers = writers_of(frame)?;
+    let types = writers.iter().map(Writer::sql_type).collect();
+    let mut data = Vec::new();
+    encode_copy(frame, &writers, |piece| {
+        data.extend_from_slice(piece);
+        Ok(())
+    })?;
+    Ok((types, data))
 }
 
 /// TLS as libpq does it, so a profile connects the same way from Python and Rust blocks:

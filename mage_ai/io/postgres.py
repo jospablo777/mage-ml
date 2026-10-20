@@ -15,7 +15,7 @@ from psycopg2.extras import (
     register_default_jsonb,
 )
 
-from mage_ai.io import postgres_types
+from mage_ai.io import postgres_native, postgres_types
 from mage_ai.io.base import (
     QUERY_ROW_LIMIT,
     ExportWritePolicy,
@@ -725,10 +725,10 @@ class Postgres(BaseSQL):
                         skip_semicolon_at_end=skip_semicolon_at_end,
                     ))
 
-                rendered = postgres_types.render_columns(frame, columns, target_types)
                 insert_columns = ', '.join(f'"{column}"' for column in columns)
 
                 if method:
+                    rendered = postgres_types.render_columns(frame, columns, target_types)
                     commands = [
                         f'INSERT INTO {full_table_name} ({insert_columns})',
                         'VALUES %s',
@@ -751,6 +751,20 @@ class Postgres(BaseSQL):
                         page_size=insert_page_size,
                     )
                 else:
+                    # Binary COPY encoded in Rust when every column encodes to the table's
+                    # type (postgres_native.py); COPY text otherwise.
+                    unsent = 'binary COPY is off'
+                    if postgres_native.enabled():
+                        unsent = postgres_native.copy(
+                            cursor,
+                            full_table_name,
+                            frame,
+                            columns,
+                            self._table_column_types(full_table_name),
+                        )
+                    rendered = []
+                    if unsent is not None:
+                        rendered = postgres_types.render_columns(frame, columns, target_types)
                     row_count = len(rendered[0]) if rendered else 0
                     for start in range(0, row_count, COPY_CHUNK_ROWS):
                         chunk = [column[start:start + COPY_CHUNK_ROWS] for column in rendered]

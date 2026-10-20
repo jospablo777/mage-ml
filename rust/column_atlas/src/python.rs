@@ -117,8 +117,55 @@ fn profile_columns(py: Python<'_>, path: String, request: String) -> PyResult<St
     json(&result)
 }
 
+/// The result of a query as an Arrow IPC stream, read through binary COPY.
+#[cfg(feature = "postgres")]
+#[pyfunction]
+fn pg_query<'py>(
+    py: Python<'py>,
+    settings: String,
+    sql: String,
+) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let bytes = py
+        .detach(|| crate::postgres::query(&settings, &sql))
+        .map_err(to_python)?;
+    Ok(pyo3::types::PyBytes::new(py, &bytes))
+}
+
+/// Writes an Arrow IPC stream into a table through binary COPY; returns the rows written.
+#[cfg(feature = "postgres")]
+#[pyfunction]
+fn pg_write(
+    py: Python<'_>,
+    settings: String,
+    data: &[u8],
+    table: String,
+    policy: String,
+) -> PyResult<u64> {
+    py.detach(|| crate::postgres::write(&settings, data, &table, &policy))
+        .map_err(to_python)
+}
+
+/// For a frame as an Arrow IPC stream: the column types binary COPY writes and the COPY data.
+#[cfg(feature = "postgres")]
+#[pyfunction]
+fn pg_copy_binary<'py>(
+    py: Python<'py>,
+    data: &[u8],
+) -> PyResult<(Vec<String>, Bound<'py, pyo3::types::PyBytes>)> {
+    let (types, bytes) = py
+        .detach(|| crate::postgres::copy_binary(data))
+        .map_err(to_python)?;
+    Ok((types, pyo3::types::PyBytes::new(py, &bytes)))
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[cfg(feature = "postgres")]
+    {
+        module.add_function(wrap_pyfunction!(pg_query, module)?)?;
+        module.add_function(wrap_pyfunction!(pg_write, module)?)?;
+        module.add_function(wrap_pyfunction!(pg_copy_binary, module)?)?;
+    }
     module.add_class::<NativeTable>()?;
     module.add_function(wrap_pyfunction!(validate_contract, module)?)?;
     module.add_function(wrap_pyfunction!(infer_contract, module)?)?;

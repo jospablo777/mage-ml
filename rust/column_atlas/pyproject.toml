@@ -4,14 +4,14 @@ build-backend = "maturin"
 
 [project]
 name = "column-atlas-native"
-version = "0.1.2"
-description = "Read-only Parquet queries for ColumnAtlas, the block output explorer of Mage"
+version = "0.2.0"
+description = "Native code of MageML: Parquet queries for ColumnAtlas and PostgreSQL binary COPY"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 
 [tool.maturin]
 module-name = "column_atlas_native"
-features = ["extension-module"]
+features = ["extension-module", "postgres"]
 profile = "release"
 # Without debug symbols the wheel is several times smaller.
 strip = true
@@ -24,4 +24,7 @@ cache-keys = [
   { file = "Cargo.lock" },
   { file = "rust-toolchain.toml" },
   { file = "src/**/*.rs" },
+  # The PostgreSQL client comes from the Rust block SDK (the postgres feature).
+  { file = "../../mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml" },
+  { file = "../../mage_ai/data_preparation/models/block/rust/sdk/src/**/*.rs" },
 ]

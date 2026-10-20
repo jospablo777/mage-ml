@@ -239,7 +239,8 @@ class ExportTest(unittest.TestCase):
         self.assertIsNone(self.insert().args[2][1][-1])
 
     def test_copy_path_writes_microsecond_timestamps(self):
-        self.export()
+        with patch.dict('os.environ', MAGE_POSTGRES_BINARY_COPY='off'):
+            self.export()
 
         query, contents = self.connection.copy_calls[0]
         self.assertIn('COPY analytics.daily_orders', query)
@@ -247,6 +248,18 @@ class ExportTest(unittest.TestCase):
             contents.splitlines()[1],
             '345039\t2026-07-20 18:15:34.258586+00:00\tfalse\t1\t\\N',
         )
+        self.assertEqual(self.connection.commits, 1)
+
+    def test_copy_path_sends_binary_rows_when_the_columns_encode_to_the_table(self):
+        from mage_ai.io import postgres_native
+
+        if not postgres_native.enabled():
+            self.skipTest('column_atlas_native has no binary COPY')
+        self.export()
+
+        query, contents = self.connection.copy_calls[0]
+        self.assertIn('FROM STDIN (FORMAT binary)', query)
+        self.assertTrue(contents.startswith(b'PGCOPY\n\xff\r\n\x00'))
         self.assertEqual(self.connection.commits, 1)
 
     def test_a_failed_export_rolls_back(self):
