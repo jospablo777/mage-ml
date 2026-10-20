@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from warnings import warn
 
 import ruamel.yaml
-from jinja2 import Template
+from mage_ai.shared.jinja import compiled
 
 from mage_ai.cluster_manager.constants import ClusterType
 from mage_ai.data_preparation.templates.utils import copy_template_directory
@@ -90,7 +90,7 @@ class RepoConfig:
             if not config_dict:
                 if os.path.exists(self.metadata_path):
                     with open(self.metadata_path) as f:
-                        config_file = Template(f.read()).render(**get_template_vars())
+                        config_file = compiled(f.read()).render(**get_template_vars())
                         repo_config = load_yaml(config_file) or {}
                         repo_config = trim_strings(repo_config)
                 else:

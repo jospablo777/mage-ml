@@ -32,7 +32,7 @@ import pandas as pd
 import polars as pl
 import simplejson
 import yaml
-from jinja2 import Template
+from mage_ai.shared.jinja import compiled
 
 import mage_ai.data_preparation.decorators
 from mage_ai.cache.block import BlockCache
@@ -2951,7 +2951,7 @@ class Block(
                 executor_type_str = self.executor_type.value
             else:
                 executor_type_str = self.executor_type
-            block_executor_type = Template(executor_type_str).render(**get_template_vars())
+            block_executor_type = compiled(executor_type_str).render(**get_template_vars())
         else:
             block_executor_type = None
         if not block_executor_type or block_executor_type == ExecutorType.LOCAL_PYTHON:

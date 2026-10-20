@@ -17,6 +17,10 @@
   worker. Job workers and `mage run` now freeze what they imported before the first block
   (`gc.freeze`): a fused three-block run on the run engine went from 0.25 to 0.12 seconds,
   and `mage run` of the same pipeline from 0.95 to 0.77.
+- A run read the project's `metadata.yaml` as a Jinja template about a dozen times and
+  compiled it each time, about a sixth of a short run on the run engine. Templates are now
+  compiled once per text and still rendered on each read, so environment variables are
+  current.
 
 ## MageML 0.2.0 (2026-10-19)
 

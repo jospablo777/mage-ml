@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import aiofiles
 import pytz
-from jinja2 import Template
+from mage_ai.shared.jinja import compiled
 
 from mage_ai.authentication.permissions.constants import EntityName
 from mage_ai.cache.block import BlockCache
@@ -2095,7 +2095,7 @@ class Pipeline:
     def get_executor_type(self) -> Optional[str]:
         if self._rendered_executor_type is None:
             if self.executor_type:
-                return Template(self.executor_type).render(**get_template_vars())
+                return compiled(self.executor_type).render(**get_template_vars())
             else:
                 self._rendered_executor_type = self.executor_type
         return self._rendered_executor_type
