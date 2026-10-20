@@ -8,8 +8,9 @@ the process queue: has_job, kill_job and jobs_finished behave the same, and with
 job keys and this process's liveness key are the process queue's, so replicas and crash
 detection work as before.
 
-MAGE_JOB_ENGINE=on selects it (queue_factory.py); without an engine that has the `jobs`
-command, the process queue runs the jobs.
+It runs the jobs when an engine is installed (queue_factory.py); MAGE_JOB_ENGINE=off runs
+them in the process queue, and without an engine that has the `jobs` command the process
+queue runs them too.
 """
 import base64
 import json

@@ -322,7 +322,7 @@ committed: write the ones that should guard a deploy, and commit them.
 the engine, `mage-service`, with the Python running MageML: the same API, schedules and
 streams as the image, without Docker.
 
-- **The engine.** `uv pip install mageml-engine` installs it next to Python (Linux x86_64
+- **The engine.** `uv pip install "mage-ml[services]"` installs it next to Python (Linux x86_64
   and aarch64 with glibc 2.28 or later, macOS on Apple silicon). Elsewhere, build it with
   `cargo build --release -p mage-service --features full` and set `MAGE_ENGINE_PATH`.
 - **Values.** `environments/dev.yaml` holds the non-secret `variables`; secrets go in

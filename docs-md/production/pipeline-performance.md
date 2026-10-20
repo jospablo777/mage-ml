@@ -120,8 +120,8 @@ languages are smaller.
 
 ### Scheduled runs on the run engine
 
-With `MAGE_JOB_ENGINE=on` and `mageml-engine` 0.2.0 or later, the scheduler runs each job in
-a Python worker that is already started, instead of a new process that imports MageML
+With the engine installed (`mage-ml[services]`, `mageml-engine` 0.2.0 or later), the
+scheduler runs each job in a Python worker that is already started, instead of a new process that imports MageML
 ([job workers](../design/data-pipeline-management.md#job-workers-on-the-run-engine)). A separate
 run of the benchmark (2026-10-20, 3 repeats), median seconds:
 
@@ -193,8 +193,9 @@ and converts the data from one language to the other.
   block compute and store its output, which undoes compiled chains.
 - **Let MageML compile ahead.** Compilation runs after a save, when a trigger is turned on
   and at server start, so a scheduled run does not wait for a Rust build.
-- **Run the scheduler's jobs on the run engine** (`MAGE_JOB_ENGINE=on`): scheduled runs
-  take about a third of the time, for about 450 MB held by the engine and its idle worker.
+- **Install the engine** (`uv pip install "mage-ml[services]"`): the scheduler's jobs run in
+  its warm workers, and scheduled runs take about a third of the time, for about 450 MB held
+  by the engine and its idle workers. `MAGE_JOB_ENGINE=off` turns it off.
 - **For the lowest latency and memory, export a service.** It runs without the scheduler,
   database and editor.
 - **R: fewer chains.** Each chain of R blocks starts one R session.

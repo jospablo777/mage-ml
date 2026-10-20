@@ -3,10 +3,11 @@
 The MageML service engine, `mage-service`, as a platform wheel: it runs pipelines and
 streams exported from MageML, with the standard connectors (Kafka, RabbitMQ, NATS JetStream,
 IBM MQ, ActiveMQ, Amazon SQS, Google Cloud Pub/Sub, MongoDB, PostgreSQL, ClickHouse, object
-storage, Elasticsearch, OpenSearch and InfluxDB).
+storage, Elasticsearch, OpenSearch and InfluxDB), and the scheduler's jobs of a MageML
+server in warm Python workers.
 
 ```bash
-uv pip install "mage-ml[engine]"
+uv pip install "mage-ml[services]"
 mage service run my-service
 ```
 

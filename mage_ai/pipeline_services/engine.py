@@ -34,12 +34,28 @@ def engine_path() -> Path:
         if candidate is not None and _executable(candidate):
             return candidate
     raise EngineNotFound(
-        'The service engine is not installed. Install it with `uv pip install mageml-engine` '
+        'The service engine is not installed. Install it with `uv pip install "mage-ml[services]"` '
         '(Linux x86_64 and aarch64 with glibc 2.28 or later, macOS on Apple silicon); '
         'elsewhere build it with `cargo build --release -p mage-service` in '
         'mage_ai/pipeline_services/service and set MAGE_ENGINE_PATH to the binary, or run '
         'the service in Docker with `mage service build <name> --image`.'
     )
+
+
+def installed_engine_path() -> Optional[Path]:
+    """
+    An installed engine: MAGE_ENGINE_PATH, the wheel's binary next to Python, or
+    mage-service on PATH; not the builds of a source checkout. None without one.
+    """
+    configured = os.getenv('MAGE_ENGINE_PATH')
+    if configured:
+        path = Path(configured).expanduser()
+        return path if _executable(path) else None
+    beside = Path(sys.executable).parent / ENGINE_NAME
+    if _executable(beside):
+        return beside
+    found = shutil.which(ENGINE_NAME)
+    return Path(found) if found and _executable(Path(found)) else None
 
 
 def _candidates():

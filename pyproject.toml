@@ -235,6 +235,9 @@ trino = [
 ]
 integrations = ["mage-integrations==0.2.0"]
 # Dependency profile used by the container image.
+# The Rust engine, mage-service: stream and pipeline services, and the scheduler's jobs in
+# warm workers (on by default when it is installed; MAGE_JOB_ENGINE=off turns it off).
+services = ["mageml-engine>=0.2.0"]
 all = [
   "mage-ml[airtable]",
   "mage-ml[azure]",
@@ -304,11 +307,12 @@ constraint-dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["mage_integrations", "vendor/singer-python", "rust/column_atlas"]
+members = ["mage_integrations", "vendor/singer-python", "rust/column_atlas", "packages/mageml-engine"]
 exclude = ["runtimes/*"]
 
 [tool.uv.sources]
 column-atlas-native = { workspace = true }
+mageml-engine = { workspace = true }
 mage-integrations = { workspace = true }
 singer-python = { workspace = true }
 

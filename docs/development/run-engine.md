@@ -1,6 +1,7 @@
 # Rust run engine for triggered runs
 
-Status: steps 1 to 3 done (2026-10-20); `MAGE_JOB_ENGINE=on` turns it on.
+Status: steps 1 to 3 done (2026-10-20). On by default where the engine is installed
+(`mage-ml[services]`); `MAGE_JOB_ENGINE=off` turns it off (decision 2026-10-20, below).
 
 ## Where a triggered run spends its time
 
@@ -110,6 +111,27 @@ database round trips (refreshes, guarded updates, the crashed block run check), 
 scheduler in Rust would make too. A rewrite would carry the scheduler's rules (triggers,
 backfills, concurrency, resources, retries, locks between replicas) for little gain, so it
 is not planned; batching those round trips is the next step if passes grow.
+
+## On by default (decision, 2026-10-20)
+
+Jobs run on the engine wherever it is installed, unless `MAGE_JOB_ENGINE=off`.
+
+- **For:** a scheduled run takes about a third of the time (Measured, above); the soak tests
+  pass on it; a worker puts back environment variables, the working directory, `sys.path`,
+  warning filters and NumPy error settings after each job, drops the project's modules, and
+  is replaced when a job leaves threads running or its memory grows past
+  `MAGE_JOBS_MAX_RSS_MB`; without the engine, jobs run in processes as before.
+- **Against:** state a library keeps in its own module (an MLflow experiment set with
+  `mlflow.set_experiment`, pandas display options, a random seed) carries over to the next
+  job in the same worker, as in Celery's workers. Blocks that set what they use are not
+  affected. The engine and its idle workers hold about 450 MB.
+- **So:** installing the engine (`mage-ml[services]`) is the choice to use it, and `off`
+  is one variable away. Only an installed engine is used without `MAGE_JOB_ENGINE`: a
+  source checkout's cargo build can be stale or a debug build, and needs
+  `MAGE_JOB_ENGINE=on`. The process soak tests set `MAGE_JOB_ENGINE=off`, so both ways
+  stay tested.
+- **The extra is `services`:** the engine is `mage-service`, which runs services, streams
+  and these jobs. `engine` named the implementation, not what it does.
 
 ## Plan
 

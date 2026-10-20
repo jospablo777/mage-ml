@@ -145,7 +145,7 @@ def export_service(project: Path, name: str, target: Path, env: Dict[str, str]) 
 # ---- one run --------------------------------------------------------------------------
 
 DRIVER = '''
-import json, resource, sys, time
+import json, os, resource, sys, time
 
 from mage_ai.data_preparation.repo_manager import set_repo_path
 
@@ -163,6 +163,9 @@ db_connection.start_session(force=True)
 pipeline = Pipeline.get(pipeline_uuid, repo_path=project)
 fusion_mode = fusion.BLOCK_FUSION_OFF if mode == 'scheduler' else fusion.BLOCK_FUSION_CHAINS
 manager = None
+if mode in ('scheduler', 'fused'):
+    # A process per job, as these modes measure, even where an engine is installed.
+    os.environ['MAGE_JOB_ENGINE'] = 'off'
 if mode == 'warm':
     # The engine and its workers run all the time in production, as the scheduler does:
     # started before the measured run.

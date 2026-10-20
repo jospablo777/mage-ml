@@ -46,7 +46,9 @@ class EngineLookupTest(TestCase):
         with patch.dict(os.environ, {}, clear=False), \
                 patch.object(engine, '_candidates', return_value=iter([])):
             os.environ.pop('MAGE_ENGINE_PATH', None)
-            with self.assertRaisesRegex(engine.EngineNotFound, 'uv pip install mageml-engine'):
+            with self.assertRaisesRegex(
+                engine.EngineNotFound, r'uv pip install "mage-ml\[services\]"',
+            ):
                 engine.engine_path()
 
 

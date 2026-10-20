@@ -233,7 +233,9 @@ def test_scheduler_runs_every_pipeline_run_once(soak):
     same = [load_pid == export_pid for load_pid, export_pid in pids]
     if os.getenv('MAGE_TEST_SOAK_FUSION'):
         assert all(same), pids
-    elif not os.getenv('MAGE_JOB_ENGINE'):
+    elif os.getenv('MAGE_JOB_ENGINE', '').lower() == 'off':
+        # The process queue: a process per job. Without `off`, an installed engine runs
+        # the jobs in warm workers.
         assert not any(same), pids
 
     # The flaky loader failed once per run and passed on its retry.

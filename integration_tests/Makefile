@@ -179,11 +179,12 @@ test-kafka-outage:
 
 # It runs on its own: make test-soak MAGE_TEST_SOAK_SECONDS=1800
 test-soak: up
-	cd .. && $(PYTHON) -m pytest integration_tests/soak -p no:xdist -rs $(PYTEST_ARGS)
+	cd .. && MAGE_JOB_ENGINE=off $(PYTHON) -m pytest integration_tests/soak -p no:xdist -rs \
+		$(PYTEST_ARGS)
 
 # The same, with every chain of blocks running as one stage (block_fusion: chains).
 test-soak-fusion: up
-	cd .. && MAGE_TEST_SOAK_FUSION=1 $(PYTHON) -m pytest integration_tests/soak -p no:xdist \
+	cd .. && MAGE_JOB_ENGINE=off MAGE_TEST_SOAK_FUSION=1 $(PYTHON) -m pytest integration_tests/soak -p no:xdist \
 		-rs $(PYTEST_ARGS)
 
 # The same with the scheduler's jobs on the Rust run engine (docs/development/run-engine.md),

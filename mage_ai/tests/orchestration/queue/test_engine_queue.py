@@ -15,7 +15,11 @@ from mage_ai.orchestration.fusion import ProcessState
 from mage_ai.orchestration.queue import engine_worker
 from mage_ai.orchestration.queue.config import QueueConfig
 from mage_ai.orchestration.queue.engine_queue import EngineQueue, engine_supports_jobs
-from mage_ai.orchestration.queue.queue_factory import QueueFactory, job_engine_requested
+from mage_ai.orchestration.queue.queue_factory import (
+    QueueFactory,
+    job_engine_mode,
+    job_engine_requested,
+)
 from mage_ai.pipeline_services.engine import EngineNotFound, engine_path
 from mage_ai.tests.base_test import TestCase
 
@@ -152,6 +156,53 @@ class QueueFactoryTests(unittest.TestCase):
         with patch.dict(os.environ, MAGE_JOB_ENGINE='on',
                         MAGE_ENGINE_PATH='/nonexistent/mage-service'):
             queue = QueueFactory.get_queue()
+        self.assertIsInstance(queue, ProcessQueue)
+        queue.mp_manager.shutdown()
+
+    def fake_engine(self, directory, has_jobs=True):
+        path = Path(directory, 'mage-service')
+        path.write_text('#!/bin/sh\nexit 0\n' if has_jobs else '#!/bin/sh\nexit 2\n')
+        path.chmod(0o755)
+        return path
+
+    def test_unset_is_automatic(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('MAGE_JOB_ENGINE', None)
+            self.assertEqual(job_engine_mode(), 'auto')
+        with patch.dict(os.environ, MAGE_JOB_ENGINE='Off'):
+            self.assertEqual(job_engine_mode(), 'off')
+
+    def test_an_installed_engine_runs_jobs_by_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.fake_engine(directory)
+            env = dict(MAGE_ENGINE_PATH=str(engine))
+            with patch.dict(os.environ, env):
+                os.environ.pop('MAGE_JOB_ENGINE', None)
+                queue = QueueFactory.get_queue()
+            self.assertIsInstance(queue, EngineQueue)
+
+    def test_off_runs_jobs_in_processes_with_an_engine_installed(self):
+        from mage_ai.orchestration.queue.process_queue import ProcessQueue
+
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self.fake_engine(directory)
+            with patch.dict(os.environ, MAGE_ENGINE_PATH=str(engine), MAGE_JOB_ENGINE='off'):
+                queue = QueueFactory.get_queue()
+        self.assertIsInstance(queue, ProcessQueue)
+        queue.mp_manager.shutdown()
+
+    def test_a_source_checkouts_build_is_not_used_by_default(self):
+        from mage_ai.orchestration.queue.process_queue import ProcessQueue
+
+        with tempfile.TemporaryDirectory() as directory:
+            built = self.fake_engine(directory)
+            with patch.dict(os.environ, {}), \
+                    patch('mage_ai.pipeline_services.engine.installed_engine_path',
+                          return_value=None), \
+                    patch('mage_ai.pipeline_services.engine.engine_path', return_value=built):
+                os.environ.pop('MAGE_JOB_ENGINE', None)
+                os.environ.pop('MAGE_ENGINE_PATH', None)
+                queue = QueueFactory.get_queue()
         self.assertIsInstance(queue, ProcessQueue)
         queue.mp_manager.shutdown()
 

@@ -9,7 +9,7 @@ takes about fifteen minutes.
 
 ## Before you start
 
-- MageML and the stream engine: `uv pip install "mage-ml[streaming]" mageml-engine`.
+- MageML and the stream engine: `uv pip install "mage-ml[streaming,services]"`.
 - Docker, for PostgreSQL.
 - For the last step, an Amplitude plan with destinations (Plus, Growth or Enterprise) and an
   HTTPS address for the service.

@@ -12,6 +12,7 @@ members = [
     "column-atlas-native",
     "mage-integrations",
     "mage-ml",
+    "mageml-engine",
     "singer-python",
 ]
 constraints = [
@@ -3767,6 +3768,9 @@ s3 = [
     { name = "boto3" },
     { name = "botocore" },
 ]
+services = [
+    { name = "mageml-engine" },
+]
 snowflake = [
     { name = "snowflake-connector-python" },
 ]
@@ -3902,6 +3906,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["spark"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["streaming"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["trino"], marker = "extra == 'all'" },
+    { name = "mageml-engine", marker = "extra == 'services'", editable = "packages/mageml-engine" },
     { name = "memory-profiler" },
     { name = "mlflow-skinny", marker = "extra == 'mlflow'", specifier = ">=3.17,<4" },
     { name = "mysql-connector-python", marker = "extra == 'mysql'", specifier = ">=9.1,<10" },
@@ -3973,7 +3978,7 @@ requires-dist = [
     { name = "werkzeug", specifier = ">=3.1.6" },
     { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3992,6 +3997,11 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
 ]
+
+[[package]]
+name = "mageml-engine"
+version = "0.2.0"
+source = { editable = "packages/mageml-engine" }
 
 [[package]]
 name = "mako"

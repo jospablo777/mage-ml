@@ -8,7 +8,7 @@ a MageML stream reads that topic like any other. It takes about ten minutes.
 
 ## Before you start
 
-- MageML and the stream engine: `uv pip install "mage-ml[streaming]" mageml-engine`.
+- MageML and the stream engine: `uv pip install "mage-ml[streaming,services]"`.
 - Docker, for a local Kafka.
 
 ## 1. Start Kafka and write Amplitude events

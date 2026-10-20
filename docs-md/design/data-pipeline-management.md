@@ -212,15 +212,26 @@ queue_config:
 The default value of concurrency is 20.
 
 ### Job workers on the run engine
-By default the scheduler starts a new Python process for each block run, or each fused
-stage, and that process imports MageML before the block starts: most of a short run. With
-the engine installed (`uv pip install mageml-engine`, version 0.2.0 or later), set
-`MAGE_JOB_ENGINE=on` where the scheduler runs, and jobs run in Python workers that are
-already started:
+Without the engine, the scheduler starts a new Python process for each block run, or each
+fused stage, and that process imports MageML before the block starts: most of a short run.
+With the engine installed, jobs run in Python workers that are already started, about three
+times faster:
 
 ```bash
-MAGE_JOB_ENGINE=on mage start my_project
+uv pip install "mage-ml[services]"
+mage start my_project
 ```
+
+The server says `Jobs run in warm workers of ...` when it starts. `MAGE_JOB_ENGINE` decides:
+
+| `MAGE_JOB_ENGINE` | Jobs run |
+| --- | --- |
+| unset (`auto`) | In warm workers when the engine is installed (the `mageml-engine` wheel, `MAGE_ENGINE_PATH` or `mage-service` on `PATH`), in a process each otherwise |
+| `off` | In a process each, as before the engine |
+| `on` | In warm workers, with an engine a source checkout built too; a warning and processes when there is none |
+
+The engine and its idle workers hold about 450 MB. Installing the engine is the choice to
+spend it; set `MAGE_JOB_ENGINE=off` on small machines.
 
 `queue_config.concurrency` bounds the jobs that run at once, as it bounds processes.
 `MAGE_JOBS_WARM` (2) sets how many workers wait idle for the next job, and
