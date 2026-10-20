@@ -154,6 +154,9 @@ hdf5 = [
 mongodb = [
   "pymongo>=4.6.3,<5",
 ]
+pinot = [
+  "pinotdb>=5.7,<6",
+]
 mysql = [
   "mysql-connector-python>=9.1,<10",
 ]
@@ -250,6 +253,7 @@ all = [
   "mage-ml[mlflow]",
   "mage-ml[mongodb]",
   "mage-ml[oracle]",
+  "mage-ml[pinot]",
   "mage-ml[pointblank]",
   "mage-ml[postgres]",
   "mage-ml[redshift]",
@@ -271,7 +275,6 @@ all = [
   "opentelemetry-exporter-prometheus>=0.61b0",
   "opentelemetry-instrumentation-sqlalchemy>=0.61b0",
   "opentelemetry-instrumentation-tornado>=0.61b0",
-  "pinotdb>=5.7,<6",
   "prometheus_client>=0.18.0",
   "pydruid>=0.6.9",
   "pyodbc>=5.2,<6",

@@ -314,7 +314,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R

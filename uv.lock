@@ -3747,6 +3747,9 @@ mysql = [
 oracle = [
     { name = "oracledb" },
 ]
+pinot = [
+    { name = "pinotdb" },
+]
 pointblank = [
     { name = "pointblank" },
 ]
@@ -3898,6 +3901,7 @@ requires-dist = [
     { name = "mage-ml", extras = ["mlflow"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["pinot"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["pointblank"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["postgres"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["redshift"], marker = "extra == 'all'" },
@@ -3925,7 +3929,7 @@ requires-dist = [
     { name = "paramiko", specifier = ">=5.0.0" },
     { name = "pika", marker = "extra == 'streaming'", specifier = ">=1.4" },
     { name = "pillow", specifier = ">=12.3.0" },
-    { name = "pinotdb", marker = "extra == 'all'", specifier = ">=5.7,<6" },
+    { name = "pinotdb", marker = "extra == 'pinot'", specifier = ">=5.7,<6" },
     { name = "pointblank", marker = "extra == 'pointblank'", specifier = ">=1.0.1" },
     { name = "polars", specifier = ">=2.0.0,<3" },
     { name = "prometheus-client", marker = "extra == 'all'", specifier = ">=0.18.0" },
@@ -3978,7 +3982,7 @@ requires-dist = [
     { name = "werkzeug", specifier = ">=3.1.6" },
     { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
 
 [package.metadata.requires-dev]
 dev = [

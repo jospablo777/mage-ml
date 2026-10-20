@@ -115,7 +115,8 @@
 - A query with `limit` anywhere in it, such as a `credit_limit` column, got no LIMIT, and
   Pinot's broker returned 10 rows.
 - `PINOT_PASSWORD` in the verbose io_config format was never read.
-- Integration tests run a pipeline against a Pinot server in CI.
+- Integration tests run a pipeline against a Pinot server in CI. The Pinot client installs
+  with `mage-ml[pinot]` (in `all`, as before).
 
 ### BigQuery
 

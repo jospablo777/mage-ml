@@ -2,6 +2,14 @@
 
 ![](https://pinot.apache.org/img/pinot-navbar-logo-722f37.svg)
 
+## Install
+
+```bash
+uv pip install "mage-ml[pinot]"
+```
+
+The `all` extra includes it.
+
 ## Add credentials
 
 1. Create a new pipeline or open an existing pipeline.

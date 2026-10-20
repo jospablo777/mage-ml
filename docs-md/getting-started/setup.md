@@ -344,6 +344,7 @@ uv sync --locked --no-default-groups --extra postgres --extra s3 --extra dbt
 | `mongodb`              | MongoDB                                              |
 | `mysql`                | MySQL                                                |
 | `oracle`               | OracleDB                                             |
+| `pinot`                | Apache Pinot                                         |
 | `pointblank`           | Pointblank data validation                           |
 | `postgres`             | PostgreSQL                                           |
 | `qdrant`               | Qdrant and sentence-transformers                     |
