@@ -60,8 +60,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/mage \
     MAGE_RUNTIME_CONSTRAINTS=/opt/mage/runtime-constraints.txt
 
 FROM runtime-base AS python-build
+# cmake builds librdkafka into the engine (mageml-engine).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential libkrb5-dev unixodbc-dev && \
+      build-essential cmake libkrb5-dev unixodbc-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Rust compiles the ColumnAtlas extension (rust/column_atlas) here. The runtime image
@@ -80,6 +81,7 @@ COPY pyproject.toml uv.lock README.md MANIFEST.in ./
 COPY mage_integrations ./mage_integrations
 COPY vendor ./vendor
 COPY rust ./rust
+COPY packages/mageml-engine ./packages/mageml-engine
 COPY mage_ai ./mage_ai
 COPY scripts/check_installed_source.py ./scripts/check_installed_source.py
 COPY --from=frontend /build/mage_ai/server/frontend_dist ./mage_ai/server/frontend_dist
@@ -87,15 +89,21 @@ COPY --from=frontend /build/mage_ai/server/frontend_dist_base_path_template ./ma
 # uv rebuilds a local project only when its pyproject.toml changes, and the cache mount
 # keeps the wheel it built last time, so images carried old Mage code. The workspace
 # packages are rebuilt from the copied source every time.
+# The engine (the services extra) runs the scheduler's jobs in warm workers by default,
+# and services and streams with `mage service run`; its cargo build is cached.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/opt/cargo/registry \
-    UV_LINK_MODE=copy uv sync --locked --no-editable --no-default-groups \
-      --extra all --extra integrations \
+    --mount=type=cache,target=/build/engine-target \
+    UV_LINK_MODE=copy CARGO_TARGET_DIR=/build/engine-target \
+      uv sync --locked --no-editable --no-default-groups \
+      --extra all --extra integrations --extra services \
       --reinstall-package mage-ml --reinstall-package mage-integrations \
-      --reinstall-package singer-python --reinstall-package column-atlas-native && \
+      --reinstall-package singer-python --reinstall-package column-atlas-native \
+      --reinstall-package mageml-engine && \
     uv pip check --python /opt/mage/bin/python && \
     /opt/mage/bin/python scripts/check_installed_source.py mage_ai && \
     /opt/mage/bin/python -c 'import column_atlas_native' && \
+    /opt/mage/bin/mage-service jobs --help > /dev/null && \
     uv export --locked --no-default-groups --extra all --extra integrations \
       --no-emit-workspace --no-hashes --no-header --output-file "$MAGE_RUNTIME_CONSTRAINTS"
 

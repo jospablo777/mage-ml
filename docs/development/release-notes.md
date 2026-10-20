@@ -109,7 +109,8 @@
   Rust) a third of their time. Runs keep everything they record (block runs, logs, outputs,
   run records, tests, retries); a worker drops the project's modules after each job and is
   replaced when a job leaves threads or memory behind. Without the engine, jobs run in
-  processes as before. See [run engine](/development/run-engine).
+  processes as before. The Docker image includes the engine. See
+  [run engine](/development/run-engine).
 - Runs spend less time collecting garbage. A stage collects garbage after each block to free
   its inputs, and each collection also scanned all of MageML: 33 ms per block in a warm
   worker. Job workers and `mage run` now freeze what they imported before the first block

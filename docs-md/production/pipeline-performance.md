@@ -195,7 +195,8 @@ and converts the data from one language to the other.
   and at server start, so a scheduled run does not wait for a Rust build.
 - **Install the engine** (`uv pip install "mage-ml[services]"`): the scheduler's jobs run in
   its warm workers, and scheduled runs take about a third of the time, for about 450 MB held
-  by the engine and its idle workers. `MAGE_JOB_ENGINE=off` turns it off.
+  by the engine and its idle workers. The Docker image has it. `MAGE_JOB_ENGINE=off` turns
+  it off.
 - **For the lowest latency and memory, export a service.** It runs without the scheduler,
   database and editor.
 - **R: fewer chains.** Each chain of R blocks starts one R session.
