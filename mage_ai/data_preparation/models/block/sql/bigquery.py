@@ -1,4 +1,6 @@
-from typing import Dict, List
+import json
+from os import path
+from typing import Dict, List, Optional, Tuple
 
 # from mage_ai.data_preparation.models.block.content import template_render
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
@@ -10,9 +12,49 @@ from mage_ai.data_preparation.models.block.sql.utils.shared import (
 )
 from mage_ai.data_preparation.models.constants import BlockType
 from mage_ai.data_preparation.variable_manager import get_variable
-from mage_ai.io.config import ConfigKey
+from mage_ai.io.config import ConfigFileLoader, ConfigKey
+from mage_ai.settings.repo import get_repo_path
 
 # from sqlglot import exp, parse_one
+
+
+def bigquery_project(profile: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    The project and location an io_config profile reaches BigQuery in: the project_id of
+    its service account key (the key, or the file it names) and GOOGLE_LOCATION. The
+    project is None for application default credentials, which the file does not name.
+    """
+    config = ConfigFileLoader(path.join(get_repo_path(), 'io_config.yaml'), profile)
+    key = config[ConfigKey.GOOGLE_SERVICE_ACC_KEY]
+    if not key and config[ConfigKey.GOOGLE_SERVICE_ACC_KEY_FILEPATH]:
+        try:
+            with open(config[ConfigKey.GOOGLE_SERVICE_ACC_KEY_FILEPATH]) as file:
+                key = json.load(file)
+        except (OSError, ValueError):
+            key = None
+    if isinstance(key, str):
+        try:
+            key = json.loads(key)
+        except ValueError:
+            key = None
+    project = key.get('project_id') if isinstance(key, dict) else None
+    return project, config[ConfigKey.GOOGLE_LOCATION]
+
+
+def reads_upstream_table(block, upstream_block) -> bool:
+    """
+    Whether the block reads an upstream BigQuery SQL block's table as it is: both use the
+    same io_config profile, or profiles of the same project and location. The check
+    required GOOGLE_SERVICE_ACC_KEY and GOOGLE_SERVICE_ACC_KEY_FILEPATH, which profiles
+    seldom both set, so every upstream table was read into pandas and written over itself
+    (I-222).
+    """
+    profile = (block.configuration or {}).get('data_provider_profile')
+    upstream_profile = (upstream_block.configuration or {}).get('data_provider_profile')
+    if profile == upstream_profile:
+        return True
+    project, location = bigquery_project(profile)
+    return project is not None and (project, location) == bigquery_project(upstream_profile)
 
 
 def create_upstream_block_tables(
@@ -42,12 +84,10 @@ def create_upstream_block_tables(
         if query and upstream_block.uuid not in mapping:
             continue
 
-        if should_cache_data_from_upstream(block, upstream_block, [
-            'data_provider',
-        ], [
-            ConfigKey.GOOGLE_SERVICE_ACC_KEY,
-            ConfigKey.GOOGLE_SERVICE_ACC_KEY_FILEPATH,
-        ]):
+        copy = should_cache_data_from_upstream(block, upstream_block, ['data_provider'], [])
+        if not copy and BlockType.SENSOR != upstream_block.type:
+            copy = not reads_upstream_table(block, upstream_block)
+        if copy:
             if BlockType.DBT == upstream_block.type and not cache_upstream_dbt_models:
                 continue
 

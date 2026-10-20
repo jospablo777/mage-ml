@@ -94,6 +94,14 @@
   in seconds, which two runs started in the same second shared), and the tables are dropped
   when the block ends.
 
+### BigQuery
+
+- A BigQuery SQL block read its SQL upstream block's table into pandas and wrote it back
+  over the same table before each query, unless both profiles set the service account key
+  and its file path, which profiles seldom do; the round trip could change column types.
+  Blocks on the same profile, or on profiles of the same project and location, now read the
+  upstream table as it is.
+
 ### Command line runs
 
 - `mage run` records its run when it ends: a pipeline run of the pipeline's "Command

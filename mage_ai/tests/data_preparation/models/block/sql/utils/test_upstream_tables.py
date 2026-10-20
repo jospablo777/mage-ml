@@ -122,3 +122,75 @@ class UpstreamTablesTest(DBTestCase):
         self.assertFalse(should_cache_data_from_upstream(
             second, first, ['data_provider'], CACHE_KEYS,
         ))
+
+    def test_bigquery_blocks_of_one_project_share_tables(self):
+        import json
+        import tempfile
+
+        from mage_ai.data_preparation.models.block.sql.bigquery import (
+            reads_upstream_table,
+        )
+
+        key_file = tempfile.NamedTemporaryFile('w', suffix='.json', delete=False)
+        json.dump(dict(type='service_account', project_id='shop'), key_file)
+        key_file.close()
+        self.addCleanup(Path(key_file.name).unlink)
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        # Profiles seldom set both the key and its file; one of them is enough.
+        io_config.write_text(original + (
+            'bq_file:\n'
+            f'  GOOGLE_SERVICE_ACC_KEY_FILEPATH: {key_file.name}\n'
+            'bq_key:\n'
+            '  GOOGLE_SERVICE_ACC_KEY:\n'
+            '    type: service_account\n'
+            '    project_id: shop\n'
+            'bq_other:\n'
+            '  GOOGLE_SERVICE_ACC_KEY:\n'
+            '    project_id: finance\n'
+            'bq_adc:\n'
+            '  GOOGLE_LOCATION: EU\n'
+        ))
+
+        def bq(profile):
+            return dict(data_provider='bigquery', data_provider_profile=profile)
+
+        first = self.block('first', configuration=bq('bq_file'))
+        same_profile = self.block('same_profile', configuration=bq('bq_file'), upstream=[first])
+        same_project = self.block('same_project', configuration=bq('bq_key'), upstream=[first])
+        other = self.block('other', configuration=bq('bq_other'), upstream=[first])
+        adc = self.block('adc', configuration=bq('bq_adc'), upstream=[first])
+
+        self.assertTrue(reads_upstream_table(same_profile, first))
+        self.assertTrue(reads_upstream_table(same_project, first))
+        self.assertFalse(reads_upstream_table(other, first))
+        # Application default credentials name no project: the table is copied.
+        self.assertFalse(reads_upstream_table(adc, first))
+
+    def test_a_bigquery_sql_upstream_is_not_written_over_itself(self):
+        from unittest.mock import MagicMock, patch
+
+        from mage_ai.data_preparation.models.block.sql.bigquery import (
+            create_upstream_block_tables,
+        )
+
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        io_config.write_text(original + 'bq:\n  GOOGLE_LOCATION: US\n')
+        bq = dict(data_provider='bigquery', data_provider_profile='bq',
+                  data_provider_schema='analytics')
+        sql = self.block('sql_up', configuration=bq)
+        python = self.block('python_up', BlockLanguage.PYTHON)
+        block = self.block('down', configuration=bq, upstream=[sql, python])
+        frame = pd.DataFrame({'a': [1]})
+        loader = MagicMock()
+        loader.default_database.return_value = 'shop'
+
+        with patch.object(block, 'fetch_input_variables',
+                          return_value=([frame, frame], {}, [sql.uuid, python.uuid])):
+            create_upstream_block_tables(loader, block, query=None)
+
+        written = [call.args[1] for call in loader.export.call_args_list]
+        self.assertEqual(written, [f'analytics.{python.table_name}'])
