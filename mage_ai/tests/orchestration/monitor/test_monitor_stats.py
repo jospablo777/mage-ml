@@ -49,3 +49,18 @@ class MonitorStatsScopeTest(DBTestCase):
         )
 
         self.assertEqual(self.total(stats), 3)
+
+    def test_runs_of_a_deleted_pipeline_count_without_an_error(self):
+        import contextlib
+        import io
+
+        # The runs' pipeline has no folder in the project, as after it was deleted.
+        self.runs(self.repo_path, 2)
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            stats = MonitorStats().get_stats(
+                MonitorStatsType.PIPELINE_RUN_COUNT, pipeline_uuid=self._testMethodName,
+            )
+
+        self.assertEqual(self.total(stats), 2)
+        self.assertNotIn('ERROR', printed.getvalue())

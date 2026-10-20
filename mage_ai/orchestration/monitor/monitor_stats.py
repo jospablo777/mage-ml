@@ -135,6 +135,11 @@ class MonitorStats:
         stats_by_schedule_id = dict()
         pipelines_mapping = {}
         for uuid in set([p.pipeline_uuid for p in pipeline_runs]):
+            if not project_platform_activated() and \
+                    not Pipeline.exists(uuid, repo_path=self.repo_path):
+                # A deleted pipeline keeps its runs; they count without a pipeline type.
+                # Each refresh of the overview printed an error for each such pipeline.
+                continue
             try:
                 pipeline = Pipeline.get(
                     uuid,
