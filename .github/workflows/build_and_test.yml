@@ -545,7 +545,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y freetds-dev unixodbc-dev libmagic1 libkrb5-dev
           uv sync --locked --group dev --extra all --extra integrations \
-            --extra great-expectations --extra qdrant
+            --extra great-expectations --extra qdrant --extra chroma
           uv pip check --system
       - name: Run focused Git tests
         run: |

@@ -13,14 +13,15 @@ default:
 
 ## Dependencies
 
-The Chroma client is not installed in the image built from the repository's Dockerfile.
-Add it to the project's `requirements.txt` and install it (see
-[Install dependencies](../../getting-started/install-dependencies.md)), or, in a source checkout,
-add `--extra chroma` to the `uv sync` command you installed with.
+Chroma comes with the `chroma` extra, which `all` and the Docker image leave out:
 
+```bash
+uv pip install "mage-ml[chroma]"
 ```
-chromadb>=0.4.17
-```
+
+In a source checkout, add `--extra chroma` to the `uv sync` command you installed with. In
+the Docker image, add `chromadb` to the project's `requirements.txt` (see
+[Install dependencies](../../getting-started/install-dependencies.md)).
 
 > [!WARNING]
 > chromadb 1.5.9, the newest release, has open advisories without a fixed release
@@ -49,6 +50,9 @@ chromadb>=0.4.17
   - document_column: specify the column in df dataframe that contains documents to be stored in Chroma.
   - id_column: specify the column in df dataframe that contains the id of the document
   - metadata_column: specify the column in df dataframe that contains the metadata of the document (metadata should be dictionary format)
+  - embedding_column: a column of vectors your own model computed. Without it, Chroma
+    embeds the documents with the collection's embedding function, which downloads its
+    model the first time.
 
 3. Add your customized code into the loader, exporter or add extra transformer blocks.
 4. Run the block.

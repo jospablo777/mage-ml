@@ -134,6 +134,7 @@ class Chroma(BaseIO):
         collection: str = None,
         id_column: str = None,
         metadata_column: str = None,
+        embedding_column: str = None,
         **kwargs,
     ) -> None:
         """
@@ -144,6 +145,9 @@ class Chroma(BaseIO):
         Args:
             df (DataFrame): Data frame to export.
             document_column (str): name of the document.
+            embedding_column (str): a column of vectors already computed (by your own
+                model); without it, Chroma embeds the documents with the collection's
+                embedding function, which downloads its model on first use.
         """
         df = to_pandas_frame(df)
         docs = df[document_column].tolist()
@@ -159,6 +163,10 @@ class Chroma(BaseIO):
         )
         if metadata_column:
             insert_kwargs['metadatas'] = df[metadata_column].tolist()
+        if embedding_column:
+            insert_kwargs['embeddings'] = [
+                [float(x) for x in vector] for vector in df[embedding_column].tolist()
+            ]
         return collection_client.add(
             **insert_kwargs
         )
