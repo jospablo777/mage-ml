@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import aiofiles
 import pytz
-from mage_ai.shared.jinja import compiled
 
 from mage_ai.authentication.permissions.constants import EntityName
 from mage_ai.cache.block import BlockCache
@@ -81,6 +80,7 @@ from mage_ai.settings.server import RUN_PIPELINE_IN_ONE_PROCESS
 from mage_ai.shared.array import find
 from mage_ai.shared.hash import extract, ignore_keys, index_by, merge_dict
 from mage_ai.shared.io import safe_write, safe_write_async
+from mage_ai.shared.jinja import compiled
 from mage_ai.shared.path_fixer import remove_base_repo_path
 from mage_ai.shared.strings import format_enum
 from mage_ai.shared.utils import clean_name

@@ -32,7 +32,6 @@ import pandas as pd
 import polars as pl
 import simplejson
 import yaml
-from mage_ai.shared.jinja import compiled
 
 import mage_ai.data_preparation.decorators
 from mage_ai.cache.block import BlockCache
@@ -147,6 +146,7 @@ from mage_ai.shared.custom_logger import DX_PRINTER
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.environments import get_env, is_debug
 from mage_ai.shared.hash import extract, ignore_keys, merge_dict
+from mage_ai.shared.jinja import compiled
 from mage_ai.shared.logger import BlockFunctionExec
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.path_fixer import (

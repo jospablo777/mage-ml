@@ -7,7 +7,6 @@ from typing import Dict, Optional
 from warnings import warn
 
 import ruamel.yaml
-from mage_ai.shared.jinja import compiled
 
 from mage_ai.cluster_manager.constants import ClusterType
 from mage_ai.data_preparation.templates.utils import copy_template_directory
@@ -26,6 +25,7 @@ from mage_ai.settings.repo import set_repo_path as set_repo_path_new
 from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.enum import StrEnum
 from mage_ai.shared.environments import is_debug
+from mage_ai.shared.jinja import compiled
 from mage_ai.shared.yaml import load_yaml, trim_strings
 
 yml = ruamel.yaml.YAML()
