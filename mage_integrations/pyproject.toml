@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mage-integrations"
-version = "0.1.1"
+version = "0.2.0"
 description = "Data source and destination connectors for MageML, based on Mage."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

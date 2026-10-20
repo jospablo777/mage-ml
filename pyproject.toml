@@ -231,7 +231,7 @@ rust = []
 trino = [
   "trino~=0.326",
 ]
-integrations = ["mage-integrations==0.1.1"]
+integrations = ["mage-integrations==0.2.0"]
 # Dependency profile used by the container image.
 all = [
   "mage-ml[airtable]",
