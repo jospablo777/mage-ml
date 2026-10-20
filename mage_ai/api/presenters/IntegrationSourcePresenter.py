@@ -10,6 +10,8 @@ from mage_ai.data_preparation.models.block.data_integration.utils import (
 class IntegrationSourcePresenter(BasePresenter):
     default_attributes = [
         'block',
+        # The source's README, which the editor shows next to its settings.
+        'docs',
         'name',
         'partition',
         'pipeline_run',

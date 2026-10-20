@@ -3130,7 +3130,15 @@ function PipelineDetailPage({
     onCreateCallback,
     name,
   ) => new Promise(() => {
-    if (ObjectType.BLOCK_FILE === block?.block_action_object?.object_type
+    // An integration pipeline has one source and one destination: picking one creates its
+    // block at once, named after the pipeline, instead of asking for a block name first.
+    if (isDataIntegration
+      && BlockLanguageEnum.YAML === block?.language
+      && [BlockTypeEnum.DATA_LOADER, BlockTypeEnum.DATA_EXPORTER].includes(block?.type)
+    ) {
+      const role = BlockTypeEnum.DATA_LOADER === block?.type ? 'source' : 'destination';
+      addNewBlockAtIndex(block, idx, onCreateCallback, name || `${pipeline?.uuid}_${role}`);
+    } else if (ObjectType.BLOCK_FILE === block?.block_action_object?.object_type
       || (
       BlockTypeEnum.DBT === block?.type
         && BlockLanguageEnum.SQL === block?.language
@@ -3141,7 +3149,7 @@ function PipelineDetailPage({
       // @ts-ignore
       showAddBlockModal({ block, idx, name, onCreateCallback });
     }
-  }), [addNewBlockAtIndex, showAddBlockModal]);
+  }), [addNewBlockAtIndex, isDataIntegration, pipeline?.uuid, showAddBlockModal]);
 
   const showUpdateBlockModalCallbackMemo = useCallback((
     block,

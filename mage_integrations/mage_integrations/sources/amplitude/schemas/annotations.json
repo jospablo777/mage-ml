@@ -1,4 +1,5 @@
 {
+  "description": "Chart annotations: releases, campaigns and other marked dates.",
   "type": [
     "null",
     "object"

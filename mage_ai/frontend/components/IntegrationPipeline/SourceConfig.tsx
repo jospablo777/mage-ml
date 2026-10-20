@@ -44,6 +44,10 @@ function SourceConfig({
 
   const [connected, setConnected] = useState<boolean>(null);
   const [error, setError] = useState<string>();
+  // While the settings are being typed they are often not YAML yet ("host" before its
+  // colon): the last valid settings are kept, and the problem is shown instead of thrown on
+  // every keystroke.
+  const [yamlError, setYamlError] = useState<string>(null);
   const [testConnection, { isLoading }] = useMutation(
     api[apiName].useCreate(),
     {
@@ -80,9 +84,17 @@ function SourceConfig({
           language={BlockLanguageEnum.YAML}
           onChange={(val: string) => {
             setBlockConfig(val);
+            let config;
+            try {
+              config = parse(val);
+            } catch (err) {
+              setYamlError(String(err?.message || err).split('\n')[0]);
+              return;
+            }
+            setYamlError(null);
             onChangeCodeBlock(block.type, block.uuid, stringify({
               ...blockContent,
-              config: parse(val),
+              config,
             }));
           }}
           tabSize={2}
@@ -93,6 +105,7 @@ function SourceConfig({
       <Spacing mt={1}>
         <FlexContainer alignItems="center">
           <Button
+            disabled={!!yamlError}
             onClick={() => {
               // @ts-ignore
               testConnection({
@@ -128,6 +141,13 @@ function SourceConfig({
             )}
           </Spacing>
         </FlexContainer>
+        {yamlError && (
+          <Spacing mt={1}>
+            <Text muted small>
+              Not valid YAML yet, so the settings are not saved: {yamlError}
+            </Text>
+          </Spacing>
+        )}
         {error && (
           <Spacing mt={1}>
             <Text small warning>

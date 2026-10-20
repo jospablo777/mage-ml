@@ -78,6 +78,16 @@ type IntegrationPipelineProps = {
   setSelectedStream: (stream: string) => void;
 };
 
+// A block file edited into invalid YAML used to throw here and blank the whole editor; its
+// settings show as empty until the file is fixed.
+function parseBlockContent(content: string) {
+  try {
+    return parse(content || '') || {};
+  } catch {
+    return {};
+  }
+}
+
 function IntegrationPipeline({
   addNewBlockAtIndex,
   blocks,
@@ -130,7 +140,7 @@ function IntegrationPipeline({
       return {};
     }
 
-    return parse(dataLoaderBlock.content);
+    return parseBlockContent(dataLoaderBlock.content);
   }, [dataLoaderBlock]);
 
   useEffect(() => {
@@ -161,7 +171,7 @@ function IntegrationPipeline({
       return {};
     }
 
-    return parse(dataExporterBlock.content);
+    return parseBlockContent(dataExporterBlock.content);
   }, [dataExporterBlock]);
   const dataExporterEditor = useMemo(() => (
     <SourceConfig

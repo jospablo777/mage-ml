@@ -1,4 +1,5 @@
 {
+  "description": "The users of the cohorts in cohort_ids (500 downloads a month).",
   "type": [
     "null",
     "object"

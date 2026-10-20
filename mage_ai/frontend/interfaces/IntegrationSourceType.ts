@@ -85,6 +85,8 @@ export interface SchemaPropertyType {
 }
 
 interface SchemaType {
+  // What the stream holds, shown when picking streams.
+  description?: string;
   properties: {
     [columnName: string]: SchemaPropertyType;
   };

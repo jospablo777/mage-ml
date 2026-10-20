@@ -59,6 +59,8 @@ from mage_integrations.sources.base import Source, main
 from mage_integrations.sources.messages import write_state
 
 LOGGER = singer.get_logger()
+# Ranges the editor's sample reads, newest first, until one has events.
+SAMPLE_LOOKBACK_HOURS = (1, 6, 24, 168)
 EU_HOSTS = ('analytics.eu.amplitude.com',)
 STANDARD_HOSTS = ('https://amplitude.com', 'https://analytics.eu.amplitude.com')
 TIME_FIELDS = (
@@ -156,7 +158,10 @@ class Amplitude(Source):
         return super().build_catalog_entry(stream_id, schema, **kwargs)
 
     def test_connection(self) -> None:
-        self.client.test_connection()
+        # The editor waits 10 seconds for the answer: one quick try, one retry.
+        client = self.client
+        client.timeout, client.max_retries = 4, 1
+        client.test_connection()
 
     # ---- Sync ---------------------------------------------------------------------------
 
@@ -246,14 +251,7 @@ class Amplitude(Source):
         client = self.client
 
         if stream_id == STREAM_EVENTS:
-            # Sample data in the editor: the newest complete hour.
-            newest = last_complete_hour()
-            events = []
-            for event in client.iter_events(newest, newest):
-                events.append(event_record(event))
-                if len(events) >= SAMPLE_ROWS:
-                    break
-            yield events
+            yield self.sample_events()
             return
 
         if stream_id in METRIC_STREAMS:
@@ -272,6 +270,24 @@ class Amplitude(Source):
             yield client._json('/api/3/cohorts').get('cohorts') or []
         elif stream_id == STREAM_COHORT_MEMBERS:
             yield from self.cohort_member_batches()
+
+    def sample_events(self) -> List[Dict]:
+        """
+        Sample data in the editor: the newest events, from the newest complete hour, or the
+        last 6 hours, day or week when it has none (a quiet project), without downloading
+        more than the first range that has events.
+        """
+        newest = last_complete_hour()
+        for hours in SAMPLE_LOOKBACK_HOURS:
+            events = []
+            first = newest - dt.timedelta(hours=hours - 1)
+            for event in self.client.iter_events(first, newest, window_hours=hours):
+                events.append(event_record(event))
+                if len(events) >= SAMPLE_ROWS:
+                    return events
+            if events:
+                return events
+        return []
 
     def metric_rows(
         self, stream_id: str, bookmarks: Dict, query: Dict, sample_data: bool = False,

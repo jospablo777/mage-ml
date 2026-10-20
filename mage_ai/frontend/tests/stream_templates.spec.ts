@@ -17,6 +17,7 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 
 test.afterAll(async () => {
   await api.deletePipeline(NAME).catch(() => null);
+  await api.deletePipeline(`${NAME}_amp`).catch(() => null);
   await apiContext.dispose();
 });
 
@@ -48,4 +49,29 @@ test('a stream from the Kafka template runs on its sample', async ({ page }) => 
 
   await expect(page.getByText('5 in → 4 out')).toBeVisible({ timeout: 60000 });
   await expect(page.getByText('1 message dropped', { exact: false })).toBeVisible();
+});
+
+// The Amplitude template: events as Amplitude's Webhook destination forwards them become one
+// flat row each, and the connection check says how to set the destination up.
+test('a stream from the Amplitude template flattens its sample events', async ({ page }) => {
+  const name = `${NAME}_amp`;
+  await page.goto('/pipelines');
+  await expect(page.getByText('Name', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New' }).click();
+  await page.getByRole('menuitem', { name: 'Streaming' }).click();
+  await page.getByPlaceholder('Pipeline name...').fill(name);
+  await page.getByLabel('Start from').selectOption('amplitude');
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  await page.waitForURL(new RegExp(`/pipelines/${name}/edit`));
+  await expect(page.getByText(`${name}_amplitude`).first()).toBeVisible();
+
+  await page.goto(`/pipelines/${name}/edit?sideview=samples`);
+  await expect(page.getByText('example', { exact: true })).toBeVisible();
+  const editor = page.locator('.monaco-editor .view-lines').nth(1);
+  await expect(editor).toBeVisible();
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  // Five events in, five flat rows out.
+  await expect(page.getByText('5 in → 5 out')).toBeVisible({ timeout: 60000 });
 });

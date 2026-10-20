@@ -4,6 +4,7 @@ from mage_ai.api.presenters.BasePresenter import BasePresenter
 
 class IntegrationDestinationPresenter(BasePresenter):
     default_attributes = [
+        'docs',
         'name',
         'templates',
         'uuid',

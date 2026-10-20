@@ -1,4 +1,5 @@
 {
+  "description": "Average session length per day, in seconds.",
   "type": [
     "null",
     "object"

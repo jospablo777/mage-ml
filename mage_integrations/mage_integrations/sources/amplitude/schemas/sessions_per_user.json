@@ -1,4 +1,5 @@
 {
+  "description": "Average sessions per user per day.",
   "type": [
     "null",
     "object"

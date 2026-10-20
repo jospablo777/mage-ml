@@ -1,4 +1,5 @@
 {
+  "description": "The tracking plan: user properties and their types.",
   "type": [
     "null",
     "object"

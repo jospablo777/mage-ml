@@ -1,4 +1,5 @@
 {
+  "description": "Active users per day.",
   "type": [
     "null",
     "object"

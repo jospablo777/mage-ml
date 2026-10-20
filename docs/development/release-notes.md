@@ -32,6 +32,9 @@
 - Streams receive events from Amplitude's Webhook destination with `connector_type:
   amplitude`, which writes an event Amplitude retries once, by its uuid; a webhook source can
   dedupe by any message field with `idempotency_key_field`.
+- The editor shows each integration source's and destination's documentation next to its
+  settings (the API had dropped it, for every source), creates the source and destination
+  blocks without asking for a block name, and describes each stream in the stream picker.
 - Kafka streams read topics compressed with Zstandard (the engine's librdkafka had no zstd),
   and a Kafka sink's `librdkafka: {compression.type: ...}` is no longer replaced by lz4.
 

@@ -1,4 +1,5 @@
 {
+  "description": "Behavioral cohorts: name, size and owners.",
   "type": [
     "null",
     "object"

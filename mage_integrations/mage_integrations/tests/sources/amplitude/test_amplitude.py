@@ -188,3 +188,23 @@ class AmplitudeSourceTest(unittest.TestCase):
         self.assertEqual(next_hour(window_bookmark(last)), last + dt.timedelta(hours=1))
         # A position inside an hour reads that hour again.
         self.assertEqual(next_hour('2024-06-01T05:10:00+00:00'), last)
+
+    def test_listed_streams_say_what_they_hold(self):
+        streams = {
+            s['tap_stream_id']: s
+            for s in Amplitude(config=dict(api_key='a', secret_key='b')).discover_streams()
+        }
+        self.assertIn('Every event', streams['events']['schema']['description'])
+        self.assertIn('500 downloads', streams['cohort_members']['schema']['description'])
+
+    def test_a_quiet_project_samples_its_last_events(self):
+        # The newest complete hour (09:00 on day 2) has no events; the day before has.
+        with FakeAmplitude(events_between(0, 20)) as fake:
+            _, _, samples = run(fake, ['events'], sample=True)
+            exports = [r for r in fake.requests if r.startswith('/api/2/export')]
+        sample = json.loads(samples[0]['sample_data'])
+        # Hours 10 to 19 of day 1, two events each.
+        self.assertEqual(len(sample['uuid']), 20)
+        # The last hour, then 6 hours, then a day: three requests, not a week of data.
+        self.assertEqual(len(exports), 3)
+

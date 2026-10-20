@@ -209,3 +209,27 @@ class FakeAmplitude:
                 return self.send(404, 'Not found', 'text/plain')
 
         return Handler
+
+
+def serve(port: int) -> None:
+    """Serves events of the last two days on a fixed port, for the editor's browser tests."""
+    now = dt.datetime.now(dt.timezone.utc).replace(
+        minute=0, second=0, microsecond=0, tzinfo=None,
+    )
+    start = now - dt.timedelta(hours=48)
+    events = [
+        event(h * 100 + n, start + dt.timedelta(hours=h, minutes=n),
+              event_type=['Sign Up', 'Add To Cart', 'Purchase'][n % 3])
+        for h in range(44) for n in range(5)
+    ]
+    fake = FakeAmplitude(events)
+    fake.server.server_close()
+    fake.server = ThreadingHTTPServer(('127.0.0.1', port), fake._handler())
+    print(f'Amplitude on {port} with {len(events)} events', flush=True)
+    fake.server.serve_forever()
+
+
+if __name__ == '__main__':
+    import sys
+
+    serve(int(sys.argv[1]))

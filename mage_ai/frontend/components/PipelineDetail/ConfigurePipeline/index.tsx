@@ -33,6 +33,7 @@ const STREAM_TEMPLATES = [
   ['rabbitmq', 'RabbitMQ'],
   ['nats', 'NATS JetStream'],
   ['webhook', 'Webhook (HTTP)'],
+  ['amplitude', 'Amplitude (webhook)'],
   ['postgres', 'PostgreSQL changes'],
 ];
 

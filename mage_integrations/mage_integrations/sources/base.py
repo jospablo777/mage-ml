@@ -157,10 +157,36 @@ class Source:
         Returns:
             List[Dict]: Description
         """
-        return [dict(
-            stream=stream_id,
-            tap_stream_id=stream_id,
-        ) for stream_id in self.get_stream_ids()]
+        descriptions = self._schema_descriptions()
+        streams = []
+        for stream_id in self.get_stream_ids():
+            stream = dict(stream=stream_id, tap_stream_id=stream_id)
+            # What the stream holds, which the editor shows when streams are picked.
+            if descriptions.get(stream_id):
+                stream['schema'] = dict(description=descriptions[stream_id])
+            streams.append(stream)
+        return streams
+
+    def _schema_descriptions(self) -> Dict[str, str]:
+        """The description of each schema file in the schemas folder, if the source has one."""
+        try:
+            parts = inspect.getfile(self.__class__).split('/')
+            folder = get_abs_path(f"{'/'.join(parts[:len(parts) - 1])}/{self.schemas_folder}")
+            names = os.listdir(folder)
+        except (OSError, TypeError):
+            return {}
+        descriptions = {}
+        for filename in names:
+            if not filename.endswith('.json'):
+                continue
+            try:
+                with open(os.path.join(folder, filename)) as file:
+                    description = json.load(file).get('description')
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(description, str) and description:
+                descriptions[filename[:-len('.json')]] = description
+        return descriptions
 
     def get_stream_ids(self) -> List[str]:
         """

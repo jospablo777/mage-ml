@@ -201,14 +201,26 @@ function SelectStreams({
                   }));
                 }}
               />,
-              <Text
-                danger={isMissingStream}
-                key={`stream-${streamID}`}
-                title={streamID}
-                width={TABLE_WIDTH - 48 - 32}
-              >
-                {streamID}{isMissingStream ? ' (no longer available)' : ''}
-              </Text>,
+              <div key={`stream-${streamID}`}>
+                <Text
+                  danger={isMissingStream}
+                  title={streamID}
+                  width={TABLE_WIDTH - 48 - 32}
+                >
+                  {streamID}{isMissingStream ? ' (no longer available)' : ''}
+                </Text>
+                {/* What the stream holds, when its source describes it. */}
+                {stream?.schema?.description && (
+                  <Text
+                    muted
+                    small
+                    whiteSpaceNormal
+                    width={TABLE_WIDTH - 48 - 32}
+                  >
+                    {stream.schema.description}
+                  </Text>
+                )}
+              </div>,
             ];
           })}
           stickyHeader
