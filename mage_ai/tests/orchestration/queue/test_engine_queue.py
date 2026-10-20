@@ -184,10 +184,17 @@ class EngineQueueTests(TestCase):
         self.assertTrue(wait_until(lambda: not self.queue.has_job('block_run_1')))
         self.assertTrue(self.queue.jobs_finished())
         self.assertFalse(self.queue.jobs_finished(), 'reported once')
-        # The next job runs in the same worker: no new process.
-        self.queue.enqueue('block_run_2', touch, self.path('two'))
-        self.assertTrue(wait_until(lambda: os.path.exists(self.path('two'))))
-        self.assertEqual(Path(self.path('one')).read_text(), Path(self.path('two')).read_text())
+        # The next jobs run in warm workers, not in a process each. Which warm worker takes
+        # a job depends on when each finished starting, so only the count is fixed: at most
+        # the queue's concurrency.
+        pids = {Path(self.path('one')).read_text()}
+        for index in range(2, 6):
+            name = f'block_run_{index}'
+            self.queue.enqueue(name, touch, self.path(name))
+            self.assertTrue(wait_until(lambda name=name: os.path.exists(self.path(name))))
+            self.assertTrue(wait_until(lambda name=name: not self.queue.has_job(name)))
+            pids.add(Path(self.path(name)).read_text())
+        self.assertLessEqual(len(pids), 3, pids)
 
     def test_a_running_job_is_present_and_a_killed_one_is_not(self):
         self.queue.enqueue('block_run_3', sleep_then_touch, 30, self.path('never'))
