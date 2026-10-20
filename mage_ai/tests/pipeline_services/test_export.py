@@ -360,6 +360,36 @@ class CaptureTest(ExportTestCase):
             with self.assertRaisesRegex(export.ExportError, 'docker is not installed'):
                 export.build_commands(out, 'shop')
 
+    def test_two_exports_are_compared_package_by_package_and_file_by_file(self):
+        load, _, _ = self.chain()
+        first = Path(tempfile.mkdtemp())
+        second = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, first, True)
+        self.addCleanup(shutil.rmtree, second, True)
+        export.write(export.capture(self.repo_path, [self.pipeline.uuid]), str(first),
+                     force=True)
+
+        self.assertEqual(export.compare(str(first), str(first)), ['No change.'])
+        Path(load.file_path).write_text(Path(load.file_path).read_text() + '\n# changed\n')
+        (Path(self.repo_path) / 'requirements.txt').write_text('tabulate\n')
+        export.write(export.capture(self.repo_path, [self.pipeline.uuid]), str(second),
+                     force=True)
+
+        lines = export.compare(str(first), str(second))
+        relative = Path(load.file_path).relative_to(self.repo_path).as_posix()
+        self.assertIn(f'  ~ {self.project.name}/{relative}', lines)
+        self.assertTrue(any(line.startswith('  + tabulate==0.10.0') for line in lines), lines)
+        with self.assertRaisesRegex(export.ExportError, 'no manifest.json'):
+            export.compare(str(first), tempfile.gettempdir())
+
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        result = CliRunner().invoke(app, ['export', 'compare', str(first), str(second)])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('+ tabulate==0.10.0', result.output)
+
     def test_a_private_index_token_stays_out_of_every_exported_file(self):
         import http.server
         import threading

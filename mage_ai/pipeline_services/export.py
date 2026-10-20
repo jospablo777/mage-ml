@@ -2712,6 +2712,108 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     return out_dir
 
 
+
+def _locked_packages(folder: Path) -> Dict[str, str]:
+    """Package versions in an export's uv.lock."""
+    import tomllib
+
+    path = folder / 'uv.lock'
+    if not path.is_file():
+        return {}
+    lock = tomllib.loads(path.read_text())
+    return {
+        package['name']: package.get('version', '')
+        for package in lock.get('package', [])
+        if 'version' in package
+    }
+
+
+# Folders of an export that hold MageML's own code; a change there is counted, not listed.
+MAGEML_FOLDERS = ('python/', 'build/')
+
+
+def compare(old: str, new: str) -> List[str]:
+    """
+    What changed between two exports, from their manifest.json and uv.lock: MageML, Python
+    and uv, the Python packages, the models, and the files.
+    """
+    old_dir, new_dir = Path(old).resolve(), Path(new).resolve()
+    manifests = []
+    for folder in (old_dir, new_dir):
+        path = folder / 'manifest.json'
+        if not path.is_file():
+            raise ExportError([
+                f'{folder} has no manifest.json: export it with this MageML version first.',
+            ])
+        manifests.append(json.loads(path.read_text()))
+    before, after = manifests
+    lines: List[str] = []
+
+    def changed(label, a, b):
+        if a != b:
+            lines.append(f'{label}: {a or "-"} -> {b or "-"}')
+
+    changed('MageML', (before.get('mageml') or {}).get('version'),
+            (after.get('mageml') or {}).get('version'))
+    changed('MageML commit', (before.get('mageml') or {}).get('commit'),
+            (after.get('mageml') or {}).get('commit'))
+    changed('Project commit', (before.get('project') or {}).get('commit'),
+            (after.get('project') or {}).get('commit'))
+    changed('Python', before.get('python'), after.get('python'))
+    changed('uv', before.get('uv'), after.get('uv'))
+
+    old_packages, new_packages = _locked_packages(old_dir), _locked_packages(new_dir)
+    package_lines = []
+    for name in sorted(set(old_packages) | set(new_packages)):
+        a, b = old_packages.get(name), new_packages.get(name)
+        if a == b:
+            continue
+        if a is None:
+            package_lines.append(f'  + {name}=={b}')
+        elif b is None:
+            package_lines.append(f'  - {name}=={a}')
+        else:
+            package_lines.append(f'  ~ {name} {a} -> {b}')
+    if package_lines:
+        lines.append(f'Python packages ({len(package_lines)}):')
+        lines.extend(package_lines)
+
+    old_models = {m['name']: m for m in before.get('models') or []}
+    new_models = {m['name']: m for m in after.get('models') or []}
+    model_lines = []
+    for name in sorted(set(old_models) | set(new_models)):
+        a, b = old_models.get(name), new_models.get(name)
+        if a is None:
+            model_lines.append(f"  + {name} {b.get('uri')} (version {b.get('version') or '-'})")
+        elif b is None:
+            model_lines.append(f"  - {name} {a.get('uri')}")
+        elif a.get('sha256') != b.get('sha256') or a.get('uri') != b.get('uri'):
+            model_lines.append(
+                f"  ~ {name} {a.get('uri')} version {a.get('version') or '-'} -> "
+                f"{b.get('uri')} version {b.get('version') or '-'}"
+            )
+    if model_lines:
+        lines.append(f'Models ({len(model_lines)}):')
+        lines.extend(model_lines)
+
+    old_files, new_files = before.get('files') or {}, after.get('files') or {}
+    file_lines, mageml_changes = [], 0
+    for path in sorted(set(old_files) | set(new_files)):
+        a, b = old_files.get(path), new_files.get(path)
+        if a == b or path in ('manifest.json',):
+            continue
+        if path.startswith(MAGEML_FOLDERS):
+            mageml_changes += 1
+            continue
+        mark = '+' if a is None else '-' if b is None else '~'
+        file_lines.append(f'  {mark} {path}')
+    if file_lines:
+        lines.append(f'Files ({len(file_lines)}):')
+        lines.extend(file_lines)
+    if mageml_changes:
+        lines.append(f"MageML's code in the image: {mageml_changes} files changed.")
+    return lines or ['No change.']
+
 # The uv the image installs packages with when the export's own is unknown.
 UV_VERSION = '0.11.29'
 # The platforms an export's lock and image are made for.
@@ -3487,7 +3589,8 @@ def _compose(capture_: Capture) -> str:
 services:
   {capture_.name}:
     build: .
-    image: {capture_.name}:latest
+    # IMAGE=registry/name:tag docker compose up -d runs a built version; see the README.
+    image: ${{IMAGE:-{capture_.name}:latest}}
     ports:
       - "127.0.0.1:${{PORT:-8080}}:8080"
     environment:

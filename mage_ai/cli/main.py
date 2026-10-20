@@ -1225,6 +1225,26 @@ EXPORT_MODELS = typer.Option(
 )
 
 
+@export_app.command('compare')
+def export_compare(
+    old: str = typer.Argument(..., help='the earlier export folder.'),
+    new: str = typer.Argument(..., help='the later export folder.'),
+):
+    """
+    What changed between two exports of a service: MageML, Python and uv, the packages of
+    uv.lock, the models and the files, from their manifest.json. For a change review.
+    """
+    from mage_ai.pipeline_services import export
+
+    try:
+        lines = export.compare(old, new)
+    except export.ExportError as error:
+        for problem in error.problems:
+            print(problem)
+        raise typer.Exit(code=1)
+    print('\n'.join(lines))
+
+
 @export_app.command('service')
 def export_service(
     project_path: str = EXPORT_PROJECT_PATH,

@@ -18,8 +18,10 @@
   checks every file.
 - `manifest.json` records what an export holds: MageML's version and commit, Python and uv,
   the locks' and models' digests, the platforms, the build command and the SHA-256 of every
-  file, to review what changed between two exports. See
-  [Export a service](/production/export-a-service).
+  file; `mage export compare OLD NEW` lists the packages, models and files that changed
+  between two exports. The README's runbook gives one command per step (build, deploy,
+  check, roll back) for compose, Kubernetes and Code Engine, and `compose.yaml` runs a given
+  version with `IMAGE=...:tag`. See [Export a service](/production/export-a-service).
 
 ### PostgreSQL
 

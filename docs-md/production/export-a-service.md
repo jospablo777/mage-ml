@@ -104,7 +104,7 @@ The folder is a Docker build context:
 | `shop/` | The project files the blocks need |
 | `pyproject.toml`, `uv.lock` | The pinned Python packages, and every package with its hashes for Linux on amd64 and arm64; the image installs the lock with `uv sync --locked` |
 | `requirements.txt` | The same packages, exported from the lock, for scanners |
-| `manifest.json` | What the export holds: MageML's version and commit, Python and uv, the locks' digests, the models with their digests, the platforms, the build command and the SHA-256 of every file. Compare two exports' manifests to review a change |
+| `manifest.json` | What the export holds: MageML's version and commit, Python and uv, the locks' digests, the models with their digests, the platforms, the build command and the SHA-256 of every file. `mage export compare OLD NEW` lists what changed between two exports |
 | `.env.example` | The variables the code reads, without values |
 | `deploy/`, `.tekton/` | Kubernetes, IBM Cloud Code Engine and Tekton files |
 | `report.txt`, `README.md` | The report above and how to run this service |

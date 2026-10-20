@@ -148,6 +148,32 @@ missing; otherwise it warns. The service's own tokens can come from files too:
 Any platform that runs a container works: the image needs only its environment and a
 volume at `/var/lib/mage-service` for the run history.
 
+## Runbook
+
+Tag every image with a version, such as the commit, and keep the tag that runs now: rolling
+back is running that tag again.
+
+```bash
+export REPO=registry.example.com/team/$name    # your registry
+export TAG=$$(git rev-parse --short HEAD)        # the new version
+export PREVIOUS=...                               # the version that runs now
+```
+
+| Step | One machine (`compose.yaml`) | Kubernetes (`deploy/kubernetes.yaml`) | IBM Cloud Code Engine |
+| --- | --- | --- | --- |
+| Build and push | `docker buildx build --platform linux/amd64,linux/arm64 -t "$$REPO:$$TAG" --push .` | the same | the same |
+| Deploy | `IMAGE="$$REPO:$$TAG" docker compose up -d` | `kubectl set image deployment/$name service="$$REPO:$$TAG"` | `ibmcloud ce app update --name $name --image "$$REPO:$$TAG" --wait` |
+| Check | `curl -fsS http://127.0.0.1:8080/healthz` | `kubectl rollout status deployment/$name` | `ibmcloud ce app get --name $name` |
+| Roll back | `IMAGE="$$REPO:$$PREVIOUS" docker compose up -d` | `kubectl rollout undo deployment/$name` | `ibmcloud ce app update --name $name --image "$$REPO:$$PREVIOUS" --wait` |
+
+The first Kubernetes deploy applies the file, with the image set:
+`kubectl apply -f deploy/kubernetes.yaml`, then the Deploy step. `mage service deploy` does
+all of this, rollback on failure included, for a service saved in the Mage project.
+
+To review a change before deploying it, compare this export with the one that runs:
+`mage export compare OLD_FOLDER .` lists the packages, models and files that changed, from
+the two `manifest.json` files and locks.
+
 ## Settings
 
 | Variable | Default | |

@@ -381,6 +381,26 @@ mage export service <project_path> <pipeline_uuid>... --out <directory> [OPTIONS
 - `--force` (optional): Replace a non-empty output directory
 - `--model`, `-m` (optional): An MLflow model to embed, `NAME=URI`; repeat for more
 
+The folder holds `pyproject.toml` and `uv.lock` (the image installs exactly the lock) and
+`manifest.json` (versions, lock and model digests, and the SHA-256 of every file).
+
+#### `export compare`
+
+What changed between two exports of a service, for a change review: MageML, Python and uv,
+the packages of `uv.lock`, the models and the files.
+
+**Usage:**
+```bash
+mage export compare <old_folder> <new_folder>
+```
+
+```text
+Python packages (1):
+  ~ pandas 3.0.5 -> 3.0.6
+Files (1):
+  ~ shop/transformers/clean_orders.py
+```
+
 ---
 
 ## Common Use Cases
