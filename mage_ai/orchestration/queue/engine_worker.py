@@ -6,8 +6,9 @@ jobs one at a time as they arrive on file descriptor 4: each is a pickled call, 
 and arguments the process queue would run in a new process. What a job prints goes to the
 engine's stderr, as a process queue worker's output goes to the scheduler's.
 
-Between jobs it puts back what block code can change in a process (environment variables,
-working directory, sys.path) and drops the project's own modules, so the next job reads
+Between jobs it puts back what block code can change in a process (fusion.ProcessState:
+environment variables, working directory, sys.path, warning filters, NumPy error settings)
+and drops the project's own modules, so the next job reads
 edited code. It asks to be replaced when a job leaves threads running or its memory grew
 past MAGE_JOBS_MAX_RSS_MB (2048 by default): the engine starts a fresh worker instead.
 """
@@ -54,32 +55,6 @@ class _AliasSink(dict):
         super().__setitem__(key, value)
         if isinstance(value, int) and not isinstance(value, bool):
             self.replies.send(dict(event='alias', alias=key))
-
-
-class _ProcessState:
-    """What block code can change in a process, taken before a job and put back after."""
-
-    def __init__(self):
-        self.environ = dict(os.environ)
-        self.cwd = os.getcwd()
-        self.path = list(sys.path)
-        self.threads = set(threading.enumerate())
-
-    def restore(self) -> None:
-        if dict(os.environ) != self.environ:
-            os.environ.clear()
-            os.environ.update(self.environ)
-        try:
-            os.chdir(self.cwd)
-        except OSError:
-            pass
-        sys.path[:] = self.path
-
-    def threads_left(self) -> List[threading.Thread]:
-        return [
-            t for t in threading.enumerate()
-            if t not in self.threads and t.is_alive() and not t.daemon
-        ]
 
 
 def _project_roots() -> List[str]:
@@ -135,6 +110,7 @@ def _preload() -> None:
 def run_job(request: Dict, replies: _Replies) -> Dict:
     """Runs one job; returns the reply for the engine."""
     from mage_ai.orchestration.db.process import start_session_and_run
+    from mage_ai.orchestration.fusion import ProcessState
     from mage_ai.orchestration.queue import process_queue
     from mage_ai.services.redis.redis import init_redis_client
 
@@ -144,7 +120,7 @@ def run_job(request: Dict, replies: _Replies) -> Dict:
     client_id = payload.get('client_id')
     redis_url = payload.get('redis_url')
     redis_client = init_redis_client(redis_url) if redis_url else None
-    state = _ProcessState()
+    state = ProcessState()
     current = process_queue._CurrentJob(
         aliases=[],
         client_id=client_id,
@@ -171,7 +147,7 @@ def run_job(request: Dict, replies: _Replies) -> Dict:
         process_queue._current_job = None
         state.restore()
         drop_project_modules()
-    threads = state.threads_left()
+    threads = state.threads_left_running()
     if threads:
         print(
             f'[engine worker {os.getpid()}] job {job_id} left threads running '

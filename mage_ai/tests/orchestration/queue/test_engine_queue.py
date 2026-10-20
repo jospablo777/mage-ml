@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from mage_ai.orchestration.fusion import ProcessState
 from mage_ai.orchestration.queue import engine_worker
 from mage_ai.orchestration.queue.config import QueueConfig
 from mage_ai.orchestration.queue.engine_queue import EngineQueue, engine_supports_jobs
@@ -29,12 +30,25 @@ def sleep_then_touch(seconds, path):
 
 
 def set_variable_and_cwd(directory):
+    import warnings
+
+    import numpy as np
+
     os.environ['MAGE_TEST_LEAKED'] = 'yes'
     os.chdir(directory)
+    np.seterr(divide='raise')
+    warnings.simplefilter('error')
 
 
 def report_state(path):
-    Path(path).write_text(f'{os.environ.get("MAGE_TEST_LEAKED")}|{os.getcwd()}')
+    import warnings
+
+    import numpy as np
+
+    errors = any(f[0] == 'error' and f[2] is Warning for f in warnings.filters)
+    Path(path).write_text(
+        f'{os.environ.get("MAGE_TEST_LEAKED")}|{os.getcwd()}|{np.geterr()["divide"]}|{errors}',
+    )
 
 
 def register_alias_and_wait(alias, seconds):
@@ -70,7 +84,7 @@ def wait_until(condition, seconds=30):
 
 class EngineWorkerTests(unittest.TestCase):
     def test_a_job_cannot_leave_variables_cwd_or_path_behind(self):
-        state = engine_worker._ProcessState()
+        state = ProcessState()
         before = os.getcwd()
         with tempfile.TemporaryDirectory() as directory:
             os.environ['MAGE_TEST_LEAKED'] = 'yes'
@@ -110,12 +124,12 @@ class EngineWorkerTests(unittest.TestCase):
     def test_a_thread_left_running_is_found(self):
         import threading
 
-        state = engine_worker._ProcessState()
+        state = ProcessState()
         stop = threading.Event()
         thread = threading.Thread(target=stop.wait, name='left-running')
         thread.start()
         try:
-            self.assertEqual([t.name for t in state.threads_left()], ['left-running'])
+            self.assertEqual([t.name for t in state.threads_left_running()], ['left-running'])
         finally:
             stop.set()
             thread.join()
@@ -208,9 +222,11 @@ class EngineQueueTests(TestCase):
         self.assertTrue(wait_until(lambda: not self.queue.has_job('block_run_7')))
         self.queue.enqueue('block_run_8', report_state, self.path('state'))
         self.assertTrue(wait_until(lambda: os.path.exists(self.path('state'))))
-        leaked, cwd = Path(self.path('state')).read_text().split('|')
+        leaked, cwd, divide, warnings_raise = Path(self.path('state')).read_text().split('|')
         self.assertEqual(leaked, 'None')
         self.assertNotEqual(os.path.realpath(cwd), os.path.realpath(self.directory))
+        self.assertNotEqual(divide, 'raise')
+        self.assertEqual(warnings_raise, 'False')
 
     def test_a_failed_job_ends_and_the_worker_runs_the_next(self):
         self.queue.enqueue('block_run_9', fail)

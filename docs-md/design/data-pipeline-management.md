@@ -226,7 +226,10 @@ MAGE_JOB_ENGINE=on mage start my_project
 `MAGE_JOBS_WARM` (2) sets how many workers wait idle for the next job, and
 `MAGE_JOBS_MAX_PER_WORKER` (50) after how many jobs a worker is replaced. A worker drops
 the project's modules after each job, so edited code is read again, and puts back
-environment variables, the working directory and `sys.path` that block code changed. It
+environment variables, the working directory, `sys.path`, warning filters and NumPy error
+settings that block code changed. Other process-wide settings a block changes, such as
+pandas options, stay for the next job in that worker, as they do for the next block in a
+fused stage. It
 is replaced when a job leaves threads running or its memory passes
 `MAGE_JOBS_MAX_RSS_MB` (2048). Block runs, logs, outputs, retries and timeouts work as
 with processes. Without the engine, or with an engine older than 0.2.0, the scheduler
