@@ -62,7 +62,7 @@ The lock retains pandas 3, NumPy 2, Polars 2, and SQLAlchemy 2. Updated packages
 | Separate local Spark environment | Nine packages checked; no published advisories reported. |
 | Optional Spark NLP Python environment | 115 packages checked; no published Python advisories reported. Local JVM execution and pandas conversion pass. |
 | Updated frontend, including development tools | 1,204 dependencies checked; no published advisories reported. |
-| Optional Chroma extra | Four distinct advisories without a reported fixed release. Excluded from the production profile. |
+| Optional Chroma extra | Four distinct advisories without a reported fixed release (2026-10-20: chromadb 1.5.9, CVE-2026-45829, CVE-2026-45830, CVE-2026-45831, CVE-2026-45833, all about Chroma's HTTP server; MageML runs Chroma embedded). Excluded from the production profile. |
 
 Python results use pip-audit 2.10.1. Frontend results use Yarn 1.22.22 without a dependency-group filter. These checks cover published package advisories, not native operating-system packages or application logic.
 
@@ -123,6 +123,16 @@ uv export --locked --extra all --extra integrations --no-default-groups \
   --no-hashes --no-emit-workspace --output-file /tmp/mage-runtime-requirements.txt
 uvx pip-audit==2.10.1 --disable-pip --no-deps \
   --requirement /tmp/mage-runtime-requirements.txt
+```
+
+`uv audit` checks the whole lock, every extra included, against OSV, which also lists
+advisories that pip-audit's source lacks. CI runs it with the accepted advisories ignored
+(see `.github/workflows/dependency_audit.yml`): the Chroma ones until a fixed release
+exists, and PYSEC-2023-235, which is about Couchbase Server 7.2.0 but is filed against the
+Couchbase Python SDK with no version bound.
+
+```bash
+uv audit --frozen --preview-features audit-command
 ```
 
 Run backend tests in a disposable checkout with the required extras synchronized. The shared test classes now allocate temporary projects, but individual legacy tests also manipulate files and global application settings.

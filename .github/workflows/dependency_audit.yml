@@ -53,6 +53,21 @@ jobs:
         run: >-
           uv run --no-sync pip-audit --disable-pip --no-deps
           --requirement /tmp/mage-runtime-requirements.txt
+      # The whole lock, every extra included, against OSV, which also has advisories that
+      # pip-audit's source lacks.
+      # Accepted while no fixed release exists (the audit fails again once one does; a GHSA ID
+      # also covers its PYSEC alias):
+      # chromadb, only in the opt-in chroma extra. The advisories are about Chroma's HTTP
+      # server and its authorization providers; MageML runs Chroma embedded and starts no
+      # server.
+      # Ignored: PYSEC-2023-235 is about Couchbase Server 7.2.0 (a key in its debug.log),
+      # filed against the Python SDK with no version bound.
+      - name: Check OSV advisories for every extra
+        run: >-
+          uv audit --frozen --preview-features audit-command
+          --ignore-until-fixed GHSA-f4j7-r4q5-qw2c --ignore-until-fixed GHSA-36p7-vc44-83pf
+          --ignore-until-fixed GHSA-2wm9-hf6c-p5cr --ignore-until-fixed GHSA-xph7-9rjv-w5fr
+          --ignore PYSEC-2023-235
 
   runtime_helpers:
     runs-on: ubuntu-latest
@@ -76,6 +91,10 @@ jobs:
         run: >-
           uv run --no-sync pip-audit --disable-pip --no-deps
           --requirement /tmp/mage-helper-requirements.txt
+      - name: Check OSV advisories
+        run: >-
+          uv audit --frozen --preview-features audit-command
+          --project runtimes/${{ matrix.runtime }}
 
   frontend:
     runs-on: ubuntu-latest

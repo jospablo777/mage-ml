@@ -22,6 +22,14 @@ add `--extra chroma` to the `uv sync` command you installed with.
 chromadb>=0.4.17
 ```
 
+> [!WARNING]
+> chromadb 1.5.9, the newest release, has open advisories without a fixed release
+> (CVE-2026-45829, CVE-2026-45830, CVE-2026-45831, CVE-2026-45833). They are about Chroma's
+> HTTP server: code injection through a collection's embedding function settings, and
+> authorization checks that ignore the tenant. MageML uses Chroma embedded, in the block's
+> process, and starts no server. Do not run a Chroma server (`chroma run`) from this
+> environment where others can reach it; upgrade chromadb when a fixed release ships.
+
 ## Using Python block
 
 1. Create a new pipeline or open an existing pipeline.
