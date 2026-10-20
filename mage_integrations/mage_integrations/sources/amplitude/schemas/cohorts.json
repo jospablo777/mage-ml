@@ -1,0 +1,143 @@
+{
+  "type": [
+    "null",
+    "object"
+  ],
+  "properties": {
+    "id": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "appId": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "name": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "description": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "archived": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "finished": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "published": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "hidden": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "size": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "type": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "owners": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {}
+    },
+    "viewers": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {}
+    },
+    "definition": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "properties": {}
+    },
+    "lastMod": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "createdAt": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "lastComputed": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "last_viewed": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "chart_id": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "is_predictive": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_official_content": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "view_count": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    },
+    "popularity": {
+      "type": [
+        "null",
+        "integer"
+      ]
+    }
+  }
+}

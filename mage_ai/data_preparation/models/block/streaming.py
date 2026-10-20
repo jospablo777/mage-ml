@@ -32,6 +32,15 @@ def check_connection(block_type: str, content: str, global_vars: Dict = None) ->
         raise ValueError('The block needs a connector_type, such as kafka or rabbitmq.')
     connector_type = config['connector_type']
     kind = 'source' if block_type == BlockType.DATA_LOADER else 'sink'
+    if connector_type == 'amplitude' and block_type == BlockType.DATA_LOADER:
+        print(
+            'An Amplitude source has no connection to check: Amplitude forwards events to the '
+            'exported service. In Amplitude, add a Webhook destination (Data > Destinations) '
+            'with the URL https://<service>/v1/streams/<pipeline>/messages and the header '
+            'Authorization: Bearer <the service ingest token>, and forward events. Develop '
+            'the blocks on the sample meanwhile.'
+        )
+        return
     if connector_type == 'webhook' and block_type == BlockType.DATA_LOADER:
         # Nothing to connect to: webhooks call the exported service.
         print(

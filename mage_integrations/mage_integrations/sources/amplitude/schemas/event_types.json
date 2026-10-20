@@ -1,0 +1,76 @@
+{
+  "type": [
+    "null",
+    "object"
+  ],
+  "properties": {
+    "event_type": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "category": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "properties": {}
+    },
+    "description": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "display_name": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "is_active": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_hidden_from_dropdowns": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_hidden_from_persona_results": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_hidden_from_pathfinder": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_hidden_from_timeline": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "tags": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {}
+    },
+    "owner": {
+      "type": [
+        "null",
+        "string"
+      ]
+    }
+  }
+}

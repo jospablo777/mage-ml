@@ -227,6 +227,12 @@ fn source(
                         handle,
                         signature,
                         max_bytes: stream.batch.max_bytes,
+                        key_field: _config
+                            .get("idempotency_key_field")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|f| !f.is_empty())
+                            .map(str::to_string),
                     }),
                 );
             Ok(Box::new(source))
@@ -245,6 +251,9 @@ pub struct HttpIngest {
     pub signature: Option<mage_connector_http::signature::SignatureCheck>,
     /// The largest request body accepted, the stream's batch size in bytes.
     pub max_bytes: usize,
+    /// For requests without an `Idempotency-Key`: the message field that identifies them
+    /// (`idempotency_key_field`, `uuid` for Amplitude).
+    pub key_field: Option<String>,
 }
 
 /// With `MAGE_SERVICE_INSTANCE_ID` (a stable name per replica, such as a StatefulSet pod's),

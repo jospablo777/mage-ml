@@ -244,6 +244,11 @@ curl -X POST "$SERVICE/v1/streams/orders_stream/messages" \
   the stream is busy or stopped, `504` that delivery was not confirmed in time: retry with
   the same `Idempotency-Key`, and nothing is written twice within the dedupe window.
 - `MAGE_SERVICE_INGEST_TOKEN` can only send messages, so senders never hold the service token.
+- Senders that cannot set an `Idempotency-Key` header, but put an id in each message, set
+  `idempotency_key_field` (such as `uuid`): a request without the header is deduplicated by
+  that field of its messages.
+- `connector_type: amplitude` is a webhook source for Amplitude's Webhook destination, with
+  `idempotency_key_field: uuid`; see [Amplitude](../data-integrations/sources/amplitude.md#streams).
 - A request larger than the stream's batch size in bytes gets `413`.
 
 ### NATS JetStream

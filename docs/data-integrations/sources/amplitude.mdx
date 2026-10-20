@@ -1,56 +1,155 @@
 ---
 title: "Amplitude"
+description: "Load Amplitude events, metrics, the tracking plan and cohorts into tables, frames or streams."
 ---
 
+MageML reads Amplitude three ways. Pick by what you need:
 
-![Amplitude](https://user-images.githubusercontent.com/78053898/198753477-f08a7424-00de-4ae3-9d04-e1c1429a7d28.png)
+| You want | Use | Freshness |
+| --- | --- | --- |
+| Every event and metric in a database or warehouse, kept up to date | [Data integration pipeline](#data-integration-pipeline) | Hourly, about two hours behind |
+| Events or metrics as a frame in a Python block (analysis, features, training) | [Python block](#python-blocks) | Same |
+| Each event as it happens (real-time features, alerts, scoring) | [Stream](#streams) | Seconds |
 
-<br/>
+All three use the project's **API key** and **secret key** (Amplitude > Settings > Projects >
+your project > General) and its **region**: `US` (amplitude.com) or `EU`
+(analytics.eu.amplitude.com).
 
-## Configuration
+## Data integration pipeline
 
-To set up the Amplitude source, provide the following configuration parameters:
+1. Create a pipeline of type **Integration** and select **Amplitude** as the source.
+2. Fill in the settings:
 
-| Key           | Description                                  | Sample Value     | Required |
-| ------------- | -------------------------------------------- | ---------------- | -------- |
-| `api_key`     | Amplitude project's unique API key.          | `73bb...`        | ✅        |
-| `secret_key`  | Amplitude project's unique secret key.       | `ABC1...`        | ✅        |
+```yaml
+api_key: "{{ env_var('AMPLITUDE_API_KEY') }}"
+secret_key: "{{ env_var('AMPLITUDE_SECRET_KEY') }}"
+region: US                 # or EU
+start_date: '2024-01-01'   # how far back the first sync reads; empty: 30 days
+cohort_ids: []             # cohorts whose users cohort_members reads
+```
 
-> **Find your API credentials:**  
-> See Amplitude’s [documentation](https://www.docs.developers.amplitude.com/analytics/find-api-credentials/).
+3. **Test connection** checks the keys and the region.
+4. Select the streams, a destination, and a trigger (hourly or daily).
 
-<br/>
+| Stream | Holds | Sync |
+| --- | --- | --- |
+| `events` | Every event with its event and user properties | Incremental, by the hour Amplitude received it |
+| `active_users`, `new_users` | Users per day | Incremental; the last 3 days read again |
+| `average_session_length`, `sessions_per_user` | Sessions per day | Incremental; the last 3 days read again |
+| `event_types`, `event_properties`, `user_properties` | The tracking plan | Full table |
+| `annotations` | Chart annotations | Full table |
+| `cohorts` | Behavioral cohorts: name, size, owners | Full table |
+| `cohort_members` | Users of the cohorts in `cohort_ids` (500 downloads a month) | Full table |
 
-### Optional Configuration
+How events sync:
 
-| Key    | Description                                                                                                                                   | Sample Value                        |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `host` | Amplitude host URL. Standard server: `https://amplitude.com`. EU Residency server: `https://analytics.eu.amplitude.com`. Defaults to `https://amplitude.com`. | `https://analytics.eu.amplitude.com` |
+- The first sync reads from `start_date`. Each sync after it continues from the last hour it
+  exported, up to the newest hour Amplitude has finished (it takes about two hours). The
+  trigger's interval is not used, so no hour is skipped, whatever the schedule.
+- The position is saved after each request (`window_hours`, 24 by default), so a failed sync
+  goes on from there.
+- Streams come with their keys: rows are upserted by `uuid` for events and by date and
+  segment for metrics, so an event Amplitude sends again, or a day of metrics read again,
+  replaces its row.
+- To read a range again, set `start_date` and `end_date` in the runtime variables of a run;
+  the saved position does not move back.
+- Times are ISO 8601 in UTC. Event and user properties are JSON objects (`jsonb` in
+  PostgreSQL).
 
-<br/>
+Optional settings: `event_types` (only these events), `window_hours`,
+`metrics_lookback_days` (3), `cohort_properties` (`true` or a list of property names) and
+`availability_delay_hours` (2).
 
-## Query Behavior
+Errors stop the sync with what to do: wrong keys or region (a project stored in the EU
+needs `region: EU`), or an hour larger than the Export API sends (4 GB; export such a project
+to Amazon S3 or a warehouse with an Amplitude destination). Rate limits (429) and server
+errors are retried, waiting as Amplitude asks.
 
-Loading data from Amplitude requires a start date and an end date.
+## Python blocks
 
-MageML automatically passes the start date and end date based on the scheduled trigger you create.  
-For example, if your pipeline runs daily, the start date will be 1 day ago, and the end date will be today.
+Add a data loader from the **Amplitude** template (APIs), and put the keys in
+`io_config.yaml`:
 
-If you prefer to hardcode and customize these dates, follow the [instructions to override runtime variables](/getting-started/runtime-variable).
+```yaml
+default:
+  AMPLITUDE_API_KEY: "{{ env_var('AMPLITUDE_API_KEY') }}"
+  AMPLITUDE_SECRET_KEY: "{{ env_var('AMPLITUDE_SECRET_KEY') }}"
+  AMPLITUDE_REGION: US
+```
 
-Add the following keys and values to your pipeline’s runtime variables:
+```python
+from mage_ai.io.amplitude import Amplitude
+from mage_ai.io.config import ConfigFileLoader
 
-| Key          | Description                          | Sample Value  |
-| ------------ | ------------------------------------ | ------------- |
-| `_start_date` | Date to start fetching events.        | `2022-10-01`  |
-| `_end_date`   | Date to stop fetching events.         | `2022-10-03`  |
+amplitude = Amplitude.with_config(ConfigFileLoader(config_path, 'default'))
 
-<br/>
+events = amplitude.load_events('2024-06-01', '2024-06-07', event_types=['Purchase'])
+users = amplitude.active_users('2024-06-01', '2024-06-30')          # date, segment, value
+purchases = amplitude.event_totals('Purchase', '2024-06-01', '2024-06-30', group_by='country')
+plan = amplitude.event_properties()                                  # the tracking plan
+members = amplitude.cohort_members('abc123', properties=True)         # a cohort's users
+```
 
-## Schema
+| Method | Returns |
+| --- | --- |
+| `load_events(start, end=None, event_types=None, expand_properties=False, polars=False)` | One row per event; times are UTC datetimes. `expand_properties` makes `event_properties.<name>` columns. `end` defaults to the newest complete hour. |
+| `iter_events(start, end=None)` | The same events one at a time, without holding them all in memory. |
+| `active_users(start, end, interval=1, new=False)` | Active (or new) users per day, week (7) or month (30). |
+| `average_session_length(start, end)`, `sessions_per_user(start, end)` | Session metrics per day. |
+| `event_totals(event_type, start, end, metric='totals', group_by=None)` | One event's totals, uniques, `pct_dau` or average per day, optionally by a user property. |
+| `event_types()`, `event_properties()`, `user_properties()` | The tracking plan. |
+| `annotations()`, `cohorts()` | Chart annotations; behavioral cohorts. |
+| `cohort_members(cohort_id, properties=False)` | A cohort's users. |
 
-The following resources are synced:
+Every method takes `polars=True` for a Polars frame.
 
-- [Events](https://www.docs.developers.amplitude.com/analytics/apis/export-api/#response-schema)
+## Streams
 
-<br/>
+Amplitude's **Webhook** destination forwards each event as Amplitude receives it. A MageML
+stream takes them and runs your blocks on each one, in an exported service or on the Run
+tab.
+
+1. Create a **Streaming** pipeline from the **Amplitude (webhook)** template. It has the
+   source, a transformer that makes one flat row per event (who, what, when, and the event's
+   properties as columns), a sink that prints, and sample events, so the blocks run on the
+   sample at once.
+2. Replace the printing sink with yours (PostgreSQL, ClickHouse, Kafka, Feast and more), and
+   export the pipeline as a [service](/production/stream-services).
+3. In Amplitude, Data > Destinations > **Webhook**: the URL
+   `https://<service>/v1/streams/<pipeline>/messages`, the header
+   `Authorization: Bearer <MAGE_SERVICE_INGEST_TOKEN>`, and **Forward events** with the
+   default payload (Amplitude's event format).
+
+```yaml
+connector_type: amplitude
+answer_within_seconds: 30
+dedupe_window_seconds: 86400   # how long an event's uuid is remembered
+```
+
+Amplitude retries an event for up to four hours when it gets no answer. Its `uuid`
+identifies it, so the stream writes it once. The service answers only after the sinks
+took the event, so Amplitude retries anything that was not written. User payloads (user
+forwarding) have no `event_type`, and the template's transformer skips them. The Webhook
+destination is in Amplitude's Plus, Growth and Enterprise plans.
+
+### Through Kafka
+
+Amplitude's **Confluent Kafka REST** destination writes each event to a Confluent Cloud or
+Confluent Platform topic (Kafka REST v3), keyed by `user_id`. Read that topic with a Kafka
+stream source: each message is the event as JSON.
+
+```yaml
+connector_type: kafka
+bootstrap_server: "{{ env_var('KAFKA_BOOTSTRAP') }}"
+topic: amplitude-events
+consumer_group: amplitude-features
+security_protocol: SASL_SSL
+sasl_config:
+  mechanism: PLAIN
+  username: "{{ env_var('CONFLUENT_API_KEY') }}"
+  password: "{{ env_var('CONFLUENT_API_SECRET') }}"
+```
+
+Topics compressed with Zstandard are read as they are. A Kafka sink compresses with lz4 by
+default; `librdkafka: {compression.type: zstd}` writes Zstandard, which made Amplitude's
+own topics smaller for more CPU.

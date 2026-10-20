@@ -69,6 +69,38 @@ def execute_pipeline(pipeline_uuid: str, **variables):
     return run
 
 
+def run_integration_pipeline(pipeline_uuid: str, **variables):
+    """
+    Run a data integration pipeline as the scheduler does, in this process: each stream of
+    its catalog through run_integration_stream; every block run must complete.
+    """
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+    from mage_ai.orchestration.pipeline_scheduler import PipelineScheduler
+    from mage_ai.orchestration.pipeline_scheduler_original import run_integration_stream
+    from mage_ai.orchestration.triggers.api import trigger_pipeline
+    from mage_ai.shared.dates import utc_now
+
+    run = trigger_pipeline(pipeline_uuid, variables=variables)
+    scheduler = PipelineScheduler(run)
+    scheduler.start(should_schedule=False)
+    run.refresh()
+    block_runs = {b.id for b in run.block_runs}
+    runtime_arguments = dict(
+        _execution_date=utc_now().isoformat(),
+        _execution_partition=run.execution_partition,
+    )
+    for stream in scheduler.streams:
+        run_integration_stream(
+            stream, block_runs, {}, runtime_arguments, run.id, run.get_variables(),
+        )
+    scheduler.schedule()
+    run.refresh()
+    statuses = block_statuses(run)
+    assert set(statuses.values()) == {'completed'}, statuses
+    assert run.status == PipelineRun.PipelineRunStatus.COMPLETED, run.status
+    return run
+
+
 def block_statuses(run) -> Dict[str, str]:
     return {b.block_uuid: b.status.value for b in run.block_runs}
 

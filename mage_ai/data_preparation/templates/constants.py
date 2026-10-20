@@ -24,6 +24,14 @@ GROUP_SHIFT = 'Shift'
 TEMPLATES = [
     dict(
         block_type=BlockType.DATA_LOADER,
+        description='Load Amplitude events, metrics, cohorts and the tracking plan.',
+        groups=[GROUP_APIS],
+        language=BlockLanguage.PYTHON,
+        name='Amplitude',
+        path='data_loaders/amplitude.py',
+    ),
+    dict(
+        block_type=BlockType.DATA_LOADER,
         description='Load a Table from Airtable App.',
         language=BlockLanguage.PYTHON,
         name='Airtable',

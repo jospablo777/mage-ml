@@ -1560,6 +1560,9 @@ pub struct KafkaSink {
     stop: Arc<AtomicBool>,
 }
 
+/// Producer settings a sink's `librdkafka` settings can change.
+const SINK_DEFAULTS: &[(&str, &str)] = &[("linger.ms", "5"), ("compression.type", "lz4")];
+
 impl KafkaSink {
     pub fn new(config: &Value) -> Result<KafkaSink, ConnectorError> {
         let topic = text(config, "topic")
@@ -1572,9 +1575,14 @@ impl KafkaSink {
         client
             .set("enable.idempotence", "true")
             .set("acks", "all")
-            .set("linger.ms", "5")
-            .set("compression.type", "lz4")
             .set_log_level(rdkafka::config::RDKafkaLogLevel::Debug);
+        // Defaults a sink's librdkafka settings can change: they set compression.type to
+        // zstd (smaller topics for more CPU) and were overwritten with lz4.
+        for (key, value) in SINK_DEFAULTS {
+            if client.get(key).is_none() {
+                client.set(*key, *value);
+            }
+        }
         let producer: Arc<FutureProducer<SinkContext>> = Arc::new(
             client
                 .create_with_context(SinkContext)

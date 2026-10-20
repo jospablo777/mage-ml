@@ -16,6 +16,25 @@
   the client's connection, or connection settings the Rust client lacks go through psycopg2.
   `MAGE_POSTGRES_BINARY_LOAD=off` turns it off.
 
+### Amplitude
+
+- The Amplitude source of data integration pipelines was rewritten. A failed request (wrong
+  keys, rate limits, server errors) ended the sync with no rows and no error; it now retries
+  what can be retried and stops with what to do. Events synced the trigger's interval, which
+  missed the last two hours of each interval (Amplitude finishes an hour about two hours
+  later); syncs now continue from the last exported hour, save their position after each
+  request, and stream the export instead of holding it in memory. Streams were added for
+  daily users and sessions, the tracking plan, annotations, cohorts and cohort members, and
+  rows are upserted by their keys out of the box. See
+  [Amplitude](/data-integrations/sources/amplitude).
+- Python blocks read Amplitude with `mage_ai.io.amplitude.Amplitude` (events, metrics, the
+  tracking plan, cohorts) and the Amplitude data loader template.
+- Streams receive events from Amplitude's Webhook destination with `connector_type:
+  amplitude`, which writes an event Amplitude retries once, by its uuid; a webhook source can
+  dedupe by any message field with `idempotency_key_field`.
+- Kafka streams read topics compressed with Zstandard (the engine's librdkafka had no zstd),
+  and a Kafka sink's `librdkafka: {compression.type: ...}` is no longer replaced by lz4.
+
 ### Rust blocks
 
 - `mage::mongodb` (feature `mongodb`) reads collections into typed frames (structs, lists,

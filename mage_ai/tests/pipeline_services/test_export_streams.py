@@ -254,6 +254,17 @@ class WebhookExportTest(StreamExportTestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_an_amplitude_source_dedupes_by_the_events_uuid(self):
+        self.stream(source='connector_type: amplitude\n')
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        source = captured.manifest['pipelines'][0]['stream']['source']
+        self.assertEqual(source['kind'], 'http')
+        self.assertEqual(source['config'], {'idempotency_key_field': 'uuid'})
+
+    def test_a_webhook_key_field_must_name_a_field(self):
+        self.stream(source='connector_type: webhook\nidempotency_key_field: ""\n')
+        self.assertIn('idempotency_key_field must name a field', self.problems())
+
     def test_a_signature_secret_in_the_file_is_refused(self):
         self.stream(source='connector_type: webhook\nsignature:\n  secret: shh\n')
         self.assertIn('signature.secret is written in the file', self.problems())
@@ -806,9 +817,9 @@ class StreamRefusalTest(StreamExportTestCase):
         self.stream(source='connector_type: kinesis\nstream_name: orders\n')
         problems = self.problems()
         self.assertIn(
-            'uses the kinesis connector; services run activemq, amazon_sqs, azure_event_hub, '
-            'google_cloud_pubsub, ibm_mq, kafka, mongodb, nats, nats_js, postgres, rabbitmq, '
-            'webhook '
+            'uses the kinesis connector; services run activemq, amazon_sqs, amplitude, '
+            'azure_event_hub, google_cloud_pubsub, ibm_mq, kafka, mongodb, nats, nats_js, '
+            'postgres, rabbitmq, webhook '
             'sources now',
             problems,
         )

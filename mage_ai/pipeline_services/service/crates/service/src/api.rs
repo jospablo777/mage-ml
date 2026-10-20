@@ -751,7 +751,14 @@ async fn ingest_messages(
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .filter(|k| !k.is_empty())
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| {
+            // Senders that cannot set the header (Amplitude) identify a message in its body.
+            ingest
+                .key_field
+                .as_deref()
+                .and_then(|field| mage_connector_http::key_from_field(&messages, field))
+        });
     if key.as_ref().is_some_and(|k| k.len() > 200) {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,

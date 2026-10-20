@@ -1,4 +1,7 @@
 {
   "api_key": "",
-  "secret_key": ""
+  "secret_key": "",
+  "region": "US",
+  "start_date": "",
+  "cohort_ids": []
 }

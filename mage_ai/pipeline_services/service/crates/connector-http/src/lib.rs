@@ -100,6 +100,40 @@ impl std::fmt::Display for IngestError {
     }
 }
 
+/// Longest idempotency key kept as it is; longer ones are hashed.
+pub const MAX_KEY_CHARS: usize = 200;
+
+/// An idempotency key from a field of a request's messages, for senders that cannot set an
+/// `Idempotency-Key` header: Amplitude's webhooks send one event per request and retry it for
+/// hours, with the event's `uuid` in the body. None when a message lacks the field (or it is
+/// not text or a number), so such requests are not deduplicated.
+pub fn key_from_field(messages: &[Box<RawValue>], field: &str) -> Option<String> {
+    let mut values = Vec::with_capacity(messages.len());
+    for message in messages {
+        let parsed: serde_json::Value = serde_json::from_str(message.get()).ok()?;
+        let text = match parsed.get(field)? {
+            serde_json::Value::String(text) => text.clone(),
+            serde_json::Value::Number(number) => number.to_string(),
+            _ => return None,
+        };
+        if text.is_empty() {
+            return None;
+        }
+        values.push(text);
+    }
+    if values.is_empty() {
+        return None;
+    }
+    let joined = values.join("\u{1f}");
+    let key = format!("{field}:{joined}");
+    if key.chars().count() <= MAX_KEY_CHARS {
+        return Some(key);
+    }
+    let digest = ring::digest::digest(&ring::digest::SHA256, joined.as_bytes());
+    let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("{field}:sha256:{hex}"))
+}
+
 type Answer = oneshot::Sender<Result<usize, IngestError>>;
 
 struct Submission {
@@ -472,6 +506,37 @@ impl Drop for HttpSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn messages(texts: &[&str]) -> Vec<Box<RawValue>> {
+        texts
+            .iter()
+            .map(|t| RawValue::from_string(t.to_string()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn keys_come_from_a_field_of_every_message() {
+        let one = messages(&[r#"{"uuid": "a-1", "event_type": "Play"}"#]);
+        assert_eq!(key_from_field(&one, "uuid").as_deref(), Some("uuid:a-1"));
+        let numbers = messages(&[r#"{"id": 7}"#, r#"{"id": 8}"#]);
+        assert_eq!(
+            key_from_field(&numbers, "id").as_deref(),
+            Some("id:7\u{1f}8")
+        );
+        // A message without the field, or with an object there, gives no key.
+        assert_eq!(
+            key_from_field(&messages(&[r#"{"uuid": "a"}"#, "{}"]), "uuid"),
+            None
+        );
+        assert_eq!(
+            key_from_field(&messages(&[r#"{"uuid": {}}"#]), "uuid"),
+            None
+        );
+        assert_eq!(key_from_field(&messages(&["[1]"]), "uuid"), None);
+        let long = format!(r#"{{"uuid": "{}"}}"#, "x".repeat(300));
+        let hashed = key_from_field(&messages(&[long.as_str()]), "uuid").unwrap();
+        assert!(hashed.starts_with("uuid:sha256:") && hashed.len() <= MAX_KEY_CHARS);
+    }
 
     fn raw(text: &str) -> Box<RawValue> {
         RawValue::from_string(text.to_string()).unwrap()

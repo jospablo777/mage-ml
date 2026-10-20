@@ -32,9 +32,16 @@ class StreamTemplateTest(DBTestCase):
 
                 self.assertIsNone(result.get('error'), result.get('error'))
                 output = result['outputs'][transformer.uuid]
-                # The refund (a negative amount) is dropped.
-                self.assertEqual(len(output), 4)
-                self.assertEqual(output[0]['amount_cents'], 4250)
+                if template == 'amplitude':
+                    # One flat row per event, with its properties as columns.
+                    self.assertEqual(len(output), 5)
+                    self.assertEqual(output[2]['event_type'], 'Purchase')
+                    self.assertEqual(output[2]['property_quantity'], 2)
+                    self.assertEqual(output[2]['user_plan'], 'free')
+                else:
+                    # The refund (a negative amount) is dropped.
+                    self.assertEqual(len(output), 4)
+                    self.assertEqual(output[0]['amount_cents'], 4250)
 
                 captured = export.capture(self.repo_path, [pipeline.uuid])
                 stream = captured.manifest['pipelines'][0]['stream']

@@ -1,0 +1,27 @@
+{
+  "type": [
+    "null",
+    "object"
+  ],
+  "properties": {
+    "date": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "format": "date"
+    },
+    "segment": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "value": {
+      "type": [
+        "null",
+        "number"
+      ]
+    }
+  }
+}

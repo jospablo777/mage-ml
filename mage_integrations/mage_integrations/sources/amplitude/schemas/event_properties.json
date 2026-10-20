@@ -1,0 +1,71 @@
+{
+  "type": [
+    "null",
+    "object"
+  ],
+  "properties": {
+    "event_type": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "event_property": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "description": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "type": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "regex": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "enum_values": {
+      "type": [
+        "null",
+        "array",
+        "string"
+      ],
+      "items": {}
+    },
+    "is_array_type": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_required": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "is_hidden": {
+      "type": [
+        "null",
+        "boolean"
+      ]
+    },
+    "classifications": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {}
+    }
+  }
+}

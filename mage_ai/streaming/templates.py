@@ -41,6 +41,60 @@ def transform(messages: List[Dict], *args, **kwargs) -> List[Dict]:
     return valid
 '''
 
+AMPLITUDE_EVENTS = [
+    {
+        'uuid': f'5e1c7a4e-0000-4000-8000-00000000000{n}',
+        'event_type': event_type,
+        'event_time': f'2026-10-17 10:0{n}:00.000000',
+        'server_upload_time': f'2026-10-17 10:0{n}:01.000000',
+        'user_id': user_id,
+        'device_id': f'device-{n}',
+        'amplitude_id': 900000000000 + n,
+        'session_id': 1792240000000 + n,
+        'platform': 'Web',
+        'country': 'Germany',
+        'event_properties': properties,
+        'user_properties': {'plan': 'pro' if n % 2 else 'free'},
+    }
+    for n, (event_type, user_id, properties) in enumerate([
+        ('Sign Up', 'u-17', {'source': 'ad'}),
+        ('Add To Cart', 'u-17', {'sku': 'A-1', 'price': 12.5}),
+        ('Purchase', 'u-17', {'sku': 'A-1', 'price': 12.5, 'quantity': 2}),
+        ('Add To Cart', None, {'sku': 'B-7', 'price': 3.0}),
+        ('Purchase', 'u-42', {'sku': 'C-2', 'price': 99.0, 'quantity': 1}),
+    ])
+]
+
+AMPLITUDE_TRANSFORMER = '''
+from typing import Dict, List
+
+
+@transformer
+def transform(events: List[Dict], *args, **kwargs) -> List[Dict]:
+    """
+    Gets the events Amplitude forwards (its Export API format, one per request) and returns
+    one flat row each: who, what, when, and the event's properties as columns. Run it on
+    the sample with Cmd+Enter (Ctrl+Enter).
+    """
+    rows = []
+    for event in events:
+        # User payloads (Identify) have no event_type; this stream keeps events.
+        if not isinstance(event, dict) or not event.get('event_type'):
+            continue
+        row = dict(
+            uuid=event.get('uuid'),
+            event_type=event['event_type'],
+            event_time=event.get('event_time'),
+            user_id=event.get('user_id'),
+            device_id=event.get('device_id'),
+            user_plan=(event.get('user_properties') or {}).get('plan'),
+        )
+        for name, value in (event.get('event_properties') or {}).items():
+            row[f'property_{name}'] = value
+        rows.append(row)
+    return rows
+'''
+
 SINK = '''
 # Prints each batch, here and in the service's log. Replace it with a sink of the
 # Data exporter menu (Kafka, PostgreSQL, ClickHouse, object storage and more).
@@ -96,6 +150,18 @@ SOURCES: Dict[str, Dict] = {
         #   prefix: "sha256="
         #   secret: "{{ env_var('WEBHOOK_SECRET') }}"
     '''),
+    'amplitude': dict(label='Amplitude (webhook)', sample=AMPLITUDE_EVENTS,
+                      transformer=AMPLITUDE_TRANSFORMER, source='''
+        # Amplitude forwards each event as it arrives (Data > Destinations > Webhook):
+        # 1. URL: https://<service>/v1/streams/<pipeline>/messages
+        # 2. Header: Authorization = Bearer <the service's ingest token>
+        # 3. Forward events, with the default payload (the Export API's event format).
+        # Amplitude retries an event for up to 4 hours; its uuid identifies it, so a retry
+        # is not written twice. The stream runs on the engine (the Run tab, or a service).
+        connector_type: amplitude
+        answer_within_seconds: 30
+        dedupe_window_seconds: 86400   # how long a uuid is remembered
+    '''),
     'postgres': dict(label='PostgreSQL changes', sample=CHANGES, source='''
         # Changes of tables by logical replication: the server needs wal_level = logical,
         # and the user the REPLICATION attribute.
@@ -143,7 +209,7 @@ def apply(pipeline, template: str) -> None:
         return block
 
     source = add(template, 'data_loader', found['source'], BlockLanguage.YAML)
-    transformer = add('transform', 'transformer', TRANSFORMER, BlockLanguage.PYTHON,
-                      upstream=[source])
+    transformer = add('transform', 'transformer', found.get('transformer', TRANSFORMER),
+                      BlockLanguage.PYTHON, upstream=[source])
     add('print', 'data_exporter', SINK, BlockLanguage.YAML, upstream=[transformer])
     write_sample(repo_path, pipeline.uuid, 'example', json.loads(json.dumps(found['sample'])))

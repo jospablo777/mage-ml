@@ -557,6 +557,9 @@ def _pipeline_entry(pipeline, project: Path, repo_config, capture_: Capture,
 # Stream connectors services run, by Mage's connector_type: the manifest kind.
 STREAM_SOURCES = {
     'kafka': 'kafka', 'webhook': 'http', 'rabbitmq': 'rabbitmq', 'ibm_mq': 'ibm_mq',
+    # Amplitude's Webhooks destination: one event per request, retried for hours, with the
+    # event's uuid in the body.
+    'amplitude': 'http',
     # Read through Event Hubs' Kafka endpoint.
     'azure_event_hub': 'kafka',
     # nats is Mage's name (the block templates, the executor); nats_js an older alias.
@@ -638,7 +641,11 @@ CREDENTIAL_HEADER = re.compile(r'auth|token|key|secret|password|cookie', re.IGNO
 STREAM_PLANNED = 'Kinesis and Pulsar come next'
 # A webhook source's settings: requests signed with an HMAC of the body, and how long a
 # caller waits and a retry's key is remembered.
-WEBHOOK_SETTINGS = {'signature', 'answer_within_seconds', 'dedupe_window_seconds'}
+WEBHOOK_SETTINGS = {
+    'signature', 'answer_within_seconds', 'dedupe_window_seconds',
+    # The message field that identifies a request without an Idempotency-Key header.
+    'idempotency_key_field',
+}
 SIGNATURE_SETTINGS = {'header', 'prefix', 'secret'}
 # Mage's Kafka settings the engine's connector reads; others stop the export, as Mage's own
 # settings class refuses unknown keys.
@@ -770,6 +777,9 @@ def _webhook_settings(config: Dict, where: str, problems: List[str]) -> Dict:
         value = config.get(key)
         if value is not None and not (isinstance(value, int) and value > 0):
             problems.append(f'{where}: {key} must be a whole number of seconds above 0.')
+    field = config.get('idempotency_key_field')
+    if field is not None and not (isinstance(field, str) and field.strip()):
+        problems.append(f'{where}: idempotency_key_field must name a field of the messages.')
     return {k: v for k, v in config.items() if k in WEBHOOK_SETTINGS}
 
 
@@ -1347,6 +1357,10 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     if kind == 'stdout':
         return dict(name=block.uuid, kind=kind, config={})
     if kind == 'http' and role == 'source':
+        if connector_type == 'amplitude':
+            # Amplitude retries an event for hours and cannot send an Idempotency-Key: its
+            # uuid identifies it. User payloads have none and are not deduplicated.
+            config = dict(dict(idempotency_key_field='uuid'), **config)
         return dict(name=block.uuid, kind=kind,
                     config=_webhook_settings(config, where, problems))
     if kind == 'http':

@@ -1,55 +1,65 @@
 # Amplitude
 
-![](https://user-images.githubusercontent.com/78053898/198753477-f08a7424-00de-4ae3-9d04-e1c1429a7d28.png)
+Events, daily metrics, the tracking plan and cohorts of an Amplitude project.
 
-<br />
+## Settings
 
-## Config
-
-You must enter the following settings when configuring this source:
-
-| Key | Description | Sample value
+| Key | What it is | Example |
 | --- | --- | --- |
-| `api_key` | Amplitude project's unique API key. | `73bb...` |
-| `secret_key` | Amplitude project's unique secret key. | `ABC1...` |
+| `api_key` | The project's API key: Amplitude > Settings > Projects > your project > General. | `"{{ env_var('AMPLITUDE_API_KEY') }}"` |
+| `secret_key` | The project's secret key, on the same page. | `"{{ env_var('AMPLITUDE_SECRET_KEY') }}"` |
+| `region` | Where the project's data is stored: `US` (amplitude.com) or `EU` (analytics.eu.amplitude.com). | `US` |
+| `start_date` | How far back the first sync reads. Empty: 30 days. | `2024-01-01` |
+| `cohort_ids` | Cohorts whose users the `cohort_members` stream reads (the id in the cohort's URL). | `[abc123]` |
 
-> Find your Amplitude Project API Credentials
->
-> See Amplitude’s [documentation](https://www.docs.developers.amplitude.com/analytics/find-api-credentials/).
+Optional:
 
-### Optional Configs
-
-| Key | Description | Sample value
+| Key | What it is | Default |
 | --- | --- | --- |
-| `host` | The Amplitude host. Standard server: `https://amplitude.com`. EU Residency Server: `https://analytics.eu.amplitude.com`.| Default value is `https://amplitude.com` |
-<br />
+| `event_types` | Only these events, such as `[Purchase, Sign Up]`. | all events |
+| `window_hours` | Hours of events per Export API request. | `24` |
+| `metrics_lookback_days` | Days of metrics read again on each sync, since late events change them. | `3` |
+| `cohort_properties` | `true` to add the users' properties to `cohort_members`, or a list of property names. | `false` |
+| `availability_delay_hours` | Hours Amplitude takes to finish an hour of events. | `2` |
 
+Test the connection: it checks the keys and the region.
 
-## Query
+## Streams
 
-Loading data from Amplitude requires a start date and an end date.
-
-Mage will automatically pass the start date and end date to Amplitude depending on the
-scheduled trigger you create.
-
-For example, if you create a scheduled trigger that runs daily, then on each pipeline run the
-start date will be 1 day ago and the end date will be today’s date.
-
-If you want to hardcode and customize the start date and end date,
-follow these [instructions to override the runtime variables](https://github.com/jospablo777/mage-ml/blob/master/docs-md/getting-started/runtime-variable.md)
-for your pipeline.
-
-Add the following keys and sample values to your pipeline’s variables:
-
-| Key | Description | Sample value
+| Stream | What it holds | Sync |
 | --- | --- | --- |
-| `_start_date` | The date to start fetching events from Amplitude. | `2022-10-01` |
-| `_end_date` | The date to stop fetching events from Amplitude. | `2022-10-03` |
+| `events` | Every event, with its event and user properties (Export API). | Incremental, by the hour Amplitude received it |
+| `active_users`, `new_users` | Users per day. | Incremental; the last days again |
+| `average_session_length`, `sessions_per_user` | Sessions per day. | Incremental; the last days again |
+| `event_types`, `event_properties`, `user_properties` | The tracking plan: names, types, descriptions. | Full table |
+| `annotations` | Chart annotations (releases, campaigns). | Full table |
+| `cohorts` | Behavioral cohorts: name, size, owners. | Full table |
+| `cohort_members` | The users of the cohorts in `cohort_ids`. Each sync downloads them; Amplitude allows 500 downloads a month. | Full table |
 
-<br />
+## How events sync
 
-## Schema
+- The first sync reads from `start_date`; each sync after it continues from the last hour it
+  exported, up to the newest hour Amplitude has finished (about two hours ago). A trigger's
+  interval is not used, so no hour is skipped whatever the schedule.
+- The position is saved after each window of `window_hours`: a sync that fails goes on from
+  there next time.
+- Rows are upserted by `uuid` (events) and by date and segment (metrics), so an event
+  Amplitude sends again, or a day of metrics read again, replaces its row.
+- To read a range again, set `start_date` and `end_date` in the source's query (runtime
+  variables of a trigger or backfill). The saved position does not move back.
+- Times are ISO 8601 in UTC.
 
-- [Events](https://www.docs.developers.amplitude.com/analytics/apis/export-api/#response-schema)
+## Errors
 
-<br />
+- Wrong keys or the wrong region stop the sync with that message: a project stored in the
+  EU needs `region: EU`.
+- Amplitude's rate limits (429) and server errors are retried, waiting as Amplitude asks.
+- An hour larger than the Export API sends (4 GB) stops the sync: export such a project to
+  Amazon S3 or a warehouse with an Amplitude destination instead.
+
+## Other ways in
+
+- Python blocks: the Amplitude data loader template, or `mage_ai.io.amplitude.Amplitude`
+  (`load_events`, `active_users`, `cohort_members`, ...).
+- Streams: the Amplitude stream template receives events from Amplitude's Webhook
+  destination as they happen.

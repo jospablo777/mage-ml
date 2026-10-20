@@ -13,6 +13,10 @@ default:
   ALGOLIA_INDEX_NAME: index_name
   # Airtable
   AIRTABLE_ACCESS_TOKEN: token
+  # Amplitude: Settings > Projects > your project > General; region US or EU
+  AMPLITUDE_API_KEY: "{{ env_var('AMPLITUDE_API_KEY') }}"
+  AMPLITUDE_SECRET_KEY: "{{ env_var('AMPLITUDE_SECRET_KEY') }}"
+  AMPLITUDE_REGION: US
   # Azure
   AZURE_CLIENT_ID: "{{ env_var('AZURE_CLIENT_ID') }}"
   AZURE_CLIENT_SECRET: "{{ env_var('AZURE_CLIENT_SECRET') }}"

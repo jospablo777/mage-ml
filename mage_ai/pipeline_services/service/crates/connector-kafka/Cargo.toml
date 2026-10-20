@@ -11,7 +11,9 @@ mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 serde_json.workspace = true
 # ADR-0021: librdkafka, the reference client. TLS is vendored so SASL_SSL works everywhere.
-rdkafka = { version = "0.39", features = ["cmake-build", "ssl-vendored"] }
+# zstd: topics compressed with Zstandard (Amplitude's choice for its own Kafka) are read, and
+# sinks can write them; without it a zstd batch failed to decompress.
+rdkafka = { version = "0.39", features = ["cmake-build", "ssl-vendored", "zstd"] }
 tokio = { version = "1.47", features = ["rt", "time", "sync"] }
 # Avro messages in Confluent's wire format, their schemas from a schema registry.
 apache-avro = "0.22"
