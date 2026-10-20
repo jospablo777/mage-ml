@@ -318,6 +318,24 @@ services:
       timeout: 5s
       retries: 40
 
+  # Apache Pinot's quickstart (ZooKeeper, controller, broker, server and minion in one JVM)
+  # with a heap of 1 GB, on Amazon Corretto. The controller takes schemas, tables and files;
+  # MageML queries the broker.
+  pinot:
+    image: apachepinot/pinot:1.4.0-21-amazoncorretto
+    mem_limit: 1600m
+    command: ["QuickStart", "-type", "EMPTY"]
+    environment:
+      JAVA_OPTS: "-Xms256m -Xmx1g"
+    ports:
+      - "${MAGE_TEST_PINOT_CONTROLLER_PORT:-19900}:9000"
+      - "${MAGE_TEST_PINOT_BROKER_PORT:-18999}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health && curl -sf http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
   # ActiveMQ Classic 6.2 with a heap of 256 MB. Mage's ActiveMQ source and sink use STOMP.
   activemq:
     image: apache/activemq-classic:6.2.0

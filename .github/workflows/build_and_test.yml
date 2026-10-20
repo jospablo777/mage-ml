@@ -250,9 +250,9 @@ jobs:
             r: false
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why' 'integration_tests/mysql/test_rust_mysql.py::test_exact_decimals_and_a_failure_that_says_why'"
           - id: documents
-            name: "Integration: document stores and caches"
-            services: mongodb redis
-            tests: integration_tests/mongodb integration_tests/redis
+            name: "Integration: document stores, caches and Pinot"
+            services: mongodb redis pinot
+            tests: integration_tests/mongodb integration_tests/redis integration_tests/pinot
             r: false
             # Rust blocks build Polars, and mage::mongodb its driver: warmed first.
             warm: "'integration_tests/mongodb/test_rust_mongodb.py::test_exact_decimals_read_from_documents'"

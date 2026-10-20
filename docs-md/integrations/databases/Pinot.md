@@ -13,12 +13,12 @@
 ```yaml
 version: 0.1.1
 default:
-  PINOT_HOST: ...
-  PINOT_PASSWORD: ...
-  PINOT_PATH: /query/sql
-  PINOT_PORT: 8000
-  PINOT_SCHEME: http
-  PINOT_USER: ...
+  PINOT_HOST: ...          # the broker
+  PINOT_PORT: 8099         # the broker's port (8000 in Pinot's quickstart)
+  PINOT_USER: ...          # optional
+  PINOT_PASSWORD: ...      # optional
+  PINOT_PATH: /query/sql   # optional, the default
+  PINOT_SCHEME: http       # optional, the default; https for TLS
 ```
 
 <br />
@@ -63,3 +63,26 @@ def test_output(output, *args) -> None:
 
 5. Enter the SQL query in place of 'your Pinot query'.
 6. Run the block.
+
+## Types and nulls
+
+The frame takes its column types from Pinot, not from pandas' guesses:
+
+| Pinot | Column |
+| --- | --- |
+| `INT`, `LONG` | Nullable integers (`Int32`, `Int64`): a `LONG` keeps every digit, nulls included |
+| `FLOAT`, `DOUBLE` | `float32`, `float64` |
+| `BOOLEAN` | Nullable `boolean` |
+| `TIMESTAMP` | UTC datetime, milliseconds |
+| `BIG_DECIMAL` | Exact `Decimal` |
+| `BYTES` | `bytes` |
+| `JSON` | The parsed value |
+| Multi-value columns | Lists |
+
+Queries run with `enableNullHandling`, so a table that stores nulls
+(`enableColumnBasedNullHandling` in its schema) returns them. A table that does not store
+nulls returns Pinot's default values in their place, such as `-9223372036854775808` for a
+`LONG` and `'null'` for a `STRING`. `Pinot(..., null_handling=False)` turns the option off.
+
+A query without `LIMIT` gets the loader's row limit: without one, Pinot's broker returns
+10 rows.

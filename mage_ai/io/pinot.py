@@ -1,6 +1,19 @@
+"""
+Apache Pinot for blocks: queries through the broker's SQL API (pinotdb).
+
+Results are typed from Pinot's own column types, not guessed by pandas: INT and LONG are
+nullable integers, so a LONG keeps every digit when the column has nulls; TIMESTAMP is a
+UTC datetime; BIG_DECIMAL an exact Decimal; BYTES bytes; JSON the parsed value. Queries run
+with enableNullHandling, so a table that stores nulls returns them; one that does not
+returns Pinot's default values in their place (-9223372036854775808 for a LONG, 'null' for
+a STRING), as Pinot stores them.
+"""
+import json
 import re
+from decimal import Decimal
 from typing import IO, Any, Dict, List, Union
 
+import pandas as pd
 from pandas import DataFrame, Series
 from pinotdb import connect
 
@@ -24,6 +37,7 @@ class Pinot(BaseSQL):
             password: Union[str, None] = None,
             path: str = '/query/sql',
             scheme: str = 'http',
+            null_handling: bool = True,
             **kwargs,
     ) -> None:
         """
@@ -36,9 +50,11 @@ class Pinot(BaseSQL):
             password (str): The login password for the user.
             path (str): Path to pinot sql api.
             scheme (str): The scheme identifies the protocol to be used http or https.
+            null_handling (bool): Query with enableNullHandling, so tables that store nulls
+                return them instead of Pinot's default values.
             **kwargs: Additional settings for creating SQLAlchemy engine and connection
         """
-        self._ctx = None
+        self.null_handling = null_handling
         super().__init__(
             host=host,
             port=port,
@@ -56,8 +72,9 @@ class Pinot(BaseSQL):
             port=config[ConfigKey.PINOT_PORT],
             username=config[ConfigKey.PINOT_USER],
             password=config[ConfigKey.PINOT_PASSWORD],
-            path=config[ConfigKey.PINOT_PATH],
-            scheme=config[ConfigKey.PINOT_SCHEME],
+            # Unset in most profiles: None replaced the defaults, and pinotdb failed.
+            path=config[ConfigKey.PINOT_PATH] or '/query/sql',
+            scheme=config[ConfigKey.PINOT_SCHEME] or 'http',
         )
 
     def open(self) -> None:
@@ -94,14 +111,29 @@ class Pinot(BaseSQL):
              display_query: Union[str, None] = None,
              verbose: bool = True,
              **kwargs) -> DataFrame:
-        return super().load(query_string, limit, display_query, verbose, **kwargs)
+        """The query's rows, typed from Pinot's column types."""
+        message = 'Loading data'
+        if verbose:
+            message += f' with query\n\n{display_query or query_string}\n\n'
+        query = self._enforce_limit(self._clean_query(query_string), limit)
+        with self.printer.print_msg(message):
+            cursor = self.conn.cursor()
+            cursor.execute(
+                query,
+                queryOptions='enableNullHandling=true' if self.null_handling else None,
+            )
+            return pinot_frame(cursor.fetchall(), cursor.schema or [])
 
     def clean(self, column: Series, dtype: str) -> Series:
         return super().clean(column, dtype)
 
     @property
     def conn(self) -> Any:
-        return super().conn
+        # Opened on first use: Pinot's SQL API is stateless HTTP, and a client used
+        # outside a with block had no connection and failed with a NoneType error.
+        if '_ctx' not in self.__dict__:
+            self.open()
+        return self._ctx
 
     def upload_dataframe(self,
                          cursor,
@@ -128,12 +160,69 @@ class Pinot(BaseSQL):
         raise WRITE_NOT_SUPPORTED_EXCEPTION
 
     def _enforce_limit(self, query: str, limit: int = QUERY_ROW_LIMIT) -> str:
-        query = query.strip(';')
-        if re.search('limit', query, re.IGNORECASE):
-            return f"""
-{query}
-"""
+        """
+        The query with a LIMIT unless it ends with one: without, Pinot's broker returns
+        10 rows. Any 'limit' in the query (a credit_limit column) used to count.
+        """
+        query = query.strip().rstrip(';').strip()
+        if ENDS_WITH_LIMIT.search(query):
+            return query
+        return f'{query}\nLIMIT {limit}'
+
+
+# LIMIT n, LIMIT offset, n or LIMIT n OFFSET m at the end of the query.
+ENDS_WITH_LIMIT = re.compile(
+    r'\blimit\s+\d+(\s*,\s*\d+)?(\s+offset\s+\d+)?\s*$', re.IGNORECASE,
+)
+NULLABLE_INTEGERS = {'INT': 'Int32', 'LONG': 'Int64'}
+FLOATS = {'FLOAT': 'float32', 'DOUBLE': 'float64'}
+
+
+def _decimal(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        # pinotdb hands BIG_DECIMAL over as JSON text: '"12.5"'.
+        text = value.strip()
+        if text.startswith('"'):
+            text = json.loads(text)
+        return Decimal(text)
+    return Decimal(str(value))
+
+
+def _bytes(value):
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    return bytes.fromhex(value)
+
+
+def pinot_frame(rows: List[List[Any]], schema: List[Dict]) -> DataFrame:
+    """Rows of a Pinot query as a frame typed from the query's column types."""
+    names = [column['name'] for column in schema]
+    columns = list(zip(*rows)) if rows else [[] for _ in names]
+    data = {}
+    for column, values in zip(schema, columns):
+        kind = column.get('type')
+        values = list(values)
+        if kind in NULLABLE_INTEGERS:
+            series = pd.Series(values, dtype=NULLABLE_INTEGERS[kind])
+        elif kind in FLOATS:
+            series = pd.Series(
+                [float('nan') if v is None else v for v in values], dtype=FLOATS[kind],
+            )
+        elif kind == 'BOOLEAN':
+            series = pd.Series(values, dtype='boolean')
+        elif kind == 'TIMESTAMP':
+            series = pd.to_datetime(pd.Series(values, dtype=object), utc=True).astype(
+                'datetime64[ms, UTC]',
+            )
+        elif kind == 'BIG_DECIMAL':
+            series = pd.Series([_decimal(v) for v in values], dtype=object)
+        elif kind == 'BYTES':
+            series = pd.Series([_bytes(v) for v in values], dtype=object)
         else:
-            return f"""
-{query} limit {limit}
-"""
+            series = pd.Series(values, dtype=object)
+        data[column['name']] = series
+    return pd.DataFrame(data, columns=names)

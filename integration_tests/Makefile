@@ -73,6 +73,9 @@ export MAGE_TEST_PUBSUB_HOST ?= 127.0.0.1:$(MAGE_TEST_PUBSUB_PORT)
 export MAGE_TEST_OPENSEARCH_PORT ?= 19200
 export MAGE_TEST_OPENSEARCH_URL ?= http://127.0.0.1:$(MAGE_TEST_OPENSEARCH_PORT)
 export MAGE_TEST_INFLUXDB_PORT ?= 18086
+export MAGE_TEST_PINOT_CONTROLLER_PORT ?= 19900
+export MAGE_TEST_PINOT_BROKER_PORT ?= 18999
+export MAGE_TEST_PINOT_CONTROLLER_URL ?= http://127.0.0.1:$(MAGE_TEST_PINOT_CONTROLLER_PORT)
 export MAGE_TEST_INFLUXDB_URL ?= http://127.0.0.1:$(MAGE_TEST_INFLUXDB_PORT)
 # MLflow prints a hint for coding agents on import.
 export MLFLOW_DISABLE_AGENT_HINT ?= 1
@@ -81,7 +84,7 @@ export MLFLOW_DISABLE_AGENT_HINT ?= 1
 export MAGE_TEST_R_PROJECT_DIR ?= $(CURDIR)/r_env
 RV ?= rv
 
-.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
+.PHONY: up down warm-rust ci-tests test test-postgres test-redis test-api test-feast test-mlflow test-duckdb test-s3 test-mysql test-mongodb test-pinot test-clickhouse test-kafka test-trino test-rabbitmq test-nats test-sqs test-pubsub test-opensearch test-influxdb test-deploy test-activemq test-streaming test-r test-soak test-kafka-outage test-benchmark benchmark-pipelines ci r-env
 
 up:
 	cd .. && $(PYTHON) integration_tests/tls_certs.py
@@ -131,6 +134,9 @@ test-mysql: up
 
 test-mongodb: up
 	cd .. && $(PYTHON) -m pytest integration_tests/mongodb $(PYTEST_ARGS)
+
+test-pinot: up
+	cd .. && $(PYTHON) -m pytest integration_tests/pinot $(PYTEST_ARGS)
 
 test-clickhouse: up
 	cd .. && $(PYTHON) -m pytest integration_tests/clickhouse $(PYTEST_ARGS)

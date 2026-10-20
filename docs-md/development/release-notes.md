@@ -95,6 +95,20 @@
   in seconds, which two runs started in the same second shared), and the tables are dropped
   when the block ends.
 
+### Apache Pinot
+
+- Loading from Pinot failed with a profile that left out `PINOT_PATH` or `PINOT_SCHEME` (most
+  do), and outside a `with` block. Both work now.
+- Columns take Pinot's types: pandas made a `LONG` column with nulls a float, which loses
+  digits above 2^53; timestamps were text, `BIG_DECIMAL` quoted text and `BYTES` hex. They
+  are nullable integers, UTC datetimes, exact decimals and bytes now.
+- Queries run with `enableNullHandling`: a table that stores nulls returned
+  `-9223372036854775808` and `'null'` instead.
+- A query with `limit` anywhere in it, such as a `credit_limit` column, got no LIMIT, and
+  Pinot's broker returned 10 rows.
+- `PINOT_PASSWORD` in the verbose io_config format was never read.
+- Integration tests run a pipeline against a Pinot server in CI.
+
 ### BigQuery
 
 - A BigQuery SQL block read its SQL upstream block's table into pandas and wrote it back

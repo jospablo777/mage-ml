@@ -121,7 +121,7 @@ services, and fails when one of its tests is skipped.
 | Job | Tests | Services | R | Rust warm-up |
 | --- | --- | --- | --- | --- |
 | Integration: SQL databases | `postgres`, `mysql`, `clickhouse`, `trino`, `duckdb` | PostgreSQL, MySQL, ClickHouse, Trino (with MinIO) | No | Yes |
-| Integration: document stores and caches | `mongodb`, `redis` | MongoDB, Redis | No | No |
+| Integration: document stores, caches and Pinot | `mongodb`, `redis`, `pinot` | MongoDB, Redis, Apache Pinot | No | No |
 | Integration: streaming and storage | `kafka`, `rabbitmq`, `ibm_mq`, `nats`, `sqs`, `pubsub`, `activemq`, `opensearch`, `influxdb`, `streaming`, `s3` | The brokers, OpenSearch, InfluxDB, MinIO, and the sinks the streaming tests write to | No | No |
 | Integration: ML and HTTP services | `feast`, `mlflow`, `api` | Feast (with PostgreSQL and Redis), MLflow, the test HTTP API | No | No |
 | MageML: compiled and polyglot pipelines | `chains`, `tutorials`, `benchmark`, `r` | PostgreSQL, MySQL, MinIO, the test HTTP API | Yes | Yes |

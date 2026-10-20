@@ -481,7 +481,7 @@ class ConfigFileLoader(BaseConfigLoader):
         ConfigKey.DUCKDB_SCHEMA: (VerboseConfigKey.DUCKDB, 'schema'),
         ConfigKey.MOTHERDUCK_TOKEN: (VerboseConfigKey.DUCKDB, 'motherduck_token'),
         ConfigKey.PINOT_HOST: (VerboseConfigKey.PINOT, 'host'),
-        ConfigKey.PINOT_USER: (VerboseConfigKey.PINOT, 'password'),
+        ConfigKey.PINOT_PASSWORD: (VerboseConfigKey.PINOT, 'password'),
         ConfigKey.PINOT_PATH: (VerboseConfigKey.PINOT, 'path'),
         ConfigKey.PINOT_PORT: (VerboseConfigKey.PINOT, 'port'),
         ConfigKey.PINOT_SCHEME: (VerboseConfigKey.PINOT, 'scheme'),

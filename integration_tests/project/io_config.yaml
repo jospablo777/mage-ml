@@ -88,3 +88,7 @@ analytics:
   POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
   POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
   POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+# The Pinot broker of the Pinot tests.
+pinot:
+  PINOT_HOST: 127.0.0.1
+  PINOT_PORT: "{{ env_var('MAGE_TEST_PINOT_BROKER_PORT') }}"
