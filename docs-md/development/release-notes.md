@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Exported services
+
+- An export locks its Python packages with uv: `pyproject.toml` pins what the blocks import
+  to the versions that ran them, with the project's `requirements.txt` folded in and pinned,
+  and `uv.lock` holds every package with its hashes for Linux on amd64 and arm64. The image
+  installs exactly the lock (`uv sync --locked`); it ran `pip install` on the pins before,
+  which resolved the rest at build time. `requirements.txt` is still written, from the
+  lock, for scanners. Locking needs the package index.
+- A conflict now stops the export, not the image build: a model logged with the full
+  `mlflow`, whose bounds (`pyarrow<26`) clash with the blocks' packages, is installed as
+  `mlflow-skinny`, which MageML runs with and which loads the same models.
+- Private indexes: credentials stay in `UV_INDEX_*` variables when exporting and in a build
+  secret (`--secret id=uv-env`) when building; no file of the export holds them, and a test
+  checks every file.
+- `manifest.json` records what an export holds: MageML's version and commit, Python and uv,
+  the locks' and models' digests, the platforms, the build command and the SHA-256 of every
+  file, to review what changed between two exports. See
+  [Export a service](../production/export-a-service.md).
+
 ### PostgreSQL
 
 - Exports send rows in PostgreSQL's binary `COPY` format, encoded in Rust

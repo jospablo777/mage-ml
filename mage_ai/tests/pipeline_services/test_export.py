@@ -2,6 +2,7 @@
 mage export service: what it captures from a project, what it refuses, and an exported
 pipeline run by mage-service with the same outputs as the pipeline run by Mage.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -359,6 +360,44 @@ class CaptureTest(ExportTestCase):
             with self.assertRaisesRegex(export.ExportError, 'docker is not installed'):
                 export.build_commands(out, 'shop')
 
+    def test_a_private_index_token_stays_out_of_every_exported_file(self):
+        import http.server
+        import threading
+
+        asked = []
+
+        class NotFound(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                asked.append(self.path)
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), NotFound)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        token = 'fake-index-token-4b1d'
+        index = f'http://mage:{token}@127.0.0.1:{server.server_address[1]}/simple'
+
+        self.chain()
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        with unittest.mock.patch.dict(os.environ, UV_EXTRA_INDEX_URL=index):
+            export.write(captured, str(out), force=True)
+
+        self.assertTrue((out / 'uv.lock').is_file())
+        # uv asked the private index (with the token) before falling back to PyPI.
+        self.assertTrue(asked)
+        leaked = [
+            str(path.relative_to(out)) for path in out.rglob('*')
+            if path.is_file() and token.encode() in path.read_bytes()
+        ]
+        self.assertEqual(leaked, [])
+        self.assertNotIn(token, export.report(captured))
+
     def test_the_build_context_holds_everything_the_image_needs(self):
         self.chain()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
@@ -368,8 +407,25 @@ class CaptureTest(ExportTestCase):
         export.write(captured, str(out), force=True)
 
         for name in ('service.json', 'Dockerfile', 'compose.yaml', 'README.md', 'report.txt',
-                     'requirements.txt'):
+                     'requirements.txt', 'pyproject.toml', 'uv.lock', 'manifest.json'):
             self.assertTrue((out / name).is_file(), name)
+        # The packages are pinned, locked for Linux with their hashes, and installed from
+        # the lock.
+        pyproject = (out / 'pyproject.toml').read_text()
+        self.assertIn('"pandas==', pyproject)
+        self.assertIn('environments = ["sys_platform == \'linux\'"]', pyproject)
+        lock = (out / 'uv.lock').read_text()
+        self.assertIn('name = "pandas"', lock)
+        self.assertIn('hash = "sha256:', lock)
+        dockerfile_text = (out / 'Dockerfile').read_text()
+        self.assertIn('uv sync --locked --no-dev --no-install-project', dockerfile_text)
+        self.assertNotIn('pip install --requirement', dockerfile_text)
+        manifest_file = json.loads((out / 'manifest.json').read_text())
+        self.assertEqual(manifest_file['platforms'], ['linux/amd64', 'linux/arm64'])
+        self.assertEqual(manifest_file['locks']['uv.lock'], hashlib.sha256(
+            (out / 'uv.lock').read_bytes()).hexdigest())
+        self.assertIn('Dockerfile', manifest_file['files'])
+        self.assertIn(f'{self.project.name}/utils/rates.py', manifest_file['files'])
         self.assertTrue((out / 'python/mage_ai/pipeline_services/runtime/worker.py').is_file())
         self.assertTrue((out / 'build/mage_service/Cargo.toml').is_file())
         self.assertFalse((out / 'build/mage_service/target').exists())
@@ -959,6 +1015,10 @@ class ModelTest(ExportTestCase):
         manifest = json.loads((out / 'service.json').read_text())
         self.assertEqual(manifest['models'][0]['name'], 'scorer')
         self.assertEqual(manifest['models'][0]['sha256'], metadata['sha256'])
+        self.assertEqual(
+            json.loads((out / 'manifest.json').read_text())['models'][0]['sha256'],
+            metadata['sha256'],
+        )
         requirements = (out / 'requirements.txt').read_text()
         self.assertTrue('mlflow-skinny==' in requirements or 'mlflow==' in requirements)
         dockerfile = (out / 'Dockerfile').read_text()

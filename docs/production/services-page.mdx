@@ -453,7 +453,8 @@ any CI:
 | In the folder | What it is |
 | --- | --- |
 | `Dockerfile`, `compose.yaml`, `.dockerignore` | The image and a one-machine setup |
-| `<project>/`, `requirements.txt`, `rust/`, `r/` | The pipelines' code and what it needs |
+| `<project>/`, `pyproject.toml`, `uv.lock`, `rust/`, `r/` | The pipelines' code and what it needs, locked |
+| `manifest.json` | Versions, lock and model digests, and the SHA-256 of every file, to review what changed between two exports |
 | `service.json`, `README.md`, `.env.example`, `report.txt` | The manifest, how to run it, the variables to set, what the export found |
 | `.github/workflows/build-image.yml` | GitHub Actions: builds amd64 and arm64 on every push to `main`, and pushes when the repository sets `REGISTRY_IMAGE` and the `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` secrets (ghcr.io needs no secrets: the job logs in with `GITHUB_TOKEN`) |
 | `.tekton/`, `deploy/ibm/` | IBM Cloud Continuous Delivery and Code Engine |

@@ -9,7 +9,12 @@ The export reads the project and writes a build context:
       python/mage_ai/      the part of Mage that blocks import, and the block worker
       rust/                the Rust blocks' crates, built in the image
       build/mage_service/  the service's source, built in the image
-      requirements.txt     the Python packages the blocks need, pinned
+      pyproject.toml       the Python packages the blocks need, pinned to the versions
+                           that ran them, and the project's requirements.txt folded in
+      uv.lock              every package and its hashes, for Linux on amd64 and arm64;
+                           the image installs exactly these (uv sync --locked)
+      requirements.txt     the same packages, exported from uv.lock for scanners
+      manifest.json        what the export holds: versions, locks, models, file digests
       Dockerfile, compose.yaml, .dockerignore, README.md, report.txt
 
 It only reads the project: it never syncs triggers or writes the metadata database. A
@@ -105,6 +110,8 @@ class Capture:
     # Stream source and sink YAML files: their settings are in the manifest and only the
     # engine reads them, so they count in the source digest but are not copied.
     stream_files: Set[Path] = field(default_factory=set)
+    # The uv that locked the Python packages; the image installs them with the same.
+    uv_version: Optional[str] = None
 
     @property
     def streams(self) -> List[Dict]:
@@ -2639,10 +2646,11 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
 
 def _kept_on_export(name: str) -> bool:
     """
-    Files of the user in an export folder: the filled-in environment, local data, and the
-    git repository when the folder is kept as one, so exporting again shows as a diff.
+    Files of the user in an export folder: the filled-in environment, a private index's
+    credentials for the build (uv.env), local data, and the git repository when the folder
+    is kept as one, so exporting again shows as a diff.
     """
-    return name in ('data', '.git') or (
+    return name in ('data', '.git', 'uv.env') or (
         (name == '.env' or name.startswith('.env.')) and name != '.env.example'
     )
 
@@ -2674,15 +2682,10 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
 
     if capture_.needs_python:
         _copy_mage_python(out_dir / 'python' / 'mage_ai')
-        lines = [f'{name}=={version}' for name, version in capture_.requirements.items()]
-        lines += model_requirements
-        project_requirements = capture_.project / 'requirements.txt'
-        if project_requirements.is_file():
-            lines.append('-r ' + f'{capture_.project.name}/requirements.txt')
-        (out_dir / 'requirements.txt').write_text(
-            '# The packages the exported blocks import, pinned to the versions of the Mage\n'
-            '# environment that exported them.\n' + '\n'.join(lines) + '\n'
-        )
+        dependencies = [f'{name}=={version}' for name, version in capture_.requirements.items()]
+        dependencies += model_requirements
+        dependencies += _project_requirements(capture_, set(capture_.requirements))
+        _write_python_lock(capture_, out_dir, dependencies)
     if capture_.rust_blocks:
         _copy_rust_workspace(capture_, out_dir / 'rust')
     if capture_.r_project is not None:
@@ -2694,17 +2697,212 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
         '**/__pycache__\n**/target\ndata/\n.tekton/\n.github/\n.git/\ndeploy/\n.env\n.env.*\n'
+        'uv.env\n'
     )
     (out_dir / '.gitignore').write_text(
         '# The folder can be its own repository: export again into it and commit the diff.\n'
-        '.env\n.env.*\n!.env.example\ndata/\n**/__pycache__/\n**/target/\n'
+        '.env\n.env.*\n!.env.example\nuv.env\ndata/\n**/__pycache__/\n**/target/\n'
     )
     (out_dir / 'compose.yaml').write_text(_compose(capture_))
     (out_dir / 'README.md').write_text(_readme(capture_))
     (out_dir / '.env.example').write_text(_env_example(capture_))
     _write_deploy_files(capture_, out_dir)
     (out_dir / 'report.txt').write_text(report(capture_))
+    _write_manifest(capture_, out_dir)
     return out_dir
+
+
+# The uv the image installs packages with when the export's own is unknown.
+UV_VERSION = '0.11.29'
+# The platforms an export's lock and image are made for.
+TARGET_PLATFORMS = ('linux/amd64', 'linux/arm64')
+
+
+def _uv() -> str:
+    """The uv executable: on PATH, or the uv package's."""
+    found = shutil.which('uv')
+    if found:
+        return found
+    try:
+        import uv  # type: ignore
+
+        return uv.find_uv_bin()
+    except Exception:
+        raise ExportError([
+            'Exporting Python blocks needs uv, which locks their packages: '
+            'uv pip install uv, or see https://docs.astral.sh/uv/.'
+        ])
+
+
+def _uv_version(uv: str) -> str:
+    result = subprocess.run([uv, '--version'], capture_output=True, text=True, timeout=60)
+    match = re.search(r'(\d+\.\d+\.\d+)', result.stdout)
+    return match.group(1) if match else ''
+
+
+def _project_requirements(capture_: Capture, pinned: Set[str]) -> List[str]:
+    """
+    The project's requirements.txt, folded into the service's packages: each one pinned to
+    the version that ran the blocks when it is installed, so nothing in the export floats.
+    Lines pip understands but uv does not (options, -r) are reported.
+    """
+    path = capture_.project / 'requirements.txt'
+    if not path.is_file():
+        return []
+    requirements = []
+    for raw in path.read_text().splitlines():
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith('-'):
+            capture_.notes.append(
+                f'requirements.txt: {line!r} is not exported; put the package in it instead.',
+            )
+            continue
+        match = re.match(r'^([A-Za-z0-9][A-Za-z0-9_.\-]*)(\[[^\]]*\])?(.*)$', line)
+        if not match:
+            capture_.notes.append(f'requirements.txt: {line!r} is not a package; skipped.')
+            continue
+        name = match.group(1).lower().replace('_', '-')
+        if name in pinned:
+            continue
+        rest = match.group(3).strip()
+        if '==' in rest or rest.startswith('@'):
+            requirements.append(line)
+            continue
+        try:
+            version = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            capture_.notes.append(
+                f'requirements.txt: {name} is not installed where MageML runs; the lock '
+                f'resolves {line!r} to its newest matching version.'
+            )
+            requirements.append(line)
+            continue
+        requirements.append(f'{name}{match.group(2) or ""}=={version}')
+    return requirements
+
+
+def _write_python_lock(capture_: Capture, out_dir: Path, dependencies: List[str]) -> None:
+    """
+    pyproject.toml with the service's packages, uv.lock for Linux on amd64 and arm64, and
+    requirements.txt exported from the lock. Locking reads the package index (the one uv
+    is set up with: UV_INDEX_URL and the UV_INDEX_* credentials stay in the environment and
+    out of every file).
+    """
+    python = f'{sys.version_info.major}.{sys.version_info.minor}'
+    if capture_.environment is not None:
+        python = capture_.environment.python
+    listed = ''.join(f'  {json.dumps(d)},\n' for d in sorted(set(dependencies)))
+    (out_dir / 'pyproject.toml').write_text(
+        '# The Python packages of the exported service, pinned to the versions of the MageML\n'
+        '# environment that ran the blocks. uv.lock holds every package with its hashes.\n'
+        '[project]\n'
+        f'name = "mage-service-{_slug(capture_.name)}"\n'
+        'version = "0"\n'
+        f'requires-python = "=={python}.*"\n'
+        f'dependencies = [\n{listed}]\n\n'
+        '[tool.uv]\n'
+        'package = false\n'
+        '# The image runs on Linux, on amd64 or arm64.\n'
+        'environments = ["sys_platform == \'linux\'"]\n'
+    )
+    uv = _uv()
+    # MageML's own environment must not become the lock's target.
+    env = {
+        k: v for k, v in os.environ.items()
+        if k not in ('UV_PROJECT_ENVIRONMENT', 'VIRTUAL_ENV')
+    }
+    result = subprocess.run(
+        [uv, 'lock', '--project', str(out_dir), '--python', python],
+        capture_output=True, text=True, timeout=900, env=env,
+    )
+    if result.returncode != 0:
+        raise ExportError([
+            'Locking the service\'s Python packages failed (it reads the package index; '
+            'offline, it cannot run). uv said:\n' + _without_secrets(result.stderr)[-3000:]
+        ])
+    exported = subprocess.run(
+        [uv, 'export', '--project', str(out_dir), '--frozen', '--no-hashes', '--no-header',
+         '--no-annotate',
+         '--format', 'requirements-txt', '--output-file', str(out_dir / 'requirements.txt')],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    if exported.returncode != 0:
+        raise ExportError(['Exporting requirements.txt from uv.lock failed: '
+                           + _without_secrets(exported.stderr)[-2000:]])
+    capture_.uv_version = _uv_version(uv)
+
+
+def _without_secrets(text: str) -> str:
+    """uv's message with credentials of index URLs blanked."""
+    return re.sub(r'(https?://)[^/@\s:]+:[^/@\s]+@', r'\1***@', text)
+
+
+def _slug(name: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-') or 'service'
+
+
+def _git_commit(path: Path) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(path), 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = result.stdout.strip()
+    return commit if result.returncode == 0 and re.fullmatch(r'[0-9a-f]{40}', commit) else None
+
+
+def _write_manifest(capture_: Capture, out_dir: Path) -> None:
+    """
+    manifest.json: what the export holds, to review the change between two exports and to
+    rebuild the same image: MageML's version, the Python and uv versions, the digests of
+    the locks and of every file, the models, the project's commit, the platforms and the
+    build command.
+    """
+    files = {}
+    for path in sorted(out_dir.rglob('*')):
+        relative = path.relative_to(out_dir)
+        if not path.is_file() or relative.parts[0] in ('data', '.git') or \
+                relative.name == 'manifest.json' or _kept_on_export(relative.parts[0]):
+            continue
+        files[relative.as_posix()] = _digest(path)
+    locks = {
+        name: files[name]
+        for name in ('uv.lock', 'rust/Cargo.lock', 'r/rv.lock')
+        if name in files
+    }
+    try:
+        version = importlib.metadata.version('mage-ml')
+    except importlib.metadata.PackageNotFoundError:
+        version = None
+    python = f'{sys.version_info.major}.{sys.version_info.minor}'
+    if capture_.environment is not None:
+        python = capture_.environment.python
+    manifest = dict(
+        name=capture_.name,
+        exported_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        mageml=dict(version=version, commit=_git_commit(Path(__file__).resolve().parent)),
+        project=dict(name=capture_.project.name, commit=_git_commit(capture_.project)),
+        python=python if capture_.needs_python else None,
+        uv=capture_.uv_version if capture_.needs_python else None,
+        platforms=list(TARGET_PLATFORMS),
+        build=f'docker buildx build --platform {",".join(TARGET_PLATFORMS)} -t <image> .',
+        locks=locks,
+        models=capture_.manifest.get('models') or [],
+        files=files,
+    )
+    (out_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+
+
+def _installed(distribution: str) -> bool:
+    try:
+        importlib.metadata.version(distribution)
+        return True
+    except importlib.metadata.PackageNotFoundError:
+        return False
 
 
 def _file_requirements(artifacts: Path) -> List[str]:
@@ -2760,6 +2958,12 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
         for requirement in requirements:
             match = re.match(r'^([A-Za-z0-9_.\-]+)', requirement)
             package = match.group(1).lower().replace('_', '-') if match else requirement
+            if package == 'mlflow' and _installed('mlflow-skinny') and not _installed('mlflow'):
+                # MLflow logs the full package; mlflow-skinny, which MageML runs with,
+                # loads the same models. The full package's bounds (pyarrow<26) conflicted
+                # with the blocks' packages, and the image would have held two MLflows.
+                package = 'mlflow-skinny'
+                requirement = f"mlflow-skinny=={importlib.metadata.version('mlflow-skinny')}"
             pinned = capture_.requirements.get(package)
             if pinned and requirement != f'{package}=={pinned}' and '==' in requirement:
                 capture_.notes.append(
@@ -3087,6 +3291,7 @@ def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
 
 def _dockerfile(capture_: Capture) -> str:
     project = capture_.project.name
+    uv_version = capture_.uv_version or UV_VERSION
     rust = _rust_version()
     python_version = f'{sys.version_info.major}.{sys.version_info.minor}'
     if capture_.environment is not None:
@@ -3165,9 +3370,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY requirements.txt /tmp/requirements.txt
-COPY {project}/requirements.tx[t] /tmp/{project}/
-RUN pip install --requirement /tmp/requirements.txt && rm -rf /tmp/requirements.txt /tmp/{project}
+# The packages of uv.lock, each checked against its hash, into the image's Python. A
+# private index's credentials come in as a build secret, a file of UV_INDEX_* lines that
+# no layer keeps: docker build --secret id=uv-env,src=uv.env .
+COPY pyproject.toml uv.lock /tmp/service-python/
+RUN --mount=type=secret,id=uv-env,required=false \\
+    pip install uv=={uv_version} && \\
+    cd /tmp/service-python && \\
+    if [ -f /run/secrets/uv-env ]; then set -a; . /run/secrets/uv-env; set +a; fi && \\
+    UV_PROJECT_ENVIRONMENT=/usr/local uv sync --locked --no-dev --no-install-project \\
+      --no-cache --compile-bytecode && \\
+    pip uninstall -y uv && rm -rf /tmp/service-python
 {r_install}'''
         python_env = (
             ' \\\n    PYTHONPATH=/srv/mage-service/python'
