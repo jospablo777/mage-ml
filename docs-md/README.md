@@ -542,6 +542,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Roadmap](about/roadmap.md)
 - [OracleDB](data-integrations/sources/oracledb.md)
 - [1. Use uv for Python package management](decisions/0001-use-uv-for-python-package-management.md)
+- [2. One native extension, named column-atlas-native](decisions/0002-one-native-extension-named-column-atlas-native.md)
 - [Pipeline services: pipelines exported as standalone Docker services](design/pipeline-services.md)
 - [Block fusion: blocks that run together without losing their boundaries](development/block-fusion.md)
 - [CI and tests](development/ci.md)

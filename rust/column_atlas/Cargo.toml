@@ -3,7 +3,7 @@ name = "column_atlas_native"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Read-only Parquet queries for ColumnAtlas, the block output explorer of Mage"
+description = "Native code of MageML: ColumnAtlas Parquet queries and profiles, PostgreSQL binary COPY, log windows"
 publish = false
 
 [lib]
