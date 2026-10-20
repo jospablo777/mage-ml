@@ -74,4 +74,19 @@ test('a stream from the Amplitude template flattens its sample events', async ({
   await page.keyboard.press('ControlOrMeta+Enter');
   // Five events in, five flat rows out.
   await expect(page.getByText('5 in → 5 out')).toBeVisible({ timeout: 60000 });
+
+  // An Amplitude sink from the exporter menu: its settings keep the env_var() reference.
+  await page.goto(`/pipelines/${name}/edit`);
+  const addExporter = page.getByRole('button', { name: 'Data exporter' }).last();
+  await addExporter.scrollIntoViewIfNeeded();
+  await addExporter.click();
+  await page.getByText('Amplitude', { exact: true }).filter({ visible: true }).first().click();
+  await page.getByRole('button', { name: 'Save and add' }).click();
+  await expect.poll(async () => {
+    const detail = await api.call('GET', `pipelines/${name}?includes_content=true`);
+    return detail.pipeline.blocks
+      .filter(({ type }) => type === 'data_exporter')
+      .map(({ content }) => content || '')
+      .find(content => content.includes('connector_type: amplitude')) || '';
+  }, { timeout: 30_000 }).toContain('api_key: "{{ env_var(\'AMPLITUDE_API_KEY\') }}"');
 });
