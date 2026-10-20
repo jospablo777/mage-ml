@@ -153,10 +153,12 @@ def explain(service, bootstrap, group, topic):
     print('\n'.join(lines[-80:]))
 
 
-def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recovery=180):
+def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recovery=180,
+                         cpus=None):
     """Stops the broker under a running stream for `down` seconds, starts it again, and
     checks that every message reached the sink within `recovery` seconds of its return,
-    with at most `repeats` written twice."""
+    with at most `repeats` written twice. With `cpus`, the broker has that many CPUs while
+    it stops, so its controlled shutdown is slow."""
     name, bootstrap = broker
     topics = [f'it_in_{uuid.uuid4().hex[:10]}', f'it_out_{uuid.uuid4().hex[:10]}']
     admin = KafkaAdminClient(bootstrap_servers=bootstrap)
@@ -165,7 +167,8 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
     group = f'g_{uuid.uuid4().hex[:8]}'
     # librdkafka's group log goes to the service log, for a failure to explain itself.
     pipeline = make_pipeline(project, topics, group, batch_size=100,
-                             librdkafka={'debug': 'cgrp'})
+                             librdkafka={'debug': 'cgrp,broker'},
+                             sink_librdkafka={'debug': 'broker,topic,msg,eos'})
     service = None
     try:
         directory = export_service(project, pipeline.uuid, tmp_path)
@@ -175,9 +178,15 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
         service.start()
         wait_for(lambda: committed_now(bootstrap, group, topics[0]) >= 300)
 
+        if cpus:
+            subprocess.run(['docker', 'update', '--cpus', cpus, name], check=True,
+                           capture_output=True)
         subprocess.run(['docker', *halt, name], check=True, capture_output=True)
         time.sleep(down)
         assert service.process.poll() is None, 'the engine exited while the broker was down'
+        if cpus:
+            subprocess.run(['docker', 'update', '--cpus', '0', name], check=True,
+                           capture_output=True)
         subprocess.run(['docker', 'start', name], check=True, capture_output=True)
         wait_for(lambda: admin_ready(bootstrap), timeout=120).close()
 
@@ -186,6 +195,11 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
         ids = [m['id'] for m in out]
 
         assert sorted(set(ids)) == list(range(TOTAL)), 'a message was lost'
+        # A broker that took longer than the session timeout to come back took the group's
+        # partitions away (the log says so): the batches written but not yet committed were
+        # read again, at least once.
+        if 'Consumer group session timed out' in service.log.read_text(errors='replace'):
+            repeats = max(repeats, TOTAL // 4)
         assert len(ids) - TOTAL <= repeats, f'{len(ids) - TOTAL} messages written twice'
         assert service.process.poll() is None
         assert service.streams()[0]['messages_in'] >= TOTAL
@@ -199,19 +213,24 @@ def restart_under_stream(broker, project, tmp_path, halt, down, repeats, recover
         pipeline.delete()
 
 
-@pytest.mark.parametrize('halt, down, repeats', [
-    (['stop', '-t', '5'], 8, 0),
+@pytest.mark.parametrize('halt, down, repeats, recovery, cpus', [
+    (['stop', '-t', '5'], 8, 0, 180, None),
+    # A slow controlled shutdown (a tenth of a CPU): the broker answers metadata with no
+    # brokers, and librdkafka drops the one it knew; the broker watch connects to the
+    # bootstrap servers again (I-217). The session usually expires meanwhile.
+    (['stop', '-t', '20'], 8, TOTAL // 4, 300, '0.1'),
     # A killed broker leaves produce requests unanswered; the idempotent producer can bump
     # its epoch and send them again under new sequence numbers, which the broker cannot tell
     # from new messages (one in 20,000 seen in CI): at least once, a batch at most.
-    (['kill'], 8, 500),
+    (['kill'], 8, 500, 180, None),
     # Longer than the group's session timeout (45 s): the group takes the partitions away,
     # and the batches written but not yet committed then are read again (at least once).
-    (['kill'], 60, TOTAL // 4),
-], ids=['stopped', 'killed', 'killed-past-session-timeout'])
-def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats):
+    (['kill'], 60, TOTAL // 4, 180, None),
+], ids=['stopped', 'stopped-slow', 'killed', 'killed-past-session-timeout'])
+def test_a_broker_restart_loses_nothing(broker, mage_project, tmp_path, halt, down, repeats,
+                                        recovery, cpus):
     """Down mid-stream for seconds: the engine waits, reconnects, and goes on from where it
     was; nothing is lost, and after a graceful stop nothing is written twice. Down past
     the session timeout, the group gives the partitions back after the restarted broker
     drops the old member, and nothing is lost."""
-    restart_under_stream(broker, mage_project, tmp_path, halt, down, repeats)
+    restart_under_stream(broker, mage_project, tmp_path, halt, down, repeats, recovery, cpus)

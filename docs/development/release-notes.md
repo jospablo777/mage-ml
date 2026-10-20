@@ -202,6 +202,11 @@ services that run in the Rust engine, with Python, Rust or R blocks
 
 ### Fixes
 
+- Kafka streams: after a graceful restart of a one-broker cluster with a slow shutdown, a
+  stream stood still for minutes or did not go on at all: the broker answered metadata
+  with no brokers, librdkafka forgot the broker, and it does not bootstrap again without
+  one. The source and the sink connect to `bootstrap_server` again after 30 seconds
+  without an answer.
 - The overview's run counts and charts refresh every minute, as its failed-run lists do;
   they changed only after a browser refresh or a change of period tab.
 - `mage examples stream <name> <project>` failed, or wrote the block code into the

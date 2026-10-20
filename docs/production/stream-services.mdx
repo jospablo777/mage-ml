@@ -189,6 +189,12 @@ sasl_config:
   member (another session timeout), and reads again the batches it wrote but had not
   committed when the broker went down. A broker down for minutes is tested too
   (`make -C integration_tests test-kafka-outage`).
+- A one-broker cluster in a slow controlled shutdown can answer with no brokers, and
+  librdkafka then forgets the broker. The source and the sink each check every 10 seconds
+  that a broker answers; after 30 seconds without an answer they connect to
+  `bootstrap_server` again (`Kafka source, no broker answered ...` in the service log).
+  Without this, a stream stood still after such a restart until the producer's messages
+  timed out (5 minutes), or for good.
 - librdkafka's warnings and errors go to the service log, as `Kafka source, librdkafka
   <facility>: ...` lines. `librdkafka: {debug: cgrp}` adds its consumer group log, for a
   stream that does not get its partitions.

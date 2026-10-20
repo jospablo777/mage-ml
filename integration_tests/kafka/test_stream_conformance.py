@@ -77,7 +77,8 @@ def topics(kafka_bootstrap):
     admin.close()
 
 
-def make_pipeline(project, topics, group, http_url=None, batch_size=100, librdkafka=None):
+def make_pipeline(project, topics, group, http_url=None, batch_size=100, librdkafka=None,
+                  sink_librdkafka=None):
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.constants import PipelineType
     from mage_ai.data_preparation.models.pipeline import Pipeline
@@ -103,10 +104,12 @@ def make_pipeline(project, topics, group, http_url=None, batch_size=100, librdka
         timeout_ms: 200
         {'librdkafka:' + settings if librdkafka else ''}
     ''')
+    sink_settings = ''.join(f'\n          {k}: {v}' for k, v in (sink_librdkafka or {}).items())
     add('kafka_out', 'data_exporter', f'''
         connector_type: kafka
         bootstrap_server: "{{{{ env_var('KAFKA_BOOTSTRAP') }}}}"
         topic: {topics[1]}
+        {'librdkafka:' + sink_settings if sink_librdkafka else ''}
     ''', [source])
     if http_url:
         add('http_out', 'data_exporter', f'''

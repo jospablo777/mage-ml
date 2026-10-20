@@ -32,7 +32,7 @@ use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, ConsumerContext, Rebalance};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header as KafkaHeader, Headers, Message, OwnedHeaders};
-use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer as _};
 use rdkafka::{Offset, TopicPartitionList};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -256,9 +256,116 @@ fn text(config: &Value, key: &str) -> Option<String> {
     }
 }
 
+/// How long a client that knows no usable broker waits before it reads `bootstrap.servers`
+/// again (librdkafka: 5 minutes). A broker in a controlled shutdown can answer metadata with
+/// no brokers, and librdkafka then drops the brokers it knew: the client had none left, and
+/// a stream stood still for 5 minutes after the broker was back (I-217).
+const REBOOTSTRAP_AFTER: &str = "30000";
+
+/// How often a client's broker watch checks that a broker answers.
+const BROKER_CHECK_EVERY: Duration = Duration::from_secs(10);
+/// How long a check waits for the broker's answer.
+const BROKER_CHECK_WITHIN: Duration = Duration::from_secs(3);
+/// Failed checks in a row after which the watch connects to `bootstrap.servers` again.
+const BROKER_CHECKS_FAILED: u32 = 3;
+
+/// The broker checks that failed in a row.
+#[derive(Default)]
+struct BrokerChecks {
+    failed: u32,
+}
+
+impl BrokerChecks {
+    /// Records a check; true when it is time to connect to `bootstrap.servers` again.
+    fn checked(&mut self, answered: bool) -> bool {
+        if answered {
+            self.failed = 0;
+            return false;
+        }
+        self.failed += 1;
+        if self.failed < BROKER_CHECKS_FAILED {
+            return false;
+        }
+        self.failed = 0;
+        true
+    }
+}
+
+/// Keeps a client able to reach the cluster. A one-broker cluster in a controlled shutdown
+/// can answer metadata with no brokers, and librdkafka then drops the brokers it knew; its
+/// own re-bootstrap needs a metadata request to time out, which a client with no broker
+/// never sends. The producer held its messages until `message.timeout.ms` and the stream
+/// stood still with them (I-217). Every BROKER_CHECK_EVERY this asks for the topic's
+/// metadata, and after BROKER_CHECKS_FAILED failures in a row adds `bootstrap.servers`
+/// again: librdkafka skips a broker it already knows by that address, so while the broker
+/// is only down this changes nothing. The thread holds the client weakly and ends with it.
+fn watch_brokers<T: Send + Sync + 'static>(
+    side: &'static str,
+    client: std::sync::Weak<T>,
+    topic: String,
+    servers: String,
+    stop: Arc<AtomicBool>,
+    answers: fn(&T, &str) -> bool,
+    add: fn(&T, &std::ffi::CStr),
+) -> Result<(), ConnectorError> {
+    let Ok(servers) = std::ffi::CString::new(servers) else {
+        return Ok(());
+    };
+    std::thread::Builder::new()
+        .name(format!("kafka-{side}-brokers"))
+        .spawn(move || {
+            let mut checks = BrokerChecks::default();
+            loop {
+                let next = Instant::now() + BROKER_CHECK_EVERY;
+                while Instant::now() < next {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                let Some(client) = client.upgrade() else {
+                    return;
+                };
+                if checks.checked(answers(&client, &topic)) {
+                    write_log(
+                        "warn",
+                        side,
+                        &format!(
+                            "no broker answered for {} seconds; connecting to the bootstrap \
+                             servers again",
+                            (BROKER_CHECK_EVERY * BROKER_CHECKS_FAILED).as_secs()
+                        ),
+                    );
+                    add(&client, &servers);
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))
+}
+
+/// Whether a broker answers a metadata request for the topic.
+fn broker_answers<C: ClientContext>(client: &rdkafka::client::Client<C>, topic: &str) -> bool {
+    client
+        .fetch_metadata(Some(topic), BROKER_CHECK_WITHIN)
+        .is_ok()
+}
+
+/// Adds the brokers of a `bootstrap.servers` list to the client.
+fn add_brokers<C: ClientContext>(client: &rdkafka::client::Client<C>, servers: &std::ffi::CStr) {
+    // SAFETY: the client handle is alive (borrowed), and librdkafka copies the list.
+    unsafe {
+        rdkafka::bindings::rd_kafka_brokers_add(client.native_ptr(), servers.as_ptr());
+    }
+}
+
 /// The client properties shared by the source and the sink.
 fn client_config(config: &Value) -> Result<ClientConfig, ConnectorError> {
     let mut client = ClientConfig::new();
+    client.set(
+        "metadata.recovery.rebootstrap.trigger.ms",
+        REBOOTSTRAP_AFTER,
+    );
     if let Some(connection) = text(config, "event_hubs_connection_string") {
         event_hubs(&mut client, &connection)?;
         return Ok(client);
@@ -615,9 +722,14 @@ fn write_librdkafka_log(side: &str, level: i32, facility: &str, message: &str) {
         5 | 6 => "info",
         _ => "debug",
     };
+    write_log(name, side, &format!("librdkafka {facility}: {message}"));
+}
+
+/// Writes a line of the connector's own, as the service log writes its lines.
+fn write_log(level: &str, side: &str, message: &str) {
     let time = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    eprintln!("{time} {name:<5} Kafka {side}, librdkafka {facility}: {message}");
+    eprintln!("{time} {level:<5} Kafka {side}, {message}");
 }
 
 /// The sink's producer context: rdkafka serves the producer's log through it, and without
@@ -907,6 +1019,10 @@ impl KafkaSource {
         let group = text(config, "consumer_group")
             .ok_or_else(|| ConnectorError::fatal("Kafka source settings need consumer_group."))?;
         let mut client = client_config(config)?;
+        let servers = client
+            .get("bootstrap.servers")
+            .unwrap_or_default()
+            .to_string();
         let queue_kb = (byte_budget / 1024).clamp(1024, 65536);
         client
             .set("group.id", group)
@@ -958,6 +1074,15 @@ impl KafkaSource {
             consumer.subscribe(&names).map_err(connector_error)?;
         }
         let consumer = Arc::new(consumer);
+        watch_brokers(
+            "source",
+            Arc::downgrade(&consumer),
+            topics[0].clone(),
+            servers,
+            stop.clone(),
+            |consumer: &KafkaConsumer, topic| broker_answers(consumer.client(), topic),
+            |consumer: &KafkaConsumer, servers| add_brokers(consumer.client(), servers),
+        )?;
         let thread = std::thread::Builder::new()
             .name("kafka-source".into())
             .spawn({
@@ -1393,9 +1518,11 @@ impl Drop for KafkaSource {
 }
 
 pub struct KafkaSink {
-    producer: FutureProducer<SinkContext>,
+    producer: Arc<FutureProducer<SinkContext>>,
     topic: String,
     timeout: Duration,
+    /// Ends the broker watch.
+    stop: Arc<AtomicBool>,
 }
 
 impl KafkaSink {
@@ -1403,19 +1530,40 @@ impl KafkaSink {
         let topic = text(config, "topic")
             .ok_or_else(|| ConnectorError::fatal("Kafka sink settings need topic."))?;
         let mut client = client_config(config)?;
+        let servers = client
+            .get("bootstrap.servers")
+            .unwrap_or_default()
+            .to_string();
         client
             .set("enable.idempotence", "true")
             .set("acks", "all")
             .set("linger.ms", "5")
             .set("compression.type", "lz4")
             .set_log_level(rdkafka::config::RDKafkaLogLevel::Debug);
-        let producer: FutureProducer<SinkContext> = client
-            .create_with_context(SinkContext)
-            .map_err(connector_error)?;
+        let producer: Arc<FutureProducer<SinkContext>> = Arc::new(
+            client
+                .create_with_context(SinkContext)
+                .map_err(connector_error)?,
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        watch_brokers(
+            "sink",
+            Arc::downgrade(&producer),
+            topic.clone(),
+            servers,
+            stop.clone(),
+            |producer: &FutureProducer<SinkContext>, topic| {
+                broker_answers(producer.client(), topic)
+            },
+            |producer: &FutureProducer<SinkContext>, servers| {
+                add_brokers(producer.client(), servers)
+            },
+        )?;
         Ok(KafkaSink {
             producer,
             topic,
             timeout: Duration::from_secs(30),
+            stop,
         })
     }
 }
@@ -1478,6 +1626,12 @@ async fn delivered(deliveries: Vec<DeliveryFuture>) -> Result<(), ConnectorError
     Ok(())
 }
 
+impl Drop for KafkaSink {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 impl Sink for KafkaSink {
     fn write<'a>(
         &'a self,
@@ -1503,7 +1657,6 @@ impl Sink for KafkaSink {
 
     fn flush(&self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
-            use rdkafka::producer::Producer as _;
             let _ = self.producer.flush(Duration::from_secs(10));
         })
     }
@@ -1551,6 +1704,38 @@ mod tests {
             serde_json::from_slice(&with_metadata(&message, b"plain text")).unwrap();
         assert_eq!(wrapped["data"], "plain text");
         assert_eq!(wrapped["metadata"]["key"], Value::Null);
+    }
+
+    #[test]
+    fn the_bootstrap_servers_come_back_after_three_failed_checks_in_a_row() {
+        let mut checks = BrokerChecks::default();
+        assert!(!checks.checked(false));
+        assert!(!checks.checked(false));
+        assert!(!checks.checked(true), "an answer starts the count again");
+        assert!(!checks.checked(false));
+        assert!(!checks.checked(false));
+        assert!(checks.checked(false));
+        assert!(!checks.checked(false), "and again three checks later");
+        assert!(!checks.checked(false));
+        assert!(checks.checked(false));
+    }
+
+    #[test]
+    fn a_client_without_brokers_bootstraps_again_within_30_seconds() {
+        let client = client_config(&serde_json::json!({"bootstrap_server": "kafka:9092"})).unwrap();
+        assert_eq!(
+            client.get("metadata.recovery.rebootstrap.trigger.ms"),
+            Some(REBOOTSTRAP_AFTER)
+        );
+        let tuned = client_config(&serde_json::json!({
+            "bootstrap_server": "kafka:9092",
+            "librdkafka": {"metadata.recovery.rebootstrap.trigger.ms": 60000},
+        }))
+        .unwrap();
+        assert_eq!(
+            tuned.get("metadata.recovery.rebootstrap.trigger.ms"),
+            Some("60000")
+        );
     }
 
     #[test]
