@@ -23,6 +23,12 @@
   from the block's io_config profile. Scans are lazy, so filters and column selections
   reach the files. See [Rust blocks](../guides/blocks/rust-blocks.md#object-storage).
 
+### Stream services
+
+- After a Kafka broker's controlled shutdown, librdkafka could hand a message over twice,
+  and the stream wrote it twice. The source now skips an offset it already read under the
+  same partition assignment, and logs it.
+
 ### Trino
 
 - Trino SQL blocks run in [pipeline services](../production/pipeline-services.md), as in a

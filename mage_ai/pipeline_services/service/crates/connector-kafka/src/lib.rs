@@ -994,6 +994,28 @@ pub struct KafkaSource {
     held: BTreeMap<u32, Instant>,
     stopped: BTreeSet<u32>,
     limits: BatchLimits,
+    read: ReadPositions,
+}
+
+/// The last offset read from each partition under its assignment. librdkafka can hand a
+/// message over twice after a broker's controlled shutdown (it fetched the partition again
+/// from an earlier position), and the stream wrote it twice. Within one assignment the
+/// source never seeks back, so an offset at or below the last one read is such a repeat;
+/// after a new assignment, reading uncommitted messages again is at-least-once delivery.
+#[derive(Debug, Default)]
+struct ReadPositions(BTreeMap<u32, (AssignmentEpoch, i64)>);
+
+impl ReadPositions {
+    /// Records the offset; false when the partition's assignment read it already.
+    fn first_read(&mut self, id: u32, epoch: AssignmentEpoch, offset: i64) -> bool {
+        match self.0.get(&id) {
+            Some((read_in, last)) if *read_in == epoch && offset <= *last => false,
+            _ => {
+                self.0.insert(id, (epoch, offset));
+                true
+            }
+        }
+    }
 }
 
 impl KafkaSource {
@@ -1102,6 +1124,7 @@ impl KafkaSource {
             seq: BTreeMap::new(),
             paused: BTreeSet::new(),
             carry: BTreeMap::new(),
+            read: ReadPositions::default(),
             held: BTreeMap::new(),
             stopped: BTreeSet::new(),
             limits,
@@ -1234,6 +1257,19 @@ impl KafkaSource {
         if self.revoking.contains(&id) {
             return false;
         }
+        let offset = message.offset();
+        if !self.read.first_read(id, epoch, offset) {
+            write_log(
+                "warn",
+                "source",
+                &format!(
+                    "skipped offset {offset} of {} [{}]: librdkafka handed it over again",
+                    message.topic(),
+                    message.partition()
+                ),
+            );
+            return false;
+        }
         let mut headers: Vec<Header> = message
             .headers()
             .map(|h| {
@@ -1251,7 +1287,6 @@ impl KafkaSource {
                 value: error.into_bytes(),
             });
         }
-        let offset = message.offset();
         let envelope = Envelope {
             key: message.key().map(<[u8]>::to_vec),
             value: value
@@ -1672,6 +1707,23 @@ impl Sink for KafkaSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_read_twice_in_one_assignment_is_skipped() {
+        let mut read = ReadPositions::default();
+        let first = AssignmentEpoch(1);
+        assert!(read.first_read(0, first, 10));
+        assert!(read.first_read(0, first, 11));
+        assert!(!read.first_read(0, first, 11), "the same offset again");
+        assert!(!read.first_read(0, first, 9), "an earlier offset");
+        // Gaps (compaction, transaction markers) are fine.
+        assert!(read.first_read(0, first, 20));
+        // Each partition has its own position.
+        assert!(read.first_read(1, first, 5));
+        // A new assignment reads from the committed offset again: at-least-once.
+        assert!(read.first_read(0, AssignmentEpoch(2), 12));
+        assert!(!read.first_read(0, AssignmentEpoch(2), 12));
+    }
 
     #[test]
     fn include_metadata_wraps_values_as_mage_does() {
