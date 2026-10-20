@@ -248,6 +248,12 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 
 - [ETL pipeline tutorial](guides/load-api-data.md)
 - [How to build a data integration pipeline](guides/data-integration-pipeline.md)
+- **Amplitude**
+  - [Amplitude](guides/amplitude/overview.md)
+  - [Amplitude events in a warehouse](guides/amplitude/warehouse.md)
+  - [Amplitude features in Python blocks](guides/amplitude/python-blocks.md)
+  - [Amplitude events as they happen](guides/amplitude/webhook-stream.md)
+  - [Amplitude events through Kafka](guides/amplitude/kafka.md)
 - **Streaming**
   - [Overview](guides/streaming/introduction.md)
   - **Sources**

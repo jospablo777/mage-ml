@@ -14,9 +14,9 @@ Streams:
 - cohort_members: the users of the cohorts listed in cohort_ids.
 
 The window of a scheduled run (_start_date and _end_date) is not used: the last hours of
-a day were exported before Amplitude had them, and never read again. start_date and
-end_date in the source's query read a range once (a backfill) without moving the saved
-position back.
+a day were exported before Amplitude had them, and never read again. backfill_start_date
+and backfill_end_date in the settings read a range again without moving the saved position
+back.
 """
 import datetime as dt
 from typing import Dict, Generator, List
@@ -171,8 +171,16 @@ class Amplitude(Source):
         return configured or utc_now() - dt.timedelta(days=DEFAULT_START_DAYS)
 
     def query_range(self, query: Dict):
+        """
+        A range to read once (a backfill): backfill_start_date and backfill_end_date in the
+        settings, or start_date and end_date in the query. Integration pipelines pass the
+        scheduler's interval (_start_date, _end_date), not a run's variables, so the
+        settings are where a user sets one.
+        """
         query = query or {}
-        return to_utc(query.get('start_date') or None), to_utc(query.get('end_date') or None)
+        start = query.get('start_date') or self.setting('backfill_start_date')
+        end = query.get('end_date') or self.setting('backfill_end_date')
+        return to_utc(start or None), to_utc(end or None)
 
     def sync_stream(self, stream, properties: Dict = None) -> int:
         if stream.tap_stream_id != STREAM_EVENTS:

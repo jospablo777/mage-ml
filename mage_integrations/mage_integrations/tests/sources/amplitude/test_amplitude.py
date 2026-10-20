@@ -218,3 +218,15 @@ class AmplitudeSourceTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'did not answer'):
             source.test_connection()
         self.assertLess(time.monotonic() - started, 8)
+
+    def test_a_backfill_set_in_the_settings_reads_its_range(self):
+        with FakeAmplitude(events_between(0, 6)) as fake:
+            saved = '2024-06-02T09:59:59.999999+00:00'
+            records, states, _ = run(
+                fake, ['events'],
+                state=dict(bookmarks=dict(events=dict(server_upload_time=saved))),
+                config=dict(backfill_start_date='2024-06-01T04:00',
+                            backfill_end_date='2024-06-01T05:00'),
+            )
+        self.assertEqual(len(records['events']), 4)
+        self.assertEqual(states, [])

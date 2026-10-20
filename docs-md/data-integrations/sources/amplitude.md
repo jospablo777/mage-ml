@@ -50,14 +50,18 @@ How events sync:
 - Streams come with their keys: rows are upserted by `uuid` for events and by date and
   segment for metrics, so an event Amplitude sends again, or a day of metrics read again,
   replaces its row.
-- To read a range again, set `start_date` and `end_date` in the runtime variables of a run;
-  the saved position does not move back.
+- To read a range again, set `backfill_start_date` and `backfill_end_date` in the settings
+  and run once; the saved position does not move back. Remove them afterwards.
 - Times are ISO 8601 in UTC. Event and user properties are JSON objects (`jsonb` in
   PostgreSQL).
 
 Optional settings: `event_types` (only these events), `window_hours`,
-`metrics_lookback_days` (3), `cohort_properties` (`true` or a list of property names) and
-`availability_delay_hours` (2).
+`metrics_lookback_days` (3), `cohort_properties` (`true` or a list of property names),
+`availability_delay_hours` (2), `backfill_start_date` and `backfill_end_date`, and `host`
+(a proxy, or `mage examples amplitude-server`).
+
+Step by step: [Amplitude events in a warehouse](../../guides/amplitude/warehouse.md). Every way to
+read Amplitude, with tutorials: [Amplitude](../../guides/amplitude/overview.md).
 
 Errors stop the sync with what to do: wrong keys or region (a project stored in the EU
 needs `region: EU`), or an hour larger than the Export API sends (4 GB; export such a project
@@ -74,6 +78,7 @@ default:
   AMPLITUDE_API_KEY: "{{ env_var('AMPLITUDE_API_KEY') }}"
   AMPLITUDE_SECRET_KEY: "{{ env_var('AMPLITUDE_SECRET_KEY') }}"
   AMPLITUDE_REGION: US
+  # AMPLITUDE_HOST: a proxy, or http://127.0.0.1:18765 for mage examples amplitude-server
 ```
 
 ```python

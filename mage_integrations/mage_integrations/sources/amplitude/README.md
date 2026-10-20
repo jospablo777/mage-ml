@@ -21,6 +21,8 @@ Optional:
 | `metrics_lookback_days` | Days of metrics read again on each sync, since late events change them. | `3` |
 | `cohort_properties` | `true` to add the users' properties to `cohort_members`, or a list of property names. | `false` |
 | `availability_delay_hours` | Hours Amplitude takes to finish an hour of events. | `2` |
+| `backfill_start_date`, `backfill_end_date` | A range to read again (UTC), without moving the saved position. Remove them after the run. | none |
+| `host` | Another address: a proxy, or `mage examples amplitude-server`. | the region's |
 
 Test the connection: it checks the keys and the region.
 
@@ -45,8 +47,8 @@ Test the connection: it checks the keys and the region.
   there next time.
 - Rows are upserted by `uuid` (events) and by date and segment (metrics), so an event
   Amplitude sends again, or a day of metrics read again, replaces its row.
-- To read a range again, set `start_date` and `end_date` in the source's query (runtime
-  variables of a trigger or backfill). The saved position does not move back.
+- To read a range again, set `backfill_start_date` and `backfill_end_date` and run once;
+  the saved position does not move back. A trigger's start and end dates are not used.
 - Times are ISO 8601 in UTC.
 
 ## Errors

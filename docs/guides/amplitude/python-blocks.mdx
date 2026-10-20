@@ -1,0 +1,138 @@
+---
+title: "Amplitude features in Python blocks"
+description: "Load Amplitude events into a Polars frame in a data loader, turn them into per-user features, and keep the daily metrics beside them."
+---
+
+You build a pipeline whose data loader reads a week of Amplitude events, a transformer that
+turns them into one row of features per user (plays, skip rate, purchases, revenue, plan),
+and a second loader for daily active users. It takes about ten minutes.
+
+## Before you start
+
+- MageML installed and a project (`mage init demo`).
+- An Amplitude project's API key and secret key, or the local Amplitude:
+
+```bash
+mage examples amplitude-server
+```
+
+## 1. Put the keys in io_config.yaml
+
+```yaml
+default:
+  AMPLITUDE_API_KEY: "{{ env_var('AMPLITUDE_API_KEY') }}"
+  AMPLITUDE_SECRET_KEY: "{{ env_var('AMPLITUDE_SECRET_KEY') }}"
+  AMPLITUDE_REGION: US
+  # Only for the local Amplitude or a proxy:
+  AMPLITUDE_HOST: http://127.0.0.1:18765
+```
+
+```bash
+export AMPLITUDE_API_KEY=test-api-key AMPLITUDE_SECRET_KEY=test-secret-key
+mage start demo
+```
+
+## 2. Load the events
+
+Create a **Standard** pipeline and add a data loader from the **Amplitude** template
+(**APIs**). Change it to read the last 7 days as a Polars frame, with the event and user
+properties as columns:
+
+```python
+from datetime import datetime, timedelta, timezone
+from os import path
+
+from mage_ai.io.amplitude import Amplitude
+from mage_ai.io.config import ConfigFileLoader
+from mage_ai.settings.repo import get_repo_path
+
+
+@data_loader
+def load_events(*args, **kwargs):
+    config = ConfigFileLoader(path.join(get_repo_path(), 'io_config.yaml'), 'default')
+    amplitude = Amplitude.with_config(config)
+    end = datetime.now(timezone.utc)
+    return amplitude.load_events(
+        end - timedelta(days=7),
+        polars=True,
+        expand_properties=True,
+    )
+```
+
+- Events are selected by the hour Amplitude received them, in UTC. Without an end, the range
+  ends at the newest hour Amplitude has finished, about two hours ago.
+- `expand_properties=True` turns `event_properties` and `user_properties` into columns such
+  as `event_properties.price`; without it they stay dictionaries.
+- `event_types=['Purchase']` reads only those events.
+- Times are UTC datetimes.
+
+Run the block: about 4,000 rows from the local Amplitude.
+
+## 3. Turn events into features
+
+Add a transformer:
+
+```python
+import polars as pl
+
+
+@transformer
+def user_features(events: pl.DataFrame, *args, **kwargs) -> pl.DataFrame:
+    is_type = lambda name: pl.col('event_type') == name  # noqa: E731
+    return (
+        events
+        .filter(pl.col('user_id').is_not_null())
+        .group_by('user_id')
+        .agg(
+            plays=is_type('Play Song').sum(),
+            skips=is_type('Skip Song').sum(),
+            purchases=is_type('Purchase').sum(),
+            revenue=pl.when(is_type('Purchase'))
+            .then(pl.col('event_properties.price') * pl.col('event_properties.quantity'))
+            .otherwise(0)
+            .sum(),
+            last_seen=pl.col('event_time').max(),
+            plan=pl.col('user_properties.plan').last(),
+        )
+        .with_columns(skip_rate=pl.col('skips') / (pl.col('plays') + pl.col('skips')))
+        .sort('revenue', descending=True)
+    )
+```
+
+Run it: one row per user, the top spenders first.
+
+## 4. Load the daily metrics
+
+Add a second data loader for daily active users:
+
+```python
+@data_loader
+def daily_users(*args, **kwargs):
+    config = ConfigFileLoader(path.join(get_repo_path(), 'io_config.yaml'), 'default')
+    amplitude = Amplitude.with_config(config)
+    end = datetime.now(timezone.utc)
+    return amplitude.active_users(end - timedelta(days=30), end, polars=True)
+```
+
+It returns `date`, `segment` and `value`. The client has the other reads Amplitude offers:
+
+| Method | Returns |
+| --- | --- |
+| `active_users(start, end, interval=1, new=False)` | Active (or new) users per day, week (7) or month (30) |
+| `average_session_length(start, end)`, `sessions_per_user(start, end)` | Session metrics per day |
+| `event_totals('Purchase', start, end, metric='uniques', group_by='country')` | One event per day, by a user property |
+| `event_types()`, `event_properties()`, `user_properties()` | The tracking plan |
+| `cohorts()`, `cohort_members(cohort_id, properties=True)` | Behavioral cohorts and their users |
+| `iter_events(start, end)` | Events one at a time, for ranges too large for memory |
+
+## 5. Keep it running
+
+Add a data exporter (PostgreSQL, a feature store, a model training block) after the
+transformer, and a daily trigger. Each run reads the last 7 days again, so the features are
+complete even for events Amplitude received late.
+
+## Next
+
+- [Events in a warehouse](/guides/amplitude/warehouse): every event kept in a table without
+  code.
+- [Events as they happen](/guides/amplitude/webhook-stream): features updated per event.
