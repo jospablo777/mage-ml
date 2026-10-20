@@ -140,8 +140,15 @@ class EngineWorkerTests(unittest.TestCase):
 
 
 class QueueFactoryTests(unittest.TestCase):
-    def tearDown(self):
+    # Each test makes its own queue and shuts it down. The queue the scheduler shares (the
+    # job manager's) is set aside and restored: a test that got it back from get_queue shut
+    # its manager down, and every scheduler test after it failed with a broken pipe.
+    def setUp(self):
+        self.shared_queue = QueueFactory.queue
         QueueFactory.queue = None
+
+    def tearDown(self):
+        QueueFactory.queue = self.shared_queue
 
     def test_the_engine_is_asked_for_with_mage_job_engine(self):
         with patch.dict(os.environ, MAGE_JOB_ENGINE='on'):
@@ -152,7 +159,6 @@ class QueueFactoryTests(unittest.TestCase):
     def test_without_an_engine_jobs_run_in_processes(self):
         from mage_ai.orchestration.queue.process_queue import ProcessQueue
 
-        QueueFactory.queue = None
         with patch.dict(os.environ, MAGE_JOB_ENGINE='on',
                         MAGE_ENGINE_PATH='/nonexistent/mage-service'):
             queue = QueueFactory.get_queue()
