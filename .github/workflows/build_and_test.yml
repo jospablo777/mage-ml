@@ -250,7 +250,8 @@ jobs:
             services: mongodb redis
             tests: integration_tests/mongodb integration_tests/redis
             r: false
-            warm: ""
+            # Rust blocks build Polars, and mage::mongodb its driver: warmed first.
+            warm: "'integration_tests/mongodb/test_rust_mongodb.py::test_exact_decimals_read_from_documents'"
           - id: streaming
             name: "Integration: streaming and storage"
             services: kafka rabbitmq ibm-mq nats toxiproxy sqs pubsub opensearch influxdb activemq minio postgres mongodb mysql clickhouse

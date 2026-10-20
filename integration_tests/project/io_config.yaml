@@ -26,6 +26,10 @@ s3:
   AWS_SECRET_ACCESS_KEY: "{{ env_var('MAGE_TEST_S3_SECRET_KEY') }}"
   AWS_ENDPOINT: "{{ env_var('MAGE_TEST_S3_ENDPOINT') }}"
   AWS_REGION: us-east-1
+# MongoDB, in the database of one test (MAGE_TEST_MONGODB_DATABASE, which the test sets).
+mongodb:
+  MONGODB_CONNECTION_STRING: "{{ env_var('MAGE_TEST_MONGODB_URL') }}"
+  MONGODB_DATABASE: "{{ env_var('MAGE_TEST_MONGODB_DATABASE') }}"
 # The MySQL database of the MySQL pipeline tests.
 mysql:
   MYSQL_DATABASE: "{{ env_var('MAGE_TEST_MYSQL_DATABASE') }}"
