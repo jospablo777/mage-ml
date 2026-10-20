@@ -244,7 +244,7 @@ jobs:
             services: postgres mysql clickhouse trino db2
             tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb integration_tests/db2
             r: false
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why'"
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why' 'integration_tests/mysql/test_rust_mysql.py::test_exact_decimals_and_a_failure_that_says_why'"
           - id: documents
             name: "Integration: document stores and caches"
             services: mongodb redis

@@ -256,6 +256,47 @@ fn export_data(totals: DataFrame) -> Result<()> {
 
 The PostgreSQL loader and exporter templates start from these.
 
+## MySQL
+
+The `mage::mysql` module reads and writes MySQL and MariaDB. Turn on the `mysql` feature of
+the `mage` crate in `rust/Cargo.toml`:
+
+```toml
+mage-block = { path = ".mage/sdk", features = ["postgres", "mysql"] }
+```
+
+```rust
+use mage::mysql::{MySql, WritePolicy};
+use mage::prelude::*;
+
+fn load_data() -> Result<DataFrame> {
+    MySql::connect()?.query("SELECT * FROM orders WHERE created_at >= CURDATE()")
+}
+
+fn export_data(totals: DataFrame) -> Result<()> {
+    MySql::connect()?.write(&totals, "daily_totals", WritePolicy::Replace)?;
+    Ok(())
+}
+```
+
+- **Connection.** `MySql::connect()` uses the block's io_config profile: `MYSQL_HOST`,
+  `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER` and `MYSQL_PASSWORD`. TLS is off unless
+  `MYSQL_SSL_MODE` asks for it: `REQUIRED` encrypts without checking the certificate,
+  `VERIFY_CA` checks that it chains to a trusted root (Mozilla's, or the PEM file in
+  `MYSQL_SSL_CA`), and `VERIFY_IDENTITY` also checks the host name. SSH tunnels are not
+  supported here.
+- **Reading.** Signed and unsigned integers keep their width, `DECIMAL` is exact
+  (`Decimal(p, s)` up to 38 digits, exact text past that), `DATETIME` is a naive datetime,
+  `TIMESTAMP` a datetime in UTC (the session runs in UTC), `TIME` a duration and binary
+  strings bytes. `BOOLEAN` is `TINYINT(1)` in MySQL and reads as an integer. Zero dates
+  read as NULL.
+- **Writing.** New tables get the column types of the Python client (`BIGINT`, `DOUBLE`,
+  `LONGTEXT`, `DATETIME(6)`, `DECIMAL(p, s)`, ...); zoned datetimes are written in UTC.
+  Rows go in batches of prepared multi-row `INSERT`s, by column name, in one transaction.
+  MySQL commits `CREATE` and `DROP` on their own, so `WritePolicy::Replace` is not atomic.
+- **Other statements.** `execute(sql)` runs a statement and returns the rows it changed;
+  `conn()` gives the underlying `mysql::Conn`.
+
 ## ClickHouse
 
 The `mage::clickhouse` module reads and writes ClickHouse over its HTTP interface, with

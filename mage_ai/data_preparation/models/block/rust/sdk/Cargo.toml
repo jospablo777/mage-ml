@@ -25,6 +25,8 @@ postgres = { version = "0.19", optional = true }
 tokio-postgres-rustls = { version = "0.13", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 webpki-roots = { version = "1", optional = true }
+# MySQL for blocks (mage::mysql), behind the mysql feature: rustls, a pure Rust zlib.
+mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring", "buffer-pool"], optional = true }
 # Feast's feature server REST API for blocks (mage::feast), behind the feast feature.
 ureq = { version = "3", features = ["json"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"], optional = true }
@@ -38,6 +40,7 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "
 storage = ["polars/aws", "polars/gcp", "polars/azure"]
 # ClickHouse for blocks (mage::clickhouse), over HTTP with rows in Arrow.
 clickhouse = ["dep:ureq", "polars/ipc_streaming"]
+mysql = ["dep:mysql", "dep:chrono"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]

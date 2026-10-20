@@ -18,6 +18,10 @@
 
 ### Rust blocks
 
+- `mage::mysql` (feature `mysql`) reads MySQL and MariaDB into typed columns (exact
+  decimals, unsigned integers, TIMESTAMP in UTC) and writes frames with prepared
+  multi-row inserts in one transaction. See
+  [Rust blocks](/guides/blocks/rust-blocks#mysql).
 - `mage::clickhouse` (feature `clickhouse`) reads and writes ClickHouse over HTTP with rows
   in Arrow, with the Python client's profile keys and table engine. Types Arrow cannot
   carry (UUID, IP addresses, enums, wide integers and decimals) read as exact text. See

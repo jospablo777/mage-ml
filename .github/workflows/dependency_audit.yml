@@ -125,12 +125,14 @@ jobs:
         # Accepted until Polars (0.55.2, the newest) updates them: quick-xml through
         # object_store, only reachable from a cloud storage server that sends crafted XML
         # (RUSTSEC-2026-0194, RUSTSEC-2026-0195); bincode unmaintained (RUSTSEC-2025-0141).
+        # rustls-pemfile unmaintained (RUSTSEC-2025-0134), no known vulnerability: the
+        # mysql crate's TLS needs it to read MYSQL_SSL_CA; the SDK's mysql feature only.
         run: |
           status=0
           for lock in $(git ls-files '*Cargo.lock'); do
             echo "== $lock"
             cargo audit --file "$lock" --deny warnings \
               --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
-              --ignore RUSTSEC-2025-0141 || status=1
+              --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2025-0134 || status=1
           done
           exit $status
