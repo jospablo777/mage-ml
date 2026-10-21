@@ -252,7 +252,8 @@ jobs:
   integration:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # A cold Rust blocks cache (evicted) costs about 40 minutes of the limit.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -262,7 +263,7 @@ jobs:
             services: postgres mysql clickhouse trino db2
             tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb integration_tests/db2
             r: false
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why' 'integration_tests/mysql/test_rust_mysql.py::test_exact_decimals_and_a_failure_that_says_why'"
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why' 'integration_tests/mysql/test_rust_mysql.py::test_exact_decimals_and_a_failure_that_says_why' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks'"
           - id: documents
             name: "Integration: document stores, caches and Pinot"
             services: mongodb redis pinot
@@ -291,7 +292,9 @@ jobs:
             services: postgres mysql minio api
             tests: integration_tests/chains integration_tests/checks integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/r
             r: true
-            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
+            # This group saves the shared Rust blocks cache: DuckDB (18 minutes of C++) is
+            # warmed here so the SQL group finds it built.
+            warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks'"
           - id: study
             name: "MageML: pipeline shape study"
             # PostgreSQL only for the Rust warm-up's exported-service build.
