@@ -3,6 +3,16 @@
 //! Reads need the read token or the full token; starting runs, cancelling and control
 //! commands need the full token. `/healthz` and `/metrics` need none: they hold counts and
 //! durations, never data, variables or errors.
+//!
+//! A handler answers every failure with a status and a message; it never panics (the
+//! error-message rule in QUALITY.md, enforced by clippy in CI).
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented
+)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -1423,6 +1433,7 @@ fn escape(value: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{content_type, ipc_rows_json};
     use serde_json::json;

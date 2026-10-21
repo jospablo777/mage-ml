@@ -613,6 +613,20 @@ jobs:
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py unit-results.xml
+      # Per-run overhead (QUALITY.md): mage run of a tiny pipeline, the base commit's code
+      # against this one in this environment; fails on a regression over 15%.
+      - name: Per-run overhead
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "No base commit to compare with."
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          python3 scripts/ci/run_overhead.py compare --base "$RUNNER_TEMP/base" \
+            --rounds 3 --runs 7 --out "$RUNNER_TEMP/run-overhead.json"
       # Run Playwright once per matrix.
       - name: Set up Node
         uses: actions/setup-node@v6

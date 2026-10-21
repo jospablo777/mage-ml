@@ -1918,3 +1918,38 @@ fn a_timer_fires_once_when_the_watermark_passes_it_and_survives_a_restart() {
     send(&service, "4", r#"[{"device": "d3", "at": 200000}]"#);
     assert_eq!(alerts(&service), [("d2".into(), 71000)]);
 }
+
+/// Resident set of a process in KiB, from ps (Linux and macOS).
+fn rss_kib(pid: u32) -> u64 {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+// The idle memory budget (QUALITY.md, performance): the service process with its
+// pipelines loaded and nothing running, under 60 MiB even unoptimized (about 21 MiB on
+// macOS arm64). Worker processes are their own budget.
+const IDLE_RSS_BUDGET_KIB: u64 = 60 * 1024;
+
+#[test]
+fn an_idle_service_stays_within_its_memory_budget() {
+    let mut service = Service::create(false);
+    service.start(&[]);
+    let pid = service.child.as_ref().unwrap().id();
+    std::thread::sleep(Duration::from_secs(2));
+    let (status, _) = service.get("/v1/runs");
+    assert_eq!(status, 200);
+    let rss = rss_kib(pid);
+    println!("idle service RSS: {rss} KiB");
+    assert!(
+        rss < IDLE_RSS_BUDGET_KIB,
+        "the idle service holds {} MiB; the budget is {} MiB",
+        rss / 1024,
+        IDLE_RSS_BUDGET_KIB / 1024
+    );
+}
