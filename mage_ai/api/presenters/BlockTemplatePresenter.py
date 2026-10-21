@@ -5,6 +5,7 @@ class BlockTemplatePresenter(BasePresenter):
     default_attributes = [
         'block_type',
         'configuration',
+        'data_source',
         'defaults',
         'description',
         'groups',

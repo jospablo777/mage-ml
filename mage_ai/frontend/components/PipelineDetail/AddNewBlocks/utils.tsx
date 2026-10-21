@@ -209,6 +209,7 @@ export function groupBlockTemplates(
   blockTemplates?.forEach(({
     block_type: blockType,
     configuration,
+    data_source: dataSource,
     defaults,
     description,
     groups,
@@ -233,7 +234,8 @@ export function groupBlockTemplates(
     const newItem: FlyoutMenuItemType = {
       label: () => name,
       onClick: () => addNewBlock({
-        config: {
+        // A source template is made with its source, as the source menus always made it.
+        config: dataSource ? { data_source: dataSource } : {
           template_path: path,
           template_type: templateType,
           template_variables: templateVariables,
@@ -243,7 +245,7 @@ export function groupBlockTemplates(
         language,
         type: blockType,
       }),
-      uuid: `${path}/${name}`,
+      uuid: dataSource ? `${blockType}/${dataSource}` : `${path}/${name}`,
     };
 
     if (!uuidsToHideTooltips?.[path]) {
@@ -305,6 +307,14 @@ export function groupBlockTemplates(
     }
   });
 
+  // The block types whose records hold their Python sources: their menus need no list of
+  // sources written here.
+  blockTemplates?.forEach(({ block_type: blockType, data_source: dataSource, language }) => {
+    if (dataSource && mapping[blockType]?.[language]) {
+      mapping[blockType][language].hasSources = true;
+    }
+  });
+
   return mapping;
 }
 
@@ -315,7 +325,8 @@ export const getdataSourceMenuItems = (
   opts?: {
     blockTemplatesByBlockType?: {
       [blockType: string]: {
-        [language: string]: FlyoutMenuItemType;
+        // hasSources: the records hold the block type's Python sources.
+        [language: string]: FlyoutMenuItemType & { hasSources?: boolean };
       };
     };
     dataIntegrationType?: DataIntegrationTypeEnum;
@@ -381,12 +392,17 @@ export const getdataSourceMenuItems = (
   } else {
     const additionalTemplates =
       blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.PYTHON]?.items || [];
+    // The server's template records hold the Python sources (templates/constants.py); the
+    // list written here is for a server that does not send them.
+    const recordsHaveSources =
+      !!blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.PYTHON]?.hasSources;
 
     const arr = [
       {
         // @ts-ignore
         items: sortByKey(
-          (dataSourceMenuItemsMapping[blockType] || []).concat(additionalTemplates),
+          (recordsHaveSources ? [] : (dataSourceMenuItemsMapping[blockType] || []))
+            .concat(additionalTemplates),
           ({ label }) => label(),
         ),
         label: () => 'Python',

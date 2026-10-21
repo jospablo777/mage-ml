@@ -20,6 +20,13 @@ GROUP_FORMATTING = 'Formatting'
 GROUP_ORCHESTRATION = 'Orchestration'
 GROUP_ROW_ACTIONS = 'Row actions'
 GROUP_SHIFT = 'Shift'
+GROUP_COMBINE = 'Combine'
+GROUP_COMPUTE = 'Compute'
+GROUP_MACHINE_LEARNING = 'Machine learning'
+GROUP_RESHAPE = 'Reshape'
+GROUP_SEARCH = 'Search'
+GROUP_SPREADSHEETS = 'Spreadsheets'
+GROUP_VECTOR_DATABASES = 'Vector databases'
 
 TEMPLATES = [
     dict(
@@ -33,6 +40,7 @@ TEMPLATES = [
     dict(
         block_type=BlockType.DATA_LOADER,
         description='Load a Table from Airtable App.',
+        groups=[GROUP_APIS],
         language=BlockLanguage.PYTHON,
         name='Airtable',
         path='data_loaders/airtable.py',
@@ -104,6 +112,7 @@ TEMPLATES = [
     dict(
         block_type=BlockType.DATA_EXPORTER,
         description='Export data to MongoDB.',
+        groups=[GROUP_DATABASES_NO_SQL],
         language=BlockLanguage.PYTHON,
         name='MongoDB',
         path='data_exporters/mongodb.py',
@@ -817,10 +826,11 @@ R_TEMPLATES = [
     ),
     _r_template(
         BlockType.TRANSFORMER, 'Join', 'join.r', 'Join the outputs of two upstream blocks.',
+        [GROUP_COMBINE],
     ),
     _r_template(
         BlockType.TRANSFORMER, 'Reshape', 'reshape.r',
-        'Turn columns into rows with pivot_longer.',
+        'Turn columns into rows with pivot_longer.', [GROUP_RESHAPE],
     ),
     _r_template(
         BlockType.DATA_EXPORTER, 'Local file', 'file.r',
@@ -853,6 +863,7 @@ R_TEMPLATES = [
     _r_template(
         BlockType.TRANSFORMER, 'Model inference', 'predict.r',
         'Score rows with a model saved with saveRDS (lm, glm, ranger, tidymodels).',
+        [GROUP_MACHINE_LEARNING],
     ),
 ]
 TEMPLATES += R_TEMPLATES
@@ -882,7 +893,7 @@ RUST_TEMPLATES = [
     ),
     _rust_template(
         BlockType.DATA_LOADER, 'API', 'api.rs',
-        'Load JSON records from an HTTP API into a table.',
+        'Load JSON records from an HTTP API into a table.', [GROUP_APIS],
     ),
     _rust_template(
         BlockType.DATA_LOADER, 'PostgreSQL', 'postgres.rs',
@@ -898,34 +909,145 @@ RUST_TEMPLATES = [
     ),
     _rust_template(
         BlockType.DATA_EXPORTER, 'API', 'api.rs',
-        'Send rows to an HTTP API as JSON, in batches.',
+        'Send rows to an HTTP API as JSON, in batches.', [GROUP_APIS],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Model features', 'features.rs',
         'Lags, changes, running means, z-scores and ranks per entity, in time order.',
+        [GROUP_FEATURE_EXTRACTION],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Aggregate', 'aggregate.rs',
-        'Totals per group with a Polars lazy query.',
+        'Totals per group with a Polars lazy query.', [GROUP_AGGREGATE],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Join', 'join.rs',
-        'Join the outputs of two upstream blocks.',
+        'Join the outputs of two upstream blocks.', [GROUP_COMBINE],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Clean data', 'clean.rs',
         'Remove duplicates and missing ids, trim text, fill missing numbers.',
+        [GROUP_DATA_CLEANING],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'Parallel computation', 'parallel.rs',
-        'Compute a value per row on every core with Rayon.',
+        'Compute a value per row on every core with Rayon.', [GROUP_COMPUTE],
     ),
     _rust_template(
         BlockType.TRANSFORMER, 'ONNX model inference', 'onnx.rs',
         'Score rows with an ONNX model (needs the onnx feature in rust/Cargo.toml).',
+        [GROUP_MACHINE_LEARNING],
     ),
 ]
 TEMPLATES += RUST_TEMPLATES
+
+# Each Python source a data loader, data exporter or sensor template exists for, in
+# <folder>/<source>.py: its name in the menus and its family. A template file without an
+# entry fails the catalog test (templates/catalog.py), so every file has a menu item.
+PYTHON_SOURCES = {
+    'airtable': ('Airtable', GROUP_APIS),
+    'algolia': ('Algolia', GROUP_SEARCH),
+    'amplitude': ('Amplitude', GROUP_APIS),
+    'api': ('API', GROUP_APIS),
+    'azure_blob_storage': ('Azure Blob Storage', GROUP_CLOUD_STORAGE),
+    'bigquery': ('Google BigQuery', GROUP_DATA_WAREHOUSES),
+    'chroma': ('Chroma', GROUP_VECTOR_DATABASES),
+    'db2': ('IBM Db2', GROUP_DATABASES),
+    'druid': ('Druid', GROUP_DATABASES),
+    'duckdb': ('DuckDB', GROUP_DATABASES),
+    'file': ('Local file', GROUP_FILES),
+    'google_cloud_storage': ('Google Cloud Storage', GROUP_CLOUD_STORAGE),
+    'google_sheets': ('Google Sheets', GROUP_SPREADSHEETS),
+    'ibm_cos': ('IBM Cloud Object Storage', GROUP_CLOUD_STORAGE),
+    'mongodb': ('MongoDB', GROUP_DATABASES_NO_SQL),
+    'mssql': ('Microsoft SQL Server', GROUP_DATABASES),
+    'mysql': ('MySQL', GROUP_DATABASES),
+    'oracledb': ('OracleDB', GROUP_DATABASES),
+    'pinot': ('Pinot', GROUP_DATABASES),
+    'postgres': ('PostgreSQL', GROUP_DATABASES),
+    'qdrant': ('Qdrant', GROUP_VECTOR_DATABASES),
+    'redshift': ('Amazon Redshift', GROUP_DATA_WAREHOUSES),
+    's3': ('Amazon S3', GROUP_CLOUD_STORAGE),
+    'snowflake': ('Snowflake', GROUP_DATA_WAREHOUSES),
+    'weaviate': ('Weaviate', GROUP_VECTOR_DATABASES),
+}
+# Python transformers that run their SQL in a database or warehouse.
+PYTHON_WAREHOUSE_TRANSFORMERS = ('bigquery', 'postgres', 'redshift', 'snowflake')
+_SOURCE_FOLDERS = {
+    BlockType.DATA_LOADER: ('data_loaders', 'Load data from {}.'),
+    BlockType.DATA_EXPORTER: ('data_exporters', 'Export data to {}.'),
+    BlockType.SENSOR: ('sensors', 'Wait until {} has what the pipeline needs.'),
+}
+BASE_TEMPLATE_NAME = 'Base template (generic)'
+
+
+def _python_source_templates() -> list:
+    """
+    A record per Python source template file: a block created from it has the source as
+    its data_source, as the menus always made them. Files with a record above are left out.
+    """
+    import os
+
+    folder_of_templates = os.path.dirname(__file__)
+    listed = {t['path'] for t in TEMPLATES}
+    records = [dict(
+        block_type=BlockType.TRANSFORMER,
+        description='A block with an empty function to fill in.',
+        language=BlockLanguage.PYTHON,
+        name=BASE_TEMPLATE_NAME,
+        path='transformers/default.jinja',
+    )]
+    for block_type, (folder, description) in _SOURCE_FOLDERS.items():
+        directory = os.path.join(folder_of_templates, folder)
+        records.append(dict(
+            block_type=block_type,
+            description='A block with an empty function to fill in.',
+            language=BlockLanguage.PYTHON,
+            name=BASE_TEMPLATE_NAME,
+            path=f'{folder}/default.{"py" if block_type == BlockType.SENSOR else "jinja"}',
+        ))
+        for name in sorted(os.listdir(directory)):
+            source, extension = os.path.splitext(name)
+            path = f'{folder}/{name}'
+            if extension != '.py' or source == 'default' or path in listed:
+                continue
+            title, family = PYTHON_SOURCES.get(source, (source, None))
+            records.append(dict(
+                block_type=block_type,
+                data_source=source,
+                description=description.format(title),
+                groups=[family] if family else [],
+                language=BlockLanguage.PYTHON,
+                name=title,
+                path=path,
+            ))
+    for source in PYTHON_WAREHOUSE_TRANSFORMERS:
+        title, family = PYTHON_SOURCES[source]
+        records.append(dict(
+            block_type=BlockType.TRANSFORMER,
+            data_source=source,
+            description=f'Transform data with SQL that runs in {title}.',
+            groups=[family],
+            language=BlockLanguage.PYTHON,
+            name=title,
+            path='transformers/data_warehouse_transformer.jinja',
+        ))
+    return records
+
+
+PYTHON_SOURCE_TEMPLATES = _python_source_templates()
+TEMPLATES += PYTHON_SOURCE_TEMPLATES
+# The records above hold the Python sources and base templates the newer menus listed
+# here too; one record per template.
+_GENERATED = {(t['block_type'], t['path'], t['name']) for t in PYTHON_SOURCE_TEMPLATES}
+_GENERATED_PATHS = {(t['block_type'], t['path']) for t in PYTHON_SOURCE_TEMPLATES
+                    if t['path'] != 'transformers/data_warehouse_transformer.jinja'}
+TEMPLATES_ONLY_FOR_V2 = [
+    t for t in TEMPLATES_ONLY_FOR_V2
+    if (t['block_type'], t.get('path')) not in _GENERATED_PATHS
+    and (t['block_type'], t.get('path'), t['name']) not in _GENERATED
+    and not (t.get('path') == 'transformers/data_warehouse_transformer.jinja')
+]
 
 # By name, which R and Rust templates share with Python ones; they are left out.
 TEMPLATES_BY_UUID = index_by(

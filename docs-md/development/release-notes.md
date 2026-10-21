@@ -23,6 +23,16 @@
   1 s instead of 20 s and wrote 1 MB instead of 952 MB. The Compile panel lists the
   chains and the SQL blocks left out, with the reason.
 
+### Block templates
+
+- The block menus come from one list of template records: every Python source template
+  file has a menu item, by family (APIs, cloud storage, databases, data warehouses,
+  vector databases and others), in both block menus. DuckDB, IBM Db2, IBM Cloud Object
+  Storage, Chroma, Qdrant, Weaviate and Algolia loaders were in the code but in no menu of
+  the older block buttons. A test renders every record and checks it has its block
+  type's function; [Block templates](../guides/blocks/block-templates.md) shows the coverage
+  by block type, family and language.
+
 ### Python workers
 
 - Python workers: named environments in `python_workers/<name>/` (a uv project with its

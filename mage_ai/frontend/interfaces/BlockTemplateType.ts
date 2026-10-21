@@ -13,6 +13,8 @@ export enum TemplateTypeEnum {
 export default interface BlockTemplateType {
   block_type: BlockTypeEnum;
   configuration?: ConfigurationType;
+  // A Python source template: the block is made with it as its data_source.
+  data_source?: string;
   defaults?: {
     language?: BlockLanguageEnum;
   };

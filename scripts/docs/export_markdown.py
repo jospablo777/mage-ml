@@ -478,7 +478,7 @@ def export(docs: Path = DOCS, out: Path = OUT) -> List[str]:
         out_file = out / (slug.lstrip('/') + '.md')
         out_file.parent.mkdir(parents=True, exist_ok=True)
         out_file.write_text(Converter(site, source, out_file).convert(source.read_text()))
-    (out / 'README.md').write_text(index(site) + '\n')
+    (out / 'README.md').write_text(index(site).rstrip('\n') + '\n')
     return broken_links(out, docs)
 
 

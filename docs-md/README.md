@@ -228,6 +228,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 
 - [Reordering blocks](guides/blocks/reorder-blocks.md)
 - [Reuse blocks](guides/blocks/reuse-blocks.md)
+- [Block templates](guides/blocks/block-templates.md)
 - [User-defined templates](guides/blocks/user-defined-templates.md)
 - [Detaching blocks](guides/blocks/detach-blocks.md)
 - [Dynamic blocks](guides/blocks/dynamic-blocks.md)
@@ -582,4 +583,3 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Use a completed pipeline](guides/train/complete-project.md)
 - [Compute management for Spark](integrations/compute/management.md)
 - [Pipeline filtering and tagging](pipelines/pipeline-tagging.md)
-
