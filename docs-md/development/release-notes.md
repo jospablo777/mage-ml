@@ -13,6 +13,11 @@
 
 ### Exported services
 
+- Timers in stream blocks with keyed state, in Python, Rust and R: a block sets a time per
+  key and runs once with the keys whose time came, before the batch that moved the
+  watermark past them, such as an alert when a device goes silent. Event time when the
+  stream has `time`, else the time batches arrive. Timers are saved with the state and
+  fire after a restart.
 - Keyed state in Rust and R stream blocks, as in Python ones: a Rust block takes `State`
   (`get`, `set`, `remove`, `key_of`), an R block calls `state_get()`, `state_set()`,
   `state_remove()` and `state_keys()`. The engine sends the values of each batch's keys

@@ -753,6 +753,7 @@ fn region_session(
                 pool: service.python.clone(),
                 state_dir,
                 stable_positions,
+                time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
             },
         )?));
     }
@@ -774,6 +775,7 @@ fn region_session(
             shape,
             state_dir,
             stable_positions,
+            time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
         },
     )))
 }

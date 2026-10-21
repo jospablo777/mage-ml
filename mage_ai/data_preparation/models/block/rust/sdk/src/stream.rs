@@ -45,12 +45,33 @@
 //! }
 //! ```
 //!
+//! [`Timers`] set a time per key; when the stream's watermark (or, without event time, the
+//! time batches arrive) reaches it, the block runs once with the key in `fired()` and no
+//! messages, before the batch that moved the time:
+//!
+//! ```ignore
+//! fn watch(messages: Vec<Value>, state: State, timers: Timers) -> Result<Vec<Value>> {
+//!     let mut out = Vec::new();
+//!     for (key, _) in timers.fired() {
+//!         out.push(json!({"device": key, "silent_since": state.value(&key)}));
+//!     }
+//!     for m in messages {
+//!         let key = state.key_of(&m);
+//!         let at = m["at"].as_i64().context("no time")?;
+//!         state.set(&key, at)?;
+//!         timers.set(&key, at + 60_000)?;
+//!         out.push(m);
+//!     }
+//!     Ok(out)
+//! }
+//! ```
+//!
 //! The program connects to the Unix socket `stream.json` names and says it is ready. For each
 //! batch the engine sends a header frame and one frame per message; the program answers
 //! with a header frame, then the messages of each block the engine asked for, in order. A
 //! frame is a little-endian u32 length and its bytes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::panic::{self, AssertUnwindSafe};
@@ -227,26 +248,100 @@ impl State {
     }
 }
 
+/// A stream block's timers: a time per key, in milliseconds, of the keys of its keyed
+/// state (see [`State`]). Event time when the stream has `time`, else the time batches
+/// arrive. A timer fires once, when a batch of its partition moves the watermark to it or
+/// past it: the block runs with the key in [`Timers::fired`] and no messages, and the timer
+/// is removed unless the block sets it again. A clone is the same timers.
+#[derive(Debug, Clone, Default)]
+pub struct Timers {
+    times: Rc<RefCell<BTreeMap<String, i64>>>,
+    fired: Rc<RefCell<BTreeMap<String, i64>>>,
+    watermark: Rc<Cell<Option<i64>>>,
+    key: Option<String>,
+    block: String,
+}
+
+impl Timers {
+    /// When the key's timer fires; None without a timer.
+    pub fn get(&self, key: &str) -> Option<i64> {
+        self.times.borrow().get(key).copied()
+    }
+
+    /// Sets the key's timer to `at`, in milliseconds; it replaces the key's timer.
+    pub fn set(&self, key: impl Into<String>, at: i64) -> anyhow::Result<()> {
+        let Some(_) = &self.key else {
+            bail!(
+                "Block {} has no state_key in its configuration: name the field of the \
+                 messages that keys its state and timers",
+                self.block
+            );
+        };
+        self.times.borrow_mut().insert(key.into(), at);
+        Ok(())
+    }
+
+    /// Removes the key's timer, returning its time.
+    pub fn remove(&self, key: &str) -> Option<i64> {
+        self.times.borrow_mut().remove(key)
+    }
+
+    /// The keys whose timers fired, with their times; empty when the block runs on messages.
+    pub fn fired(&self) -> Vec<(String, i64)> {
+        self.fired
+            .borrow()
+            .iter()
+            .map(|(key, at)| (key.clone(), *at))
+            .collect()
+    }
+
+    /// The time timers follow: the partition's watermark, or the batch's arrival.
+    pub fn watermark(&self) -> Option<i64> {
+        self.watermark.get()
+    }
+
+    fn snapshot(&self) -> BTreeMap<String, i64> {
+        self.times.borrow().clone()
+    }
+
+    fn restore(&self, times: BTreeMap<String, i64>) {
+        *self.times.borrow_mut() = times;
+    }
+}
+
+/// What a step's block holds between calls: its state and its timers.
+#[derive(Debug, Clone, Default)]
+pub struct Held {
+    state: State,
+    timers: Timers,
+}
+
 /// What a stream block takes after its messages.
 pub trait FromContext: Sized {
-    fn from_context(context: &BlockContext, state: &State) -> Self;
+    fn from_context(context: &BlockContext, held: &Held) -> Self;
 }
 
 impl FromContext for Vars {
-    fn from_context(context: &BlockContext, _state: &State) -> Self {
+    fn from_context(context: &BlockContext, _held: &Held) -> Self {
         context.variables.clone()
     }
 }
 
 impl FromContext for BlockContext {
-    fn from_context(context: &BlockContext, _state: &State) -> Self {
+    fn from_context(context: &BlockContext, _held: &Held) -> Self {
         context.clone()
     }
 }
 
 impl FromContext for State {
-    fn from_context(_context: &BlockContext, state: &State) -> Self {
-        state.clone()
+    fn from_context(_context: &BlockContext, held: &Held) -> Self {
+        held.state.clone()
+    }
+}
+
+impl FromContext for Timers {
+    fn from_context(_context: &BlockContext, held: &Held) -> Self {
+        held.timers.clone()
     }
 }
 
@@ -330,7 +425,7 @@ impl<T: IntoMessages, E: Into<anyhow::Error>> IntoMessages for Result<T, E> {
 #[diagnostic::on_unimplemented(
     message = "this function cannot be a Mage stream block function",
     label = "check its parameters and return type",
-    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then up to two of Vars, BlockContext and State",
+    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then up to three of Vars, BlockContext, State and Timers",
     note = "it returns Vec<Value>, Value, DataFrame, LazyFrame, Vec<String>, Vec<Vec<u8>>, (), or an Option or Result of these"
 )]
 pub trait StreamFn<Args> {
@@ -338,7 +433,7 @@ pub trait StreamFn<Args> {
         &mut self,
         messages: &[Vec<u8>],
         context: &BlockContext,
-        state: &State,
+        held: &Held,
     ) -> anyhow::Result<Raw>;
 }
 
@@ -352,7 +447,7 @@ where
         &mut self,
         messages: &[Vec<u8>],
         _context: &BlockContext,
-        _state: &State,
+        _held: &Held,
     ) -> anyhow::Result<Raw> {
         (self)(M::from_messages(messages)?).into_messages()
     }
@@ -369,13 +464,9 @@ where
         &mut self,
         messages: &[Vec<u8>],
         context: &BlockContext,
-        state: &State,
+        held: &Held,
     ) -> anyhow::Result<Raw> {
-        (self)(
-            M::from_messages(messages)?,
-            C1::from_context(context, state),
-        )
-        .into_messages()
+        (self)(M::from_messages(messages)?, C1::from_context(context, held)).into_messages()
     }
 }
 
@@ -391,18 +482,43 @@ where
         &mut self,
         messages: &[Vec<u8>],
         context: &BlockContext,
-        state: &State,
+        held: &Held,
     ) -> anyhow::Result<Raw> {
         (self)(
             M::from_messages(messages)?,
-            C1::from_context(context, state),
-            C2::from_context(context, state),
+            C1::from_context(context, held),
+            C2::from_context(context, held),
         )
         .into_messages()
     }
 }
 
-type StreamCall = Box<dyn FnMut(&[Vec<u8>], &BlockContext, &State) -> anyhow::Result<Raw>>;
+impl<F, R, M, C1, C2, C3> StreamFn<(M, C1, C2, C3)> for F
+where
+    F: FnMut(M, C1, C2, C3) -> R,
+    M: FromMessages,
+    C1: FromContext,
+    C2: FromContext,
+    C3: FromContext,
+    R: IntoMessages,
+{
+    fn call(
+        &mut self,
+        messages: &[Vec<u8>],
+        context: &BlockContext,
+        held: &Held,
+    ) -> anyhow::Result<Raw> {
+        (self)(
+            M::from_messages(messages)?,
+            C1::from_context(context, held),
+            C2::from_context(context, held),
+            C3::from_context(context, held),
+        )
+        .into_messages()
+    }
+}
+
+type StreamCall = Box<dyn FnMut(&[Vec<u8>], &BlockContext, &Held) -> anyhow::Result<Raw>>;
 
 /// A stream block's function, for [`serve_stream`]: what a block's generated library
 /// returns from `mage_stream_block`.
@@ -416,7 +532,7 @@ where
     F: StreamFn<Args> + 'static,
 {
     StreamBlock {
-        call: Box::new(move |messages, context, state| function.call(messages, context, state)),
+        call: Box::new(move |messages, context, held| function.call(messages, context, held)),
     }
 }
 
@@ -427,7 +543,7 @@ struct Step {
     block: StreamBlock,
     context: BlockContext,
     send: bool,
-    state: State,
+    held: Held,
 }
 
 #[derive(Serialize)]
@@ -443,13 +559,22 @@ struct Ready<'a> {
 struct Request {
     id: u64,
     count: usize,
-    /// Per block with keyed state: the values of the batch's keys.
+    /// Per block with keyed state: the values and timers of the batch's keys, the timers
+    /// that fired, and the time timers follow.
     #[serde(default)]
     state: BTreeMap<String, Map<String, Value>>,
+    #[serde(default)]
+    timers: BTreeMap<String, BTreeMap<String, i64>>,
+    #[serde(default)]
+    fired: BTreeMap<String, BTreeMap<String, i64>>,
+    #[serde(default)]
+    watermark: Option<i64>,
 }
 
 /// Per block, the keys whose state changed: the new value, or null for a removed key.
 type StateUpdates = BTreeMap<String, BTreeMap<String, Option<Value>>>;
+/// Per block, the keys whose timer changed: the new time, or null for a removed timer.
+type TimerUpdates = BTreeMap<String, BTreeMap<String, Option<i64>>>;
 
 #[derive(Serialize)]
 struct Reply {
@@ -465,6 +590,8 @@ struct Reply {
     error: Option<Failure>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     state_updates: StateUpdates,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    timer_updates: TimerUpdates,
 }
 
 #[derive(Serialize)]
@@ -533,10 +660,17 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
                 scratch_dir: scratch_dir.clone(),
             },
             send: step.send,
-            state: State {
-                values: Rc::default(),
-                key: step.state_key.clone(),
-                block: step.block_uuid.clone(),
+            held: Held {
+                state: State {
+                    values: Rc::default(),
+                    key: step.state_key.clone(),
+                    block: step.block_uuid.clone(),
+                },
+                timers: Timers {
+                    key: step.state_key.clone(),
+                    block: step.block_uuid.clone(),
+                    ..Timers::default()
+                },
             },
         });
     }
@@ -564,12 +698,14 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
             messages.push(read_frame(&mut reader)?.ok_or_else(|| anyhow!("A batch ended early"))?);
         }
         for step in &steps {
-            let values = request
-                .state
-                .get(&step.context.block_uuid)
-                .cloned()
-                .unwrap_or_default();
-            step.state.restore(values);
+            let uuid = &step.context.block_uuid;
+            let held = &step.held;
+            held.state
+                .restore(request.state.get(uuid).cloned().unwrap_or_default());
+            held.timers
+                .restore(request.timers.get(uuid).cloned().unwrap_or_default());
+            *held.timers.fired.borrow_mut() = request.fired.get(uuid).cloned().unwrap_or_default();
+            held.timers.watermark.set(request.watermark);
         }
         let (reply, outputs) = run_batch(&mut steps, request.id, messages, job.isolate);
         std::io::stdout().flush().ok();
@@ -585,49 +721,103 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
 
 fn run_batch(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (Reply, Vec<Raw>) {
     let before = snapshot(steps);
-    let (mut reply, outputs) = run_messages(steps, id, messages, isolate);
-    if reply.ok {
-        reply.state_updates = state_updates(steps, &before);
-    } else {
-        restore(steps, before);
+    // Timers that fired run first, on their own, so each fires once even when a failing
+    // batch is split to find the messages that fail.
+    let mut fired = None;
+    if steps
+        .iter()
+        .any(|s| !s.held.timers.fired.borrow().is_empty())
+    {
+        match run_chain(steps, &Vec::new(), true) {
+            Ok(done) => fired = Some(done),
+            Err(error) => {
+                restore(steps, before);
+                return (failed(id, error), Vec::new());
+            }
+        }
+        for step in steps.iter() {
+            step.held.timers.fired.borrow_mut().clear();
+        }
     }
+    let (mut reply, mut outputs) = run_messages(steps, id, messages, isolate);
+    if !reply.ok {
+        restore(steps, before);
+        return (reply, outputs);
+    }
+    if let Some((fired_outputs, fired_blocks)) = fired {
+        for ((output, count), mut first) in outputs
+            .iter_mut()
+            .zip(reply.outputs.iter_mut())
+            .zip(fired_outputs)
+        {
+            first.append(output);
+            *output = first;
+            count.count = output.len();
+        }
+        let mut blocks = fired_blocks;
+        blocks.append(&mut reply.blocks);
+        reply.blocks = blocks;
+    }
+    (reply.state_updates, reply.timer_updates) = held_updates(steps, &before);
     (reply, outputs)
 }
 
-fn snapshot(steps: &[Step]) -> Vec<Map<String, Value>> {
-    steps.iter().map(|s| s.state.snapshot()).collect()
+type Snapshot = Vec<(Map<String, Value>, BTreeMap<String, i64>)>;
+
+fn snapshot(steps: &[Step]) -> Snapshot {
+    steps
+        .iter()
+        .map(|s| (s.held.state.snapshot(), s.held.timers.snapshot()))
+        .collect()
 }
 
-fn restore(steps: &[Step], values: Vec<Map<String, Value>>) {
-    for (step, values) in steps.iter().zip(values) {
-        step.state.restore(values);
+fn restore(steps: &[Step], snapshot: Snapshot) {
+    for (step, (values, times)) in steps.iter().zip(snapshot) {
+        step.held.state.restore(values);
+        step.held.timers.restore(times);
     }
 }
 
-/// Per block with keyed state, the keys that changed since `before`.
-fn state_updates(steps: &[Step], before: &[Map<String, Value>]) -> StateUpdates {
-    let mut updates = StateUpdates::new();
-    for (step, before) in steps.iter().zip(before) {
-        if step.state.key.is_none() {
+/// The keys that changed since `before` in a map: the new value, or None when removed.
+fn changes<T: Clone + PartialEq>(
+    before: &BTreeMap<String, T>,
+    after: &BTreeMap<String, T>,
+) -> BTreeMap<String, Option<T>> {
+    let mut changed: BTreeMap<String, Option<T>> = after
+        .iter()
+        .filter(|(key, value)| before.get(*key) != Some(*value))
+        .map(|(key, value)| (key.clone(), Some(value.clone())))
+        .collect();
+    changed.extend(
+        before
+            .keys()
+            .filter(|key| !after.contains_key(*key))
+            .map(|key| (key.clone(), None)),
+    );
+    changed
+}
+
+/// Per block with keyed state, the keys and timers that changed since `before`.
+fn held_updates(steps: &[Step], before: &Snapshot) -> (StateUpdates, TimerUpdates) {
+    let mut values = StateUpdates::new();
+    let mut timers = TimerUpdates::new();
+    for (step, (values_before, times_before)) in steps.iter().zip(before) {
+        if step.held.state.key.is_none() {
             continue;
         }
-        let after = step.state.values.borrow();
-        let mut changed: BTreeMap<String, Option<Value>> = after
-            .iter()
-            .filter(|(key, value)| before.get(*key) != Some(value))
-            .map(|(key, value)| (key.clone(), Some(value.clone())))
-            .collect();
-        changed.extend(
-            before
-                .keys()
-                .filter(|key| !after.contains_key(*key))
-                .map(|key| (key.clone(), None)),
-        );
+        let uuid = &step.context.block_uuid;
+        let before: BTreeMap<String, Value> = values_before.clone().into_iter().collect();
+        let after: BTreeMap<String, Value> = step.held.state.snapshot().into_iter().collect();
+        let changed = changes(&before, &after);
         if !changed.is_empty() {
-            updates.insert(step.context.block_uuid.clone(), changed);
+            values.insert(uuid.clone(), changed);
+        }
+        let changed = changes(times_before, &step.held.timers.snapshot());
+        if !changed.is_empty() {
+            timers.insert(uuid.clone(), changed);
         }
     }
-    updates
+    (values, timers)
 }
 
 fn run_messages(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (Reply, Vec<Raw>) {
@@ -637,7 +827,7 @@ fn run_messages(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (R
         .map(|s| s.context.block_uuid.clone())
         .collect();
     let before_attempt = snapshot(steps);
-    let (outputs, blocks, failures) = match run_chain(steps, &messages) {
+    let (outputs, blocks, failures) = match run_chain(steps, &messages, false) {
         Ok((outputs, blocks)) => (outputs, blocks, Vec::new()),
         Err(error) if !isolate || messages.len() <= 1 => {
             return (failed(id, error), Vec::new());
@@ -668,6 +858,7 @@ fn run_messages(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (R
         failures,
         error: None,
         state_updates: StateUpdates::new(),
+        timer_updates: TimerUpdates::new(),
     };
     (reply, outputs)
 }
@@ -681,18 +872,25 @@ fn failed(id: u64, error: Failure) -> Reply {
         failures: Vec::new(),
         error: Some(error),
         state_updates: StateUpdates::new(),
+        timer_updates: TimerUpdates::new(),
     }
 }
 
 /// Runs the blocks in order on the messages: the messages of each block the engine wants,
-/// and each block's time; or the failing block's error.
-fn run_chain(steps: &mut [Step], messages: &Raw) -> Result<(Vec<Raw>, Vec<Timing>), Failure> {
+/// and each block's time; or the failing block's error. In the timers pass, a block runs
+/// when its timers fired or the block before it sent messages.
+fn run_chain(
+    steps: &mut [Step],
+    messages: &Raw,
+    timers_pass: bool,
+) -> Result<(Vec<Raw>, Vec<Timing>), Failure> {
     let mut outputs = Vec::new();
     let mut timings = Vec::with_capacity(steps.len());
     let mut current: Option<Raw> = None;
     for step in steps.iter_mut() {
         let input = current.as_deref().unwrap_or(messages);
-        let output = if input.is_empty() && current.is_some() {
+        let fired = timers_pass && !step.held.timers.fired.borrow().is_empty();
+        let output = if input.is_empty() && (current.is_some() || timers_pass) && !fired {
             // The block before kept nothing of this batch.
             Vec::new()
         } else {
@@ -701,7 +899,7 @@ fn run_chain(steps: &mut [Step], messages: &Raw) -> Result<(Vec<Raw>, Vec<Timing
             println!("{BLOCK_MARKER}{uuid}");
             let started = Instant::now();
             let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
-                (step.block.call)(input, &step.context, &step.state)
+                (step.block.call)(input, &step.context, &step.held)
             }));
             let output = match outcome {
                 Ok(Ok(output)) => output,
@@ -739,7 +937,7 @@ fn run_chain(steps: &mut [Step], messages: &Raw) -> Result<(Vec<Raw>, Vec<Timing
 fn isolated(steps: &mut [Step], messages: &[Vec<u8>], offset: usize) -> (Vec<Raw>, Vec<Failure>) {
     let batch = messages.to_vec();
     let before = snapshot(steps);
-    let mut failure = match run_chain(steps, &batch) {
+    let mut failure = match run_chain(steps, &batch, false) {
         Ok((outputs, _)) => return (outputs, Vec::new()),
         Err(failure) => failure,
     };
@@ -802,10 +1000,16 @@ mod tests {
                 scratch_dir: std::env::temp_dir(),
             },
             send,
-            state: State {
-                values: Rc::default(),
-                key: None,
-                block: uuid.into(),
+            held: Held {
+                state: State {
+                    values: Rc::default(),
+                    key: None,
+                    block: uuid.into(),
+                },
+                timers: Timers {
+                    block: uuid.into(),
+                    ..Timers::default()
+                },
             },
         }
     }
@@ -906,14 +1110,15 @@ mod tests {
 
     fn stateful(key: &str) -> Vec<Step> {
         let mut counting = step(stream_block(counted), "counted", true);
-        counting.state.key = Some(key.into());
+        counting.held.state.key = Some(key.into());
+        counting.held.timers.key = Some(key.into());
         vec![counting]
     }
 
     #[test]
     fn a_block_keeps_state_per_key_and_sends_back_what_changed() {
         let mut steps = stateful("card.id");
-        steps[0].state.restore(Map::from_iter([
+        steps[0].held.state.restore(Map::from_iter([
             ("a".to_string(), json!(4)),
             ("b".to_string(), json!(1)),
             ("c".to_string(), json!(9)),
@@ -954,10 +1159,10 @@ mod tests {
             ])
         );
         // Without isolation the batch fails and keeps nothing.
-        steps[0].state.restore(Map::new());
+        steps[0].held.state.restore(Map::new());
         let (reply, _) = run_batch(&mut steps, 2, batch, false);
         assert!(!reply.ok && reply.state_updates.is_empty());
-        assert!(steps[0].state.keys().is_empty());
+        assert!(steps[0].held.state.keys().is_empty());
     }
 
     #[test]
@@ -969,6 +1174,80 @@ mod tests {
             error.message.contains("has no state_key"),
             "{}",
             error.message
+        );
+    }
+
+    fn watch(messages: Vec<Value>, state: State, timers: Timers) -> Result<Vec<Value>> {
+        let mut out: Vec<Value> = timers
+            .fired()
+            .into_iter()
+            .map(|(key, at)| json!({"device": key, "silent_since": state.value(&key), "at": at}))
+            .collect();
+        for m in messages {
+            ensure!(m["fail"].is_null(), "a bad reading");
+            let key = state.key_of(&m);
+            let at = m["at"].as_i64().context("no time")?;
+            state.set(&key, at)?;
+            timers.set(&key, at + 60_000)?;
+            out.push(m);
+        }
+        ensure!(timers.watermark().is_some(), "no watermark");
+        Ok(out)
+    }
+
+    fn watching(fired: &[(&str, i64)]) -> Vec<Step> {
+        let mut watching = step(stream_block(watch), "watch", true);
+        watching.held.state.key = Some("device".into());
+        watching.held.timers.key = Some("device".into());
+        watching
+            .held
+            .state
+            .restore(Map::from_iter([("d3".to_string(), json!(30))]));
+        *watching.held.timers.fired.borrow_mut() =
+            fired.iter().map(|(k, at)| (k.to_string(), *at)).collect();
+        watching.held.timers.watermark.set(Some(100_000));
+        vec![watching]
+    }
+
+    #[test]
+    fn a_fired_timer_runs_once_before_the_messages_and_timers_go_back() {
+        let mut steps = watching(&[("d3", 90_000)]);
+        let batch = raw(&[r#"{"device":"d1","at":90000}"#]);
+        let (reply, outputs) = run_batch(&mut steps, 1, batch, false);
+        assert!(reply.ok, "{:?}", reply.error.map(|e| e.message));
+        assert_eq!(
+            outputs[0],
+            raw(&[
+                r#"{"at":90000,"device":"d3","silent_since":30}"#,
+                r#"{"at":90000,"device":"d1"}"#
+            ])
+        );
+        assert_eq!(reply.outputs[0].count, 2);
+        assert_eq!(
+            reply.timer_updates["watch"],
+            BTreeMap::from_iter([("d1".to_string(), Some(150_000))])
+        );
+    }
+
+    #[test]
+    fn a_fired_timer_runs_once_when_a_failing_batch_is_split() {
+        let mut steps = watching(&[("d3", 90_000)]);
+        let batch = raw(&[
+            r#"{"device":"d1","at":1}"#,
+            r#"{"device":"d2","fail":true}"#,
+            r#"{"device":"d4","at":2}"#,
+        ]);
+        let (reply, outputs) = run_batch(&mut steps, 1, batch, true);
+        assert!(reply.ok);
+        let alerts = outputs[0]
+            .iter()
+            .filter(|m| String::from_utf8_lossy(m).contains("silent_since"))
+            .count();
+        assert_eq!(alerts, 1);
+        assert_eq!(reply.failures[0].row, Some(1));
+        assert_eq!(
+            reply.timer_updates["watch"].keys().collect::<Vec<_>>(),
+            ["d1", "d4"]
         );
     }
 

@@ -128,14 +128,15 @@ class StreamProgram:
             return None
         return self._read_exact(struct.unpack('<I', head)[0])
 
-    def run(self, messages: List[bytes], state: Optional[Dict] = None) -> Dict:
+    def run(self, messages: List[bytes], state: Optional[Dict] = None, **held) -> Dict:
         """
         The block's reply to one batch, with its messages (`messages`) as bytes. `state`: per
-        block with keyed state, the values of the batch's keys, as the engine sends them.
+        block with keyed state, the values of the batch's keys, as the engine sends them;
+        `held` its `timers`, `fired` and `watermark`.
         """
         request = dict(id=1, count=len(messages))
         if state is not None:
-            request['state'] = state
+            request.update(state=state, **held)
         header = json.dumps(request).encode()
         frames = [struct.pack('<I', len(header)), header]
         for message in messages:

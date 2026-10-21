@@ -881,52 +881,91 @@ def _stream_batch(request: Dict) -> Dict:
         import base64
 
         request = dict(request, messages=[base64.b64decode(m) for m in request['messages']])
-    # Keyed state, per block: the values of the batch's keys, which the blocks change in
-    # place. Only what changed goes back. A message that fails leaves the state as it was.
-    original = request.get('state') or {}
+    # Keyed state, per block: the values and timers of the batch's keys, which the blocks
+    # change in place, keyed ('state', block) and ('timers', block). Only what changed goes
+    # back. A message that fails leaves them as they were.
+    original = {}
+    for block_uuid, values in (request.get('state') or {}).items():
+        original[('state', block_uuid)] = values
+        original[('timers', block_uuid)] = (request.get('timers') or {}).get(block_uuid) or {}
     state = copy.deepcopy(original)
     messages = request['messages']
+    # Timers that fired run first, on their own, so each fires once even when a failing
+    # batch is split to find the messages that fail.
+    fired_result = None
+    if any((request.get('fired') or {}).values()):
+        fired_result = _run_stream_chain(request, [], state, fired=True)
     if not request.get('isolate'):
         result = _run_stream_chain(request, messages, state)
-        return _with_state_updates(result, original, state)
+        return _with_state_updates(_after_fired(fired_result, result), original, state)
+    attempt = copy.deepcopy(state)
     try:
-        result = _run_stream_chain(request, messages, state)
-        return _with_state_updates(result, original, state)
+        result = _run_stream_chain(request, messages, attempt)
+        return _with_state_updates(_after_fired(fired_result, result), original, attempt)
     except BlockError as error:
         if error.phase != 'run' or len(messages) <= 1:
             raise
-        state = copy.deepcopy(original)
         outputs, failures = _isolate(request, messages, 0, state)
         if len(failures) == len(messages):
             raise
         last = request['chain'][-1]['uuid'] if request['chain'] else None
-        return _with_state_updates(dict(
+        return _with_state_updates(_after_fired(fired_result, dict(
             outputs=outputs,
             messages=outputs.get(last, []) if last else messages,
             blocks=[],
             failures=failures,
             outputs_json={uuid: _messages_json(o, uuid) for uuid, o in outputs.items()},
-        ), original, state)
+        )), original, state)
+
+
+def _after_fired(fired: Optional[Dict], result: Dict) -> Dict:
+    """The batch's result with the messages its fired timers sent before it."""
+    if not fired:
+        return result
+    outputs = {uuid: _as_list(fired['outputs'].get(uuid, []))
+               + _as_list(result['outputs'].get(uuid, []))
+               for uuid in dict.fromkeys([*fired['outputs'], *result['outputs']])}
+    return dict(
+        result,
+        outputs=outputs,
+        messages=_as_list(fired['messages']) + _as_list(result['messages']),
+        blocks=fired['blocks'] + result['blocks'],
+        outputs_json={uuid: _messages_json(o, uuid) for uuid, o in outputs.items()},
+    )
 
 
 def _with_state_updates(result: Dict, original: Dict, state: Dict) -> Dict:
-    """The result with each block's changed keys (a removed key as null)."""
+    """
+    The result with each block's changed keys and timers (a removed one as null). A timer is
+    a time in milliseconds.
+    """
     if not original:
         return result
-    updates = {}
-    for block_uuid, values in state.items():
-        before = original.get(block_uuid) or {}
+    updates = dict(state=dict(), timers=dict())
+    for (kind, block_uuid), values in state.items():
+        before = original.get((kind, block_uuid)) or {}
         changed = {key: value for key, value in values.items()
                    if key not in before or before[key] != value}
         changed.update({key: None for key in before if key not in values})
-        if changed:
+        if not changed:
+            continue
+        if kind == 'timers':
+            for key, value in changed.items():
+                if value is not None and (isinstance(value, bool)
+                                          or not isinstance(value, (int, float))):
+                    raise BlockError('run', f'Block {block_uuid} set the timer of {key} to '
+                                     f'{value!r}; a timer is a time in milliseconds.',
+                                     block_uuid=block_uuid)
+            changed = {key: None if value is None else int(value)
+                       for key, value in changed.items()}
+        else:
             try:
                 json.dumps(changed, allow_nan=False, default=_json_default)
             except (TypeError, ValueError) as error:
                 raise BlockError('run', f'Block {block_uuid} kept state that is not JSON: '
                                  f'{error}.', block_uuid=block_uuid)
-            updates[block_uuid] = changed
-    return dict(result, state_updates=updates)
+        updates[kind][block_uuid] = changed
+    return dict(result, state_updates=updates['state'], timer_updates=updates['timers'])
 
 
 def _read_messages_file(request: Dict) -> Any:
@@ -1009,7 +1048,8 @@ def _isolate(request: Dict, messages: List, offset: int,
         return outputs, left_failures + right_failures
 
 
-def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = None) -> Dict:
+def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = None,
+                      fired: bool = False) -> Dict:
     """
     Runs a stream's blocks on one batch of messages, as Mage's streaming transformers do:
     each gets the list of messages of the block before it (the source's for a block without
@@ -1030,15 +1070,22 @@ def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = Non
             raise BlockError('load', f"Block {block['uuid']} reads {len(upstream)} blocks; a "
                              'stream block reads one.', block_uuid=block['uuid'])
         block_messages = results.get(upstream[0], []) if upstream else messages
-        if upstream and not len(block_messages):
-            # The block before it kept nothing of this batch.
+        has_fired = fired and bool((request.get('fired') or {}).get(block['uuid']))
+        if (upstream or fired) and not len(block_messages) and not has_fired:
+            # The block before it kept nothing of this batch; in the timers pass, the block
+            # has no timers that fired either.
             results[block['uuid']] = []
             continue
         function = _stream_function(block)
         kwargs = _kwargs(request, block)
-        if state is not None and block['uuid'] in state:
-            # The block's keyed state: the values of this batch's keys, to read and change.
-            kwargs['state'] = state[block['uuid']]
+        if state is not None and ('state', block['uuid']) in state:
+            # The block's keyed state: the values and timers of this batch's keys, to read
+            # and change, the keys whose timers fired, and the time timers follow.
+            kwargs['state'] = state[('state', block['uuid'])]
+            kwargs['timers'] = state[('timers', block['uuid'])]
+            kwargs['fired'] = dict((request.get('fired') or {}).get(block['uuid']) or {}) \
+                if fired else {}
+            kwargs['watermark'] = request.get('watermark')
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
         started = time.monotonic()
         block_messages = _as_input(block_messages, _input_kind(function), block['uuid'])

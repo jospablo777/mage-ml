@@ -1,5 +1,12 @@
-//! Keyed state of a stream block: a JSON value per key, per partition. The block gets the
-//! values of each batch's keys and sends back what it changed (stream_python.rs).
+//! Keyed state of a stream block: a JSON value and a timer per key, per partition. The
+//! block gets the values and timers of each batch's keys, and the keys whose timers fired,
+//! and sends back what it changed (stream_python.rs, stream_rust.rs).
+//!
+//! A timer is a time in milliseconds: event time when the stream has `time`, else the time
+//! batches arrive. It fires when a batch of its partition moves the watermark (or the
+//! arrival time) to it or past it: the engine sends the key with that batch, with its state,
+//! and removes the timer unless the block sets it again. Timers fire with batches, so their
+//! outputs and changes commit with the batch's positions.
 //!
 //! Saved with the positions it reflects, as windows are (stream_window.rs): each batch's
 //! changes are kept with the batch's last position, and before the source commits a position
@@ -7,9 +14,11 @@
 //! `<data>/state/<pipeline>/<block>/partition-<n>.json`. A restart loads it and, with offsets,
 //! skips the messages it already holds.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use mage_service_core::manifest::EventTime;
+use mage_stream_core::{EventClock, PartitionId};
 use mage_stream_ports::{Commit, Position};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -19,19 +28,33 @@ struct Saved {
     /// The last position whose message the values hold.
     applied: Option<i64>,
     values: BTreeMap<String, Value>,
+    /// Per key, when its timer fires.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    timers: BTreeMap<String, i64>,
 }
 
 /// A batch's changes: a key's new value, or None when the key was removed.
 pub type Changes = BTreeMap<String, Option<Value>>;
+/// A batch's timer changes: a key's new time, or None when its timer was removed.
+pub type TimerChanges = BTreeMap<String, Option<i64>>;
+
+/// What a batch changed in a block's state.
+#[derive(Debug, Clone, Default)]
+pub struct Update {
+    pub values: Changes,
+    pub timers: TimerChanges,
+}
 
 #[derive(Default)]
 struct Partition {
     saved: Saved,
     /// The saved values with the changes not yet committed.
     current: BTreeMap<String, Value>,
+    /// The saved timers with the changes not yet committed.
+    timers: BTreeMap<String, i64>,
     applied: Option<i64>,
     /// Each batch's changes, by its last position, oldest first.
-    pending: Vec<(Option<i64>, Changes)>,
+    pending: Vec<(Option<i64>, Update)>,
 }
 
 pub struct KeyedState {
@@ -45,6 +68,22 @@ fn position_number(position: &Position) -> Option<i64> {
         Position::Lsn(lsn) => i64::try_from(*lsn).ok(),
         Position::Tag(tag) => i64::try_from(*tag).ok(),
         Position::Opaque(_) => None,
+    }
+}
+
+fn merge<T>(
+    into: &mut BTreeMap<String, T>,
+    changes: impl IntoIterator<Item = (String, Option<T>)>,
+) {
+    for (key, value) in changes {
+        match value {
+            Some(value) => {
+                into.insert(key, value);
+            }
+            None => {
+                into.remove(&key);
+            }
+        }
     }
 }
 
@@ -74,6 +113,7 @@ impl KeyedState {
                 partition,
                 Partition {
                     current: saved.values.clone(),
+                    timers: saved.timers.clone(),
                     applied: saved.applied,
                     saved,
                     pending: Vec::new(),
@@ -97,28 +137,44 @@ impl KeyedState {
             .collect())
     }
 
-    /// A batch's changes (null removes a key), as of the batch's last position.
+    /// The timers of these keys, for a batch.
+    pub fn timers(
+        &mut self,
+        partition: u32,
+        keys: &[String],
+    ) -> Result<Map<String, Value>, String> {
+        let state = self.partition(partition)?;
+        Ok(keys
+            .iter()
+            .filter_map(|key| Some((key.clone(), Value::from(*state.timers.get(key)?))))
+            .collect())
+    }
+
+    /// The timers due at `time`: at it or before it.
+    pub fn due(&mut self, partition: u32, time: i64) -> Result<BTreeMap<String, i64>, String> {
+        let state = self.partition(partition)?;
+        Ok(state
+            .timers
+            .iter()
+            .filter(|(_, at)| **at <= time)
+            .map(|(key, at)| (key.clone(), *at))
+            .collect())
+    }
+
+    /// A batch's changes (null removes a key or a timer), as of the batch's last position.
     pub fn apply(
         &mut self,
         partition: u32,
         last: Option<i64>,
-        changes: Changes,
+        update: Update,
     ) -> Result<(), String> {
         let state = self.partition(partition)?;
-        for (key, value) in &changes {
-            match value {
-                Some(value) => {
-                    state.current.insert(key.clone(), value.clone());
-                }
-                None => {
-                    state.current.remove(key);
-                }
-            }
-        }
+        merge(&mut state.current, update.values.clone());
+        merge(&mut state.timers, update.timers.clone());
         if let Some(last) = last {
             state.applied = Some(state.applied.map_or(last, |a| a.max(last)));
         }
-        state.pending.push((last, changes));
+        state.pending.push((last, update));
         Ok(())
     }
 
@@ -144,17 +200,9 @@ impl KeyedState {
             if through == 0 {
                 continue;
             }
-            for (at, changes) in state.pending.drain(..through) {
-                for (key, value) in changes {
-                    match value {
-                        Some(value) => {
-                            state.saved.values.insert(key, value);
-                        }
-                        None => {
-                            state.saved.values.remove(&key);
-                        }
-                    }
-                }
+            for (at, update) in state.pending.drain(..through) {
+                merge(&mut state.saved.values, update.values);
+                merge(&mut state.saved.timers, update.timers);
                 if let Some(at) = at {
                     state.saved.applied = Some(state.saved.applied.map_or(at, |a| a.max(at)));
                 }
@@ -182,14 +230,17 @@ impl KeyedState {
 }
 
 /// The keyed state of a stream's blocks, for a session that runs them: which blocks keep
-/// state and by what field, the messages each batch skips, the values it sends and the
-/// changes it gets back.
+/// state and by what field, the messages each batch skips, what it sends and the changes it
+/// gets back.
 pub struct BlockStates {
     /// Per block with keyed state: its uuid, the source messages' field that keys it, the
     /// store.
     blocks: Vec<(String, String, KeyedState)>,
     /// Whether positions stay the same across restarts (offsets), so held ones are skipped.
     stable: bool,
+    /// The stream's event time, and per partition its watermark for timers; without it,
+    /// timers are in the time batches arrive.
+    time: Option<(EventTime, EventClock)>,
 }
 
 /// A batch's messages as keyed state sees them.
@@ -197,8 +248,27 @@ pub struct BlockStates {
 pub struct BatchKeys {
     /// The last position of the messages that run.
     pub last: Option<i64>,
-    /// Per block, the keys of the messages that run.
-    keys: Vec<std::collections::BTreeSet<String>>,
+    /// Per block, the keys of the messages that run and of the timers that fire.
+    keys: Vec<BTreeSet<String>>,
+    /// Per block, the timers that fire with the batch.
+    fired: Vec<BTreeMap<String, i64>>,
+    /// The time timers are judged by: the partition's watermark after the batch, or the
+    /// batch's arrival.
+    pub watermark: Option<i64>,
+}
+
+/// What a batch sends to the blocks with keyed state, per block.
+pub struct Outgoing {
+    pub state: Value,
+    pub timers: Value,
+    pub fired: Value,
+    pub watermark: Option<i64>,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 impl BlockStates {
@@ -207,6 +277,7 @@ impl BlockStates {
         order: &[mage_service_core::manifest::Block],
         state_dir: &std::path::Path,
         stable: bool,
+        time: Option<EventTime>,
     ) -> BlockStates {
         let blocks = order
             .iter()
@@ -219,7 +290,15 @@ impl BlockStates {
                 ))
             })
             .collect();
-        BlockStates { blocks, stable }
+        let time = time.map(|settings| {
+            let clock = EventClock::new(settings.lateness_ms as i64);
+            (settings, clock)
+        });
+        BlockStates {
+            blocks,
+            stable,
+            time,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -247,11 +326,13 @@ impl BlockStates {
         BatchKeys {
             last: None,
             keys: vec![Default::default(); self.blocks.len()],
+            fired: vec![Default::default(); self.blocks.len()],
+            watermark: None,
         }
     }
 
-    /// Notes a message that runs: its position, and its key for each block.
-    pub fn note(&self, batch: &mut BatchKeys, envelope: &mage_stream_ports::Envelope) {
+    /// Notes a message that runs: its position, its key for each block, and its event time.
+    pub fn note(&mut self, batch: &mut BatchKeys, envelope: &mage_stream_ports::Envelope) {
         if self.blocks.is_empty() {
             return;
         }
@@ -260,34 +341,94 @@ impl BlockStates {
         for (index, (_, field, _)) in self.blocks.iter().enumerate() {
             batch.keys[index].insert(mage_stream_core::window::key_of(&value, Some(field)));
         }
+        if let Some((settings, clock)) = &mut self.time {
+            let time =
+                crate::stream_time::event_time_of(settings, &envelope.value, envelope.timestamp);
+            clock.observe(PartitionId(envelope.partition), &[time]);
+        }
     }
 
-    /// Per block, the values of the batch's keys; None without keyed state.
-    pub fn slices(&mut self, partition: u32, batch: &BatchKeys) -> Result<Option<Value>, String> {
+    /// The timers the batch fires: due at the partition's watermark after its messages, or
+    /// at the time it arrived.
+    pub fn fire(&mut self, partition: u32, batch: &mut BatchKeys) -> Result<(), String> {
+        if self.blocks.is_empty() {
+            return Ok(());
+        }
+        batch.watermark = match &self.time {
+            Some((_, clock)) => clock.watermark(PartitionId(partition)),
+            None => Some(now_ms()),
+        };
+        let Some(watermark) = batch.watermark else {
+            return Ok(());
+        };
+        for (index, (_, _, store)) in self.blocks.iter_mut().enumerate() {
+            let due = store.due(partition, watermark)?;
+            batch.keys[index].extend(due.keys().cloned());
+            batch.fired[index] = due;
+        }
+        Ok(())
+    }
+
+    /// Per block, the values and timers of the batch's keys and the timers that fire; None
+    /// without keyed state.
+    pub fn outgoing(
+        &mut self,
+        partition: u32,
+        batch: &BatchKeys,
+    ) -> Result<Option<Outgoing>, String> {
         if self.blocks.is_empty() {
             return Ok(None);
         }
-        let mut slices = Map::new();
+        let (mut state, mut timers, mut fired) = (Map::new(), Map::new(), Map::new());
         for (index, (block, _, store)) in self.blocks.iter_mut().enumerate() {
             let wanted: Vec<String> = batch.keys[index].iter().cloned().collect();
-            slices.insert(
+            state.insert(
                 block.clone(),
                 Value::Object(store.slice(partition, &wanted)?),
             );
+            timers.insert(
+                block.clone(),
+                Value::Object(store.timers(partition, &wanted)?),
+            );
+            fired.insert(
+                block.clone(),
+                Value::Object(
+                    batch.fired[index]
+                        .iter()
+                        .map(|(key, at)| (key.clone(), Value::from(*at)))
+                        .collect(),
+                ),
+            );
         }
-        Ok(Some(Value::Object(slices)))
+        Ok(Some(Outgoing {
+            state: Value::Object(state),
+            timers: Value::Object(timers),
+            fired: Value::Object(fired),
+            watermark: batch.watermark,
+        }))
     }
 
-    /// The changes a batch made, per block, as of the batch's last position.
+    /// The changes a batch made, per block, as of the batch's last position. Timers that
+    /// fired are removed unless the block set them again.
     pub fn apply(
         &mut self,
         partition: u32,
         batch: &BatchKeys,
-        updates: &BTreeMap<String, Changes>,
+        values: &BTreeMap<String, Changes>,
+        timers: &BTreeMap<String, TimerChanges>,
     ) -> Result<(), String> {
-        for (block, _, store) in &mut self.blocks {
-            let changes = updates.get(block.as_str()).cloned().unwrap_or_default();
-            store.apply(partition, batch.last, changes)?;
+        for (index, (block, _, store)) in self.blocks.iter_mut().enumerate() {
+            let mut update = Update {
+                values: values.get(block.as_str()).cloned().unwrap_or_default(),
+                timers: batch.fired[index]
+                    .keys()
+                    .map(|k| (k.clone(), None))
+                    .collect(),
+            };
+            if let Some(changes) = timers.get(block.as_str()) {
+                update.timers.extend(changes.clone());
+            }
+            store.apply(partition, batch.last, update)?;
         }
         Ok(())
     }
@@ -302,6 +443,9 @@ impl BlockStates {
     pub fn revoked(&mut self, partition: u32) {
         for (_, _, store) in &mut self.blocks {
             store.revoked(partition);
+        }
+        if let Some((_, clock)) = &mut self.time {
+            clock.forget(PartitionId(partition));
         }
     }
 }
@@ -321,11 +465,14 @@ mod tests {
         }
     }
 
-    fn changes(pairs: &[(&str, Option<Value>)]) -> BTreeMap<String, Option<Value>> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect()
+    fn values(pairs: &[(&str, Option<Value>)]) -> Update {
+        Update {
+            values: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            timers: TimerChanges::new(),
+        }
     }
 
     #[test]
@@ -336,11 +483,11 @@ mod tests {
             .apply(
                 0,
                 Some(4),
-                changes(&[("a", Some(json!(1))), ("b", Some(json!(2)))]),
+                values(&[("a", Some(json!(1))), ("b", Some(json!(2)))]),
             )
             .unwrap();
         state
-            .apply(0, Some(9), changes(&[("a", Some(json!(5))), ("b", None)]))
+            .apply(0, Some(9), values(&[("a", Some(json!(5))), ("b", None)]))
             .unwrap();
         assert_eq!(
             state.slice(0, &["a".into(), "b".into()]).unwrap(),
@@ -359,5 +506,41 @@ mod tests {
         let mut again = KeyedState::new(dir.path().to_path_buf());
         assert_eq!(again.applied(0).unwrap(), Some(9));
         assert_eq!(again.slice(0, &["b".into()]).unwrap(), Map::new());
+    }
+
+    #[test]
+    fn timers_fire_once_when_due_and_are_saved_with_the_committed_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = KeyedState::new(dir.path().to_path_buf());
+        let timers = |pairs: &[(&str, Option<i64>)]| Update {
+            values: Changes::new(),
+            timers: pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        };
+        state
+            .apply(0, Some(1), timers(&[("a", Some(100)), ("b", Some(200))]))
+            .unwrap();
+        assert_eq!(
+            state.due(0, 150).unwrap(),
+            BTreeMap::from_iter([("a".to_string(), 100)])
+        );
+        assert_eq!(
+            state.timers(0, &["b".into(), "c".into()]).unwrap(),
+            json!({"b": 200}).as_object().unwrap().clone()
+        );
+        // "a" fired and was removed; "b" moved later.
+        state
+            .apply(0, Some(2), timers(&[("a", None), ("b", Some(300))]))
+            .unwrap();
+        assert!(state.due(0, 250).unwrap().is_empty());
+        state.save(&[commit(1)]).unwrap();
+        let mut restarted = KeyedState::new(dir.path().to_path_buf());
+        // Saved through position 1: both timers as they were then.
+        assert_eq!(restarted.due(0, 1_000).unwrap().len(), 2);
+        state.save(&[commit(2)]).unwrap();
+        let mut again = KeyedState::new(dir.path().to_path_buf());
+        assert_eq!(
+            again.due(0, 1_000).unwrap(),
+            BTreeMap::from_iter([("b".to_string(), 300)])
+        );
     }
 }

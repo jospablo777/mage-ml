@@ -49,6 +49,9 @@ serve_stream <- function(dir) {
     }
     for (step in steps) {
       restore_state(step, request$state[[step$uuid]])
+      restore_timers(step, request$timers[[step$uuid]])
+      step$batch$fired <- request$fired[[step$uuid]]
+      step$batch$watermark <- request$watermark
     }
     result <- run_stream_batch(steps, messages, isTRUE(job$isolate))
     reply <- c(list(id = request$id), result$reply)
@@ -93,7 +96,9 @@ load_stream_block <- function(step, job) {
     context = state$context,
     send = isTRUE(step$send),
     state_key = step$state_key,
-    state = new.env(parent = emptyenv())
+    state = new.env(parent = emptyenv()),
+    timers = new.env(parent = emptyenv()),
+    batch = new.env(parent = emptyenv())
   )
 }
 
@@ -107,14 +112,42 @@ load_stream_block <- function(step, job) {
 #' @noRd
 run_stream_batch <- function(steps, messages, isolate) {
   before <- snapshot_states(steps)
-  result <- run_stream_messages(steps, messages, isolate)
-  if (isTRUE(result$reply$ok)) {
-    updates <- state_updates(steps, before)
-    if (length(updates) > 0) {
-      result$reply$state_updates <- updates
+  # Timers that fired run first, on their own, so each fires once even when a
+  # failing batch is split to find the messages that fail.
+  fired <- NULL
+  if (any(vapply(steps, function(s) length(s$batch$fired) > 0, TRUE))) {
+    fired <- run_stream_chain(steps, list(), timers_pass = TRUE)
+    for (step in steps) {
+      step$batch$fired <- NULL
     }
-  } else {
+    if (!is.null(fired$error)) {
+      restore_states(steps, before)
+      return(list(
+        reply = list(ok = FALSE, error = fired$error),
+        outputs = list()
+      ))
+    }
+  }
+  result <- run_stream_messages(steps, messages, isolate)
+  if (!isTRUE(result$reply$ok)) {
     restore_states(steps, before)
+    return(result)
+  }
+  if (!is.null(fired)) {
+    result$outputs <- lapply(seq_along(result$outputs), function(i) {
+      c(fired$outputs[[i]], result$outputs[[i]])
+    })
+    for (i in seq_along(result$reply$outputs)) {
+      result$reply$outputs[[i]]$count <- length(result$outputs[[i]])
+    }
+    result$reply$blocks <- c(fired$blocks, result$reply$blocks)
+  }
+  updates <- state_updates(steps, before)
+  if (length(updates$state) > 0) {
+    result$reply$state_updates <- updates$state
+  }
+  if (length(updates$timers) > 0) {
+    result$reply$timer_updates <- updates$timers
   }
   result
 }
@@ -166,14 +199,17 @@ run_stream_messages <- function(steps, messages, isolate) {
 #' @return The messages of each block to send and each block's time, or the
 #'   failing block's error.
 #' @noRd
-run_stream_chain <- function(steps, messages) {
+run_stream_chain <- function(steps, messages, timers_pass = FALSE) {
   outputs <- list()
   timings <- list()
   current <- messages
   for (i in seq_along(steps)) {
     step <- steps[[i]]
-    # A block after one that kept nothing of the batch does not run.
-    if (i == 1 || length(current) > 0) {
+    fired <- timers_pass && length(step$batch$fired) > 0
+    # A block after one that kept nothing of the batch does not run; in the
+    # timers pass, a block runs when its timers fired or the one before sent
+    # messages.
+    if (fired || length(current) > 0 || (i == 1 && !timers_pass)) {
       cat("\036mage-block ", step$uuid, "\n", sep = "")
       started <- Sys.time()
       state$context <- step$context
@@ -396,6 +432,95 @@ keyed_values <- function(change = FALSE) {
   step$state
 }
 
+#' Timers of a stream block's keys
+#'
+#' A stream block with `state_key` sets a timer per key: a time in
+#' milliseconds, event time when the stream has `time`, else the time batches
+#' arrive. A timer fires once, when a batch of its partition moves the
+#' watermark to it or past it: the block runs with no messages and the key in
+#' `timers_fired()`, and the timer is removed unless the block sets it again.
+#' `timer_get()` reads a key's timer, `timer_set()` sets it, `timer_remove()`
+#' removes it, and `watermark()` is the time timers follow.
+#'
+#' @param key The key, such as a message's `device`.
+#' @param at When the timer fires, in milliseconds since 1970.
+#' @return `timer_get()` the time or `NULL`; `timers_fired()` a named numeric
+#'   vector of the keys that fired and their times; `watermark()` a number or
+#'   `NULL`; the others the previous time, invisibly.
+#' @export
+#' @examples
+#' \dontrun{
+#' transformer(function(messages) {
+#'   fired <- timers_fired()
+#'   alerts <- tibble::tibble(device = names(fired), silent_since = fired)
+#'   for (i in seq_len(nrow(messages))) {
+#'     state_set(messages$device[[i]], messages$at[[i]])
+#'     timer_set(messages$device[[i]], messages$at[[i]] + 60000)
+#'   }
+#'   dplyr::bind_rows(alerts, messages)
+#' })
+#' }
+timer_get <- function(key) {
+  timers <- running_step()$timers
+  key <- state_key_text(key)
+  if (exists(key, envir = timers, inherits = FALSE)) {
+    get(key, envir = timers, inherits = FALSE)
+  } else {
+    NULL
+  }
+}
+
+#' @rdname timer_get
+#' @export
+timer_set <- function(key, at) {
+  step <- running_step()
+  keyed_values(change = TRUE)
+  if (length(at) != 1 || !is.numeric(at) || !is.finite(at)) {
+    stop("A timer is one time in milliseconds.", call. = FALSE)
+  }
+  key <- state_key_text(key)
+  previous <- timer_get(key)
+  assign(key, round(as.numeric(at)), envir = step$timers)
+  invisible(previous)
+}
+
+#' @rdname timer_get
+#' @export
+timer_remove <- function(key) {
+  step <- running_step()
+  key <- state_key_text(key)
+  previous <- timer_get(key)
+  if (exists(key, envir = step$timers, inherits = FALSE)) {
+    rm(list = key, envir = step$timers)
+  }
+  invisible(previous)
+}
+
+#' @rdname timer_get
+#' @export
+timers_fired <- function() {
+  fired <- running_step()$batch$fired
+  if (length(fired) == 0) {
+    return(stats::setNames(numeric(0), character(0)))
+  }
+  unlist(fired)
+}
+
+#' @rdname timer_get
+#' @export
+watermark <- function() {
+  running_step()$batch$watermark
+}
+
+#' @noRd
+running_step <- function() {
+  step <- state$keyed
+  if (is.null(step)) {
+    stop("Timers are for stream blocks while they run.", call. = FALSE)
+  }
+  step
+}
+
 #' @noRd
 state_key_text <- function(key) {
   if (length(key) != 1 || is.na(key)) {
@@ -415,45 +540,71 @@ restore_state <- function(step, values) {
   invisible(NULL)
 }
 
+#' Set a block's timers to those the engine sent
+#'
+#' @noRd
+restore_timers <- function(step, times) {
+  rm(list = ls(step$timers, all.names = TRUE), envir = step$timers)
+  if (length(times) > 0) {
+    list2env(times, envir = step$timers)
+  }
+  invisible(NULL)
+}
+
 #' @noRd
 snapshot_states <- function(steps) {
-  lapply(steps, function(step) as.list(step$state, all.names = TRUE))
+  lapply(steps, function(step) {
+    list(
+      state = as.list(step$state, all.names = TRUE),
+      timers = as.list(step$timers, all.names = TRUE)
+    )
+  })
 }
 
 #' @noRd
 restore_states <- function(steps, snapshots) {
   for (i in seq_along(steps)) {
-    restore_state(steps[[i]], snapshots[[i]])
+    restore_state(steps[[i]], snapshots[[i]]$state)
+    restore_timers(steps[[i]], snapshots[[i]]$timers)
   }
 }
 
-#' Per block with keyed state, the keys that changed: the new value, or NULL
-#' (null) for a removed key
+#' Per block with keyed state, the keys and timers that changed: the new
+#' value, or NULL (null) for a removed one
 #'
 #' @noRd
 state_updates <- function(steps, snapshots) {
-  updates <- list()
+  updates <- list(state = list(), timers = list())
   for (i in seq_along(steps)) {
     step <- steps[[i]]
     if (is.null(step$state_key)) {
       next
     }
-    before <- snapshots[[i]]
-    after <- as.list(step$state, all.names = TRUE)
-    changed <- list()
-    for (key in names(after)) {
-      if (!key %in% names(before) || !identical(before[[key]], after[[key]])) {
-        changed[key] <- list(after[[key]])
+    for (kind in c("state", "timers")) {
+      changed <- changed_keys(
+        snapshots[[i]][[kind]],
+        as.list(step[[kind]], all.names = TRUE)
+      )
+      if (length(changed) > 0) {
+        updates[[kind]][[step$uuid]] <- changed
       }
-    }
-    for (key in setdiff(names(before), names(after))) {
-      changed[key] <- list(NULL)
-    }
-    if (length(changed) > 0) {
-      updates[[step$uuid]] <- changed
     }
   }
   updates
+}
+
+#' @noRd
+changed_keys <- function(before, after) {
+  changed <- list()
+  for (key in names(after)) {
+    if (!key %in% names(before) || !identical(before[[key]], after[[key]])) {
+      changed[key] <- list(after[[key]])
+    }
+  }
+  for (key in setdiff(names(before), names(after))) {
+    changed[key] <- list(NULL)
+  }
+  changed
 }
 
 #' Write a frame: a little-endian 32-bit length, then the bytes

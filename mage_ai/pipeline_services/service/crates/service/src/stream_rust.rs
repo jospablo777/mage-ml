@@ -112,6 +112,8 @@ pub struct RustSessionOptions {
     /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
     pub state_dir: PathBuf,
     pub stable_positions: bool,
+    /// The stream's event time, which timers of keyed state follow.
+    pub time: Option<mage_service_core::manifest::EventTime>,
 }
 
 impl RustStreamSession {
@@ -148,6 +150,7 @@ impl RustStreamSession {
             order,
             &options.state_dir,
             options.stable_positions,
+            options.time.clone(),
         );
         let mut chain = Vec::with_capacity(order.len());
         for (position, block) in order.iter().enumerate() {
@@ -410,12 +413,15 @@ impl RustStreamSession {
         &mut self,
         id: u64,
         values: &[Vec<u8>],
-        state: Option<&Value>,
+        state: Option<&crate::keyed_state::Outgoing>,
     ) -> std::io::Result<Reply> {
         let live = self.live.as_mut().expect("started");
         let mut header = json!({"id": id, "count": values.len()});
         if let Some(state) = state {
-            header["state"] = state.clone();
+            header["state"] = state.state.clone();
+            header["timers"] = state.timers.clone();
+            header["fired"] = state.fired.clone();
+            header["watermark"] = json!(state.watermark);
         }
         let header = header.to_string();
         write_frame(&mut live.writer, header.as_bytes()).await?;
@@ -462,6 +468,9 @@ struct Reply {
     /// Per block: the keys whose state changed, null for a removed one.
     #[serde(default)]
     state_updates: BTreeMap<String, crate::keyed_state::Changes>,
+    /// Per block: the keys whose timer changed, null for a removed one.
+    #[serde(default)]
+    timer_updates: BTreeMap<String, crate::keyed_state::TimerChanges>,
     #[serde(skip)]
     messages: Vec<Vec<Vec<u8>>>,
 }
@@ -681,9 +690,12 @@ impl TransformSession for RustStreamSession {
                 // Every message was held already.
                 return Ok(TransformOutput::default());
             }
+            self.state
+                .fire(partition, &mut batch_keys)
+                .map_err(TransformError::Crash)?;
             let state = self
                 .state
-                .slices(partition, &batch_keys)
+                .outgoing(partition, &batch_keys)
                 .map_err(TransformError::Crash)?;
             if self.live.is_none() {
                 self.live = Some(self.start().await.map_err(TransformError::Crash)?);
@@ -742,7 +754,12 @@ impl TransformSession for RustStreamSession {
                 )));
             }
             self.state
-                .apply(partition, &batch_keys, &reply.state_updates)
+                .apply(
+                    partition,
+                    &batch_keys,
+                    &reply.state_updates,
+                    &reply.timer_updates,
+                )
                 .map_err(TransformError::Crash)?;
             let micros = started.elapsed().as_micros() as u64;
             let mut outputs = BTreeMap::new();

@@ -2,6 +2,7 @@ import asyncio
 import copy
 import logging
 import os
+import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
@@ -223,14 +224,23 @@ class StreamingPipelineExecutor(PipelineExecutor):
 
         # Rust and R transformers: one program per block for the run (rust_sample).
         rust_programs: Dict = dict()
-        # Keyed state of the blocks with state_key, in memory for the run: it starts empty
-        # and is not saved, unlike a service's.
+        # Keyed state and timers of the blocks with state_key, in memory for the run: they
+        # start empty and are not saved, unlike a service's. Timers follow the time batches
+        # arrive and fire with the next batch.
         states: Dict[str, Dict] = dict()
+        block_timers: Dict[str, Dict] = dict()
 
         def block_state(block) -> Optional[Dict]:
+            """The block's state, timers, the timers that fire now and the time, or None."""
             if not (block.configuration or {}).get('state_key'):
                 return None
-            return states.setdefault(block.uuid, dict())
+            timers = block_timers.setdefault(block.uuid, dict())
+            now = int(time.time() * 1000)
+            fired = {key: at for key, at in timers.items() if at <= now}
+            for key in fired:
+                del timers[key]
+            return dict(state=states.setdefault(block.uuid, dict()), timers=timers,
+                        fired=fired, watermark=now)
 
         def run_rust(block, data, variables: Dict):
             from mage_ai.streaming import rust_sample
@@ -251,11 +261,14 @@ class StreamingPipelineExecutor(PipelineExecutor):
                 )
                 rust_programs[block.uuid] = program
             messages = data if isinstance(data, list) else [data]
-            state = block_state(block)
+            held = block_state(block)
             try:
                 reply = program.run(
                     [rust_sample.encode(m) for m in messages],
-                    state=None if state is None else {block.uuid: state},
+                    **({} if held is None else {
+                        name: value if name == 'watermark' else {block.uuid: value}
+                        for name, value in held.items()
+                    }),
                 )
             except rust_sample.RustSampleError:
                 rust_programs.pop(block.uuid, None)
@@ -267,11 +280,13 @@ class StreamingPipelineExecutor(PipelineExecutor):
             if not reply.get('ok'):
                 error = reply.get('error') or {}
                 raise Exception(f'{block.uuid}: {error.get("message")}')
-            for key, value in ((reply.get('state_updates') or {}).get(block.uuid) or {}).items():
-                if value is None:
-                    state.pop(key, None)
-                else:
-                    state[key] = value
+            for kind, updates in (('state', 'state_updates'), ('timers', 'timer_updates')):
+                changed = (reply.get(updates) or {}).get(block.uuid) or {}
+                for key, value in changed.items():
+                    if value is None:
+                        held[kind].pop(key, None)
+                    else:
+                        held[kind][key] = value
             return [rust_sample.decode(m) for m in reply['messages']]
 
         def handle_batch_events_recursively(curr_block, outputs_by_block: Dict, **kwargs):
@@ -295,9 +310,9 @@ class StreamingPipelineExecutor(PipelineExecutor):
                         downstream_block, data, kwargs,
                     )
                 elif downstream_block.type == BlockType.TRANSFORMER:
-                    state = block_state(downstream_block)
+                    held = block_state(downstream_block)
                     execute_block_kwargs = dict(
-                        global_vars=kwargs if state is None else dict(kwargs, state=state),
+                        global_vars=kwargs if held is None else dict(kwargs, **held),
                         input_args=[data],
                         logger=self.logger,
                     )

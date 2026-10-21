@@ -1821,3 +1821,63 @@ fn a_rust_block_keeps_keyed_state_over_a_restart() {
     send(&service, "3", r#"[{"card": "a"}, {"card": "b"}]"#);
     assert_eq!(seen(&service), [("a".into(), 4), ("b".into(), 2)]);
 }
+
+const WATCH_BLOCK: &str = "@transformer\ndef watch(messages, *args, **kwargs):\n    state, timers = kwargs['state'], kwargs['timers']\n    out = [dict(silent=key, since=state[key]) for key in kwargs['fired']]\n    for m in messages:\n        state[m['device']] = m['at']\n        timers[m['device']] = m['at'] + 60000\n        out.append(m)\n    return out\n";
+
+#[test]
+fn a_timer_fires_once_when_the_watermark_passes_it_and_survives_a_restart() {
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    manifest["pipelines"][0]["blocks"][0]["configuration"] = json!({"state_key": "device"});
+    manifest["pipelines"][0]["stream"]["time"] =
+        json!({"field": "at", "format": "epoch_ms", "on_late": "pass"});
+    let mut service = Service::with_manifest(&manifest, &[("transformers/tag.py", WATCH_BLOCK)]);
+    let env = [("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")];
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    let send = |service: &Service, key: &str, body: &str| {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    };
+    let alerts = |service: &Service| -> Vec<(String, i64)> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("\"silent\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .map(|r| {
+                let value = r.get("value").cloned().unwrap_or(r);
+                (
+                    value["silent"].as_str().unwrap().to_string(),
+                    value["since"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    send(
+        &service,
+        "1",
+        r#"[{"device": "d1", "at": 0}, {"device": "d2", "at": 30000}]"#,
+    );
+    assert!(alerts(&service).is_empty());
+    // 70 s moves the watermark past d1's timer (60 s), not d2's, which moves to 130 s.
+    send(&service, "2", r#"[{"device": "d2", "at": 70000}]"#);
+    assert_eq!(alerts(&service), [("d1".into(), 0)]);
+    send(&service, "3", r#"[{"device": "d2", "at": 71000}]"#);
+    assert_eq!(alerts(&service).len(), 1, "a timer fires once");
+
+    service.signal("-TERM");
+    std::fs::write(service.dir.path().join("service.log"), "").unwrap();
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    // d2's timer, saved at 131 s, fires after the restart.
+    send(&service, "4", r#"[{"device": "d3", "at": 200000}]"#);
+    assert_eq!(alerts(&service), [("d2".into(), 71000)]);
+}

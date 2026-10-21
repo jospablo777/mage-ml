@@ -10,7 +10,9 @@ stream_step <- function(f, uuid = "block", send = TRUE, state_key = NULL) {
     context = list(),
     send = send,
     state_key = state_key,
-    state = new.env(parent = emptyenv())
+    state = new.env(parent = emptyenv()),
+    timers = new.env(parent = emptyenv()),
+    batch = new.env(parent = emptyenv())
   )
 }
 
@@ -177,4 +179,89 @@ test_that("a block without a state_key cannot keep state", {
   expect_false(result$reply$ok)
   expect_match(result$reply$error$message, "has no state_key")
   expect_error(state_get("a"), "while they run")
+})
+
+watch_devices <- function(m, ...) {
+  fired <- timers_fired()
+  alerts <- lapply(names(fired), function(device) {
+    list(
+      device = device,
+      silent_since = state_get(device),
+      at = fired[[device]]
+    )
+  })
+  if (nrow(m) > 0) {
+    if ("fail" %in% names(m) && any(m$fail %in% TRUE)) stop("a bad reading")
+    for (i in seq_len(nrow(m))) {
+      state_set(m$device[[i]], m$at[[i]])
+      timer_set(m$device[[i]], m$at[[i]] + 60000)
+    }
+  }
+  if (is.null(watermark())) stop("no watermark")
+  c(alerts, lapply(seq_len(nrow(m)), function(i) as.list(m[i, ])))
+}
+
+watching <- function(fired) {
+  step <- stream_step(watch_devices, "watch", state_key = "device")
+  restore_state(step, list(d3 = 30))
+  step$batch$fired <- fired
+  step$batch$watermark <- 100000
+  step
+}
+
+test_that("a fired timer runs once before the messages and timers go back", {
+  step <- watching(list(d3 = 90000))
+
+  result <- run_stream_batch(
+    list(step),
+    raw_messages('{"device": "d1", "at": 90000}'),
+    FALSE
+  )
+
+  expect_true(result$reply$ok)
+  sent <- lapply(
+    result$outputs[[1]],
+    function(m) jsonlite::fromJSON(rawToChar(m))
+  )
+  expect_equal(sent[[1]]$device, "d3")
+  expect_equal(sent[[1]]$silent_since, 30)
+  expect_equal(sent[[2]]$device, "d1")
+  expect_equal(result$reply$outputs[[1]]$count, 2)
+  expect_equal(result$reply$timer_updates$watch, list(d1 = 150000))
+  expect_match(
+    as.character(jsonlite::toJSON(
+      result$reply$timer_updates,
+      auto_unbox = TRUE,
+      digits = NA
+    )),
+    '"d1":150000',
+    fixed = TRUE
+  )
+})
+
+test_that("a fired timer runs once when a failing batch is split", {
+  step <- watching(list(d3 = 90000))
+  batch <- raw_messages(
+    '{"device": "d1", "at": 1}',
+    '{"device": "d2", "at": 2, "fail": true}',
+    '{"device": "d4", "at": 3}'
+  )
+
+  result <- run_stream_batch(list(step), batch, TRUE)
+
+  expect_true(result$reply$ok)
+  texts <- vapply(result$outputs[[1]], rawToChar, "")
+  expect_equal(sum(grepl("silent_since", texts, fixed = TRUE)), 1)
+  expect_equal(result$reply$failures[[1]]$row, 1L)
+  expect_equal(sort(names(result$reply$timer_updates$watch)), c("d1", "d4"))
+})
+
+test_that("a timer is one time, for a block with a state_key", {
+  step <- stream_step(function(m, ...) {
+    timer_set("a", "soon")
+    m
+  }, "watch", state_key = "device")
+  result <- run_stream_batch(list(step), raw_messages('{"device": "a"}'), FALSE)
+  expect_match(result$reply$error$message, "one time in milliseconds")
+  expect_error(timers_fired(), "while they run")
 })

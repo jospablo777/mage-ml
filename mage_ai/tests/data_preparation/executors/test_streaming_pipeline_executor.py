@@ -296,6 +296,37 @@ class KeyedStateRunTest(StreamRunCase):
     def test_r_blocks_count_across_batches(self):
         self.assertEqual(self.counts(BlockLanguage.R), self.EXPECTED)
 
+    def test_a_timer_set_in_the_past_fires_with_the_next_batch(self):
+        self.pipeline = Pipeline.create(
+            self._testMethodName, repo_path=self.repo_path, pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        watch = self.add('watch', 'transformer', '''
+            @transformer
+            def watch(messages, *args, **kwargs):
+                timers = kwargs['timers']
+                out = [dict(fired=key) for key in kwargs['fired']]
+                for m in messages:
+                    # Due at once: the next batch fires it.
+                    timers[m['card']] = kwargs['watermark'] - 1
+                    out.append(m)
+                return out
+        ''', upstream=[source], configuration=dict(state_key='card'))
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[watch], language=BlockLanguage.YAML)
+
+        _, sinks = self.run_pipeline(
+            ['sink'], first=[dict(card='a')], later=[[dict(card='b')], [dict(card='c')]],
+        )
+
+        self.assertEqual(sinks['sink'].batches, [
+            [dict(card='a')],
+            [dict(fired='a'), dict(card='b')],
+            [dict(fired='b'), dict(card='c')],
+        ])
+
 
 class DevelopmentRunTest(DBTestCase):
     """A stream run from the editor never moves production's consumer group (SAFETY.md 3)."""

@@ -816,3 +816,90 @@ class StreamStateTest(WorkerTestCase):
         ''', name='plain')
         result = worker.run_stream_batch(dict(chain=[plain], messages=[{'n': 1}], kwargs={}))
         self.assertNotIn('state_updates', result)
+
+
+class StreamTimersTest(WorkerTestCase):
+    """
+    Timers of keyed state: a block sets a time per key; the engine sends the keys whose time
+    came, which run once on their own before the batch's messages.
+    """
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+        # Remembers each device's last reading and alerts when one is silent for 60 s.
+        self.watch = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                state, timers = kwargs['state'], kwargs['timers']
+                out = [dict(device=key, silent_since=state[key], at=at)
+                       for key, at in kwargs['fired'].items()]
+                for m in messages:
+                    if m.get('fail'):
+                        raise ValueError('a bad reading')
+                    state[m['device']] = m['at']
+                    timers[m['device']] = m['at'] + 60_000
+                    out.append(m)
+                if kwargs['watermark'] is None:
+                    raise ValueError('no watermark')
+                return out
+        ''', name='watch')
+
+    def stream(self, messages, state=None, timers=None, fired=None, isolate=False,
+               chain=None):
+        return worker.run_stream_batch(dict(
+            chain=chain or [self.watch], messages=messages, isolate=isolate, kwargs={},
+            state={'watch': state or {}}, timers={'watch': timers or {}},
+            fired={'watch': fired or {}}, watermark=100_000,
+        ))
+
+    def test_a_block_sets_timers_and_a_fired_one_runs_once_before_the_messages(self):
+        result = self.stream(
+            [{'device': 'd1', 'at': 90_000}, {'device': 'd2', 'at': 95_000}],
+            state={'d3': 30_000}, timers={'d1': 70_000}, fired={'d3': 90_000},
+        )
+        self.assertEqual(result['outputs']['watch'], [
+            dict(device='d3', silent_since=30_000, at=90_000),
+            {'device': 'd1', 'at': 90_000},
+            {'device': 'd2', 'at': 95_000},
+        ])
+        self.assertEqual(result['timer_updates'],
+                         {'watch': {'d1': 150_000, 'd2': 155_000}})
+        self.assertEqual(result['state_updates'], {'watch': {'d1': 90_000, 'd2': 95_000}})
+
+    def test_a_fired_timer_runs_once_when_a_failing_batch_is_split(self):
+        result = self.stream(
+            [{'device': 'd1', 'at': 1}, {'device': 'd2', 'fail': True},
+             {'device': 'd4', 'at': 2}],
+            state={'d3': 30_000}, fired={'d3': 90_000}, isolate=True,
+        )
+        alerts = [m for m in result['outputs']['watch'] if 'silent_since' in m]
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual([f['row'] for f in result['failures']], [1])
+        # The failed message set no timer.
+        self.assertEqual(sorted(result['timer_updates']['watch']), ['d1', 'd4'])
+
+    def test_a_downstream_block_gets_its_fired_timers_when_the_first_sends_nothing(self):
+        first = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return messages
+        ''', name='first')
+        watch = dict(self.watch, upstream=['first'])
+        result = worker.run_stream_batch(dict(
+            chain=[dict(first, upstream=[]), watch], messages=[], kwargs={},
+            outputs=['watch'], state={'watch': {'d3': 5}}, timers={'watch': {}},
+            fired={'watch': {'d3': 90_000}}, watermark=100_000,
+        ))
+        self.assertEqual(result['outputs']['watch'],
+                         [dict(device='d3', silent_since=5, at=90_000)])
+
+    def test_a_timer_must_be_a_time(self):
+        bad = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                kwargs['timers']['d1'] = 'soon'
+                return messages
+        ''', name='watch')
+        with self.assertRaisesRegex(worker.BlockError, 'a timer is a time in milliseconds'):
+            self.stream([{'device': 'd1'}], chain=[bad])

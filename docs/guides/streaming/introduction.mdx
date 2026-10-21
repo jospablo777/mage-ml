@@ -315,6 +315,41 @@ velocity <- function(messages, ...) {
 - In the editor, a sample run starts from empty state, and **Execute pipeline** keeps the
   state in memory for the run, without saving it.
 
+### Timers
+
+A block with `state_key` can also set a timer per key: a time in milliseconds when
+something should happen if nothing else did, such as an alert when a device goes silent.
+Timers follow event time when the stream has `time` (above), else the time batches arrive.
+When a batch moves its partition's watermark to a timer or past it, the block runs once
+with that key among the fired ones and no messages, before the batch's messages; the timer
+is removed unless the block sets it again.
+
+```python
+@transformer
+def watch(messages, *args, **kwargs):
+    state, timers = kwargs['state'], kwargs['timers']
+    # Keys whose timer fired: no reading for 60 s of event time.
+    out = [dict(device=key, silent_since=state[key]) for key in kwargs['fired']]
+    for m in messages:
+        state[m['device']] = m['at']
+        timers[m['device']] = m['at'] + 60_000
+        out.append(m)
+    return out
+```
+
+| | Python | Rust | R |
+| --- | --- | --- | --- |
+| Set or move a key's timer | `timers[key] = at` | `timers.set(&key, at)?` | `timer_set(key, at)` |
+| Read, remove | `timers.get(key)`, `del timers[key]` | `timers.get(&key)`, `timers.remove(&key)` | `timer_get(key)`, `timer_remove(key)` |
+| Keys that fired, with their times | `kwargs['fired']` | `timers.fired()` | `timers_fired()` |
+| The time timers follow | `kwargs['watermark']` | `timers.watermark()` | `watermark()` |
+
+A Rust block takes `Timers` after its messages, next to `State`. Timers are saved with the
+state and its positions, so one that was due before a restart fires after it. They fire
+with the batches of their partition: a timer fires when a message of its partition moves
+the time, not while the partition receives nothing. In the editor, **Execute pipeline**
+fires timers with the next batch, by the clock.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

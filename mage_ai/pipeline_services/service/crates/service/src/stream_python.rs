@@ -60,6 +60,8 @@ pub struct SessionOptions {
     /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
     pub state_dir: std::path::PathBuf,
     pub stable_positions: bool,
+    /// The stream's event time, which timers of keyed state follow.
+    pub time: Option<mage_service_core::manifest::EventTime>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,8 +92,9 @@ impl PythonStreamSession {
             shape,
             state_dir,
             stable_positions,
+            time,
         } = options;
-        let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions);
+        let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions, time);
         let chain = order
             .iter()
             .map(|block| {
@@ -276,9 +279,16 @@ struct StreamRequest<'a> {
     outputs: &'a [String],
     kwargs: &'a Value,
     isolate: bool,
-    /// Per block with keyed state: the values of the batch's keys.
+    /// Per block with keyed state: the values and timers of the batch's keys, the timers
+    /// that fire, and the time they are judged by.
     #[serde(skip_serializing_if = "Option::is_none")]
     state: Option<&'a Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timers: Option<&'a Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fired: Option<&'a Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    watermark: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_shape: Option<&'static str>,
 }
@@ -299,7 +309,10 @@ struct StreamReply {
     blocks: Vec<ReplyBlock>,
     /// Per block: the keys whose state changed, null for a removed one.
     #[serde(default)]
-    state_updates: BTreeMap<String, BTreeMap<String, Option<Value>>>,
+    state_updates: BTreeMap<String, crate::keyed_state::Changes>,
+    /// Per block: the keys whose timer changed, null for a removed one.
+    #[serde(default)]
+    timer_updates: BTreeMap<String, crate::keyed_state::TimerChanges>,
 }
 
 #[derive(Deserialize)]
@@ -397,15 +410,18 @@ impl TransformSession for PythonStreamSession {
                 // Every message was held already.
                 return Ok(TransformOutput::default());
             }
-            let state_slices = self
+            self.state
+                .fire(partition, &mut batch_keys)
+                .map_err(TransformError::Crash)?;
+            let outgoing = self
                 .state
-                .slices(partition, &batch_keys)
+                .outgoing(partition, &batch_keys)
                 .map_err(TransformError::Crash)?;
             let sent: &[Box<RawValue>] = if file.is_some() { &[] } else { &messages };
             let shape = self.shape;
             let (chain, outputs, kwargs, isolate) =
                 (&self.chain, &self.outputs, &self.kwargs, self.isolate);
-            let state_sent = state_slices.as_ref();
+            let state_sent = outgoing.as_ref();
             let line = |id: &str| {
                 serde_json::to_string(&StreamRequest {
                     id,
@@ -417,7 +433,10 @@ impl TransformSession for PythonStreamSession {
                     outputs,
                     kwargs,
                     isolate,
-                    state: state_sent,
+                    state: state_sent.map(|o| &o.state),
+                    timers: state_sent.map(|o| &o.timers),
+                    fired: state_sent.map(|o| &o.fired),
+                    watermark: state_sent.and_then(|o| o.watermark),
                     message_shape: match shape {
                         MessageShape::Values => None,
                         MessageShape::RabbitmqPayload => Some("rabbitmq"),
@@ -454,7 +473,12 @@ impl TransformSession for PythonStreamSession {
                 return Err(TransformError::User(format!("{block}: {message}")));
             }
             self.state
-                .apply(partition, &batch_keys, &reply.state_updates)
+                .apply(
+                    partition,
+                    &batch_keys,
+                    &reply.state_updates,
+                    &reply.timer_updates,
+                )
                 .map_err(TransformError::Crash)?;
             let mut outputs = BTreeMap::new();
             for (block, messages) in &reply.outputs {
