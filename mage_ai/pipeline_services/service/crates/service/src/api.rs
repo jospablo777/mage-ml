@@ -61,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/streams", get(streams))
         .route("/v1/streams/{pipeline}", get(stream_detail))
         .route("/v1/streams/{pipeline}/tap", get(stream_tap))
+        .route("/v1/streams/{pipeline}/state/{block}", get(stream_state))
         .route(
             "/v1/streams/{pipeline}/messages",
             post(ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BODY)),
@@ -941,6 +942,77 @@ async fn stream_detail(
     let mut value = json!(status);
     value["pipeline"] = json!(pipeline);
     Ok(Json(value))
+}
+
+#[derive(Deserialize)]
+struct StateQuery {
+    key: Option<String>,
+}
+
+/// `GET /v1/streams/{pipeline}/state/{block}?key=`: a key's current value and timer in a
+/// block's keyed state, changes of batches not yet committed included, from the partitions
+/// this instance reads; without `key`, the keys and timers each partition holds.
+async fn stream_state(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((pipeline, block)): Path<(String, String)>,
+    Query(query): Query<StateQuery>,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    let (field, view) = state
+        .service
+        .stream_state
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&(pipeline.clone(), block.clone()))
+        .cloned()
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                format!(
+                    "Stream {pipeline} has no block {block} with keyed state running here; a \
+                     block keeps state with state_key in its configuration."
+                ),
+            )
+        })?;
+    let partitions = crate::keyed_state::counts(&view);
+    let Some(key) = query.key else {
+        return Ok(Json(json!({
+            "pipeline": pipeline,
+            "block": block,
+            "state_key": field,
+            "partitions": partitions
+                .iter()
+                .map(|(p, keys, timers)| json!({"partition": p, "keys": keys, "timers": timers}))
+                .collect::<Vec<_>>(),
+        })));
+    };
+    match crate::keyed_state::lookup(&view, &key) {
+        Some(found) => Ok(Json(json!({
+            "pipeline": pipeline,
+            "block": block,
+            "key": key,
+            "partition": found.partition,
+            "value": found.value,
+            "timer": found.timer,
+        }))),
+        None => Err(ApiError(
+            StatusCode::NOT_FOUND,
+            format!(
+                "Block {block} holds no state for {field} {key} in the partitions this instance \
+                 reads ({}).",
+                if partitions.is_empty() {
+                    "none yet".to_string()
+                } else {
+                    partitions
+                        .iter()
+                        .map(|(p, _, _)| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            ),
+        )),
+    }
 }
 
 #[derive(Deserialize)]

@@ -336,6 +336,11 @@ struct Failure {
 }
 
 impl PythonStreamSession {
+    /// Per block with keyed state, its field and what the service API reads of it.
+    pub fn state_views(&self) -> Vec<(String, String, crate::keyed_state::StateView)> {
+        self.state.views()
+    }
+
     /// Loads the stream's blocks (their top-level code, such as a model) into a worker in the
     /// background, after the one serving the stream was replaced, so the next batch does not
     /// wait for it.

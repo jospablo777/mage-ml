@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use mage_service_core::manifest::EventTime;
 use mage_stream_core::{EventClock, PartitionId};
@@ -46,7 +47,7 @@ pub struct Update {
 }
 
 #[derive(Default)]
-struct Partition {
+pub struct Partition {
     saved: Saved,
     /// The saved values with the changes not yet committed.
     current: BTreeMap<String, Value>,
@@ -59,7 +60,43 @@ struct Partition {
 
 pub struct KeyedState {
     dir: PathBuf,
-    partitions: BTreeMap<u32, Partition>,
+    /// Shared with the service API, which reads keys (`view`).
+    partitions: StateView,
+}
+
+/// A block's keyed state as the service API reads it: the partitions this instance holds.
+pub type StateView = Arc<RwLock<BTreeMap<u32, Partition>>>;
+
+/// What a key holds in a view: its partition, value and timer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub partition: u32,
+    pub value: Option<Value>,
+    pub timer: Option<i64>,
+}
+
+/// A key's current value and timer, from the partitions the view holds; changes of batches
+/// not yet committed included.
+pub fn lookup(view: &StateView, key: &str) -> Option<Found> {
+    let partitions = view.read().unwrap_or_else(|p| p.into_inner());
+    partitions.iter().find_map(|(partition, state)| {
+        let value = state.current.get(key).cloned();
+        let timer = state.timers.get(key).copied();
+        (value.is_some() || timer.is_some()).then_some(Found {
+            partition: *partition,
+            value,
+            timer,
+        })
+    })
+}
+
+/// Per partition the view holds: its keys with a value and its timers.
+pub fn counts(view: &StateView) -> Vec<(u32, usize, usize)> {
+    let partitions = view.read().unwrap_or_else(|p| p.into_inner());
+    partitions
+        .iter()
+        .map(|(partition, state)| (*partition, state.current.len(), state.timers.len()))
+        .collect()
 }
 
 fn position_number(position: &Position) -> Option<i64> {
@@ -91,50 +128,56 @@ impl KeyedState {
     pub fn new(dir: PathBuf) -> KeyedState {
         KeyedState {
             dir,
-            partitions: BTreeMap::new(),
+            partitions: StateView::default(),
         }
+    }
+
+    pub fn view(&self) -> StateView {
+        self.partitions.clone()
     }
 
     fn file(&self, partition: u32) -> PathBuf {
         self.dir.join(format!("partition-{partition}.json"))
     }
 
-    fn partition(&mut self, partition: u32) -> Result<&mut Partition, String> {
-        if !self.partitions.contains_key(&partition) {
-            let file = self.file(partition);
-            let saved: Saved = match std::fs::read(&file) {
-                Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
-                    format!("the saved state in {} is unreadable: {e}", file.display())
-                })?,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Saved::default(),
-                Err(error) => return Err(format!("reading {}: {error}", file.display())),
-            };
-            self.partitions.insert(
-                partition,
-                Partition {
+    /// Runs `f` on the partition's state, loaded from its file the first time.
+    fn with<T>(&self, partition: u32, f: impl FnOnce(&mut Partition) -> T) -> Result<T, String> {
+        let file = self.file(partition);
+        let mut partitions = self.partitions.write().unwrap_or_else(|p| p.into_inner());
+        let state = match partitions.entry(partition) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                let saved: Saved = match std::fs::read(&file) {
+                    Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+                        format!("the saved state in {} is unreadable: {e}", file.display())
+                    })?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Saved::default(),
+                    Err(error) => return Err(format!("reading {}: {error}", file.display())),
+                };
+                entry.insert(Partition {
                     current: saved.values.clone(),
                     timers: saved.timers.clone(),
                     applied: saved.applied,
                     saved,
                     pending: Vec::new(),
-                },
-            );
-        }
-        Ok(self.partitions.get_mut(&partition).expect("inserted"))
+                })
+            }
+        };
+        Ok(f(state))
     }
 
     /// The last position the state holds in the partition.
     pub fn applied(&mut self, partition: u32) -> Result<Option<i64>, String> {
-        Ok(self.partition(partition)?.applied)
+        self.with(partition, |state| state.applied)
     }
 
     /// The values of these keys, for a batch.
     pub fn slice(&mut self, partition: u32, keys: &[String]) -> Result<Map<String, Value>, String> {
-        let state = self.partition(partition)?;
-        Ok(keys
-            .iter()
-            .filter_map(|key| Some((key.clone(), state.current.get(key)?.clone())))
-            .collect())
+        self.with(partition, |state| {
+            keys.iter()
+                .filter_map(|key| Some((key.clone(), state.current.get(key)?.clone())))
+                .collect()
+        })
     }
 
     /// The timers of these keys, for a batch.
@@ -143,22 +186,23 @@ impl KeyedState {
         partition: u32,
         keys: &[String],
     ) -> Result<Map<String, Value>, String> {
-        let state = self.partition(partition)?;
-        Ok(keys
-            .iter()
-            .filter_map(|key| Some((key.clone(), Value::from(*state.timers.get(key)?))))
-            .collect())
+        self.with(partition, |state| {
+            keys.iter()
+                .filter_map(|key| Some((key.clone(), Value::from(*state.timers.get(key)?))))
+                .collect()
+        })
     }
 
     /// The timers due at `time`: at it or before it.
     pub fn due(&mut self, partition: u32, time: i64) -> Result<BTreeMap<String, i64>, String> {
-        let state = self.partition(partition)?;
-        Ok(state
-            .timers
-            .iter()
-            .filter(|(_, at)| **at <= time)
-            .map(|(key, at)| (key.clone(), *at))
-            .collect())
+        self.with(partition, |state| {
+            state
+                .timers
+                .iter()
+                .filter(|(_, at)| **at <= time)
+                .map(|(key, at)| (key.clone(), *at))
+                .collect()
+        })
     }
 
     /// A batch's changes (null removes a key or a timer), as of the batch's last position.
@@ -168,14 +212,14 @@ impl KeyedState {
         last: Option<i64>,
         update: Update,
     ) -> Result<(), String> {
-        let state = self.partition(partition)?;
-        merge(&mut state.current, update.values.clone());
-        merge(&mut state.timers, update.timers.clone());
-        if let Some(last) = last {
-            state.applied = Some(state.applied.map_or(last, |a| a.max(last)));
-        }
-        state.pending.push((last, update));
-        Ok(())
+        self.with(partition, |state| {
+            merge(&mut state.current, update.values.clone());
+            merge(&mut state.timers, update.timers.clone());
+            if let Some(last) = last {
+                state.applied = Some(state.applied.map_or(last, |a| a.max(last)));
+            }
+            state.pending.push((last, update));
+        })
     }
 
     /// Saves each committed partition's state as of its committed position.
@@ -183,39 +227,42 @@ impl KeyedState {
         for commit in commits {
             let partition = commit.partition.0;
             let file = self.file(partition);
-            let dir = self.dir.clone();
-            let Some(state) = self.partitions.get_mut(&partition) else {
-                continue;
-            };
-            let committed = position_number(&commit.position);
-            let through = state
-                .pending
-                .iter()
-                .take_while(|(at, _)| match (at, committed) {
-                    (Some(at), Some(committed)) => *at <= committed,
-                    // Without comparable positions, everything read so far is committed.
-                    _ => true,
-                })
-                .count();
-            if through == 0 {
-                continue;
-            }
-            for (at, update) in state.pending.drain(..through) {
-                merge(&mut state.saved.values, update.values);
-                merge(&mut state.saved.timers, update.timers);
-                if let Some(at) = at {
-                    state.saved.applied = Some(state.saved.applied.map_or(at, |a| a.max(at)));
+            // The file is written outside the lock; the API keeps reading meanwhile.
+            let saved = {
+                let mut partitions = self.partitions.write().unwrap_or_else(|p| p.into_inner());
+                let Some(state) = partitions.get_mut(&partition) else {
+                    continue;
+                };
+                let committed = position_number(&commit.position);
+                let through = state
+                    .pending
+                    .iter()
+                    .take_while(|(at, _)| match (at, committed) {
+                        (Some(at), Some(committed)) => *at <= committed,
+                        // Without comparable positions, everything read so far is committed.
+                        _ => true,
+                    })
+                    .count();
+                if through == 0 {
+                    continue;
                 }
-            }
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+                for (at, update) in state.pending.drain(..through) {
+                    merge(&mut state.saved.values, update.values);
+                    merge(&mut state.saved.timers, update.timers);
+                    if let Some(at) = at {
+                        state.saved.applied = Some(state.saved.applied.map_or(at, |a| a.max(at)));
+                    }
+                }
+                serde_json::to_vec(&state.saved).map_err(|e| e.to_string())?
+            };
+            std::fs::create_dir_all(&self.dir)
+                .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
             let temporary = file.with_extension("json.tmp");
-            let bytes = serde_json::to_vec(&state.saved).map_err(|e| e.to_string())?;
             {
                 use std::io::Write;
                 let mut handle = std::fs::File::create(&temporary)
                     .map_err(|e| format!("writing {}: {e}", temporary.display()))?;
-                handle.write_all(&bytes).map_err(|e| e.to_string())?;
+                handle.write_all(&saved).map_err(|e| e.to_string())?;
                 handle.sync_all().map_err(|e| e.to_string())?;
             }
             std::fs::rename(&temporary, &file)
@@ -225,7 +272,10 @@ impl KeyedState {
     }
 
     pub fn revoked(&mut self, partition: u32) {
-        self.partitions.remove(&partition);
+        self.partitions
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&partition);
     }
 }
 
@@ -303,6 +353,14 @@ impl BlockStates {
 
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    /// Per block, its field and what the service API reads of its state.
+    pub fn views(&self) -> Vec<(String, String, StateView)> {
+        self.blocks
+            .iter()
+            .map(|(block, field, store)| (block.clone(), field.clone(), store.view()))
+            .collect()
     }
 
     /// The field that keys a block's state.
@@ -542,5 +600,39 @@ mod tests {
             again.due(0, 1_000).unwrap(),
             BTreeMap::from_iter([("b".to_string(), 300)])
         );
+    }
+
+    #[test]
+    fn the_view_reads_current_values_and_timers_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = KeyedState::new(dir.path().to_path_buf());
+        let view = state.view();
+        assert_eq!(lookup(&view, "a"), None);
+        state
+            .apply(3, Some(1), values(&[("a", Some(json!({"n": 1})))]))
+            .unwrap();
+        state
+            .apply(
+                3,
+                Some(2),
+                Update {
+                    values: Changes::new(),
+                    timers: TimerChanges::from_iter([("b".to_string(), Some(50))]),
+                },
+            )
+            .unwrap();
+        // Not committed yet, and read anyway.
+        assert_eq!(
+            lookup(&view, "a"),
+            Some(Found {
+                partition: 3,
+                value: Some(json!({"n": 1})),
+                timer: None
+            })
+        );
+        assert_eq!(lookup(&view, "b").unwrap().timer, Some(50));
+        assert_eq!(counts(&view), [(3, 1, 1)]);
+        state.revoked(3);
+        assert_eq!(lookup(&view, "a"), None);
     }
 }

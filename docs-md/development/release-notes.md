@@ -13,6 +13,9 @@
 
 ### Exported services
 
+- `GET /v1/streams/<pipeline>/state/<block>?key=` serves a stream block's keyed state by
+  key: its current value and timer, so other services read the features a stream computes
+  online.
 - Timers in stream blocks with keyed state, in Python, Rust and R: a block sets a time per
   key and runs once with the keys whose time came, before the batch that moved the
   watermark past them, such as an alert when a device goes silent. Event time when the

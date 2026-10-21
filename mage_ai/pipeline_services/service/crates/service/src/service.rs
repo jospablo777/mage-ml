@@ -50,6 +50,9 @@ pub struct Service {
     pub streams: Mutex<BTreeMap<String, crate::stream::SharedStatus>>,
     /// Each running stream's pause switch, set by the control API.
     pub stream_pause: Mutex<BTreeMap<String, tokio::sync::watch::Sender<bool>>>,
+    /// Keyed state of stream blocks, by (pipeline, block): the field that keys it and what
+    /// the API reads of it (`GET /v1/streams/{pipeline}/state/{block}`).
+    pub stream_state: Mutex<BTreeMap<(String, String), (String, crate::keyed_state::StateView)>>,
     /// Streams with an HTTP source: where the API hands their requests.
     pub ingest: Mutex<BTreeMap<String, Arc<crate::streams::HttpIngest>>>,
     /// Cancelled at shutdown: streams stop reading and drain.
@@ -190,6 +193,7 @@ impl Service {
             extra_env: config.extra_env,
             streams: Mutex::new(BTreeMap::new()),
             stream_pause: Mutex::new(BTreeMap::new()),
+            stream_state: Mutex::new(BTreeMap::new()),
             ingest: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),

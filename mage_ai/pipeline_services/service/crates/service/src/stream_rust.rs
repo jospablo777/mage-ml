@@ -117,6 +117,11 @@ pub struct RustSessionOptions {
 }
 
 impl RustStreamSession {
+    /// Per block with keyed state, its field and what the service API reads of it.
+    pub fn state_views(&self) -> Vec<(String, String, crate::keyed_state::StateView)> {
+        self.state.views()
+    }
+
     /// The blocks must form one chain (each reads the one before) and share one io_config
     /// profile, as the program runs them in order with one environment.
     pub fn new(

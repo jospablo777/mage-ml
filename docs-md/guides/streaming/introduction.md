@@ -348,6 +348,27 @@ with the batches of their partition: a timer fires when a message of its partiti
 the time, not while the partition receives nothing. In the editor, **Execute pipeline**
 fires timers with the next batch, by the clock.
 
+### Read the state over the API
+
+A service serves a block's state by key, so the features a stream computes (a card's
+payments today, a device's last reading) are read online by other services, with the
+service's read token:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "$SERVICE/v1/streams/payments/state/velocity?key=c-17"
+```
+
+```json
+{"pipeline": "payments", "block": "velocity", "key": "c-17", "partition": 0,
+ "value": 3, "timer": null}
+```
+
+The answer holds the key's current value and timer, batches not yet committed included.
+An unknown key is a 404. Without `key`, the answer lists the keys and timers of each
+partition. Each instance holds the partitions it reads: with several instances, a key is
+on the instance that reads its partition.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](../../design/data-pipeline-management.md#create-trigger) to run streaming pipelines in production.
 

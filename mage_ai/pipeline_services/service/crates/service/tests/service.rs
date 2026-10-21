@@ -1683,6 +1683,27 @@ fn a_python_block_keeps_keyed_state_over_a_restart() {
             ("a".into(), 3)
         ]
     );
+    // The state is served by key, as online features.
+    let (status, found) = service.get("/v1/streams/hooks/state/tag?key=a");
+    assert_eq!(status, 200, "{found}");
+    assert_eq!(
+        (found["value"].clone(), found["partition"].clone()),
+        (json!(3), json!(0))
+    );
+    let (status, missing) = service.get("/v1/streams/hooks/state/tag?key=zzz");
+    assert_eq!(status, 404, "{missing}");
+    assert!(
+        missing["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("card zzz")),
+        "{missing}"
+    );
+    let (_, summary) = service.get("/v1/streams/hooks/state/tag");
+    assert_eq!(
+        summary["partitions"],
+        json!([{"partition": 0, "keys": 2, "timers": 0}])
+    );
+    assert_eq!(service.get("/v1/streams/hooks/state/nothing").0, 404);
     // Stopped cleanly, its positions committed with the state saved first.
     service.signal("-TERM");
     assert!(

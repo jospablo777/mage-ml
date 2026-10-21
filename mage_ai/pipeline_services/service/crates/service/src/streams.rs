@@ -740,8 +740,17 @@ fn region_session(
             .map_err(|e| format!("window block {}: {e}", block.uuid))?,
         ));
     }
+    let register = |views: Vec<(String, String, crate::keyed_state::StateView)>| {
+        let mut registry = service
+            .stream_state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        for (block, field, view) in views {
+            registry.insert((pipeline.uuid.clone(), block), (field, view));
+        }
+    };
     if matches!(blocks[0].language, Language::Rust | Language::R) {
-        return Ok(Box::new(crate::stream_rust::RustStreamSession::new(
+        let session = crate::stream_rust::RustStreamSession::new(
             service.clone(),
             pipeline,
             blocks,
@@ -755,13 +764,15 @@ fn region_session(
                 stable_positions,
                 time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
             },
-        )?));
+        )?;
+        register(session.state_views());
+        return Ok(Box::new(session));
     }
     let pool = service
         .python
         .clone()
         .ok_or("the stream has Python blocks but the service has no Python worker")?;
-    Ok(Box::new(PythonStreamSession::new(
+    let session = PythonStreamSession::new(
         pool,
         &service.project_dir(),
         pipeline,
@@ -777,7 +788,9 @@ fn region_session(
             stable_positions,
             time: pipeline.stream.as_ref().and_then(|s| s.time.clone()),
         },
-    )))
+    );
+    register(session.state_views());
+    Ok(Box::new(session))
 }
 
 /// Starts every stream of the manifest; a stream that cannot start is reported as failed with
