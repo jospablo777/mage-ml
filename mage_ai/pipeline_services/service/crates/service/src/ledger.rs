@@ -1,5 +1,5 @@
 //! The run history: runs, block runs, schedule occurrences and pipeline settings, in
-//! SQLite with a write-ahead log.
+//! SQLite with a write-ahead log, or in PostgreSQL for instances on several machines.
 //!
 //! A run is committed before its request is acknowledged, so an accepted run survives a
 //! restart. Idempotency keys and schedule occurrences are unique, so a repeated request or
@@ -12,9 +12,18 @@
 //! instances whose lease expired, not the runs of every instance, which it did when a
 //! second instance started on the same ledger (I-22).
 //!
-//! Commits do not checkpoint the write-ahead log: a checkpoint writes pages to the database
-//! file and syncs it, which held the ledger's lock for 0.2 to 0.9 s and stalled the runs
-//! behind it. A background thread checkpoints on its own connection instead.
+//! A pipeline's `max_concurrent_runs` holds across instances: a claim counts the running
+//! runs and takes the next queued one in one transaction, serialized per pipeline (SQLite's
+//! write lock, a PostgreSQL advisory lock). A cancel reaches a run on another instance
+//! through the run's row, which its owner reads every dispatch.
+//!
+//! The schema is versioned (`PRAGMA user_version` in SQLite, `schema_migrations` in
+//! PostgreSQL). An engine refuses a run history newer than it knows, and migrates an older
+//! one at start unless told not to (`mage-service ledger migrate` then does it).
+//!
+//! SQLite commits do not checkpoint the write-ahead log: a checkpoint writes pages to the
+//! database file and syncs it, which held the ledger's lock for 0.2 to 0.9 s and stalled
+//! the runs behind it. A background thread checkpoints on its own connection instead.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -22,10 +31,14 @@ use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use mage_service_core::protocol::{BlockRunSummary, BlockStatus, RunDetail, RunStatus, RunSummary};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::Connection;
 use serde_json::{Map, Value};
 
-const SCHEMA: &str = r#"
+use crate::ledger_sql::{Db, Postgres, Row, cells};
+
+/// SQLite's schema at version 1, the first versioned one. Ledgers from 0.2 (version 0) have
+/// these tables without the later columns, which version 1 adds in place.
+const SQLITE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     pipeline TEXT NOT NULL,
@@ -79,31 +92,83 @@ CREATE TABLE IF NOT EXISTS instances (
 );
 "#;
 
-/// The database's time, as the ledger writes timestamps; leases compare in it, so instances
-/// on hosts with different clocks agree (PostgreSQL will use the server's time the same way).
-const DB_NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+/// The columns version 1 adds to a 0.2 ledger's runs.
+const SQLITE_V1_COLUMNS: &[(&str, &str)] = &[
+    ("retry_of", "TEXT"),
+    // Runs from before have no owner: recovery treats them as an expired instance's.
+    ("owner", "TEXT"),
+    ("cancel_requested", "INTEGER NOT NULL DEFAULT 0"),
+];
+
+/// The SQLite schema version this engine writes.
+pub const SQLITE_VERSION: i64 = 1;
+
+/// PostgreSQL migrations, in order: version N is the Nth. Types are the SQLite ones' (text
+/// timestamps in ISO 8601 UTC, integers), so a statement means the same on both.
+const POSTGRES_MIGRATIONS: &[&str] = &[r#"
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    pipeline TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    idempotency_key TEXT,
+    variables TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT,
+    retry_of TEXT,
+    owner TEXT,
+    cancel_requested BIGINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX runs_idempotency
+    ON runs (pipeline, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX runs_pipeline_created ON runs (pipeline, created_at);
+CREATE INDEX runs_status ON runs (status);
+CREATE TABLE block_runs (
+    run_id TEXT NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    block TEXT NOT NULL,
+    position BIGINT NOT NULL,
+    status TEXT NOT NULL,
+    attempts BIGINT NOT NULL DEFAULT 0,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT,
+    outputs TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (run_id, block)
+);
+CREATE TABLE occurrences (
+    trigger_key TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE pipeline_settings (
+    pipeline TEXT PRIMARY KEY,
+    paused BIGINT NOT NULL DEFAULT 0,
+    max_concurrent_runs BIGINT NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1
+);
+CREATE TABLE leases (
+    name TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE instances (
+    id TEXT PRIMARY KEY,
+    host TEXT NOT NULL,
+    pid BIGINT NOT NULL,
+    started_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE TABLE service (
+    name TEXT NOT NULL
+);
+"#];
+
 /// An instance's lease, and how often it is renewed: an instance silent for this long is
 /// taken for dead and its runs are failed.
 pub const INSTANCE_LEASE_SECONDS: i64 = 30;
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
-
-/// Columns added after the first release: existing ledgers get them in place.
-fn migrate(connection: &Connection) -> rusqlite::Result<()> {
-    let has_retry_of: bool = connection
-        .prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'retry_of'")?
-        .exists([])?;
-    if !has_retry_of {
-        connection.execute_batch("ALTER TABLE runs ADD COLUMN retry_of TEXT")?;
-    }
-    let has_owner: bool = connection
-        .prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'owner'")?
-        .exists([])?;
-    if !has_owner {
-        // Runs from before have no owner: recovery treats them as an expired instance's.
-        connection.execute_batch("ALTER TABLE runs ADD COLUMN owner TEXT")?;
-    }
-    Ok(())
-}
 
 pub fn now() -> DateTime<Utc> {
     Utc::now()
@@ -129,8 +194,22 @@ fn duration_ms(start: &Option<String>, end: &Option<String>) -> Option<u64> {
 pub enum LedgerError {
     #[error("the run history failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("the run history failed: {0}")]
+    Postgres(String),
     #[error("the run history holds invalid data: {0}")]
     Data(String),
+    #[error("{0}")]
+    Version(String),
+}
+
+impl From<tokio_postgres::Error> for LedgerError {
+    fn from(error: tokio_postgres::Error) -> LedgerError {
+        // The server's message, not only "db error".
+        match error.as_db_error() {
+            Some(db) => LedgerError::Postgres(db.to_string()),
+            None => LedgerError::Postgres(error.to_string()),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, LedgerError>;
@@ -139,11 +218,72 @@ const CHECKPOINT_EVERY: Duration = Duration::from_secs(1);
 /// Above this size the checkpoint also truncates the log, waiting for readers if it must.
 const WAL_LIMIT: u64 = 64 * 1024 * 1024;
 
+/// Where the run history is.
+#[derive(Debug, Clone)]
+pub enum Location {
+    Sqlite(PathBuf),
+    Postgres {
+        url: String,
+        schema: String,
+        /// The service's name, recorded at first use: a schema holds one service's runs.
+        service: String,
+    },
+}
+
+enum Store {
+    Sqlite(Mutex<Connection>),
+    Postgres(Postgres),
+}
+
+impl Store {
+    /// Runs `work` on the connection, each statement on its own.
+    fn run<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut dyn Db) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        match self {
+            Store::Sqlite(connection) => work(&mut *lock(connection)),
+            Store::Postgres(postgres) => postgres.run(move |connection| work(connection)),
+        }
+    }
+
+    /// Runs `work` in a write transaction, committed when it returns Ok.
+    fn transaction<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut dyn Db) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        match self {
+            Store::Sqlite(connection) => {
+                let mut connection = lock(connection);
+                // IMMEDIATE takes the write lock first, so two processes cannot both read
+                // and then fail to upgrade.
+                let mut transaction = rusqlite::Transaction::new(
+                    &mut connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )?;
+                let value = work(&mut transaction)?;
+                transaction.commit()?;
+                Ok(value)
+            }
+            Store::Postgres(postgres) => {
+                postgres.run(move |connection| connection.transaction(|t| work(t)))
+            }
+        }
+    }
+}
+
+fn lock(connection: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+    // A panic while holding the lock leaves a consistent database: every write is a single
+    // statement or transaction.
+    connection.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 #[derive(Clone)]
 pub struct Ledger {
-    connection: Arc<Mutex<Connection>>,
+    store: Arc<Store>,
     /// This process's instance id: the owner of the runs it claims.
     instance: Arc<str>,
+    host: Arc<str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,73 +301,223 @@ pub struct NewRun<'a> {
     pub blocks: &'a [String],
 }
 
+/// Brings a SQLite ledger to `SQLITE_VERSION`; refuses a newer one.
+fn migrate_sqlite(connection: &mut Connection, path: &Path) -> Result<()> {
+    let transaction =
+        rusqlite::Transaction::new(connection, rusqlite::TransactionBehavior::Immediate)?;
+    let version: i64 = transaction.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version > SQLITE_VERSION {
+        return Err(LedgerError::Version(format!(
+            "The run history {} is at version {version}; this engine knows versions up to \
+             {SQLITE_VERSION}. Use the engine that wrote it, or a newer one.",
+            path.display()
+        )));
+    }
+    if version < 1 {
+        transaction.execute_batch(SQLITE_SCHEMA)?;
+        for (column, kind) in SQLITE_V1_COLUMNS {
+            let exists = transaction
+                .prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = ?1")?
+                .exists([column])?;
+            if !exists {
+                transaction
+                    .execute_batch(&format!("ALTER TABLE runs ADD COLUMN {column} {kind}"))?;
+            }
+        }
+    }
+    transaction.execute_batch(&format!("PRAGMA user_version = {SQLITE_VERSION}"))?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// The PostgreSQL schema's version, and the migrations this engine has that it lacks.
+pub struct PostgresVersion {
+    pub current: i64,
+    pub known: i64,
+}
+
+/// Brings the schema to the newest version this engine knows, with `apply`; otherwise only
+/// checks it. Serialized across instances by an advisory lock.
+fn migrate_postgres(db: &mut dyn Db, schema: &str, apply: bool) -> Result<PostgresVersion> {
+    let known = POSTGRES_MIGRATIONS.len() as i64;
+    db.lock("migrate")?;
+    let exists = db
+        .query_one(
+            "SELECT 1 FROM pg_namespace WHERE nspname = ?1",
+            cells![schema],
+        )?
+        .is_some();
+    let current = if exists {
+        let has_table = db
+            .query_one(
+                "SELECT 1 FROM pg_tables WHERE schemaname = ?1 AND tablename = 'schema_migrations'",
+                cells![schema],
+            )?
+            .is_some();
+        if has_table {
+            db.query_one(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                &[],
+            )?
+            .map(|row| row.int(0))
+            .transpose()?
+            .unwrap_or(0)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    if current > known {
+        return Err(LedgerError::Version(format!(
+            "The run history in schema {schema} is at version {current}; this engine knows \
+             versions up to {known}. Use the engine that wrote it, or a newer one."
+        )));
+    }
+    if current < known && apply {
+        if !exists {
+            db.batch(&format!(
+                "CREATE SCHEMA {}",
+                crate::ledger_sql::quote_identifier(schema)
+            ))?;
+        }
+        db.batch(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (version BIGINT PRIMARY KEY, \
+             applied_at TEXT NOT NULL)",
+        )?;
+        for (index, sql) in POSTGRES_MIGRATIONS
+            .iter()
+            .enumerate()
+            .skip(current as usize)
+        {
+            db.batch(sql)?;
+            db.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, db_now())",
+                cells![index as i64 + 1],
+            )?;
+        }
+    }
+    Ok(PostgresVersion { current, known })
+}
+
+/// Checks or migrates a PostgreSQL run history without opening it as an instance, for
+/// `mage-service ledger migrate`.
+pub fn postgres_version(url: &str, schema: &str, apply: bool) -> Result<PostgresVersion> {
+    let postgres = Postgres::connect(url, schema)?;
+    let schema = schema.to_string();
+    postgres.run(move |connection| {
+        connection.transaction(|transaction| migrate_postgres(transaction, &schema, apply))
+    })
+}
+
 impl Ledger {
+    /// Opens the run history at `location`, migrating an older schema when `migrate`.
+    pub fn open_at(location: &Location, migrate: bool) -> Result<Ledger> {
+        match location {
+            Location::Sqlite(path) => Ledger::open(path),
+            Location::Postgres {
+                url,
+                schema,
+                service,
+            } => Ledger::open_postgres(url, schema, service, migrate, &this_host()),
+        }
+    }
+
     pub fn open(path: &Path) -> Result<Ledger> {
         Ledger::open_on(path, &this_host())
     }
 
     fn open_on(path: &Path, host: &str) -> Result<Ledger> {
-        let connection = Connection::open(path)?;
+        let mut connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         // A run is acknowledged after its commit reaches the write-ahead log.
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.busy_timeout(std::time::Duration::from_secs(10))?;
-        connection.execute_batch(SCHEMA)?;
-        migrate(&connection)?;
+        migrate_sqlite(&mut connection, path)?;
         connection.pragma_update(None, "wal_autocheckpoint", 0)?;
         let checkpoints = Connection::open(path)?;
         checkpoints.busy_timeout(std::time::Duration::from_secs(10))?;
-        let ledger = Ledger::register(connection, host)?;
+        let ledger = Ledger::register(Store::Sqlite(Mutex::new(connection)), host)?;
         let mut wal = path.as_os_str().to_owned();
         wal.push("-wal");
         start_checkpoints(
             checkpoints,
             PathBuf::from(wal),
-            Arc::downgrade(&ledger.connection),
+            Arc::downgrade(&ledger.store),
         );
         start_heartbeats(ledger.clone());
         Ok(ledger)
     }
 
+    fn open_postgres(
+        url: &str,
+        schema: &str,
+        service: &str,
+        migrate: bool,
+        host: &str,
+    ) -> Result<Ledger> {
+        let postgres = Postgres::connect(url, schema)?;
+        let (schema_name, service_name) = (schema.to_string(), service.to_string());
+        postgres.run(move |connection| {
+            connection.transaction(|db| {
+                let version = migrate_postgres(db, &schema_name, migrate)?;
+                if version.current < version.known && !migrate {
+                    return Err(LedgerError::Version(format!(
+                        "The run history in schema {schema_name} is at version {} and this \
+                         engine needs {}: run `mage-service ledger migrate`, or start without \
+                         MAGE_SERVICE_LEDGER_MIGRATE=off.",
+                        version.current, version.known
+                    )));
+                }
+                match db.query_one("SELECT name FROM service", &[])? {
+                    Some(row) if row.text(0)? != service_name => {
+                        Err(LedgerError::Version(format!(
+                            "The run history in schema {schema_name} is service {}'s, not \
+                             {service_name}'s: give each service its own schema \
+                             (MAGE_SERVICE_LEDGER_SCHEMA).",
+                            row.text(0)?
+                        )))
+                    }
+                    Some(_) => Ok(()),
+                    None => db
+                        .execute(
+                            "INSERT INTO service (name) VALUES (?1)",
+                            cells![service_name],
+                        )
+                        .map(|_| ()),
+                }
+            })
+        })?;
+        let ledger = Ledger::register(Store::Postgres(postgres), host)?;
+        start_heartbeats(ledger.clone());
+        Ok(ledger)
+    }
+
     /// Registers this process as an instance with a fresh lease.
-    fn register(connection: Connection, host: &str) -> Result<Ledger> {
+    fn register(store: Store, host: &str) -> Result<Ledger> {
         let instance: Arc<str> = uuid::Uuid::now_v7().to_string().into();
-        connection.execute(
-            &format!(
+        let host_name: Arc<str> = host.into();
+        let (id, host) = (instance.to_string(), host.to_string());
+        store.transaction(move |db| {
+            let pid = i64::from(std::process::id());
+            db.execute(
                 "INSERT INTO instances (id, host, pid, started_at, expires_at) \
-                 VALUES (?1, ?2, ?3, {DB_NOW}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?4))"
-            ),
-            params![
-                instance.as_ref(),
-                host,
-                std::process::id(),
-                format!("+{INSTANCE_LEASE_SECONDS} seconds")
-            ],
-        )?;
-        // An instance on this host whose process is gone stopped: its runs are recovered
-        // now, not when its lease ends. A restarted container is pid 1 again, so this pid
-        // under another instance id is gone too.
-        let same_host: Vec<(String, i64)> = connection
-            .prepare(&format!(
-                "SELECT id, pid FROM instances WHERE host = ?1 AND host <> '' AND id <> ?2 \
-                 AND expires_at > {DB_NOW}"
-            ))?
-            .query_map(params![host, instance.as_ref()], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        for (id, pid) in same_host {
-            if pid == i64::from(std::process::id()) || !process_alive(pid) {
-                connection.execute(
-                    &format!("UPDATE instances SET expires_at = {DB_NOW} WHERE id = ?1"),
-                    params![id],
-                )?;
-            }
-        }
+                 VALUES (?1, ?2, ?3, db_now(), db_time(?4))",
+                cells![
+                    id.as_str(),
+                    host.as_str(),
+                    pid,
+                    format!("+{INSTANCE_LEASE_SECONDS} seconds")
+                ],
+            )?;
+            expire_gone_processes(db, &host, &id)?;
+            Ok(())
+        })?;
         Ok(Ledger {
-            connection: Arc::new(Mutex::new(connection)),
+            store: Arc::new(store),
             instance,
+            host: host_name,
         })
     }
 
@@ -240,55 +530,60 @@ impl Ledger {
     /// the fences keep this instance out of it, and the runs it claims from now on are kept.
     /// Deletes the rows of instances long expired.
     pub fn heartbeat(&self) -> Result<bool> {
-        let connection = self.lock();
-        let live = connection
-            .prepare(&format!(
-                "SELECT 1 FROM instances WHERE id = ?1 AND expires_at > {DB_NOW}"
-            ))?
-            .exists(params![self.instance.as_ref()])?;
-        connection.execute(
-            &format!(
+        let (id, host) = (self.instance.to_string(), self.host.to_string());
+        self.store.run(move |db| {
+            expire_gone_processes(db, &host, &id)?;
+            let live = db
+                .query_one(
+                    "SELECT 1 FROM instances WHERE id = ?1 AND expires_at > db_now()",
+                    cells![id.as_str()],
+                )?
+                .is_some();
+            db.execute(
                 "INSERT INTO instances (id, host, pid, started_at, expires_at) \
-                 VALUES (?1, '', ?2, {DB_NOW}, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?3)) \
-                 ON CONFLICT (id) DO UPDATE SET expires_at = excluded.expires_at"
-            ),
-            params![
-                self.instance.as_ref(),
-                std::process::id(),
-                format!("+{INSTANCE_LEASE_SECONDS} seconds")
-            ],
-        )?;
-        connection.execute(
-            "DELETE FROM instances WHERE expires_at < \
-             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')",
-            [],
-        )?;
-        Ok(live)
+                 VALUES (?1, ?4, ?2, db_now(), db_time(?3)) \
+                 ON CONFLICT (id) DO UPDATE SET expires_at = excluded.expires_at",
+                cells![
+                    id.as_str(),
+                    i64::from(std::process::id()),
+                    format!("+{INSTANCE_LEASE_SECONDS} seconds"),
+                    host.as_str()
+                ],
+            )?;
+            db.execute(
+                "DELETE FROM instances WHERE expires_at < db_time('-1 day')",
+                &[],
+            )?;
+            Ok(live)
+        })
     }
 
     /// Ends this instance's lease at once, so a restart recovers its runs without waiting
     /// for the lease to expire.
     pub fn release(&self) -> Result<()> {
-        self.lock().execute(
-            &format!("UPDATE instances SET expires_at = {DB_NOW} WHERE id = ?1"),
-            params![self.instance.as_ref()],
-        )?;
-        Ok(())
+        let id = self.instance.to_string();
+        self.store.run(move |db| {
+            db.execute(
+                "UPDATE instances SET expires_at = db_now() WHERE id = ?1",
+                cells![id],
+            )
+            .map(|_| ())
+        })
     }
 
     #[cfg(test)]
     pub fn in_memory() -> Result<Ledger> {
-        let connection = Connection::open_in_memory()?;
+        let mut connection = Connection::open_in_memory()?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.execute_batch(SCHEMA)?;
-        migrate(&connection)?;
-        Ledger::register(connection, "")
+        migrate_sqlite(&mut connection, Path::new(":memory:"))?;
+        Ledger::register(Store::Sqlite(Mutex::new(connection)), "")
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
-        // A panic while holding the lock leaves a consistent database: every write is a
-        // single statement or transaction.
-        self.connection.lock().unwrap_or_else(|p| p.into_inner())
+    /// Runs a statement as is, for tests that set up states the API does not make.
+    #[cfg(test)]
+    pub fn sql(&self, sql: &str, params: &[crate::ledger_sql::Cell]) -> u64 {
+        let (sql, params) = (sql.to_string(), params.to_vec());
+        self.store.run(move |db| db.execute(&sql, &params)).unwrap()
     }
 
     /// Creates a queued run with its block runs. With an idempotency key already used, it
@@ -296,155 +591,145 @@ impl Ledger {
     /// new run takes the key and records the earlier one in `retry_of`. A key used to return
     /// a failed run forever, so a caller's retry could never run the pipeline again.
     pub fn create_run(&self, new: NewRun) -> Result<(String, bool)> {
-        let mut connection = self.lock();
-        let transaction = connection.transaction()?;
-        let mut retry_of: Option<String> = None;
-        if let Some(key) = new.idempotency_key {
-            let existing: Option<(String, String)> = transaction
-                .query_row(
-                    "SELECT id, status FROM runs WHERE pipeline = ?1 AND idempotency_key = ?2",
-                    params![new.pipeline, key],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            match existing {
-                Some((id, status)) if status == "failed" || status == "cancelled" => {
-                    transaction.execute(
-                        "UPDATE runs SET idempotency_key = NULL WHERE id = ?1",
-                        params![id],
-                    )?;
-                    retry_of = Some(id);
-                }
-                Some((id, _)) => return Ok((id, false)),
-                None => {}
-            }
-        }
-        let id = uuid::Uuid::now_v7().to_string();
-        let variables =
-            serde_json::to_string(new.variables).map_err(|e| LedgerError::Data(e.to_string()))?;
-        transaction.execute(
-            "INSERT INTO runs (id, pipeline, status, source, idempotency_key, variables, \
-             created_at, retry_of) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7)",
-            params![
-                id,
-                new.pipeline,
-                new.source,
-                new.idempotency_key,
-                variables,
-                timestamp(now()),
-                retry_of
-            ],
-        )?;
-        for (position, block) in new.blocks.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO block_runs (run_id, block, position, status) \
-                 VALUES (?1, ?2, ?3, 'pending')",
-                params![id, block, position as i64],
-            )?;
-        }
-        transaction.commit()?;
-        Ok((id, true))
+        let owned = OwnedRun::from(&new)?;
+        self.store.transaction(move |db| create_run_in(db, &owned))
     }
 
     /// Creates the run of a schedule occurrence once; None when it exists already.
     pub fn create_occurrence_run(&self, trigger_key: &str, new: NewRun) -> Result<Option<String>> {
-        {
-            let connection = self.lock();
-            let exists: Option<String> = connection
-                .query_row(
+        let owned = OwnedRun::from(&new)?;
+        let key = trigger_key.to_string();
+        self.store.transaction(move |db| {
+            db.lock(&format!("occurrence:{key}"))?;
+            if db
+                .query_one(
                     "SELECT run_id FROM occurrences WHERE trigger_key = ?1",
-                    params![trigger_key],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if exists.is_some() {
+                    cells![key.as_str()],
+                )?
+                .is_some()
+            {
                 return Ok(None);
             }
-        }
-        let (run_id, _) = self.create_run(new)?;
-        let connection = self.lock();
-        let inserted = connection.execute(
-            "INSERT OR IGNORE INTO occurrences (trigger_key, run_id, created_at) \
-             VALUES (?1, ?2, ?3)",
-            params![trigger_key, run_id, timestamp(now())],
-        )?;
-        if inserted == 0 {
-            // Another writer recorded this occurrence first; this run never existed.
-            connection.execute("DELETE FROM runs WHERE id = ?1", params![run_id])?;
-            return Ok(None);
-        }
-        Ok(Some(run_id))
+            let (run_id, _) = create_run_in(db, &owned)?;
+            db.execute(
+                "INSERT INTO occurrences (trigger_key, run_id, created_at) \
+                 VALUES (?1, ?2, ?3)",
+                cells![key.as_str(), run_id.as_str(), timestamp(now())],
+            )?;
+            Ok(Some(run_id))
+        })
     }
 
     pub fn has_occurrence(&self, trigger_key: &str) -> Result<bool> {
-        let connection = self.lock();
-        Ok(connection
-            .query_row(
-                "SELECT 1 FROM occurrences WHERE trigger_key = ?1",
-                params![trigger_key],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some())
+        let key = trigger_key.to_string();
+        self.store.run(move |db| {
+            Ok(db
+                .query_one(
+                    "SELECT 1 FROM occurrences WHERE trigger_key = ?1",
+                    cells![key],
+                )?
+                .is_some())
+        })
     }
 
-    /// The oldest queued run of a pipeline, marked running; None when none waits.
-    pub fn claim_next(&self, pipeline: &str) -> Result<Option<String>> {
-        let mut connection = self.lock();
-        let transaction = connection.transaction()?;
-        let id: Option<String> = transaction
-            .query_row(
-                "SELECT id FROM runs WHERE pipeline = ?1 AND status = 'queued' \
-                 ORDER BY created_at, id LIMIT 1",
-                params![pipeline],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(id) = &id {
-            transaction.execute(
+    /// The oldest queued run of a pipeline, marked running, while fewer than `max` of its
+    /// runs are running on any instance; None otherwise.
+    pub fn claim_next(&self, pipeline: &str, max: u32) -> Result<Option<String>> {
+        let (pipeline, instance) = (pipeline.to_string(), self.instance.to_string());
+        self.store.transaction(move |db| {
+            db.lock(&format!("claim:{pipeline}"))?;
+            let running = db
+                .query_one(
+                    "SELECT COUNT(*) FROM runs WHERE pipeline = ?1 AND status = 'running'",
+                    cells![pipeline.as_str()],
+                )?
+                .map(|row| row.int(0))
+                .transpose()?
+                .unwrap_or(0);
+            if running >= i64::from(max) {
+                return Ok(None);
+            }
+            let claimed = db.query_one(
                 "UPDATE runs SET status = 'running', started_at = ?2, owner = ?3 \
-                 WHERE id = ?1 AND status = 'queued'",
-                params![id, timestamp(now()), self.instance.as_ref()],
+                 WHERE id = (SELECT id FROM runs WHERE pipeline = ?1 AND status = 'queued' \
+                 ORDER BY created_at, id LIMIT 1) AND status = 'queued' RETURNING id",
+                cells![pipeline.as_str(), timestamp(now()), instance.as_str()],
             )?;
-        }
-        transaction.commit()?;
-        Ok(id)
+            claimed.map(|row| row.text(0)).transpose()
+        })
     }
 
     /// Finishes a queued run, or a running run this instance holds; false when the run is
     /// another instance's or already finished (its recovery, a cancel), which then stands.
     pub fn finish_run(&self, id: &str, status: RunStatus, error: Option<&str>) -> Result<bool> {
         let error = error.map(crate::log::redact);
-        let changed = self.lock().execute(
-            "UPDATE runs SET status = ?2, finished_at = ?3, error = ?4 WHERE id = ?1 \
-             AND (status = 'queued' OR (status = 'running' AND owner = ?5))",
-            params![
-                id,
-                status.as_str(),
-                timestamp(now()),
-                error,
-                self.instance.as_ref()
-            ],
-        )?;
-        Ok(changed == 1)
+        let (id, instance) = (id.to_string(), self.instance.to_string());
+        self.store.run(move |db| {
+            Ok(db.execute(
+                "UPDATE runs SET status = ?2, finished_at = ?3, error = ?4 WHERE id = ?1 \
+                 AND (status = 'queued' OR (status = 'running' AND owner = ?5))",
+                cells![id, status.as_str(), timestamp(now()), error, instance],
+            )? == 1)
+        })
+    }
+
+    /// Asks the instance running a run to cancel it; false when it is not running.
+    pub fn request_cancel(&self, id: &str) -> Result<bool> {
+        let id = id.to_string();
+        self.store.run(move |db| {
+            Ok(db.execute(
+                "UPDATE runs SET cancel_requested = 1 WHERE id = ?1 AND status = 'running'",
+                cells![id],
+            )? == 1)
+        })
+    }
+
+    /// This instance's running runs that another instance asked to cancel.
+    pub fn cancel_requests(&self) -> Result<Vec<String>> {
+        let instance = self.instance.to_string();
+        self.store.run(move |db| {
+            db.query(
+                "SELECT id FROM runs WHERE owner = ?1 AND status = 'running' \
+                 AND cancel_requested = 1",
+                cells![instance],
+            )?
+            .iter()
+            .map(|row| row.text(0))
+            .collect()
+        })
+    }
+
+    /// The instance that ran or runs a run, and its host, when it is not this one.
+    pub fn other_owner(&self, id: &str) -> Result<Option<(String, String)>> {
+        let (id, instance) = (id.to_string(), self.instance.to_string());
+        self.store.run(move |db| {
+            let Some(row) = db.query_one(
+                "SELECT runs.owner, instances.host FROM runs LEFT JOIN instances \
+                 ON instances.id = runs.owner WHERE runs.id = ?1 AND runs.owner IS NOT NULL \
+                 AND runs.owner <> ?2",
+                cells![id, instance],
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some((row.text(0)?, row.opt_text(1)?.unwrap_or_default())))
+        })
     }
 
     pub fn start_block(&self, run_id: &str, block: &str, attempt: u32) -> Result<()> {
-        self.lock().execute(
-            "UPDATE block_runs SET status = 'running', attempts = ?3, \
-             started_at = COALESCE(started_at, ?4), error = NULL \
-             WHERE run_id = ?1 AND block = ?2 AND EXISTS (SELECT 1 FROM runs \
-             WHERE runs.id = block_runs.run_id AND runs.status = 'running' \
-             AND runs.owner = ?5)",
-            params![
-                run_id,
-                block,
-                attempt,
-                timestamp(now()),
-                self.instance.as_ref()
-            ],
-        )?;
-        Ok(())
+        let (run_id, block) = (run_id.to_string(), block.to_string());
+        let instance = self.instance.to_string();
+        self.store.run(move |db| {
+            db.execute(
+                "UPDATE block_runs SET status = 'running', attempts = ?3, \
+                 started_at = COALESCE(started_at, ?4), error = NULL \
+                 WHERE run_id = ?1 AND block = ?2 AND EXISTS (SELECT 1 FROM runs \
+                 WHERE runs.id = block_runs.run_id AND runs.status = 'running' \
+                 AND runs.owner = ?5)",
+                cells![run_id, block, attempt, timestamp(now()), instance],
+            )
+            .map(|_| ())
+        })
     }
 
     pub fn finish_block(
@@ -458,22 +743,26 @@ impl Ledger {
         let outputs =
             serde_json::to_string(outputs).map_err(|e| LedgerError::Data(e.to_string()))?;
         let error = error.map(crate::log::redact);
-        self.lock().execute(
-            "UPDATE block_runs SET status = ?3, finished_at = ?4, error = ?5, outputs = ?6 \
-             WHERE run_id = ?1 AND block = ?2 AND EXISTS (SELECT 1 FROM runs \
-             WHERE runs.id = block_runs.run_id AND runs.status = 'running' \
-             AND runs.owner = ?7)",
-            params![
-                run_id,
-                block,
-                status.as_str(),
-                timestamp(now()),
-                error,
-                outputs,
-                self.instance.as_ref()
-            ],
-        )?;
-        Ok(())
+        let (run_id, block) = (run_id.to_string(), block.to_string());
+        let instance = self.instance.to_string();
+        self.store.run(move |db| {
+            db.execute(
+                "UPDATE block_runs SET status = ?3, finished_at = ?4, error = ?5, outputs = ?6 \
+                 WHERE run_id = ?1 AND block = ?2 AND EXISTS (SELECT 1 FROM runs \
+                 WHERE runs.id = block_runs.run_id AND runs.status = 'running' \
+                 AND runs.owner = ?7)",
+                cells![
+                    run_id,
+                    block,
+                    status.as_str(),
+                    timestamp(now()),
+                    error,
+                    outputs,
+                    instance
+                ],
+            )
+            .map(|_| ())
+        })
     }
 
     /// A completed block of a chain, with its own span inside the chain's time.
@@ -487,84 +776,69 @@ impl Ledger {
     ) -> Result<()> {
         let outputs =
             serde_json::to_string(outputs).map_err(|e| LedgerError::Data(e.to_string()))?;
-        self.lock().execute(
-            "UPDATE block_runs SET status = 'completed', started_at = ?3, finished_at = ?4, \
-             error = NULL, outputs = ?5 WHERE run_id = ?1 AND block = ?2 \
-             AND EXISTS (SELECT 1 FROM runs WHERE runs.id = block_runs.run_id \
-             AND runs.status = 'running' AND runs.owner = ?6)",
-            params![
-                run_id,
-                block,
-                timestamp(started_at),
-                timestamp(finished_at),
-                outputs,
-                self.instance.as_ref()
-            ],
-        )?;
-        Ok(())
+        let (run_id, block) = (run_id.to_string(), block.to_string());
+        let instance = self.instance.to_string();
+        self.store.run(move |db| {
+            db.execute(
+                "UPDATE block_runs SET status = 'completed', started_at = ?3, finished_at = ?4, \
+                 error = NULL, outputs = ?5 WHERE run_id = ?1 AND block = ?2 \
+                 AND EXISTS (SELECT 1 FROM runs WHERE runs.id = block_runs.run_id \
+                 AND runs.status = 'running' AND runs.owner = ?6)",
+                cells![
+                    run_id,
+                    block,
+                    timestamp(started_at),
+                    timestamp(finished_at),
+                    outputs,
+                    instance
+                ],
+            )
+            .map(|_| ())
+        })
     }
 
     /// The runs of instances whose lease expired (a killed or stalled process, or a run from
     /// before owners were recorded): marks them and their unfinished block runs failed. The
-    /// runs of live instances, this one included, are left alone.
+    /// runs of live instances, this one included, are left alone. One statement claims the
+    /// runs, so two instances recovering at once fail each run once.
     pub fn recover_interrupted(&self) -> Result<Vec<String>> {
-        let mut connection = self.lock();
-        let transaction = connection.transaction()?;
-        let ids: Vec<String> = {
-            let mut statement = transaction.prepare(&format!(
-                "SELECT id FROM runs WHERE status = 'running' AND (owner IS NULL OR owner \
-                 NOT IN (SELECT id FROM instances WHERE expires_at > {DB_NOW}))"
-            ))?;
-            statement
-                .query_map([], |row| row.get(0))?
-                .collect::<rusqlite::Result<_>>()?
-        };
-        let finished = timestamp(now());
-        for id in &ids {
-            transaction.execute(
-                "UPDATE runs SET status = 'failed', finished_at = ?2, error = ?3 \
-                 WHERE id = ?1 AND status = 'running'",
-                params![
-                    id,
-                    finished,
-                    "The service stopped while this run was running."
-                ],
-            )?;
-            transaction.execute(
-                "UPDATE block_runs SET status = CASE WHEN status = 'running' THEN 'failed' \
-                 ELSE 'cancelled' END, finished_at = ?2, \
-                 error = CASE WHEN status = 'running' THEN ?3 ELSE error END \
-                 WHERE run_id = ?1 AND status IN ('running', 'pending')",
-                params![
-                    id,
-                    finished,
-                    "The service stopped while this block was running."
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(ids)
+        self.store.transaction(move |db| {
+            let finished = timestamp(now());
+            let mut ids: Vec<String> = db
+                .query(
+                    "UPDATE runs SET status = 'failed', finished_at = ?1, error = ?2 \
+                     WHERE status = 'running' AND (owner IS NULL OR owner NOT IN \
+                     (SELECT id FROM instances WHERE expires_at > db_now())) RETURNING id",
+                    cells![
+                        finished.as_str(),
+                        "The service stopped while this run was running."
+                    ],
+                )?
+                .iter()
+                .map(|row| row.text(0))
+                .collect::<Result<_>>()?;
+            ids.sort();
+            for id in &ids {
+                db.execute(
+                    "UPDATE block_runs SET status = CASE WHEN status = 'running' THEN 'failed' \
+                     ELSE 'cancelled' END, finished_at = ?2, \
+                     error = CASE WHEN status = 'running' THEN ?3 ELSE error END \
+                     WHERE run_id = ?1 AND status IN ('running', 'pending')",
+                    cells![
+                        id.as_str(),
+                        finished.as_str(),
+                        "The service stopped while this block was running."
+                    ],
+                )?;
+            }
+            Ok(ids)
+        })
     }
 
     pub fn settings(&self, pipeline: &str, default_max: u32) -> Result<Settings> {
-        let connection = self.lock();
-        connection.execute(
-            "INSERT OR IGNORE INTO pipeline_settings (pipeline, max_concurrent_runs) \
-             VALUES (?1, ?2)",
-            params![pipeline, default_max],
-        )?;
-        Ok(connection.query_row(
-            "SELECT paused, max_concurrent_runs, revision FROM pipeline_settings \
-             WHERE pipeline = ?1",
-            params![pipeline],
-            |row| {
-                Ok(Settings {
-                    paused: row.get::<_, i64>(0)? != 0,
-                    max_concurrent_runs: row.get::<_, i64>(1)? as u32,
-                    revision: row.get::<_, i64>(2)? as u64,
-                })
-            },
-        )?)
+        let pipeline = pipeline.to_string();
+        self.store
+            .run(move |db| settings_in(db, &pipeline, default_max))
     }
 
     /// Changes settings only at the expected revision; returns the new settings, or the
@@ -576,28 +850,36 @@ impl Ledger {
         paused: Option<bool>,
         max_concurrent_runs: Option<u32>,
     ) -> Result<(Settings, bool)> {
-        let changed = self.lock().execute(
-            "UPDATE pipeline_settings SET paused = COALESCE(?3, paused), \
-             max_concurrent_runs = COALESCE(?4, max_concurrent_runs), revision = revision + 1 \
-             WHERE pipeline = ?1 AND revision = ?2",
-            params![
-                pipeline,
-                expected_revision,
-                paused.map(i64::from),
-                max_concurrent_runs
-            ],
-        )?;
-        let settings = self.settings(pipeline, max_concurrent_runs.unwrap_or(1))?;
-        Ok((settings, changed == 1))
+        let pipeline = pipeline.to_string();
+        self.store.run(move |db| {
+            let changed = db.execute(
+                "UPDATE pipeline_settings SET paused = COALESCE(?3, paused), \
+                 max_concurrent_runs = COALESCE(?4, max_concurrent_runs), \
+                 revision = revision + 1 WHERE pipeline = ?1 AND revision = ?2",
+                cells![
+                    pipeline.as_str(),
+                    expected_revision,
+                    paused,
+                    max_concurrent_runs
+                ],
+            )?;
+            let settings = settings_in(db, &pipeline, max_concurrent_runs.unwrap_or(1))?;
+            Ok((settings, changed == 1))
+        })
     }
 
     pub fn count(&self, pipeline: &str, status: RunStatus) -> Result<u64> {
-        let connection = self.lock();
-        Ok(connection.query_row(
-            "SELECT COUNT(*) FROM runs WHERE pipeline = ?1 AND status = ?2",
-            params![pipeline, status.as_str()],
-            |row| row.get::<_, i64>(0),
-        )? as u64)
+        let pipeline = pipeline.to_string();
+        self.store.run(move |db| {
+            Ok(db
+                .query_one(
+                    "SELECT COUNT(*) FROM runs WHERE pipeline = ?1 AND status = ?2",
+                    cells![pipeline, status.as_str()],
+                )?
+                .map(|row| row.int(0))
+                .transpose()?
+                .unwrap_or(0) as u64)
+        })
     }
 
     pub fn list_runs(
@@ -606,98 +888,106 @@ impl Ledger {
         status: Option<RunStatus>,
         limit: u32,
     ) -> Result<Vec<RunSummary>> {
-        let connection = self.lock();
-        let mut statement = connection.prepare(
-            "SELECT id, pipeline, status, source, created_at, started_at, finished_at, error, \
-             retry_of FROM runs WHERE (?1 IS NULL OR pipeline = ?1) AND (?2 IS NULL OR status = ?2) \
-             ORDER BY created_at DESC, id DESC LIMIT ?3",
-        )?;
-        let rows = statement.query_map(
-            params![pipeline, status.map(RunStatus::as_str), limit],
-            run_summary,
-        )?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let pipeline = pipeline.map(str::to_string);
+        self.store.run(move |db| {
+            db.query(
+                "SELECT id, pipeline, status, source, created_at, started_at, finished_at, \
+                 error, retry_of FROM runs WHERE (CAST(?1 AS TEXT) IS NULL OR pipeline = ?1) \
+                 AND (CAST(?2 AS TEXT) IS NULL OR status = ?2) \
+                 ORDER BY created_at DESC, id DESC LIMIT ?3",
+                cells![pipeline, status.map(RunStatus::as_str), limit],
+            )?
+            .iter()
+            .map(run_summary)
+            .collect()
+        })
     }
 
     pub fn run(&self, id: &str) -> Result<Option<RunDetail>> {
-        let connection = self.lock();
-        let found = connection
-            .query_row(
+        let id = id.to_string();
+        self.store.run(move |db| {
+            let Some(row) = db.query_one(
                 "SELECT id, pipeline, status, source, created_at, started_at, finished_at, \
                  error, retry_of, variables FROM runs WHERE id = ?1",
-                params![id],
-                |row| Ok((run_summary(row)?, row.get::<_, String>(9)?)),
-            )
-            .optional()?;
-        let Some((run, variables)) = found else {
-            return Ok(None);
-        };
-        let mut statement = connection.prepare(
-            "SELECT block, status, attempts, started_at, finished_at, error, outputs \
-             FROM block_runs WHERE run_id = ?1 ORDER BY position",
-        )?;
-        let blocks = statement
-            .query_map(params![id], |row| {
-                let started_at: Option<String> = row.get(3)?;
-                let finished_at: Option<String> = row.get(4)?;
-                let status: String = row.get(1)?;
-                let outputs: String = row.get(6)?;
-                Ok(BlockRunSummary {
-                    block: row.get(0)?,
-                    status: BlockStatus::parse(&status).unwrap_or(BlockStatus::Pending),
-                    attempts: row.get::<_, i64>(2)? as u32,
-                    duration_ms: duration_ms(&started_at, &finished_at),
-                    started_at,
-                    finished_at,
-                    error: row.get(5)?,
-                    outputs: serde_json::from_str(&outputs).unwrap_or_default(),
+                cells![id.as_str()],
+            )?
+            else {
+                return Ok(None);
+            };
+            let run = run_summary(&row)?;
+            let variables = row.text(9)?;
+            let blocks = db
+                .query(
+                    "SELECT block, status, attempts, started_at, finished_at, error, outputs \
+                     FROM block_runs WHERE run_id = ?1 ORDER BY position",
+                    cells![id.as_str()],
+                )?
+                .iter()
+                .map(|row| {
+                    let started_at = row.opt_text(3)?;
+                    let finished_at = row.opt_text(4)?;
+                    Ok(BlockRunSummary {
+                        block: row.text(0)?,
+                        status: BlockStatus::parse(&row.text(1)?).unwrap_or(BlockStatus::Pending),
+                        attempts: row.int(2)? as u32,
+                        duration_ms: duration_ms(&started_at, &finished_at),
+                        started_at,
+                        finished_at,
+                        error: row.opt_text(5)?,
+                        outputs: serde_json::from_str(&row.text(6)?).unwrap_or_default(),
+                    })
                 })
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(Some(RunDetail {
-            run,
-            variables: serde_json::from_str(&variables).unwrap_or_default(),
-            blocks,
-        }))
+                .collect::<Result<_>>()?;
+            Ok(Some(RunDetail {
+                run,
+                variables: serde_json::from_str(&variables).unwrap_or_default(),
+                blocks,
+            }))
+        })
     }
 
     /// Durations and finish times of the last finished runs, oldest first.
     pub fn recent_finished(&self, pipeline: &str, limit: u32) -> Result<Vec<(String, u64)>> {
-        let connection = self.lock();
-        let mut statement = connection.prepare(
-            "SELECT started_at, finished_at FROM runs WHERE pipeline = ?1 \
-             AND status IN ('completed', 'failed') AND started_at IS NOT NULL \
-             ORDER BY finished_at DESC LIMIT ?2",
-        )?;
-        let mut rows: Vec<(String, u64)> = statement
-            .query_map(params![pipeline, limit], |row| {
-                let started: Option<String> = row.get(0)?;
-                let finished: Option<String> = row.get(1)?;
-                Ok((
-                    finished.clone().unwrap_or_default(),
-                    duration_ms(&started, &finished).unwrap_or(0),
-                ))
-            })?
-            .collect::<rusqlite::Result<_>>()?;
-        rows.reverse();
-        Ok(rows)
+        let pipeline = pipeline.to_string();
+        self.store.run(move |db| {
+            let mut rows = db
+                .query(
+                    "SELECT started_at, finished_at FROM runs WHERE pipeline = ?1 \
+                     AND status IN ('completed', 'failed') AND started_at IS NOT NULL \
+                     ORDER BY finished_at DESC LIMIT ?2",
+                    cells![pipeline, limit],
+                )?
+                .iter()
+                .map(|row| {
+                    let started = row.opt_text(0)?;
+                    let finished = row.opt_text(1)?;
+                    Ok((
+                        finished.clone().unwrap_or_default(),
+                        duration_ms(&started, &finished).unwrap_or(0),
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            rows.reverse();
+            Ok(rows)
+        })
     }
 
     pub fn last_error(&self, pipeline: &str) -> Result<Option<String>> {
-        let connection = self.lock();
-        Ok(connection
-            .query_row(
+        let pipeline = pipeline.to_string();
+        self.store.run(move |db| {
+            let Some(row) = db.query_one(
                 "SELECT finished_at, error FROM runs WHERE pipeline = ?1 AND status = 'failed' \
                  ORDER BY finished_at DESC LIMIT 1",
-                params![pipeline],
-                |row| {
-                    let at: Option<String> = row.get(0)?;
-                    let error: Option<String> = row.get(1)?;
-                    Ok(error.map(|e| format!("{}: {e}", at.unwrap_or_default())))
-                },
-            )
-            .optional()?
-            .flatten())
+                cells![pipeline],
+            )?
+            else {
+                return Ok(None);
+            };
+            let at = row.opt_text(0)?;
+            Ok(row
+                .opt_text(1)?
+                .map(|e| format!("{}: {e}", at.unwrap_or_default())))
+        })
     }
 
     pub fn running_count(&self, pipeline: &str) -> Result<u32> {
@@ -707,31 +997,224 @@ impl Ledger {
     /// Takes or renews a named lease; false while another owner holds it.
     /// Times are the database's: instances on hosts with different clocks agree.
     pub fn acquire_lease(&self, name: &str, owner: &str, seconds: i64) -> Result<bool> {
-        let changed = self.lock().execute(
-            &format!(
-                "INSERT INTO leases (name, owner, expires_at) \
-                 VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?3)) \
+        let (name, owner) = (name.to_string(), owner.to_string());
+        self.store.run(move |db| {
+            Ok(db.execute(
+                "INSERT INTO leases (name, owner, expires_at) VALUES (?1, ?2, db_time(?3)) \
                  ON CONFLICT (name) DO UPDATE SET owner = excluded.owner, \
                  expires_at = excluded.expires_at \
-                 WHERE leases.owner = excluded.owner OR leases.expires_at < {DB_NOW}"
-            ),
-            params![name, owner, format!("{seconds:+} seconds")],
-        )?;
-        Ok(changed == 1)
+                 WHERE leases.owner = excluded.owner OR leases.expires_at < db_now()",
+                cells![name, owner, format!("{seconds:+} seconds")],
+            )? == 1)
+        })
     }
 
     /// Deletes finished runs older than the cutoff; returns their ids.
     pub fn prune(&self, older_than: DateTime<Utc>) -> Result<Vec<String>> {
-        let connection = self.lock();
-        let mut statement = connection.prepare(
-            "DELETE FROM runs WHERE status IN ('completed', 'failed', 'cancelled') \
-             AND finished_at < ?1 RETURNING id",
-        )?;
-        let ids = statement
-            .query_map(params![timestamp(older_than)], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(ids)
+        self.store.run(move |db| {
+            db.query(
+                "DELETE FROM runs WHERE status IN ('completed', 'failed', 'cancelled') \
+                 AND finished_at < ?1 RETURNING id",
+                cells![timestamp(older_than)],
+            )?
+            .iter()
+            .map(|row| row.text(0))
+            .collect()
+        })
     }
+
+    /// Copies a SQLite run history into this one (PostgreSQL), skipping runs it has: the
+    /// move from one machine's file to a shared database. Returns the runs copied.
+    pub fn import_sqlite(&self, path: &Path) -> Result<u64> {
+        let mut source =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i64 = source.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > SQLITE_VERSION {
+            return Err(LedgerError::Version(format!(
+                "{} is at version {version}; this engine knows versions up to {SQLITE_VERSION}.",
+                path.display()
+            )));
+        }
+        let has_retry_of = source
+            .prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'retry_of'")?
+            .exists([])?;
+        let retry_of = if has_retry_of { "retry_of" } else { "NULL" };
+        let tables = [
+            (
+                "INSERT INTO runs (id, pipeline, status, source, idempotency_key, variables, \
+                 created_at, started_at, finished_at, error, retry_of) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT DO NOTHING",
+                format!(
+                    "SELECT id, pipeline, status, source, idempotency_key, variables, \
+                     created_at, started_at, finished_at, error, {retry_of} FROM runs"
+                ),
+            ),
+            (
+                "INSERT INTO block_runs (run_id, block, position, status, attempts, started_at, \
+                 finished_at, error, outputs) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                 ON CONFLICT DO NOTHING",
+                "SELECT run_id, block, position, status, attempts, started_at, finished_at, \
+                 error, outputs FROM block_runs"
+                    .to_string(),
+            ),
+            (
+                "INSERT INTO occurrences (trigger_key, run_id, created_at) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT DO NOTHING",
+                "SELECT trigger_key, run_id, created_at FROM occurrences".to_string(),
+            ),
+            (
+                "INSERT INTO pipeline_settings (pipeline, paused, max_concurrent_runs, \
+                 revision) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING",
+                "SELECT pipeline, paused, max_concurrent_runs, revision FROM pipeline_settings"
+                    .to_string(),
+            ),
+        ];
+        let mut runs = 0;
+        for (index, (insert, select)) in tables.into_iter().enumerate() {
+            let rows: Vec<Vec<crate::ledger_sql::Cell>> = source
+                .query(&select, &[])?
+                .into_iter()
+                .map(Row::into_cells)
+                .collect();
+            let copied = self.store.transaction(move |db| {
+                let mut count = 0;
+                for row in &rows {
+                    count += db.execute(insert, row)?;
+                }
+                Ok(count)
+            })?;
+            if index == 0 {
+                runs = copied;
+            }
+        }
+        Ok(runs)
+    }
+}
+
+/// A new run's values, owned, for a transaction on another thread.
+struct OwnedRun {
+    pipeline: String,
+    source: String,
+    variables: String,
+    idempotency_key: Option<String>,
+    blocks: Vec<String>,
+}
+
+impl OwnedRun {
+    fn from(new: &NewRun) -> Result<OwnedRun> {
+        Ok(OwnedRun {
+            pipeline: new.pipeline.to_string(),
+            source: new.source.to_string(),
+            variables: serde_json::to_string(new.variables)
+                .map_err(|e| LedgerError::Data(e.to_string()))?,
+            idempotency_key: new.idempotency_key.map(str::to_string),
+            blocks: new.blocks.to_vec(),
+        })
+    }
+}
+
+fn create_run_in(db: &mut dyn Db, new: &OwnedRun) -> Result<(String, bool)> {
+    let mut retry_of: Option<String> = None;
+    if let Some(key) = &new.idempotency_key {
+        db.lock(&format!("key:{}:{key}", new.pipeline))?;
+        let existing = db.query_one(
+            "SELECT id, status FROM runs WHERE pipeline = ?1 AND idempotency_key = ?2",
+            cells![new.pipeline.as_str(), key.as_str()],
+        )?;
+        if let Some(row) = existing {
+            let (id, status) = (row.text(0)?, row.text(1)?);
+            if status == "failed" || status == "cancelled" {
+                db.execute(
+                    "UPDATE runs SET idempotency_key = NULL WHERE id = ?1",
+                    cells![id.as_str()],
+                )?;
+                retry_of = Some(id);
+            } else {
+                return Ok((id, false));
+            }
+        }
+    }
+    let id = uuid::Uuid::now_v7().to_string();
+    db.execute(
+        "INSERT INTO runs (id, pipeline, status, source, idempotency_key, variables, \
+         created_at, retry_of) VALUES (?1, ?2, 'queued', ?3, ?4, ?5, ?6, ?7)",
+        cells![
+            id.as_str(),
+            new.pipeline.as_str(),
+            new.source.as_str(),
+            new.idempotency_key.as_deref(),
+            new.variables.as_str(),
+            timestamp(now()),
+            retry_of
+        ],
+    )?;
+    for (position, block) in new.blocks.iter().enumerate() {
+        db.execute(
+            "INSERT INTO block_runs (run_id, block, position, status) \
+             VALUES (?1, ?2, ?3, 'pending')",
+            cells![id.as_str(), block.as_str(), position as i64],
+        )?;
+    }
+    Ok((id, true))
+}
+
+fn settings_in(db: &mut dyn Db, pipeline: &str, default_max: u32) -> Result<Settings> {
+    db.execute(
+        "INSERT INTO pipeline_settings (pipeline, max_concurrent_runs) VALUES (?1, ?2) \
+         ON CONFLICT DO NOTHING",
+        cells![pipeline, default_max],
+    )?;
+    let row = db
+        .query_one(
+            "SELECT paused, max_concurrent_runs, revision FROM pipeline_settings \
+             WHERE pipeline = ?1",
+            cells![pipeline],
+        )?
+        .ok_or_else(|| LedgerError::Data(format!("no settings for {pipeline}")))?;
+    Ok(Settings {
+        paused: row.int(0)? != 0,
+        max_concurrent_runs: row.int(1)? as u32,
+        revision: row.int(2)? as u64,
+    })
+}
+
+fn run_summary(row: &Row) -> Result<RunSummary> {
+    let started_at = row.opt_text(5)?;
+    let finished_at = row.opt_text(6)?;
+    Ok(RunSummary {
+        id: row.text(0)?,
+        pipeline: row.text(1)?,
+        status: RunStatus::parse(&row.text(2)?).unwrap_or(RunStatus::Failed),
+        source: row.text(3)?,
+        created_at: row.text(4)?,
+        duration_ms: duration_ms(&started_at, &finished_at),
+        started_at,
+        finished_at,
+        error: row.opt_text(7)?,
+        retry_of: row.opt_text(8)?,
+    })
+}
+
+/// Ends the leases of the other instances on this host whose process is gone, so their runs
+/// are recovered now, not when their lease ends. A restarted container is pid 1 again, so
+/// this pid under another instance id is gone too.
+fn expire_gone_processes(db: &mut dyn Db, host: &str, me: &str) -> Result<()> {
+    let pid = i64::from(std::process::id());
+    let same_host = db.query(
+        "SELECT id, pid FROM instances WHERE host = ?1 AND host <> '' AND id <> ?2 \
+         AND expires_at > db_now()",
+        cells![host, me],
+    )?;
+    for row in same_host {
+        let other = row.int(1)?;
+        if other == pid || !process_alive(other) {
+            db.execute(
+                "UPDATE instances SET expires_at = db_now() WHERE id = ?1",
+                cells![row.text(0)?],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// This machine's name, which with a pid tells whether an instance's process is gone.
@@ -763,20 +1246,21 @@ fn process_alive(pid: i64) -> bool {
 /// Renews the instance's lease and fails the runs of expired instances, every few seconds
 /// while the ledger is open.
 fn start_heartbeats(ledger: Ledger) {
-    let connection = Arc::downgrade(&ledger.connection);
-    let instance = ledger.instance.clone();
+    let store = Arc::downgrade(&ledger.store);
+    let (instance, host) = (ledger.instance.clone(), ledger.host.clone());
     drop(ledger);
     std::thread::Builder::new()
         .name("ledger-heartbeats".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(HEARTBEAT_EVERY);
-                let Some(connection) = connection.upgrade() else {
+                let Some(store) = store.upgrade() else {
                     break;
                 };
                 let ledger = Ledger {
-                    connection,
+                    store,
                     instance: instance.clone(),
+                    host: host.clone(),
                 };
                 match ledger.heartbeat() {
                     Ok(true) => {}
@@ -801,7 +1285,7 @@ fn start_heartbeats(ledger: Ledger) {
 }
 
 /// Checkpoints every second while the ledger is open.
-fn start_checkpoints(connection: Connection, wal: PathBuf, ledger: Weak<Mutex<Connection>>) {
+fn start_checkpoints(connection: Connection, wal: PathBuf, ledger: Weak<Store>) {
     std::thread::Builder::new()
         .name("ledger-checkpoints".into())
         .spawn(move || {
@@ -824,24 +1308,6 @@ fn checkpoint(connection: &Connection, wal: &Path, limit: u64) -> rusqlite::Resu
     let size = std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0);
     let mode = if size > limit { "TRUNCATE" } else { "PASSIVE" };
     connection.query_row(&format!("PRAGMA wal_checkpoint({mode})"), [], |_| Ok(()))
-}
-
-fn run_summary(row: &rusqlite::Row) -> rusqlite::Result<RunSummary> {
-    let status: String = row.get(2)?;
-    let started_at: Option<String> = row.get(5)?;
-    let finished_at: Option<String> = row.get(6)?;
-    Ok(RunSummary {
-        id: row.get(0)?,
-        pipeline: row.get(1)?,
-        status: RunStatus::parse(&status).unwrap_or(RunStatus::Failed),
-        source: row.get(3)?,
-        created_at: row.get(4)?,
-        duration_ms: duration_ms(&started_at, &finished_at),
-        started_at,
-        finished_at,
-        error: row.get(7)?,
-        retry_of: row.get(8)?,
-    })
 }
 
 #[cfg(test)]
@@ -867,8 +1333,10 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("runs.db");
         let ledger = Ledger::open(&path).unwrap();
-        let automatic: i64 = ledger
-            .lock()
+        let Store::Sqlite(connection) = ledger.store.as_ref() else {
+            unreachable!()
+        };
+        let automatic: i64 = lock(connection)
             .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))
             .unwrap();
         assert_eq!(automatic, 0);
@@ -975,20 +1443,36 @@ mod tests {
     }
 
     #[test]
-    fn a_ledger_from_an_earlier_release_gets_the_new_column() {
+    fn a_ledger_from_an_earlier_release_is_migrated_and_a_newer_one_refused() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("runs.db");
         {
+            // 0.2's ledger: no version, no owner or cancel columns, one running run.
             let old = Connection::open(&path).unwrap();
-            old.execute_batch(SCHEMA).unwrap();
-            old.execute_batch("ALTER TABLE runs DROP COLUMN retry_of")
-                .ok();
+            old.execute_batch(SQLITE_SCHEMA).unwrap();
+            old.execute_batch(
+                "INSERT INTO runs (id, pipeline, status, source, variables, created_at) \
+                 VALUES ('old', 'etl', 'running', 'api', '{}', '2026-10-01T00:00:00.000Z')",
+            )
+            .unwrap();
         }
         let ledger = Ledger::open(&path).unwrap();
         let vars = Map::new();
         let blocks = vec!["a".to_string()];
         let (id, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
         assert_eq!(ledger.run(&id).unwrap().unwrap().run.retry_of, None);
+        assert_eq!(
+            ledger.recover_interrupted().unwrap(),
+            vec!["old".to_string()]
+        );
+        ledger.release().unwrap();
+        drop(ledger);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("PRAGMA user_version = 99")
+            .unwrap();
+        let refused = Ledger::open(&path).err().unwrap().to_string();
+        assert!(refused.contains("at version 99"), "{refused}");
     }
 
     #[test]
@@ -998,9 +1482,9 @@ mod tests {
         let blocks = vec!["a".to_string()];
         let (a, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
         let (b, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
-        assert_eq!(ledger.claim_next("etl").unwrap(), Some(a.clone()));
-        assert_eq!(ledger.claim_next("etl").unwrap(), Some(b));
-        assert_eq!(ledger.claim_next("etl").unwrap(), None);
+        assert_eq!(ledger.claim_next("etl", 100).unwrap(), Some(a.clone()));
+        assert_eq!(ledger.claim_next("etl", 100).unwrap(), Some(b));
+        assert_eq!(ledger.claim_next("etl", 100).unwrap(), None);
         assert_eq!(ledger.running_count("etl").unwrap(), 2);
         ledger.finish_run(&a, RunStatus::Completed, None).unwrap();
         assert_eq!(ledger.count("etl", RunStatus::Completed).unwrap(), 1);
@@ -1012,7 +1496,7 @@ mod tests {
         let vars = Map::new();
         let blocks = vec!["a".to_string(), "b".to_string()];
         let (id, _) = ledger.create_run(new_run(&vars, None, &blocks)).unwrap();
-        ledger.claim_next("etl").unwrap();
+        ledger.claim_next("etl", 100).unwrap();
         ledger.start_block(&id, "a", 1).unwrap();
         // The process stopped: a live instance's runs are left alone.
         assert!(ledger.recover_interrupted().unwrap().is_empty());
@@ -1086,13 +1570,10 @@ mod tests {
     }
 
     fn expire(ledger: &Ledger, instance: &str) {
-        ledger
-            .lock()
-            .execute(
-                "UPDATE instances SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
-                params![instance],
-            )
-            .unwrap();
+        ledger.sql(
+            "UPDATE instances SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+            cells![instance],
+        );
     }
 
     fn status(ledger: &Ledger, id: &str) -> RunStatus {
@@ -1108,7 +1589,7 @@ mod tests {
             .create_run(new_run(&variables, None, &blocks))
             .unwrap();
         assert_eq!(
-            first.claim_next("etl").unwrap().as_deref(),
+            first.claim_next("etl", 100).unwrap().as_deref(),
             Some(id.as_str())
         );
 
@@ -1131,7 +1612,7 @@ mod tests {
         let (id, _) = first
             .create_run(new_run(&variables, None, &blocks))
             .unwrap();
-        first.claim_next("etl").unwrap();
+        first.claim_next("etl", 100).unwrap();
         first.start_block(&id, "load", 1).unwrap();
         expire(&second, first.instance());
         second.recover_interrupted().unwrap();
@@ -1151,7 +1632,7 @@ mod tests {
         let (next, _) = first
             .create_run(new_run(&variables, Some("next"), &blocks))
             .unwrap();
-        first.claim_next("etl").unwrap();
+        first.claim_next("etl", 100).unwrap();
         assert!(second.recover_interrupted().unwrap().is_empty());
         assert!(first.finish_run(&next, RunStatus::Completed, None).unwrap());
     }
@@ -1164,18 +1645,15 @@ mod tests {
         let (old, _) = first
             .create_run(new_run(&variables, None, &blocks))
             .unwrap();
-        first
-            .lock()
-            .execute(
-                "UPDATE runs SET status = 'running', owner = NULL WHERE id = ?1",
-                params![old],
-            )
-            .unwrap();
+        first.sql(
+            "UPDATE runs SET status = 'running', owner = NULL WHERE id = ?1",
+            cells![old.as_str()],
+        );
         let (mine, _) = first
             .create_run(new_run(&variables, Some("k"), &blocks))
             .unwrap();
-        first.claim_next("etl").unwrap();
-        first.claim_next("etl").unwrap();
+        first.claim_next("etl", 100).unwrap();
+        first.claim_next("etl", 100).unwrap();
         assert_eq!(second.recover_interrupted().unwrap(), vec![old]);
         first.release().unwrap();
         assert_eq!(second.recover_interrupted().unwrap(), vec![mine]);
@@ -1201,7 +1679,7 @@ mod tests {
         let (claimed, _) = first
             .create_run(new_run(&variables, Some("other"), &blocks))
             .unwrap();
-        first.claim_next("etl").unwrap();
+        first.claim_next("etl", 100).unwrap();
         assert!(
             !second
                 .finish_run(&claimed, RunStatus::Cancelled, None)
@@ -1230,18 +1708,16 @@ mod tests {
         ] {
             let old = Ledger::open_on(&path, host).unwrap();
             let (id, _) = old.create_run(new_run(&variables, None, &blocks)).unwrap();
-            old.claim_next("etl").unwrap();
+            old.claim_next("etl", 100).unwrap();
             let pid = if pid == -1 {
                 i64::from(std::process::id())
             } else {
                 pid
             };
-            old.lock()
-                .execute(
-                    "UPDATE instances SET pid = ?1 WHERE id = ?2",
-                    params![pid, old.instance()],
-                )
-                .unwrap();
+            old.sql(
+                "UPDATE instances SET pid = ?1 WHERE id = ?2",
+                cells![pid, old.instance()],
+            );
             ids.push(id);
         }
         let restarted = Ledger::open_on(&path, "box").unwrap();
@@ -1250,5 +1726,415 @@ mod tests {
         let mut expected = ids[..2].to_vec();
         expected.sort();
         assert_eq!(recovered, expected);
+    }
+
+    #[test]
+    fn max_concurrent_runs_holds_across_instances() {
+        let (_dir, first, second) = two_instances();
+        let variables = Map::new();
+        let blocks = vec!["load".to_string()];
+        for _ in 0..3 {
+            first
+                .create_run(new_run(&variables, None, &blocks))
+                .unwrap();
+        }
+        let a = first.claim_next("etl", 2).unwrap().unwrap();
+        assert!(second.claim_next("etl", 2).unwrap().is_some());
+        // Two run, on two instances: the third waits on both.
+        assert_eq!(first.claim_next("etl", 2).unwrap(), None);
+        assert_eq!(second.claim_next("etl", 2).unwrap(), None);
+        first.finish_run(&a, RunStatus::Completed, None).unwrap();
+        assert!(second.claim_next("etl", 2).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_cancel_reaches_the_instance_running_the_run() {
+        let (_dir, first, second) = two_instances();
+        let variables = Map::new();
+        let blocks = vec!["load".to_string()];
+        let (id, _) = first
+            .create_run(new_run(&variables, None, &blocks))
+            .unwrap();
+        assert!(
+            !second.request_cancel(&id).unwrap(),
+            "a queued run is not running"
+        );
+        first.claim_next("etl", 1).unwrap();
+        assert!(second.cancel_requests().unwrap().is_empty());
+        assert!(second.request_cancel(&id).unwrap());
+        assert!(
+            second.cancel_requests().unwrap().is_empty(),
+            "not second's run"
+        );
+        assert_eq!(first.cancel_requests().unwrap(), vec![id.clone()]);
+        first
+            .finish_run(&id, RunStatus::Cancelled, Some("Cancelled."))
+            .unwrap();
+        assert!(first.cancel_requests().unwrap().is_empty());
+    }
+}
+
+/// The run history on PostgreSQL, with `MAGE_TEST_POSTGRES_URL` (integration_tests/compose.yaml
+/// serves one: postgres://postgres:test@localhost:15432/test). Each test has its own schema.
+#[cfg(test)]
+mod postgres_tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    fn url() -> Option<String> {
+        let url = std::env::var("MAGE_TEST_POSTGRES_URL").ok();
+        if url.is_none() {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+        }
+        url
+    }
+
+    fn schema() -> String {
+        format!("ledger_test_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    fn open(url: &str, schema: &str, host: &str) -> Ledger {
+        Ledger::open_postgres(url, schema, "svc", true, host).unwrap()
+    }
+
+    fn drop_schema(ledger: &Ledger, schema: &str) {
+        ledger.sql(&format!("DROP SCHEMA {schema} CASCADE"), &[]);
+    }
+
+    fn run<'a>(
+        variables: &'a Map<String, Value>,
+        key: Option<&'a str>,
+        blocks: &'a [String],
+    ) -> NewRun<'a> {
+        NewRun {
+            pipeline: "etl",
+            source: "api",
+            variables,
+            idempotency_key: key,
+            blocks,
+        }
+    }
+
+    #[test]
+    fn the_run_history_works_on_postgresql() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let ledger = open(&url, &schema, "a");
+        let mut variables = Map::new();
+        variables.insert("n".into(), Value::from(3));
+        let blocks = vec!["load".to_string(), "save".to_string()];
+
+        let (id, created) = ledger
+            .create_run(run(&variables, Some("k"), &blocks))
+            .unwrap();
+        assert!(created);
+        assert_eq!(
+            ledger
+                .create_run(run(&variables, Some("k"), &blocks))
+                .unwrap(),
+            (id.clone(), false)
+        );
+        assert_eq!(ledger.count("etl", RunStatus::Queued).unwrap(), 1);
+        assert_eq!(
+            ledger.claim_next("etl", 1).unwrap().as_deref(),
+            Some(id.as_str())
+        );
+        ledger.start_block(&id, "load", 1).unwrap();
+        ledger
+            .finish_block(
+                &id,
+                "load",
+                BlockStatus::Completed,
+                None,
+                &[Value::from("out")],
+            )
+            .unwrap();
+        ledger.start_block(&id, "save", 2).unwrap();
+        ledger
+            .finish_block(&id, "save", BlockStatus::Failed, Some("disk full"), &[])
+            .unwrap();
+        assert!(
+            ledger
+                .finish_run(&id, RunStatus::Failed, Some("disk full"))
+                .unwrap()
+        );
+        let detail = ledger.run(&id).unwrap().unwrap();
+        assert_eq!(detail.run.status, RunStatus::Failed);
+        assert_eq!(detail.variables["n"], 3);
+        assert_eq!(detail.blocks[0].status, BlockStatus::Completed);
+        assert_eq!(detail.blocks[0].outputs, vec![Value::from("out")]);
+        assert_eq!(
+            (detail.blocks[1].attempts, detail.blocks[1].error.as_deref()),
+            (2, Some("disk full"))
+        );
+        assert!(
+            ledger
+                .last_error("etl")
+                .unwrap()
+                .unwrap()
+                .ends_with("disk full")
+        );
+        assert_eq!(ledger.recent_finished("etl", 10).unwrap().len(), 1);
+
+        // A failed run's key starts a new run, which records the old one.
+        let (retry, created) = ledger
+            .create_run(run(&variables, Some("k"), &blocks))
+            .unwrap();
+        assert!(created);
+        assert_eq!(
+            ledger.run(&retry).unwrap().unwrap().run.retry_of.as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(ledger.list_runs(None, None, 10).unwrap().len(), 2);
+        assert_eq!(
+            ledger
+                .list_runs(Some("etl"), Some(RunStatus::Queued), 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            ledger
+                .list_runs(Some("other"), None, 10)
+                .unwrap()
+                .is_empty()
+        );
+
+        let key = "etl/daily/2026-10-21T00:00:00Z";
+        assert!(
+            ledger
+                .create_occurrence_run(key, run(&variables, None, &blocks))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            ledger
+                .create_occurrence_run(key, run(&variables, None, &blocks))
+                .unwrap()
+                .is_none()
+        );
+        assert!(ledger.has_occurrence(key).unwrap());
+
+        let settings = ledger.settings("etl", 2).unwrap();
+        assert_eq!(
+            (
+                settings.paused,
+                settings.max_concurrent_runs,
+                settings.revision
+            ),
+            (false, 2, 1)
+        );
+        let (updated, ok) = ledger
+            .update_settings("etl", 1, Some(true), Some(4))
+            .unwrap();
+        assert!(ok && updated.paused && updated.max_concurrent_runs == 4);
+        assert!(
+            !ledger
+                .update_settings("etl", 1, Some(false), None)
+                .unwrap()
+                .1
+        );
+
+        assert!(ledger.acquire_lease("scheduler", "a", 30).unwrap());
+        assert!(!ledger.acquire_lease("scheduler", "b", 30).unwrap());
+        assert!(ledger.acquire_lease("other", "b", -1).unwrap());
+        assert!(ledger.acquire_lease("other", "c", 30).unwrap());
+
+        let pruned = ledger
+            .prune(Utc::now() + chrono::Duration::days(1))
+            .unwrap();
+        assert_eq!(pruned, vec![id.clone()]);
+        assert!(ledger.run(&id).unwrap().is_none());
+        drop_schema(&ledger, &schema);
+    }
+
+    #[test]
+    fn instances_on_postgresql_fence_recover_and_share_the_limits() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let first = open(&url, &schema, "first");
+        let second = open(&url, &schema, "second");
+        let variables = Map::new();
+        let blocks = vec!["load".to_string()];
+        let (id, _) = first.create_run(run(&variables, None, &blocks)).unwrap();
+        first.create_run(run(&variables, None, &blocks)).unwrap();
+        assert_eq!(
+            first.claim_next("etl", 1).unwrap().as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(
+            second.claim_next("etl", 1).unwrap(),
+            None,
+            "max 1 across instances"
+        );
+        assert!(second.recover_interrupted().unwrap().is_empty());
+
+        assert!(second.request_cancel(&id).unwrap());
+        assert_eq!(first.cancel_requests().unwrap(), vec![id.clone()]);
+
+        first.start_block(&id, "load", 1).unwrap();
+        second.sql(
+            "UPDATE instances SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+            cells![first.instance()],
+        );
+        assert_eq!(second.recover_interrupted().unwrap(), vec![id.clone()]);
+        first
+            .finish_block(&id, "load", BlockStatus::Completed, None, &[])
+            .unwrap();
+        assert!(!first.finish_run(&id, RunStatus::Completed, None).unwrap());
+        let detail = second.run(&id).unwrap().unwrap();
+        assert_eq!(
+            (detail.run.status, detail.blocks[0].status),
+            (RunStatus::Failed, BlockStatus::Failed)
+        );
+        assert!(!first.heartbeat().unwrap());
+        assert!(first.heartbeat().unwrap());
+        assert!(second.claim_next("etl", 1).unwrap().is_some());
+        drop_schema(&first, &schema);
+    }
+
+    #[test]
+    fn concurrent_claims_on_postgresql_take_each_run_once_within_the_limit() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let instances: Vec<Ledger> = (0..3)
+            .map(|i| open(&url, &schema, &format!("host{i}")))
+            .collect();
+        let variables = Map::new();
+        let blocks = vec!["load".to_string()];
+        let mut all = BTreeSet::new();
+        for _ in 0..40 {
+            all.insert(
+                instances[0]
+                    .create_run(run(&variables, None, &blocks))
+                    .unwrap()
+                    .0,
+            );
+        }
+        // Racing to concurrency 4 again and again, until every run ran.
+        let mut done = BTreeSet::new();
+        while done.len() < all.len() {
+            let claimed: Vec<(usize, String)> = std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..12)
+                    .map(|worker| {
+                        let ledger = instances[worker % 3].clone();
+                        scope.spawn(move || {
+                            let mut mine = Vec::new();
+                            while let Some(id) = ledger.claim_next("etl", 4).unwrap() {
+                                mine.push((worker % 3, id));
+                            }
+                            mine
+                        })
+                    })
+                    .collect();
+                workers
+                    .into_iter()
+                    .flat_map(|w| w.join().unwrap())
+                    .collect()
+            });
+            let remaining = all.len() - done.len();
+            assert_eq!(claimed.len(), remaining.min(4), "{claimed:?}");
+            for (instance, id) in claimed {
+                assert!(done.insert(id.clone()), "{id} claimed twice");
+                assert!(
+                    instances[instance]
+                        .finish_run(&id, RunStatus::Completed, None)
+                        .unwrap()
+                );
+            }
+        }
+        assert_eq!(done, all);
+
+        // One key, many requests at once: one run.
+        let ids: BTreeSet<String> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|worker| {
+                    let ledger = instances[worker % 3].clone();
+                    let variables = &variables;
+                    let blocks = &blocks;
+                    scope.spawn(move || {
+                        ledger
+                            .create_run(run(variables, Some("same"), blocks))
+                            .unwrap()
+                            .0
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|w| w.join().unwrap()).collect()
+        });
+        assert_eq!(ids.len(), 1);
+        drop_schema(&instances[0], &schema);
+    }
+
+    #[test]
+    fn a_postgresql_run_history_is_versioned_and_holds_one_service() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let refused = Ledger::open_postgres(&url, &schema, "svc", false, "a")
+            .err()
+            .unwrap();
+        assert!(refused.to_string().contains("ledger migrate"), "{refused}");
+        let version = postgres_version(&url, &schema, true).unwrap();
+        assert_eq!(
+            (version.current, version.known),
+            (0, POSTGRES_MIGRATIONS.len() as i64)
+        );
+        let version = postgres_version(&url, &schema, true).unwrap();
+        assert_eq!(version.current, version.known);
+        let ledger = Ledger::open_postgres(&url, &schema, "svc", false, "a").unwrap();
+        let other = Ledger::open_postgres(&url, &schema, "billing", true, "a")
+            .err()
+            .unwrap();
+        assert!(
+            other.to_string().contains("service svc's, not billing's"),
+            "{other}"
+        );
+        ledger.sql(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (99, 'x')",
+            &[],
+        );
+        let newer = Ledger::open_postgres(&url, &schema, "svc", true, "a")
+            .err()
+            .unwrap();
+        assert!(newer.to_string().contains("at version 99"), "{newer}");
+        drop_schema(&ledger, &schema);
+    }
+
+    #[test]
+    fn a_sqlite_run_history_is_copied_into_postgresql_once() {
+        let Some(url) = url() else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runs.db");
+        let variables = Map::new();
+        let blocks = vec!["load".to_string(), "save".to_string()];
+        {
+            let local = Ledger::open(&path).unwrap();
+            for key in ["a", "b", "c"] {
+                let (id, _) = local
+                    .create_run(run(&variables, Some(key), &blocks))
+                    .unwrap();
+                local.claim_next("etl", 5).unwrap();
+                local.finish_run(&id, RunStatus::Completed, None).unwrap();
+            }
+            local.settings("etl", 3).unwrap();
+            local.release().unwrap();
+        }
+        let schema = schema();
+        let ledger = open(&url, &schema, "a");
+        assert_eq!(ledger.import_sqlite(&path).unwrap(), 3);
+        assert_eq!(ledger.import_sqlite(&path).unwrap(), 0);
+        let runs = ledger
+            .list_runs(Some("etl"), Some(RunStatus::Completed), 10)
+            .unwrap();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(ledger.run(&runs[0].id).unwrap().unwrap().blocks.len(), 2);
+        assert_eq!(ledger.settings("etl", 1).unwrap().max_concurrent_runs, 3);
+        // The keys came along: a repeated request returns the imported run.
+        let (_, created) = ledger
+            .create_run(run(&variables, Some("a"), &blocks))
+            .unwrap();
+        assert!(!created);
+        drop_schema(&ledger, &schema);
     }
 }

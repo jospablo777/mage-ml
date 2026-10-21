@@ -992,3 +992,128 @@ fn a_webhook_checks_its_signature_and_size() {
     let large = format!("[{}]", vec![r#"{"x": 1}"#; 400].join(","));
     assert_eq!(post(&large, &format!("sha256={signature}")).0, 413);
 }
+
+/// Two services on one PostgreSQL run history (`MAGE_TEST_POSTGRES_URL`): each sees the
+/// other's runs, a cancel sent to either reaches the run, and the run of an instance that
+/// was killed is failed by the other one.
+#[test]
+fn two_services_share_a_postgresql_run_history() {
+    let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") else {
+        eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+        return;
+    };
+    let schema = format!(
+        "service_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+    let env = [
+        ("MAGE_SERVICE_LEDGER_URL", url.as_str()),
+        ("MAGE_SERVICE_LEDGER_SCHEMA", schema.as_str()),
+    ];
+    let mut a = Service::create(false);
+    a.start(&env);
+    let mut b = Service::create(false);
+    b.start(&env);
+
+    let (_, run) = a.post("/v1/pipelines/sum/runs?wait=60", json!({}));
+    assert_eq!(run["status"], "completed", "{run}");
+    let (_, seen) = b.get(&format!("/v1/runs/{}", run["id"].as_str().unwrap()));
+    assert_eq!(seen["status"], "completed", "{seen}");
+
+    // Whichever instance claimed it, a cancel sent to b stops it.
+    let markers = a.markers();
+    let (_, run) = a.post(
+        "/v1/pipelines/slow/runs",
+        json!({"variables": {"marker_dir": markers, "seconds": 60}}),
+    );
+    let id = run["id"].as_str().unwrap().to_string();
+    wait_status(&a, &id, "running");
+    let (status, body) = b.post(&format!("/v1/runs/{id}/cancel"), json!({}));
+    assert_eq!((status, body["cancelling"].clone()), (200, json!(true)));
+    wait_status(&a, &id, "cancelled");
+
+    // A run on a, which is then killed: b fails it once it sees a's process gone.
+    b.signal("-TERM");
+    let (_, run) = a.post(
+        "/v1/pipelines/slow/runs",
+        json!({"variables": {"marker_dir": markers, "seconds": 60}}),
+    );
+    let id = run["id"].as_str().unwrap().to_string();
+    wait_status(&a, &id, "running");
+    b.start(&env);
+    a.signal("-KILL");
+    let run = wait_status(&b, &id, "failed");
+    let (status, body) = b.get(&format!("/v1/runs/{id}/logs"));
+    assert_eq!(status, 409, "{body}");
+    assert!(
+        body.to_string()
+            .contains("its log is on that instance's data volume"),
+        "{body}"
+    );
+    assert!(
+        run["error"]
+            .as_str()
+            .unwrap()
+            .contains("stopped while this run was running"),
+        "{run}"
+    );
+}
+
+/// `mage-service ledger migrate` and `ledger import`: a service moves its SQLite run
+/// history into PostgreSQL (`MAGE_TEST_POSTGRES_URL`).
+#[test]
+fn the_ledger_command_migrates_postgresql_and_imports_a_sqlite_history() {
+    let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") else {
+        eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+        return;
+    };
+    let schema = format!(
+        "ledger_command_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+    let mut service = Service::create(false);
+    service.start(&[]);
+    let (_, run) = service.post("/v1/pipelines/sum/runs?wait=60", json!({}));
+    assert_eq!(run["status"], "completed");
+    service.signal("-TERM");
+
+    let ledger = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_mage-service"))
+            .arg("ledger")
+            .args(args)
+            .env("MAGE_SERVICE_DIR", service.dir.path())
+            .env("MAGE_SERVICE_LEDGER_URL", &url)
+            .env("MAGE_SERVICE_LEDGER_SCHEMA", &schema)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        (output.status.success(), text)
+    };
+    let (ok, text) = ledger(&["migrate"]);
+    assert!(ok && text.contains("from version 0 to 1"), "{text}");
+    let (ok, text) = ledger(&["migrate"]);
+    assert!(ok && text.contains("is at version 1"), "{text}");
+    let history = service.dir.path().join("data/runs.db");
+    let history = history.to_str().unwrap();
+    let (ok, text) = ledger(&["import", history]);
+    assert!(ok && text.contains("Copied 1 run(s)"), "{text}");
+    let (ok, text) = ledger(&["import", history]);
+    assert!(ok && text.contains("Copied 0 run(s)"), "{text}");
+
+    // Served from PostgreSQL, the service has the run it made on SQLite.
+    service.start(&[
+        ("MAGE_SERVICE_LEDGER_URL", url.as_str()),
+        ("MAGE_SERVICE_LEDGER_SCHEMA", schema.as_str()),
+    ]);
+    let (_, seen) = service.get(&format!("/v1/runs/{}", run["id"].as_str().unwrap()));
+    assert_eq!(seen["status"], "completed", "{seen}");
+}

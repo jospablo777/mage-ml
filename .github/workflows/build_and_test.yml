@@ -114,6 +114,18 @@ jobs:
   rust:
     name: Rust extension
     runs-on: ubuntu-latest
+    # The pipeline service's run history on PostgreSQL (MAGE_TEST_POSTGRES_URL).
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_DB: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
     defaults:
       run:
         working-directory: rust/column_atlas
@@ -155,6 +167,8 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Pipeline service tests
         working-directory: mage_ai/pipeline_services/service
+        env:
+          MAGE_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/test?sslmode=disable
         run: cargo test --locked --all-features
 
   packaging:

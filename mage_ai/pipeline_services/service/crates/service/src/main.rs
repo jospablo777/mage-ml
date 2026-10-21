@@ -10,6 +10,7 @@ mod gcp;
 mod ibm;
 mod jobs;
 mod ledger;
+mod ledger_sql;
 mod log;
 mod monitor;
 mod python;
@@ -66,11 +67,27 @@ enum Command {
     /// Warm Python workers for the jobs of MageML's scheduler (requests on stdin, events
     /// on stdout); MageML starts it, see docs/development/run-engine.md.
     Jobs(jobs::JobsArgs),
+    /// Migrate the run history, or copy a SQLite one into PostgreSQL, then exit.
+    Ledger {
+        #[command(subcommand)]
+        command: LedgerCommand,
+    },
     /// Exit 0 when the local service answers /healthz; for Docker's HEALTHCHECK.
     Health {
         /// MAGE_SERVICE_PORT, else the platform's PORT, else 8080.
         #[arg(long, env = "MAGE_SERVICE_PORT")]
         port: Option<u16>,
+    },
+}
+
+#[derive(Subcommand)]
+enum LedgerCommand {
+    /// Bring the run history to this engine's schema version.
+    Migrate,
+    /// Copy a SQLite run history (`runs.db`) into the PostgreSQL one; runs it has are kept.
+    Import {
+        /// The `runs.db` to copy.
+        path: PathBuf,
     },
 }
 
@@ -131,6 +148,27 @@ struct Common {
     environment: String,
     #[arg(long, global = true, env = "MAGE_SERVICE_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
     log_format: LogFormat,
+    /// A PostgreSQL run history (`postgres://...`), which instances on several machines
+    /// share; without one, `runs.db` in the data directory.
+    #[arg(
+        long,
+        global = true,
+        env = "MAGE_SERVICE_LEDGER_URL",
+        hide_env_values = true
+    )]
+    ledger_url: Option<String>,
+    /// The PostgreSQL schema of this service's run history; one service per schema.
+    #[arg(
+        long,
+        global = true,
+        env = "MAGE_SERVICE_LEDGER_SCHEMA",
+        default_value = "mage_service"
+    )]
+    ledger_schema: String,
+    /// `off` refuses to start on an older run history instead of migrating it; `mage-service
+    /// ledger migrate` then migrates it.
+    #[arg(long, global = true, env = "MAGE_SERVICE_LEDGER_MIGRATE", value_enum, default_value_t = Switch::On)]
+    ledger_migrate: Switch,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -225,6 +263,7 @@ fn main() -> ExitCode {
             Command::Info => info(&cli.common).map(|_| ExitCode::SUCCESS),
             Command::Health { port } => Ok(health(listen_port(port))),
             Command::Env => env_report(&cli.common),
+            Command::Ledger { command } => ledger_command(&cli.common, command),
             Command::Jobs(args) => {
                 log::to_stderr();
                 jobs::run(args).await
@@ -406,6 +445,80 @@ fn env_report(common: &Common) -> Result<ExitCode, String> {
     })
 }
 
+/// Where the run history is: PostgreSQL with a ledger URL, else the data directory's file.
+fn ledger_location(common: &Common, service: &str) -> Result<ledger::Location, String> {
+    let Some(url) = &common.ledger_url else {
+        return Ok(ledger::Location::Sqlite(data_dir(common).join("runs.db")));
+    };
+    let schema = &common.ledger_schema;
+    let valid = schema.len() <= 63
+        && schema.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && schema
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return Err(format!(
+            "MAGE_SERVICE_LEDGER_SCHEMA {schema} is not a schema name: letters, digits and _, \
+             at most 63, not starting with a digit."
+        ));
+    }
+    Ok(ledger::Location::Postgres {
+        url: url.clone(),
+        schema: schema.clone(),
+        service: service.to_string(),
+    })
+}
+
+fn ledger_command(common: &Common, command: LedgerCommand) -> Result<ExitCode, String> {
+    let manifest = load_manifest(common)?;
+    let location = ledger_location(common, &manifest.service.name)?;
+    match (command, &location) {
+        (LedgerCommand::Migrate, ledger::Location::Sqlite(path)) => {
+            Ledger::open(path)
+                .map_err(|e| e.to_string())?
+                .release()
+                .ok();
+            println!(
+                "The run history {} is at version {}.",
+                path.display(),
+                ledger::SQLITE_VERSION
+            );
+        }
+        (LedgerCommand::Migrate, ledger::Location::Postgres { url, schema, .. }) => {
+            let version = ledger::postgres_version(url, schema, true).map_err(|e| e.to_string())?;
+            if version.current == version.known {
+                println!(
+                    "The run history in schema {schema} is at version {}.",
+                    version.known
+                );
+            } else {
+                println!(
+                    "Migrated the run history in schema {schema} from version {} to {}.",
+                    version.current, version.known
+                );
+            }
+        }
+        (LedgerCommand::Import { .. }, ledger::Location::Sqlite(_)) => {
+            return Err(
+                "Importing copies a SQLite run history into PostgreSQL: set \
+                 MAGE_SERVICE_LEDGER_URL."
+                    .into(),
+            );
+        }
+        (LedgerCommand::Import { path }, ledger::Location::Postgres { schema, .. }) => {
+            let ledger = Ledger::open_at(&location, common.ledger_migrate == Switch::On)
+                .map_err(|e| e.to_string())?;
+            let copied = ledger.import_sqlite(&path).map_err(|e| e.to_string())?;
+            let _ = ledger.release();
+            println!(
+                "Copied {copied} run(s) from {} into schema {schema}.",
+                path.display()
+            );
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn data_dir(common: &Common) -> PathBuf {
     common
         .data
@@ -481,8 +594,17 @@ async fn start_service(
     let data = data_dir(common);
     service::ensure_dir(&data.join("runs"))
         .map_err(|e| format!("Could not create {}: {e}", data.display()))?;
-    let ledger = Ledger::open(&data.join("runs.db")).map_err(|e| e.to_string())?;
-    log::info(&format!("Run history instance {}.", ledger.instance()));
+    let location = ledger_location(common, &manifest.service.name)?;
+    let ledger = Ledger::open_at(&location, common.ledger_migrate == Switch::On)
+        .map_err(|e| e.to_string())?;
+    log::info(&format!(
+        "Run history: {}, instance {}.",
+        match &location {
+            ledger::Location::Sqlite(path) => path.display().to_string(),
+            ledger::Location::Postgres { schema, .. } => format!("PostgreSQL schema {schema}"),
+        },
+        ledger.instance()
+    ));
     let recovered = ledger.recover_interrupted().map_err(|e| e.to_string())?;
     if !recovered.is_empty() {
         log::warn(&format!(

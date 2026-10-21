@@ -103,7 +103,13 @@ project.
   `GET /v1/runs`, `GET /v1/runs/{id}` with each block's status, duration and error,
   `GET /v1/runs/{id}/logs`, `GET /v1/snapshot` for the console, `GET /metrics`
   (Prometheus), `GET /healthz`, `POST /v1/control` for pause, resume and concurrency.
-- **Ledger** (SQLite, WAL): runs, block runs, idempotency keys and schedule occurrences.
+- **Ledger** (SQLite with WAL, or PostgreSQL for instances on several machines): runs,
+  block runs, idempotency keys and schedule occurrences. Statements are written once and
+  rewritten per dialect; PostgreSQL runs on a thread of its own, so the ledger stays
+  synchronous. Versioned schema (`user_version`, `schema_migrations`), refused when newer
+  than the engine. A claim counts and takes in one transaction serialized per pipeline
+  (SQLite's write lock, a PostgreSQL advisory lock), so `max_concurrent_runs` is global; a
+  cancel reaches another instance through the run's row.
   A run is committed before the request is acknowledged. Each process is an instance with
   a lease in database time; a claimed run is its instance's, and the run's writes are
   fenced on that ownership. Runs of an instance whose lease ended, or whose process is gone

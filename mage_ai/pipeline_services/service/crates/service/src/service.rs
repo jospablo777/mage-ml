@@ -250,14 +250,49 @@ impl Service {
         }
         match self.ledger.run(run_id)? {
             Some(detail) if detail.run.status == RunStatus::Queued => {
-                // False when it was claimed in the meantime.
-                self.ledger.finish_run(
+                if self.ledger.finish_run(
                     run_id,
                     RunStatus::Cancelled,
                     Some("Cancelled before it started."),
-                )
+                )? {
+                    return Ok(true);
+                }
+                // Claimed in the meantime, here or by another instance.
+                self.cancel_running(run_id)
             }
+            Some(detail) if detail.run.status == RunStatus::Running => self.cancel_running(run_id),
             _ => Ok(false),
+        }
+    }
+
+    /// A running run: its token when it runs here, else a request its owner reads.
+    fn cancel_running(&self, run_id: &str) -> Result<bool, LedgerError> {
+        if let Some((_, token)) = self
+            .running
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(run_id)
+        {
+            token.cancel();
+            return Ok(true);
+        }
+        self.ledger.request_cancel(run_id)
+    }
+
+    /// Cancels the runs here that a cancel on another instance asked for.
+    fn take_cancel_requests(&self) {
+        let ids = match self.ledger.cancel_requests() {
+            Ok(ids) => ids,
+            Err(error) => {
+                crate::log::warn(&format!("Reading cancel requests failed: {error}"));
+                return;
+            }
+        };
+        let running = self.running.lock().unwrap_or_else(|p| p.into_inner());
+        for id in ids {
+            if let Some((_, token)) = running.get(&id) {
+                token.cancel();
+            }
         }
     }
 
@@ -320,6 +355,7 @@ impl Service {
     /// service shuts down and its runs have finished.
     pub async fn dispatch(self: Arc<Self>) {
         loop {
+            self.take_cancel_requests();
             if !self.shutting_down() {
                 self.start_queued();
             }
@@ -362,7 +398,10 @@ impl Service {
                 {
                     break;
                 }
-                let run_id = match self.ledger.claim_next(&pipeline.uuid) {
+                let run_id = match self
+                    .ledger
+                    .claim_next(&pipeline.uuid, settings.max_concurrent_runs)
+                {
                     Ok(Some(id)) => id,
                     Ok(None) => break,
                     Err(error) => {

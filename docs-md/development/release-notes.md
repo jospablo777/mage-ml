@@ -10,6 +10,12 @@
 
 ### Exported services
 
+- The run history can be PostgreSQL (`MAGE_SERVICE_LEDGER_URL`), for instances of a
+  service on several machines: each run runs once, `max_concurrent_runs` counts every
+  instance, and a cancel reaches the run from any instance. Every image can use it.
+  `mage-service ledger migrate` migrates the schema; `mage-service ledger import` copies a
+  service's `runs.db` into it.
+- The run history's schema is versioned; an engine refuses one newer than it knows.
 - Two instances on one run history no longer fail each other's runs: each holds a lease,
   renewed every 5 seconds, and a running run is failed only when its instance's lease ends
   or its process is gone from the machine. A stalled instance cannot overwrite a run

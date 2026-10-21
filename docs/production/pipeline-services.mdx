@@ -480,14 +480,49 @@ instance that stays up.
 
 On serverless platforms without a volume, the run history lasts as long as the instance.
 
-Two instances can share one run history, as during a rolling update on one node. Each
-holds a lease in the run history, renewed every 5 seconds, and a run belongs to the
-instance that started it. An instance fails another's running runs only when that
-instance's lease ends (30 seconds without a renewal) or its process is gone from the same
-machine. A service that stops ends its lease, so a restart fails what it left at once. A
-process that stalls past its lease finds its runs failed and cannot change them. The run
-history is SQLite in write-ahead-log mode, which needs its instances on one machine; a
-volume shared by several machines needs the PostgreSQL run history, planned for 0.3.
+### Several instances
+
+The run history is a SQLite file in the data directory by default. SQLite's write-ahead log
+needs every instance that opens it on one machine, as during a rolling update on one node.
+For instances on several machines, put the run history in PostgreSQL:
+
+```bash
+MAGE_SERVICE_LEDGER_URL='postgres://mage:secret@db.internal:5432/mage?sslmode=verify-full'
+MAGE_SERVICE_LEDGER_SCHEMA=orders_service
+```
+
+Every instance of the service uses the same URL and schema. A schema holds one service's
+runs: a second service on the same schema is refused at start, so give each its own.
+
+| | Across instances |
+| --- | --- |
+| Runs | A run asked of any instance runs on whichever claims it first; each run once |
+| `max_concurrent_runs` | Counts the pipeline's runs on every instance |
+| Cancel | Sent to any instance; the instance running the run stops it within 2 seconds |
+| A stopped instance | Its running runs are failed when its lease ends (30 seconds without a renewal), at once when it stopped cleanly or its process is gone from the same machine |
+| A stalled instance | Finds its runs failed when it wakes, and cannot change them |
+| Schedules | One instance owns them at a time |
+| Logs and outputs | On the data volume of the instance that ran the run. Another instance answers `/v1/runs/{id}/logs` with 409 and the host that has them |
+
+`sslmode` takes libpq's modes (`disable`, `prefer`, `require`, `verify-ca`, `verify-full`)
+and `sslrootcert` a file; the `key=value` form works too. The service makes the schema and
+its tables at first start, and migrates them when a newer engine starts. With
+`MAGE_SERVICE_LEDGER_MIGRATE=off` it refuses an older schema instead, and an operator runs
+the migration before the rollout:
+
+```bash
+mage-service ledger migrate
+```
+
+To move an existing service from its file to PostgreSQL, copy its history once with the
+new settings; runs already copied are skipped, so it can run again:
+
+```bash
+mage-service ledger import /var/lib/mage-service/runs.db
+```
+
+An engine refuses a run history newer than it knows, file or schema, instead of writing
+to it.
 
 ## Settings
 
@@ -515,6 +550,9 @@ volume shared by several machines needs the PostgreSQL run history, planned for 
 | `MAGE_SERVICE_STREAM_LOG_MB` | 64 | A stream's log (`<data>/streams/<pipeline>/stream.log`) moves to `stream.log.1` past this size; every line also goes to the service's output |
 | `MAGE_SERVICE_STREAM_LOG_FILES` | 4 | Rotated stream logs kept |
 | `MAGE_SERVICE_INGEST_TOKEN` | none | A token that can only send messages to webhook streams, for webhook senders |
+| `MAGE_SERVICE_LEDGER_URL` | none | A PostgreSQL run history, shared by instances on several machines; see [Several instances](#several-instances) |
+| `MAGE_SERVICE_LEDGER_SCHEMA` | `mage_service` | Its schema; one service per schema |
+| `MAGE_SERVICE_LEDGER_MIGRATE` | `on` | `off` refuses an older run history instead of migrating it at start |
 | `MAGE_SERVICE_INSTANCE_ID` | none | A stable name for this replica, such as a Kubernetes StatefulSet pod's name. Kafka streams then join their group as static members (`group.instance.id`), so a restart within the session timeout keeps the replica's partitions instead of moving the group's partitions twice |
 
 ### What block code can read

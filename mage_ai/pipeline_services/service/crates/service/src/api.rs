@@ -601,7 +601,27 @@ async fn logs(
         return Err(ApiError(StatusCode::NOT_FOUND, format!("no run {id}")));
     }
     let path = state.service.run_dir(&id).join("run.log");
-    let text = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    let text = match tokio::fs::read_to_string(&path).await {
+        Ok(text) => text,
+        Err(_) => match state.service.ledger.other_owner(&id)? {
+            // An empty log would read as a run that printed nothing.
+            Some((instance, host)) => {
+                return Err(ApiError(
+                    StatusCode::CONFLICT,
+                    format!(
+                        "Run {id} ran on instance {instance}{}; its log is on that \
+                         instance's data volume.",
+                        if host.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (host {host})")
+                        }
+                    ),
+                ));
+            }
+            None => String::new(),
+        },
+    };
     let mut lines: Vec<Value> = text
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
