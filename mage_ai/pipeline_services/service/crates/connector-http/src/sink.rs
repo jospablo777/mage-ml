@@ -406,7 +406,12 @@ mod tests {
                 reader.read_exact(&mut body).unwrap();
                 tx.send(format!("{head}\n{}", String::from_utf8(body).unwrap()))
                     .unwrap();
-                write!(stream, "HTTP/1.1 {status} X\r\ncontent-length: 2\r\n\r\nno").unwrap();
+                // The connection closes after each answer, as it says.
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\ncontent-length: 2\r\nconnection: close\r\n\r\nno"
+                )
+                .unwrap();
             }
         });
         (url, rx)

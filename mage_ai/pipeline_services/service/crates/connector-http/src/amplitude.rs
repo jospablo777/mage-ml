@@ -746,7 +746,8 @@ mod tests {
     }
 
     /// A receiver that answers each request with the next status and body, and keeps the
-    /// request bodies.
+    /// request bodies. It closes each connection, and says so: a client that reused it would
+    /// meet a reset.
     fn receiver(answers: Vec<(u16, &'static str)>) -> (String, std::sync::mpsc::Receiver<Value>) {
         use std::io::{BufRead, BufReader, Read, Write};
 
@@ -773,7 +774,7 @@ mod tests {
                 tx.send(serde_json::from_slice(&body).unwrap()).unwrap();
                 write!(
                     stream,
-                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{answer}",
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
                     answer.len()
                 )
                 .unwrap();
