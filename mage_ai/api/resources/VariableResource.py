@@ -2,6 +2,7 @@ from typing import Dict
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.data_preparation.models.variables.constants import VariableType
 from mage_ai.data_preparation.variable_manager import (
     VariableManager,
@@ -44,7 +45,7 @@ class VariableResource(GenericResource):
         context_data = kwargs.get('context_data')
         repo_path = get_repo_path(context_data=context_data, user=user)
         variables_dir = get_variables_dir(repo_path=repo_path)
-        pipeline_uuid = kwargs['parent_model'].uuid
+        pipeline_uuid = parent_of(kwargs, 'variables', 'pipelines').uuid
 
         global_only = query.get('global_only', [False])
         if global_only:
@@ -103,7 +104,7 @@ class VariableResource(GenericResource):
     @classmethod
     @safe_db_query
     def create(self, payload: Dict, user, **kwargs) -> 'VariableResource':
-        pipeline_uuid = kwargs['parent_model'].uuid
+        pipeline_uuid = parent_of(kwargs, 'variables', 'pipelines').uuid
 
         error = ApiError.RESOURCE_INVALID.copy()
 
@@ -146,7 +147,7 @@ class VariableResource(GenericResource):
 
     @safe_db_query
     def update(self, payload, **kwargs):
-        pipeline_uuid = kwargs['parent_model'].uuid
+        pipeline_uuid = parent_of(kwargs, 'variables', 'pipelines').uuid
 
         error = ApiError.RESOURCE_INVALID.copy()
 
@@ -185,6 +186,6 @@ class VariableResource(GenericResource):
 
     @safe_db_query
     def delete(self, **kwargs):
-        pipeline_uuid = kwargs['parent_model'].uuid
+        pipeline_uuid = parent_of(kwargs, 'variables', 'pipelines').uuid
         delete_global_variable(pipeline_uuid, self.name)
         return self

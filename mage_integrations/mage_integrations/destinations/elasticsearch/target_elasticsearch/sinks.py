@@ -1,10 +1,10 @@
 import datetime
+import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import elasticsearch
 import jinja2
 import jsonpath_ng
-import singer_sdk.io_base
 from elasticsearch.helpers import bulk, parallel_bulk
 from singer_sdk import PluginBase
 
@@ -63,7 +63,7 @@ def build_fields(
     stream_name: str,
     mapping: Dict,
     record: Dict[str, Union[str, Dict[str, str], int]],
-    logger: singer_sdk.io_base.logger,
+    logger: logging.Logger,
 ) -> Dict:
     """
     build_fields parses records for supplied mapping to be used later in index

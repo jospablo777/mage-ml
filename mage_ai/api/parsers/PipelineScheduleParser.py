@@ -37,7 +37,7 @@ async def parse_write(
         parsed_value = (value or {}).copy()
 
     pipeline = parser.policy.parent_model()
-    if not pipeline:
+    if not pipeline and parser.policy.resource:
         pipeline = parser.policy.resource.pipeline
 
     if Project(repo_config=pipeline.repo_config if pipeline else None).is_feature_enabled(

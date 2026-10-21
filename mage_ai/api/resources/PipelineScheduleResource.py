@@ -9,6 +9,7 @@ from sqlalchemy.sql.expression import func
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import (
     ScheduleStatus,
@@ -276,7 +277,7 @@ class PipelineScheduleResource(DatabaseResource):
     @classmethod
     @safe_db_query
     def create(self, payload, user, **kwargs):
-        pipeline = kwargs['parent_model']
+        pipeline = parent_of(kwargs, 'pipeline_schedules', 'pipelines')
         payload['pipeline_uuid'] = pipeline.uuid
 
         if 'repo_path' not in payload:

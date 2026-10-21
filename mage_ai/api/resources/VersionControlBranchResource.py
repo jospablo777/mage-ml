@@ -3,6 +3,7 @@ from typing import Dict
 
 from mage_ai.api.resources.AsyncBaseResource import AsyncBaseResource
 from mage_ai.api.resources.mixins.version_control_errors import VersionControlErrors
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.orchestration.db.models.oauth import User
 from mage_ai.version_control.models import Branch, Remote
 
@@ -10,7 +11,7 @@ from mage_ai.version_control.models import Branch, Remote
 class VersionControlBranchResource(VersionControlErrors, AsyncBaseResource):
     @classmethod
     async def collection(self, query: Dict, _meta: Dict, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_branches', 'version_control_projects')
 
         remote = query.get('remote', [None])
         if remote:
@@ -74,7 +75,7 @@ class VersionControlBranchResource(VersionControlErrors, AsyncBaseResource):
 
     @classmethod
     def hydrate_models(self, user: User, name: str = None, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_branches', 'version_control_projects')
 
         query = kwargs.get('query') or {}
         remote = query.get('remote', [None])

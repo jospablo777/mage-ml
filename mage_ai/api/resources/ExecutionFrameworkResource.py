@@ -53,7 +53,7 @@ class ExecutionFrameworkResource(GenericResource):
 
     @classmethod
     async def member(cls, pk, user, **kwargs):
-        model = cls.get_model(pk, **kwargs)
+        model = await cls.get_model(pk, **kwargs)
 
         if not model:
             raise ApiError(ApiError.RESOURCE_NOT_FOUND)

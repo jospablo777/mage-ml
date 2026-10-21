@@ -257,6 +257,15 @@ class BlockResource(GenericResource):
             block_type = block_type[0]
 
         pipeline = kwargs.get('parent_model')
+        if isinstance(pipeline, PipelineRun):
+            # A block the run has a block run for, from the run's pipeline.
+            pk = urllib.parse.unquote(pk)
+            ran = {block_run.block_uuid for block_run in pipeline.block_runs}
+            block = pipeline.pipeline.get_block(pk) if pk in ran and pipeline.pipeline else None
+            if block:
+                return self(block, user, **kwargs)
+            error.update(message=f'Block {pk} is not in pipeline run {pipeline.id}.')
+            raise ApiError(error)
         if pipeline:
             pk = urllib.parse.unquote(pk)
             block = pipeline.get_block(pk, block_type=block_type, extension_uuid=extension_uuid)

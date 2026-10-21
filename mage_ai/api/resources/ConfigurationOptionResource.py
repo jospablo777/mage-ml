@@ -31,8 +31,9 @@ class ConfigurationOptionResource(AsyncBaseResource):
             resource_uuid=resource_uuid,
         )
 
+        # fetch has options for dbt only; any other type has none.
         return self.build_result_set(
-            results,
+            results or [],
             user,
             **kwargs,
         )

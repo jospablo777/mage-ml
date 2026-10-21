@@ -4,6 +4,7 @@ import pytz
 from sqlalchemy import desc
 
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.orchestration.backfills.service import cancel_backfill, start_backfill
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.schedules import Backfill
@@ -41,7 +42,7 @@ class BackfillResource(DatabaseResource):
     @classmethod
     @safe_db_query
     def create(self, payload, user, **kwargs):
-        pipeline_uuid = kwargs['parent_model'].uuid
+        pipeline_uuid = parent_of(kwargs, 'backfills', 'pipelines').uuid
 
         return super().create(merge_dict(
             extract(payload, ALLOWED_PAYLOAD_KEYS),

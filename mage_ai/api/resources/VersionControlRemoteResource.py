@@ -3,6 +3,7 @@ from typing import Dict
 
 from mage_ai.api.resources.AsyncBaseResource import AsyncBaseResource
 from mage_ai.api.resources.mixins.version_control_errors import VersionControlErrors
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.orchestration.db.models.oauth import User
 from mage_ai.version_control.models import Remote
 
@@ -10,7 +11,7 @@ from mage_ai.version_control.models import Remote
 class VersionControlRemoteResource(VersionControlErrors, AsyncBaseResource):
     @classmethod
     async def collection(self, query: Dict, _meta: Dict, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_remotes', 'version_control_projects')
 
         models = Remote.load_all(project=project)
         return self.build_result_set(
@@ -21,7 +22,7 @@ class VersionControlRemoteResource(VersionControlErrors, AsyncBaseResource):
 
     @classmethod
     async def create(self, payload: Dict, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_remotes', 'version_control_projects')
         model = Remote.load(**payload)
         model.project = project
         model.create()
@@ -33,7 +34,7 @@ class VersionControlRemoteResource(VersionControlErrors, AsyncBaseResource):
 
     @classmethod
     async def member(self, pk: str, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_remotes', 'version_control_projects')
 
         query = kwargs.get('query') or {}
         url = query.get('url', [None])

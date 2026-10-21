@@ -4,6 +4,7 @@ from typing import Dict
 
 from mage_ai.api.resources.AsyncBaseResource import AsyncBaseResource
 from mage_ai.api.resources.mixins.version_control_errors import VersionControlErrors
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.orchestration.db.models.oauth import User
 from mage_ai.version_control.models import File
 
@@ -21,7 +22,7 @@ async def get_content(model: File) -> File:
 class VersionControlFileResource(VersionControlErrors, AsyncBaseResource):
     @classmethod
     async def collection(self, query: Dict, _meta: Dict, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_files', 'version_control_projects')
 
         models = File.load_all(project=project)
 
@@ -53,7 +54,7 @@ class VersionControlFileResource(VersionControlErrors, AsyncBaseResource):
 
     @classmethod
     async def create(self, payload: Dict, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_files', 'version_control_projects')
         model = File()
         model.project = project
         model.name = payload.get('name')
@@ -65,7 +66,7 @@ class VersionControlFileResource(VersionControlErrors, AsyncBaseResource):
 
     @classmethod
     async def member(self, pk: str, user: User, **kwargs):
-        project = kwargs.get('parent_model')
+        project = parent_of(kwargs, 'version_control_files', 'version_control_projects')
         model = File.load(name=urllib.parse.unquote(pk))
         model.project = project
 

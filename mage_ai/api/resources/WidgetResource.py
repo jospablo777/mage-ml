@@ -3,6 +3,7 @@ from typing import Dict
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.data_preparation.models.widget import Widget
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.settings.repo import get_repo_path
@@ -12,7 +13,7 @@ class WidgetResource(GenericResource):
     @classmethod
     @safe_db_query
     async def collection(self, query, meta, user, **kwargs):
-        pipeline = kwargs['parent_model']
+        pipeline = parent_of(kwargs, 'widgets', 'pipelines')
 
         include_outputs = query.get('include_outputs', [True])
         if include_outputs:
@@ -34,7 +35,7 @@ class WidgetResource(GenericResource):
     @classmethod
     @safe_db_query
     async def create(self, payload: Dict, user, **kwargs) -> 'WidgetResource':
-        pipeline = kwargs['parent_model']
+        pipeline = parent_of(kwargs, 'widgets', 'pipelines')
 
         resource = Widget.create(
             payload.get('name') or payload.get('uuid'),
@@ -59,7 +60,7 @@ class WidgetResource(GenericResource):
     @classmethod
     @safe_db_query
     async def member(self, pk, user, **kwargs):
-        pipeline = kwargs['parent_model']
+        pipeline = parent_of(kwargs, 'widgets', 'pipelines')
         widget = pipeline.get_block(pk, widget=True)
 
         error = ApiError.RESOURCE_NOT_FOUND.copy()

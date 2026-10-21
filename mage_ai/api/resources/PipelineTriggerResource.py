@@ -1,5 +1,6 @@
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
+from mage_ai.api.resources.shared.parents import parent_of
 from mage_ai.data_preparation.models.triggers import (
     Trigger,
     add_or_update_trigger_for_pipeline_and_persist,
@@ -15,7 +16,7 @@ class PipelineTriggerResource(GenericResource):
     @classmethod
     @safe_db_query
     def collection(self, query, meta, user, **kwargs):
-        parent_model = kwargs['parent_model']
+        parent_model = parent_of(kwargs, 'pipeline_triggers', 'pipelines')
 
         return self.build_result_set(
             get_triggers_by_pipeline(
@@ -29,7 +30,7 @@ class PipelineTriggerResource(GenericResource):
     @classmethod
     @safe_db_query
     def create(self, payload, user, **kwargs):
-        parent_model = kwargs['parent_model']
+        parent_model = parent_of(kwargs, 'pipeline_triggers', 'pipelines')
         error = dict(ApiError.RESOURCE_INVALID)
 
         pipeline_schedule_id = payload.get('pipeline_schedule_id')
