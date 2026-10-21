@@ -29,8 +29,8 @@ use mage_stream_ports::{
 };
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, ConsumerContext, Rebalance};
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance};
+use rdkafka::error::{KafkaError, KafkaResult, RDKafkaErrorCode};
 use rdkafka::message::{Header as KafkaHeader, Headers, Message, OwnedHeaders};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer as _};
 use rdkafka::{Offset, TopicPartitionList};
@@ -456,10 +456,15 @@ const LAG_EVERY: Duration = Duration::from_secs(5);
 /// How long a commit made before giving partitions up waits for the coordinator's answer.
 const COMMIT_WITHIN: Duration = Duration::from_secs(10);
 /// How often the poll thread commits the positions again, as the Java client's auto commit
-/// does. librdkafka reports the result of a manual asynchronous commit to no one, so a commit
-/// lost while the coordinator was down stayed lost: a partition whose last batch it was kept
-/// its old committed offset as long as the stream ran (I-195).
+/// does: a commit lost while the coordinator was down stayed lost, and a partition whose
+/// last batch it was kept its old committed offset as long as the stream ran (I-195).
 const RECOMMIT_EVERY: Duration = Duration::from_secs(5);
+/// Batches of a partition read past the last offset the broker confirmed committing, at
+/// most: the stream's in-flight batches. Past it, the partition waits for its commits, so a
+/// lost assignment reads at most this much again. Asynchronous commits count as done when
+/// handed to librdkafka, and a broker refusing them for a while (a slow shutdown) let the
+/// stream read on: 5,587 of 20,000 messages were read again in a CI restart test.
+const UNCONFIRMED_BATCHES: usize = 8;
 /// Chunks of messages between the poll thread and the stream; librdkafka's own queue, sized
 /// from the stream's byte budget, holds the rest.
 const CHANNEL: usize = 16;
@@ -484,9 +489,32 @@ struct Table {
     /// again every [`RECOMMIT_EVERY`], and waited for (up to [`COMMIT_WITHIN`]) before a
     /// partition is given up and when the source closes.
     committed: BTreeMap<u32, i64>,
+    /// The next offset to read, as the broker confirmed committing it, per partition: from
+    /// the answers to the commits, or the first offset read in the assignment.
+    confirmed: BTreeMap<u32, i64>,
+    /// The next offset after the last one read, per partition.
+    read_next: BTreeMap<u32, i64>,
 }
 
 impl Table {
+    /// The broker confirmed committing `next` as the partition's next offset to read.
+    /// Partitions not assigned here are left out.
+    fn confirm(&mut self, topic: &str, partition: i32, next: i64) {
+        let id = self.id(topic, partition);
+        if self.epochs.contains_key(&id) {
+            let confirmed = self.confirmed.entry(id).or_insert(next);
+            *confirmed = (*confirmed).max(next);
+        }
+    }
+
+    /// Messages of the partition read past what the broker confirmed committing.
+    fn unconfirmed(&self, id: u32) -> i64 {
+        match (self.read_next.get(&id), self.confirmed.get(&id)) {
+            (Some(read), Some(confirmed)) => (read - confirmed).max(0),
+            _ => 0,
+        }
+    }
+
     /// The committed offsets of the partitions, to commit synchronously.
     fn committed_list(&self, ids: impl Iterator<Item = u32>) -> TopicPartitionList {
         let mut list = TopicPartitionList::new();
@@ -688,6 +716,8 @@ impl ConsumerContext for RebalanceContext {
             table.epochs.remove(&id);
             table.lag.remove(&id);
             table.committed.remove(&id);
+            table.confirmed.remove(&id);
+            table.read_next.remove(&id);
         }
     }
 
@@ -811,6 +841,88 @@ impl Drop for LogQueue {
     }
 }
 
+/// Asynchronous commits whose answers come back. librdkafka posts the answer to a manual
+/// asynchronous commit only to a commit callback set in its configuration, which rdkafka's
+/// event API leaves unset, so the answers went nowhere. The commits go through a queue of
+/// their own, which the poll thread drains into the table's confirmed offsets.
+struct Committer {
+    queue: *mut rdkafka::bindings::rd_kafka_queue_t,
+    // Dropped after the queue is destroyed (Drop runs first).
+    consumer: Arc<KafkaConsumer>,
+}
+
+// SAFETY: a librdkafka queue is thread safe: the stream's task commits through it and the
+// poll thread drains it.
+unsafe impl Send for Committer {}
+unsafe impl Sync for Committer {}
+
+impl Committer {
+    fn new(consumer: Arc<KafkaConsumer>) -> Committer {
+        // SAFETY: the client handle lives as long as `consumer`, which outlives the queue.
+        let queue =
+            unsafe { rdkafka::bindings::rd_kafka_queue_new(consumer.client().native_ptr()) };
+        Committer { queue, consumer }
+    }
+
+    /// Hands the positions to librdkafka; the broker's answer comes to [`Committer::drain`].
+    fn commit(&self, list: &TopicPartitionList) -> KafkaResult<()> {
+        use rdkafka::bindings::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR as NO_ERROR;
+
+        // SAFETY: librdkafka copies the list; the queue lives as long as self.
+        let error = unsafe {
+            rdkafka::bindings::rd_kafka_commit_queue(
+                self.consumer.client().native_ptr(),
+                list.ptr(),
+                self.queue,
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        match error {
+            NO_ERROR => Ok(()),
+            error => Err(KafkaError::ConsumerCommit(error.into())),
+        }
+    }
+
+    /// Records the offsets the broker confirmed committing since the last call.
+    fn drain(&self, table: &Mutex<Table>) {
+        use rdkafka::bindings as rd;
+        use rdkafka::bindings::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR as NO_ERROR;
+        use std::ffi::CStr;
+
+        // SAFETY: each event is ours until destroyed, and its list and topic names live as
+        // long as the event.
+        unsafe {
+            loop {
+                let event = rd::rd_kafka_queue_poll(self.queue, 0);
+                if event.is_null() {
+                    return;
+                }
+                let list = rd::rd_kafka_event_topic_partition_list(event);
+                if rd::rd_kafka_event_error(event) == NO_ERROR && !list.is_null() {
+                    let elements = std::slice::from_raw_parts((*list).elems, (*list).cnt as usize);
+                    let mut table = table.lock().unwrap_or_else(|p| p.into_inner());
+                    for element in elements {
+                        if element.err == NO_ERROR && element.offset >= 0 {
+                            let topic = CStr::from_ptr(element.topic).to_string_lossy();
+                            table.confirm(&topic, element.partition, element.offset);
+                        }
+                    }
+                }
+                rd::rd_kafka_event_destroy(event);
+            }
+        }
+    }
+}
+
+impl Drop for Committer {
+    fn drop(&mut self) {
+        // SAFETY: created by rd_kafka_queue_new and destroyed once, before the consumer; an
+        // answer still to come holds its own reference to the queue.
+        unsafe { rdkafka::bindings::rd_kafka_queue_destroy(self.queue) };
+    }
+}
+
 /// Commits the positions and waits up to `within` for the coordinator's answer. librdkafka's
 /// synchronous commit waits without end: in a revoke, a coordinator that did not answer
 /// held the poll thread, and the stream with it (I-196).
@@ -856,6 +968,7 @@ fn commit_within(
 /// the stream without holding up the stream's own task.
 fn poll_loop(
     consumer: Arc<KafkaConsumer>,
+    committer: Arc<Committer>,
     table: Arc<Mutex<Table>>,
     stop: Arc<AtomicBool>,
     mut reading: Reading,
@@ -866,6 +979,7 @@ fn poll_loop(
     let mut recommit_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         log.drain();
+        committer.drain(&table);
         // One message woke the stream's task and parked it again each time: the two
         // threads mostly waited on each other (I-84). The messages librdkafka already
         // holds go together.
@@ -912,7 +1026,7 @@ fn poll_loop(
                 table.committed_list(table.epochs.keys().copied())
             };
             if list.count() > 0 {
-                let _ = consumer.commit(&list, CommitMode::Async);
+                let _ = committer.commit(&list);
             }
         }
     }
@@ -976,6 +1090,7 @@ struct Pending {
 
 pub struct KafkaSource {
     consumer: Arc<KafkaConsumer>,
+    committer: Arc<Committer>,
     table: Arc<Mutex<Table>>,
     polled: mpsc::Receiver<Polled>,
     stop: Arc<AtomicBool>,
@@ -1105,15 +1220,18 @@ impl KafkaSource {
             |consumer: &KafkaConsumer, topic| broker_answers(consumer.client(), topic),
             |consumer: &KafkaConsumer, servers| add_brokers(consumer.client(), servers),
         )?;
+        let committer = Arc::new(Committer::new(consumer.clone()));
         let thread = std::thread::Builder::new()
             .name("kafka-source".into())
             .spawn({
-                let (consumer, table, stop) = (consumer.clone(), table.clone(), stop.clone());
-                move || poll_loop(consumer, table, stop, reading)
+                let (consumer, committer) = (consumer.clone(), committer.clone());
+                let (table, stop) = (table.clone(), stop.clone());
+                move || poll_loop(consumer, committer, table, stop, reading)
             })
             .map_err(|e| ConnectorError::fatal(format!("Kafka: {e}")))?;
         Ok(KafkaSource {
             consumer,
+            committer,
             table,
             polled,
             stop,
@@ -1231,6 +1349,11 @@ impl KafkaSource {
             .max(Duration::from_millis(1))
     }
 
+    fn unconfirmed(&self, id: u32) -> i64 {
+        let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+        table.unconfirmed(id)
+    }
+
     fn tpl(&self, id: u32) -> Option<TopicPartitionList> {
         let table = self.table.lock().unwrap_or_else(|p| p.into_inner());
         let (topic, partition) = table.names.get(id as usize)?.clone();
@@ -1258,6 +1381,14 @@ impl KafkaSource {
             return false;
         }
         let offset = message.offset();
+        {
+            let mut table = self.table.lock().unwrap_or_else(|p| p.into_inner());
+            // Until the broker confirms a commit, the assignment's first offset is the one a
+            // restart would read from.
+            table.confirmed.entry(id).or_insert(offset);
+            let next = table.read_next.entry(id).or_insert(offset + 1);
+            *next = (*next).max(offset + 1);
+        }
         if !self.read.first_read(id, epoch, offset) {
             write_log(
                 "warn",
@@ -1355,8 +1486,11 @@ impl KafkaSource {
     /// the others', and its batch grew past full one message per wait (I-197).
     fn take_carry(&mut self) -> Result<Option<SourceEvent>, ConnectorError> {
         let ids: Vec<u32> = self.carry.keys().copied().collect();
+        let limit = (UNCONFIRMED_BATCHES * self.limits.max_records) as i64;
         for id in ids {
-            while !self.pending.get(&id).is_some_and(|p| self.full(p)) {
+            while !self.pending.get(&id).is_some_and(|p| self.full(p))
+                && self.unconfirmed(id) < limit
+            {
                 let Some(message) = self.carry.get_mut(&id).and_then(|q| q.pop_front()) else {
                     break;
                 };
@@ -1443,12 +1577,13 @@ impl Source for KafkaSource {
                 table.committed.extend(next);
             }
             // Asynchronous, in order: a synchronous commit held the stream's loop for a
-            // round trip to the coordinator on every batch (I-85). librdkafka reports no
-            // result, so the poll thread commits the positions again every RECOMMIT_EVERY,
-            // and synchronously before a partition is given up and at close. Committed here
-            // means handed to librdkafka: after a crash, a batch can be read again, as
-            // at-least-once allows.
-            match self.consumer.commit(&list, CommitMode::Async) {
+            // round trip to the coordinator on every batch (I-85). A commit that fails is
+            // not tried again by librdkafka, so the poll thread commits the positions again
+            // every RECOMMIT_EVERY, and synchronously before a partition is given up and at
+            // close. Committed here means handed to librdkafka: after a crash, a batch can be
+            // read again, as at-least-once allows, and reading stops UNCONFIRMED_BATCHES
+            // past the broker's answers.
+            match self.committer.commit(&list) {
                 Ok(()) => CommitOutcome::Committed,
                 Err(error) => match error.rdkafka_error_code() {
                     Some(RDKafkaErrorCode::IllegalGeneration)
@@ -1715,6 +1850,31 @@ impl Sink for KafkaSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_runs_ahead_of_the_broker_confirmed_offsets_of_assigned_partitions_only() {
+        let mut table = Table::default();
+        let id = table.id("orders", 0);
+        table.assign(id);
+        table.confirmed.insert(id, 100);
+        table.read_next.insert(id, 900);
+        assert_eq!(table.unconfirmed(id), 800);
+
+        table.confirm("orders", 0, 600);
+        assert_eq!(table.unconfirmed(id), 300);
+        // An offset of a partition not assigned here is not recorded.
+        table.confirm("other", 3, 5);
+        assert!(
+            !table
+                .confirmed
+                .contains_key(&table.ids[&("other".to_string(), 3)])
+        );
+        // An older answer does not move the confirmed offset back.
+        table.confirm("orders", 0, 200);
+        assert_eq!(table.unconfirmed(id), 300);
+        table.confirm("orders", 0, 950);
+        assert_eq!(table.unconfirmed(id), 0);
+    }
 
     #[test]
     fn a_message_read_twice_in_one_assignment_is_skipped() {
