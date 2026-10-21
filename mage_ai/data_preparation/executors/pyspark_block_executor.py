@@ -49,10 +49,13 @@ class PySparkBlockExecutor(BlockExecutor):
         3. Submit a spark job
         """
         stdout = StreamToLogger(self.logger)
-        with redirect_stdout(stdout):
-            self.upload_block_execution_script(global_vars=global_vars)
-            self.resource_manager.upload_bootstrap_script()
-            self.submit_spark_job()
+        try:
+            with redirect_stdout(stdout):
+                self.upload_block_execution_script(global_vars=global_vars)
+                self.resource_manager.upload_bootstrap_script()
+                self.submit_spark_job()
+        finally:
+            stdout.flush()
 
     @property
     def spark_script_path(self) -> str:

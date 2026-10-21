@@ -125,13 +125,17 @@ class StreamingPipelineExecutor(PipelineExecutor):
                 retry_metadata=self.retry_metadata,
             )
             def __execute_with_retry():
-                with redirect_stdout(stdout):
-                    with redirect_stderr(stdout):
-                        self.__execute_in_python(
-                            build_block_output_stdout=build_block_output_stdout,
-                            global_vars=global_vars,
-                            pipeline_run_id=pipeline_run_id,
-                        )
+                try:
+                    with redirect_stdout(stdout):
+                        with redirect_stderr(stdout):
+                            self.__execute_in_python(
+                                build_block_output_stdout=build_block_output_stdout,
+                                global_vars=global_vars,
+                                pipeline_run_id=pipeline_run_id,
+                            )
+                finally:
+                    if isinstance(stdout, StreamToLogger):
+                        stdout.flush()
             __execute_with_retry()
         except Exception as e:
             if not build_block_output_stdout:

@@ -1977,8 +1977,12 @@ class Block(
         else:
             stdout = sys.stdout
 
-        with redirect_stdout(stdout) as out, redirect_stderr(stdout) as err:
-            yield (out, err)
+        try:
+            with redirect_stdout(stdout) as out, redirect_stderr(stdout) as err:
+                yield (out, err)
+        finally:
+            if isinstance(stdout, StreamToLogger):
+                stdout.flush()
 
     def _compiled(self, code: str):
         """The block's code compiled under its file name, so tracebacks show its lines."""

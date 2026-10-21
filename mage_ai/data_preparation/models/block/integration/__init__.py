@@ -42,8 +42,12 @@ class IntegrationBlock(Block):
         else:
             stdout = sys.stdout
 
-        with redirect_stdout(stdout) as out:
-            yield out
+        try:
+            with redirect_stdout(stdout) as out:
+                yield out
+        finally:
+            if isinstance(stdout, StreamToLogger):
+                stdout.flush()
 
     def _execute_block(
         self,
