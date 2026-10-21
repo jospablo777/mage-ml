@@ -376,6 +376,22 @@ fn runs_complete_and_return_their_blocks_when_waited_for() {
         .map(|l| l["message"].as_str().unwrap().to_string())
         .collect();
     assert!(lines.iter().any(|l| l == "loading 5"), "{lines:?}");
+    // A reader that follows the run asks for the lines after the ones it has.
+    let id = run["id"].as_str().unwrap();
+    let (_, all) = service.get(&format!("/v1/runs/{id}/logs"));
+    let total = all["lines"].as_array().unwrap().len();
+    assert_eq!(all["next"], json!(total));
+    let (_, rest) = service.get(&format!("/v1/runs/{id}/logs?after=1"));
+    assert_eq!(rest["lines"].as_array().unwrap().len(), total - 1);
+    assert_eq!(rest["lines"][0], all["lines"][1]);
+    let (_, none) = service.get(&format!("/v1/runs/{id}/logs?after={}", total + 5));
+    assert_eq!(
+        (
+            none["lines"].as_array().unwrap().len(),
+            none["next"].clone()
+        ),
+        (0, json!(total))
+    );
 
     // The same idempotency key returns the first run.
     let (first_status, first) = service.post(

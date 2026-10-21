@@ -23,6 +23,15 @@
   1 s instead of 20 s and wrote 1 MB instead of 952 MB. The Compile panel lists the
   chains and the SQL blocks left out, with the reason.
 
+### Airflow
+
+- `mageml-airflow`, an Airflow provider: `MageMLServiceRunOperator` runs a pipeline of a
+  MageML service from a DAG, with one run per task instance across retries (the service's
+  idempotency key), the run's log in the task log, the failing block's error, a block's
+  output as XCom, deferral to the triggerer and cancel on kill. Tested against a real
+  service and in Airflow 3.3. `GET /v1/runs/<id>/logs?after=` returns the lines after
+  the ones a reader has, with `next`.
+
 ### Block templates
 
 - The block menus come from one list of template records: every Python source template

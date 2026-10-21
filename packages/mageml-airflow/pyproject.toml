@@ -1,0 +1,26 @@
+# Runs pipelines of MageML services from Airflow. The operator calls a service's API, so
+# the pipelines run in the service, with their own packages, never in Airflow's Python.
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mageml-airflow"
+version = "0.1.0"
+description = "Airflow operator that runs pipelines of MageML services: idempotent runs, logs in the task log, outputs as XCom, deferrable"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+  "apache-airflow>=2.10",
+  "requests>=2.28",
+]
+
+[project.urls]
+Source = "https://github.com/jospablo777/mage-ml/tree/master/packages/mageml-airflow"
+
+[project.entry-points.apache_airflow_provider]
+provider_info = "mageml_airflow:get_provider_info"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mageml_airflow"]

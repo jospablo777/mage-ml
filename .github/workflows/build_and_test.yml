@@ -170,6 +170,19 @@ jobs:
         env:
           MAGE_TEST_POSTGRES_URL: postgres://postgres:test@localhost:5432/test?sslmode=disable
         run: cargo test --locked --all-features
+      # The Airflow provider (packages/mageml-airflow) against the engine the tests above
+      # built, in Airflow 3 in a venv of its own.
+      - name: Set up Python for the Airflow provider
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Airflow provider tests
+        working-directory: packages/mageml-airflow
+        run: |
+          python -m pip install "uv==${{ env.UV_VERSION }}"
+          uv venv /tmp/airflow --python 3.12
+          uv pip install --python /tmp/airflow/bin/python "apache-airflow>=3.3,<4" pytest -e .
+          /tmp/airflow/bin/python -m pytest -q tests
 
   packaging:
     name: Packaging
@@ -636,4 +649,3 @@ jobs:
           path: mage_ai/frontend/playwright-report/
           retention-days: 3
           overwrite: true
-

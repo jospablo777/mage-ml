@@ -591,6 +591,9 @@ struct LogQuery {
     block: Option<String>,
     tail: Option<usize>,
     format: Option<String>,
+    /// Only the lines after the first `after`: a reader that follows a run passes the
+    /// `next` of its last answer.
+    after: Option<usize>,
 }
 
 async fn logs(
@@ -633,6 +636,10 @@ async fn logs(
             None => true,
         })
         .collect();
+    let total = lines.len();
+    if let Some(after) = query.after {
+        lines.drain(..after.min(lines.len()));
+    }
     if let Some(tail) = query.tail
         && lines.len() > tail
     {
@@ -653,7 +660,7 @@ async fn logs(
             .collect();
         return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response());
     }
-    Ok(Json(json!({"lines": lines})).into_response())
+    Ok(Json(json!({"lines": lines, "next": total})).into_response())
 }
 
 async fn cancel(

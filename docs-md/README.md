@@ -480,7 +480,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Using an external IDE](integrations/text-editor.md)
 - **Orchestration**
   - **Airflow**
-    - [Run MageML pipelines in Airflow](integrations/airflow/index.md)
+    - [Run MageML pipelines from Airflow](integrations/airflow/index.md)
     - [Integrate MageML into an existing Airflow project](integrations/airflow/integrate-mage-airflow.md)
   - [Run MageML pipelines in Prefect](integrations/prefect.md)
 - **ETL**
