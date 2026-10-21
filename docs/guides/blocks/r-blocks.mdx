@@ -51,7 +51,7 @@ and callbacks are written in Python.
 | Block type | Templates |
 | --- | --- |
 | Data loader | Generic, local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
-| Transformer | Generic, clean, aggregate, join, reshape |
+| Transformer | Generic, clean, deduplicate (latest row per key), data quality checks, date features, one-hot encoding, aggregate, join, reshape, train a model (tidymodels), model inference |
 | Data exporter | Generic, local file, Amazon S3, API, PostgreSQL, MySQL, DuckDB, SQLite |
 | Custom | Generic |
 

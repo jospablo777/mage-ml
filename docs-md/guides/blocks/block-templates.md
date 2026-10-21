@@ -42,12 +42,12 @@ there.
 | Aggregate | none yet | Aggregate | Aggregate |
 | Combine | none yet | Join | Join |
 | Compute | none yet | none yet | Parallel computation |
-| Data cleaning | none yet | Clean data | Clean data, Data quality checks, Deduplicate |
+| Data cleaning | none yet | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate |
 | Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
 | Databases | PostgreSQL | none yet | none yet |
-| Feature extraction | none yet | none yet | Model features |
+| Feature extraction | none yet | Date features, One-hot encoding | Model features |
 | Formatting | none yet | none yet | Cast types |
-| Machine learning | none yet | Model inference | ONNX model inference |
+| Machine learning | none yet | Model inference, Train a model | ONNX model inference |
 | Reshape | none yet | Reshape | Unpivot |
 | Other | Base template (generic) | none yet | none yet |
 

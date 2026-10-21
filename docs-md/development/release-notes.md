@@ -34,6 +34,8 @@
 
 ### Block templates
 
+- R templates: deduplicate, data quality checks, date features, one-hot encoding and
+  train a model (a tidymodels random forest, saved for the Model inference template).
 - Rust templates for cloud storage (S3, Google Cloud Storage, Azure: lazy Parquet or CSV
   scans), DuckDB, MySQL, ClickHouse and MongoDB loaders and exporters, and deduplicate,
   data quality checks, unpivot and cast types transformers. A Rust block that uses
@@ -64,6 +66,9 @@
 
 ### Exported services
 
+- A stream that keeps no state commits its positions as soon as the sinks confirm a batch.
+  Since keyed state, every commit waited behind the next batch's transform, so a crash
+  repeated up to a batch more per partition than before.
 - `GET /v1/streams/<pipeline>/state/<block>?key=` serves a stream block's keyed state by
   key: its current value and timer, so other services read the features a stream computes
   online.

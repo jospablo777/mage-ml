@@ -215,6 +215,51 @@ def test_transformer_templates(mage_project):
     ]
 
 
+def test_cleaning_and_feature_templates(mage_project):
+    orders = pd.DataFrame({
+        'id': [1, 1, 2, None],
+        'updated_at': pd.to_datetime(['2024-01-01', '2024-01-05', '2024-01-02', '2024-01-03']),
+        'amount': [5.0, 7.0, -1.0, 2.0],
+    })
+    latest = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Deduplicate'), orders)
+    assert latest.sort_values('id')[['id', 'amount']].to_dict('records') == [
+        {'id': 1.0, 'amount': 7.0}, {'id': 2.0, 'amount': -1.0},
+    ]
+
+    with pytest.raises(Exception, match='id is missing in 1 rows; id repeats in 1 rows; '
+                                        'amount is negative in 1 rows'):
+        run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Data quality checks'), orders)
+    checked = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Data quality checks'),
+                  orders.iloc[[1, 2]].assign(amount=[7.0, 1.0]))
+    assert len(checked) == 2
+
+    stamps = pd.DataFrame({'created_at': pd.to_datetime(['2024-06-01 13:45', '2024-06-03 08:00'])})
+    dated = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Date features'), stamps)
+    assert dated[['weekday', 'month', 'hour', 'weekend']].to_dict('records') == [
+        {'weekday': 6, 'month': 6, 'hour': 13, 'weekend': True},
+        {'weekday': 1, 'month': 6, 'hour': 8, 'weekend': False},
+    ]
+
+    encoded = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'One-hot encoding'),
+                  pd.DataFrame({'id': [1, 2, 3], 'category': ['a', 'b', 'a']}))
+    assert encoded.to_dict('records') == [
+        {'id': 1, 'category_a': 1, 'category_b': 0},
+        {'id': 2, 'category_a': 0, 'category_b': 1},
+        {'id': 3, 'category_a': 1, 'category_b': 0},
+    ]
+
+
+def test_a_trained_model_scores_with_the_inference_template(mage_project):
+    rows = pd.DataFrame({'x': [float(i) for i in range(40)]})
+    rows['target'] = rows['x'] * 2 + 1
+    metrics = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Train a model'), rows,
+                  variables={'model': 'models/trained.rds'})
+    assert set(metrics['.metric']) == {'rmse', 'rsq', 'mae'}
+    scored = run(mage_project, TRANSFORMER, template(TRANSFORMER, 'Model inference'),
+                 pd.DataFrame({'x': [10.0, 20.0]}), variables={'model': 'models/trained.rds'})
+    assert scored['.pred'].between([15, 35], [27, 47]).all(), scored
+
+
 def test_model_inference_template(mage_project):
     models = Path(mage_project) / 'models'
     models.mkdir(exist_ok=True)

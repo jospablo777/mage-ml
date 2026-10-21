@@ -861,6 +861,29 @@ R_TEMPLATES = [
         'Write a table to a SQLite database file with DBI and RSQLite.', [GROUP_DATABASES],
     ),
     _r_template(
+        BlockType.TRANSFORMER, 'Deduplicate', 'deduplicate.r',
+        'Keep the latest row of each key.', [GROUP_DATA_CLEANING],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Data quality checks', 'quality.r',
+        'Stop with every problem found: missing values, repeated keys, negative amounts.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Date features', 'dates.r',
+        'Day, ISO week day, month, hour and weekend of a date column, with lubridate.',
+        [GROUP_FEATURE_EXTRACTION],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'One-hot encoding', 'encode.r',
+        'A 0 or 1 column per value of a column.', [GROUP_FEATURE_EXTRACTION],
+    ),
+    _r_template(
+        BlockType.TRANSFORMER, 'Train a model', 'train.r',
+        'A tidymodels random forest saved for Model inference, with its test metrics.',
+        [GROUP_MACHINE_LEARNING],
+    ),
+    _r_template(
         BlockType.TRANSFORMER, 'Model inference', 'predict.r',
         'Score rows with a model saved with saveRDS (lm, glm, ranger, tidymodels).',
         [GROUP_MACHINE_LEARNING],
