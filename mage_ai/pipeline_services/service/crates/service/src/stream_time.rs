@@ -47,14 +47,7 @@ impl Lateness {
     }
 
     fn time_of(&self, value: &[u8], timestamp: Option<i64>) -> Option<i64> {
-        let Some(field) = &self.settings.field else {
-            return timestamp;
-        };
-        let message: Value = serde_json::from_slice(value).ok()?;
-        let found = field
-            .split('.')
-            .try_fold(&message, |value, part| value.get(part))?;
-        parse_time(found, self.settings.format)
+        event_time_of(&self.settings, value, timestamp)
     }
 
     /// Judges the batch's messages, in order, and moves the watermarks.
@@ -124,6 +117,18 @@ impl Lateness {
         );
         Ok(split)
     }
+}
+
+/// A message's event time, as the settings read it: its field, or the source's timestamp.
+pub fn event_time_of(settings: &EventTime, value: &[u8], timestamp: Option<i64>) -> Option<i64> {
+    let Some(field) = &settings.field else {
+        return timestamp;
+    };
+    let message: Value = serde_json::from_slice(value).ok()?;
+    let found = field
+        .split('.')
+        .try_fold(&message, |value, part| value.get(part))?;
+    parse_time(found, settings.format)
 }
 
 fn iso(millis: i64) -> String {

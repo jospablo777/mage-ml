@@ -433,6 +433,56 @@ class EventTimeExportTest(StreamExportTestCase):
         self.assertEqual(stream['time'], dict(format='epoch_ms', on_late='pass', lateness_ms=0))
 
 
+class WindowExportTest(StreamExportTestCase):
+    WINDOW = '''
+        window:
+          key: card_id
+          type: hopping
+          size_seconds: 60
+          slide_seconds: 30
+          aggregate:
+            payments: count
+            total: {sum: amount}
+            shops: {distinct: shop_id}
+    '''
+
+    def windowed(self, window_yaml):
+        source = self.add('source', 'data_loader', SOURCE, language='yaml')
+        window = self.add('window', 'transformer', window_yaml, upstream=[source],
+                          language='yaml')
+        self.add('totals', 'data_exporter', SINK, upstream=[window], language='yaml')
+        return window
+
+    def test_a_yaml_transformer_with_window_becomes_a_window_block(self):
+        window = self.windowed(self.WINDOW)
+
+        pipeline = export.capture(self.repo_path, [self.pipeline.uuid]).manifest['pipelines'][0]
+
+        [entry] = [b for b in pipeline['blocks'] if b['uuid'] == window.uuid]
+        self.assertEqual(entry['language'], 'window')
+        self.assertEqual(entry['upstream'], [])
+        self.assertEqual(entry['window'], dict(
+            key='card_id', kind=dict(type='hopping', size_ms=60000, slide_ms=30000),
+            aggregates=[['payments', 'count'], ['total', {'sum': 'amount'}],
+                        ['shops', {'distinct': 'shop_id'}]],
+        ))
+
+    def test_a_window_says_what_to_fix(self):
+        self.windowed('''
+            window:
+              type: hopping
+              size_seconds: 60
+              slide_seconds: 25
+              aggregate:
+                key: count
+                p90: {percentile: amount}
+        ''')
+        problems = self.problems()
+        self.assertIn("a hopping window's size is a whole number of slides", problems)
+        self.assertIn('key is a field of every window result', problems)
+        self.assertIn('aggregate p90 is count, or one of sum, min, max, avg, distinct', problems)
+
+
 class RabbitmqExportTest(StreamExportTestCase):
     SOURCE = '''
         connector_type: rabbitmq

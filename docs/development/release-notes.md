@@ -42,6 +42,10 @@
 - R blocks in exported services run in an R session each Python worker keeps: a one-row R
   block over HTTP went from 627 ms to 8 ms p50. `MAGE_SERVICE_R_RESIDENT=off` starts Rscript
   for each run.
+- Window blocks: a YAML transformer with `window:` aggregates a stream over tumbling,
+  hopping or session windows of event time, per key (count, sum, min, max, average,
+  distinct count), computed in Rust. Windows are saved with the positions they hold before
+  each commit, so a restart resumes both from the same point.
 - Streams have event time: `event_time` on a source reads each message's time from a field
   or the source's timestamp, keeps a watermark per partition, and sends late messages (and
   messages without a time) to the dead-letter sink with the reason, or passes and counts

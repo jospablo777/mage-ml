@@ -202,6 +202,17 @@ pub struct StreamParts {
     pub time: Option<crate::stream_time::Lateness>,
 }
 
+/// Work for the transform lane, in order.
+enum LaneJob {
+    Transform(BatchId, RecordBatch),
+    /// Save the state as of these positions before the source commits them.
+    Committed(
+        Vec<mage_stream_core::Commit>,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    ),
+    Revoked(PartitionId),
+}
+
 enum Internal {
     Event(Event),
     /// A transform finished: each block's output, or the error.
@@ -464,11 +475,28 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
         .map(|sink| spawn_writer(sink, SinkId::DEAD_LETTER, true, tx.clone()));
 
     // The transform lane.
-    let (lane_tx, mut lane_rx) = mpsc::unbounded_channel::<(BatchId, RecordBatch)>();
+    let (lane_tx, mut lane_rx) = mpsc::unbounded_channel::<LaneJob>();
     let mut transform = parts.transform.take();
     let lane_events = tx.clone();
     let lane = tokio::spawn(async move {
-        while let Some((id, batch)) = lane_rx.recv().await {
+        while let Some(job) = lane_rx.recv().await {
+            let (id, batch) = match job {
+                LaneJob::Transform(id, batch) => (id, batch),
+                LaneJob::Committed(commits, reply) => {
+                    let saved = match transform.as_mut() {
+                        Some(session) => session.committed(&commits).await,
+                        None => Ok(()),
+                    };
+                    let _ = reply.send(saved);
+                    continue;
+                }
+                LaneJob::Revoked(partition) => {
+                    if let Some(session) = transform.as_mut() {
+                        session.revoked(partition);
+                    }
+                    continue;
+                }
+            };
             let result = match transform.as_mut() {
                 Some(session) => session.transform(batch).await,
                 None => Ok(TransformOutput {
@@ -595,7 +623,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         Operation::Transform(id) => {
                             if let Some((batch, _)) = inputs.get(&id) {
                                 let batch = on_time.get(&id).map_or(batch, |(kept, _, _)| kept);
-                                let _ = lane_tx.send((id, batch.clone()));
+                                let _ = lane_tx.send(LaneJob::Transform(id, batch.clone()));
                             }
                         }
                         Operation::Write(id, SinkId::REJECTED_ROWS) => {
@@ -771,10 +799,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                     ));
                                 }
                                 Some((kept, _, _)) => {
-                                    let _ = lane_tx.send((id, kept.clone()));
+                                    let _ = lane_tx.send(LaneJob::Transform(id, kept.clone()));
                                 }
                                 None => {
-                                    let _ = lane_tx.send((id, batch.clone()));
+                                    let _ = lane_tx.send(LaneJob::Transform(id, batch.clone()));
                                 }
                             }
                         }
@@ -848,6 +876,20 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                     }
                     Effect::Commit(commits) => {
+                        // State as of these positions is saved first: a restart then finds
+                        // both at the same point, never positions past their state.
+                        let (reply, saved) = tokio::sync::oneshot::channel();
+                        let _ = lane_tx.send(LaneJob::Committed(commits.clone(), reply));
+                        if let Ok(Err(error)) = saved.await {
+                            record_error(
+                                &status,
+                                &parts.name,
+                                &format!(
+                                    "saving the stream's state failed; the positions are not acknowledged: {error}"
+                                ),
+                            );
+                            continue;
+                        }
                         match parts.source.commit(&commits).await {
                             CommitOutcome::Committed => {
                                 for commit in commits {
@@ -879,7 +921,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             }
                         }
                     }
-                    Effect::Revoked { partition, epoch } => parts.source.revoked(partition, epoch),
+                    Effect::Revoked { partition, epoch } => {
+                        let _ = lane_tx.send(LaneJob::Revoked(partition));
+                        parts.source.revoked(partition, epoch);
+                    }
                     Effect::Pause(partition) => parts.source.pause(partition),
                     // A paused stream stays paused when backpressure lifts.
                     Effect::Resume(_) if user_paused => {}

@@ -1518,3 +1518,114 @@ fn a_stream_with_event_time_counts_late_messages_and_shows_its_watermark() {
         "{text}"
     );
 }
+
+fn window_manifest() -> Value {
+    json!({
+        "schema_version": 2,
+        "service": {"name": "windows", "project": "proj", "exported_at": "2026-10-21T00:00:00Z",
+                    "mage_version": "test", "source_sha256": "abc"},
+        "pipelines": [{
+            "uuid": "spend", "name": "spend", "max_concurrent_runs": 1, "variables": {},
+            "blocks": [{"uuid": "per_card", "type": "transformer", "language": "window",
+                        "file": "transformers/per_card.yaml", "sha256": "0", "upstream": [],
+                        "window": {"key": "card", "kind": {"type": "tumbling", "size_ms": 60000},
+                                   "aggregates": [["payments", "count"],
+                                                  ["total", {"sum": "amount"}]]}}],
+            "triggers": [],
+            "stream": {
+                "source": {"name": "hook", "kind": "http", "config": {}},
+                "sinks": [{"name": "out", "kind": "stdout", "after": "per_card"}],
+                "batch": {"max_records": 100, "max_wait_ms": 50, "max_bytes": 1 << 20},
+                "time": {"field": "at", "format": "epoch_s", "on_late": "pass"}
+            }
+        }]
+    })
+}
+
+#[test]
+fn a_window_block_emits_each_window_once_and_keeps_its_windows_over_a_restart() {
+    let mut service = Service::with_manifest(
+        &window_manifest(),
+        &[("transformers/per_card.yaml", "window: {}\n")],
+    );
+    let env = [("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")];
+    service.start(&env);
+    wait_for_stream(&service, "spend");
+    let send = |service: &Service, key: &str, body: &str| {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/spend/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    };
+    let results = |service: &Service| -> Vec<Value> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("window_start"))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .collect()
+    };
+    send(
+        &service,
+        "1",
+        r#"[{"card": "a", "at": 0, "amount": 5}, {"card": "a", "at": 30, "amount": 7},
+                           {"card": "b", "at": 59, "amount": 1}]"#,
+    );
+    assert!(results(&service).is_empty());
+    // 70 moves the watermark past 60: the first minute closes, once per card.
+    send(&service, "2", r#"[{"card": "a", "at": 70, "amount": 2}]"#);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while results(&service).len() < 2 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let closed = results(&service);
+    let summary: Vec<(String, u64, f64)> = closed
+        .iter()
+        .map(|r| {
+            let value = r.get("value").unwrap_or(r);
+            (
+                value["key"].as_str().unwrap().to_string(),
+                value["payments"].as_u64().unwrap(),
+                value["total"].as_f64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [("a".into(), 2, 12.0), ("b".into(), 1, 1.0)],
+        "{closed:?}"
+    );
+    assert!(
+        service
+            .dir
+            .path()
+            .join("data/state/spend/per_card/partition-0.json")
+            .is_file()
+    );
+
+    // Restarted, the open window of the second minute comes back with its event at 70.
+    service.signal("-TERM");
+    std::fs::write(service.dir.path().join("service.log"), "").unwrap();
+    service.start(&env);
+    wait_for_stream(&service, "spend");
+    send(&service, "3", r#"[{"card": "a", "at": 130, "amount": 1}]"#);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while results(&service).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let [second] = &results(&service)[..] else {
+        panic!("{:?}", results(&service))
+    };
+    let value = second.get("value").unwrap_or(second);
+    assert_eq!(
+        (value["payments"].clone(), value["window_start"].clone()),
+        (json!(1), json!("1970-01-01T00:01:00.000Z")),
+        "{second}"
+    );
+}

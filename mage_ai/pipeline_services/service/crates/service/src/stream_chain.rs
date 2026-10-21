@@ -87,6 +87,24 @@ impl TransformSession for ChainedSession {
             }
         })
     }
+
+    fn committed<'a>(
+        &'a mut self,
+        commits: &'a [mage_stream_ports::Commit],
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            for (session, _) in &mut self.runs {
+                session.committed(commits).await?;
+            }
+            Ok(())
+        })
+    }
+
+    fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {
+        for (session, _) in &mut self.runs {
+            session.revoked(partition);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -212,6 +212,44 @@ watermark, and `/metrics` has `mage_service_stream_late_total` and
 instance that reads it, and starts again when a partition moves or the service restarts.
 MageML's own streaming takes messages as they come and ignores `event_time`.
 
+## Windows
+
+A transformer written in YAML with `window:` aggregates the messages of a window of event
+time, per key, without code. The engine computes it, and emits one message per key and
+window when the partition's watermark passes the window's end:
+
+```yaml
+window:
+  key: card_id          # optional: windows per value of this field
+  type: tumbling        # tumbling, hopping or session
+  size_seconds: 60      # tumbling and hopping
+  slide_seconds: 10     # hopping: a new window every 10 seconds
+  gap_seconds: 300      # session: a key's events closer than this are one window
+  aggregate:
+    payments: count
+    total: {sum: amount}
+    largest: {max: amount}
+    smallest: {min: amount}
+    mean: {avg: amount}
+    shops: {distinct: shop_id}
+```
+
+```json
+{"key": "c-17", "window_start": "2026-10-21T10:00:00.000Z",
+ "window_end": "2026-10-21T10:01:00.000Z", "payments": 3, "total": 61.5, "shops": 2}
+```
+
+Event time comes from the source's `event_time` (above), or the source's timestamp. A window
+closes once; a message for a window that already closed is counted late.
+
+The windows are saved with the positions they hold: before the source commits a position,
+each partition's open windows as of it are written to
+`<data>/state/<pipeline>/<block>/`. A restarted service resumes them from the same point,
+and with Kafka or PostgreSQL changes it skips the messages its saved windows already hold.
+The files are on the instance's data volume: a partition that moves to another instance
+starts its windows empty there. Windows run on the engine, in exported services and in
+the Run tab, not in MageML's own streaming.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

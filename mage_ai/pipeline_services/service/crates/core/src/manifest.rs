@@ -451,6 +451,8 @@ pub enum Language {
     Rust,
     R,
     Sql,
+    /// A stream's window block: aggregates over event time, computed by the engine.
+    Window,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -496,6 +498,9 @@ pub struct Block {
     /// The monitors that watch the block's output, checked after the block ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monitors: Vec<MonitorCheck>,
+    /// A window block's windows and aggregates (mage_stream_core::window::WindowSpec).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<Value>,
 }
 
 /// A monitor of the block's output, as MageML runs it: its settings (the monitor file as
@@ -763,6 +768,23 @@ impl Manifest {
                 ));
             }
             problems.extend(pipeline.validate(project_dir));
+            for block in &pipeline.blocks {
+                if block.language != Language::Window {
+                    continue;
+                }
+                if pipeline.stream.is_none() {
+                    problems.push(format!(
+                        "Pipeline {}: block {} is a window, which runs in a stream.",
+                        pipeline.uuid, block.uuid
+                    ));
+                }
+                if block.window.is_none() {
+                    problems.push(format!(
+                        "Pipeline {}: window block {} has no window settings.",
+                        pipeline.uuid, block.uuid
+                    ));
+                }
+            }
             for trigger in &pipeline.triggers {
                 if let Some(after) = &trigger.after_pipeline
                     && trigger.kind == TriggerKind::AfterRun
@@ -894,10 +916,11 @@ impl Pipeline {
             }
             if !matches!(
                 block.language,
-                Language::Python | Language::Rust | Language::R
+                Language::Python | Language::Rust | Language::R | Language::Window
             ) {
                 problems.push(format!(
-                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust or R.",
+                    "Pipeline {name}: block {} is in {:?}; stream blocks run in Python, Rust or R, \
+                     or are windows.",
                     block.uuid, block.language
                 ));
             }

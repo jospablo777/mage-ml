@@ -26,6 +26,7 @@ mod stream_chain;
 mod stream_python;
 mod stream_rust;
 mod stream_time;
+mod stream_window;
 mod streams;
 
 use std::net::SocketAddr;
@@ -370,6 +371,7 @@ fn info(common: &Common) -> Result<(), String> {
                 Language::Rust => "rs",
                 Language::R => "r",
                 Language::Sql => "sql",
+                Language::Window => "window",
             };
             let upstream = if block.upstream.is_empty() {
                 String::new()

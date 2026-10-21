@@ -224,4 +224,14 @@ pub trait TransformSession: Send {
         batch: RecordBatch,
     ) -> BoxFuture<'_, Result<TransformOutput, TransformError>>;
     fn close(&mut self) -> BoxFuture<'_, ()>;
+
+    /// The source is about to commit these positions: a session that keeps state saves the
+    /// state as of them first, so a restart resumes both from the same point. An error
+    /// holds the commit back.
+    fn committed<'a>(&'a mut self, _commits: &'a [Commit]) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// The partition went to another reader: its state here is no longer current.
+    fn revoked(&mut self, _partition: PartitionId) {}
 }

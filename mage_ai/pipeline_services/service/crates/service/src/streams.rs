@@ -578,12 +578,14 @@ fn transform_session(
         .into_iter()
         .cloned()
         .collect();
-    if let Some(block) = order
-        .iter()
-        .find(|b| !matches!(b.language, Language::Python | Language::Rust | Language::R))
-    {
+    if let Some(block) = order.iter().find(|b| {
+        !matches!(
+            b.language,
+            Language::Python | Language::Rust | Language::R | Language::Window
+        )
+    }) {
         return Err(format!(
-            "stream block {} is in {:?}; stream blocks run in Python, Rust or R",
+            "stream block {} is in {:?}; stream blocks run in Python, Rust, R or are windows",
             block.uuid, block.language
         ));
     }
@@ -601,7 +603,12 @@ fn transform_session(
     let mut regions: Vec<Vec<Block>> = Vec::new();
     for block in order.iter().cloned() {
         match regions.last_mut() {
-            Some(region) if region[0].language == block.language => region.push(block),
+            // Each window block is a session of its own.
+            Some(region)
+                if region[0].language == block.language && block.language != Language::Window =>
+            {
+                region.push(block)
+            }
             _ => regions.push(vec![block]),
         }
     }
@@ -696,6 +703,33 @@ fn region_session(
     log: RunLog,
 ) -> Result<Box<dyn TransformSession>, String> {
     let cancel = service.stream_stop.child_token();
+    if blocks[0].language == Language::Window {
+        let block = &blocks[0];
+        let spec: mage_stream_core::window::WindowSpec =
+            serde_json::from_value(block.window.clone().unwrap_or(Value::Null))
+                .map_err(|e| format!("window block {}: {e}", block.uuid))?;
+        let stream = pipeline.stream.as_ref().expect("a stream");
+        // Offsets and log positions stay the same across restarts; queue tags do not.
+        let stable = matches!(
+            stream.source.kind,
+            ConnectorKind::Kafka | ConnectorKind::Postgres
+        );
+        let dir = service
+            .data_dir
+            .join("state")
+            .join(crate::executor::sanitize(&pipeline.uuid))
+            .join(crate::executor::sanitize(&block.uuid));
+        return Ok(Box::new(
+            crate::stream_window::WindowSession::new(
+                &block.uuid,
+                spec,
+                stream.time.clone(),
+                dir,
+                stable,
+            )
+            .map_err(|e| format!("window block {}: {e}", block.uuid))?,
+        ));
+    }
     if matches!(blocks[0].language, Language::Rust | Language::R) {
         return Ok(Box::new(crate::stream_rust::RustStreamSession::new(
             service.clone(),

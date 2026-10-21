@@ -8,6 +8,9 @@ publish.workspace = true
 
 # Layer 1 (ADR-0002, ADR-0028): no tokio, no Arrow, no I/O.
 [dependencies]
+# Window snapshots and the JSON events windows read.
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
 
 [dev-dependencies]
 proptest = "1.12"

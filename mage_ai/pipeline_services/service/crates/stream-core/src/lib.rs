@@ -16,6 +16,7 @@ mod ids;
 mod runner;
 mod time;
 mod tracker;
+pub mod window;
 
 pub use ids::{AssignmentEpoch, BatchId, BatchMeta, PartitionId, Position, SinkId};
 pub use runner::{

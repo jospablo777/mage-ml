@@ -1627,6 +1627,12 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
     blocks = []
     for block in transformers:
         language = str(getattr(block.language, 'value', block.language))
+        if language == 'yaml':
+            entry = _window_entry(pipeline, block, project, prefix, capture_, problems)
+            if entry is not None:
+                entry['upstream'] = [u for u in entry['upstream'] if u != source_block.uuid]
+                blocks.append(entry)
+            continue
         if language not in ('python', 'rust', 'r'):
             problems.append(
                 f'{prefix}, block {block.uuid} is written in {language}; services run stream '
@@ -1901,6 +1907,94 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
             entry['io_config'] = profile
     capture_.files.add(path)
     return entry
+
+
+WINDOW_TYPES = ('tumbling', 'hopping', 'session')
+WINDOW_FUNCTIONS = ('sum', 'min', 'max', 'avg', 'distinct')
+
+
+def _window_entry(pipeline, block, project: Path, prefix: str, capture_: Capture,
+                  problems: List[str]) -> Optional[Dict]:
+    """
+    A YAML transformer with `window:`, which the engine computes over event time:
+
+        window:
+          key: card_id                  # optional: windows per value of this field
+          type: tumbling                # tumbling, hopping or session
+          size_seconds: 60              # tumbling and hopping
+          slide_seconds: 10             # hopping: a new window every slide
+          gap_seconds: 300              # session: a key's events closer than this
+          aggregate:
+            payments: count
+            total: {sum: amount}
+            largest: {max: amount}
+            mean: {avg: amount}
+            shops: {distinct: shop_id}
+    """
+    where = f'{prefix}, block {block.uuid}'
+    path = Path(block.file_path).resolve()
+    try:
+        config = compile_stream_config(path.read_text(), getattr(pipeline, 'variables', None))
+    except (OSError, ValueError) as error:
+        problems.append(f'{where}: {error}')
+        return None
+    window = config.get('window')
+    if not isinstance(window, dict):
+        problems.append(f'{where} is a YAML transformer without window:; YAML transformers in '
+                        'a stream are windows, and the others are written in Python, Rust or R.')
+        return None
+    kind = window.get('type', 'tumbling')
+    if kind not in WINDOW_TYPES:
+        problems.append(f'{where}: window type is one of {", ".join(WINDOW_TYPES)}.')
+        return None
+
+    def millis(name: str) -> Optional[int]:
+        value = window.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            problems.append(f'{where}: window {name} is a number of seconds above 0.')
+            return None
+        return int(value * 1000)
+
+    if kind == 'tumbling':
+        spec_kind = dict(type=kind, size_ms=millis('size_seconds'))
+    elif kind == 'hopping':
+        spec_kind = dict(type=kind, size_ms=millis('size_seconds'),
+                         slide_ms=millis('slide_seconds'))
+        if (None not in spec_kind.values()
+                and spec_kind['size_ms'] % spec_kind['slide_ms'] != 0):
+            problems.append(f'{where}: a hopping window\'s size is a whole number of slides.')
+    else:
+        spec_kind = dict(type=kind, gap_ms=millis('gap_seconds'))
+    aggregates = []
+    for name, function in (window.get('aggregate') or {}).items():
+        if name in ('key', 'window_start', 'window_end'):
+            problems.append(f'{where}: {name} is a field of every window result; name the '
+                            'aggregate otherwise.')
+        elif function == 'count':
+            aggregates.append([str(name), 'count'])
+        elif (isinstance(function, dict) and len(function) == 1
+              and next(iter(function)) in WINDOW_FUNCTIONS
+              and isinstance(next(iter(function.values())), str)):
+            ((fn, field),) = function.items()
+            aggregates.append([str(name), {fn: field}])
+        else:
+            problems.append(f'{where}: aggregate {name} is count, or one of '
+                            f'{", ".join(WINDOW_FUNCTIONS)} of a field, such as '
+                            '{sum: amount}.')
+    if not aggregates:
+        problems.append(f'{where}: a window needs aggregate, such as {{payments: count}}.')
+    if None in spec_kind.values() or not aggregates:
+        return None
+    capture_.files.add(path)
+    return dict(
+        uuid=block.uuid,
+        type='transformer',
+        language='window',
+        file=str(path.relative_to(project)),
+        sha256=_digest(path),
+        upstream=list(block.upstream_block_uuids or []),
+        window=dict(key=window.get('key'), kind=spec_kind, aggregates=aggregates),
+    )
 
 
 def _conditional_entry(conditional, project: Path, prefix: str,

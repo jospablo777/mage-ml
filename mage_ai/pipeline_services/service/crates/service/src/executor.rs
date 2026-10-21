@@ -345,6 +345,8 @@ fn chain_kind(block: &Block) -> Option<ChainKind> {
         Language::Rust if block.entry.is_some() => Some(ChainKind::Rust),
         Language::Rust => None,
         Language::Python | Language::R | Language::Sql => Some(ChainKind::Worker),
+        // Window blocks are stream blocks; the manifest check keeps them out of runs.
+        Language::Window => None,
     }
 }
 
@@ -603,6 +605,9 @@ impl BlockTask {
             Language::Python | Language::R | Language::Sql => {
                 self.run_python(pool()?, timeout, false).await
             }
+            Language::Window => Err(BlockFailure::fatal(
+                "a window block runs in a stream, not in a pipeline run",
+            )),
             Language::Rust => {
                 if !self.block.conditions.is_empty()
                     && let Ran::Skipped(reason) = self.run_python(pool()?, timeout, true).await?
