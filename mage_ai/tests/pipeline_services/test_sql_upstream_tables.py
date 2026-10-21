@@ -40,8 +40,9 @@ class UpstreamTablesTest(unittest.TestCase):
         )
 
     def test_a_profile_without_an_optional_key_reads_its_own_tables(self):
-        # No DUCKDB_SCHEMA: the same database all the same.
+        # No DUCKDB_SCHEMA, no REDSHIFT_CLUSTER_ID: the same database all the same.
         self.assertFalse(self.copies('duckdb', 'duckdb', 'duckdb'))
+        self.assertFalse(self.copies('redshift', 'redshift', 'redshift'))
         self.assertFalse(self.copies('duckdb', 'duckdb', 'duckdb_too'))
         self.assertTrue(self.copies('duckdb', 'duckdb', 'duckdb_other'))
 

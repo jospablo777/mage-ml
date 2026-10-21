@@ -1,11 +1,12 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
 (mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB,
-ClickHouse, Trino, BigQuery and Snowflake branches):
+ClickHouse, Trino, BigQuery, Snowflake and Redshift branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
 2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL,
+   database.schema.table on Redshift,
    catalog.schema.table on Trino, project.dataset.table on BigQuery, "DATABASE"."SCHEMA".
    "TABLE" in capitals on Snowflake, the table alone on MySQL, DuckDB and ClickHouse.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
@@ -63,6 +64,12 @@ PROVIDERS = {
     # the same project and location (_bigquery_project), not by comparing settings.
     'bigquery': dict(
         profile_keys=(),
+        no_schema=False,
+        full_names=True,
+    ),
+    'redshift': dict(
+        profile_keys=('REDSHIFT_CLUSTER_ID', 'REDSHIFT_DBNAME', 'REDSHIFT_HOST', 'REDSHIFT_PORT',
+                      'REDSHIFT_SCHEMA'),
         no_schema=False,
         full_names=True,
     ),
@@ -450,6 +457,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.bigquery import BigQuery
 
         return BigQuery.with_config(config_loader)
+    if provider == 'redshift':
+        from mage_ai.io.redshift import Redshift
+
+        return Redshift.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -520,6 +531,19 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             return _run_on_trino(loader, provider, configuration, upstreams, inputs, query,
                                  io_config, variables, schema, table, limit, options)
     with loader:
+        if name == 'redshift':
+            # Mage's Redshift branch: names database.schema.table, the database unquoted.
+            upload_upstream_tables(
+                loader, configuration, upstreams, inputs, query, io_config, provider,
+            )
+            schema = schema or loader.default_schema()
+            query = interpolate_input(loader, configuration, upstreams, query,
+                                      quote_database=False)
+            query = render(query, variables)
+            if configuration.get('use_raw_sql'):
+                return execute_raw_sql(loader, query, configuration, limit)
+            loader.export(None, table, schema=schema, query_string=query, **options)
+            return [loader.load(f'SELECT * FROM {schema}.{table}', limit=limit, verbose=False)]
         if name == 'postgres':
             upload_upstream_tables(
                 loader, configuration, upstreams, inputs, query, io_config, provider,

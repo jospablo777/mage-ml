@@ -34,6 +34,7 @@
 - Snowflake SQL blocks run in services too: names in capitals and quoted, the client opened
   on the block's database and schema, and an upstream table copied unless both profiles
   name the same account, warehouse and database. Tested the same way as BigQuery's.
+- Redshift SQL blocks run in services too, tested the same way.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
   MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the

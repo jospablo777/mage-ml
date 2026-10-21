@@ -43,6 +43,21 @@ as the `REDSHIFT_HOST` value.
 8. Enter in this test query: `SELECT 1`.
 9. Run the block.
 
+### Upstream tables
+
+A query reads an upstream block's output as `{{ df_1 }}`, `{{ df_2 }}` and so on, named
+`database.schema.table`:
+
+- The output of a Python or R block is written to a table in the block's schema first,
+  replacing the table of the last run.
+- The table of an upstream Redshift SQL block is read as it is when both blocks use the
+  same profile, or profiles with the same `REDSHIFT_HOST`, `REDSHIFT_PORT`,
+  `REDSHIFT_DBNAME`, `REDSHIFT_CLUSTER_ID` and `REDSHIFT_SCHEMA` (unset in both counts as the
+  same). Otherwise it is copied.
+
+Redshift SQL blocks also run in [pipeline services](/production/pipeline-services), the same
+way.
+
 <br />
 
 ## Using Python block
