@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from typing import List, Union
+from typing import List, Optional, Union
 
 import typer
 from click import Context
@@ -1483,6 +1483,82 @@ def workers_prepare(
             typer.echo(f'{worker.alias}: prepared.')
     except environments.PipelineEnvironmentError as error:
         _service_error(error)
+
+
+golden_app = typer.Typer(
+    cls=OrderCommands,
+    help='Golden runs: the expected outputs and effect counts of a pipeline, checked per block.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(golden_app, name='golden')
+GOLDEN_RUN = typer.Option(None, '--run', help='id of the pipeline run; the latest completed one '
+                          'by default.')
+
+
+def _golden_run(pipeline, run_id: Optional[int]):
+    from mage_ai.orchestration import golden
+
+    if run_id is not None:
+        return _pipeline_run(pipeline, run_id)
+    try:
+        return golden.latest_completed_run(pipeline)
+    except golden.GoldenError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+
+
+@golden_app.command('record')
+def golden_record(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    run_id: Optional[int] = GOLDEN_RUN,
+):
+    """
+    Write golden/<pipeline>.yaml from a completed run: a fingerprint of each block's outputs
+    and the counts of the effect probes the file declares.
+    """
+    from mage_ai.orchestration import golden
+
+    pipeline = _run_records_setup(os.path.abspath(project_path), pipeline_uuid)
+    run = _golden_run(pipeline, run_id)
+    try:
+        document = golden.record(pipeline, run)
+    except golden.GoldenError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    outputs = sum(len(outputs) for outputs in document['blocks'].values())
+    typer.echo(f"{os.path.relpath(golden.golden_path(pipeline), pipeline.repo_path)}: run "
+               f"{run.id}, {len(document['blocks'])} blocks, {outputs} outputs, "
+               f"{len(document['effects'])} effects.")
+
+
+@golden_app.command('compare')
+def golden_compare(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    pipeline_uuid: str = typer.Argument(..., help='uuid of the pipeline.'),
+    run_id: Optional[int] = GOLDEN_RUN,
+    ordered: bool = typer.Option(False, help='count a different row order as different.'),
+    as_json: bool = typer.Option(False, '--json', help='print the comparison as JSON.'),
+):
+    """
+    Compare a run with golden/<pipeline>.yaml: each block equal or different (rows, columns,
+    values), and each effect count. Exits with 1 when anything differs.
+    """
+    from mage_ai.orchestration import golden
+
+    pipeline = _run_records_setup(os.path.abspath(project_path), pipeline_uuid)
+    run = _golden_run(pipeline, run_id)
+    try:
+        comparison = golden.compare(pipeline, run, ordered=ordered)
+    except golden.GoldenError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    if as_json:
+        typer.echo(json.dumps(comparison, indent=2, default=str))
+    else:
+        typer.echo(golden.format_comparison(comparison))
+    if not comparison['passed']:
+        raise typer.Exit(code=1)
 
 
 def _service_error(error: Exception) -> None:

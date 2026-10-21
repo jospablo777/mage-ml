@@ -21,6 +21,7 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`contract-compat`](#contract-compat) | Compare a contract with its version at a git revision |
 | [`run-diff`](#run-diff) | Compare what two runs of a pipeline ran with |
 | [`reproduce`](#reproduce) | Run a pipeline run again with its recorded code and compare the outputs |
+| [`golden record`, `golden compare`](#golden-record) | Record a run's outputs and effect counts as the expected ones, and check later runs against them |
 | [`release-status`](#release-status) | Show a model's release policy, alias holder and release log |
 | [`release-promote`](#release-promote) | Evaluate a model version and move the release alias to it |
 | [`release-rollback`](#release-rollback) | Give the release alias back to the previous version |
@@ -292,6 +293,29 @@ mage reproduce <project_path> <pipeline_uuid> <run_id> [OPTIONS]
 - `--yes`, `-y` (optional): Run without asking first
 - `--report` (optional): Also write the result as JSON to this path
 - `--keep` (optional): Keep the restored copy of the project
+
+#### `golden record`
+
+Write `golden/<pipeline_uuid>.yaml` from a completed run: a fingerprint of each block's outputs (rows, column types, values) and the counts of the effect probes the file declares. See [Golden runs](../guides/pipelines/run-records.md#golden-runs).
+
+**Usage:**
+```bash
+mage golden record <project_path> <pipeline_uuid> [--run RUN_ID]
+```
+
+#### `golden compare`
+
+Compare a run with the golden file: each block equal or different, and each effect count. Exits with 1 when anything differs.
+
+**Usage:**
+```bash
+mage golden compare <project_path> <pipeline_uuid> [--run RUN_ID] [--ordered] [--json]
+```
+
+**Parameters:**
+- `--run` (optional): The pipeline run; the latest completed one by default
+- `--ordered` (optional): Count a different row order as different
+- `--json` (optional): Print the comparison as JSON
 
 ---
 

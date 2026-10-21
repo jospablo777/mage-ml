@@ -82,6 +82,65 @@ Things to know:
   original run gives different outputs; that's what the comparison shows.
 - Runs started before run records existed have no record and can't be reproduced.
 
+## Golden runs
+
+A golden file holds what a pipeline is expected to produce. Use it to check that a run made
+another way still gives the same results: on a new MageML version, another engine, another
+machine, or after a refactor.
+
+```bash
+mage run <project path> <pipeline uuid>
+mage golden record <project path> <pipeline uuid>     # writes golden/<pipeline uuid>.yaml
+# later, after a change
+mage run <project path> <pipeline uuid>
+mage golden compare <project path> <pipeline uuid>
+```
+
+```text
+orders_daily: run 42 against the golden file (recorded from run 17).
+  load_orders    equal
+  clean_orders   different  (output_0: rows 1200 -> 1180)
+  daily_totals   different  (output_0: values differ)
+  effect orders_written: equal (expected 1200, counted 1200)
+Different.
+```
+
+The file records each output's data, not its stored bytes:
+
+| Field | |
+| --- | --- |
+| `rows` | Row count (items of a list, keys of a dict) |
+| `columns` | Name and kind of each column: integer, float, string, boolean, date, datetime, datetime_tz, decimal, binary, list, struct, null |
+| `content` | A hash of the rows in any order |
+| `order` | A hash of the rows in their order; compared only with `--ordered` |
+
+The same data from pandas, Polars or Arrow compares equal, and so do integer columns of
+different widths. Floats compare to 12 significant digits, so a different summation order
+doesn't count as a change. A pandas index other than row numbers counts as columns. Outputs
+that aren't tables or JSON, such as a model, compare by the SHA-256 of their stored files.
+
+### Effect counts
+
+Block outputs don't show what a run wrote to other systems. To check that, declare probes in
+the golden file before recording. `record` fills in each probe's count, and `compare`
+counts again:
+
+```yaml
+effects:
+  orders_written:
+    sql: select count(*) from analytics.orders
+    data_provider: postgres   # bigquery, clickhouse, duckdb, mssql, mysql, redshift, snowflake, trino
+    profile: default          # of io_config.yaml
+  export_file:
+    file: exports/orders.parquet   # rows of a Parquet or CSV file, lines of any other file
+```
+
+A probe counts the destination after the run. A run that wrote twice to an append-only
+table shows a higher count.
+
+Commit the `golden/` folder with the project, and record again when a change to the
+results is intended.
+
 ## Storage and settings
 
 Records are stored with the pipeline variables, in `.run_records/`. The code copies and
