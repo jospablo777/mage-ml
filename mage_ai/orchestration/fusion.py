@@ -492,10 +492,7 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
     for index, uuid in enumerate(stage):
         block = pipeline.get_block(uuid)
         following = pipeline.get_block(stage[index + 1]) if index + 1 < len(stage) else None
-        next_block = None
-        if following is not None and block.language in (BlockLanguage.RUST, BlockLanguage.R) \
-                and following.language == block.language:
-            next_block = following.uuid
+        next_block = following.uuid if plans.chains_with(block, following) else None
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
         started = time.monotonic()

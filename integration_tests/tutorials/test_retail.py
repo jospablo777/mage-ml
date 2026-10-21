@@ -93,14 +93,16 @@ def shop(mage_project):
     return retail.write(mage_project).folder
 
 
-def build(project: str, language: str):
+def build(project: str, language: str, replace_tables: bool = False):
+    """The page's pipeline; with replace_tables, every block replaces its table."""
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.pipeline import Pipeline
 
     suffix = SUFFIXES[language]
     code = page_code(language)
     assert set(code) == {f'{name}_{suffix}' for name, _, _ in GRAPH}, sorted(code)
-    pipeline = Pipeline.create(f'retail_{language}', repo_path=project)
+    name = f'retail_{language}_compiled' if replace_tables else f'retail_{language}'
+    pipeline = Pipeline.create(name, repo_path=project)
     for name, block_type, upstream in GRAPH:
         uuid = f'{name}_{suffix}'
         configuration = None
@@ -115,6 +117,8 @@ def build(project: str, language: str):
                 configuration.update(
                     data_provider_table=EXPORT_TABLES[name], export_write_policy='replace',
                 )
+            elif replace_tables:
+                configuration['export_write_policy'] = 'replace'
         block = Block.create(
             uuid, block_type, project, language=language, configuration=configuration,
         )
@@ -183,6 +187,44 @@ def test_the_tutorial_runs_as_written_and_gives_the_reference_tables(
     got_revenue, got_scores = outputs(mage_project, language, tmp_path)
     assert list(got_revenue.columns) == list(revenue.columns)
     assert list(got_scores.columns) == list(scores.columns)
+    pd.testing.assert_frame_equal(
+        comparable(got_revenue, ['region', 'month']), comparable(revenue, ['region', 'month']),
+        rtol=1e-9,
+    )
+    pd.testing.assert_frame_equal(
+        comparable(got_scores, ['customer_id']), comparable(scores, ['customer_id']),
+        rtol=1e-9, atol=1e-15,
+    )
+
+
+def test_the_sql_tutorial_compiled_into_duckdb_views_gives_the_same_tables(
+    mage_project, shop, monkeypatch, tmp_path,
+):
+    """
+    With every block replacing its table, the SQL chains compile: the intermediate blocks
+    become views and each exporter writes its table from one query across them.
+    """
+    import duckdb
+
+    from mage_ai.orchestration import fusion_verify
+    from mage_ai.shared.dates import utc_now
+
+    runtime('sql', monkeypatch, tmp_path)
+    _, revenue, scores = reference(shop)
+    pipeline = build(mage_project, 'sql', replace_tables=True)
+    run = fusion_verify.run_in_process(
+        fusion_verify._create_run(pipeline, 'chains', {}, utc_now()), log=lambda text: None,
+    )
+    statuses = {b.block_uuid: getattr(b.status, 'value', b.status) for b in run.block_runs}
+    assert set(statuses.values()) == {'completed'}, statuses
+
+    with duckdb.connect(str(tmp_path / 'retail.duckdb'), read_only=True) as con:
+        kinds = dict(con.execute(
+            "SELECT table_name, table_type FROM information_schema.tables "
+            "WHERE table_schema = 'main'"
+        ).fetchall())
+    assert 'VIEW' in kinds.values(), kinds
+    got_revenue, got_scores = outputs(mage_project, 'sql', tmp_path)
     pd.testing.assert_frame_equal(
         comparable(got_revenue, ['region', 'month']), comparable(revenue, ['region', 'month']),
         rtol=1e-9,

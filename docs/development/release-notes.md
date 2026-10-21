@@ -15,6 +15,14 @@
   sets keeps its value for the next run. `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary
   for each run.
 
+### Pipelines
+
+- Compiled DuckDB SQL chains: in a production run, consecutive DuckDB SQL blocks that
+  replace their tables become views, and the block that needs the rows writes its table
+  from one query DuckDB plans across them. A four-block chain over 30 million rows ran in
+  1 s instead of 20 s and wrote 1 MB instead of 952 MB. The Compile panel lists the
+  chains and the SQL blocks left out, with the reason.
+
 ### Python workers
 
 - Python workers: named environments in `python_workers/<name>/` (a uv project with its

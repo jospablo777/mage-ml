@@ -8,6 +8,8 @@ every language, ahead of the run.
   a run plans it, a block the first time it runs alone (block/plans.py, rust/build.py).
 
 SQL blocks are left as they are: their queries run in the database, which checks them.
+Consecutive DuckDB SQL blocks of a stage chain in a production run (block/plans.py): the
+summary lists those chains and the SQL blocks that stay out of them, with the reason.
 
 It starts on its own when a pipeline or one of its blocks is saved (request), and from
 the Compile button (start). Builds are cached, so compiling a compiled pipeline takes a
@@ -232,11 +234,50 @@ def summary_for(pipeline) -> Dict:
         languages=languages,
         language_switches=switches,
     )
+    sql_chains, sql_left_out = _sql_chains(pipeline)
+    if sql_chains or sql_left_out:
+        summary.update(sql_chains=sql_chains, sql_left_out=sql_left_out)
     if str(getattr(pipeline.type, 'value', pipeline.type)) == 'streaming':
         from mage_ai.streaming.plan import stream_plan
 
         summary['stream'] = stream_plan(pipeline)
     return summary
+
+
+def _sql_chains(pipeline):
+    """
+    The DuckDB SQL chains of a production run, and each SQL block followed in its stage by
+    another SQL block that stays out of a chain, with the reason.
+    """
+    from mage_ai.data_preparation.models.block import plans
+    from mage_ai.data_preparation.models.constants import BlockLanguage
+    from mage_ai.orchestration import fusion
+
+    if not fusion.fusion_enabled(pipeline):
+        return [], []
+    chains, left_out = [], []
+    for stage in fusion.fusion_plan(pipeline):
+        blocks = [pipeline.get_block(uuid) for uuid in stage]
+        chain = []
+        for block, following in zip(blocks, blocks[1:] + [None]):
+            if block is None or block.language != BlockLanguage.SQL:
+                continue
+            if following is not None and following.language == BlockLanguage.SQL:
+                if plans.chains_with(block, following) and \
+                        not plans.output_needed(block, False):
+                    chain.append(block.uuid)
+                    continue
+                reason = plans.sql_view_problem(block)
+                if reason is None and plans.output_needed(block, False):
+                    reason = ('Its own rows are needed: it is an exporter, or has a data '
+                              'contract or monitors, or the pipeline keeps every output.')
+                left_out.append(dict(block=block.uuid, reason=reason or (
+                    'The next block uses another connection profile.'
+                )))
+            if chain:
+                chains.append(dict(blocks=chain + [block.uuid], views=list(chain)))
+                chain = []
+    return chains, left_out
 
 
 def _check_python(pipeline, unit: Unit) -> None:

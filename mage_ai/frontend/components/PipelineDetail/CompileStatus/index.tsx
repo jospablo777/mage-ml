@@ -493,6 +493,29 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
 
           {summary?.stream && <StreamPlan plan={summary.stream} />}
 
+          {(summary?.sql_chains?.length >= 1 || summary?.sql_left_out?.length >= 1) && (
+          <Spacing mt={2}>
+            <Text bold small>SQL chains</Text>
+            {(summary?.sql_chains || []).map(({ blocks }) => (
+              <Text key={blocks.join(',')} monospace small>
+                {blocks.join(' → ')}
+              </Text>
+            ))}
+            {summary?.sql_chains?.length >= 1 && (
+              <Text muted xsmall>
+                In production runs, every block of a chain but the last becomes a DuckDB view,
+                and the last one writes its table from one query across them.
+              </Text>
+            )}
+            {(summary?.sql_left_out || []).map(({ block, reason }) => (
+              <Text key={block} small>
+                <Text inline monospace small>{block}</Text>
+                <Text inline muted small> runs on its own: {reason}</Text>
+              </Text>
+            ))}
+          </Spacing>
+            )}
+
           {summary && !summary.fusion && !summary.stream && (
           <Spacing mt={1}>
             <Text small warning>

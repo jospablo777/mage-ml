@@ -28,6 +28,10 @@ export type CompilationSummaryType = {
   fusion: boolean;
   language_switches: number;
   languages: string[];
+  // DuckDB SQL chains: the blocks that become views, read by the last one in one query.
+  sql_chains?: { blocks: string[]; views: string[] }[];
+  // SQL blocks followed by another that stay out of a chain, with the reason.
+  sql_left_out?: { block: string; reason: string }[];
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
 };

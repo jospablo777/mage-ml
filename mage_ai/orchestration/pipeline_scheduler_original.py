@@ -1757,13 +1757,14 @@ def run_stage(
         )
         result = None
         # A Rust or R block followed in the stage by a block of its language may return a
-        # plan, which that block extends: the chain runs once, compiled (plans.py).
+        # plan, which that block extends: the chain runs once, compiled; a DuckDB SQL block
+        # may become a view its next block reads (plans.py).
         next_block = None
         if next_id is not None and block is not None and block.language in (
-            BlockLanguage.RUST, BlockLanguage.R,
+            BlockLanguage.RUST, BlockLanguage.R, BlockLanguage.SQL,
         ):
             following = pipeline.get_block(BlockRun.get_by_id(next_id).block_uuid)
-            if following is not None and following.language == block.language:
+            if plans.chains_with(block, following):
                 next_block = following.uuid
         try:
             with plans.stage_context(next_block, pipeline_run_id):

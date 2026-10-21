@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import uuid
-from typing import IO, Any, Dict, List, Tuple, Union
+from typing import IO, Any, Dict, List, Optional, Tuple, Union
 
 import duckdb
 import pandas as pd
@@ -252,6 +252,40 @@ class DuckDB(BaseSQL):
             ]))
             result = cur.fetchall()
             return len(result) >= 1
+
+    def relation_type(self, schema_name: str, name: str) -> Optional[str]:
+        """'BASE TABLE', 'VIEW' or another relation type; None when nothing has the name."""
+        row = self.conn.execute(
+            'SELECT table_type FROM information_schema.tables '
+            'WHERE table_schema = ? AND table_name = ?',
+            [schema_name or 'main', name],
+        ).fetchone()
+        return row[0] if row else None
+
+    def create_view(self, schema_name: str, name: str, query_string: str) -> None:
+        """
+        Makes the name a view of the query, in place of a table of the name: a compiled
+        chain's intermediate block (block/plans.py), which DuckDB plans with its reader.
+        """
+        schema_name = schema_name or self.default_schema()
+        full_name = f'{_quote(schema_name)}.{_quote(name)}'
+        query = query_string.strip().rstrip(';').rstrip()
+        self.conn.execute('BEGIN TRANSACTION')
+        try:
+            self.conn.execute(f'CREATE SCHEMA IF NOT EXISTS {_quote(schema_name)}')
+            if self.relation_type(schema_name, name) == 'BASE TABLE':
+                self.conn.execute(f'DROP TABLE {full_name}')
+            self.conn.execute(f'CREATE OR REPLACE VIEW {full_name} AS {query}')
+            self.conn.execute('COMMIT')
+        except BaseException:
+            self.conn.execute('ROLLBACK')
+            raise
+
+    def drop_view(self, schema_name: str, name: str) -> None:
+        """Drops a view of the name, so a block that ran as a view writes its table again."""
+        schema_name = schema_name or self.default_schema()
+        if self.relation_type(schema_name, name) == 'VIEW':
+            self.conn.execute(f'DROP VIEW {_quote(schema_name)}.{_quote(name)}')
 
     def export(
         self,

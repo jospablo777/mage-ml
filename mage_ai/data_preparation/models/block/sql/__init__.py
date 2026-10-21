@@ -2,7 +2,7 @@ from os import path
 from time import sleep
 from typing import Any, Dict, List
 
-from mage_ai.data_preparation.models.block import Block
+from mage_ai.data_preparation.models.block import Block, plans
 from mage_ai.data_preparation.models.block.dynamic.utils import (
     is_dynamic_block,
     is_dynamic_block_child,
@@ -335,7 +335,17 @@ def execute_sql_code(
                     should_query=should_query,
                     limit=limit,
                 )
+            elif not from_notebook and plans.sql_view_problem(block) is None and \
+                    plans.may_plan(block, {}):
+                # In a compiled chain, the next block reads the query as a view and DuckDB
+                # plans both as one (plans.py).
+                loader.create_view(schema, table_name, query_string)
+                print(f'Compiled into the view {schema}.{table_name}; the block that needs '
+                      'its rows reads them with the whole chain.')
+                return [plans.view_output(block, schema, table_name)]
             else:
+                # A block that ran as a view in a compiled chain writes its table again.
+                loader.drop_view(schema, table_name)
                 loader.export(
                     None,
                     schema,

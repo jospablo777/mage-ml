@@ -11,6 +11,12 @@ A block's output is needed, so it runs the chain, when it is the last block of t
 chain, an exporter, or has tests, monitors or a data contract, or when the pipeline keeps
 every block's output (keep_block_outputs). A planned block keeps its block run, logs and
 status; its stored output is the plan, as JSON, which any later reader can run.
+
+DuckDB SQL blocks chain too: a planned block whose table is replaced on each run
+(export_write_policy replace) becomes a view of its query instead of a table, and the
+block that needs its output writes its table from a query DuckDB plans across the views,
+as one statement. A block that appends keeps its table, as the rows it accumulates are
+what the blocks after it read.
 """
 import contextvars
 import os
@@ -79,6 +85,63 @@ class Plan(dict):
         plan = Plan(self.language, self.steps + [step], self.inputs,
                     self[PLAN_KEY]['upstream_uuids'], self.global_vars)
         return plan
+
+
+VIEW_KEY = '__mage_view__'
+
+
+def chains_with(block, following) -> bool:
+    """
+    Whether the block may plan for the next block of its stage: both Rust, both R, or a
+    DuckDB SQL block that replaces its table followed by a DuckDB SQL block of its profile.
+    """
+    from mage_ai.data_preparation.models.constants import BlockLanguage
+
+    if block is None or following is None:
+        return False
+    if block.language in (BlockLanguage.RUST, BlockLanguage.R):
+        return following.language == block.language
+    if block.language == BlockLanguage.SQL and following.language == BlockLanguage.SQL:
+        return sql_view_problem(block) is None and _duckdb(following) and (
+            (block.configuration or {}).get('data_provider_profile')
+            == (following.configuration or {}).get('data_provider_profile')
+        )
+    return False
+
+
+def _duckdb(block) -> bool:
+    return (block.configuration or {}).get('data_provider') == 'duckdb'
+
+
+def sql_view_problem(block) -> Optional[str]:
+    """Why a SQL block cannot become a view in a compiled chain; None when it can."""
+    from mage_ai.data_preparation.models.block.dynamic.utils import (
+        is_dynamic_block,
+        is_dynamic_block_child,
+        is_replicated_block,
+    )
+
+    configuration = block.configuration or {}
+    if not _duckdb(block):
+        return 'For now, compiling SQL block chains supports only DuckDB.'
+    if configuration.get('use_raw_sql'):
+        return 'It runs raw SQL, which can hold several statements.'
+    if str(configuration.get('export_write_policy') or 'append') != 'replace':
+        return ('It appends to its table on each run, and the blocks after it read the rows '
+                'it accumulated; set its write policy to replace to compile it into the chain.')
+    if is_dynamic_block(block) or is_dynamic_block_child(block) or is_replicated_block(block):
+        return 'It is dynamic or replicated.'
+    return None
+
+
+def view_output(block, schema: str, name: str) -> Dict:
+    """What a SQL block that became a view stores as its output."""
+    return {VIEW_KEY: dict(
+        schema=schema,
+        view=name,
+        note=(f'Compiled into a view, {schema}.{name}: the block that needs its rows reads '
+              'them with the whole chain. Run the block in the editor to see its output.'),
+    )}
 
 
 def is_plan(value: Any) -> bool:
