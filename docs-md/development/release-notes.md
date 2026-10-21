@@ -15,6 +15,15 @@
   sets keeps its value for the next run. `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary
   for each run.
 
+### Python workers
+
+- Python workers: named environments in `python_workers/<name>/` (a uv project with its
+  `uv.lock`) that blocks select one by one (`python_worker: feast`) or a pipeline selects
+  for all its Python blocks. `mage workers prepare` builds them with `uv sync --locked`;
+  runs never install packages, and a block whose worker is not prepared says what to run.
+  Tables cross between workers as Arrow, so a block can use pandas 2 next to MageML's
+  pandas 3. A service exports the worker its blocks share.
+
 ### Exported services
 
 - `GET /v1/streams/<pipeline>/state/<block>?key=` serves a stream block's keyed state by

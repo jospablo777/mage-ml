@@ -9,6 +9,14 @@ of packages.
       requirements: requirements.txt   # relative to the pipeline's folder
       python: '3.12'                    # optional; the server's version by default
 
+A Python worker is a named environment a block selects: a uv project in
+`python_workers/<alias>/` (pyproject.toml and uv.lock, in Git). A block's configuration
+names it (`python_worker: feast`), or the pipeline does for its blocks
+(`environment: {worker: feast}`); `python_worker: mage` runs a block in MageML's own
+Python. A worker is prepared before runs use it (`mage workers prepare`), with
+`uv sync --locked`, so a run never installs packages; a block whose worker is not
+prepared fails with what to do.
+
 uv builds the environment once per set of inputs: a hash of the Python version, the
 requirements, the versions of the packages that pass tables between Mage and the block
 (pandas, pyarrow, Polars and NumPy, pinned to Mage's unless the requirements name them),
@@ -87,6 +95,132 @@ class Environment:
         return self.directory / 'bin' / 'python'
 
 
+WORKERS_DIR = 'python_workers'
+# What selects MageML's own Python for a block in a pipeline with a worker.
+BUILTIN_WORKERS = ('mage', 'builtin')
+
+
+def normalized_alias(name: str) -> str:
+    import re
+
+    return re.sub(r'[-_.]+', '-', str(name).strip()).lower()
+
+
+@dataclass(frozen=True)
+class NamedWorker:
+    """A Python worker: a uv project in python_workers/<folder>/, prepared with its lock."""
+
+    alias: str
+    definition: str
+    python: str
+    digest: str
+
+    @property
+    def identity(self) -> str:
+        payload = json.dumps(dict(
+            version=1,
+            kind='worker',
+            digest=self.digest,
+            python=self.python,
+            platform=f'{sys.platform}-{platform.machine()}',
+            uv=_uv_version(),
+        ), sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    @property
+    def directory(self) -> Path:
+        return environments_dir() / self.identity[:24]
+
+    @property
+    def python_executable(self) -> Path:
+        if sys.platform == 'win32':
+            return self.directory / 'Scripts' / 'python.exe'
+        return self.directory / 'bin' / 'python'
+
+    @property
+    def prepared(self) -> bool:
+        return (self.directory / MARKER).is_file()
+
+    def relative_definition(self) -> str:
+        return f'{WORKERS_DIR}/{Path(self.definition).name}'
+
+
+def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
+    """The project's Python workers, by alias (the normalized [project].name)."""
+    import tomllib
+
+    root = Path(repo_path) / WORKERS_DIR
+    workers: Dict[str, NamedWorker] = {}
+    if not root.is_dir():
+        return workers
+    for folder in sorted(p for p in root.iterdir() if (p / 'pyproject.toml').is_file()):
+        relative = f'{WORKERS_DIR}/{folder.name}'
+        try:
+            project = tomllib.loads((folder / 'pyproject.toml').read_text()).get('project') or {}
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise PipelineEnvironmentError(
+                f'{relative}/pyproject.toml cannot be read: {error}'
+            )
+        alias = normalized_alias(project.get('name') or folder.name)
+        if alias in workers:
+            raise PipelineEnvironmentError(
+                f'Python workers {workers[alias].relative_definition()} and {relative} are '
+                f'both named {alias}; names compare without case, "-", "_" or ".".'
+            )
+        lock = folder / 'uv.lock'
+        digest = hashlib.sha256()
+        digest.update((folder / 'pyproject.toml').read_bytes())
+        digest.update(lock.read_bytes() if lock.is_file() else b'')
+        version_file = folder / '.python-version'
+        python = (version_file.read_text().strip() if version_file.is_file()
+                  else f'{sys.version_info.major}.{sys.version_info.minor}')
+        workers[alias] = NamedWorker(
+            alias=alias, definition=str(folder), python=python, digest=digest.hexdigest(),
+        )
+    return workers
+
+
+def worker_selection(block) -> Optional[str]:
+    """
+    The worker a Python block selects: its configuration's python_worker, else its
+    pipeline's environment worker. 'mage' for MageML's own Python; None when nothing is
+    selected.
+    """
+    selected = (block.configuration or {}).get('python_worker')
+    if isinstance(selected, dict):
+        selected = 'mage' if selected.get('kind') == 'builtin' else selected.get('alias')
+    if not selected:
+        config = getattr(getattr(block, 'pipeline', None), 'environment', None)
+        if isinstance(config, dict):
+            selected = config.get('worker')
+    if not selected:
+        return None
+    alias = normalized_alias(selected)
+    return 'mage' if alias in BUILTIN_WORKERS else alias
+
+
+def block_worker(block) -> Optional[NamedWorker]:
+    """The prepared worker the block runs in; None for MageML's own Python."""
+    alias = worker_selection(block)
+    if alias is None or alias == 'mage':
+        return None
+    repo_path = getattr(block, 'repo_path', None) or os.getcwd()
+    workers = named_workers(repo_path)
+    worker = workers.get(alias)
+    if worker is None:
+        known = ', '.join(sorted(workers)) or f'none (add one in {WORKERS_DIR}/<name>/)'
+        raise PipelineEnvironmentError(
+            f'Block {block.uuid} selects Python worker "{alias}", which does not exist. '
+            f'Workers in this project: {known}.'
+        )
+    if not worker.prepared:
+        raise PipelineEnvironmentError(
+            f'Python worker "{alias}" is not prepared for its current pyproject.toml and '
+            f'uv.lock. Run "mage workers prepare {alias}" in the project.'
+        )
+    return worker
+
+
 def environments_dir() -> Path:
     configured = os.getenv(ENVIRONMENTS_DIR_ENV)
     if configured:
@@ -110,7 +244,7 @@ def _uv_version() -> str:
         return subprocess.run(
             [_uv(), '--version'], capture_output=True, text=True, timeout=30,
         ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, PipelineEnvironmentError):
         return 'unknown'
 
 
@@ -125,6 +259,13 @@ def pipeline_environment(pipeline) -> Optional[Environment]:
     """The environment the pipeline declares, or None when its blocks use Mage's."""
     config = getattr(pipeline, 'environment', None)
     if not config:
+        return None
+    if isinstance(config, dict) and config.get('worker'):
+        if config.get('requirements'):
+            raise PipelineEnvironmentError(
+                f'The environment of pipeline {pipeline.uuid} names both a worker and '
+                'requirements; a worker holds its packages in its own pyproject.toml.'
+            )
         return None
     if not isinstance(config, dict):
         raise PipelineEnvironmentError(
@@ -187,7 +328,10 @@ def ensure(environment: Environment, log=print) -> Path:
                 fcntl.flock(lock_file, fcntl.LOCK_EX)
             try:
                 if not (environment.directory / MARKER).is_file():
-                    _build(environment, log)
+                    if isinstance(environment, NamedWorker):
+                        _build_worker(environment, log)
+                    else:
+                        _build(environment, log)
             finally:
                 if fcntl is not None:
                     fcntl.flock(lock_file, fcntl.LOCK_UN)
@@ -195,9 +339,13 @@ def ensure(environment: Environment, log=print) -> Path:
 
 
 def _run(command: List[str], log) -> None:
+    _run_with_env(command, log, None)
+
+
+def _run_with_env(command: List[str], log, env: Optional[Dict[str, str]]) -> None:
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        encoding='utf-8', errors='replace', start_new_session=HAS_PROCESS_GROUPS,
+        encoding='utf-8', errors='replace', start_new_session=HAS_PROCESS_GROUPS, env=env,
     )
     timed_out = threading.Event()
 
@@ -265,6 +413,63 @@ def _build(environment: Environment, log) -> None:
         raise
 
 
+def _build_worker(worker: NamedWorker, log) -> None:
+    uv = _uv()
+    definition = Path(worker.definition)
+    relative = worker.relative_definition()
+    if not (definition / 'uv.lock').is_file():
+        raise PipelineEnvironmentError(
+            f'Python worker "{worker.alias}" has no uv.lock. Run "uv lock" in {relative} and '
+            'commit the result.'
+        )
+    final = worker.directory
+    staging = final.parent / f'{final.name}.staging-{os.getpid()}'
+    shutil.rmtree(staging, ignore_errors=True)
+    log(f'Preparing Python worker {worker.alias} (Python {worker.python}) in {final.name}.')
+    try:
+        _run([uv, 'venv', '--relocatable', '--python', worker.python, str(staging)], log)
+        environment = dict(os.environ, UV_PROJECT_ENVIRONMENT=str(staging))
+        environment.pop('VIRTUAL_ENV', None)
+        try:
+            _run_with_env(
+                [uv, 'sync', '--locked', '--no-dev', '--no-install-project',
+                 '--project', str(definition)],
+                log, environment,
+            )
+        except PipelineEnvironmentError as error:
+            text = str(error)
+            if 'lockfile' in text.lower() and 'update' in text.lower():
+                raise PipelineEnvironmentError(
+                    f'Python worker "{worker.alias}": uv.lock does not match pyproject.toml. '
+                    f'Run "uv lock" in {relative} and commit the result.'
+                ) from error
+            raise PipelineEnvironmentError(
+                f'Python worker "{worker.alias}" could not be prepared: {text}'
+            ) from error
+        python = staging / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+        frozen = subprocess.run(
+            [uv, 'pip', 'freeze', '--python', str(python)],
+            capture_output=True, text=True, timeout=120,
+        ).stdout.splitlines()
+        (staging / MARKER).write_text(json.dumps(dict(
+            identity=worker.identity,
+            worker=worker.alias,
+            definition=relative,
+            digest=worker.digest,
+            python=worker.python,
+            packages=frozen,
+        ), indent=2) + '\n')
+        os.replace(staging, final)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def prepare(worker: NamedWorker, log=print) -> Path:
+    """Builds the worker's environment from its lock when needed; returns its interpreter."""
+    return ensure(worker, log)
+
+
 def _json_variables(variables: Dict) -> Dict:
     """The variables a block can receive as JSON; other values are left out."""
     from datetime import date, datetime
@@ -293,9 +498,12 @@ def _forward(stream, sink) -> threading.Thread:
 
 
 def run_block(
-    block, environment: Environment, code: Optional[str], input_vars: List, global_vars: Dict,
+    block, environment, code: Optional[str], input_vars: List, global_vars: Dict,
 ) -> Tuple[List[Any], List[Dict]]:
-    """Runs a Python block in the environment; returns its outputs and test results."""
+    """
+    Runs a Python block in the environment (an Environment or a NamedWorker); returns its
+    outputs and test results.
+    """
     from mage_ai.pipeline_services.runtime import worker
 
     if block.type not in SUPPORTED_BLOCK_TYPES:

@@ -3334,18 +3334,25 @@ class Block(
         )
 
     def _pipeline_environment(self):
-        """The pipeline's own environment when this Python block runs in it, else None."""
-        if (
-            self.language != BlockLanguage.PYTHON
-            or self.pipeline is None
-            or not getattr(self.pipeline, 'environment', None)
-        ):
+        """
+        The environment this Python block runs in: its Python worker (its own or its
+        pipeline's), or its pipeline's requirements environment; None for MageML's Python.
+        """
+        if self.language != BlockLanguage.PYTHON:
             return None
         from mage_ai.data_preparation import environments
 
         if str(getattr(self.type, 'value', self.type)) not in environments.SUPPORTED_BLOCK_TYPES:
             return None
-        environment = environments.pipeline_environment(self.pipeline)
+        selection = environments.worker_selection(self)
+        if selection == 'mage':
+            return None
+        if selection is not None:
+            environment = environments.block_worker(self)
+        elif self.pipeline is not None and getattr(self.pipeline, 'environment', None):
+            environment = environments.pipeline_environment(self.pipeline)
+        else:
+            return None
         if environment is not None:
             from mage_ai.data_preparation.models.block.dynamic.utils import (
                 is_dynamic_block,

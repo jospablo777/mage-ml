@@ -1430,6 +1430,61 @@ def data_sample(
                ' (Parquet, dev.duckdb and record.json).')
 
 
+workers_app = typer.Typer(
+    cls=OrderCommands,
+    help='Python workers: named environments in python_workers/<name>/ that blocks select.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(workers_app, name='workers')
+
+
+@workers_app.command('list')
+def workers_list(project: str = SERVICE_PROJECT):
+    """The project's Python workers and whether each is prepared for its lock."""
+    from mage_ai.data_preparation import environments
+
+    try:
+        workers = environments.named_workers(os.path.abspath(project))
+    except environments.PipelineEnvironmentError as error:
+        _service_error(error)
+    if not workers:
+        typer.echo(f'No Python workers: add a uv project in {environments.WORKERS_DIR}/<name>/.')
+        return
+    for alias, worker in workers.items():
+        state = 'prepared' if worker.prepared else 'not prepared'
+        typer.echo(f'{alias}  Python {worker.python}  {state}  ({worker.relative_definition()})')
+
+
+WORKER_NAMES = typer.Argument(None, help='the workers; all of them by default.')
+
+
+@workers_app.command('prepare')
+def workers_prepare(
+    names: List[str] = WORKER_NAMES,
+    project: str = SERVICE_PROJECT,
+):
+    """Builds each worker's environment from its uv.lock (uv sync --locked)."""
+    from mage_ai.data_preparation import environments
+
+    try:
+        workers = environments.named_workers(os.path.abspath(project))
+        chosen = names or list(workers)
+        for name in chosen:
+            worker = workers.get(environments.normalized_alias(name))
+            if worker is None:
+                raise environments.PipelineEnvironmentError(
+                    f'There is no Python worker {name}; workers: '
+                    f'{", ".join(workers) or "none"}.'
+                )
+            if worker.prepared:
+                typer.echo(f'{worker.alias}: prepared already.')
+                continue
+            environments.prepare(worker, log=typer.echo)
+            typer.echo(f'{worker.alias}: prepared.')
+    except environments.PipelineEnvironmentError as error:
+        _service_error(error)
+
+
 def _service_error(error: Exception) -> None:
     problems = getattr(error, 'problems', None) or [str(error)]
     for problem in problems:

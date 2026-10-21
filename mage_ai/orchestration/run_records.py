@@ -9,7 +9,8 @@ When a pipeline run starts, the scheduler records a manifest:
   YAML, TOML, lock files). The files themselves are saved once per distinct set, so a
   run's exact code can be restored later.
 - environment: Python, Mage and every installed package with its version, the platform,
-  and the pipeline environment (data_preparation/environments.py) when it has one.
+  the pipeline environment (data_preparation/environments.py) when it has one, and the
+  Python worker each block selects, with the packages it was prepared with.
 - variables: a digest and the names of the run's variables (the values stay in the
   database, with the run).
 - git: the commit, branch and whether the project had uncommitted changes.
@@ -197,7 +198,49 @@ def environment(pipeline=None) -> Dict[str, Any]:
     document = dict(cached)
     if pipeline is not None and getattr(pipeline, 'environment', None):
         document['pipeline_environment'] = _pipeline_environment(pipeline)
+    if pipeline is not None:
+        workers = _python_workers(pipeline)
+        if workers:
+            document['python_workers'] = workers
     return document
+
+
+def _python_workers(pipeline) -> Dict[str, Any]:
+    """Per block that selects a Python worker: the worker as the run finds it."""
+    from mage_ai.data_preparation import environments
+
+    selections = {}
+    for block in (getattr(pipeline, 'blocks_by_uuid', None) or {}).values():
+        if str(getattr(block.language, 'value', block.language)) != 'python':
+            continue
+        alias = environments.worker_selection(block)
+        if alias not in (None, 'mage'):
+            selections[block.uuid] = alias
+    if not selections:
+        return {}
+    try:
+        workers = environments.named_workers(pipeline.repo_path)
+    except environments.PipelineEnvironmentError as error:
+        return {uuid: dict(worker=alias, error=str(error)) for uuid, alias in selections.items()}
+    described = {}
+    for uuid, alias in selections.items():
+        worker = workers.get(alias)
+        if worker is None:
+            described[uuid] = dict(worker=alias, error='no such worker')
+            continue
+        entry = dict(
+            worker=alias,
+            definition=worker.relative_definition(),
+            digest=worker.digest,
+            identity=worker.identity,
+            python=worker.python,
+            prepared=worker.prepared,
+        )
+        marker = worker.directory / environments.MARKER
+        if marker.is_file():
+            entry['packages'] = json.loads(marker.read_text()).get('packages') or []
+        described[uuid] = entry
+    return described
 
 
 def _pipeline_environment(pipeline) -> Dict[str, Any]:

@@ -267,3 +267,229 @@ class PipelineEnvironmentTest(DBTestCase):
         reloaded = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
         self.assertIsNone(reloaded.environment)
         self.assertNotIn('environment', Path(reloaded.config_path).read_text())
+
+
+WORKER_LOAD = '''
+import sys
+
+import pandas as pd
+import six
+
+
+@data_loader
+def load(**kwargs):
+    return pd.DataFrame({'six': [six.__version__], 'python': [sys.executable]})
+'''
+
+WORKER_TRANSFORM = '''
+import sys
+
+import six
+
+
+@transformer
+def transform(frame, *args, **kwargs):
+    frame['next_six'] = six.__version__
+    frame['next_python'] = sys.executable
+    return frame
+'''
+
+
+@unittest.skipUnless(shutil.which('uv'), 'needs uv')
+class NamedWorkerTest(DBTestCase):
+    """
+    Python workers: uv projects in python_workers/<name>/ that blocks select. A worker is
+    prepared from its lock before runs use it; frames cross between workers as Arrow.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.cache = tempfile.mkdtemp()
+        cls.patcher = patch.dict('os.environ', {environments.ENVIRONMENTS_DIR_ENV: cls.cache})
+        cls.patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patcher.stop()
+        shutil.rmtree(cls.cache, ignore_errors=True)
+        super().tearDownClass()
+
+    def worker(self, name='legacy', dependencies=None, lock=True):
+        import importlib.metadata
+        import subprocess
+
+        folder = Path(self.repo_path, environments.WORKERS_DIR, name)
+        folder.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        # Mage has six 1.17.0; the frame packages at Mage's versions, from uv's cache.
+        dependencies = dependencies or [
+            'six==1.16.0',
+            f'pandas=={importlib.metadata.version("pandas")}',
+            f'pyarrow=={importlib.metadata.version("pyarrow")}',
+        ]
+        folder.joinpath('pyproject.toml').write_text(textwrap.dedent(f'''
+            [project]
+            name = "{name}"
+            version = "0"
+            requires-python = ">=3.12"
+            dependencies = {dependencies!r}
+        ''').replace("'", '"'))
+        if lock:
+            subprocess.run(['uv', 'lock', '--project', str(folder)], check=True,
+                           capture_output=True)
+        return folder
+
+    def pipeline(self, environment=None, load_worker=None, transform_worker=None):
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        if environment:
+            pipeline.environment = environment
+            pipeline.save()
+        load = Block.create(
+            f'{pipeline.uuid}_load', 'data_loader', self.repo_path, pipeline=pipeline,
+            configuration=dict(python_worker=load_worker) if load_worker else None,
+        )
+        Path(load.file_path).write_text(textwrap.dedent(WORKER_LOAD))
+        transform = Block.create(
+            f'{pipeline.uuid}_transform', 'transformer', self.repo_path, pipeline=pipeline,
+            upstream_block_uuids=[load.uuid],
+            configuration=dict(python_worker=transform_worker) if transform_worker else None,
+        )
+        Path(transform.file_path).write_text(textwrap.dedent(WORKER_TRANSFORM))
+        return Pipeline.get(pipeline.uuid, repo_path=self.repo_path), load.uuid, transform.uuid
+
+    def test_a_block_runs_in_its_prepared_worker_and_passes_a_frame_to_mages_python(self):
+        self.worker()
+        pipeline, load, transform = self.pipeline(load_worker='Legacy')
+        [worker] = environments.named_workers(self.repo_path).values()
+        self.assertEqual((worker.alias, worker.prepared), ('legacy', False))
+        with self.assertRaisesRegex(Exception, 'not prepared.*mage workers prepare legacy'):
+            pipeline.get_block(load).execute_sync()
+
+        environments.prepare(worker, log=lambda line: None)
+        pipeline.get_block(load).execute_sync()
+        pipeline.get_block(transform).execute_sync()
+
+        frame = pipeline.variable_manager.get_variable(pipeline.uuid, transform, 'output_0')
+        self.assertEqual(frame['six'].tolist(), ['1.16.0'])
+        self.assertTrue(frame['python'][0].startswith(self.cache))
+        # The transformer selects no worker: MageML's own Python and six.
+        self.assertEqual(frame['next_six'].tolist(), ['1.17.0'])
+        self.assertEqual(frame['next_python'].tolist(), [sys.executable])
+
+    def test_the_pipeline_selects_a_worker_and_a_block_can_choose_mages_python(self):
+        environments.prepare(
+            environments.named_workers(str(self.worker().parent.parent))['legacy'],
+            log=lambda line: None,
+        )
+        pipeline, load, transform = self.pipeline(
+            environment=dict(worker='legacy'), transform_worker='mage',
+        )
+        pipeline.get_block(load).execute_sync()
+        pipeline.get_block(transform).execute_sync()
+        frame = pipeline.variable_manager.get_variable(pipeline.uuid, transform, 'output_0')
+        self.assertEqual((frame['six'][0], frame['next_six'][0]), ('1.16.0', '1.17.0'))
+
+    def test_an_unknown_worker_names_the_projects_workers(self):
+        self.worker()
+        pipeline, load, _ = self.pipeline(load_worker='faest')
+        with self.assertRaisesRegex(
+            Exception, 'selects Python worker "faest", which does not exist.*legacy',
+        ):
+            pipeline.get_block(load).execute_sync()
+
+    def test_a_lock_that_does_not_match_its_project_says_to_lock_again(self):
+        folder = self.worker(name='stale')
+        pyproject = folder / 'pyproject.toml'
+        pyproject.write_text(pyproject.read_text().replace('"six==1.16.0"', '"six==1.15.0"'))
+        worker = environments.named_workers(self.repo_path)['stale']
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError,
+            'uv.lock does not match pyproject.toml. Run "uv lock" in python_workers/stale',
+        ):
+            environments.prepare(worker, log=lambda line: None)
+        self.assertFalse(worker.prepared)
+
+    def test_a_worker_without_a_lock_is_refused(self):
+        self.worker(name='unlocked', lock=False)
+        worker = environments.named_workers(self.repo_path)['unlocked']
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'has no uv.lock'):
+            environments.prepare(worker, log=lambda line: None)
+
+    def test_an_export_takes_the_worker_its_blocks_share_and_refuses_a_mixture(self):
+        from mage_ai.pipeline_services import export
+
+        self.worker()
+        shared, _, _ = self.pipeline(environment=dict(worker='legacy'))
+        captured = export.capture(self.repo_path, [shared.uuid])
+        self.assertEqual(captured.requirements['six'], '1.16.0')
+
+        mixed, load, transform = self.pipeline(load_worker='legacy')
+        with self.assertRaises(export.ExportError) as caught:
+            export.capture(self.repo_path, [mixed.uuid])
+        problems = '\n'.join(caught.exception.problems)
+        self.assertIn('run in different Python workers', problems)
+        self.assertIn(f'{load} (legacy), {transform} (MageML)', problems)
+
+
+class WorkersCommandTest(unittest.TestCase):
+    """mage workers list and prepare."""
+
+    def test_the_list_says_which_workers_are_prepared(self):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        runner = CliRunner()
+        result = runner.invoke(app, ['workers', 'list', '--project', str(project)])
+        self.assertIn('No Python workers', result.output)
+        folder = project / environments.WORKERS_DIR / 'Feast_Store'
+        folder.mkdir(parents=True)
+        (folder / 'pyproject.toml').write_text('[project]\nname = "Feast_Store"\n')
+        with patch.dict('os.environ', {environments.ENVIRONMENTS_DIR_ENV: str(project / 'envs')}):
+            result = runner.invoke(app, ['workers', 'list', '--project', str(project)])
+            self.assertIn('feast-store', result.output)
+            self.assertIn('not prepared', result.output)
+            result = runner.invoke(app, ['workers', 'prepare', 'other', '--project', str(project)])
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('There is no Python worker other; workers: feast-store.', result.output)
+
+    def test_two_workers_with_one_name_are_refused(self):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        for folder, name in (('a', 'Feast_Store'), ('b', 'feast-store')):
+            path = project / environments.WORKERS_DIR / folder
+            path.mkdir(parents=True)
+            (path / 'pyproject.toml').write_text(f'[project]\nname = "{name}"\n')
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError, 'both named feast-store',
+        ):
+            environments.named_workers(str(project))
+
+
+class RunRecordWorkersTest(DBTestCase):
+    """A run's record names the worker each block selects and how it was prepared."""
+
+    def test_the_record_holds_each_blocks_worker(self):
+        from mage_ai.orchestration import run_records
+
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'feast')
+        folder.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / 'pyproject.toml').write_text('[project]\nname = "feast"\n')
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        Block.create(f'{pipeline.uuid}_features', 'data_loader', self.repo_path,
+                     pipeline=pipeline, configuration=dict(python_worker='feast'))
+        Block.create(f'{pipeline.uuid}_plain', 'data_loader', self.repo_path, pipeline=pipeline)
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+
+        record = run_records.environment(pipeline)['python_workers']
+
+        self.assertEqual(list(record), [f'{pipeline.uuid}_features'])
+        entry = record[f'{pipeline.uuid}_features']
+        self.assertEqual(
+            (entry['worker'], entry['definition'], entry['prepared']),
+            ('feast', 'python_workers/feast', False),
+        )

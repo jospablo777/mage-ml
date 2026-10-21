@@ -97,7 +97,7 @@ def normalized_environment(environment) -> Optional[Dict]:
     if not isinstance(environment, dict):
         return environment or None
     normalized = {}
-    for key in ('requirements', 'python'):
+    for key in ('requirements', 'python', 'worker'):
         value = environment.get(key)
         if isinstance(value, str):
             value = value.strip()

@@ -78,6 +78,62 @@ requirements file when a block fails with a missing module.
   `MAGE_ENVIRONMENT_BUILD_TIMEOUT_SECONDS` to change the limit.
 - `mage-environment.json` in each environment's folder lists every package it installed.
 
+## Python workers
+
+A pipeline environment gives every Python block of a pipeline the same packages. A
+Python worker is a named environment that each block chooses: in one pipeline, a block
+can load features with Feast, which needs pandas 2, while the blocks around it run with
+MageML's pandas 3.
+
+A worker is a [uv project](https://docs.astral.sh/uv/concepts/projects/) in
+`python_workers/<name>/`, with its `pyproject.toml` and `uv.lock` in Git:
+
+```toml
+# python_workers/feast/pyproject.toml
+[project]
+name = "feast"
+version = "0"
+requires-python = ">=3.12"
+dependencies = [
+  "feast[redis]>=0.50",
+  "pyarrow",
+]
+```
+
+```bash
+uv lock --project python_workers/feast
+mage workers prepare feast      # uv sync --locked into the environment cache
+mage workers list               # each worker and whether it is prepared
+```
+
+A block selects its worker in its configuration in the pipeline's `metadata.yaml`; a
+pipeline selects one for all its Python blocks, and a block can still choose MageML's
+own Python with `mage`:
+
+```yaml
+environment:
+  worker: feast                  # every Python block, unless it selects another
+blocks:
+- uuid: online_features
+  configuration:
+    python_worker: feast
+- uuid: score
+  configuration:
+    python_worker: mage          # MageML's own Python
+```
+
+- The worker's name is its `[project].name`, compared without case, `-`, `_` or `.`.
+  `.python-version` in its folder sets the Python version; MageML's is the default.
+- Prepare is explicit: a run never installs packages. A block whose worker is not
+  prepared for its current `pyproject.toml` and `uv.lock` fails with the command to run,
+  and a lock that does not match its project says to run `uv lock` again.
+- Tables cross between a worker and MageML's Python as Arrow, so a worker that returns
+  pandas frames needs pyarrow. A worker does not import MageML: blocks in it can't import
+  `mage_ai` helpers unless the worker has their packages.
+- A service exports the worker when every Python block of its pipelines runs in it, with
+  the worker's locked packages in the image. Pipelines whose blocks run in different
+  workers are refused, with each block's worker named; export them as separate services.
+
 ## Pipeline services
 
 `mage export service` installs the environment's packages, at the versions the

@@ -367,10 +367,41 @@ def _check_after_runs(entries: List[Dict], notes: List[str], problems: List[str]
 
 
 def _pipeline_environment(pipeline, problems: List[str]):
+    """
+    The Python environment the pipeline's Python blocks run in: its Python worker when
+    they all select the same one, or its requirements environment; None for Mage's.
+    """
     from mage_ai.data_preparation import environments
 
     try:
-        return environments.pipeline_environment(pipeline)
+        selections = {}
+        for block in pipeline.blocks_by_uuid.values():
+            if str(getattr(block.language, 'value', block.language)) != 'python':
+                continue
+            if str(getattr(block.type, 'value', block.type)) not in \
+                    environments.SUPPORTED_BLOCK_TYPES:
+                continue
+            selections[block.uuid] = environments.worker_selection(block)
+        workers = {s for s in selections.values() if s not in (None, 'mage')}
+        if not workers:
+            return environments.pipeline_environment(pipeline)
+        if len(set(selections.values())) > 1:
+            described = ', '.join(
+                f'{uuid} ({selected if selected not in (None, "mage") else "MageML"})'
+                for uuid, selected in selections.items()
+            )
+            problems.append(
+                f'The Python blocks of pipeline {pipeline.uuid} run in different Python '
+                f'workers and a service has one Python environment: {described}. Select one '
+                'worker for all of them, or export them as separate services.'
+            )
+            return None
+        [alias] = workers
+        worker = environments.named_workers(pipeline.repo_path).get(alias)
+        if worker is None:
+            problems.append(f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which '
+                            'does not exist.')
+        return worker
     except environments.PipelineEnvironmentError as error:
         problems.append(str(error))
         return None
