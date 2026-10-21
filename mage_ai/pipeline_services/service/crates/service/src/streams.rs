@@ -384,6 +384,87 @@ fn unavailable(kind: ConnectorKind) -> &'static str {
     }
 }
 
+/// One connector's check, for `mage-service check-connections` and the editor.
+pub struct Checked {
+    pub pipeline: String,
+    /// `source`, `sink 1`, `dead letters`.
+    pub role: String,
+    pub kind: &'static str,
+    pub report: mage_stream_ports::check::ConnectionReport,
+}
+
+/// Checks the source, sinks and dead-letter sink of each stream (or of `only`), with
+/// settings filled from `lookup` as the stream fills them. Checks only read.
+pub async fn check_connections(
+    manifest: &Manifest,
+    only: Option<&str>,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Checked> {
+    let mut checked = Vec::new();
+    for pipeline in &manifest.pipelines {
+        let Some(stream) = &pipeline.stream else {
+            continue;
+        };
+        if only.is_some_and(|name| name != pipeline.uuid) {
+            continue;
+        }
+        let mut connectors = vec![("source".to_string(), &stream.source, true)];
+        for (index, sink) in stream.sinks.iter().enumerate() {
+            connectors.push((format!("sink {}", index + 1), sink, false));
+        }
+        if let Some(sink) = &stream.errors.dead_letter {
+            connectors.push(("dead letters".to_string(), sink, false));
+        }
+        for (role, connector, source) in connectors {
+            let config = io_config::render(&Value::Object(connector.config.clone()), lookup);
+            checked.push(Checked {
+                pipeline: pipeline.uuid.clone(),
+                role,
+                kind: connector.kind.as_str(),
+                report: check_connector(connector.kind, &config, source).await,
+            });
+        }
+    }
+    checked
+}
+
+async fn check_connector(
+    kind: ConnectorKind,
+    config: &Value,
+    source: bool,
+) -> mage_stream_ports::check::ConnectionReport {
+    use mage_stream_ports::check::ConnectionReport;
+    match kind {
+        ConnectorKind::Stdout => {
+            ConnectionReport::passed("Writes to the service's output; nothing to reach.")
+        }
+        ConnectorKind::Http if source => ConnectionReport::passed(
+            "Receives messages at POST /v1/streams/{pipeline}/messages; nothing to reach.",
+        ),
+        ConnectorKind::Postgres if source => {
+            mage_connector_postgres::cdc::check_source(config).await
+        }
+        ConnectorKind::Postgres => mage_connector_postgres::check_sink(config).await,
+        #[cfg(feature = "kafka")]
+        ConnectorKind::Kafka => mage_connector_kafka::check::check(config, source).await,
+        #[cfg(feature = "rabbitmq")]
+        ConnectorKind::Rabbitmq => mage_connector_rabbitmq::check(config, source).await,
+        #[cfg(feature = "nats")]
+        ConnectorKind::Nats => mage_connector_nats::check(config, source).await,
+        #[allow(unreachable_patterns)]
+        ConnectorKind::Kafka | ConnectorKind::Rabbitmq | ConnectorKind::Nats => {
+            ConnectionReport::failed(format!(
+                "This service cannot connect: {}.",
+                unavailable(kind)
+            ))
+        }
+        other => ConnectionReport::not_checked(format!(
+            "{} has no connection check yet; the stream's start reports what fails.",
+            other.as_str()
+        )),
+    }
+}
+
 fn in_flight_bytes(stream: &mage_service_core::manifest::Stream) -> u64 {
     (stream.batch.max_bytes as u64).saturating_mul(4)
 }

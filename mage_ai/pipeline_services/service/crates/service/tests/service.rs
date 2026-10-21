@@ -1117,3 +1117,84 @@ fn the_ledger_command_migrates_postgresql_and_imports_a_sqlite_history() {
     let (_, seen) = service.get(&format!("/v1/runs/{}", run["id"].as_str().unwrap()));
     assert_eq!(seen["status"], "completed", "{seen}");
 }
+
+/// `mage-service check-connections`: each connector of a stream, read-only; exit 1 when one
+/// failed. A PostgreSQL sink with a wrong password fails (with `MAGE_TEST_POSTGRES_URL`).
+#[test]
+fn check_connections_reports_each_connector_of_a_stream() {
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    let sinks = &mut manifest["pipelines"][0]["stream"]["sinks"];
+    sinks
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name": "search", "kind": "search", "after": "tag",
+                     "config": {"url": "http://localhost:1"}}));
+    let service = Service::with_manifest(&manifest, &[("transformers/tag.py", TAG_BLOCK)]);
+    let check = |manifest_dir: &Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_mage-service"))
+            .args(["check-connections", "--json"])
+            .env("MAGE_SERVICE_DIR", manifest_dir)
+            .output()
+            .unwrap();
+        let rows: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+            panic!("{}", String::from_utf8_lossy(&output.stderr));
+        });
+        (output.status.success(), rows)
+    };
+    let (ok, rows) = check(service.dir.path());
+    assert!(ok, "{rows}");
+    let results: Vec<(String, String, String)> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r["role"].as_str().unwrap().to_string(),
+                r["kind"].as_str().unwrap().to_string(),
+                r["result"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        results,
+        vec![
+            ("source".into(), "http".into(), "passed".into()),
+            ("sink 1".into(), "stdout".into(), "passed".into()),
+            ("sink 2".into(), "search".into(), "not_checked".into()),
+        ]
+    );
+
+    let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") else {
+        eprintln!("MAGE_TEST_POSTGRES_URL is not set: the PostgreSQL part is skipped");
+        return;
+    };
+    let config: tokio_postgres::Config = url.split('?').next().unwrap().parse().unwrap();
+    let host = match &config.get_hosts()[0] {
+        tokio_postgres::config::Host::Tcp(host) => host.clone(),
+        tokio_postgres::config::Host::Unix(path) => path.display().to_string(),
+    };
+    manifest["pipelines"][0]["stream"]["sinks"]
+        .as_array_mut()
+        .unwrap()
+        .push(
+            json!({"name": "pg", "kind": "postgres", "after": "tag", "config": {
+            "host": host, "port": config.get_ports()[0], "database": config.get_dbname(),
+            "username": config.get_user(), "password": "wrong", "schema": "public",
+            "table": "orders", "sslmode": "disable"}}),
+        );
+    let service = Service::with_manifest(&manifest, &[("transformers/tag.py", TAG_BLOCK)]);
+    let (ok, rows) = check(service.dir.path());
+    assert!(!ok, "{rows}");
+    let pg = &rows[3];
+    assert_eq!(
+        (pg["kind"].as_str(), pg["result"].as_str()),
+        (Some("postgres"), Some("failed"))
+    );
+    assert!(
+        pg["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Could not connect"),
+        "{pg}"
+    );
+}

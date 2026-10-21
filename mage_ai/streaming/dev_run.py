@@ -1,6 +1,7 @@
 """
 A streaming pipeline running on the local engine from the editor (C2): start, pause,
-resume, stop, and its status (state, rates, lag, totals, the engine's log).
+resume, stop, and its status (state, rates, lag, totals, the engine's log); and the check of
+its connections (C3).
 
 The run is a development run (SAFETY.md section 3): sources read with positions of their own
 (mage_ai/streaming/development.py), and it starts only when every sink it writes was named
@@ -151,6 +152,46 @@ def start(repo_path: str, pipeline_uuid: str, confirmed_sinks: List[str],
     with _lock:
         _runs[key] = run
     return status(repo_path, pipeline_uuid)
+
+
+def check_connections(repo_path: str, pipeline_uuid: str, user: Optional[str] = None,
+                      timeout: float = 120) -> Dict:
+    """
+    The engine's connection check of the stream's source and sinks (C3), on the settings a
+    development run would use (its own consumer group and positions): reachable or why not,
+    the topic, queue, table or slot, and what to fix. The check only reads.
+    """
+    from mage_ai.pipeline_services import engine, export, local_run
+    from mage_ai.streaming.development import for_development_manifest
+
+    binary = engine.engine_path()
+    folder = Path(repo_path) / DEV_DIR / pipeline_uuid
+    try:
+        captured = export.capture(repo_path, [pipeline_uuid], name=f'dev-{pipeline_uuid}')
+    except export.ExportError as error:
+        raise DevRunError('The pipeline cannot run on the engine:\n'
+                          + '\n'.join(f'- {p}' for p in error.problems)) from None
+    box = Path(export.write(captured, str(folder / 'check'), force=True))
+    manifest_path = box / 'service.json'
+    manifest = json.loads(manifest_path.read_text())
+    notes = for_development_manifest(manifest, user)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    data = folder / 'data'
+    data.mkdir(parents=True, exist_ok=True)
+    env = local_run.engine_environment(box, data, _free_port(), secrets.token_urlsafe(24))
+    try:
+        result = subprocess.run(
+            [str(binary), 'check-connections', pipeline_uuid, '--json'],
+            env=env, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise DevRunError(f'The connection check took over {int(timeout)} seconds.') from None
+    try:
+        checks = json.loads(result.stdout)
+    except ValueError:
+        raise DevRunError('The connection check failed:\n'
+                          + (result.stderr or result.stdout).strip()[-2000:]) from None
+    return dict(checks=checks, notes=notes, checked_at=time.time())
 
 
 def _run(repo_path: str, pipeline_uuid: str) -> Optional[DevRun]:

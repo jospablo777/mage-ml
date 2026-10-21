@@ -15,6 +15,7 @@
 //! `password`, `check_hostname`), and `librdkafka` for any other client property.
 
 pub mod avro;
+pub mod check;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};

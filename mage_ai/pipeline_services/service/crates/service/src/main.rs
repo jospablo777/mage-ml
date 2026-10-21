@@ -67,6 +67,15 @@ enum Command {
     /// Warm Python workers for the jobs of MageML's scheduler (requests on stdin, events
     /// on stdout); MageML starts it, see docs/development/run-engine.md.
     Jobs(jobs::JobsArgs),
+    /// Check that each stream's source and sinks answer, read-only, then exit: 0 when none
+    /// failed.
+    CheckConnections {
+        /// Only this pipeline's stream.
+        pipeline: Option<String>,
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Migrate the run history, or copy a SQLite one into PostgreSQL, then exit.
     Ledger {
         #[command(subcommand)]
@@ -264,6 +273,9 @@ fn main() -> ExitCode {
             Command::Health { port } => Ok(health(listen_port(port))),
             Command::Env => env_report(&cli.common),
             Command::Ledger { command } => ledger_command(&cli.common, command),
+            Command::CheckConnections { pipeline, json } => {
+                check_connections(&cli.common, pipeline.as_deref(), json).await
+            }
             Command::Jobs(args) => {
                 log::to_stderr();
                 jobs::run(args).await
@@ -466,6 +478,80 @@ fn ledger_location(common: &Common, service: &str) -> Result<ledger::Location, S
         url: url.clone(),
         schema: schema.clone(),
         service: service.to_string(),
+    })
+}
+
+async fn check_connections(
+    common: &Common,
+    pipeline: Option<&str>,
+    json: bool,
+) -> Result<ExitCode, String> {
+    use mage_stream_ports::check::CheckResult;
+
+    let manifest = load_manifest(common)?;
+    if let Some(name) = pipeline
+        && !manifest
+            .pipelines
+            .iter()
+            .any(|p| p.uuid == name && p.stream.is_some())
+    {
+        return Err(format!("This service has no stream named {name}."));
+    }
+    let secrets = load_secrets(&manifest);
+    log::set_redactions(secrets.redacted_values());
+    let lookup = |name: &str| {
+        secrets
+            .additions
+            .get(name)
+            .cloned()
+            .or_else(|| std::env::var(name).ok())
+    };
+    let checked = streams::check_connections(&manifest, pipeline, &lookup).await;
+    let failed = checked
+        .iter()
+        .any(|c| c.report.result == CheckResult::Failed);
+    if json {
+        let rows: Vec<serde_json::Value> = checked
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "pipeline": c.pipeline,
+                    "role": c.role,
+                    "kind": c.kind,
+                    "result": c.report.result.as_str(),
+                    "summary": log::redact(&c.report.summary),
+                    "facts": c.report.facts.iter()
+                        .map(|(label, value)| serde_json::json!({"label": label, "value": value}))
+                        .collect::<Vec<_>>(),
+                    "problems": c.report.problems.iter().map(|p| log::redact(p)).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::Value::Array(rows));
+    } else if checked.is_empty() {
+        println!("This service has no streams.");
+    } else {
+        for c in &checked {
+            println!(
+                "{} {} ({}): {}: {}",
+                c.pipeline,
+                c.role,
+                c.kind,
+                c.report.result.as_str().replace('_', " "),
+                log::redact(&c.report.summary)
+            );
+            for (label, value) in &c.report.facts {
+                println!("    {label}: {value}");
+            }
+            for problem in &c.report.problems {
+                println!("    - {}", log::redact(problem));
+            }
+        }
+    }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     })
 }
 

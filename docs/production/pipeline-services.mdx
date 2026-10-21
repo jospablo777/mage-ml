@@ -619,6 +619,10 @@ failed when the service starts again.
 
 ## Check that it works like Mage
 
+`mage-service check-connections` checks that each stream's source and sinks answer, with the
+service's settings and secrets, read-only, and exits 1 when one fails; `--json` prints the
+reports. Run it in the container before switching traffic to a new deployment.
+
 `mage-service validate` checks the image's files at build time. To compare outputs, run the
 pipeline in Mage and with `mage-service run` from the export directory, and compare the
 block outputs: the tests in `mage_ai/tests/pipeline_services` do exactly that.

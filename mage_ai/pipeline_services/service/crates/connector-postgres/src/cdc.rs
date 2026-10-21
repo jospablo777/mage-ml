@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use bytes::Bytes;
 use mage_stream_core::BatchId;
+use mage_stream_ports::check::ConnectionReport;
 use mage_stream_ports::{
     AckKind, AssignmentEpoch, BatchMeta, BoxFuture, Commit, CommitOutcome, ConnectorError,
     Envelope, EnvelopeBuilder, PartitionId, Position, Source, SourceCapabilities, SourceEvent,
@@ -246,30 +247,7 @@ impl PgCdcSource {
     }
 
     async fn client(&self) -> Result<Client, ConnectorError> {
-        let s = &self.settings;
-        let mut config = Config::new();
-        config
-            .host(&s.host)
-            .port(s.port)
-            .dbname(&s.database)
-            .user(&s.user)
-            .application_name("mage-stream")
-            .connect_timeout(s.connect_timeout);
-        if let Some(password) = &s.password {
-            config.password(password);
-        }
-        let (mode, check, root) = tls_mode(s.sslmode.as_deref(), s.sslrootcert.as_deref())?;
-        let connector = tls::connector(check, root.as_deref())
-            .map_err(|e| ConnectorError::fatal(format!("PostgreSQL TLS: {e}")))?;
-        config.ssl_mode(mode);
-        let (client, connection) = config
-            .connect(connector)
-            .await
-            .map_err(|e| classify(&format!("connecting to {}", self.label()), e))?;
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        Ok(client)
+        plain_client(&self.settings, &self.label()).await
     }
 
     /// Creates the publication and the slot when they do not exist. A publication without
@@ -1111,6 +1089,193 @@ impl Source for PgCdcSource {
             self.client = None;
         })
     }
+}
+
+/// A normal (not replication) connection with the source's settings.
+async fn plain_client(s: &Settings, label: &str) -> Result<Client, ConnectorError> {
+    let mut config = Config::new();
+    config
+        .host(&s.host)
+        .port(s.port)
+        .dbname(&s.database)
+        .user(&s.user)
+        .application_name("mage-stream")
+        .connect_timeout(s.connect_timeout);
+    if let Some(password) = &s.password {
+        config.password(password);
+    }
+    let (mode, check, root) = tls_mode(s.sslmode.as_deref(), s.sslrootcert.as_deref())?;
+    let connector = tls::connector(check, root.as_deref())
+        .map_err(|e| ConnectorError::fatal(format!("PostgreSQL TLS: {e}")))?;
+    config.ssl_mode(mode);
+    let (client, connection) = config
+        .connect(connector)
+        .await
+        .map_err(|e| classify(&format!("connecting to {label}"), e))?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
+}
+
+/// The connection check of a change capture source: the server's `wal_level`, the user's
+/// right to replicate, the slot (its plugin, whether another connection holds it, how far
+/// behind the server it is) and the publication's tables. Reads only: the slot and the
+/// publication are made by the stream's first start, not by the check.
+pub async fn check_source(config: &Value) -> ConnectionReport {
+    let settings = match Settings::new(config) {
+        Ok(settings) => settings,
+        Err(error) => return ConnectionReport::failed(error.to_string()),
+    };
+    let label = format!("{}:{}/{}", settings.host, settings.port, settings.database);
+    let client = match plain_client(&settings, &label).await {
+        Ok(client) => client,
+        Err(error) => return ConnectionReport::failed(format!("Could not connect: {error}")),
+    };
+    match check_source_on(&client, &settings, &label).await {
+        Ok(report) => report,
+        Err(error) => ConnectionReport::failed(format!("Connected to {label}, but: {error}")),
+    }
+}
+
+async fn check_source_on(
+    client: &Client,
+    s: &Settings,
+    label: &str,
+) -> Result<ConnectionReport, tokio_postgres::Error> {
+    let mut report = ConnectionReport::passed(format!("Connected to {label} as {}.", s.user));
+    let level: String = client.query_one("SHOW wal_level", &[]).await?.get(0);
+    report = report.fact("wal_level", &level);
+    if level != "logical" {
+        report = report.fail(format!(
+            "wal_level is {level}; change capture needs logical (set it and restart the server)."
+        ));
+    }
+    let can_replicate: bool = client
+        .query_one(
+            "SELECT rolreplication OR rolsuper FROM pg_roles WHERE rolname = current_user",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !can_replicate {
+        report = report.fail(format!(
+            "User {} cannot replicate: it needs the REPLICATION attribute.",
+            s.user
+        ));
+    }
+    let slot = client
+        .query_opt(
+            "SELECT plugin, active, \
+             pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn)::bigint \
+             FROM pg_replication_slots WHERE slot_name = $1",
+            &[&s.slot],
+        )
+        .await?;
+    match slot {
+        Some(row) => {
+            let plugin: String = row.get(0);
+            let active: bool = row.get(1);
+            let behind: Option<i64> = row.get(2);
+            report = report.fact("replication slot", &s.slot);
+            if let Some(bytes) = behind {
+                report = report.fact("slot behind the server (bytes)", bytes);
+            }
+            if plugin != "pgoutput" {
+                report = report.fail(format!(
+                    "Slot {} uses {plugin}; the stream reads pgoutput.",
+                    s.slot
+                ));
+            }
+            if active {
+                report = report.warn(format!(
+                    "Slot {} is in use by another connection: a second reader waits for it.",
+                    s.slot
+                ));
+            }
+        }
+        None => {
+            let free: i64 = client
+                .query_one(
+                    "SELECT current_setting('max_replication_slots')::bigint - count(*) \
+                     FROM pg_replication_slots",
+                    &[],
+                )
+                .await?
+                .get(0);
+            report = if free <= 0 {
+                report.fail(format!(
+                    "Slot {} does not exist and the server has no free slot \
+                     (max_replication_slots).",
+                    s.slot
+                ))
+            } else if s.create_slot {
+                report.warn(format!(
+                    "Slot {} does not exist; the stream's first start makes it.",
+                    s.slot
+                ))
+            } else {
+                report.fail(format!(
+                    "Slot {} does not exist and create_slot is off.",
+                    s.slot
+                ))
+            };
+        }
+    }
+    let publication = client
+        .query_opt(
+            "SELECT puballtables FROM pg_publication WHERE pubname = $1",
+            &[&s.publication],
+        )
+        .await?;
+    match publication {
+        Some(row) => {
+            let all: bool = row.get(0);
+            let published: Vec<String> = client
+                .query(
+                    "SELECT schemaname || '.' || tablename FROM pg_publication_tables \
+                     WHERE pubname = $1 ORDER BY 1",
+                    &[&s.publication],
+                )
+                .await?
+                .iter()
+                .map(|row| row.get(0))
+                .collect();
+            report = report.fact(
+                "publication",
+                format!(
+                    "{} ({})",
+                    s.publication,
+                    if all {
+                        "all tables".to_string()
+                    } else {
+                        format!("{} tables", published.len())
+                    }
+                ),
+            );
+            for table in &s.tables {
+                if !all && !published.contains(table) {
+                    report = report.fail(format!(
+                        "Table {table} is not in publication {}.",
+                        s.publication
+                    ));
+                }
+            }
+        }
+        None if s.create_slot => {
+            report = report.warn(format!(
+                "Publication {} does not exist; the stream's first start makes it.",
+                s.publication
+            ));
+        }
+        None => {
+            report = report.fail(format!(
+                "Publication {} does not exist and create_slot is off.",
+                s.publication
+            ));
+        }
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

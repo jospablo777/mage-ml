@@ -5,6 +5,7 @@
 //! methods return boxed futures. Implementations live in connector crates; the engine drives
 //! them with the state machine of `mage-stream-core`.
 
+pub mod check;
 mod envelope;
 
 use std::future::Future;

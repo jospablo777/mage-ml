@@ -74,3 +74,14 @@ test('a stream starts on the local engine, pauses, resumes and stops', async ({ 
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(page.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 60000 });
 });
+
+test('the run panel checks the connections before a start', async ({ page }) => {
+  await page.goto(`/pipelines/${pipelineUUID}/edit?sideview=stream_run`);
+  await page.getByRole('button', { name: 'Check connections' }).click();
+
+  // The source's topic was never made: the check says so, and the sink's is missing too.
+  await expect(page.getByText('1 of 2 connections failed: the stream cannot start'))
+    .toBeVisible({ timeout: 90000 });
+  await expect(page.getByText(`Topic run_in_${SUFFIX} does not exist.`)).toBeVisible();
+  await expect(page.getByText('Look at this')).toBeVisible();
+});

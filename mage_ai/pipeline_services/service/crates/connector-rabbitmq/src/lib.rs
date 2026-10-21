@@ -107,6 +107,91 @@ fn header_bytes(value: &AMQPValue) -> Vec<u8> {
     }
 }
 
+/// The connection check of a source (`source`) or a sink: the broker, and the queue (its
+/// messages and consumers) or the sink's exchange. Passive declarations only, so nothing is
+/// made, taken or written.
+pub async fn check(config: &Value, source: bool) -> mage_stream_ports::check::ConnectionReport {
+    use lapin::options::{ExchangeDeclareOptions, QueueDeclareOptions};
+    use mage_stream_ports::check::ConnectionReport;
+
+    let (url, label) = match connection_url(config) {
+        Ok(urls) => urls,
+        Err(error) => return ConnectionReport::failed(error.to_string()),
+    };
+    let connecting = Connection::connect(&url, ConnectionProperties::default());
+    let connection = match tokio::time::timeout(Duration::from_secs(10), connecting).await {
+        Ok(Ok(connection)) => connection,
+        Ok(Err(error)) => {
+            return ConnectionReport::failed(format!("Could not connect to {label}: {error}"));
+        }
+        Err(_) => {
+            return ConnectionReport::failed(format!("{label} did not answer within 10 seconds."));
+        }
+    };
+    let mut report = ConnectionReport::passed(format!("Connected to {label}."));
+    let exchange = if source {
+        String::new()
+    } else {
+        text(config, "exchange").unwrap_or_default()
+    };
+    let queue = text(config, "queue_name");
+    if !exchange.is_empty() {
+        let channel = match connection.create_channel().await {
+            Ok(channel) => channel,
+            Err(error) => return report.fail(format!("Opening a channel: {error}")),
+        };
+        let passive = ExchangeDeclareOptions {
+            passive: true,
+            ..Default::default()
+        };
+        report = match channel
+            .exchange_declare(
+                exchange.as_str().into(),
+                lapin::ExchangeKind::Direct,
+                passive,
+                FieldTable::default(),
+            )
+            .await
+        {
+            Ok(()) => report.fact("exchange", &exchange),
+            Err(error) => report.fail(format!("Exchange {exchange}: {error}")),
+        };
+    }
+    // A source reads the queue; a sink on the default exchange publishes to it by name.
+    let queue = if source || exchange.is_empty() {
+        queue.or_else(|| text(config, "routing_key"))
+    } else {
+        None
+    };
+    if let Some(queue) = queue {
+        let channel = match connection.create_channel().await {
+            Ok(channel) => channel,
+            Err(error) => return report.fail(format!("Opening a channel: {error}")),
+        };
+        let passive = QueueDeclareOptions {
+            passive: true,
+            ..Default::default()
+        };
+        report = match channel
+            .queue_declare(queue.as_str().into(), passive, FieldTable::default())
+            .await
+        {
+            Ok(declared) => report
+                .fact("queue", &queue)
+                .fact("messages ready", declared.message_count())
+                .fact("consumers", declared.consumer_count()),
+            Err(error) if error.to_string().contains("NOT_FOUND") => {
+                report.fail(format!("Queue {queue} does not exist."))
+            }
+            Err(error) => report.fail(format!("Queue {queue}: {error}")),
+        };
+    } else if source {
+        report = report.fail("The settings name no queue (queue_name).");
+    }
+    let _ = connection.close(0, "check done".into()).await;
+    report
+}
+
 struct Live {
     connection: Connection,
     channel: Channel,
@@ -550,5 +635,88 @@ mod tests {
             connection_url(&serde_json::json!({"connection_host": "h", "url_protocol": "http"}))
                 .is_err()
         );
+    }
+
+    /// Against a broker (`MAGE_TEST_RABBITMQ`, host:port; integration_tests/compose.yaml
+    /// serves localhost:15673 with its user, which the test uses).
+    #[tokio::test]
+    async fn a_check_reports_the_queue_or_what_is_missing() {
+        use lapin::options::QueueDeclareOptions;
+        use mage_stream_ports::check::CheckResult;
+
+        let Ok(address) = std::env::var("MAGE_TEST_RABBITMQ") else {
+            eprintln!("MAGE_TEST_RABBITMQ is not set: skipped");
+            return;
+        };
+        let (host, port) = address.rsplit_once(':').unwrap();
+        let queue = format!("check_{}", std::process::id());
+        let settings = |extra: Value| {
+            let mut base = serde_json::json!({"connection_host": host, "connection_port": port,
+                                              "queue_name": queue, "username": "mage",
+                                              "password": "p@ss/w:rd%"});
+            for (key, value) in extra.as_object().unwrap() {
+                base[key] = value.clone();
+            }
+            base
+        };
+        let missing = check(&settings(serde_json::json!({})), true).await;
+        assert_eq!(missing.result, CheckResult::Failed, "{missing:?}");
+        assert!(
+            missing.problems[0].contains("does not exist"),
+            "{missing:?}"
+        );
+
+        let (url, _) = connection_url(&settings(serde_json::json!({}))).unwrap();
+        let connection = Connection::connect(&url, ConnectionProperties::default())
+            .await
+            .unwrap();
+        let channel = connection.create_channel().await.unwrap();
+        channel
+            .queue_declare(
+                queue.as_str().into(),
+                QueueDeclareOptions {
+                    durable: true,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await
+            .unwrap();
+        for body in [b"1", b"2"] {
+            channel
+                .basic_publish(
+                    "".into(),
+                    queue.as_str().into(),
+                    BasicPublishOptions::default(),
+                    body,
+                    BasicProperties::default(),
+                )
+                .await
+                .unwrap()
+                .await
+                .unwrap();
+        }
+        let report = check(&settings(serde_json::json!({})), true).await;
+        assert_eq!(report.result, CheckResult::Passed, "{report:?}");
+        assert!(
+            report
+                .facts
+                .contains(&("messages ready".to_string(), "2".to_string())),
+            "{report:?}"
+        );
+
+        let sink = check(
+            &settings(serde_json::json!({"exchange": "no_such_exchange"})),
+            false,
+        )
+        .await;
+        assert_eq!(sink.result, CheckResult::Failed, "{sink:?}");
+        assert!(sink.problems[0].contains("no_such_exchange"), "{sink:?}");
+        let wrong = check(&settings(serde_json::json!({"password": "wrong"})), true).await;
+        assert_eq!(wrong.result, CheckResult::Failed, "{wrong:?}");
+        channel
+            .queue_delete(queue.as_str().into(), Default::default())
+            .await
+            .unwrap();
     }
 }

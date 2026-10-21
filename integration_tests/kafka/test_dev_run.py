@@ -162,3 +162,60 @@ def test_a_variable_the_stream_needs_stops_the_start_with_its_name(mage_project,
     finally:
         dev_run.stop(mage_project, pipeline.uuid)
         pipeline.delete()
+
+
+def test_the_editor_checks_a_streams_connections_without_moving_a_group(
+    mage_project, kafka_bootstrap, kafka_topic, monkeypatch,
+):
+    from kafka import KafkaConsumer, TopicPartition
+
+    from integration_tests.exported_services import stream_service_binary
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.constants import PipelineType
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.streaming import dev_run
+
+    monkeypatch.setenv('MAGE_ENGINE_PATH', str(stream_service_binary()))
+    group = f'it_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(f'check_{uuid.uuid4().hex[:8]}',
+                               pipeline_type=PipelineType.STREAMING, repo_path=mage_project)
+
+    def add(name, kind, content, upstream=(), language='yaml'):
+        block = Block.create(f'{pipeline.uuid}_{name}', kind, mage_project,
+                             language=language, pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(content))
+        pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
+        return block
+
+    source = add('source', 'data_loader', f'''
+        connector_type: kafka
+        bootstrap_server: {kafka_bootstrap}
+        topic: {kafka_topic}
+        consumer_group: {group}
+    ''')
+    add('sink', 'data_exporter', f'''
+        connector_type: kafka
+        bootstrap_server: {kafka_bootstrap}
+        topic: missing_{uuid.uuid4().hex[:8]}
+    ''', upstream=[source])
+    produce(kafka_bootstrap, kafka_topic, 0, 4)
+
+    checked = dev_run.check_connections(mage_project, pipeline.uuid, user='ada')
+
+    by_role = {c['role']: c for c in checked['checks']}
+    assert set(by_role) == {'source', 'sink 1'}
+    source_check = by_role['source']
+    # The development group, which has no position yet.
+    assert source_check['result'] == 'warning', source_check
+    assert f'{group}-dev-ada' in source_check['problems'][0]
+    facts = {f['label']: f['value'] for f in source_check['facts']}
+    assert facts[f'{kafka_topic}: messages kept'] == '4'
+    assert by_role['sink 1']['result'] == 'warning'
+    assert 'does not exist' in by_role['sink 1']['problems'][0]
+    # Read-only: no group was made or moved by the check.
+    consumer = KafkaConsumer(bootstrap_servers=kafka_bootstrap, group_id=f'{group}-dev-ada',
+                             enable_auto_commit=False)
+    partitions = consumer.partitions_for_topic(kafka_topic)
+    committed = [consumer.committed(TopicPartition(kafka_topic, p)) for p in partitions]
+    consumer.close()
+    assert committed == [None] * len(partitions)

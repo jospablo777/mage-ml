@@ -832,6 +832,81 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The connection check of a sink: the server, the table and the user's right to write it,
+/// or to make it when it does not exist. Writes nothing.
+pub async fn check_sink(config: &Value) -> mage_stream_ports::check::ConnectionReport {
+    use mage_stream_ports::check::ConnectionReport;
+
+    let sink = match PgSink::new(config) {
+        Ok(sink) => sink,
+        Err(error) => return ConnectionReport::failed(error.to_string()),
+    };
+    let s = &sink.settings;
+    let client = match sink.connect().await {
+        Ok(client) => client,
+        Err(error) => return ConnectionReport::failed(format!("Could not connect: {error}")),
+    };
+    let label = format!("{}:{}/{}", s.host, s.port, s.database);
+    let mut report = ConnectionReport::passed(format!("Connected to {label} as {}.", s.user));
+    let table = format!("{}.{}", quote(&s.schema), quote(&s.table));
+    let checked: Result<ConnectionReport, String> = async {
+        let columns = PgSink::columns(&client, s)
+            .await
+            .map_err(|e| e.to_string())?;
+        if columns.is_empty() {
+            let can_create: bool = client
+                .query_one(
+                    "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1) \
+                     AND has_schema_privilege($1, 'CREATE')",
+                    &[&s.schema],
+                )
+                .await
+                .map_err(|e| e.to_string())?
+                .get(0);
+            report = if can_create {
+                report.warn(format!(
+                    "Table {} does not exist; the first batch makes it.",
+                    s.label()
+                ))
+            } else {
+                report.fail(format!(
+                    "Table {} does not exist, and user {} cannot make tables in schema {}.",
+                    s.label(),
+                    s.user,
+                    s.schema
+                ))
+            };
+            return Ok(report);
+        }
+        report = report
+            .fact("table", s.label())
+            .fact("columns", columns.len());
+        let mut needed = vec!["INSERT"];
+        if !s.unique.is_empty() && s.update {
+            needed.push("UPDATE");
+        }
+        for privilege in needed {
+            let allowed: bool = client
+                .query_one("SELECT has_table_privilege($1, $2)", &[&table, &privilege])
+                .await
+                .map_err(|e| e.to_string())?
+                .get(0);
+            if !allowed {
+                report = report.fail(format!(
+                    "User {} has no {privilege} privilege on {}.",
+                    s.user,
+                    s.label()
+                ));
+            }
+        }
+        Ok(report)
+    }
+    .await;
+    checked.unwrap_or_else(|error| {
+        ConnectionReport::failed(format!("Connected to {label}, but: {error}"))
+    })
+}
+
 fn tls_for(
     settings: &Settings,
 ) -> Result<
@@ -1028,5 +1103,124 @@ mod tests {
         assert_eq!(rest, "host=db password='a b\\'c'");
         assert_eq!(mode.as_deref(), Some("verify-full"));
         assert_eq!(root.as_deref(), Some("/My Certs/ca.pem"));
+    }
+
+    /// Settings for the server of `MAGE_TEST_POSTGRES_URL`, with `extra` on top.
+    fn server_settings(extra: Value) -> Option<Value> {
+        let url = std::env::var("MAGE_TEST_POSTGRES_URL").ok()?;
+        let (rest, _, _) = split_tls(&url);
+        let config: Config = rest.parse().unwrap();
+        let host = match &config.get_hosts()[0] {
+            tokio_postgres::config::Host::Tcp(host) => host.clone(),
+            #[cfg(unix)]
+            tokio_postgres::config::Host::Unix(path) => path.display().to_string(),
+        };
+        let mut settings = serde_json::json!({
+            "host": host,
+            "port": config.get_ports().first().copied().unwrap_or(5432),
+            "database": config.get_dbname().unwrap_or("postgres"),
+            "username": config.get_user().unwrap_or("postgres"),
+            "user": config.get_user().unwrap_or("postgres"),
+            "password": String::from_utf8_lossy(config.get_password().unwrap_or_default()),
+            "sslmode": "disable",
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            settings[key] = value.clone();
+        }
+        Some(settings)
+    }
+
+    #[tokio::test]
+    async fn a_sink_check_reports_the_table_or_that_the_first_batch_makes_it() {
+        use mage_stream_ports::check::CheckResult;
+        let table = format!("check_sink_{}", std::process::id());
+        let Some(missing) =
+            server_settings(serde_json::json!({"schema": "public", "table": table}))
+        else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let report = check_sink(&missing).await;
+        assert_eq!(report.result, CheckResult::Warning, "{report:?}");
+        assert!(
+            report.problems[0].contains("the first batch makes it"),
+            "{report:?}"
+        );
+
+        let sink = PgSink::new(&missing).unwrap();
+        let client = sink.connect().await.unwrap();
+        client
+            .batch_execute(&format!(
+                "CREATE TABLE public.{table} (id bigint, name text)"
+            ))
+            .await
+            .unwrap();
+        let report = check_sink(&missing).await;
+        assert_eq!(report.result, CheckResult::Passed, "{report:?}");
+        assert!(
+            report
+                .facts
+                .contains(&("columns".to_string(), "2".to_string())),
+            "{report:?}"
+        );
+        client
+            .batch_execute(&format!("DROP TABLE public.{table}"))
+            .await
+            .unwrap();
+
+        let wrong = server_settings(serde_json::json!({"schema": "public", "table": "t",
+                                                        "password": "wrong"}))
+        .unwrap();
+        let report = check_sink(&wrong).await;
+        assert_eq!(report.result, CheckResult::Failed, "{report:?}");
+        assert!(
+            report.summary.starts_with("Could not connect"),
+            "{report:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_change_capture_check_reports_the_slot_and_the_publication() {
+        use mage_stream_ports::check::CheckResult;
+        let slot = format!("check_slot_{}", std::process::id());
+        let Some(settings) = server_settings(serde_json::json!({
+            "replication_slot": slot, "publication_name": format!("{slot}_pub"),
+        })) else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let report = cdc::check_source(&settings).await;
+        // A slot and publication the first start makes; wal_level may be replica on a
+        // server set up only for the run history (CI's), which the check names.
+        let level = report
+            .facts
+            .iter()
+            .find(|(l, _)| l == "wal_level")
+            .unwrap()
+            .1
+            .clone();
+        if level == "logical" {
+            assert_eq!(report.result, CheckResult::Warning, "{report:?}");
+            assert!(
+                report
+                    .problems
+                    .iter()
+                    .any(|p| p.contains("first start makes it"))
+            );
+        } else {
+            assert_eq!(report.result, CheckResult::Failed, "{report:?}");
+            assert!(report.problems[0].contains("needs logical"), "{report:?}");
+        }
+        let mut off = settings.clone();
+        off["create_slot"] = Value::Bool(false);
+        let report = cdc::check_source(&off).await;
+        assert_eq!(report.result, CheckResult::Failed, "{report:?}");
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|p| p.contains("create_slot is off")),
+            "{report:?}"
+        );
     }
 }

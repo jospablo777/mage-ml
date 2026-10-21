@@ -10,6 +10,10 @@
 
 ### Exported services
 
+- **Check connections** in a stream's Run tab, and `mage-service check-connections`: the
+  engine reports whether the source and each sink answer, read-only, with what the system
+  says (Kafka partitions, retention and group lag; PostgreSQL tables, privileges, slots and
+  publications; RabbitMQ queues; NATS streams and consumers) and what to fix.
 - The run history can be PostgreSQL (`MAGE_SERVICE_LEDGER_URL`), for instances of a
   service on several machines: each run runs once, `max_concurrent_runs` counts every
   instance, and a cancel reaches the run from any instance. Every image can use it.

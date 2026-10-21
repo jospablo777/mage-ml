@@ -15,7 +15,24 @@ import { MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
 
 // A stream on the local engine, from the editor: start it (naming its sinks), see what it
-// does (state, rates, lag, totals, the engine's log), pause, resume and stop it.
+// does (state, rates, lag, totals, the engine's log), pause, resume and stop it; and check
+// that its source and sinks answer before starting it.
+
+export type ConnectionCheckType = {
+  facts: { label: string; value: string }[];
+  kind: string;
+  pipeline: string;
+  problems: string[];
+  result: 'passed' | 'warning' | 'failed' | 'not_checked';
+  role: string;
+  summary: string;
+};
+
+export type ConnectionsType = {
+  checks?: ConnectionCheckType[];
+  error?: string;
+  notes?: string[];
+};
 
 export type StreamRunBlockType = {
   batches: number;
@@ -31,6 +48,7 @@ export type StreamRunType = {
   alerts?: number;
   batches?: number;
   blocks?: StreamRunBlockType[];
+  connections?: ConnectionsType;
   dead_lettered_messages?: number;
   error?: string;
   exit_code?: number;
@@ -93,6 +111,12 @@ const NameStyle = styled.div`
   p {
     display: inline;
   }
+`;
+
+const FactsStyle = styled.div`
+  display: grid;
+  gap: ${UNIT * 0.25}px ${UNIT * 1.5}px;
+  grid-template-columns: auto minmax(0, 1fr);
 `;
 
 const LogStyle = styled.pre`
@@ -166,6 +190,75 @@ function headline(run: StreamRunType): string {
     + `${last(run.rate_out).toLocaleString()} out/s · lag ${lag.toLocaleString()}`;
 }
 
+const RESULT_WORDS = {
+  failed: 'Failed',
+  not_checked: 'Not checked',
+  passed: 'Passed',
+  warning: 'Look at this',
+};
+
+// The point first: how many connections failed or need a look.
+export function connectionsHeadline(checks: ConnectionCheckType[]): string {
+  const count = (result: string) => checks.filter(c => c.result === result).length;
+  const failed = count('failed');
+  const warnings = count('warning');
+  if (failed) {
+    return `${failed} of ${checks.length} connections failed: the stream cannot start`;
+  }
+  if (warnings) {
+    return `Every connection answered; ${warnings} to look at`;
+  }
+  return checks.length ? 'Every connection answered' : 'No connections to check';
+}
+
+function ConnectionChecks({ connections }: { connections: ConnectionsType }) {
+  if (connections.error) {
+    return <LogStyle><Text danger small>{connections.error}</Text></LogStyle>;
+  }
+  const checks = connections.checks || [];
+  return (
+    <>
+      <Text bold>{connectionsHeadline(checks)}</Text>
+      {checks.map(check => (
+        <Spacing key={`${check.role}-${check.kind}`} mt={2}>
+          <FlexContainer alignItems="center">
+            <Text bold small>{check.role}</Text>
+            <Spacing ml={1}><Text monospace muted small>{check.kind}</Text></Spacing>
+            <Spacing ml={1}>
+              <Text
+                danger={check.result === 'failed'}
+                muted={check.result === 'not_checked'}
+                small
+                success={check.result === 'passed'}
+                warning={check.result === 'warning'}
+              >
+                {RESULT_WORDS[check.result] || check.result}
+              </Text>
+            </Spacing>
+          </FlexContainer>
+          <Text small>{check.summary}</Text>
+          {check.problems.map(problem => (
+            <Text danger={check.result === 'failed'} key={problem} small
+              warning={check.result !== 'failed'}>
+              {problem}
+            </Text>
+          ))}
+          {!!check.facts.length && (
+            <Spacing mt={1}>
+              <FactsStyle>
+                {check.facts.map(({ label, value }) => [
+                  <Text key={`${label}-label`} muted small>{label}</Text>,
+                  <Text key={`${label}-value`} monospace small>{value}</Text>,
+                ])}
+              </FactsStyle>
+            </Spacing>
+          )}
+        </Spacing>
+      ))}
+    </>
+  );
+}
+
 type StreamRunProps = {
   blocks: BlockType[];
   pipelineUUID: string;
@@ -179,6 +272,24 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
   // The tap point whose last messages the panel shows; none until chosen.
   const [tapPoint, setTapPoint] = useState<string>(null);
   const sinks = useMemo(() => sinksOf(blocks), [blocks]);
+  const [connections, setConnections] = useState<ConnectionsType>(null);
+  const [checking, setChecking] = useState<boolean>(false);
+
+  // The engine checks the source and sinks with the settings a development run uses; the
+  // check only reads.
+  const checkConnections = useCallback(async () => {
+    setChecking(true);
+    try {
+      const response = await api.stream_runs.pipelines.detailAsync(
+        pipelineUUID, 'current', { connections: 1 },
+      );
+      const found = body(response);
+      setConnections(found?.stream_run?.connections
+        || { error: found?.error?.message || 'The check did not answer.' });
+    } finally {
+      setChecking(false);
+    }
+  }, [pipelineUUID]);
 
   const load = useCallback(async () => {
     const response = await api.stream_runs.pipelines.detailAsync(
@@ -278,6 +389,11 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
                 <Button disabled={busy} onClick={stop}>Stop</Button>
               </Spacing>
             )}
+            <Spacing ml={1}>
+              <Button disabled={checking} loading={checking} onClick={checkConnections}>
+                Check connections
+              </Button>
+            </Spacing>
           </FlexContainer>
         </Spacing>
         {error && (
@@ -296,6 +412,12 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
           </Spacing>
         )}
       </PanelStyle>
+
+      {connections && (
+        <PanelStyle>
+          <ConnectionChecks connections={connections} />
+        </PanelStyle>
+      )}
 
       {(running || !!run?.messages_in) && (
         <PanelStyle>

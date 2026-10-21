@@ -119,6 +119,22 @@ impl Connection {
     }
 
     async fn connect(&self) -> Result<(async_nats::Client, Context), ConnectorError> {
+        let (client, context) = self.reach().await?;
+        if let Some(name) = &self.stream {
+            context
+                .get_or_create_stream(stream::Config {
+                    name: name.clone(),
+                    subjects: vec![self.subject.clone()],
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| nats_error(&format!("opening stream {name}"), e))?;
+        }
+        Ok((client, context))
+    }
+
+    /// The connection, without making the stream.
+    async fn reach(&self) -> Result<(async_nats::Client, Context), ConnectorError> {
         let mut options = async_nats::ConnectOptions::new()
             .name("mage-service")
             .connection_timeout(Duration::from_secs(10));
@@ -151,17 +167,68 @@ impl Connection {
             .await
             .map_err(|e| nats_error(&format!("connecting to {}", self.url), e))?;
         let context = jetstream::new(client.clone());
-        if let Some(name) = &self.stream {
-            context
-                .get_or_create_stream(stream::Config {
-                    name: name.clone(),
-                    subjects: vec![self.subject.clone()],
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| nats_error(&format!("opening stream {name}"), e))?;
-        }
         Ok((client, context))
+    }
+}
+
+/// The connection check of a source (`source`) or a sink: the server, the stream (its
+/// messages and subjects) and the source's consumer (what it has not delivered or not had
+/// acknowledged). Reads only: a missing stream or consumer is made by the stream's first
+/// start, not by the check.
+pub async fn check(config: &Value, source: bool) -> mage_stream_ports::check::ConnectionReport {
+    use mage_stream_ports::check::ConnectionReport;
+
+    let connection = match Connection::new(config, if source { "source" } else { "sink" }) {
+        Ok(connection) => connection,
+        Err(error) => return ConnectionReport::failed(error.to_string()),
+    };
+    let (_client, context) = match connection.reach().await {
+        Ok(reached) => reached,
+        Err(error) => return ConnectionReport::failed(format!("Could not connect: {error}")),
+    };
+    let mut report = ConnectionReport::passed(format!("Connected to {}.", connection.url));
+    let Some(name) = connection.stream.clone() else {
+        if source {
+            return report.fail("The settings name no stream (stream_name).");
+        }
+        return match context.stream_by_subject(connection.subject.clone()).await {
+            Ok(stream) => report
+                .fact("stream", stream)
+                .fact("subject", &connection.subject),
+            Err(error) => report.fail(format!(
+                "No stream takes subject {}: {error}",
+                connection.subject
+            )),
+        };
+    };
+    let stream = match context.get_stream(&name).await {
+        Ok(stream) => stream,
+        Err(error) if error.to_string().contains("not found") => {
+            return report.warn(format!(
+                "Stream {name} does not exist; the stream's first start makes it."
+            ));
+        }
+        Err(error) => return report.fail(format!("Stream {name}: {error}")),
+    };
+    let info = stream.cached_info();
+    report = report
+        .fact("stream", &name)
+        .fact("subjects", info.config.subjects.join(", "))
+        .fact("messages", info.state.messages);
+    if !source {
+        return report;
+    }
+    let consumer = text(config, "consumer_name").unwrap_or_else(|| name.clone());
+    match stream.consumer_info(&consumer).await {
+        Ok(info) => report
+            .fact("consumer", &consumer)
+            .fact("not delivered", info.num_pending)
+            .fact("not acknowledged", info.num_ack_pending),
+        Err(error) if error.to_string().contains("not found") => report.warn(format!(
+            "Consumer {consumer} does not exist; the stream's first start makes it and reads \
+             from the stream's first message."
+        )),
+        Err(error) => report.fail(format!("Consumer {consumer}: {error}")),
     }
 }
 
@@ -636,5 +703,54 @@ mod tests {
         let (payload, headers) = mage_message(br#"{"data": 1}"#);
         assert_eq!(&payload[..], br#"{"data": 1}"#);
         assert!(headers.is_empty());
+    }
+
+    /// Against a server (`MAGE_TEST_NATS`, a URL; integration_tests/compose.yaml serves
+    /// nats://localhost:14222).
+    #[tokio::test]
+    async fn a_check_reports_the_stream_and_the_consumer_without_making_them() {
+        use mage_stream_ports::check::CheckResult;
+
+        let Ok(url) = std::env::var("MAGE_TEST_NATS") else {
+            eprintln!("MAGE_TEST_NATS is not set: skipped");
+            return;
+        };
+        let name = format!("CHECK_{}", std::process::id());
+        let settings = serde_json::json!({"server_url": url, "stream_name": name,
+                                          "subject": format!("check.{}", std::process::id())});
+        let report = check(&settings, true).await;
+        assert_eq!(report.result, CheckResult::Warning, "{report:?}");
+        let client = async_nats::connect(url.as_str()).await.unwrap();
+        let context = jetstream::new(client);
+        assert!(
+            context.get_stream(&name).await.is_err(),
+            "the check made the stream"
+        );
+
+        let connection = Connection::new(&settings, "source").unwrap();
+        connection.connect().await.unwrap();
+        context
+            .publish(connection.subject.clone(), "1".into())
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+        let report = check(&settings, true).await;
+        assert_eq!(report.result, CheckResult::Warning, "{report:?}");
+        assert!(
+            report
+                .facts
+                .contains(&("messages".to_string(), "1".to_string())),
+            "{report:?}"
+        );
+        assert!(report.problems[0].contains("Consumer"), "{report:?}");
+        assert_eq!(check(&settings, false).await.result, CheckResult::Passed);
+        let nowhere = check(
+            &serde_json::json!({"server_url": url, "subject": "no.stream.here"}),
+            false,
+        )
+        .await;
+        assert_eq!(nowhere.result, CheckResult::Failed, "{nowhere:?}");
+        context.delete_stream(&name).await.unwrap();
     }
 }

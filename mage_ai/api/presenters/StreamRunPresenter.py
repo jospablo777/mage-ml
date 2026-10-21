@@ -8,6 +8,7 @@ class StreamRunPresenter(BasePresenter):
         'assigned',
         'batches',
         'blocks',
+        'connections',
         'dead_lettered_batches',
         'dead_lettered_messages',
         'error',

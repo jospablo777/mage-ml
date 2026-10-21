@@ -140,6 +140,23 @@ messages in and out and p95 time on its node. The run refuses to start when a va
 blocks need is not set, and names it. **Pause** stops reading and lets the work in flight
 finish; **Resume** and **Stop** do what they say.
 
+**Check connections** asks the engine whether the source and each sink answer, with the
+settings a development run uses, before you start it. The check only reads: it never joins a
+consumer group, takes a message or writes.
+
+| Connector | What the check reports |
+| --- | --- |
+| Kafka | The brokers reached; each topic's partitions, messages kept and retention; the consumer group's lag, or that it has no position yet and where it would start. A sink's missing topic is a warning: the brokers may create it |
+| PostgreSQL sink | The table and its columns, or that the first batch makes it; whether the user can insert (and update, for upserts) or make the table |
+| PostgreSQL changes | `wal_level`, the user's right to replicate, the slot (its plugin, how far behind the server, whether another connection holds it) and the publication's tables |
+| RabbitMQ | The queue's ready messages and consumers, or the sink's exchange |
+| NATS JetStream | The stream's subjects and messages, and the source's consumer: messages not delivered and not acknowledged |
+| HTTP source, stdout | Nothing to reach |
+
+Other connectors say they have no check yet; their start reports what fails. A failed check
+names what to fix: the password the server refused, the topic that does not exist, the
+`wal_level` to set.
+
 The run reads with development positions (a `<group>-dev-<user>` consumer group, see above),
 from a build of the pipeline in `.mage/dev/<pipeline>/`, with the server's environment. The
 engine needs the connectors the pipeline uses: the `mageml-engine` wheel has them all. It

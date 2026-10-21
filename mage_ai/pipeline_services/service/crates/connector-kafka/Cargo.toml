@@ -21,3 +21,6 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 num-bigint = "0.4"
 ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

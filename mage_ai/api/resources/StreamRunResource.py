@@ -21,7 +21,8 @@ def _username(user) -> str:
 class StreamRunResource(GenericResource):
     """
     A streaming pipeline on the local engine, from the editor: POST starts it (with
-    `confirmed_sinks`, the sink blocks the user named), GET current reads its status, PUT
+    `confirmed_sinks`, the sink blocks the user named), GET current reads its status (with
+    `?connections=1`, the check of its source and sinks too), PUT
     current pauses or resumes it (`action`), DELETE current stops it.
     """
 
@@ -39,6 +40,15 @@ class StreamRunResource(GenericResource):
                 found['tap'] = await asyncio.to_thread(dev_run.tap, repo_path, pipeline, point)
             except dev_run.DevRunError as error:
                 found['tap'] = dict(error=str(error))
+        # ?connections=1: the engine's read-only check of the source and sinks.
+        if ((kwargs.get('query') or {}).get('connections') or [None])[0]:
+            from mage_ai.pipeline_services.engine import EngineNotFound
+            try:
+                found['connections'] = await asyncio.to_thread(
+                    dev_run.check_connections, repo_path, pipeline, _username(user),
+                )
+            except (dev_run.DevRunError, EngineNotFound) as error:
+                found['connections'] = dict(error=str(error))
         return cls(found, user, **kwargs)
 
     @classmethod
