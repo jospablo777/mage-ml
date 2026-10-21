@@ -35,6 +35,12 @@
   on the block's database and schema, and an upstream table copied unless both profiles
   name the same account, warehouse and database. Tested the same way as BigQuery's.
 - Redshift SQL blocks run in services too, tested the same way.
+- Db2 SQL blocks run in services, tested against MageML on Db2 in CI and over a stand-in.
+- An export whose image needs IBM MQ's client or Db2's (`ibm_db`), which IBM publishes for
+  `linux/amd64` only, now says so in its notes and names that platform alone in
+  `manifest.json`, the README's build commands and the GitHub workflow, whose arm64 build
+  failed. The Dockerfile stops an arm64 build of a Db2 image with the reason, as it did for
+  IBM MQ.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
   MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the

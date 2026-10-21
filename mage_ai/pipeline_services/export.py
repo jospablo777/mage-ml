@@ -145,6 +145,25 @@ class Capture:
         return 'ibm_mq' in self.connector_kinds
 
     @property
+    def needs_db2_client(self) -> bool:
+        return any(name.lower().replace('_', '-') == 'ibm-db' for name in self.requirements)
+
+    @property
+    def amd64_only(self) -> List[str]:
+        """What IBM publishes for linux/amd64 only, which the image installs."""
+        reasons = []
+        if self.needs_ibm_mq:
+            reasons.append("IBM MQ's client")
+        if self.needs_db2_client:
+            reasons.append("IBM's Db2 client (ibm_db)")
+        return reasons
+
+    @property
+    def platforms(self) -> List[str]:
+        """The platforms the image builds for."""
+        return ['linux/amd64'] if self.amd64_only else list(TARGET_PLATFORMS)
+
+    @property
     def needs_r(self) -> bool:
         return any(
             b['language'] == 'r' for p in self.manifest['pipelines'] for b in p['blocks']
@@ -253,6 +272,11 @@ def capture(
         capture_.requirements = _requirements(capture_)
         if capture_.environment is not None:
             _apply_environment(capture_)
+    if capture_.amd64_only:
+        notes.append(
+            f'{" and ".join(capture_.amd64_only)}: IBM publishes it for linux/amd64 only, so '
+            'the image builds for linux/amd64 only.'
+        )
     return capture_
 
 
@@ -388,6 +412,7 @@ def _apply_environment(capture_: Capture) -> None:
 
 SQL_PROVIDERS = (
     'postgres', 'mysql', 'duckdb', 'clickhouse', 'trino', 'bigquery', 'snowflake', 'redshift',
+    'db2',
 )
 
 
@@ -397,7 +422,7 @@ def _sql_unsupported(block) -> Optional[str]:
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
-            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake and Redshift.'
+            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift and Db2.'
         )
     if not configuration.get('data_provider_profile'):
         return 'a SQL block without a data provider profile (io_config.yaml).'
@@ -2594,6 +2619,8 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             candidates += ['snowflake.connector', 'mage_ai.io.snowflake']
         if 'redshift' in providers:
             candidates += ['redshift_connector', 'mage_ai.io.redshift']
+        if 'db2' in providers:
+            candidates += ['ibm_db', 'ibm_db_dbi', 'mage_ai.io.db2']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [
@@ -3033,8 +3060,8 @@ def _write_manifest(capture_: Capture, out_dir: Path) -> None:
         project=dict(name=capture_.project.name, commit=_git_commit(capture_.project)),
         python=python if capture_.needs_python else None,
         uv=capture_.uv_version if capture_.needs_python else None,
-        platforms=list(TARGET_PLATFORMS),
-        build=f'docker buildx build --platform {",".join(TARGET_PLATFORMS)} -t <image> .',
+        platforms=capture_.platforms,
+        build=f'docker buildx build --platform {",".join(capture_.platforms)} -t <image> .',
         locks=locks,
         models=capture_.manifest.get('models') or [],
         files=files,
@@ -3144,6 +3171,11 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
 
 
 # Deployment files, rendered with the service's name: (template, destination).
+# The arm64 entry of the image workflow's matrix, left out when the image is amd64 only.
+ARM64_MATRIX_ENTRY = """          - platform: linux/arm64
+            arch: arm64
+            runner: arm
+"""
 DEPLOY_FILES = (
     ('tekton/pipeline.yaml', '.tekton/pipeline.yaml'),
     ('tekton/tasks.yaml', '.tekton/tasks.yaml'),
@@ -3176,6 +3208,10 @@ def _write_deploy_files(capture_: Capture, out_dir: Path) -> None:
             name=capture_.name,
             project=capture_.project.name,
         )
+        if template == 'ci/github-build-image.yml' and capture_.amd64_only:
+            if ARM64_MATRIX_ENTRY not in text:
+                raise ExportError([f'{template} has no arm64 entry to leave out.'])
+            text = text.replace(ARM64_MATRIX_ENTRY, '')
         target = out_dir / destination
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
@@ -3510,12 +3546,22 @@ ENV MAGE_R_SYNC=off \\
 '''
     if capture_.needs_python:
         base = 'trixie' if capture_.needs_r or onnx else 'bookworm'
+        db2_guard = ''
+        if capture_.needs_db2_client:
+            db2_guard = (
+                '# IBM builds its Db2 client (ibm_db) for linux/amd64 only.\n'
+                'ARG TARGETARCH\n'
+                'RUN if [ "$TARGETARCH" != "amd64" ]; then \\\n'
+                '      echo "IBM\'s Db2 client is for linux/amd64 only; build with --platform '
+                'linux/amd64" >&2; \\\n'
+                '      exit 1; fi\n'
+            )
         runtime = f'''FROM python:{python_version}-slim-{base}
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     PIP_NO_CACHE_DIR=1 \\
     PIP_DISABLE_PIP_VERSION_CHECK=1
-# The packages of uv.lock, each checked against its hash, into the image's Python. A
+{db2_guard}# The packages of uv.lock, each checked against its hash, into the image's Python. A
 # private index's credentials come in as a build secret, a file of UV_INDEX_* lines that
 # no layer keeps: docker build --secret id=uv-env,src=uv.env .
 COPY pyproject.toml uv.lock /tmp/service-python/
@@ -3709,6 +3755,7 @@ def _readme(capture_: Capture) -> str:
         exported_at=capture_.manifest['service']['exported_at'],
         rows=rows,
         first=first,
+        platforms=','.join(capture_.platforms),
     )
 
 

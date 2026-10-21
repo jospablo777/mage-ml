@@ -321,7 +321,10 @@ templates (`mage_ai.io.db2.Db2` in code).
   `MERGE` statements. Db2 requires the columns of a unique constraint to be `NOT NULL`, so they
   are created that way.
 - **SQL blocks** write their upstream outputs as tables in `DB2_SCHEMA`, which the connection
-  sets as the current schema, so blocks name them without a schema.
+  sets as the current schema, so blocks name them without a schema. They run the same way in
+  exported services, whose image then builds for `linux/amd64` only: `mage export` sets the
+  platform in the manifest, the README's commands and the GitHub workflow, and the
+  Dockerfile stops an arm64 build with the reason.
 - **TLS.** Db2 on Cloud's certificate is from a public CA, so `DB2_SSL: true` is enough. For a
   server with a private CA, set `DB2_SSL_CERTIFICATE`. User and password are passed to the
   driver on their own, so they may contain `;`.

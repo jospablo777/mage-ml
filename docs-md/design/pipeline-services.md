@@ -3,7 +3,7 @@
 Status: phase 1 implemented (Python and pandas/Polars pipelines, secrets providers, models,
 IBM Cloud and Kubernetes deploy files, the console); Rust blocks are compiled into the
 image; R blocks run with Mage's R runner and the locked rv environment; SQL blocks run on
-PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake and Redshift (runtime/sql.py follows Mage's branches for them). Other
+PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift and Db2 (runtime/sql.py follows Mage's branches for them). Other
 SQL databases are next. User guide: `docs/production/pipeline-services.mdx`.
 
 ## Goal

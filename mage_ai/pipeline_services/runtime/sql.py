@@ -1,14 +1,14 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
 (mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB,
-ClickHouse, Trino, BigQuery, Snowflake and Redshift branches):
+ClickHouse, Trino, BigQuery, Snowflake, Redshift and Db2 branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
 2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL,
    database.schema.table on Redshift,
    catalog.schema.table on Trino, project.dataset.table on BigQuery, "DATABASE"."SCHEMA".
-   "TABLE" in capitals on Snowflake, the table alone on MySQL, DuckDB and ClickHouse.
+   "TABLE" in capitals on Snowflake, the table alone on MySQL, DuckDB, ClickHouse and Db2.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -72,6 +72,13 @@ PROVIDERS = {
                       'REDSHIFT_SCHEMA'),
         no_schema=False,
         full_names=True,
+    ),
+    # Upstream tables go to the block's schema, or the profile's, which the connection sets
+    # as current: {{ df_N }} is the table alone.
+    'db2': dict(
+        profile_keys=('DB2_DATABASE', 'DB2_SCHEMA', 'DB2_HOST', 'DB2_PORT'),
+        no_schema=False,
+        full_names=False,
     ),
     'snowflake': dict(
         profile_keys=('SNOWFLAKE_ACCOUNT', 'SNOWFLAKE_DEFAULT_WH', 'SNOWFLAKE_DEFAULT_DB'),
@@ -461,6 +468,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.redshift import Redshift
 
         return Redshift.with_config(config_loader)
+    if provider == 'db2':
+        from mage_ai.io.db2 import Db2
+
+        return Db2.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -531,6 +542,18 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             return _run_on_trino(loader, provider, configuration, upstreams, inputs, query,
                                  io_config, variables, schema, table, limit, options)
     with loader:
+        if name == 'db2':
+            upload_upstream_tables(
+                loader, configuration, upstreams, inputs, query, io_config, provider,
+            )
+            raw_content = query
+            query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
+            schema = schema or loader.default_schema()
+            query = render(query, variables)
+            if configuration.get('use_raw_sql'):
+                return _execute_raw_sql_on_db2(loader, query, raw_content, configuration, limit)
+            loader.export(None, schema, table, query_string=query, **options)
+            return [loader.load(f'SELECT * FROM {table}', limit=limit, verbose=False)]
         if name == 'redshift':
             # Mage's Redshift branch: names database.schema.table, the database unquoted.
             upload_upstream_tables(
@@ -751,3 +774,24 @@ def _run_on_snowflake(config_loader, provider, configuration, upstreams, inputs,
             f'SELECT * FROM "{database}"."{schema}"."{table}"',
             database=database, schema=schema, table_name=table, limit=limit, verbose=False,
         )]
+
+
+def _execute_raw_sql_on_db2(loader, query: str, raw_content: str, configuration: Dict,
+                            limit: int) -> List:
+    """
+    As Mage's Db2 raw SQL: every statement's rows are read unless the query creates or
+    inserts, and then the table its unrendered text names is read, within the limit.
+    """
+    helpers = statements()
+    if configuration.get('disable_query_preprocessing'):
+        result = loader.execute_query_raw(query, configuration=configuration)
+        return [] if result is None else [result]
+    has_create_or_insert = helpers.has_create_or_insert_statement(query)
+    queries = helpers.split_query_string(query)
+    fetch = [not has_create_or_insert] * len(queries)
+    full_name = helpers.extract_full_table_name(raw_content)
+    if has_create_or_insert:
+        queries.append(f'SELECT * FROM {full_name} FETCH FIRST {int(limit)} ROWS ONLY')
+        fetch.append(full_name)
+    results = loader.execute_queries(queries, commit=True, fetch_query_at_indexes=fetch)
+    return [results[-1]] if results else []

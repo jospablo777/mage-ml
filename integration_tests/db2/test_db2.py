@@ -138,3 +138,44 @@ def test_sql_blocks_run_on_db2_with_their_upstream_tables(mage_project, db2_sche
     assert rows(connection, f'SELECT id, doubled, city FROM {schema}.doubled ORDER BY id') == [
         (2, 40, 'Bern'), (3, 60, 'Basel'),
     ]
+
+
+def test_an_exported_service_runs_the_db2_sql_blocks_as_mageml(mage_project, db2_schema,
+                                                                tmp_path):
+    from integration_tests.exported_services import run_exported
+
+    schema, connection = db2_schema
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'id': [1, 2, 3], 'amount': [10, 20, 30],
+                                     'city': ['Zürich', 'Bern', 'Basel']})
+        '''),
+        dict(
+            uuid='big', type='transformer', language='sql', upstream=['load'],
+            config=dict(DB2, export_write_policy='replace'),
+            code='SELECT id, amount * 2 AS doubled, city FROM {{ df_1 }} WHERE amount > 10',
+        ),
+        dict(
+            uuid='export', type='data_exporter', language='sql', upstream=['big'],
+            config=dict(DB2, data_provider_table='service_doubled',
+                        export_write_policy='replace'),
+            code='SELECT id, doubled, city FROM {{ df_1 }}',
+        ),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    query = f'SELECT id, doubled, city FROM {schema}.service_doubled ORDER BY id'
+    expected = rows(connection, query)
+    with connection.cursor() as cursor:
+        cursor.execute(f'DROP TABLE {schema}.service_doubled')
+    # The connection does not commit on its own: the drop held the table from the service.
+    connection.commit()
+
+    run_exported(mage_project, pipeline, tmp_path)
+
+    assert rows(connection, query) == expected == [(2, 40, 'Bern'), (3, 60, 'Basel')]

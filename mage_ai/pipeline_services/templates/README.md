@@ -33,11 +33,11 @@ in any CI. For other chips, or to push to a registry, use `docker buildx` (log i
 ```bash
 # Docker Hub
 docker login -u team
-docker buildx build --platform linux/amd64,linux/arm64 -t docker.io/team/$name:1.0 --push .
+docker buildx build --platform $platforms -t docker.io/team/$name:1.0 --push .
 
 # IBM Cloud Container Registry (ibmcloud cr login, or an API key)
 echo "$$IBM_CLOUD_API_KEY" | docker login -u iamapikey --password-stdin icr.io
-docker buildx build --platform linux/amd64,linux/arm64 -t icr.io/team/$name:1.0 --push .
+docker buildx build --platform $platforms -t icr.io/team/$name:1.0 --push .
 ```
 
 GitHub Container Registry (`ghcr.io`), Amazon ECR, Google Artifact Registry and Azure
@@ -161,7 +161,7 @@ export PREVIOUS=...                               # the version that runs now
 
 | Step | One machine (`compose.yaml`) | Kubernetes (`deploy/kubernetes.yaml`) | IBM Cloud Code Engine |
 | --- | --- | --- | --- |
-| Build and push | `docker buildx build --platform linux/amd64,linux/arm64 -t "$$REPO:$$TAG" --push .` | the same | the same |
+| Build and push | `docker buildx build --platform $platforms -t "$$REPO:$$TAG" --push .` | the same | the same |
 | Deploy | `IMAGE="$$REPO:$$TAG" docker compose up -d` | `kubectl set image deployment/$name service="$$REPO:$$TAG"` | `ibmcloud ce app update --name $name --image "$$REPO:$$TAG" --wait` |
 | Check | `curl -fsS http://127.0.0.1:8080/healthz` | `kubectl rollout status deployment/$name` | `ibmcloud ce app get --name $name` |
 | Roll back | `IMAGE="$$REPO:$$PREVIOUS" docker compose up -d` | `kubectl rollout undo deployment/$name` | `ibmcloud ce app update --name $name --image "$$REPO:$$PREVIOUS" --wait` |
