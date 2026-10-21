@@ -1,8 +1,9 @@
 # mageml-airflow
 
-Run pipelines of [MageML](https://github.com/jospablo777/mage-ml) services from Apache
-Airflow 3 (and 2.10). The operator calls the service's API: the pipeline runs in the
-service, with its own packages and compiled chains, never in Airflow's Python.
+Run pipelines of [MageML](https://github.com/jospablo777/mage-ml) services, and of MageML
+servers, from Apache Airflow 3 (and 2.10). The operators call an API: the pipeline runs in
+the service or the server, with its own packages and compiled chains, never in Airflow's
+Python.
 
 ```bash
 uv pip install "mageml-airflow @ git+https://github.com/jospablo777/mage-ml#subdirectory=packages/mageml-airflow"
@@ -39,3 +40,20 @@ with DAG('nightly_scores', schedule='@daily'):
   read it from the service.
 - `deferrable=True` waits in Airflow's triggerer and holds no worker slot.
 - Clearing or marking the task failed while it runs cancels the run.
+
+## Pipelines on a MageML server
+
+`MageMLPipelineOperator` runs a pipeline on a MageML server (the app) through its API,
+for pipelines that are not exported as a service. Add a connection of type **MageML
+server** with the server URL as its host and a user's email and password (editor role):
+
+```python
+from mageml_airflow.operators import MageMLPipelineOperator
+
+MageMLPipelineOperator(task_id='orders_report', pipeline='orders_report',
+                       variables={'day': '{{ ds }}'})
+```
+
+Runs go under the pipeline's API trigger named Airflow. A retry finds the run its task
+instance started, the blocks' log lines go to the task log when the run ends, a failed run
+names its failed blocks, and killing the task cancels the run.

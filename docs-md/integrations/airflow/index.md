@@ -50,6 +50,43 @@ environment, so their packages cannot clash.
 The provider's tests run it against a real service, and a DAG in Airflow 3.3 through
 `airflow dags test`.
 
+## Run a pipeline on a MageML server
+
+For pipelines that are not exported as a service, `MageMLPipelineOperator` runs them on a
+MageML server (the app) through its API. The pipeline runs on the server, as a run of its
+API trigger named **Airflow**, which the operator makes when the pipeline has none.
+
+1. Add a connection of type **MageML server**: the server URL as its host, and the email
+   and password of a user with the editor role as its login and password:
+
+```bash
+   export AIRFLOW_CONN_MAGEML_SERVER_DEFAULT='{"conn_type": "mageml_server", "host": "http://mageml.internal:6789", "login": "airflow@example.com", "password": "..."}'
+   ```
+
+2. Use the operator:
+
+```python
+   from airflow.sdk import DAG
+   from mageml_airflow.operators import MageMLPipelineOperator
+
+   with DAG('nightly_report', schedule='@daily'):
+       MageMLPipelineOperator(
+           task_id='orders_report',
+           pipeline='orders_report',
+           variables={'day': '{{ ds }}'},
+       )
+   ```
+
+| | What it does |
+| --- | --- |
+| Retries | The run carries the task instance's key in its variables (`mageml_airflow_key`): a retry finds the run while it runs or once it completed; after a failed or cancelled run it starts a new one |
+| Logs | When the run ends, its blocks' log lines go to the task log, each with its block |
+| Failures | A failed or cancelled run fails the task and names its failed blocks |
+| Stopping | Clearing the task or marking it failed while it runs cancels the run |
+
+A service is the better choice when you can export one: its runs start faster, retries
+use idempotency keys the service enforces, and outputs come back as XCom.
+
 ## Run MageML inside Airflow's Python
 
 The methods below run MageML in Airflow's own environment. MageML needs Python 3.12 and

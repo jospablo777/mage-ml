@@ -627,6 +627,28 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
           python3 scripts/ci/run_overhead.py compare --base "$RUNNER_TEMP/base" \
             --rounds 3 --runs 7 --out "$RUNNER_TEMP/run-overhead.json"
+      # MageMLPipelineOperator (packages/mageml-airflow) against a MageML server, from
+      # Airflow 3 in a venv of its own: the operator calls the server's API.
+      - name: Airflow operator against a MageML server
+        env:
+          ENV: ""
+          PYTHONPATH: .
+          REQUIRE_USER_AUTHENTICATION: "1"
+        run: |
+          python mage_ai/cli/main.py init "$RUNNER_TEMP/airflow_project"
+          python mage_ai/cli/main.py start "$RUNNER_TEMP/airflow_project" --host 127.0.0.1 \
+            --port 6790 > "$RUNNER_TEMP/airflow-server.log" 2>&1 &
+          uv venv /tmp/airflow-server --python 3.12
+          uv pip install --python /tmp/airflow-server/bin/python "apache-airflow>=3.3,<4" \
+            pytest -e packages/mageml-airflow
+          for i in $(seq 1 90); do
+            curl -sf http://127.0.0.1:6790/api/status > /dev/null && break
+            sleep 2
+          done
+          cd packages/mageml-airflow
+          MAGEML_TEST_SERVER_URL=http://127.0.0.1:6790 \
+            /tmp/airflow-server/bin/python -m pytest -q tests/test_server_operator.py \
+            || { tail -100 "$RUNNER_TEMP/airflow-server.log"; exit 1; }
       # Run Playwright once per matrix.
       - name: Set up Node
         uses: actions/setup-node@v6

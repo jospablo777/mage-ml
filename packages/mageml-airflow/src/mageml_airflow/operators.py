@@ -1,9 +1,14 @@
-"""Runs a pipeline of a MageML service from an Airflow task."""
+"""Runs a pipeline of a MageML service, or of a MageML server, from an Airflow task."""
 import hashlib
 import time
 from typing import Any, Dict, Optional, Sequence
 
-from mageml_airflow.hooks import MageMLServiceError, MageMLServiceHook
+from mageml_airflow.hooks import (
+    RUN_KEY_VARIABLE,
+    MageMLServerHook,
+    MageMLServiceError,
+    MageMLServiceHook,
+)
 from mageml_airflow.triggers import FINISHED, MageMLRunTrigger
 
 try:  # Airflow 3
@@ -131,6 +136,96 @@ class MageMLServiceRunOperator(BaseOperator):
             return dict(run_id=self.run_id, block=self.output_block,
                         output_url=f'/v1/runs/{self.run_id}/output?block={self.output_block}')
         return value
+
+    def on_kill(self) -> None:
+        if self.run_id:
+            try:
+                self._hook().cancel(self.run_id)
+                self.log.info('Cancelled MageML run %s.', self.run_id)
+            except MageMLServiceError as error:
+                self.log.warning('Could not cancel MageML run %s: %s', self.run_id, error)
+
+
+SERVER_FINISHED = ('completed', 'failed', 'cancelled')
+
+
+class MageMLPipelineOperator(BaseOperator):
+    """
+    Runs a pipeline on a MageML server (the app, for pipelines that are not exported as a
+    service) and waits for it: the run goes under the pipeline's API trigger named Airflow,
+    its blocks' log lines go to the task log when it ends, and a failed or cancelled run
+    fails the task with its failed blocks.
+
+    Every try of a task instance finds the run its first try started (by a key in the
+    run's variables) while it runs or once it completed; after a failed or cancelled run a
+    try starts a new run.
+
+    Args:
+        pipeline: The pipeline's uuid.
+        variables: The run's variables (templated).
+        mageml_server_conn_id: The MageML server connection.
+        poll_interval: Seconds between checks of the run.
+    """
+
+    template_fields: Sequence[str] = ('pipeline', 'variables')
+    ui_color = '#6b50d7'
+
+    def __init__(
+        self,
+        *,
+        pipeline: str,
+        variables: Optional[Dict[str, Any]] = None,
+        mageml_server_conn_id: str = MageMLServerHook.default_conn_name,
+        poll_interval: float = 5.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.pipeline = pipeline
+        self.variables = variables or {}
+        self.mageml_server_conn_id = mageml_server_conn_id
+        self.poll_interval = poll_interval
+        self.run_id: Optional[int] = None
+        self._hook_instance: Optional[MageMLServerHook] = None
+
+    def _hook(self) -> MageMLServerHook:
+        if self._hook_instance is None:
+            self._hook_instance = MageMLServerHook(self.mageml_server_conn_id)
+        return self._hook_instance
+
+    def execute(self, context: Dict[str, Any]) -> Any:
+        hook = self._hook()
+        key = idempotency_key(context)
+        schedule = hook.trigger(self.pipeline)
+        run = hook.find_run(schedule['id'], key)
+        if run is None or run.get('status') in ('failed', 'cancelled'):
+            run = hook.start_run(schedule['id'], {**self.variables, RUN_KEY_VARIABLE: key})
+            self.log.info('Started MageML run %s of pipeline %s.', run['id'], self.pipeline)
+        else:
+            self.log.info('MageML run %s of pipeline %s, started by an earlier try: %s',
+                          run['id'], self.pipeline, run.get('status'))
+        self.run_id = run['id']
+        context['ti'].xcom_push(key='run_id', value=self.run_id)
+        while run.get('status') not in SERVER_FINISHED:
+            time.sleep(self.poll_interval)
+            run = hook.run(self.run_id)
+        return self._finish(hook, run)
+
+    def _finish(self, hook: MageMLServerHook, run: Dict[str, Any]) -> Any:
+        try:
+            for block, message in hook.logs(self.pipeline, self.run_id):
+                self.log.info('[%s] %s', block, message) if block else \
+                    self.log.info('%s', message)
+        except MageMLServiceError as error:
+            self.log.warning('Could not read the run logs: %s', error)
+        status = run.get('status')
+        if status != 'completed':
+            failed = [b.get('block_uuid') for b in hook.block_runs(self.run_id)
+                      if b.get('status') == 'failed']
+            raise AirflowException(
+                f'MageML run {self.run_id} of pipeline {self.pipeline} {status}'
+                + (f'; failed blocks: {", ".join(failed)}.' if failed else '.')
+            )
+        return dict(run_id=self.run_id, status=status)
 
     def on_kill(self) -> None:
         if self.run_id:
