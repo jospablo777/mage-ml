@@ -631,15 +631,19 @@ def run_chain(request: Dict) -> Dict:
 
 def execute_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, float]:
     """Runs one block on its inputs; returns its outputs, test results and time."""
-    from mage_ai.pipeline_services import models
-
-    # What an audit record of a prediction in this block names (models.predict).
-    kwargs = request.get('kwargs') or {}
-    models.set_decision_context(
-        pipeline=block.get('pipeline_uuid') or kwargs.get('pipeline_uuid'),
-        block=block['uuid'], block_sha256=block.get('sha256'),
-        run_id=kwargs.get('pipeline_run_id'),
-    )
+    # What an audit record of a prediction in this block names (models.predict). A worker
+    # without MageML's Python (blocks that need only the standard library) has no predict.
+    try:
+        from mage_ai.pipeline_services import models
+    except ImportError:
+        models = None
+    if models is not None:
+        kwargs = request.get('kwargs') or {}
+        models.set_decision_context(
+            pipeline=block.get('pipeline_uuid') or kwargs.get('pipeline_uuid'),
+            block=block['uuid'], block_sha256=block.get('sha256'),
+            run_id=kwargs.get('pipeline_run_id'),
+        )
     block_type = block['type']
     if block_type not in BLOCK_TYPES:
         raise BlockError('load', f'{block_type} blocks are not supported by pipeline services.')
