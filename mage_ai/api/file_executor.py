@@ -5,7 +5,6 @@ import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='mage-files')
 
 
