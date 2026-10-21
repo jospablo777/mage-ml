@@ -18,6 +18,7 @@ mod keyed_state;
 mod monitor;
 mod python;
 mod resident;
+mod run_logs;
 mod scheduler;
 mod secrets;
 mod service;

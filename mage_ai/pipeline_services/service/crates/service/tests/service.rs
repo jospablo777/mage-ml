@@ -1037,8 +1037,32 @@ fn two_services_share_a_postgresql_run_history() {
 
     let (_, run) = a.post("/v1/pipelines/sum/runs?wait=60", json!({}));
     assert_eq!(run["status"], "completed", "{run}");
-    let (_, seen) = b.get(&format!("/v1/runs/{}", run["id"].as_str().unwrap()));
+    let id = run["id"].as_str().unwrap().to_string();
+    let (_, seen) = b.get(&format!("/v1/runs/{id}"));
     assert_eq!(seen["status"], "completed", "{seen}");
+    // Whichever instance ran it, both serve its whole log: the run history keeps the lines.
+    for service in [&a, &b] {
+        let (status, body) = service.get(&format!("/v1/runs/{id}/logs"));
+        assert_eq!(status, 200, "{body}");
+        let messages: Vec<&str> = body["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|line| line["message"].as_str())
+            .collect();
+        assert!(
+            messages.contains(&format!("Run {id} completed.").as_str()),
+            "{body}"
+        );
+        assert!(
+            body["lines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|line| line["block"] == "load"),
+            "{body}"
+        );
+    }
 
     // Whichever instance claimed it, a cancel sent to b stops it.
     let markers = a.markers();
@@ -1063,11 +1087,17 @@ fn two_services_share_a_postgresql_run_history() {
     b.start(&env);
     a.signal("-KILL");
     let run = wait_status(&b, &id, "failed");
+    // a's lines up to its last write are kept, though a is gone.
     let (status, body) = b.get(&format!("/v1/runs/{id}/logs"));
-    assert_eq!(status, 409, "{body}");
+    assert_eq!(status, 200, "{body}");
     assert!(
-        body.to_string()
-            .contains("its log is on that instance's data volume"),
+        body["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with(&format!("Run {id} of slow started")))),
         "{body}"
     );
     assert!(
@@ -1115,9 +1145,9 @@ fn the_ledger_command_migrates_postgresql_and_imports_a_sqlite_history() {
         (output.status.success(), text)
     };
     let (ok, text) = ledger(&["migrate"]);
-    assert!(ok && text.contains("from version 0 to 1"), "{text}");
+    assert!(ok && text.contains("from version 0 to 2"), "{text}");
     let (ok, text) = ledger(&["migrate"]);
-    assert!(ok && text.contains("is at version 1"), "{text}");
+    assert!(ok && text.contains("is at version 2"), "{text}");
     let history = service.dir.path().join("data/runs.db");
     let history = history.to_str().unwrap();
     let (ok, text) = ledger(&["import", history]);

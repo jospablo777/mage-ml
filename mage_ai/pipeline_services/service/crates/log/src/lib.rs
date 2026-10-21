@@ -90,11 +90,21 @@ pub fn error(message: &str) {
     emit("error", None, None, None, message);
 }
 
+/// Where a run's lines also go, besides its file: the shared run history, so every instance
+/// of a service serves the log of a run another instance ran.
+pub trait LineSink: Send + Sync {
+    /// The run's line number `seq` (0 for the first line of its log).
+    fn line(&self, run_id: &str, seq: u64, line: &str);
+    /// Writes what is held, before the run's status is recorded.
+    fn flush(&self);
+}
+
 /// The log of one run: a JSON-lines file, also echoed to stdout.
 #[derive(Clone)]
 pub struct RunLog {
     run_id: Arc<str>,
     file: Arc<Mutex<LogFile>>,
+    sink: Option<Arc<dyn LineSink>>,
 }
 
 /// A log file that, past `max_bytes`, moves to `<name>.1` (older ones to `.2` and on, up to
@@ -106,6 +116,8 @@ struct LogFile {
     written: u64,
     max_bytes: u64,
     keep: u32,
+    /// Lines written, those the file had when opened included: the next line's number.
+    lines: u64,
 }
 
 impl LogFile {
@@ -115,16 +127,23 @@ impl LogFile {
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let written = file.metadata()?.len();
+        let lines = if written > 0 {
+            std::fs::read(path)?.iter().filter(|b| **b == b'\n').count() as u64
+        } else {
+            0
+        };
         Ok(LogFile {
             file,
             path: path.to_path_buf(),
             written,
             max_bytes,
             keep,
+            lines,
         })
     }
 
-    fn write_line(&mut self, line: &str) {
+    /// Writes a line and returns its number.
+    fn write_line(&mut self, line: &str) -> u64 {
         if self.written > 0 && self.written + line.len() as u64 + 1 > self.max_bytes {
             // A failed rotation keeps writing to the current file rather than losing lines.
             let _ = self.rotate();
@@ -132,6 +151,8 @@ impl LogFile {
         if writeln!(self.file, "{line}").is_ok() {
             self.written += line.len() as u64 + 1;
         }
+        self.lines += 1;
+        self.lines - 1
     }
 
     fn rotate(&mut self) -> std::io::Result<()> {
@@ -192,7 +213,21 @@ impl RunLog {
         Ok(RunLog {
             run_id: run_id.into(),
             file: Arc::new(Mutex::new(LogFile::open(path, max_bytes, keep)?)),
+            sink: None,
         })
+    }
+
+    /// The log, with its lines also sent to `sink`.
+    pub fn with_sink(mut self, sink: Arc<dyn LineSink>) -> RunLog {
+        self.sink = Some(sink);
+        self
+    }
+
+    /// Sends the lines the sink holds; a no-op without one.
+    pub fn flush(&self) {
+        if let Some(sink) = &self.sink {
+            sink.flush();
+        }
     }
 
     pub fn write(&self, level: &str, block: Option<&str>, stream: Option<&str>, message: &str) {
@@ -205,8 +240,13 @@ impl RunLog {
             "stream": stream,
             "message": message,
         });
+        let line = line.to_string();
         let mut file = self.file.lock().unwrap_or_else(|p| p.into_inner());
-        file.write_line(&line.to_string());
+        let seq = file.write_line(&line);
+        // Under the file's lock, so the sink gets lines in their order.
+        if let Some(sink) = &self.sink {
+            sink.line(&self.run_id, seq, &line);
+        }
     }
 
     pub fn info(&self, block: Option<&str>, message: &str) {
@@ -268,5 +308,69 @@ mod rotation_tests {
         }
         assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 50);
         assert!(!folder.path().join("run.log.1").exists());
+    }
+}
+
+#[cfg(test)]
+mod sink_tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Recorder {
+        lines: Mutex<Vec<(String, u64, Value)>>,
+        flushes: Mutex<u32>,
+    }
+
+    impl LineSink for Recorder {
+        fn line(&self, run_id: &str, seq: u64, line: &str) {
+            let value = serde_json::from_str(line).unwrap();
+            self.lines
+                .lock()
+                .unwrap()
+                .push((run_id.to_string(), seq, value));
+        }
+
+        fn flush(&self) {
+            *self.flushes.lock().unwrap() += 1;
+        }
+    }
+
+    #[test]
+    fn the_sink_gets_each_line_with_its_number_and_a_reopened_log_continues() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.log");
+        let recorder = Arc::new(Recorder::default());
+        let log = RunLog::create(&path, "r1")
+            .unwrap()
+            .with_sink(recorder.clone());
+        log.info(None, "started");
+        log.info(Some("load"), "loading");
+        log.flush();
+        {
+            let lines = recorder.lines.lock().unwrap();
+            assert_eq!(lines.len(), 2);
+            assert_eq!((lines[0].0.as_str(), lines[0].1), ("r1", 0));
+            assert_eq!(lines[1].1, 1);
+            assert_eq!(lines[1].2["block"], "load");
+            assert_eq!(lines[1].2["message"], "loading");
+        }
+        assert_eq!(*recorder.flushes.lock().unwrap(), 1);
+
+        // The same run's log opened again (the service restarted): numbering goes on.
+        let again = RunLog::create(&path, "r1")
+            .unwrap()
+            .with_sink(recorder.clone());
+        again.warn(None, "resumed");
+        assert_eq!(recorder.lines.lock().unwrap()[2].1, 2);
+    }
+
+    #[test]
+    fn without_a_sink_flush_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = RunLog::create(&dir.path().join("run.log"), "r2").unwrap();
+        log.info(None, "only the file");
+        log.flush();
     }
 }

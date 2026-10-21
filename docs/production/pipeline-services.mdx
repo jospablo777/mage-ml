@@ -634,7 +634,8 @@ runs: a second service on the same schema is refused at start, so give each its 
 | A stopped instance | Its running runs are failed when its lease ends (30 seconds without a renewal), at once when it stopped cleanly or its process is gone from the same machine |
 | A stalled instance | Finds its runs failed when it wakes, and cannot change them |
 | Schedules | One instance owns them at a time |
-| Logs and outputs | On the data volume of the instance that ran the run. Another instance answers `/v1/runs/{id}/logs` with 409 and the host that has them |
+| Logs | Every instance serves a run's log: the run history keeps its lines, written every quarter second and before the run's status, also after the instance that ran it is gone. Runs from before version 2 of the schema answer 409 with the host that has their file |
+| Outputs | On the data volume of the instance that ran the run |
 
 `sslmode` takes libpq's modes (`disable`, `prefer`, `require`, `verify-ca`, `verify-full`)
 and `sslrootcert` a file; the `key=value` form works too. The service makes the schema and

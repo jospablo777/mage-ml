@@ -58,7 +58,10 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
     };
     let run_dir = service.run_dir(&run_id);
     let log = match RunLog::create(&run_dir.join("run.log"), &run_id) {
-        Ok(log) => log,
+        Ok(log) => match &service.shared_logs {
+            Some(shared) => log.with_sink(shared.clone()),
+            None => log,
+        },
         Err(error) => {
             let message = format!(
                 "Could not create the run directory {}: {error}",
@@ -120,6 +123,9 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
             );
         }
     }
+    // The lines are kept before the status says the run ended, so a reader on another
+    // instance that sees it finished finds them.
+    log.flush();
     match service.ledger.finish_run(&run_id, status, error.as_deref()) {
         Ok(true) => {}
         // Another instance failed it after this one's lease expired; its record stands.
@@ -139,6 +145,7 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
             &format!("Run {run_id} {}: {message}", status.as_str()),
         ),
     }
+    log.flush();
     if status == RunStatus::Failed
         && let (Some(alerts), Some(message)) = (&service.alerts, &error)
     {

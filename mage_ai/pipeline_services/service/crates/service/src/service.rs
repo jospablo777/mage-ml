@@ -61,6 +61,8 @@ pub struct Service {
     pub residents: Option<crate::resident::Residents>,
     /// Where alerts go, when the manifest has some.
     pub alerts: Option<crate::alerts::Alerter>,
+    /// Run logs kept in a shared (PostgreSQL) run history too; None with SQLite.
+    pub shared_logs: Option<Arc<crate::run_logs::SharedLogs>>,
     max_total_runs: usize,
     wake: Notify,
     shutting_down: AtomicBool,
@@ -180,6 +182,7 @@ impl Service {
             .alerts
             .clone()
             .map(|alerts| crate::alerts::Alerter::new(alerts, &manifest.service.name));
+        let shared_logs = crate::run_logs::SharedLogs::start(ledger.clone());
         Arc::new(Service {
             manifest,
             service_dir: config.service_dir,
@@ -198,6 +201,7 @@ impl Service {
             stream_stop: CancellationToken::new(),
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
             alerts,
+            shared_logs,
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
             shutting_down: AtomicBool::new(false),

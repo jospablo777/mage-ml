@@ -14,6 +14,14 @@
 - Exported services keep their Rust binary running between runs: a `static` a Rust block
   sets keeps its value for the next run. `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary
   for each run.
+- A PostgreSQL run history moves to schema version 2 (run logs kept for every instance).
+  The first upgraded instance migrates it; an older engine then refuses to start on it, so
+  upgrade every instance of a service together, or migrate with
+  `mage-service ledger migrate` when the rollout is done.
+- A block's `print('a', b)` in a triggered run is one log line, `a b`, and blank lines are
+  logged: each write was a line of its own and blank lines were dropped.
+- Airflow's `create_dags` passes the schedule as `schedule` to Airflow 2.4 and later
+  (Airflow 3 refused `schedule_interval`).
 
 ### Pipelines
 
@@ -31,6 +39,10 @@
   output as XCom, deferral to the triggerer and cancel on kill. Tested against a real
   service and in Airflow 3.3. `GET /v1/runs/<id>/logs?after=` returns the lines after
   the ones a reader has, with `next`.
+- `MageMLPipelineOperator` runs a pipeline on a MageML server for pipelines that are not
+  exported: it signs in as a user, runs the pipeline under its API trigger named Airflow,
+  finds its run again on retry, writes the blocks' log lines to the task log, names failed
+  blocks, and cancels on kill. The Services page shows the DAG for a service's pipeline.
 
 ### Block templates
 
@@ -68,6 +80,10 @@
   variable and read a descriptor it did not have.
 
 ### Exported services
+
+- Instances that share a PostgreSQL run history all serve a run's log: its lines are kept
+  in the run history (in batches every quarter second, and before the run's status), also
+  after the instance that ran it is gone. They answered 409 with the other host.
 
 - A stream that keeps no state commits its positions as soon as the sinks confirm a batch.
   Since keyed state, every commit waited behind the next batch's transform, so a crash

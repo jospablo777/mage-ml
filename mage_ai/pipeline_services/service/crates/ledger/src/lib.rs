@@ -106,8 +106,11 @@ const SQLITE_V1_COLUMNS: &[(&str, &str)] = &[
 pub const SQLITE_VERSION: i64 = 1;
 
 /// PostgreSQL migrations, in order: version N is the Nth. Types are the SQLite ones' (text
-/// timestamps in ISO 8601 UTC, integers), so a statement means the same on both.
-const POSTGRES_MIGRATIONS: &[&str] = &[r#"
+/// timestamps in ISO 8601 UTC, integers), so a statement means the same on both. Version 2
+/// keeps run logs (`run_logs`), so every instance serves the log of a run another ran; a
+/// SQLite run history has one instance, whose log files are enough.
+const POSTGRES_MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE runs (
     id TEXT PRIMARY KEY,
     pipeline TEXT NOT NULL,
@@ -165,7 +168,16 @@ CREATE TABLE instances (
 CREATE TABLE service (
     name TEXT NOT NULL
 );
-"#];
+"#,
+    r#"
+CREATE TABLE run_logs (
+    run_id TEXT NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    seq BIGINT NOT NULL,
+    line TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq)
+);
+"#,
+];
 
 /// An instance's lease, and how often it is renewed: an instance silent for this long is
 /// taken for dead and its runs are failed.
@@ -1019,6 +1031,59 @@ impl Ledger {
         })
     }
 
+    /// Whether run logs are kept here as well as in files: a PostgreSQL run history, which
+    /// instances share.
+    pub fn keeps_logs(&self) -> bool {
+        matches!(*self.store, Store::Postgres(_))
+    }
+
+    /// Adds run log lines (run, line number, JSON line); a line already kept is skipped.
+    /// Nothing happens in a run history that keeps no logs.
+    pub fn append_logs(&self, lines: Vec<(String, u64, String)>) -> Result<()> {
+        if !self.keeps_logs() || lines.is_empty() {
+            return Ok(());
+        }
+        self.store.run(move |db| {
+            // 3 parameters a line, well under PostgreSQL's 65,535 a statement.
+            for chunk in lines.chunks(1000) {
+                let mut sql = String::from("INSERT INTO run_logs (run_id, seq, line) VALUES ");
+                let mut params = Vec::with_capacity(chunk.len() * 3);
+                for (index, (run_id, seq, line)) in chunk.iter().enumerate() {
+                    if index > 0 {
+                        sql.push_str(", ");
+                    }
+                    let n = index * 3;
+                    sql.push_str(&format!("(?{}, ?{}, ?{})", n + 1, n + 2, n + 3));
+                    params.push(crate::sql::Cell::from(run_id.as_str()));
+                    params.push(crate::sql::Cell::Int(*seq as i64));
+                    params.push(crate::sql::Cell::from(line.as_str()));
+                }
+                sql.push_str(" ON CONFLICT DO NOTHING");
+                db.execute(&sql, &params)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// A run's kept log lines in order; None when the run history keeps none for it.
+    pub fn logs(&self, run_id: &str) -> Result<Option<Vec<String>>> {
+        if !self.keeps_logs() {
+            return Ok(None);
+        }
+        let run_id = run_id.to_string();
+        self.store.run(move |db| {
+            let lines = db
+                .query(
+                    "SELECT line FROM run_logs WHERE run_id = ?1 ORDER BY seq",
+                    cells![run_id],
+                )?
+                .iter()
+                .map(|row| row.text(0))
+                .collect::<Result<Vec<String>>>()?;
+            Ok((!lines.is_empty()).then_some(lines))
+        })
+    }
+
     /// Copies a SQLite run history into this one (PostgreSQL), skipping runs it has: the
     /// move from one machine's file to a shared database. Returns the runs copied.
     pub fn import_sqlite(&self, path: &Path) -> Result<u64> {
@@ -1322,6 +1387,16 @@ mod tests {
             idempotency_key: key,
             blocks,
         }
+    }
+
+    #[test]
+    fn a_sqlite_run_history_keeps_no_run_logs() {
+        let ledger = Ledger::in_memory().unwrap();
+        assert!(!ledger.keeps_logs());
+        ledger
+            .append_logs(vec![("r".into(), 0, "{}".into())])
+            .unwrap();
+        assert_eq!(ledger.logs("r").unwrap(), None);
     }
 
     #[test]
@@ -2061,6 +2136,40 @@ mod postgres_tests {
         });
         assert_eq!(ids.len(), 1);
         drop_schema(&instances[0], &schema);
+    }
+
+    #[test]
+    fn a_postgresql_run_history_keeps_run_logs_in_order_until_the_run_is_pruned() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let ledger = open(&url, &schema, "a");
+        let variables = Map::new();
+        let (id, _) = ledger.create_run(run(&variables, None, &[])).unwrap();
+        assert!(ledger.keeps_logs());
+        assert_eq!(ledger.logs(&id).unwrap(), None);
+
+        let line = |seq: u64, text: &str| (id.clone(), seq, format!("{{\"message\": \"{text}\"}}"));
+        ledger
+            .append_logs(vec![line(1, "second"), line(0, "first")])
+            .unwrap();
+        // A batch written again after a retry: kept once.
+        ledger
+            .append_logs(vec![line(1, "second"), line(2, "third")])
+            .unwrap();
+        let many: Vec<_> = (3..2503).map(|seq| line(seq, "more")).collect();
+        ledger.append_logs(many).unwrap();
+        let lines = ledger.logs(&id).unwrap().unwrap();
+        assert_eq!(lines.len(), 2503);
+        assert_eq!(
+            &lines[..3],
+            [line(0, "first").2, line(1, "second").2, line(2, "third").2]
+        );
+
+        ledger.finish_run(&id, RunStatus::Completed, None).unwrap();
+        let pruned = ledger.prune(now() + chrono::Duration::days(1)).unwrap();
+        assert_eq!(pruned, vec![id.clone()]);
+        assert_eq!(ledger.logs(&id).unwrap(), None);
+        drop_schema(&ledger, &schema);
     }
 
     #[test]
