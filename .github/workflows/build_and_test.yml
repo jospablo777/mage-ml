@@ -275,7 +275,7 @@ jobs:
           - id: pipelines
             name: "MageML: compiled and polyglot pipelines"
             services: postgres mysql minio api
-            tests: integration_tests/chains integration_tests/contracts integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/r
+            tests: integration_tests/chains integration_tests/checks integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/r
             r: true
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service'"
           - id: study
@@ -305,10 +305,10 @@ jobs:
           workspaces: |
             rust/column_atlas -> target
             mage_ai/pipeline_services/service -> target
-      # The engine with the contract checker builds Polars, which would grow the cache past
-      # the repository's 10 GB; it builds outside the cached target.
-      - name: Keep the contract engine's build out of the cache
-        run: echo "MAGE_TEST_CONTRACT_TARGET=$RUNNER_TEMP/contract-target" >> "$GITHUB_ENV"
+      # The engine with the data checks builds Polars, which would grow the cache past the
+      # repository's 10 GB; it builds outside the cached target.
+      - name: Keep the checks engine's build out of the cache
+        run: echo "MAGE_TEST_CHECKS_TARGET=$RUNNER_TEMP/checks-target" >> "$GITHUB_ENV"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:

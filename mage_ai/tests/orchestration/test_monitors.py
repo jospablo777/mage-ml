@@ -42,9 +42,17 @@ def load(*args, **kwargs):
 
 class CompareTest(TestCase):
     def test_jensen_shannon_bounds(self):
-        self.assertEqual(monitors.jensen_shannon([1, 2, 3], [2, 4, 6]), 0)
-        self.assertAlmostEqual(monitors.jensen_shannon([1, 0], [0, 1]), math.log(2))
-        self.assertIsNone(monitors.jensen_shannon([0, 0], [1, 1]))
+        monitor = monitors.Monitor(name='m', pipeline='p', block='b', min_rows=1)
+
+        def drift(first, second):
+            column = dict(name='x', kind='numeric', rows=sum(first), missing=0, edges=[0.0])
+            return monitors.compare(
+                monitor, dict(rows=sum(second), columns=[dict(column, counts=second)]),
+                dict(rows=sum(first), columns=[dict(column, counts=first)]),
+            )['checks'][0]['value']
+
+        self.assertEqual(drift([1, 2], [2, 4]), 0)
+        self.assertAlmostEqual(drift([1, 0], [0, 1]), round(math.log(2), 4))
 
     def test_durations_and_monitor_files_are_checked(self):
         self.assertEqual(monitors.parse_duration('6h', 'x'), 21600)
@@ -80,8 +88,6 @@ class CompareTest(TestCase):
 
 class ExpandedCompareTest(TestCase):
     def test_population_stability_and_per_column_thresholds(self):
-        self.assertEqual(monitors.population_stability([10, 10], [10, 10]), 0)
-        self.assertGreater(monitors.population_stability([90, 10], [10, 90]), 1)
         monitor = monitors.Monitor(
             name='m', pipeline='p', block='b', min_rows=1,
             drift=dict(method='psi', warn=0.1, fail=0.25),
@@ -124,6 +130,84 @@ class ExpandedCompareTest(TestCase):
                 dict(task='regression', target='y', prediction='p', metrics=['f1']), 'm',
             )
         self.assertIn('cannot compute f1', str(caught.exception))
+
+
+class PerformanceParityTest(TestCase):
+    """The Rust metrics against scikit-learn's, which MageML used before."""
+
+    def metrics(self, frame, settings):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / 'out.parquet')
+            frame.to_parquet(path)
+            return monitors.performance(settings, path)
+
+    def test_every_metric_matches_scikit_learn(self):
+        import numpy as np
+        import pandas as pd
+        from sklearn import metrics as sk
+
+        rng = np.random.default_rng(7)
+        rows = 500
+        label = rng.integers(0, 2, rows)
+        score = np.round(rng.random(rows), 2)  # ties in the scores
+        binary = pd.DataFrame(dict(y=label, p=(score > 0.5).astype(int), s=score))
+        binary.loc[::50, 'y'] = None
+        result = self.metrics(binary, dict(
+            target='y', prediction='p', score='s', positive=1,
+            metrics=['accuracy', 'precision', 'recall', 'f1', 'roc_auc', 'log_loss'],
+        ))
+        kept = binary.dropna()
+        y, p, s = kept['y'].astype(int), kept['p'], kept['s']
+        expected = dict(
+            accuracy=sk.accuracy_score(y, p),
+            precision=sk.precision_score(y, p, pos_label=1, zero_division=0),
+            recall=sk.recall_score(y, p, pos_label=1, zero_division=0),
+            f1=sk.f1_score(y, p, pos_label=1, zero_division=0),
+            roc_auc=sk.roc_auc_score(y == 1, s),
+            log_loss=sk.log_loss(y == 1, s, labels=[False, True]),
+        )
+        self.assertEqual(result['rows'], len(kept))
+        for name, value in expected.items():
+            self.assertAlmostEqual(result[name], value, places=9, msg=name)
+
+        classes = pd.DataFrame(dict(
+            y=rng.choice(['a', 'b', 'c'], rows), p=rng.choice(['a', 'b', 'd'], rows),
+        ))
+        result = self.metrics(classes, dict(
+            target='y', prediction='p', positive=1, metrics=['precision', 'recall', 'f1'],
+        ))
+        for name, function in (('precision', sk.precision_score), ('recall', sk.recall_score),
+                               ('f1', sk.f1_score)):
+            self.assertAlmostEqual(
+                result[name],
+                function(classes['y'], classes['p'], average='macro', zero_division=0),
+                places=9, msg=name,
+            )
+
+        target = rng.normal(10, 3, rows)
+        target[:5] = 0  # mape's guard
+        regression = pd.DataFrame(dict(y=target, p=target + rng.normal(0, 1, rows)))
+        result = self.metrics(regression, dict(
+            target='y', prediction='p', metrics=['mae', 'rmse', 'mape', 'r2'],
+        ))
+        self.assertAlmostEqual(result['mae'], sk.mean_absolute_error(target, regression['p']),
+                               places=9)
+        self.assertAlmostEqual(
+            result['rmse'], float(np.sqrt(sk.mean_squared_error(target, regression['p']))),
+            places=9,
+        )
+        self.assertAlmostEqual(
+            result['mape'] / sk.mean_absolute_percentage_error(target, regression['p']), 1,
+            places=9,
+        )
+        self.assertAlmostEqual(result['r2'], sk.r2_score(target, regression['p']), places=9)
+        constant = pd.DataFrame(dict(y=[2.0] * 4, p=[2.0, 2.0, 2.0, 3.0]))
+        self.assertEqual(
+            self.metrics(constant, dict(target='y', prediction='p', metrics=['r2']))['r2'],
+            sk.r2_score(constant['y'], constant['p']),
+        )
 
 
 class MonitorFlowTest(DBTestCase):

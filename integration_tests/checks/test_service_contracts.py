@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from integration_tests.exported_services import (
-    contract_service_binary,
+    checks_service_binary,
     export_service,
     run_service,
 )
@@ -78,7 +78,7 @@ def statuses(run) -> dict:
 def test_a_broken_contract_fails_the_block_in_the_service_as_in_mageml(
     mage_project, contract, tmp_path,
 ):
-    binary = contract_service_binary()
+    binary = checks_service_binary()
     uuid = pipeline(mage_project, 'fail')
     directory = export_service(mage_project, uuid, tmp_path)
     contract_check = next(
@@ -114,7 +114,7 @@ def test_a_broken_contract_fails_the_block_in_the_service_as_in_mageml(
 def test_a_warn_contract_logs_the_violation_and_the_run_goes_on(
     mage_project, contract, tmp_path,
 ):
-    binary = contract_service_binary()
+    binary = checks_service_binary()
     uuid = pipeline(mage_project, 'warn')
     directory = export_service(mage_project, uuid, tmp_path)
 

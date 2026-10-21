@@ -66,6 +66,16 @@ pub struct Service {
 pub struct Metrics {
     /// (pipeline, block) -> (successes, failures, seconds, histogram buckets).
     pub blocks: BTreeMap<(String, String), BlockMetrics>,
+    /// (pipeline, block, monitor) -> the last run's result and check values.
+    pub monitors: BTreeMap<(String, String, String), MonitorMetrics>,
+}
+
+#[derive(Default, Clone)]
+pub struct MonitorMetrics {
+    /// 0 pass, 1 hold, 2 warn, 3 fail, 4 error.
+    pub result: u8,
+    /// (check, column) -> value.
+    pub checks: Vec<(String, String, f64)>,
 }
 
 pub const BUCKETS: [f64; 12] = [
@@ -401,6 +411,43 @@ impl Service {
                 entry.buckets[index] += 1;
             }
         }
+    }
+
+    /// Keeps a monitor's last result for `/metrics`.
+    #[cfg_attr(not(feature = "checks"), allow(dead_code))]
+    pub fn observe_monitor(&self, pipeline: &str, block: &str, monitor: &str, record: &Value) {
+        let result = match record["result"].as_str() {
+            Some("pass") => 0,
+            Some("hold") => 1,
+            Some("warn") => 2,
+            Some("fail") => 3,
+            _ => 4,
+        };
+        let checks = record["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                Some((
+                    c["check"].as_str()?.to_string(),
+                    c["column"].as_str().unwrap_or("").to_string(),
+                    c["value"].as_f64()?,
+                ))
+            })
+            .collect();
+        let mut metrics = self.metrics.lock().unwrap_or_else(|p| p.into_inner());
+        metrics.monitors.insert(
+            (pipeline.to_string(), block.to_string(), monitor.to_string()),
+            MonitorMetrics { result, checks },
+        );
+    }
+
+    pub fn monitor_metrics(&self) -> BTreeMap<(String, String, String), MonitorMetrics> {
+        self.metrics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .monitors
+            .clone()
     }
 
     pub fn block_metrics(&self) -> BTreeMap<(String, String), BlockMetrics> {

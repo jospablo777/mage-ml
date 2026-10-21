@@ -11,6 +11,7 @@ mod ibm;
 mod jobs;
 mod ledger;
 mod log;
+mod monitor;
 mod python;
 mod scheduler;
 mod secrets;

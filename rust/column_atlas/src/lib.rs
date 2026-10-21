@@ -7,9 +7,9 @@ pub mod engine;
 pub mod error;
 pub mod format;
 pub mod logs;
+pub mod monitor;
 #[cfg(feature = "postgres")]
 pub mod postgres;
-pub mod profile;
 pub mod schema;
 pub mod summary;
 pub mod view;

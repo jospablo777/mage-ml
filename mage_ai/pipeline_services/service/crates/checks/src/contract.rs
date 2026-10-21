@@ -7,18 +7,14 @@
 //! example rows. A contract also infers from a file: its columns, types and nullability.
 //!
 //! MageML runs check block outputs with it through ColumnAtlas (column_atlas_native), and
-//! exported services in the engine (feature `contracts` of mage-service): one checker.
+//! exported services in the engine (feature `checks` of mage-service): one checker.
 
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-mod error;
-mod table;
-
-pub use error::Error;
-use error::guarded;
-use table::Table;
+use crate::error::{Error, guarded};
+use crate::table::Table;
 
 /// The error type the checks return; the name ColumnAtlas used.
 type AtlasError = Error;

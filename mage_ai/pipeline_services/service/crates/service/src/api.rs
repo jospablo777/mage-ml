@@ -1157,6 +1157,45 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
             m.failed
         );
     }
+    let monitors = service.monitor_metrics();
+    if !monitors.is_empty() {
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_monitor_result The last result of each monitor: 0 pass, 1 hold, \
+             2 warn, 3 fail, 4 error."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_monitor_result gauge");
+        for ((pipeline, block, monitor), m) in &monitors {
+            let _ = writeln!(
+                out,
+                "mage_service_monitor_result{{pipeline=\"{}\",block=\"{}\",monitor=\"{}\"}} {}",
+                escape(pipeline),
+                escape(block),
+                escape(monitor),
+                m.result
+            );
+        }
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_monitor_check The value of each check of the last run of each \
+             monitor: drift, missing share, rows, age, metrics."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_monitor_check gauge");
+        for ((pipeline, block, monitor), m) in &monitors {
+            for (check, column, value) in &m.checks {
+                let _ = writeln!(
+                    out,
+                    "mage_service_monitor_check{{pipeline=\"{}\",block=\"{}\",monitor=\"{}\",\
+                     check=\"{}\",column=\"{}\"}} {value}",
+                    escape(pipeline),
+                    escape(block),
+                    escape(monitor),
+                    escape(check),
+                    escape(column)
+                );
+            }
+        }
+    }
     let _ = writeln!(out, "# TYPE mage_service_up gauge");
     let _ = writeln!(out, "mage_service_up 1");
     let _ = writeln!(

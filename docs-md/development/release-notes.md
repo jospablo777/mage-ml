@@ -41,9 +41,18 @@
   `manifest.json`, the README's build commands and the GitHub workflow, whose arm64 build
   failed. The Dockerfile stops an arm64 build of a Db2 image with the reason, as it did for
   IBM MQ.
+- Monitors run in services. After a block, the engine profiles its output and compares it
+  with the service's earlier runs (or with the MageML run a `run:<id>` baseline names),
+  check by check, with the same code as MageML: the comparison and the performance metrics
+  moved from Python (and scikit-learn) to the `mage-checks` crate, which MageML calls
+  through ColumnAtlas, and a test checks that both give the same checks on the same data.
+  Results are in the run log, `monitors.json` and `/metrics` (`mage_service_monitor_result`,
+  `mage_service_monitor_check`); `fail_block` fails the block. Evidently and NannyML run in
+  MageML only. The `mage-contracts` crate is now `mage-checks`, and the engine feature
+  `checks`.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
-  MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the
+  MageML uses (now the `mage-checks` crate, which ColumnAtlas wraps): `fail` fails the
   block without retries and stops what is downstream, `warn` logs the broken rules, and the
   report is kept as `contract.json`. A block pinned to another contract version stops the
   export. The engine builds with the checker only when a block has a contract. Exports

@@ -48,19 +48,19 @@ def stream_service_binary(release: bool = False) -> Path:
     return STREAM_TARGET / ('release' if release else 'debug') / 'mage-service'
 
 
-# The engine with the data contract checker (Polars), in its own target folder. CI builds it
-# outside the cached target: Polars' build would grow the shared Rust cache past the
-# repository's 10 GB, which evicts the others.
-CONTRACT_TARGET = Path(os.getenv('MAGE_TEST_CONTRACT_TARGET') or SERVICE / 'target' / 'contracts')
+# The engine with the data checks (contracts and monitors, on Polars), in its own target
+# folder. CI builds it outside the cached target: Polars' build would grow the shared Rust
+# cache past the repository's 10 GB, which evicts the others.
+CHECKS_TARGET = Path(os.getenv('MAGE_TEST_CHECKS_TARGET') or SERVICE / 'target' / 'checks')
 
 
-def contract_service_binary() -> Path:
-    """The engine an exported service with a data contract builds: feature contracts."""
+def checks_service_binary() -> Path:
+    """The engine of an exported service with a contract or a monitor: feature checks."""
     subprocess.run(
-        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', 'contracts'],
-        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(CONTRACT_TARGET)),
+        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', 'checks'],
+        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(CHECKS_TARGET)),
     )
-    return CONTRACT_TARGET / 'debug' / 'mage-service'
+    return CHECKS_TARGET / 'debug' / 'mage-service'
 
 
 def run_exported(project, pipeline: str, out: Path, variables=None, timeout: int = 600):

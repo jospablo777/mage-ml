@@ -146,7 +146,7 @@ class CaptureTest(ExportTestCase):
         self.assertIn('is a sensor block', problems)
         self.assertIn('missing_pipeline', problems)
 
-    def test_a_contract_goes_in_the_manifest_and_a_monitor_is_noted(self):
+    def test_a_contract_and_a_monitor_go_in_the_manifest(self):
         load, summary, _ = self.chain()
         summary.configuration = dict(contract=dict(name='regions', enforcement='warn'))
         self.pipeline.save()
@@ -160,7 +160,7 @@ class CaptureTest(ExportTestCase):
         (self.project / 'monitors').mkdir(exist_ok=True)
         monitor = self.project / 'monitors' / f'{self.pipeline.uuid}.yaml'
         monitor.write_text(f'pipeline: {self.pipeline.uuid}\nblock: {summary.uuid}\n')
-        self.addCleanup(monitor.unlink)
+        self.addCleanup(monitor.unlink, missing_ok=True)
 
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
 
@@ -174,18 +174,23 @@ class CaptureTest(ExportTestCase):
         self.assertEqual(contract['document']['unique'], ['region'])
         self.assertEqual(contract['document']['columns'][0]['name'], 'region')
         self.assertNotIn('contract', blocks[load.uuid])
-        self.assertIn('contracts', captured.engine_features)
+        self.assertIn('checks', captured.engine_features)
         notes = '\n'.join(captured.notes)
         self.assertIn(f'block {summary.uuid}: the service checks its output against contract '
                       'regions (warn)', notes)
-        self.assertIn(f'the service does not run monitor {self.pipeline.uuid}.', notes)
+        self.assertIn(f'the service runs monitor {self.pipeline.uuid} after the block', notes)
+        watcher = blocks[summary.uuid]['monitors'][0]
+        self.assertEqual((watcher['name'], watcher['output']), (self.pipeline.uuid, 0))
+        self.assertEqual(watcher['settings']['baseline'], 'previous')
+        self.assertNotIn('baseline', watcher)
 
-        # The engine builds without the checker when no block has a contract.
+        # The engine builds without the checks when no block has a contract or a monitor.
         summary.configuration = dict(contract=dict(name='regions', enforcement='off'))
         self.pipeline.save()
+        monitor.unlink()
         captured = export.capture(self.repo_path, [self.pipeline.uuid])
         self.assertFalse(any('contract' in b for b in captured.manifest['pipelines'][0]['blocks']))
-        self.assertNotIn('contracts', captured.engine_features)
+        self.assertNotIn('checks', captured.engine_features)
 
     def test_a_missing_contract_or_another_version_is_refused(self):
         _, summary, _ = self.chain()
@@ -208,7 +213,7 @@ class CaptureTest(ExportTestCase):
 
         summary.configuration = dict(contract=dict(name='regions', version='2'))
         self.pipeline.save()
-        self.assertIn('contracts', export.capture(self.repo_path, [self.pipeline.uuid])
+        self.assertIn('checks', export.capture(self.repo_path, [self.pipeline.uuid])
                       .engine_features)
 
     def test_model_files_the_blocks_name_and_includes_go_in_the_image(self):

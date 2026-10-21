@@ -112,8 +112,8 @@ class Capture:
     stream_files: Set[Path] = field(default_factory=set)
     # The uv that locked the Python packages; the image installs them with the same.
     uv_version: Optional[str] = None
-    # A block has a data contract: the engine builds with its checker (feature contracts).
-    has_contracts: bool = False
+    # A block has a data contract or a monitor: the engine builds with its checks.
+    has_checks: bool = False
 
     @property
     def streams(self) -> List[Dict]:
@@ -136,8 +136,8 @@ class Capture:
     def engine_features(self) -> List[str]:
         """The engine's optional connectors the streams use, and its contract checker."""
         features = {ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES}
-        if self.has_contracts:
-            features.add('contracts')
+        if self.has_checks:
+            features.add('checks')
         return sorted(features)
 
     @property
@@ -1743,7 +1743,7 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
             'support yet.'
         )
         return None
-    _note_unchecked_guards(pipeline, block, project, where, capture_.notes)
+    monitors = _monitor_checks(pipeline, block, project, where, problems, capture_.notes)
     contract = _contract_check(block, project, where, problems, capture_.notes)
     path = Path(block.file_path).resolve()
     if not path.is_file():
@@ -1773,7 +1773,10 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
         entry['conditions'] = conditions
     if contract is not None:
         entry['contract'] = contract
-        capture_.has_contracts = True
+        capture_.has_checks = True
+    if monitors:
+        entry['monitors'] = monitors
+        capture_.has_checks = True
     timeout = getattr(block, 'timeout', None)
     if timeout:
         entry['timeout_seconds'] = int(timeout)
@@ -1812,12 +1815,46 @@ def _conditional_entry(conditional, project: Path, prefix: str,
     return dict(uuid=conditional.uuid, file=str(path.relative_to(project)), sha256=_digest(path))
 
 
-def _note_unchecked_guards(pipeline, block, project: Path, where: str, notes: List[str]):
-    """Services run the blocks and check their contracts; a monitor is not run."""
+def _monitor_checks(pipeline, block, project: Path, where: str, problems: List[str],
+                    notes: List[str]) -> List[Dict]:
+    """
+    The monitors that watch the block, for the service to run after it as MageML runs
+    them: each one's settings, and for a run:<id> baseline MageML's record of that run.
+    """
+    from dataclasses import asdict
+
     from mage_ai.orchestration import monitors
 
+    for broken in monitors.broken_monitors_for(str(project), pipeline.uuid, block.uuid):
+        problems.append(f'{where}: monitor {broken["monitor"]}: {broken["error"]}')
+    checks = []
     for monitor in monitors.monitors_for(str(project), pipeline.uuid, block.uuid):
-        notes.append(f'{where}: the service does not run monitor {monitor.name}.')
+        entry = dict(
+            name=monitor.name,
+            output=int(monitor.output.split('_')[1]),
+            settings=_json_safe(asdict(monitor)),
+        )
+        if monitor.baseline != 'previous':
+            run_id = int(monitor.baseline.split(':', 1)[1])
+            record = next(
+                (r for r in monitors.saved(pipeline, monitor) if r['pipeline_run_id'] == run_id),
+                None,
+            )
+            if record is None:
+                problems.append(
+                    f'{where}: monitor {monitor.name} compares with run {run_id}, which has no '
+                    'monitor record in this project; run it, or use baseline: previous.'
+                )
+                continue
+            entry['baseline'] = _json_safe(record)
+        engines = [name for name in ('evidently', 'nannyml') if getattr(monitor, name)]
+        notes.append(
+            f'{where}: the service runs monitor {monitor.name} after the block; its results are '
+            'in the run log and /metrics'
+            + (f'; {" and ".join(engines)} run in MageML only.' if engines else '.')
+        )
+        checks.append(entry)
+    return checks
 
 
 def _contract_check(block, project: Path, where: str, problems: List[str],

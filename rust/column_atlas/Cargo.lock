@@ -377,8 +377,9 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 name = "column_atlas_native"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "mage-block",
- "mage-contracts",
+ "mage-checks",
  "memchr",
  "polars",
  "pyo3",
@@ -1425,9 +1426,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "mage-contracts"
+name = "mage-checks"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "polars",
  "serde",
  "serde_json",

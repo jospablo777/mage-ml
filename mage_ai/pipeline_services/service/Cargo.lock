@@ -3195,6 +3195,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-checks"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "polars",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mage-connector-activemq"
 version = "0.1.0"
 dependencies = [
@@ -3413,16 +3424,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mage-contracts"
-version = "0.1.0"
-dependencies = [
- "polars",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "mage-service"
 version = "0.1.0"
 dependencies = [
@@ -3436,6 +3437,7 @@ dependencies = [
  "clap",
  "croner",
  "libc",
+ "mage-checks",
  "mage-connector-activemq",
  "mage-connector-clickhouse",
  "mage-connector-http",
@@ -3451,7 +3453,6 @@ dependencies = [
  "mage-connector-rabbitmq",
  "mage-connector-search",
  "mage-connector-sqs",
- "mage-contracts",
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",

@@ -1,6 +1,6 @@
 [package]
-name = "mage-contracts"
-description = "Data contracts of MageML: checks a Parquet or Arrow IPC file against a contract's column rules"
+name = "mage-checks"
+description = "Data checks of MageML over Parquet or Arrow IPC files: contracts, and the column profiles and comparisons of monitors"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,6 +15,7 @@ polars = { version = "=0.55.2", default-features = false, features = [
   "row_hash", "semi_anti_join", "streaming", "performant", "is_between", "dtype-u128",
   "is_unique", "concat_str", "regex", "ipc",
 ] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

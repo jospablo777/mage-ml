@@ -85,7 +85,7 @@ Read it before you build:
 
 - **Blocks:** every block of every pipeline, with its language. A block the service cannot
   run (a sensor, a dynamic block) stops the export and names the reason. The service checks
-  data contracts as MageML does; it does not run monitors, and the notes list each one.
+  data contracts and runs monitors as MageML does; the notes list each one.
 - **Project files:** only the files the blocks need, found by following their imports.
   `generate_orders` is shared by both pipelines and copied once.
 - **Environment variables:** the ones the code reads, marked secret when they look like

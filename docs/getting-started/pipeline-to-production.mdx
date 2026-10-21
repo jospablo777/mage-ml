@@ -270,13 +270,15 @@ The report lists the blocks, triggers, files and packages. Read its notes:
 ```text
 Notes:
   - Pipeline regional_revenue_python, block monthly_revenue_py: the service checks its output against contract monthly_revenue (fail).
-  - Pipeline regional_revenue_python, block monthly_revenue_py: the service does not run monitor monthly_revenue.
+  - Pipeline regional_revenue_python, block monthly_revenue_py: the service runs monitor monthly_revenue after the block; its results are in the run log and /metrics.
 ```
 
 The service checks the contract as MageML does: a broken rule fails the block, without
 retries, and the exporter does not run. The report is kept next to the block's output as
-`contract.json`. Monitors stay in MageML: keep the pipeline's runs there, or watch the
-output where it lands.
+`contract.json`. The monitor runs after the block too, with the same code as in MageML, and
+compares each run with the service's earlier runs. Its result is in the run log, in
+`monitors.json` next to the output, and in `/metrics` as `mage_service_monitor_result`,
+which your alerting can watch.
 
 Build the image and run the pipeline once:
 

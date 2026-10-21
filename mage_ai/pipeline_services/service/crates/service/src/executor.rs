@@ -334,10 +334,10 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
     let mut assigned: HashSet<String> = HashSet::new();
     for block in order {
         // A block with conditions runs on its own, so its conditions see its inputs; one with
-        // a contract too, so its output is written and checked.
-        let Some(kind) =
-            chain_kind(block).filter(|_| block.conditions.is_empty() && block.contract.is_none())
-        else {
+        // a contract or monitors too, so its output is written and checked.
+        let Some(kind) = chain_kind(block).filter(|_| {
+            block.conditions.is_empty() && block.contract.is_none() && block.monitors.is_empty()
+        }) else {
             continue;
         };
         if assigned.contains(&block.uuid) || (kind == ChainKind::Rust && rust_off) {
@@ -362,6 +362,7 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
                 || next.upstream.len() != 1
                 || !next.conditions.is_empty()
                 || next.contract.is_some()
+                || !next.monitors.is_empty()
                 || !compatible
             {
                 break;
@@ -438,7 +439,7 @@ impl BlockTask {
                     };
                 }
                 Ok(Ran::Outputs(records)) => {
-                    if let Err(message) = crate::contract::check_blocking(
+                    let checked = match crate::contract::check_blocking(
                         &self.block,
                         &records,
                         &self.output_dir,
@@ -446,6 +447,21 @@ impl BlockTask {
                     )
                     .await
                     {
+                        Ok(()) => {
+                            crate::monitor::check_blocking(
+                                self.service.clone(),
+                                &self.pipeline_uuid,
+                                &self.block,
+                                &records,
+                                &self.output_dir,
+                                &self.log,
+                                &self.run_id,
+                            )
+                            .await
+                        }
+                        failed => failed,
+                    };
+                    if let Err(message) = checked {
                         // The same data breaks the same rules on every attempt.
                         self.service.observe_block(
                             &self.pipeline_uuid,

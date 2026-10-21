@@ -83,8 +83,10 @@ performance:
 
 Classification metrics are `accuracy`, `precision`, `recall`, `f1`, `roc_auc` and
 `log_loss`. Regression metrics are `mae`, `rmse`, `mape` and `r2`, with `max` bounds for
-errors. Rows without a label or a prediction are left out. The metrics come from
-scikit-learn, over every labeled row of the output.
+errors. Rows without a label or a prediction are left out. The metrics are computed in
+Rust over every labeled row of the output, as scikit-learn defines them (a test compares
+the two): `precision`, `recall` and `f1` for the `positive` class when the labels have two
+values, else averaged over the classes.
 
 ### Evidently and NannyML
 
@@ -180,3 +182,18 @@ also fails the block run, so downstream blocks don't run.
 Each checked run's profile and checks are stored with the pipeline variables in
 `.monitoring/<monitor>/<pipeline run id>.json`. The profile is a summary (bin edges and
 counts, frequent values, missing counts), not the data.
+
+## In exported services
+
+A [pipeline service](../../production/pipeline-services.md) runs the monitors of its blocks after
+each run, with the same Rust code as MageML, so the same data gets the same checks:
+
+- `baseline: previous` compares with the service's own earlier runs (the last `rolling`),
+  kept in `<data>/monitors/<pipeline>/<monitor>/`. `baseline: run:<id>` compares with
+  MageML's record of that run, taken into the service when it is exported.
+- The result is in the run log, in `monitors.json` next to the block's output, and in
+  `/metrics`: `mage_service_monitor_result` (0 pass, 1 hold, 2 warn, 3 fail, 4 error) and
+  `mage_service_monitor_check` (each check's value), for Prometheus or another alerting
+  system. The service sends no notifications itself.
+- `fail_block: true` fails the block, without retries.
+- Evidently and NannyML run in MageML only.

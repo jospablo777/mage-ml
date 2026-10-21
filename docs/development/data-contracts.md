@@ -1,10 +1,10 @@
 # Data contracts
 
-Status: implemented and tested. The engine is the `mage-contracts` crate
-(`mage_ai/pipeline_services/service/crates/contracts`, crate tests), which ColumnAtlas
-wraps for MageML and the service engine links with its `contracts` feature. An exported
+Status: implemented and tested. The engine is the `mage-checks` crate
+(`mage_ai/pipeline_services/service/crates/checks`, crate tests), which ColumnAtlas
+wraps for MageML and the service engine links with its `checks` feature. An exported
 service embeds each block's contract in `service.json`; the engine checks the output after
-the block (`crates/service/src/contract.rs`), and `integration_tests/contracts` compares
+the block (`crates/service/src/contract.rs`), and `integration_tests/checks` compares
 its outcome with MageML's. The Mage side is `mage_ai/data_preparation/contracts.py`, the check in
 `Block.run_tests`, the `data_contracts` API, the block settings section, and the CLI
 `contract-draft` and `contract-check`. Python tests: `test_contracts.py`, which covers

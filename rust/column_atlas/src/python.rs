@@ -112,7 +112,41 @@ fn infer_contract(py: Python<'_>, path: String, name: String) -> PyResult<String
 #[pyfunction]
 fn profile_columns(py: Python<'_>, path: String, request: String) -> PyResult<String> {
     let result = py
-        .detach(|| crate::profile::profile(&path, &request))
+        .detach(|| crate::monitor::profile(&path, &request))
+        .map_err(to_python)?;
+    json(&result)
+}
+
+/// A monitor's checks (JSON) for a profile against a baseline profile.
+#[pyfunction]
+#[pyo3(signature = (monitor, current, baseline=None, execution_date=None))]
+fn compare_profiles(
+    monitor: String,
+    current: String,
+    baseline: Option<String>,
+    execution_date: Option<String>,
+) -> PyResult<String> {
+    let result = crate::monitor::compare(
+        &monitor,
+        &current,
+        baseline.as_deref(),
+        execution_date.as_deref(),
+    )
+    .map_err(to_python)?;
+    json(&result)
+}
+
+/// One rolling baseline record (JSON) from earlier runs' records.
+#[pyfunction]
+fn merge_monitor_records(records: String) -> PyResult<String> {
+    json(&crate::monitor::merge(&records).map_err(to_python)?)
+}
+
+/// The performance metrics (JSON) of a monitor's labeled rows in a Parquet file.
+#[pyfunction]
+fn monitor_performance(py: Python<'_>, monitor: String, path: String) -> PyResult<String> {
+    let result = py
+        .detach(|| crate::monitor::performance(&monitor, &path))
         .map_err(to_python)?;
     json(&result)
 }
@@ -241,6 +275,9 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(infer_contract, module)?)?;
     module.add_function(wrap_pyfunction!(check_contract, module)?)?;
     module.add_function(wrap_pyfunction!(profile_columns, module)?)?;
+    module.add_function(wrap_pyfunction!(compare_profiles, module)?)?;
+    module.add_function(wrap_pyfunction!(merge_monitor_records, module)?)?;
+    module.add_function(wrap_pyfunction!(monitor_performance, module)?)?;
     module.add("MAX_ROWS", crate::engine::MAX_ROWS)?;
     module.add("MAX_COLUMNS", crate::engine::MAX_COLUMNS)?;
     module.add("MAX_SUMMARY_COLUMNS", crate::engine::MAX_SUMMARY_COLUMNS)?;

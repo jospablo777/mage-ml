@@ -29,7 +29,7 @@ mage-connector-search = { path = "../connector-search", optional = true }
 mage-connector-influxdb = { path = "../connector-influxdb", optional = true }
 # Data contracts on block outputs, checked by the checker of MageML runs; exports turn it
 # on when a block has a contract. It builds Polars.
-mage-contracts = { path = "../contracts", optional = true }
+mage-checks = { path = "../checks", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -70,7 +70,7 @@ pubsub = ["dep:mage-connector-pubsub"]
 activemq = ["dep:mage-connector-activemq"]
 search = ["dep:mage-connector-search"]
 influxdb = ["dep:mage-connector-influxdb"]
-contracts = ["dep:mage-contracts"]
+checks = ["dep:mage-checks"]
 # The standard connectors: the engine the mageml-engine wheel ships (ADR-0017).
 full = [
     "kafka", "rabbitmq", "nats", "mongodb", "ibm-mq", "object-store", "postgres", "clickhouse",

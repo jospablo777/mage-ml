@@ -361,6 +361,25 @@ pub struct Block {
     /// The data contract the block's output must meet, checked after the block ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<ContractCheck>,
+    /// The monitors that watch the block's output, checked after the block ran.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monitors: Vec<MonitorCheck>,
+}
+
+/// A monitor of the block's output, as MageML runs it: its settings (the monitor file as
+/// MageML parsed it), the output it profiles, and the baseline a `run:<id>` baseline names,
+/// taken from MageML's record of that run. A `previous` baseline is the service's own
+/// earlier runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MonitorCheck {
+    pub name: String,
+    /// The index of the output profiled: 0 for output_0.
+    #[serde(default)]
+    pub output: usize,
+    pub settings: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<Value>,
 }
 
 /// A block's data contract, as MageML checks it: the contract document (contracts/<name>

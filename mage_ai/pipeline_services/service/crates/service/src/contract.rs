@@ -1,6 +1,6 @@
 //! Data contracts on block outputs: after a block ran, its output is checked against the
-//! contract MageML exported with it, by mage-contracts, the checker of MageML runs (feature
-//! `contracts`). The report is written next to the output as `contract.json`.
+//! contract MageML exported with it, by mage-checks, the checker of MageML runs (feature
+//! `checks`). The report is written next to the output as `contract.json`.
 //!
 //! A violation with enforcement `fail` fails the block, without retries: the same data
 //! breaks the same rules on every attempt. With `warn`, the run log has the violations and
@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::log::RunLog;
 
 /// Examples of breaking rows kept per rule, as in MageML runs.
-#[cfg(feature = "contracts")]
+#[cfg(feature = "checks")]
 const EXAMPLES: usize = 10;
 
 /// [`check`] on a blocking thread: it reads the whole output, which must not hold up the
@@ -70,10 +70,10 @@ pub fn check(
     validate(block, path, output_dir, log)
 }
 
-#[cfg(feature = "contracts")]
+#[cfg(feature = "checks")]
 fn validate(block: &Block, path: &str, output_dir: &Path, log: &RunLog) -> Result<(), String> {
     let contract = block.contract.as_ref().expect("checked by the caller");
-    let report = mage_contracts::validate(path, &contract.document.to_string(), EXAMPLES)
+    let report = mage_checks::contract::validate(path, &contract.document.to_string(), EXAMPLES)
         .map_err(|error| format!("Contract {}: the check failed: {error}", contract.name))?;
     let text = serde_json::to_string_pretty(&report).unwrap_or_default();
     let _ = std::fs::write(output_dir.join("contract.json"), text);
@@ -116,7 +116,7 @@ fn validate(block: &Block, path: &str, output_dir: &Path, log: &RunLog) -> Resul
     )
 }
 
-#[cfg(not(feature = "contracts"))]
+#[cfg(not(feature = "checks"))]
 fn validate(block: &Block, _path: &str, _output_dir: &Path, log: &RunLog) -> Result<(), String> {
     let contract = block.contract.as_ref().expect("checked by the caller");
     log.warn(
@@ -228,7 +228,7 @@ mod tests {
         assert!(check(&plain, &[], dir.path(), &log(dir.path())).is_ok());
     }
 
-    #[cfg(feature = "contracts")]
+    #[cfg(feature = "checks")]
     #[test]
     fn violations_fail_the_block_or_warn_and_a_report_is_kept() {
         for lz4 in [false, true] {
@@ -264,7 +264,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "contracts"))]
+    #[cfg(not(feature = "checks"))]
     #[test]
     fn an_engine_without_contracts_says_the_contract_is_not_checked() {
         let dir = tempfile::tempdir().unwrap();

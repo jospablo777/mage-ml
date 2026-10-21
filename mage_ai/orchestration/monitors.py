@@ -22,8 +22,9 @@ Monitors: a block's output watched across pipeline runs, against a baseline run.
     fail_block: false         # true: a failed check fails the block run
     notify: true              # a failed check sends the pipeline's notifications
 
-When a block run that a monitor watches completes, the Rust engine of ColumnAtlas
-profiles the whole stored output (rust/column_atlas/src/profile.rs): numeric columns are
+When a block run that a monitor watches completes, Rust profiles the whole stored output
+and compares it with the baseline (the mage-checks crate, pipeline_services/service/crates/
+checks, through ColumnAtlas; exported services run the same code): numeric columns are
 binned on the baseline's edges, text and boolean columns by their most frequent values.
 Each check passes, warns, fails, or holds when there is too little data to decide.
 The profile and the checks are saved for the run, the next run's baseline, and recorded in
@@ -62,8 +63,6 @@ DRIFT_METHODS = {
 }
 CLASSIFICATION_METRICS = ('accuracy', 'precision', 'recall', 'f1', 'roc_auc', 'log_loss')
 REGRESSION_METRICS = ('mae', 'rmse', 'mape', 'r2')
-# Metrics where a larger value is worse.
-LOWER_IS_BETTER = {'log_loss', 'mae', 'rmse', 'mape'}
 _DURATION = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$')
 _SECONDS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
 RESULT_ORDER = {'pass': 0, 'hold': 1, 'warn': 2, 'fail': 3}
@@ -352,60 +351,14 @@ def _scan(repo_path: str) -> List[Any]:
 # ---- comparing profiles -------------------------------------------------------------
 
 
-def jensen_shannon(first: List[float], second: List[float]) -> Optional[float]:
-    """Jensen-Shannon divergence (natural log) of two count vectors; None if one is empty."""
-    total_a, total_b = sum(first), sum(second)
-    if total_a <= 0 or total_b <= 0:
-        return None
-    p = [a / total_a for a in first]
-    q = [b / total_b for b in second]
-    m = [(a + b) / 2 for a, b in zip(p, q)]
+def _monitor_json(monitor: Monitor) -> str:
+    from dataclasses import asdict
 
-    def kl(x, y):
-        return sum(a * math.log(a / b) for a, b in zip(x, y) if a > 0)
-
-    return max(0.0, (kl(p, m) + kl(q, m)) / 2)
-
-
-def population_stability(first: List[float], second: List[float]) -> Optional[float]:
-    """
-    Population stability index of two count vectors. Empty bins count as 0.0001 of their
-    side, the usual guard against log(0); None if one side is empty.
-    """
-    total_a, total_b = sum(first), sum(second)
-    if total_a <= 0 or total_b <= 0:
-        return None
-    psi = 0.0
-    for a, b in zip(first, second):
-        p = max(a / total_a, 1e-4)
-        q = max(b / total_b, 1e-4)
-        psi += (q - p) * math.log(q / p)
-    return psi
-
-
-DIVERGENCES = {'js': jensen_shannon, 'psi': population_stability}
-DIVERGENCE_NAMES = {'js': 'Jensen-Shannon divergence', 'psi': 'population stability index'}
-
-
-def _category_counts(column: Dict, keys: List[str]) -> List[float]:
-    top = {value: count for value, count in column.get('top') or []}
-    listed = sum(top.values())
-    other = (column.get('other') or 0) + listed - sum(top.get(k, 0) for k in keys)
-    return [top.get(k, 0) for k in keys] + [other]
+    return json.dumps(asdict(monitor), default=str)
 
 
 def _worst(results: List[str]) -> str:
     return max(results, key=lambda r: RESULT_ORDER[r]) if results else 'pass'
-
-
-def _parse_time(text: Optional[str]) -> Optional[datetime]:
-    if not text:
-        return None
-    try:
-        value = datetime.fromisoformat(text.replace('Z', '+00:00').replace(' UTC', '+00:00'))
-    except ValueError:
-        return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def compare(
@@ -414,194 +367,31 @@ def compare(
     baseline: Optional[Dict],
     execution_date: Optional[datetime] = None,
 ) -> Dict:
-    """Each check of the monitor for the current profile against the baseline's."""
-    checks = []
-    rows = current['rows']
-    baseline_rows = baseline['rows'] if baseline else None
-    enough = rows >= monitor.min_rows and (baseline_rows or 0) >= monitor.min_rows
+    """
+    Each check of the monitor for the current profile against the baseline's, in the Rust
+    crate exported services check monitors with (mage-checks, through ColumnAtlas).
+    """
+    import column_atlas_native
 
-    if 'min' in monitor.rows:
-        checks.append(dict(
-            check='rows', column=None, value=rows,
-            result='fail' if rows < monitor.rows['min'] else 'pass',
-            detail=f'{rows} rows; at least {int(monitor.rows["min"])}',
-        ))
-    if 'max_change' in monitor.rows:
-        if not baseline_rows:
-            checks.append(dict(check='row_change', column=None, value=None, result='hold',
-                               detail='no baseline rows to compare with'))
-        else:
-            change = abs(rows - baseline_rows) / baseline_rows
-            checks.append(dict(
-                check='row_change', column=None, value=round(change, 4),
-                result='fail' if change > monitor.rows['max_change'] else 'pass',
-                detail=f'{rows} rows against {baseline_rows} ({change:.1%} change)',
-            ))
-
-    baseline_columns = {c['name']: c for c in (baseline or {}).get('columns') or []}
-    for column in current['columns']:
-        name = column['name']
-        rules = monitor.column_rules.get(name) or {}
-        missing_rules = rules.get('missing') if rules.get('missing') is not None \
-            else monitor.missing
-        drift_rules = rules.get('drift') or monitor.drift
-        share = column['missing'] / column['rows'] if column['rows'] else 0.0
-        reference = baseline_columns.get(name)
-        if 'max' in missing_rules:
-            checks.append(dict(
-                check='missing', column=name, value=round(share, 4),
-                result='fail' if share > missing_rules['max'] else 'pass',
-                detail=f'{share:.1%} missing; at most {missing_rules["max"]:.1%}',
-            ))
-        if 'max_increase' in missing_rules and reference:
-            before = reference['missing'] / reference['rows'] if reference['rows'] else 0.0
-            increase = share - before
-            checks.append(dict(
-                check='missing_increase', column=name, value=round(increase, 4),
-                result='fail' if increase > missing_rules['max_increase'] else 'pass',
-                detail=f'{share:.1%} missing against {before:.1%}',
-            ))
-
-        if column['kind'] not in ('numeric', 'string', 'boolean'):
-            continue
-        if reference is None:
-            checks.append(dict(check='drift', column=name, value=None, result='hold',
-                               detail='no baseline for this column'))
-            continue
-        if not enough:
-            checks.append(dict(check='drift', column=name, value=None, result='hold', detail=(
-                f'too few rows to compare ({rows} now, {baseline_rows or 0} in the baseline; '
-                f'{monitor.min_rows} needed)'
-            )))
-            continue
-        if column['kind'] == 'numeric':
-            first, second = reference.get('counts') or [], column.get('counts') or []
-        else:
-            keys = [value for value, _ in reference.get('top') or []]
-            first = _category_counts(reference, keys)
-            second = _category_counts(column, keys)
-        method = drift_rules.get('method', 'js')
-        divergence = DIVERGENCES[method](first, second) if len(first) == len(second) else None
-        if divergence is None:
-            checks.append(dict(check='drift', column=name, value=None, result='hold',
-                               detail='no values to compare'))
-            continue
-        result = (
-            'fail' if divergence >= drift_rules['fail']
-            else 'warn' if divergence >= drift_rules['warn'] else 'pass'
-        )
-        checks.append(dict(
-            check='drift', column=name, value=round(divergence, 4), result=result,
-            method=method,
-            detail=f'{DIVERGENCE_NAMES[method]} {divergence:.4f}',
-        ))
-
-    if monitor.freshness:
-        name = monitor.freshness['column']
-        column = next((c for c in current['columns'] if c['name'] == name), None)
-        newest = _parse_time(column.get('max')) if column else None
-        reference_time = execution_date or datetime.now(timezone.utc)
-        if reference_time.tzinfo is None:
-            reference_time = reference_time.replace(tzinfo=timezone.utc)
-        if newest is None:
-            checks.append(dict(check='freshness', column=name, value=None, result='hold',
-                               detail='no timestamps to check'))
-        else:
-            age = (reference_time - newest).total_seconds()
-            checks.append(dict(
-                check='freshness', column=name, value=round(age),
-                result='fail' if age > monitor.freshness['max_age'] else 'pass',
-                detail=f'newest value {age / 3600:.1f} h before the run',
-            ))
-    checks.extend(_performance_checks(
-        monitor, current.get('performance'), (baseline or {}).get('performance'),
+    when = None
+    if execution_date is not None:
+        when = (execution_date if execution_date.tzinfo else
+                execution_date.replace(tzinfo=timezone.utc)).isoformat()
+    return json.loads(column_atlas_native.compare_profiles(
+        _monitor_json(monitor),
+        json.dumps(current, default=str),
+        json.dumps(baseline, default=str) if baseline is not None else None,
+        when,
     ))
-    return dict(result=_worst([c['result'] for c in checks]), checks=checks)
-
-
-def _performance_checks(monitor: Monitor, current: Optional[Dict], baseline: Optional[Dict]):
-    settings = monitor.performance
-    if not settings:
-        return []
-    if not current or current.get('error'):
-        return [dict(check='performance', column=None, value=None, result='hold',
-                     detail=(current or {}).get('error') or 'no labeled rows')]
-    checks = []
-    for metric in settings['metrics']:
-        value = current.get(metric)
-        if value is None or not math.isfinite(value):
-            checks.append(dict(check=metric, column=None, value=None, result='hold',
-                               detail=f'{metric} could not be computed'))
-            continue
-        result, reasons = 'pass', []
-        if metric in settings['min'] and value < settings['min'][metric]:
-            result = 'fail'
-            reasons.append(f'below the min {settings["min"][metric]}')
-        if metric in settings['max'] and value > settings['max'][metric]:
-            result = 'fail'
-            reasons.append(f'above the max {settings["max"][metric]}')
-        before = (baseline or {}).get(metric)
-        if metric in settings['max_drop'] and before is not None:
-            drop = (value - before) if metric in LOWER_IS_BETTER else (before - value)
-            if drop > settings['max_drop'][metric]:
-                result = 'fail'
-                reasons.append(f'{drop:.4g} worse than the baseline ({before:.4g})')
-        checks.append(dict(
-            check=metric, column=None, value=round(value, 6), result=result,
-            detail=f'{metric} {value:.4g} on {current.get("rows", 0)} labeled rows'
-                   + (f'; {"; ".join(reasons)}' if reasons else ''),
-        ))
-    return checks
 
 
 def performance(settings: Dict, path: str) -> Dict:
     """The performance metrics of a model's predictions in an output with their labels."""
-    import numpy as np
-    import pyarrow.parquet as pq
-    from sklearn import metrics as sk
+    import column_atlas_native
 
-    columns = [settings['target'], settings['prediction']]
-    if settings.get('score'):
-        columns.append(settings['score'])
-    try:
-        frame = pq.read_table(path, columns=list(dict.fromkeys(columns))).to_pandas()
-    except Exception as error:
-        return dict(error=f'the performance columns could not be read: {error}')
-    frame = frame.dropna(subset=columns)
-    if frame.empty:
-        return dict(error='no rows have both a label and a prediction', rows=0)
-    target, prediction = frame[settings['target']], frame[settings['prediction']]
-    result: Dict[str, Any] = dict(rows=int(len(frame)))
-    for metric in settings['metrics']:
-        try:
-            if metric == 'accuracy':
-                value = sk.accuracy_score(target, prediction)
-            elif metric in ('precision', 'recall', 'f1'):
-                binary = target.nunique() <= 2 and settings.get('positive') in set(target)
-                kwargs = dict(pos_label=settings['positive'], average='binary') if binary \
-                    else dict(average='macro')
-                function = dict(
-                    precision=sk.precision_score, recall=sk.recall_score, f1=sk.f1_score,
-                )[metric]
-                value = function(target, prediction, zero_division=0, **kwargs)
-            elif metric == 'roc_auc':
-                value = sk.roc_auc_score(target == settings['positive'], frame[settings['score']])
-            elif metric == 'log_loss':
-                value = sk.log_loss(
-                    target == settings['positive'], frame[settings['score']], labels=[False, True],
-                )
-            elif metric == 'mae':
-                value = sk.mean_absolute_error(target, prediction)
-            elif metric == 'rmse':
-                value = float(np.sqrt(sk.mean_squared_error(target, prediction)))
-            elif metric == 'mape':
-                value = sk.mean_absolute_percentage_error(target, prediction)
-            else:
-                value = sk.r2_score(target, prediction)
-            result[metric] = float(value)
-        except Exception:
-            result[metric] = None
-    return result
+    return json.loads(column_atlas_native.monitor_performance(
+        json.dumps(dict(performance=settings), default=str), path,
+    ))
 
 
 # ---- profiles of runs ---------------------------------------------------------------
@@ -626,43 +416,9 @@ def saved(pipeline, monitor: Monitor) -> List[Dict]:
 
 def _merged(records: List[Dict]) -> Dict:
     """One baseline record from several, whose profiles share their bin edges."""
-    if len(records) == 1:
-        return records[0]
-    newest = records[-1]
-    columns = {}
-    for record in records:
-        for column in record['profile']['columns']:
-            merged = columns.get(column['name'])
-            if merged is None:
-                columns[column['name']] = json.loads(json.dumps(column))
-                continue
-            merged['rows'] += column['rows']
-            merged['missing'] += column['missing']
-            if column.get('counts') and merged.get('edges') == column.get('edges'):
-                merged['counts'] = [a + b for a, b in zip(merged['counts'], column['counts'])]
-            if 'top' in column:
-                tally = {value: count for value, count in merged.get('top') or []}
-                for value, count in column['top']:
-                    tally[value] = tally.get(value, 0) + count
-                merged['top'] = sorted(tally.items(), key=lambda item: (-item[1], item[0]))
-                merged['other'] = merged.get('other', 0) + column.get('other', 0)
-    profile = dict(
-        rows=sum(r['profile']['rows'] for r in records),
-        columns=list(columns.values()),
-    )
-    performances = [r['profile'].get('performance') for r in records]
-    if all(p and not p.get('error') for p in performances):
-        keys = {k for p in performances for k, v in p.items() if isinstance(v, (int, float))}
-        weights = [p.get('rows', 0) for p in performances]
-        profile['performance'] = {
-            key: sum((p.get(key) or 0) * w for p, w in zip(performances, weights))
-            / max(sum(weights), 1)
-            for key in keys if key != 'rows'
-        }
-    return dict(newest, profile=profile,
-                pipeline_run_id=newest['pipeline_run_id'],
-                baseline_runs=[r['pipeline_run_id'] for r in records],
-                baseline_records=[dict(partition=r.get('partition')) for r in records])
+    import column_atlas_native
+
+    return json.loads(column_atlas_native.merge_monitor_records(json.dumps(records, default=str)))
 
 
 def _baseline(pipeline, monitor: Monitor, run_id: int) -> Optional[Dict]:

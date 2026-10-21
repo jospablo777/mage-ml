@@ -11,11 +11,11 @@ use std::collections::HashMap;
 
 use polars::prelude::*;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::engine::Table;
-use crate::error::{guarded, AtlasError};
-use crate::schema::Kind;
+use crate::error::{Error as AtlasError, guarded};
+use crate::kind::Kind;
+use crate::table::Table;
 
 pub const MAX_BINS: usize = 100;
 pub const MAX_TOP: usize = 200;
@@ -128,7 +128,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
                 .map(|wanted| wanted.contains(&c.name))
                 .unwrap_or(true)
         })
-        .map(|c| (c.name.clone(), c.dtype.clone(), c.kind))
+        .map(|c| (c.name.clone(), c.dtype.clone(), Kind::of(&c.dtype)))
         .collect();
     if let Some(wanted) = &request.columns {
         let known: Vec<&String> = columns.iter().map(|(name, _, _)| name).collect();

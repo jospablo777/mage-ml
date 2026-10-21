@@ -28,8 +28,10 @@ polars = { version = "=0.55.2", default-features = false, features = [
 ] }
 pyo3 = { version = "0.29", optional = true }
 mage-block = { path = "../../mage_ai/data_preparation/models/block/rust/sdk", features = ["postgres"], optional = true }
-# Data contracts: the checker of the engine's workspace, which exported services use too.
-mage-contracts = { path = "../../mage_ai/pipeline_services/service/crates/contracts" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+# Data contracts and monitors: the checks of the engine's workspace, which exported services
+# use too.
+mage-checks = { path = "../../mage_ai/pipeline_services/service/crates/checks" }
 memchr = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
