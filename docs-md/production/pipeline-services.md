@@ -419,6 +419,48 @@ Resolve the alias once per run and use the version for the model, the metadata a
 provenance you write. The embedded copy does this by itself: an image holds one version,
 so a run cannot mix two.
 
+### Champion and challengers
+
+A model can have challengers: other versions the service scores in the shadow, on a sample
+of the inputs, so you see how a candidate would do on live traffic before you promote it.
+The callers only ever get the champion's output.
+
+```yaml
+    models:
+      - name: churn
+        uri: models:/churn-classifier@champion
+        challengers:
+          - name: v4
+            uri: models:/churn-classifier/4
+        shadow:
+          sample: 0.25      # the share of inputs the challengers score; 0.1 by default
+```
+
+Score with `predict` instead of calling the model yourself:
+
+```python
+from mage_ai.pipeline_services.models import predict
+
+scores = predict('churn', customers, uri='models:/churn-classifier@champion',
+                 key='customer_id', features=FEATURES, flavor='native',
+                 method='predict_proba')
+```
+
+- `predict` returns the champion's output as soon as it has it. The challengers score in
+  a background thread of the worker, so they add no time to a request; when they fall
+  behind by 100 calls, a call is dropped and counted rather than waited on.
+- The sample is chosen by `key`: the same input is always in it or out of it, so a
+  customer's scores line up across versions.
+- A challenger that fails is recorded with its error and never reaches the caller.
+- The records go to `<data>/shadow/<model>/<challenger>/<day>.jsonl`: each call with the
+  rows, both versions and both times, and each row with its key and the two outputs.
+- `GET /v1/models` (`?days=7`) compares each challenger with the champion over those
+  records: the rows and calls compared, errors and dropped calls, how often the outputs
+  agreed, for numeric scores the mean absolute difference, each model's mean and a shared
+  histogram, and each model's p50 and p95 time per call.
+
+In MageML, `predict` scores with the model alone.
+
 ### Features that follow the model
 
 Feast's [MLflow integration](https://docs.feast.dev/reference/mlflow) tags a model version

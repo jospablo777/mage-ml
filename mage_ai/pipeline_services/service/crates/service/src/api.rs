@@ -941,8 +941,26 @@ async fn stream_detail(
     Ok(Json(value))
 }
 
-async fn models(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
+#[derive(Deserialize)]
+struct ModelsQuery {
+    /// Days of shadow records the challengers' comparison covers.
+    days: Option<u32>,
+}
+
+async fn models(
+    State(state): State<AppState>,
+    Query(query): Query<ModelsQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Value>> {
     authorize(&state, &headers, Access::Read)?;
+    let days = query.days.unwrap_or(7).clamp(1, 366);
+    let shadow_dir = state.service.data_dir.join("shadow");
+    let models_list = state.service.manifest.models.clone();
+    // The comparison reads files: off the async threads.
+    let mut comparisons =
+        tokio::task::spawn_blocking(move || crate::shadow::all(&shadow_dir, &models_list, days))
+            .await
+            .unwrap_or_default();
     let mut models = Vec::new();
     for model in &state.service.manifest.models {
         let metadata_path = state
@@ -964,6 +982,8 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<
             "sha256": model.sha256,
             "size_bytes": model.size_bytes,
             "metadata": metadata,
+            "shadow_sample": model.shadow_sample,
+            "challengers": comparisons.remove(&model.name).unwrap_or_default(),
         }));
     }
     Ok(Json(json!({"models": models})))

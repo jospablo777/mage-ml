@@ -17,6 +17,11 @@ service.yaml:
     models:                  # optional: models embedded in the image
       - name: churn
         uri: models:/churn@champion
+        challengers:         # optional: scored in the shadow, compared with the champion
+          - name: v4
+            uri: models:/churn/4
+        shadow:
+          sample: 0.25       # the share of inputs the challengers score (default 0.1)
 
 The Services page edits these files, and the `mage service` commands use them. Services in
 the earlier single file, pipeline_services.yaml, are still read; saving one moves it to its
@@ -172,6 +177,10 @@ def normalize(name: str, value: Dict) -> Dict:
             f'Service {name}: models must be a list of {{name, uri}}, such as '
             '{name: churn, uri: "models:/churn@champion"}.'
         )
+    for model in models:
+        problem = _challenger_problem(model)
+        if problem:
+            raise DefinitionError(f"Service {name}: model {model['name']}: {problem}")
     if registry is not None and (
         not isinstance(registry, str) or not REGISTRY_URL.match(registry.strip())
     ):
@@ -184,9 +193,40 @@ def normalize(name: str, value: Dict) -> Dict:
         include=list(include),
         max_runs=max_runs,
         model_registry=registry.strip() if registry else None,
-        models=[dict(name=m['name'], uri=m['uri']) for m in models],
+        models=[_model(m) for m in models],
         pipelines=list(dict.fromkeys(pipelines)),
     )
+
+
+# The share of inputs challengers score when the definition does not say.
+DEFAULT_SHADOW_SAMPLE = 0.1
+
+
+def _challenger_problem(model: Dict) -> Optional[str]:
+    challengers = model.get('challengers') or []
+    if not isinstance(challengers, list) or not all(
+        isinstance(c, dict) and isinstance(c.get('name'), str) and isinstance(c.get('uri'), str)
+        and re.match(r'^[A-Za-z0-9_.-]+$', c['name']) and c['uri']
+        for c in challengers
+    ):
+        return ('challengers must be a list of {name, uri}, names of letters, digits, ".", "_" '
+                'and "-", such as {name: v4, uri: "models:/churn/4"}.')
+    if len({c['name'] for c in challengers}) != len(challengers):
+        return 'two challengers have the same name.'
+    shadow = model.get('shadow') or {}
+    sample = shadow.get('sample', DEFAULT_SHADOW_SAMPLE) if isinstance(shadow, dict) else None
+    if isinstance(sample, bool) or not isinstance(sample, (int, float)) or not 0 < sample <= 1:
+        return 'shadow.sample must be a share of inputs above 0 and at most 1, such as 0.25.'
+    return None
+
+
+def _model(model: Dict) -> Dict:
+    out = dict(name=model['name'], uri=model['uri'])
+    if model.get('challengers'):
+        out['challengers'] = [dict(name=c['name'], uri=c['uri']) for c in model['challengers']]
+        out['shadow'] = dict(sample=float(
+            (model.get('shadow') or {}).get('sample', DEFAULT_SHADOW_SAMPLE)))
+    return out
 
 
 def save_definition(

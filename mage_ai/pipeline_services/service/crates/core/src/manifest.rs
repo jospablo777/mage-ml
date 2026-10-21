@@ -46,6 +46,22 @@ pub struct Model {
     pub flavors: Vec<String>,
     #[serde(default)]
     pub size_bytes: Option<u64>,
+    /// Models scored in the shadow on a sample of the inputs (`shadow_sample`), compared
+    /// with this one; under `<path>/challengers/<name>`.
+    #[serde(default)]
+    pub challengers: Vec<Challenger>,
+    #[serde(default)]
+    pub shadow_sample: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Challenger {
+    pub name: String,
+    pub uri: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

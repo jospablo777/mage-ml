@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')
-HELPERS = ('load_model', 'model_path', 'model_metadata')
+HELPERS = ('load_model', 'model_path', 'model_metadata', 'predict')
 
 
 def parse_model_option(text: str) -> Tuple[str, str]:
@@ -30,7 +30,10 @@ def parse_model_option(text: str) -> Tuple[str, str]:
 
 
 def detect(path: Path) -> List[Tuple[str, str]]:
-    """(name, uri) of each `load_model('name', uri='...')` call with literal arguments."""
+    """
+    (name, uri) of each `load_model('name', uri='...')` call with literal arguments, and of
+    `predict('name', data, uri='...')`.
+    """
     try:
         tree = ast.parse(path.read_text(), str(path))
     except (SyntaxError, UnicodeDecodeError):
@@ -49,7 +52,12 @@ def detect(path: Path) -> List[Tuple[str, str]]:
             if k.arg and isinstance(k.value, ast.Constant)
         }
         model = keywords.get('name') or (args[0] if args else None)
-        uri = keywords.get('uri') or (args[1] if len(args) > 1 else None)
+        if name == 'predict':
+            # predict(name, data, uri=...): only a uri keyword, as any model's predict
+            # method has this name too.
+            uri = keywords.get('uri')
+        else:
+            uri = keywords.get('uri') or (args[1] if len(args) > 1 else None)
         if isinstance(model, str) and isinstance(uri, str):
             found.append((model, uri))
     return found

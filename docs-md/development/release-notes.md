@@ -13,6 +13,11 @@
 
 ### Exported services
 
+- Champion and challengers: a service's model can name challengers in `service.yaml`.
+  `predict` returns the champion's output and scores a sample of the inputs, chosen by
+  key, with each challenger in the background; `GET /v1/models` compares them (agreement,
+  score differences and distributions, time per call). A failing or slow challenger never
+  reaches the caller.
 - Rust blocks in exported services run in a resident program: the service starts its Rust
   binary once and sends it each run's job, so a model loaded with `mage::onnx::model` stays
   loaded between runs. A program is replaced after 1,000 jobs, a panic or a timeout.

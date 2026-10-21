@@ -105,6 +105,14 @@ def model_options(models: Optional[List[Dict]]) -> List[str]:
     return [f"{m['name']}={m['uri']}" for m in models or []]
 
 
+def challenger_settings(models: Optional[List[Dict]]) -> Dict[str, Dict]:
+    """Each model's challengers and shadow sample, from a service definition."""
+    return {
+        m['name']: dict(sample=m['shadow']['sample'], challengers=m['challengers'])
+        for m in models or [] if m.get('challengers')
+    }
+
+
 def resolve_models(
     models: List[Tuple[str, str]],
     registry: Optional[str] = None,
@@ -249,6 +257,7 @@ def export_pipelines(
         captured = export.capture(
             repo_path, list(pipeline_uuids), name=name or None, max_concurrent_runs=max_runs,
             includes=includes, models=model_options(models),
+            challengers=challenger_settings(models),
         )
         out_dir = export_directory(repo_path, captured.name)
         out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -280,6 +289,7 @@ def preview_pipelines(
             captured = export.capture(
                 repo_path, list(pipeline_uuids), name=name or None,
                 max_concurrent_runs=max_runs, includes=includes, models=model_options(models),
+                challengers=challenger_settings(models),
             )
         except export.ExportError as error:
             return dict(name=export._service_name(name, list(pipeline_uuids)),

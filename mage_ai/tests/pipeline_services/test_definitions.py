@@ -136,6 +136,27 @@ class DefinitionsTest(ExportTestCase):
         written = self.service_yaml('scoring')
         self.assertEqual(written['models'][0]['uri'], 'models:/churn-scorer@champion')
 
+    def test_a_models_challengers_and_sample_are_saved_with_it(self):
+        definitions.save_definition(self.repo_path, 'scoring', dict(
+            pipelines=['a'],
+            models=[
+                dict(name='churn', uri='models:/churn@champion',
+                     challengers=[dict(name='v4', uri='models:/churn/4')],
+                     shadow=dict(sample=0.25)),
+                dict(name='fraud', uri='models:/fraud/2',
+                     challengers=[dict(name='next', uri='models:/fraud@next')]),
+            ],
+        ))
+
+        saved = definitions.load_definition(self.repo_path, 'scoring')
+        churn, fraud = saved['models']
+        self.assertEqual(churn['challengers'], [dict(name='v4', uri='models:/churn/4')])
+        self.assertEqual(churn['shadow'], dict(sample=0.25))
+        self.assertEqual(fraud['shadow'], dict(sample=definitions.DEFAULT_SHADOW_SAMPLE))
+        from mage_ai.pipeline_services.exports import challenger_settings
+        self.assertEqual(challenger_settings(saved['models'])['churn'], dict(
+            sample=0.25, challengers=[dict(name='v4', uri='models:/churn/4')]))
+
     def test_bad_settings_say_what_to_fix(self):
         for value, message in (
             (dict(pipelines='a'), 'pipelines must be a list'),
@@ -143,6 +164,12 @@ class DefinitionsTest(ExportTestCase):
             (dict(pipelines=['a'], include='models'), 'include must be a list'),
             (dict(pipelines=['a'], models=[dict(name='churn')]), 'models must be a list'),
             (dict(pipelines=['a'], model_registry=5), 'model_registry must be the address'),
+            (dict(pipelines=['a'], models=[dict(name='m', uri='u', challengers=[
+                dict(name='bad name', uri='x')])]), 'challengers must be a list'),
+            (dict(pipelines=['a'], models=[dict(name='m', uri='u', challengers=[
+                dict(name='c', uri='x'), dict(name='c', uri='y')])]), 'same name'),
+            (dict(pipelines=['a'], models=[dict(name='m', uri='u', challengers=[
+                dict(name='c', uri='x')], shadow=dict(sample=2))]), 'shadow.sample must be'),
             (dict(pipelines=['a'], model_registry='mlflow:5000'), 'such as http://mlflow:5000'),
         ):
             with self.subTest(message=message):

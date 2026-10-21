@@ -18,6 +18,7 @@ mod resident;
 mod scheduler;
 mod secrets;
 mod service;
+mod shadow;
 mod stream;
 mod stream_chain;
 mod stream_python;
@@ -730,6 +731,11 @@ async fn start_service(
             env: [
                 ("MAGE_SERVICE".to_string(), "1".to_string()),
                 ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
+                // Challengers' shadow records (models.predict), compared at /v1/models.
+                (
+                    "MAGE_SERVICE_SHADOW_DIR".to_string(),
+                    data.join("shadow").display().to_string(),
+                ),
                 // R blocks run in an R session kept between runs (runtime.run_r_job).
                 (
                     "MAGE_R_RESIDENT".to_string(),

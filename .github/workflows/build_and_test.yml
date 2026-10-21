@@ -284,13 +284,13 @@ jobs:
             name: "Integration: ML and HTTP services"
             services: feast mlflow api
             # The deploy test builds a service image and deploys it to the runner's Docker.
-            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy
+            tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models
             r: false
             warm: ""
           - id: pipelines
             name: "MageML: compiled and polyglot pipelines"
             services: postgres mysql minio api
-            tests: integration_tests/chains integration_tests/checks integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/r
+            tests: integration_tests/chains integration_tests/checks integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/benchmark/test_resident_rust_latency.py integration_tests/r
             r: true
             # This group saves the shared Rust blocks cache: DuckDB (18 minutes of C++) is
             # warmed here so the SQL group finds it built.

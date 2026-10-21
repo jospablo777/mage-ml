@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 import yaml
 
-from mage_ai.pipeline_services import definitions, export
+from mage_ai.pipeline_services import definitions, export, exports
 
 BUILD_DIR = Path('.mage') / 'build'
 LOCK_HEADER = (
@@ -68,6 +68,7 @@ def capture(repo_path: str, name: str) -> export.Capture:
             max_concurrent_runs=saved['max_runs'],
             models=[f"{m['name']}={m['uri']}" for m in saved['models']],
             includes=saved['include'],
+            challengers=exports.challenger_settings(saved['models']),
         )
 
 

@@ -99,6 +99,8 @@ class Capture:
     unresolved_imports: Set[str] = field(default_factory=set)
     # (name, uri) of each ML model to embed.
     models: List[Tuple[str, str]] = field(default_factory=list)
+    # Per model: {sample, challengers: [{name, uri}]}, scored in the shadow (item 79).
+    challengers: Dict[str, Dict] = field(default_factory=dict)
     # Whether the copied Cargo.lock matches the exported crates, so the image builds --locked.
     rust_locked: bool = False
     # The rv environment R blocks run with (rproject.toml and rv.lock).
@@ -198,6 +200,7 @@ def capture(
     max_concurrent_runs: Optional[int] = None,
     models: Optional[List[str]] = None,
     includes: Optional[List[str]] = None,
+    challengers: Optional[Dict[str, Dict]] = None,
 ) -> Capture:
     """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
@@ -271,6 +274,11 @@ def capture(
     if capture_.needs_r:
         capture_.r_project = _r_project(project_path)
     capture_.models = _models(capture_, models or [])
+    capture_.challengers = dict(challengers or {})
+    missing = [m for m in capture_.challengers if m not in dict(capture_.models)]
+    if missing:
+        raise ExportError([f'Model {m} has challengers but the service embeds no model {m}.'
+                           for m in missing])
     if capture_.needs_python:
         capture_.requirements = _requirements(capture_)
         if capture_.environment is not None:
@@ -3187,7 +3195,7 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
                 f'{model_export.explain(error, uri)}'
             )
             continue
-        capture_.manifest['models'].append(dict(
+        entry = dict(
             name=name,
             uri=uri,
             path=f'models/{name}',
@@ -3196,7 +3204,29 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
             run_id=metadata.get('run_id'),
             flavors=metadata.get('flavors') or [],
             size_bytes=metadata.get('size_bytes'),
-        ))
+        )
+        capture_.manifest['models'].append(entry)
+        shadow = capture_.challengers.get(name)
+        if shadow:
+            embedded = []
+            for challenger in shadow['challengers']:
+                label, challenger_uri = challenger['name'], challenger['uri']
+                try:
+                    found = model_export.download(
+                        name, challenger_uri, out_dir / 'models' / name / 'challengers' / label,
+                    )
+                except Exception as error:
+                    problems.append(
+                        f'Challenger {label} of model {name} ({challenger_uri}) could not be '
+                        f'downloaded and embedded: {model_export.explain(error, challenger_uri)}'
+                    )
+                    continue
+                embedded.append(dict(name=label, uri=challenger_uri,
+                                     version=found.get('version'), sha256=found['sha256']))
+            (out_dir / 'models' / name / 'challengers.json').write_text(json.dumps(
+                dict(sample=shadow['sample'], challengers=embedded), indent=2) + '\n')
+            entry['challengers'] = embedded
+            entry['shadow_sample'] = shadow['sample']
         requirements = metadata.get('requirements') or _file_requirements(
             out_dir / 'models' / name / 'artifacts')
         for requirement in requirements:
