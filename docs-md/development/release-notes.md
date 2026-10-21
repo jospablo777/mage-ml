@@ -218,10 +218,11 @@
   no schema, as if it were in the block's schema; it is in the profile's default schema,
   and is now named there.
 
-### Scheduler
+### Data contracts
 
-- The per-run scheduler lock in Redis is renewed while a tick runs. It expired after 60
-  seconds, so a longer tick let a second replica act on the same pipeline run.
+- A contract on a dynamic block's children failed every child with "output_0 is dict": the
+  check looked the child's output up by its uuid, while Mage stores it by the child's
+  index. Each child is now checked with its own output.
 
 ### Command line runs
 
@@ -243,6 +244,8 @@
 
 ### Scheduler
 
+- The per-run scheduler lock in Redis is renewed while a tick runs. It expired after 60
+  seconds, so a longer tick let a second replica act on the same pipeline run.
 - A scheduler pass read each pipeline's files about five times and the project's
   metadata.yaml four times for each running pipeline run; it now reads them once per pass.
   With 50 runs in flight a pass took 0.18 seconds instead of 0.22.

@@ -236,18 +236,31 @@ def _write_frame(frame: Any, directory: str) -> Optional[str]:
     return None
 
 
-def _stored_file(block, binding: Binding, execution_partition, dynamic_block_uuid):
-    """The output's Parquet file as Mage stored it, None when it is not a local file."""
+def _stored_file(block, binding: Binding, execution_partition, dynamic_block_uuid,
+                 dynamic_block_index=None):
+    """
+    The output's Parquet file as Mage stored it, None when it is not a local file. A
+    dynamic child's output is stored by its index (<block>/<index>/output_0); looked up by
+    its uuid, the check found nothing and read an empty value (I-278).
+    """
     from mage_ai.column_atlas.sources import DATAFRAME_FILE, EXPLORABLE_TYPES
     from mage_ai.data_preparation.storage.local_storage import LocalStorage
 
     try:
-        variable = block.pipeline.variable_manager.get_variable_object(
-            block.pipeline.uuid,
-            dynamic_block_uuid or block.uuid,
-            binding.output,
-            partition=execution_partition,
-        )
+        if dynamic_block_index is not None and hasattr(block, 'get_variable_object'):
+            variable = block.get_variable_object(
+                block_uuid=block.uuid,
+                variable_uuid=binding.output,
+                dynamic_block_index=dynamic_block_index,
+                partition=execution_partition,
+            )
+        else:
+            variable = block.pipeline.variable_manager.get_variable_object(
+                block.pipeline.uuid,
+                dynamic_block_uuid or block.uuid,
+                binding.output,
+                partition=execution_partition,
+            )
     except Exception:
         return None, None
     if variable.variable_type not in EXPLORABLE_TYPES:
@@ -263,6 +276,7 @@ def check_output(
     execution_partition: Optional[str] = None,
     dynamic_block_uuid: Optional[str] = None,
     outputs: Optional[List[Any]] = None,
+    dynamic_block_index: Optional[int] = None,
 ) -> Optional[Tuple[Binding, Dict]]:
     """
     Checks the block's output against its contract; returns the binding and the report,
@@ -286,7 +300,7 @@ def check_output(
         path, variable = (None, None)
         if block.pipeline is not None:
             path, variable = _stored_file(
-                block, binding, execution_partition, dynamic_block_uuid,
+                block, binding, execution_partition, dynamic_block_uuid, dynamic_block_index,
             )
         if path is None:
             frame = None

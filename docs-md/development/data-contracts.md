@@ -69,8 +69,8 @@ parsing: unknown fields are errors, so a typo such as `nulable` isn't silently i
 
 ## Remaining gaps
 
-1. **Dynamic blocks** pass the child's uuid to the check, but no test covers them yet,
-   and the block settings show only the parent's notebook report.
+1. **Dynamic blocks**: each child is checked with its own output (by its index, as Mage
+   stores it), but the block settings show only the parent's notebook report.
 2. **No compatibility check in CI** between two versions of a contract. A block's version
    pin catches a major bump at run time.
 3. **No contracts page.** Contracts are edited as files; the block settings pick one and

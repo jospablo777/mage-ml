@@ -245,6 +245,51 @@ class DataContractTest(DBTestCase):
         report = contracts.read_report(load, execution_partition=run.execution_partition)
         self.assertEqual(report['violations'][0]['rule'], 'max')
 
+    def test_each_child_of_a_dynamic_block_is_checked_with_its_own_output(self):
+        from mage_ai.orchestration.db.models.schedules import BlockRun
+        from mage_ai.orchestration.fusion_verify import run_in_process
+        from mage_ai.orchestration.triggers.api import trigger_pipeline
+
+        items = self.block('items', 'data_loader', """
+            @data_loader
+            def load(*args, **kwargs):
+                return [
+                    [dict(scores=[0.1, 0.2, 0.3]), dict(scores=[0.4, 7.0, 0.6])],
+                    [dict(block_uuid='good'), dict(block_uuid='bad')],
+                ]
+        """)
+        items.configuration = dict(dynamic=True)
+        self.pipeline.save()
+        score = self.block('score', 'transformer', """
+            import pandas as pd
+
+
+            @transformer
+            def score(item, *args, **kwargs):
+                return pd.DataFrame({
+                    'customer_id': [1, 2, 3], 'score': item['scores'],
+                    'segment': ['new', 'active', 'new'],
+                })
+        """, contract='customer_scores', upstream=[items])
+
+        run = run_in_process(trigger_pipeline(self.pipeline.uuid), log=lambda _line: None)
+
+        children = {
+            b.block_uuid.rsplit(':', 1)[-1]: b for b in BlockRun.query.filter(
+                BlockRun.pipeline_run_id == run.id,
+                BlockRun.block_uuid.startswith(f'{score.uuid}:'),
+            )
+        }
+        self.assertEqual(
+            {k: b.status for k, b in children.items()},
+            dict(good=BlockRun.BlockRunStatus.COMPLETED, bad=BlockRun.BlockRunStatus.FAILED),
+        )
+        good = contracts.read_report(score, run.execution_partition, children['good'].block_uuid)
+        bad = contracts.read_report(score, run.execution_partition, children['bad'].block_uuid)
+        self.assertTrue(good['passed'])
+        self.assertFalse(bad['passed'])
+        self.assertEqual(bad['violations'][0]['rule'], 'max')
+
     def test_the_cli_drafts_a_contract_and_checks_an_output(self):
         from typer.testing import CliRunner
 

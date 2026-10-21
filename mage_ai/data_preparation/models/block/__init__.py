@@ -3388,6 +3388,7 @@ class Block(
         execution_partition: Optional[str] = None,
         from_notebook: bool = False,
         outputs: Optional[List[Any]] = None,
+        dynamic_block_index: Optional[int] = None,
     ) -> Optional[str]:
         """
         Checks the output against the block's data contract and prints the result; returns
@@ -3403,6 +3404,7 @@ class Block(
                 execution_partition=execution_partition,
                 dynamic_block_uuid=dynamic_block_uuid,
                 outputs=outputs,
+                dynamic_block_index=dynamic_block_index,
             )
         except contracts.ContractError as error:
             failure = str(error)
@@ -3521,6 +3523,7 @@ class Block(
                 execution_partition=execution_partition,
                 from_notebook=from_notebook,
                 outputs=outputs,
+                dynamic_block_index=dynamic_block_index,
             )
 
             if test_functions and len(test_functions) >= 0:
