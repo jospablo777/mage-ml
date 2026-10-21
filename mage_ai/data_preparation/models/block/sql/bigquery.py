@@ -158,6 +158,7 @@ def interpolate_input_data(
         block,
         query,
         get_database=lambda opts: loader.default_database(),
+        copied=lambda upstream: not reads_upstream_table(block, upstream),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

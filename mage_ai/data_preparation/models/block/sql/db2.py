@@ -14,10 +14,18 @@ from mage_ai.data_preparation.models.block.sql.utils.shared import (
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
     has_create_or_insert_statement,
     interpolate_input,
+    should_cache_data_from_upstream,
     split_query_string,
 )
 from mage_ai.io.config import ConfigKey
 
+# The profile settings that make two Db2 SQL blocks use the same database.
+CACHE_KEYS = [
+    ConfigKey.DB2_DATABASE,
+    ConfigKey.DB2_SCHEMA,
+    ConfigKey.DB2_HOST,
+    ConfigKey.DB2_PORT,
+]
 
 def create_upstream_block_tables(
     loader,
@@ -38,12 +46,7 @@ def create_upstream_block_tables(
         without_schema(configuration if configuration else block.configuration),
         execution_partition,
         cache_upstream_dbt_models,
-        cache_keys=[
-            ConfigKey.DB2_DATABASE,
-            ConfigKey.DB2_SCHEMA,
-            ConfigKey.DB2_HOST,
-            ConfigKey.DB2_PORT,
-        ],
+        cache_keys=CACHE_KEYS,
         no_schema=False,
         query=query,
         schema_name=loader.default_schema(),
@@ -79,6 +82,9 @@ def interpolate_input_data(
         _InCurrentSchema(block),
         query,
         lambda db, schema, tn: f'{schema}.{tn}' if schema else tn,
+        copied=lambda upstream: should_cache_data_from_upstream(
+            block, upstream, ['data_provider'], CACHE_KEYS,
+        ),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

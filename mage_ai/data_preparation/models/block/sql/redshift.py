@@ -1,10 +1,22 @@
-from mage_ai.data_preparation.models.block.sql.utils.shared import (
-    create_upstream_block_tables as create_upstream_block_tables_orig,
-    interpolate_input,
-)
-from mage_ai.io.config import ConfigKey
 from typing import Dict, List
 
+from mage_ai.data_preparation.models.block.sql.utils.shared import (
+    create_upstream_block_tables as create_upstream_block_tables_orig,
+)
+from mage_ai.data_preparation.models.block.sql.utils.shared import (
+    interpolate_input,
+    should_cache_data_from_upstream,
+)
+from mage_ai.io.config import ConfigKey
+
+# The profile settings that make two Redshift SQL blocks use the same database.
+CACHE_KEYS = [
+    ConfigKey.REDSHIFT_CLUSTER_ID,
+    ConfigKey.REDSHIFT_DBNAME,
+    ConfigKey.REDSHIFT_HOST,
+    ConfigKey.REDSHIFT_PORT,
+    ConfigKey.REDSHIFT_SCHEMA,
+]
 
 def create_upstream_block_tables(
     loader,
@@ -25,13 +37,7 @@ def create_upstream_block_tables(
         configuration,
         execution_partition,
         cache_upstream_dbt_models,
-        cache_keys=[
-            ConfigKey.REDSHIFT_CLUSTER_ID,
-            ConfigKey.REDSHIFT_DBNAME,
-            ConfigKey.REDSHIFT_HOST,
-            ConfigKey.REDSHIFT_PORT,
-            ConfigKey.REDSHIFT_SCHEMA,
-        ],
+        cache_keys=CACHE_KEYS,
         query=query,
         schema_name=loader.default_schema(),
         dynamic_block_index=dynamic_block_index,
@@ -52,6 +58,9 @@ def interpolate_input_data(
         query,
         get_database=lambda opts: loader.default_database(),
         get_schema=lambda opts: loader.default_schema(),
+        copied=lambda upstream: should_cache_data_from_upstream(
+            block, upstream, ['data_provider'], CACHE_KEYS,
+        ),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

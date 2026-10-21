@@ -264,3 +264,39 @@ class UpstreamTablesTest(DBTestCase):
                 "WHERE table_name = ? AND column_name = 'amount'", [up.table_name],
             ).fetchone()[0]
         self.assertEqual(column_type, 'DECIMAL(10,2)')
+
+    def test_a_copied_sql_upstream_is_named_where_the_copy_was_written(self):
+        """
+        An upstream SQL block on another database of the same kind is copied with the
+        block's names; {{ df_1 }} named it with the upstream's schema.
+        """
+        from unittest.mock import MagicMock
+
+        from mage_ai.data_preparation.models.block.sql import postgres
+
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        io_config.write_text(original + (
+            'shop:\n  POSTGRES_DBNAME: shop\n  POSTGRES_HOST: db\n  POSTGRES_PORT: 5432\n'
+            'finance:\n  POSTGRES_DBNAME: finance\n  POSTGRES_HOST: db\n  POSTGRES_PORT: 5432\n'
+        ))
+        upstream = self.block('ledger', configuration=dict(
+            data_provider='postgres', data_provider_profile='finance',
+            data_provider_schema='raw',
+        ))
+        same = self.block('same_db', configuration=dict(
+            data_provider='postgres', data_provider_profile='finance',
+        ), upstream=[upstream])
+        block = self.block('report', configuration=dict(
+            data_provider='postgres', data_provider_profile='shop',
+        ), upstream=[upstream])
+        loader = MagicMock()
+        loader.default_database.return_value = 'shop'
+        loader.default_schema.return_value = 'public'
+
+        query = postgres.interpolate_input_data(block, 'SELECT * FROM {{ df_1 }}', loader)
+        self.assertEqual(query, f'SELECT * FROM "shop".public.{upstream.table_name}')
+        # On the upstream's own database, its table is read as it is, in its schema.
+        query = postgres.interpolate_input_data(same, 'SELECT * FROM {{ df_1 }}', loader)
+        self.assertEqual(query, f'SELECT * FROM "shop".raw.{upstream.table_name}')

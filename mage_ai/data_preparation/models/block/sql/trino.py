@@ -161,6 +161,9 @@ def interpolate_input_data(
         get_database=lambda opts: loader.default_database(),
         get_schema=lambda opts: loader.default_schema(),
         get_table=_get_table if unique_table_name_suffix else None,
+        copied=lambda upstream: should_cache_data_from_upstream(
+            block, upstream, ['data_provider'], CACHE_KEYS,
+        ),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

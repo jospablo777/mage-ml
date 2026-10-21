@@ -11,6 +11,12 @@ from mage_ai.data_preparation.models.constants import BlockType
 from mage_ai.data_preparation.variable_manager import get_variable
 from mage_ai.io.config import ConfigKey
 
+# The profile settings that make two Snowflake SQL blocks use the same database.
+CACHE_KEYS = [
+    ConfigKey.SNOWFLAKE_ACCOUNT,
+    ConfigKey.SNOWFLAKE_DEFAULT_WH,
+    ConfigKey.SNOWFLAKE_DEFAULT_DB,
+]
 
 def create_upstream_block_tables(
     loader,
@@ -47,11 +53,7 @@ def create_upstream_block_tables(
 
         if should_cache_data_from_upstream(block, upstream_block, [
             'data_provider',
-        ], [
-            ConfigKey.SNOWFLAKE_ACCOUNT,
-            ConfigKey.SNOWFLAKE_DEFAULT_WH,
-            ConfigKey.SNOWFLAKE_DEFAULT_DB,
-        ]):
+        ], CACHE_KEYS):
             if BlockType.DBT == upstream_block.type and not cache_upstream_dbt_models:
                 continue
 
@@ -103,6 +105,9 @@ def interpolate_input_data(
         lambda db, schema, tn: f'"{db.upper()}"."{schema.upper()}"."{tn.upper()}"',
         get_database=lambda opts: loader.default_database(),
         get_schema=lambda opts: loader.default_schema(),
+        copied=lambda upstream: should_cache_data_from_upstream(
+            block, upstream, ['data_provider'], CACHE_KEYS,
+        ),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

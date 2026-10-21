@@ -191,6 +191,10 @@
   read another table. Upstream tables now go to the profile's schema, named alone; an
   upstream Db2 SQL block's table is named with its schema; the block's own table is read
   back from its schema.
+- An upstream SQL block on another database of the same kind (another PostgreSQL, Trino,
+  Redshift, Snowflake, Db2 or BigQuery profile) is copied into the block's database with the
+  block's schema, but `{{ df_1 }}` named it with the upstream's own database and schema, so
+  the query read a table that was not there, or an old one. It now names the copy.
 
 ### Command line runs
 

@@ -132,7 +132,13 @@ def interpolate_input(
     get_table: Callable = None,
     dynamic_block_index: int = None,
     dynamic_upstream_block_uuids: List[str] = None,
+    copied: Callable = None,
 ) -> str:
+    """
+    {{ df_N }} becomes the upstream block's table. copied(upstream_block) says whether an
+    upstream SQL block's table was copied into the block's database, where it has the block's
+    database and schema; without it, a copy was named with the upstream's own.
+    """
     def __replace_func(db, schema, tn):
         if replace_func:
             return replace_func(db, schema, tn)
@@ -168,7 +174,10 @@ def interpolate_input(
 
         database, schema, table_name = table_name_parts(block.configuration, upstream_block)
 
-        config_to_use = configuration if is_same_data_providers else block.configuration
+        was_copied = is_sql and is_same_data_providers and copied is not None and \
+            copied(upstream_block)
+        config_to_use = configuration if is_same_data_providers and not was_copied \
+            else block.configuration
         if not database:
             database = config_to_use.get('data_provider_database')
         if not schema:

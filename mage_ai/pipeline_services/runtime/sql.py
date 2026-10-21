@@ -234,6 +234,13 @@ def should_upload(
     return not same_provider or not same_database
 
 
+def _copied(configuration: Dict, io_config: str, provider: Dict):
+    """Whether an upstream SQL block's table is copied into the block's database."""
+    return lambda upstream: should_upload(
+        configuration, upstream, io_config, provider['profile_keys'],
+    )
+
+
 def _bigquery_project(io_config: str, profile: Optional[str]) -> Tuple[Optional[str], Any]:
     """
     As bigquery_project in Mage's BigQuery branch: the project_id of the profile's service
@@ -335,14 +342,15 @@ def upload_upstream_tables(
 def interpolate_input(
     loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
     quote_database: bool = True, table_suffix: Optional[str] = None, written: Dict = None,
-    default_schema: bool = True, name=None, default_database: bool = True,
+    default_schema: bool = True, name=None, default_database: bool = True, copied=None,
 ) -> str:
     """
     {{ df_N }} becomes the upstream table's name, as Mage's interpolate_input. With
     table_suffix, the tables in written are named with it. Without default_schema, a name
     with no schema configured has none (Mage's BigQuery branch). name(database, schema,
     table) writes the name, as Mage's replace_func. Without default_database, a name with no
-    database configured has none (Mage's Db2 branch).
+    database configured has none (Mage's Db2 branch). copied(upstream) says whether an
+    upstream SQL block's table was copied in, with the block's database and schema.
     """
     helpers = statements()
     for index, upstream in enumerate(upstreams):
@@ -368,7 +376,8 @@ def interpolate_input(
         if table_suffix and upstream['uuid'] in (written or {}):
             table = f'{table}_{table_suffix}'
         if full_names:
-            config_to_use = config if same_providers else configuration
+            was_copied = is_sql and same_providers and copied is not None and copied(upstream)
+            config_to_use = config if same_providers and not was_copied else configuration
             database = database or config_to_use.get('data_provider_database')
             schema = schema or config_to_use.get('data_provider_schema')
             if not database and default_database:
@@ -556,6 +565,7 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             query = interpolate_input(
                 loader, in_current_schema, upstreams, query, default_schema=False,
                 default_database=False, name=lambda db, sc, tn: f'{sc}.{tn}' if sc else tn,
+                copied=_copied(configuration, io_config, provider),
             )
             schema = schema or loader.default_schema()
             query = render(query, variables)
@@ -573,7 +583,8 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             )
             schema = schema or loader.default_schema()
             query = interpolate_input(loader, configuration, upstreams, query,
-                                      quote_database=False)
+                                      quote_database=False,
+                                      copied=_copied(configuration, io_config, provider))
             query = render(query, variables)
             if configuration.get('use_raw_sql'):
                 return execute_raw_sql(loader, query, configuration, limit)
@@ -583,7 +594,8 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             upload_upstream_tables(
                 loader, configuration, upstreams, inputs, query, io_config, provider,
             )
-            query = interpolate_input(loader, configuration, upstreams, query)
+            query = interpolate_input(loader, configuration, upstreams, query,
+                                      copied=_copied(configuration, io_config, provider))
             query = render(query, variables)
             schema = schema or loader.default_schema()
             exact = bool(configuration.get('exact_numbers'))
@@ -647,6 +659,7 @@ def _run_on_trino(loader, provider, configuration, upstreams, inputs, query, io_
         query = interpolate_input(
             loader, configuration, upstreams, query, quote_database=False,
             table_suffix=suffix, written=written,
+            copied=_copied(configuration, io_config, provider),
         )
         query = render(query, variables)
         if configuration.get('use_raw_sql'):
@@ -701,6 +714,7 @@ def _run_on_bigquery(loader, provider, configuration, upstreams, inputs, query, 
                       verbose=False)
     query = interpolate_input(
         loader, configuration, upstreams, query, quote_database=False, default_schema=False,
+        copied=_copied(configuration, io_config, provider),
     )
     query = render(query, variables)
     if configuration.get('use_raw_sql'):
@@ -776,6 +790,7 @@ def _run_on_snowflake(config_loader, provider, configuration, upstreams, inputs,
         query = interpolate_input(
             loader, configuration, upstreams, query,
             name=lambda db, sc, tn: f'"{db.upper()}"."{sc.upper()}"."{tn.upper()}"',
+            copied=_copied(configuration, io_config, provider),
         )
         query = render(query, variables)
         if configuration.get('use_raw_sql'):
