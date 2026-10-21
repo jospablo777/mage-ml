@@ -148,6 +148,14 @@ class PipelineEnvironmentTest(DBTestCase):
         self.assertEqual(frame['rows'].tolist(), [3, 3, 3])
         self.assertTrue((environment.directory / environments.MARKER).is_file())
 
+    def test_a_block_runs_from_the_engines_job_worker(self):
+        """The job worker's MAGE_WORKER_REQUEST_FD names its own descriptor, not ours."""
+        pipeline, load, _ = self.pipeline_with_environment()
+        with patch.dict('os.environ', {'MAGE_WORKER_REQUEST_FD': '4'}):
+            pipeline.get_block(load).execute_sync(global_vars=dict(rows=3))
+        frame = pipeline.variable_manager.get_variable(pipeline.uuid, load, 'output_0')
+        self.assertEqual(frame['six'].tolist(), ['1.16.0'] * 3)
+
     def test_the_environment_is_built_once_and_reused(self):
         pipeline, _, _ = self.pipeline_with_environment()
         environment = environments.pipeline_environment(pipeline)
@@ -493,3 +501,58 @@ class RunRecordWorkersTest(DBTestCase):
             (entry['worker'], entry['definition'], entry['prepared']),
             ('feast', 'python_workers/feast', False),
         )
+
+
+class PythonWorkerApiTest(DBTestCase):
+    """GET /api/python_workers and POST to prepare one, as the Settings page uses them."""
+
+    def setUp(self):
+        super().setUp()
+        from mage_ai.tests.factory import create_user
+
+        self.owner = create_user(_owner=True)
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'feast')
+        folder.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / 'pyproject.toml').write_text(
+            '[project]\nname = "feast"\ndependencies = ["feast[redis]>=0.50"]\n'
+        )
+
+    def call(self, action, pk=None, payload=None):
+        from mage_ai.api.operations.base import BaseOperation
+
+        return asyncio.run(BaseOperation(
+            action=action, pk=pk, payload=payload or {}, resource='python_workers',
+            user=self.owner,
+        ).execute())
+
+    def test_workers_are_listed_and_a_prepare_reports_its_lines_and_outcome(self):
+        from mage_ai.api.operations.constants import OperationType
+
+        [worker] = self.call(OperationType.LIST)['python_workers']
+        self.assertEqual(
+            (worker['name'], worker['dependencies'], worker['locked'], worker['prepared']),
+            ('feast', ['feast[redis]>=0.50'], False, False),
+        )
+
+        def fake_prepare(worker, log=print):
+            log('Resolved 3 packages')
+            raise environments.PipelineEnvironmentError('the lock is missing')
+
+        with patch.object(environments, 'prepare', side_effect=fake_prepare):
+            started = self.call(OperationType.CREATE,
+                                payload=dict(python_worker=dict(name='Feast')))
+            job = started['python_worker']['job']
+            for _ in range(100):
+                if job['state'] != 'running':
+                    break
+                time.sleep(0.05)
+                job = self.call(OperationType.DETAIL, pk='feast')['python_worker']['job']
+
+        self.assertEqual(job['state'], 'failed')
+        self.assertEqual(job['lines'], ['Resolved 3 packages'])
+        self.assertEqual(job['problems'], ['the lock is missing'])
+
+        missing = self.call(OperationType.DETAIL, pk='other')
+        self.assertEqual(missing['error']['code'], 404)
+        self.assertIn('workers: feast', missing['error']['message'])

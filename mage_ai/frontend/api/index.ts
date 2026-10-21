@@ -65,6 +65,7 @@ export const PIPELINE_SERVICE_EXPORTS: 'pipeline_service_exports' = 'pipeline_se
 export const LANGUAGE_SETUPS: 'language_setups' = 'language_setups';
 export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
 export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_service_builds';
+export const PYTHON_WORKERS: 'python_workers' = 'python_workers';
 export const STREAM_SAMPLES: 'stream_samples' = 'stream_samples';
 export const STREAM_SAMPLE_RUNS: 'stream_sample_runs' = 'stream_sample_runs';
 export const STREAM_RUNS: 'stream_runs' = 'stream_runs';
@@ -178,6 +179,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [LANGUAGE_SETUPS],
   [PIPELINE_SERVICES],
   [PIPELINE_SERVICE_BUILDS],
+  [PYTHON_WORKERS],
   [STREAM_SAMPLES, PIPELINES],
   [STREAM_SAMPLE_RUNS, PIPELINES],
   [STREAM_RUNS, PIPELINES],

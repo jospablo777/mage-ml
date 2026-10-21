@@ -109,9 +109,11 @@ mage workers prepare feast      # uv sync --locked into the environment cache
 mage workers list               # each worker and whether it is prepared
 ```
 
-A block selects its worker in its configuration in the pipeline's `metadata.yaml`; a
-pipeline selects one for all its Python blocks, and a block can still choose MageML's
-own Python with `mage`:
+In the editor, the pipeline's **Settings** has **Python worker**, which lists the
+project's workers and prepares the chosen one with **Prepare**, showing what uv prints;
+each block's settings have **Python worker** too. In `metadata.yaml`, a block selects its
+worker in its configuration; a pipeline selects one for all its Python blocks, and a block
+can still choose MageML's own Python with `mage`:
 
 ```yaml
 environment:

@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -470,6 +471,80 @@ def prepare(worker: NamedWorker, log=print) -> Path:
     return ensure(worker, log)
 
 
+# Prepare jobs the API started, by (project, alias): their state and every line uv printed.
+_prepare_jobs: Dict[Tuple[str, str], Dict] = {}
+_prepare_jobs_lock = threading.Lock()
+
+
+def describe_workers(repo_path: str) -> List[Dict]:
+    """Each worker as the Settings page shows it."""
+    import tomllib
+
+    described = []
+    for alias, worker in named_workers(repo_path).items():
+        folder = Path(worker.definition)
+        project = tomllib.loads((folder / 'pyproject.toml').read_text()).get('project') or {}
+        entry = dict(
+            name=alias,
+            definition=worker.relative_definition(),
+            python=worker.python,
+            dependencies=list(project.get('dependencies') or []),
+            locked=(folder / 'uv.lock').is_file(),
+            prepared=worker.prepared,
+            digest=worker.digest[:12],
+            packages=[],
+        )
+        marker = worker.directory / MARKER
+        if marker.is_file():
+            entry['packages'] = json.loads(marker.read_text()).get('packages') or []
+        job = prepare_job(repo_path, alias)
+        if job:
+            entry['job'] = job
+        described.append(entry)
+    return described
+
+
+def start_prepare(repo_path: str, alias: str) -> Dict:
+    """Prepares the worker in a thread; a prepare of it already running is returned."""
+    worker = named_workers(repo_path).get(normalized_alias(alias))
+    if worker is None:
+        raise PipelineEnvironmentError(f'There is no Python worker {alias}.')
+    key = (str(Path(repo_path).resolve()), worker.alias)
+    with _prepare_jobs_lock:
+        running = _prepare_jobs.get(key)
+        if running and running['state'] == 'running':
+            return dict(running, lines=list(running['lines']))
+        job = dict(name=worker.alias, lines=[], problems=[], state='running',
+                   started_at=time.time())
+        _prepare_jobs[key] = job
+
+    def log(line: str):
+        with _prepare_jobs_lock:
+            job['lines'].append(line)
+
+    def run():
+        try:
+            prepare(worker, log=log)
+            state, problems = 'completed', []
+        except PipelineEnvironmentError as error:
+            state, problems = 'failed', [str(error)]
+        except Exception as error:
+            state, problems = 'failed', [f'Preparing stopped on an error: {error}']
+        with _prepare_jobs_lock:
+            job.update(finished_at=time.time(), problems=problems, state=state)
+
+    threading.Thread(target=run, daemon=True, name=f'prepare-{worker.alias}').start()
+    with _prepare_jobs_lock:
+        return dict(job, lines=list(job['lines']))
+
+
+def prepare_job(repo_path: str, alias: str) -> Optional[Dict]:
+    key = (str(Path(repo_path).resolve()), normalized_alias(alias))
+    with _prepare_jobs_lock:
+        job = _prepare_jobs.get(key)
+        return dict(job, lines=list(job['lines'])) if job else None
+
+
 def _json_variables(variables: Dict) -> Dict:
     """The variables a block can receive as JSON; other values are left out."""
     from datetime import date, datetime
@@ -553,6 +628,9 @@ def run_block(
             p for p in (env.get('PYTHONPATH'), mage_root) if p
         )
         env.pop('VIRTUAL_ENV', None)
+        # A run on the engine's job worker has its protocol descriptor named here; this
+        # worker reads its request on stdin.
+        env.pop('MAGE_WORKER_REQUEST_FD', None)
         process = subprocess.Popen(
             supervised_command([str(python), '-u', str(WORKER)]),
             stdin=subprocess.PIPE,

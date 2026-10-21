@@ -13,6 +13,7 @@ import FusionVerification from './FusionVerification';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
+import PythonWorkerStatus, { PythonWorkerType } from './PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
 import SetupSection, { SetupSectionRow } from '@components/shared/SetupSection';
 import Spacing from '@oracle/elements/Spacing';
@@ -67,6 +68,16 @@ function PipelineSettings({
   const services: { name: string; path?: string }[] = useMemo(
     () => dataServices?.pipeline_services || [],
     [dataServices],
+  );
+
+  // The project's Python workers (python_workers/<name>/), for the pipeline's Python blocks.
+  const { data: dataWorkers, mutate: reloadWorkers } = api.python_workers.list(
+    {},
+    { revalidateOnFocus: false },
+  );
+  const workers: PythonWorkerType[] = useMemo(
+    () => dataWorkers?.python_workers || [],
+    [dataWorkers],
   );
 
   const [pipelineAttributesTouched, setPipelineAttributesTouched] = useState<boolean>(false);
@@ -344,6 +355,50 @@ function PipelineSettings({
           description={(
             <>
               <Text muted small>
+                A named environment in python_workers/&lt;name&gt;/ (a uv project with its
+                uv.lock) for the Python data loaders, transformers, data exporters and custom
+                blocks. A block can choose another with python_worker in its configuration.
+              </Text>
+              {!workers.length && (
+                <Text muted small>
+                  This project has no Python workers yet: add a uv project in
+                  python_workers/&lt;name&gt;/ and run uv lock in it.
+                </Text>
+              )}
+              {!!pipelineAttributes?.environment?.worker && (
+                <PythonWorkerStatus
+                  key={pipelineAttributes?.environment?.worker}
+                  onPrepared={() => reloadWorkers()}
+                  worker={workers.find(w => w.name === pipelineAttributes?.environment?.worker)}
+                />
+              )}
+            </>
+          )}
+          selectInput={{
+            monospace: true,
+            onChange: e => setPipelineAttributes(prev => ({
+              ...prev,
+              environment: e.target.value
+                ? { worker: e.target.value }
+                : { ...prev?.environment, worker: undefined },
+            })),
+            options: [
+              { label: 'MageML\'s Python', value: '' },
+              ...workers.map(({ name, prepared }) => ({
+                label: prepared ? name : `${name} (not prepared)`,
+                value: name,
+              })),
+            ],
+            value: pipelineAttributes?.environment?.worker || '',
+          }}
+          title="Python worker"
+        />
+
+        {!pipelineAttributes?.environment?.worker && (
+        <SetupSectionRow
+          description={(
+            <>
+              <Text muted small>
                 The Python data loaders, transformers, data exporters and custom blocks run
                 in a virtual environment with the packages this file lists, instead of
                 MageML&apos;s. The path is relative to the pipeline&apos;s folder. uv builds the
@@ -370,6 +425,7 @@ function PipelineSettings({
           }}
           title="Pipeline environment requirements"
         />
+        )}
 
         {!!pipelineAttributes?.environment?.requirements && (
           <SetupSectionRow

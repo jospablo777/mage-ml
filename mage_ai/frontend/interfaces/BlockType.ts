@@ -293,6 +293,8 @@ export interface TemplateType {
 }
 
 export interface ConfigurationType extends BaseConfigurationType {
+  // The Python worker (python_workers/<name>/) the block runs in; 'mage' is MageML's Python.
+  python_worker?: string;
   // The data contract the block's output must meet (contracts/<name>.yaml).
   contract?: string | {
     enforcement?: 'fail' | 'warn' | 'off';

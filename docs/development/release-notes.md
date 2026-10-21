@@ -22,7 +22,11 @@
   for all its Python blocks. `mage workers prepare` builds them with `uv sync --locked`;
   runs never install packages, and a block whose worker is not prepared says what to run.
   Tables cross between workers as Arrow, so a block can use pandas 2 next to MageML's
-  pandas 3. A service exports the worker its blocks share.
+  pandas 3. A service exports the worker its blocks share. The pipeline's and each
+  block's settings choose the worker and prepare it, with uv's output.
+- Blocks of a pipeline environment failed in triggered runs that ran on the engine's job
+  worker: the environment's Python inherited the job worker's protocol descriptor
+  variable and read a descriptor it did not have.
 
 ### Exported services
 

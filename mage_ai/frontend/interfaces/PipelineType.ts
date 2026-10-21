@@ -155,6 +155,8 @@ export default interface PipelineType {
   environment?: {
     python?: string;
     requirements?: string | string[];
+    // A Python worker (python_workers/<name>/) for the Python blocks, instead.
+    worker?: string;
   };
   executor_type?: ExecutorTypeEnum;
   execution_framework?: PipelineExecutionFrameworkUUIDEnum;

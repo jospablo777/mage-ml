@@ -13,6 +13,7 @@ import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import Circle from '@oracle/elements/Circle';
 import DataContract from './DataContract';
+import PythonWorkerStatus, { PythonWorkerType } from '@components/PipelineDetail/Settings/PythonWorker';
 import Resources from './Resources';
 import Flex from '@oracle/components/Flex';
 import FlexContainer, { JUSTIFY_SPACE_BETWEEN_PROPS } from '@oracle/components/FlexContainer';
@@ -180,6 +181,21 @@ function BlockSettings({
 
   const [blockAttributes, setBlockAttributesState] = useState<BlockType>(null);
   const [blockAttributesTouched, setBlockAttributesTouched] = useState<boolean>(false);
+  // The project's Python workers, for the block's python_worker.
+  const { data: dataPythonWorkers, mutate: reloadPythonWorkers } = api.python_workers.list(
+    {},
+    { revalidateOnFocus: false },
+  );
+  const pythonWorkers: PythonWorkerType[] = useMemo(
+    () => dataPythonWorkers?.python_workers || [],
+    [dataPythonWorkers],
+  );
+  const selectedPythonWorker: PythonWorkerType = useMemo(() => {
+    // The block's own choice, else the pipeline's; 'mage' is MageML's Python.
+    const choice = blockAttributes?.configuration?.python_worker;
+    const name = choice === 'mage' ? null : (choice || pipeline?.environment?.worker);
+    return name ? pythonWorkers.find(w => w.name === name) : null;
+  }, [blockAttributes?.configuration?.python_worker, pipeline, pythonWorkers]);
   const [editCustomExecutorType, setEditCustomExecutorType] = useState<boolean>(false);
   const [showNewBlockVariable, setShowNewBlockVariable] = useState<boolean>(false);
 
@@ -828,6 +844,55 @@ function BlockSettings({
             </Spacing>
           </Spacing>
         </Spacing>
+
+        {BlockLanguageEnum.PYTHON === language && [
+          BlockTypeEnum.CUSTOM,
+          BlockTypeEnum.DATA_EXPORTER,
+          BlockTypeEnum.DATA_LOADER,
+          BlockTypeEnum.TRANSFORMER,
+        ].includes(blockType) && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <Headline level={5}>Python worker</Headline>
+            <Spacing mb={1} />
+            <Select
+              label="Where this block runs"
+              monospace
+              onChange={e => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  python_worker: e.target.value || null,
+                },
+              }))}
+              primary
+              value={blockAttributes?.configuration?.python_worker || ''}
+            >
+              <option value="">
+                {pipeline?.environment?.worker
+                  ? `The pipeline's worker (${pipeline.environment.worker})`
+                  : 'The pipeline\'s (MageML\'s Python)'}
+              </option>
+              <option value="mage">MageML&apos;s Python</option>
+              {pythonWorkers.map(({ name, prepared }) => (
+                <option key={name} value={name}>
+                  {prepared ? name : `${name} (not prepared)`}
+                </option>
+              ))}
+            </Select>
+            <Spacing mb={1} />
+            <Text muted small>
+              A Python worker is a named environment in python_workers/&lt;name&gt;/, a uv
+              project with its uv.lock. Tables pass between workers as Arrow.
+            </Text>
+            {!!selectedPythonWorker && (
+              <PythonWorkerStatus
+                key={selectedPythonWorker.name}
+                onPrepared={() => reloadPythonWorkers()}
+                worker={selectedPythonWorker}
+              />
+            )}
+          </Spacing>
+        )}
 
         {showBlockRunTimeout && (
           <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
