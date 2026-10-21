@@ -48,8 +48,10 @@ def stream_service_binary(release: bool = False) -> Path:
     return STREAM_TARGET / ('release' if release else 'debug') / 'mage-service'
 
 
-# The engine with the data contract checker (polars), in its own target folder.
-CONTRACT_TARGET = SERVICE / 'target' / 'contracts'
+# The engine with the data contract checker (Polars), in its own target folder. CI builds it
+# outside the cached target: Polars' build would grow the shared Rust cache past the
+# repository's 10 GB, which evicts the others.
+CONTRACT_TARGET = Path(os.getenv('MAGE_TEST_CONTRACT_TARGET') or SERVICE / 'target' / 'contracts')
 
 
 def contract_service_binary() -> Path:

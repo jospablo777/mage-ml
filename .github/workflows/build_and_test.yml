@@ -305,6 +305,10 @@ jobs:
           workspaces: |
             rust/column_atlas -> target
             mage_ai/pipeline_services/service -> target
+      # The engine with the contract checker builds Polars, which would grow the cache past
+      # the repository's 10 GB; it builds outside the cached target.
+      - name: Keep the contract engine's build out of the cache
+        run: echo "MAGE_TEST_CONTRACT_TARGET=$RUNNER_TEMP/contract-target" >> "$GITHUB_ENV"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
