@@ -1,3 +1,4 @@
+import inspect
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -5,6 +6,23 @@ import mage_ai
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import ScheduleInterval
 from mage_ai.shared.hash import ignore_keys, merge_dict
+
+
+def _schedule_settings(dag_class, dag_settings: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The DAG's schedule under the name its Airflow takes: `schedule` (Airflow 2.4 and later,
+    the only one in Airflow 3) or `schedule_interval` (older), whichever the settings use.
+    """
+    try:
+        parameters = inspect.signature(dag_class).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    name = 'schedule' if 'schedule' in parameters or 'schedule_interval' not in parameters \
+        else 'schedule_interval'
+    settings = dict(dag_settings)
+    value = settings.pop('schedule', settings.pop('schedule_interval', ScheduleInterval.ONCE))
+    settings[name] = value
+    return settings
 
 
 def create_dag(
@@ -65,15 +83,14 @@ def create_dag(
         dag_id = f'mage_pipeline_{pipeline_uuid}'
         dag = dag_class(
             f'mage_pipeline_{pipeline_uuid}',
-            **merge_dict(
+            **_schedule_settings(dag_class, merge_dict(
                 dict(
                     start_date=datetime(2022, 7, 14),
                     description=f'Mage pipeline: {pipeline_uuid}.',
-                    schedule_interval=ScheduleInterval.ONCE,
                     catchup=False,
                 ),
                 dag_settings,
-            )
+            )),
         )
         globals_dict[dag_id] = dag
 

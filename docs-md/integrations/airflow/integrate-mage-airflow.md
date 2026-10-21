@@ -83,11 +83,12 @@ In the `dags/` folder, create a new file named `create_mage_pipelines.py`.
 Then, add the following code:
 
 ```python
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime
-from mage_ai.orchestration.airflow import create_dags
 import os
+from datetime import datetime
+
+from airflow.providers.standard.operators.python import PythonOperator  # Airflow 3
+from airflow.sdk import DAG  # Airflow 3
+from mage_ai.orchestration.airflow import create_dags
 
 ABSOLUTE_PATH = os.path.abspath(os.path.dirname(__file__))
 project_path = os.path.join(ABSOLUTE_PATH, 'demo_project')
@@ -102,6 +103,10 @@ create_dags(
     globals_dict=globals(),
 )
 ```
+
+On Airflow 2, import `DAG` from `airflow` and `PythonOperator` from
+`airflow.operators.python`. `create_dags` passes the schedule (`@once` unless
+`dag_settings` sets `schedule`) under the name the installed Airflow takes.
 
 **5. Create pipeline**
 
