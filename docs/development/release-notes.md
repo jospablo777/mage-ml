@@ -4,6 +4,10 @@
 
 ### Behavior changes to check before upgrading
 
+- With `MAGE_RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE`, streaming runs restart
+  after MageML installs `requirements.txt` (a git pull or reset that installs
+  requirements), not when the file changes: an edit that was not installed restarted runs
+  onto the old packages.
 - The container starts when the project's `requirements.txt` fails to install, with a
   warning in its log (as Mage 0.9.80 does): stopping left a restart loop, and the file is
   fixed in the editor. `MAGE_STRICT_REQUIREMENTS=1` keeps stopping.

@@ -25,6 +25,7 @@ from mage_ai.data_preparation.git.utils import (
     validate_authentication_for_remote_url,
 )
 from mage_ai.data_preparation.preferences import get_preferences
+from mage_ai.data_preparation.requirements_installs import record_install
 from mage_ai.data_preparation.sync import AuthType, GitConfig
 from mage_ai.orchestration.db.models.oauth import User
 from mage_ai.server.logger import Logger
@@ -799,6 +800,13 @@ class Git:
                 logger.info(f'Installing {requirements_file} completed successfully.')
             except (OSError, subprocess.CalledProcessError) as err:
                 logger.warning(f'Skip installing {requirements_file} due to error: {err}')
+                return
+        # Streaming runs restart onto the new packages (with
+        # MAGE_RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE).
+        try:
+            record_install(self.project_repo_path, requirements_file)
+        except OSError as err:
+            logger.warning(f'Could not record the install of {requirements_file}: {err}')
 
     def __create_ssh_keys(self, overwrite: bool = False) -> str:
         return create_ssh_keys(self.git_config, self.project_repo_path, overwrite=overwrite)

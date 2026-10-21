@@ -71,7 +71,6 @@ from mage_ai.shared.hash import index_by, merge_dict
 from mage_ai.shared.retry import retry
 
 MEMORY_USAGE_MAXIMUM = 0.95
-REQUIREMENTS_FILE = 'requirements.txt'
 
 lock = DistributedLock()
 logger = Logger().new_server_logger(__name__)
@@ -2035,13 +2034,20 @@ def kill_cancelled_runs(pipeline_run_id: int, cancelled_block_run_ids: List):
                 job_manager.kill_block_run_job(block_run_id)
 
 
-def requirements_file_changed_after_pipeline_run_started(
+def requirements_installed_after_pipeline_run_started(
     pipeline_run: PipelineRun,
     pipeline: Pipeline,
 ) -> bool:
+    """
+    Whether MageML installed the project's requirements after the run started. An edit of
+    requirements.txt that was not installed, or whose install failed, restarts nothing: the
+    run would start again on the old packages.
+    """
+    from mage_ai.data_preparation.requirements_installs import installed_at
+
     repo_path = pipeline.repo_path or get_repo_path()
-    requirements_path = os.path.join(repo_path, REQUIREMENTS_FILE)
-    if not os.path.exists(requirements_path):
+    requirements_installed_at = installed_at(repo_path)
+    if requirements_installed_at is None:
         return False
 
     run_started_at = pipeline_run.started_at or pipeline_run.created_at
@@ -2052,11 +2058,7 @@ def requirements_file_changed_after_pipeline_run_started(
     else:
         run_started_at = run_started_at.astimezone(pytz.UTC)
 
-    requirements_modified_at = datetime.fromtimestamp(
-        os.path.getmtime(requirements_path),
-        tz=pytz.UTC,
-    )
-    return compare(run_started_at, requirements_modified_at) == -1
+    return compare(run_started_at, requirements_installed_at.astimezone(pytz.UTC)) == -1
 
 
 def restart_running_streaming_pipeline_runs_if_requirements_changed(
@@ -2076,9 +2078,9 @@ def restart_running_streaming_pipeline_runs_if_requirements_changed(
 
     restarted_pipeline_runs = []
     for pipeline_run in running_pipeline_runs:
-        if requirements_file_changed_after_pipeline_run_started(pipeline_run, pipeline):
+        if requirements_installed_after_pipeline_run_started(pipeline_run, pipeline):
             logger.info(
-                'Restarting streaming pipeline run because requirements.txt changed. '
+                'Restarting streaming pipeline run because requirements.txt was installed. '
                 f'pipeline_run_id={pipeline_run.id}, '
                 f'pipeline_schedule_id={pipeline_schedule.id}, '
                 f'pipeline_uuid={pipeline.uuid}',
