@@ -3758,16 +3758,25 @@ R_PREPARE = (
 
 
 def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
-    """Whether the project's rust/Cargo.toml turns on a feature of MageML's crate."""
+    """
+    Whether the project's rust/Cargo.toml, or the crate of a Rust block whose code uses
+    the feature's module, turns on a feature of MageML's crate.
+    """
     import tomllib
 
-    path = capture_.project / 'rust' / 'Cargo.toml'
-    try:
-        manifest = tomllib.loads(path.read_text(encoding='utf-8'))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    block = ((manifest.get('workspace') or {}).get('dependencies') or {}).get('mage-block')
-    return isinstance(block, dict) and feature in (block.get('features') or [])
+    rust = capture_.project / 'rust'
+    manifests = [rust / 'Cargo.toml', *sorted((rust / '.mage' / 'blocks').glob('*/Cargo.toml'))]
+    for path in manifests:
+        try:
+            manifest = tomllib.loads(path.read_text(encoding='utf-8'))
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        dependencies = (manifest.get('workspace') or {}).get('dependencies') or \
+            manifest.get('dependencies') or {}
+        block = dependencies.get('mage-block')
+        if isinstance(block, dict) and feature in (block.get('features') or []):
+            return True
+    return False
 
 
 def _dockerfile(capture_: Capture) -> str:

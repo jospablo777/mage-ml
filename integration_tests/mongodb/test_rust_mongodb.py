@@ -5,6 +5,7 @@ loader reads them back into a Python block with their types.
 """
 import datetime as dt
 import decimal
+import uuid
 
 import pytest
 
@@ -108,3 +109,29 @@ def test_exact_decimals_read_from_documents(mage_project, mongodb_workspace, mon
     assert run.status.value == 'completed', error_of(run)
     value = output(reader, run, 'keep').to_dicts()[0]['balance']
     assert value == decimal.Decimal('12345678901234567890.0123')
+
+
+@pytest.mark.timeout(1800)
+def test_the_mongodb_templates_write_and_read_back_a_table(mage_project, mongodb_workspace):
+    """The loader and exporter templates of the block menus, against MongoDB."""
+    from integration_tests.rust_templates import template
+
+    table = f'from_template_{uuid.uuid4().hex[:8]}'
+    writer = build(mage_project, [
+        dict(uuid='frame', type='data_loader', code=FRAME),
+        dict(uuid='write', type='data_exporter', language='rust',
+             code=template('data_exporters/rust/mongodb.rs'), upstream=['frame'],
+             config=PROFILE),
+    ])
+    run = execute_pipeline(writer, collection=table)
+    assert run.status.value == 'completed', error_of(run)
+    reader = build(mage_project, [
+        dict(uuid='read', type='data_loader', language='rust',
+             code=template('data_loaders/rust/mongodb.rs'), config=PROFILE),
+        dict(uuid='keep', type='transformer', code=PASS_ON, upstream=['read']),
+    ])
+    run = execute_pipeline(reader, collection=table)
+    assert run.status.value == 'completed', error_of(run)
+    rows = sorted(output(reader, run, 'keep').to_dicts(), key=lambda r: r['id'])
+    assert [r['id'] for r in rows] == [1, 2, 3]
+    assert [r['name'] for r in rows] == ['a', None, 'é']

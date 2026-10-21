@@ -6,6 +6,7 @@ in Arrow read exactly.
 """
 import datetime as dt
 import decimal
+import uuid
 
 import pytest
 
@@ -150,3 +151,31 @@ def test_a_failing_query_says_why(mage_project, clickhouse_workspace, ch):
     run = execute_pipeline(reader, query='SELECT * FROM no_such_table')
     assert run.status.value == 'failed'
     assert 'no_such_table' in error_of(run, 'read')
+
+
+@pytest.mark.timeout(1800)
+def test_the_clickhouse_templates_write_and_read_back_a_table(
+    mage_project, clickhouse_workspace, ch,
+):
+    """The loader and exporter templates of the block menus, against ClickHouse."""
+    from integration_tests.rust_templates import template
+
+    table = f'from_template_{uuid.uuid4().hex[:8]}'
+    writer = build(mage_project, [
+        dict(uuid='frame', type='data_loader', code=FRAME),
+        dict(uuid='write', type='data_exporter', language='rust',
+             code=template('data_exporters/rust/clickhouse.rs'), upstream=['frame'],
+             config=PROFILE),
+    ])
+    run = execute_pipeline(writer, table=table)
+    assert run.status.value == 'completed', error_of(run)
+    reader = build(mage_project, [
+        dict(uuid='read', type='data_loader', language='rust',
+             code=template('data_loaders/rust/clickhouse.rs'), config=PROFILE),
+        dict(uuid='keep', type='transformer', code=PASS_ON, upstream=['read']),
+    ])
+    run = execute_pipeline(reader, query=f'SELECT * FROM {table}')
+    assert run.status.value == 'completed', error_of(run)
+    rows = sorted(output(reader, run, 'keep').to_dicts(), key=lambda r: r['id'])
+    assert [r['id'] for r in rows] == [1, 2, 3]
+    assert [r['label'] for r in rows] == ['a', None, 'é']

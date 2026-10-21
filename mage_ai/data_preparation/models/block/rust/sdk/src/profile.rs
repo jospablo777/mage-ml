@@ -15,6 +15,15 @@ pub fn settings() -> Result<HashMap<String, String>> {
     parse(&text)
 }
 
+/// The profile's settings, or none when the block has no profile: for clients whose
+/// credentials can come from the environment, such as object storage.
+pub fn settings_or_empty() -> Result<HashMap<String, String>> {
+    match std::env::var("MAGE_IO_CONFIG") {
+        Ok(text) => parse(&text),
+        Err(_) => Ok(HashMap::new()),
+    }
+}
+
 pub(crate) fn parse(text: &str) -> Result<HashMap<String, String>> {
     let value: serde_json::Value = serde_json::from_str(text).context("MAGE_IO_CONFIG")?;
     let object = value

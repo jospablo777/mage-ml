@@ -23,10 +23,10 @@ there.
 | Family | Python | R | Rust |
 | --- | --- | --- | --- |
 | APIs | Airtable, Amplitude, API | API | API |
-| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | none yet |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
-| Databases | Druid, DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, Pinot, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | PostgreSQL |
-| Databases (NoSQL) | MongoDB | none yet | none yet |
+| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse |
+| Databases | Druid, DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, Pinot, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL |
+| Databases (NoSQL) | MongoDB | none yet | MongoDB |
 | Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet |
 | Files | Local file | Local file | Local file |
 | Orchestration | Trigger pipeline | none yet | none yet |
@@ -42,12 +42,13 @@ there.
 | Aggregate | none yet | Aggregate | Aggregate |
 | Combine | none yet | Join | Join |
 | Compute | none yet | none yet | Parallel computation |
-| Data cleaning | none yet | Clean data | Clean data |
+| Data cleaning | none yet | Clean data | Clean data, Data quality checks, Deduplicate |
 | Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
 | Databases | PostgreSQL | none yet | none yet |
 | Feature extraction | none yet | none yet | Model features |
+| Formatting | none yet | none yet | Cast types |
 | Machine learning | none yet | Model inference | ONNX model inference |
-| Reshape | none yet | Reshape | none yet |
+| Reshape | none yet | Reshape | Unpivot |
 | Other | Base template (generic) | none yet | none yet |
 
 ### Data exporters
@@ -55,10 +56,10 @@ there.
 | Family | Python | R | Rust |
 | --- | --- | --- | --- |
 | APIs | Amplitude | API | API |
-| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | none yet |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
-| Databases | DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | PostgreSQL |
-| Databases (NoSQL) | MongoDB | none yet | none yet |
+| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse |
+| Databases | DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL |
+| Databases (NoSQL) | MongoDB | none yet | MongoDB |
 | Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet |
 | Files | Local file | Local file | Local file |
 | Orchestration | Trigger pipeline | none yet | none yet |

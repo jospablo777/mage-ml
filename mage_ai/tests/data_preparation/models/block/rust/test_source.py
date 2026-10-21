@@ -162,6 +162,21 @@ class WorkspaceTest(TestCase):
         self.assertIn('regex = { workspace = true }', manifest)
         self.assertIn('dead_code = "allow"', manifest)
 
+    def test_a_block_crate_turns_on_the_sdk_features_its_code_uses(self):
+        code = (
+            'use mage::prelude::*;\nuse mage::storage::Storage;\n'
+            'use mage::{duckdb::DuckDb, feast};\n// mage::nothing is not a feature\n'
+        )
+        self.assertEqual(ws.sdk_features([code]), ['duckdb', 'feast', 'storage'])
+        self.assertEqual(ws.sdk_features(['use mage::prelude::*;']), [])
+        workspace = ws.init(tempfile.mkdtemp())
+        directory = ws.write_block_crate(workspace, 'block_s3', {'main.rs': code})
+        manifest = (directory / 'Cargo.toml').read_text()
+        self.assertIn(
+            'mage-block = { workspace = true, features = ["duckdb", "feast", "storage"] }',
+            manifest,
+        )
+
     def test_files_are_rewritten_only_when_they_change(self):
         workspace = ws.init(tempfile.mkdtemp())
         directory = ws.write_block_crate(workspace, 'block_x', {'main.rs': 'fn x() {}\n'})

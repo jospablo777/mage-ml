@@ -77,6 +77,21 @@ class RustBlockTest(DBTestCase):
             repo_path=self.rust_repo,
         )
 
+    def test_a_block_builds_with_the_sdk_feature_its_code_uses(self):
+        """mage::feast needs the feast feature, which the project's Cargo.toml does not
+        turn on: the block's crate turns it on."""
+        code = '''use mage::prelude::*;
+use mage::feast::FeastClient;
+
+fn transform(rows: DataFrame) -> Result<DataFrame> {
+    // Nothing answers on this port: the client says so without failing the block.
+    let up = FeastClient::new("http://127.0.0.1:9").health();
+    Ok(df!("rows" => [rows.height() as u32], "feast_up" => [up])?)
+}
+'''
+        run = self.run_code(code, inputs=[pl.DataFrame({'x': [1, 2]})], uuid='feast_probe')
+        self.assertEqual(run.outputs[0].to_dicts(), [{'rows': 2, 'feast_up': False}])
+
     def test_every_template_compiles_and_runs(self):
         frame = pl.DataFrame({
             'amount': [3.0, 4.0, 4.0, 1.0],
@@ -134,6 +149,21 @@ class RustBlockTest(DBTestCase):
                     )
                     rust_build.build(prepared)
                     continue
+                if name in ('clickhouse.rs', 'duckdb.rs', 'mongodb.rs', 'mysql.rs'):
+                    # Built and run against their databases by
+                    # integration_tests/<database>/test_rust_<database>.py: their clients
+                    # take minutes to compile the first time.
+                    continue
+                if name == 'quality.rs':
+                    # It fails by design on these rows: a missing id and repeated ids.
+                    with self.assertRaisesRegex(Exception, 'id is missing in 1 rows; id '
+                                                           'repeats in 1 rows'):
+                        self.run_code(code, inputs=[frame], uuid='template_quality')
+                    run = self.run_code(code, inputs=[customers], uuid='template_quality',
+                                        variables=dict(required=['customer_id'],
+                                                       unique='customer_id'))
+                    self.assertEqual(run.outputs[0].height, 2)
+                    continue
                 if block_type in (BlockType.DATA_LOADER, BlockType.CUSTOM, BlockType.CONDITIONAL):
                     inputs = []
                 elif name == 'join.rs':
@@ -150,6 +180,8 @@ class RustBlockTest(DBTestCase):
                         path=data_file,
                         url=url,
                         batch_size=3,
+                        order_by='amount',
+                        types={'amount': 'float32', 'customer_id': 'int32'},
                     ),
                 )
                 self.assertTrue(all(test['passed'] for test in run.tests), run.tests)
@@ -275,7 +307,8 @@ class RustBlockTest(DBTestCase):
         self.assertIn('Add regex there', message)
         self.assertIn('regex = "<version>"', message)
 
-    def test_a_gated_sdk_module_says_which_feature_to_turn_on(self):
+    def test_a_block_that_uses_a_gated_module_turns_its_feature_on(self):
+        """It used to fail to compile until rust/Cargo.toml listed the onnx feature."""
         code = (
             'use mage::prelude::*;\n'
             '\n'
@@ -285,17 +318,12 @@ class RustBlockTest(DBTestCase):
             '}\n'
         )
         with self.assertRaises(RustBlockError) as context:
-            self.run_code(code, uuid='gated_feature')
-        message = plain(str(context.exception))
-        self.assertIn('mage::onnx needs the onnx feature', message)
-        self.assertIn('features = ["postgres", "onnx"]', message)
+            self.run_code(code, inputs=[pl.DataFrame({'x': [1]})], uuid='gated_feature')
+        # It compiled and ran: the model file is what is missing.
+        self.assertIn('No ONNX model at models/m.onnx', plain(str(context.exception)))
 
-    def test_a_chain_of_rust_blocks_says_which_feature_to_turn_on(self):
-        """
-        The hint named the line to add only when one block compiled alone. Consecutive
-        Rust blocks compile as one chain, and the chain's error had no hint: the inference
-        tutorial's scoring pipeline showed only that mage::onnx is gated.
-        """
+    def test_a_chain_of_rust_blocks_turns_on_the_features_its_blocks_use(self):
+        """Consecutive Rust blocks compile as one chain, with each block's features."""
         from mage_ai.data_preparation.models.block.rust import execute_rust_chain
 
         load = (
@@ -321,9 +349,7 @@ class RustBlockTest(DBTestCase):
         ]
         with self.assertRaises(RustBlockError) as context:
             execute_rust_chain(members, repo_path=self.rust_repo)
-        message = plain(str(context.exception))
-        self.assertIn('mage::onnx needs the onnx feature', message)
-        self.assertIn('features = ["postgres", "onnx"]', message)
+        self.assertIn('No ONNX model at models/m.onnx', plain(str(context.exception)))
 
     def test_a_wrong_signature_is_explained(self):
         code = (

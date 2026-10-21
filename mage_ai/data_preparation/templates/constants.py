@@ -934,6 +934,67 @@ RUST_TEMPLATES = [
         'Compute a value per row on every core with Rayon.', [GROUP_COMPUTE],
     ),
     _rust_template(
+        BlockType.DATA_LOADER, 'Cloud storage', 'cloud_storage.rs',
+        'Read Parquet or CSV files lazily from S3, Google Cloud Storage or Azure.',
+        [GROUP_CLOUD_STORAGE],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'Cloud storage', 'cloud_storage.rs',
+        'Write a Parquet or CSV file to S3, Google Cloud Storage or Azure.',
+        [GROUP_CLOUD_STORAGE],
+    ),
+    _rust_template(
+        BlockType.DATA_LOADER, 'DuckDB', 'duckdb.rs',
+        'Query DuckDB, built into the block, with the result\'s types.', [GROUP_DATABASES],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'DuckDB', 'duckdb.rs',
+        'Write a table to DuckDB: replace, append or fail.', [GROUP_DATABASES],
+    ),
+    _rust_template(
+        BlockType.DATA_LOADER, 'MySQL', 'mysql.rs',
+        'Query MySQL or MariaDB into typed columns, exact decimals.', [GROUP_DATABASES],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'MySQL', 'mysql.rs',
+        'Write a table to MySQL or MariaDB in batched prepared inserts.', [GROUP_DATABASES],
+    ),
+    _rust_template(
+        BlockType.DATA_LOADER, 'ClickHouse', 'clickhouse.rs',
+        'Query ClickHouse, rows arriving as Arrow.', [GROUP_DATA_WAREHOUSES],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'ClickHouse', 'clickhouse.rs',
+        'Insert a table into ClickHouse as one Arrow insert.', [GROUP_DATA_WAREHOUSES],
+    ),
+    _rust_template(
+        BlockType.DATA_LOADER, 'MongoDB', 'mongodb.rs',
+        'Read a collection\'s documents, one column per field.', [GROUP_DATABASES_NO_SQL],
+    ),
+    _rust_template(
+        BlockType.DATA_EXPORTER, 'MongoDB', 'mongodb.rs',
+        'Write rows as documents to a collection: replace or append.',
+        [GROUP_DATABASES_NO_SQL],
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Deduplicate', 'deduplicate.rs',
+        'Keep the latest row of each key.', [GROUP_DATA_CLEANING],
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Data quality checks', 'quality.rs',
+        'Fail with every problem found: missing values, repeated keys, negative amounts.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Unpivot', 'reshape.rs',
+        'Turn columns into rows: a variable and value pair per column.', [GROUP_RESHAPE],
+    ),
+    _rust_template(
+        BlockType.TRANSFORMER, 'Cast types', 'cast.rs',
+        'Cast columns to the types a variable names; a value that does not convert fails.',
+        [GROUP_FORMATTING],
+    ),
+    _rust_template(
         BlockType.TRANSFORMER, 'ONNX model inference', 'onnx.rs',
         'Score rows with an ONNX model (needs the onnx feature in rust/Cargo.toml).',
         [GROUP_MACHINE_LEARNING],

@@ -34,6 +34,13 @@
 
 ### Block templates
 
+- Rust templates for cloud storage (S3, Google Cloud Storage, Azure: lazy Parquet or CSV
+  scans), DuckDB, MySQL, ClickHouse and MongoDB loaders and exporters, and deduplicate,
+  data quality checks, unpivot and cast types transformers. A Rust block that uses
+  `mage::storage`, `mage::duckdb` or another module that needs a feature of the `mage`
+  crate turns the feature on itself: blocks made from these templates build as they are,
+  with no edit to `rust/Cargo.toml`. `Storage::connect()` without an io_config profile uses
+  the environment's credentials.
 - The block menus come from one list of template records: every Python source template
   file has a menu item, by family (APIs, cloud storage, databases, data warehouses,
   vector databases and others), in both block menus. DuckDB, IBM Db2, IBM Cloud Object

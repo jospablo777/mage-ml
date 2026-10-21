@@ -78,9 +78,10 @@ fn provider(path: &str) -> Result<Provider> {
 }
 
 impl Storage {
-    /// The client of the block's io_config profile.
+    /// The client of the block's io_config profile; without one, the environment's
+    /// credentials and the provider's own files, as for a local path.
     pub fn connect() -> Result<Self> {
-        Ok(Self::with_settings(crate::profile::settings()?))
+        Ok(Self::with_settings(crate::profile::settings_or_empty()?))
     }
 
     /// A client with these settings (the io_config keys above); empty settings use the

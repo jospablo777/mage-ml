@@ -6,6 +6,7 @@ to Rust as exact text.
 """
 import datetime as dt
 import decimal
+import uuid
 
 import duckdb
 import pytest
@@ -113,3 +114,29 @@ def test_a_frame_round_trips_through_rust_blocks(mage_project, duckdb_workspace,
     assert exotic['huge'] == '170141183460469231731687303715884105727'
     assert exotic['uid'] == 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
     assert exotic['amount'] == decimal.Decimal('123456789012345678.1234')
+
+
+@pytest.mark.timeout(1800)
+def test_the_duckdb_templates_write_and_read_back_a_table(mage_project, duckdb_workspace):
+    """The loader and exporter templates of the block menus, against DuckDB."""
+    from integration_tests.rust_templates import template
+
+    table = f'from_template_{uuid.uuid4().hex[:8]}'
+    writer = build(mage_project, [
+        dict(uuid='frame', type='data_loader', code=FRAME),
+        dict(uuid='write', type='data_exporter', language='rust',
+             code=template('data_exporters/rust/duckdb.rs'), upstream=['frame'],
+             config=PROFILE),
+    ])
+    run = execute_pipeline(writer, table=table)
+    assert run.status.value == 'completed', error_of(run)
+    reader = build(mage_project, [
+        dict(uuid='read', type='data_loader', language='rust',
+             code=template('data_loaders/rust/duckdb.rs'), config=PROFILE),
+        dict(uuid='keep', type='transformer', code=PASS_ON, upstream=['read']),
+    ])
+    run = execute_pipeline(reader, query=f'SELECT * FROM {table}')
+    assert run.status.value == 'completed', error_of(run)
+    rows = sorted(output(reader, run, 'keep').to_dicts(), key=lambda r: r['id'])
+    assert [r['id'] for r in rows] == [1, 2, 3]
+    assert [r['label'] for r in rows] == ['a', None, 'é']

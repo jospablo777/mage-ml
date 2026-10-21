@@ -206,6 +206,11 @@ New projects come with `anyhow`, `serde`, `serde_json`, `rayon` and `ureq` (HTTP
 rustls). Polars comes with the `mage` crate; to enable more Polars features, add `polars`
 with the same version and the features you need.
 
+A block that uses a module of the `mage` crate that needs a feature (`mage::mysql`,
+`mage::storage`, `mage::duckdb` and the others below) turns that feature on itself, so a
+block made from a template builds as it is. The first build of a block with a new
+feature compiles its client, which takes a few minutes for DuckDB.
+
 ## PostgreSQL
 
 The `mage::postgres` module reads and writes PostgreSQL with binary `COPY`, so a pipeline
@@ -255,8 +260,8 @@ The PostgreSQL loader and exporter templates start from these.
 
 ## MySQL
 
-The `mage::mysql` module reads and writes MySQL and MariaDB. Turn on the `mysql` feature of
-the `mage` crate in `rust/Cargo.toml`:
+The `mage::mysql` module reads and writes MySQL and MariaDB. It needs the `mysql` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "mysql"] }
@@ -297,8 +302,8 @@ fn export_data(totals: DataFrame) -> Result<()> {
 ## MongoDB
 
 The `mage::mongodb` module reads collections into frames and writes frames as documents,
-with the rules of the Python client. Turn on the `mongodb` feature of the `mage` crate in
-`rust/Cargo.toml`:
+with the rules of the Python client. It needs the `mongodb` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "mongodb"] }
@@ -335,8 +340,8 @@ fn export_data(scores: DataFrame) -> Result<()> {
 
 The `mage::clickhouse` module reads and writes ClickHouse over its HTTP interface, with
 rows in Arrow: results arrive as an Arrow stream that Polars reads into columns, and
-frames are inserted as one. Turn on the `clickhouse` feature of the `mage` crate in
-`rust/Cargo.toml`:
+frames are inserted as one. It needs the `clickhouse` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "clickhouse"] }
@@ -416,8 +421,8 @@ fn export_data(totals: DataFrame) -> Result<()> {
 ## Redis
 
 The `mage::redis` module writes frames to Redis as hashes, one per row, and reads them back
-by key: features a service reads in a millisecond. Turn on the `redis` feature of the
-`mage` crate in `rust/Cargo.toml`:
+by key: features a service reads in a millisecond. It needs the `redis` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "redis"] }
@@ -460,8 +465,8 @@ fn load_data(customers: DataFrame) -> Result<DataFrame> {
 
 The `mage::storage` module reads and writes Parquet and CSV files on Amazon S3 and
 S3-compatible stores (MinIO, IBM Cloud Object Storage, Cloudflare R2), Google Cloud
-Storage and Azure Blob Storage, with Polars' own cloud readers. Turn on the `storage`
-feature of the `mage` crate in `rust/Cargo.toml`:
+Storage and Azure Blob Storage, with Polars' own cloud readers. It needs the `storage` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "storage"] }
@@ -504,8 +509,8 @@ The first build with the feature compiles the cloud clients, about two minutes.
 ## ONNX models
 
 The `mage::onnx` module runs ONNX models with ONNX Runtime, linked into the block's
-program: scikit-learn, XGBoost, LightGBM, CatBoost and PyTorch models export to ONNX. Turn
-on the `onnx` feature of the `mage` crate in `rust/Cargo.toml`:
+program: scikit-learn, XGBoost, LightGBM, CatBoost and PyTorch models export to ONNX. It needs the `onnx` feature of the `mage` crate, which a block that uses
+the module turns on itself; to turn it on for every block, list it in `rust/Cargo.toml`:
 
 ```toml
 mage-block = { path = ".mage/sdk", features = ["postgres", "onnx"] }
@@ -524,14 +529,17 @@ session already loaded. See [Model inference](../pipelines/model-inference.md).
 
 | Block type | Templates |
 | --- | --- |
-| Data loader | Generic, local file, HTTP API (paginated JSON into a table), PostgreSQL |
-| Transformer | Generic, clean, aggregate, join, window features, parallel (Rayon), ONNX model inference |
-| Data exporter | Generic, local file, HTTP API (batched JSON), PostgreSQL |
+| Data loader | Generic, local file, HTTP API (paginated JSON into a table), cloud storage (S3, GCS, Azure; lazy Parquet or CSV scans), PostgreSQL, MySQL, DuckDB, ClickHouse, MongoDB |
+| Transformer | Generic, clean, deduplicate (latest row per key), data quality checks, cast types, unpivot, aggregate, join, window features, parallel (Rayon), ONNX model inference |
+| Data exporter | Generic, local file, HTTP API (batched JSON), cloud storage (Parquet or CSV), PostgreSQL, MySQL, DuckDB, ClickHouse, MongoDB |
 | Custom | Generic |
 | Conditional | Generic |
 
 The parallel template computes a value per row on every core with Rayon, for logic Polars
-expressions cannot express.
+expressions cannot express. The database templates read their query, table or collection
+from pipeline variables (`query`, `table`, `collection`, `write_policy`); each is tested
+against its database. [Block templates](block-templates.md) lists every
+language's templates by family.
 
 ## Logs and errors
 
