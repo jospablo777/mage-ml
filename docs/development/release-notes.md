@@ -42,6 +42,9 @@
 - R blocks in exported services run in an R session each Python worker keeps: a one-row R
   block over HTTP went from 627 ms to 8 ms p50. `MAGE_SERVICE_R_RESIDENT=off` starts Rscript
   for each run.
+- Keyed state in Python stream blocks: with `state_key` in a block's configuration, the
+  block gets `state`, a value per key of the batch's messages, saved with the positions it
+  reflects and restored after a restart; a message that fails on its own changes nothing.
 - Window blocks: a YAML transformer with `window:` aggregates a stream over tumbling,
   hopping or session windows of event time, per key (count, sum, min, max, average,
   distinct count), computed in Rust. Windows are saved with the positions they hold before

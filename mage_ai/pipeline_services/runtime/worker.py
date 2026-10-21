@@ -19,6 +19,7 @@ This module imports only the standard library at start; pandas, Polars, pyarrow 
 load when a block's values need them.
 """
 import asyncio
+import copy
 import io
 import json
 import logging
@@ -880,25 +881,52 @@ def _stream_batch(request: Dict) -> Dict:
         import base64
 
         request = dict(request, messages=[base64.b64decode(m) for m in request['messages']])
-    if not request.get('isolate'):
-        return _run_stream_chain(request, request['messages'])
+    # Keyed state, per block: the values of the batch's keys, which the blocks change in
+    # place. Only what changed goes back. A message that fails leaves the state as it was.
+    original = request.get('state') or {}
+    state = copy.deepcopy(original)
     messages = request['messages']
+    if not request.get('isolate'):
+        result = _run_stream_chain(request, messages, state)
+        return _with_state_updates(result, original, state)
     try:
-        return _run_stream_chain(request, messages)
+        result = _run_stream_chain(request, messages, state)
+        return _with_state_updates(result, original, state)
     except BlockError as error:
         if error.phase != 'run' or len(messages) <= 1:
             raise
-        outputs, failures = _isolate(request, messages, 0)
+        state = copy.deepcopy(original)
+        outputs, failures = _isolate(request, messages, 0, state)
         if len(failures) == len(messages):
             raise
         last = request['chain'][-1]['uuid'] if request['chain'] else None
-        return dict(
+        return _with_state_updates(dict(
             outputs=outputs,
             messages=outputs.get(last, []) if last else messages,
             blocks=[],
             failures=failures,
             outputs_json={uuid: _messages_json(o, uuid) for uuid, o in outputs.items()},
-        )
+        ), original, state)
+
+
+def _with_state_updates(result: Dict, original: Dict, state: Dict) -> Dict:
+    """The result with each block's changed keys (a removed key as null)."""
+    if not original:
+        return result
+    updates = {}
+    for block_uuid, values in state.items():
+        before = original.get(block_uuid) or {}
+        changed = {key: value for key, value in values.items()
+                   if key not in before or before[key] != value}
+        changed.update({key: None for key in before if key not in values})
+        if changed:
+            try:
+                json.dumps(changed, allow_nan=False, default=_json_default)
+            except (TypeError, ValueError) as error:
+                raise BlockError('run', f'Block {block_uuid} kept state that is not JSON: '
+                                 f'{error}.', block_uuid=block_uuid)
+            updates[block_uuid] = changed
+    return dict(result, state_updates=updates)
 
 
 def _read_messages_file(request: Dict) -> Any:
@@ -954,10 +982,19 @@ def _rabbitmq_payload(message: Dict):
     return payload(method, properties, body)
 
 
-def _isolate(request: Dict, messages: List, offset: int) -> Tuple[Dict[str, List], List[Dict]]:
-    """The outputs of the messages that run, and the rows of those that fail on their own."""
+def _isolate(request: Dict, messages: List, offset: int,
+             state: Optional[Dict] = None) -> Tuple[Dict[str, List], List[Dict]]:
+    """
+    The outputs of the messages that run, and the rows of those that fail on their own.
+    State changes are kept for the messages that ran: each attempt works on a copy.
+    """
+    state = {} if state is None else state
+    attempt = copy.deepcopy(state)
     try:
-        return _run_stream_chain(request, messages)['outputs'], []
+        outputs = _run_stream_chain(request, messages, attempt)['outputs']
+        state.clear()
+        state.update(attempt)
+        return outputs, []
     except BlockError as error:
         if error.phase != 'run':
             raise
@@ -965,14 +1002,14 @@ def _isolate(request: Dict, messages: List, offset: int) -> Tuple[Dict[str, List
             return {}, [dict(row=offset, block_uuid=error.block_uuid,
                              message=str(error), details=error.details)]
         middle = len(messages) // 2
-        left, left_failures = _isolate(request, messages[:middle], offset)
-        right, right_failures = _isolate(request, messages[middle:], offset + middle)
+        left, left_failures = _isolate(request, messages[:middle], offset, state)
+        right, right_failures = _isolate(request, messages[middle:], offset + middle, state)
         outputs = {uuid: _as_list(left.get(uuid, [])) + _as_list(right.get(uuid, []))
                    for uuid in dict.fromkeys([*left, *right])}
         return outputs, left_failures + right_failures
 
 
-def _run_stream_chain(request: Dict, messages: List) -> Dict:
+def _run_stream_chain(request: Dict, messages: List, state: Optional[Dict] = None) -> Dict:
     """
     Runs a stream's blocks on one batch of messages, as Mage's streaming transformers do:
     each gets the list of messages of the block before it (the source's for a block without
@@ -999,6 +1036,9 @@ def _run_stream_chain(request: Dict, messages: List) -> Dict:
             continue
         function = _stream_function(block)
         kwargs = _kwargs(request, block)
+        if state is not None and block['uuid'] in state:
+            # The block's keyed state: the values of this batch's keys, to read and change.
+            kwargs['state'] = state[block['uuid']]
         print(f"{BLOCK_MARKER}{block['uuid']}", flush=True)
         started = time.monotonic()
         block_messages = _as_input(block_messages, _input_kind(function), block['uuid'])

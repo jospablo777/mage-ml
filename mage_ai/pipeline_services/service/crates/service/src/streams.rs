@@ -760,6 +760,14 @@ fn region_session(
             // Messages that fail on their own go to the dead-letter sink when there is one.
             isolate,
             shape,
+            state_dir: service
+                .data_dir
+                .join("state")
+                .join(crate::executor::sanitize(&pipeline.uuid)),
+            stable_positions: matches!(
+                pipeline.stream.as_ref().map(|s| s.source.kind),
+                Some(ConnectorKind::Kafka | ConnectorKind::Postgres)
+            ),
         },
     )))
 }

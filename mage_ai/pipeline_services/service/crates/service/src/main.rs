@@ -11,6 +11,7 @@ mod executor;
 mod gcp;
 mod ibm;
 mod jobs;
+mod keyed_state;
 mod ledger;
 mod ledger_sql;
 mod log;

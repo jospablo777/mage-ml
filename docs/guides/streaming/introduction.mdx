@@ -250,6 +250,35 @@ The files are on the instance's data volume: a partition that moves to another i
 starts its windows empty there. Windows run on the engine, in exported services and in
 the Run tab, not in MageML's own streaming.
 
+## Keyed state in Python blocks
+
+A Python stream block can keep a value per key between batches: a count per card, the last
+reading of a device, a running feature. Name the field of the source's messages that keys
+it in the block's configuration (`state_key: card` in the pipeline's `metadata.yaml`), and
+the block gets `state` in its keyword arguments:
+
+```python
+@transformer
+def velocity(messages, *args, **kwargs):
+    state = kwargs['state']
+    out = []
+    for m in messages:
+        state[m['card']] = state.get(m['card'], 0) + 1
+        out.append(dict(m, payments_today=state[m['card']]))
+    return out
+```
+
+- `state` holds the values of the keys of the batch's messages; set, change or delete them.
+  The values are JSON.
+- A message that fails on its own (and goes to the dead-letter sink) leaves the state as it
+  was.
+- The state is saved with the positions it reflects, as windows are, and comes back after
+  a restart; with Kafka or PostgreSQL changes the messages it already holds are not run
+  again.
+
+Keyed state runs on the engine (exported services and the Run tab), not in MageML's own
+streaming.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

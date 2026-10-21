@@ -40,6 +40,11 @@ pub struct PythonStreamSession {
     /// then a batch goes as a JSON lines file Polars reads in one pass.
     frames: Option<bool>,
     file: std::path::PathBuf,
+    /// Blocks with keyed state (configuration `state_key`): the uuid, the source messages'
+    /// field that keys it, and the store.
+    state: Vec<(String, String, crate::keyed_state::KeyedState)>,
+    /// Whether positions stay the same across restarts (offsets), so held ones are skipped.
+    stable: bool,
 }
 
 static FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -55,6 +60,9 @@ pub struct SessionOptions {
     /// How blocks receive messages: their values, or for a RabbitMQ source Mage's
     /// `Payload(method, properties, body)`, so its blocks run unchanged.
     pub shape: MessageShape,
+    /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
+    pub state_dir: std::path::PathBuf,
+    pub stable_positions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +91,22 @@ impl PythonStreamSession {
             cancel,
             isolate,
             shape,
+            state_dir,
+            stable_positions,
         } = options;
+        let state = order
+            .iter()
+            .filter_map(|block| {
+                let key = block.configuration.get("state_key")?.as_str()?.to_string();
+                Some((
+                    block.uuid.clone(),
+                    key,
+                    crate::keyed_state::KeyedState::new(
+                        state_dir.join(crate::executor::sanitize(&block.uuid)),
+                    ),
+                ))
+            })
+            .collect();
         let chain = order
             .iter()
             .map(|block| {
@@ -115,6 +138,8 @@ impl PythonStreamSession {
             isolate,
             shape,
             frames: None,
+            state,
+            stable: stable_positions,
             file: std::env::temp_dir().join(format!(
                 "mage-stream-{}-{}.ndjson",
                 std::process::id(),
@@ -267,6 +292,9 @@ struct StreamRequest<'a> {
     outputs: &'a [String],
     kwargs: &'a Value,
     isolate: bool,
+    /// Per block with keyed state: the values of the batch's keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<&'a Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_shape: Option<&'static str>,
 }
@@ -285,6 +313,9 @@ struct StreamReply {
     /// Each block's time and messages in and out.
     #[serde(default)]
     blocks: Vec<ReplyBlock>,
+    /// Per block: the keys whose state changed, null for a removed one.
+    #[serde(default)]
+    state_updates: BTreeMap<String, BTreeMap<String, Option<Value>>>,
 }
 
 #[derive(Deserialize)]
@@ -337,7 +368,31 @@ impl TransformSession for PythonStreamSession {
             let mut undecoded = Vec::new();
             let mut rows = Vec::with_capacity(envelopes.len());
             let mut messages = Vec::with_capacity(envelopes.len());
+            // With keyed state and offsets: messages the saved state already holds (read
+            // again after a restart) are done; they are not run again.
+            let held = match self.state.first_mut() {
+                Some((_, _, store)) if self.stable => {
+                    store.applied(partition).map_err(TransformError::Crash)?
+                }
+                _ => None,
+            };
+            let mut last = None;
+            let mut keys: Vec<std::collections::BTreeSet<String>> =
+                vec![Default::default(); self.state.len()];
             for (row, envelope) in envelopes.iter().enumerate() {
+                if let (Some(held), Some(position)) = (held, envelope.position)
+                    && position <= held
+                {
+                    continue;
+                }
+                if !self.state.is_empty() {
+                    last = envelope.position.or(last);
+                    let value: Value =
+                        serde_json::from_slice(&envelope.value).unwrap_or(Value::Null);
+                    for (index, (_, field, _)) in self.state.iter().enumerate() {
+                        keys[index].insert(mage_stream_core::window::key_of(&value, Some(field)));
+                    }
+                }
                 if let Some(reason) = decode_error(envelope) {
                     undecoded.push(mage_stream_ports::RowError { row, error: reason });
                     continue;
@@ -368,10 +423,28 @@ impl TransformSession for PythonStreamSession {
                 None
             };
             let count = messages.len();
+            if count == 0 && !self.state.is_empty() && undecoded.is_empty() {
+                // Every message was held already.
+                return Ok(TransformOutput::default());
+            }
+            let state_slices = if self.state.is_empty() {
+                None
+            } else {
+                let mut slices = serde_json::Map::new();
+                for (index, (block, _, store)) in self.state.iter_mut().enumerate() {
+                    let wanted: Vec<String> = keys[index].iter().cloned().collect();
+                    let slice = store
+                        .slice(partition, &wanted)
+                        .map_err(TransformError::Crash)?;
+                    slices.insert(block.clone(), Value::Object(slice));
+                }
+                Some(Value::Object(slices))
+            };
             let sent: &[Box<RawValue>] = if file.is_some() { &[] } else { &messages };
             let shape = self.shape;
             let (chain, outputs, kwargs, isolate) =
                 (&self.chain, &self.outputs, &self.kwargs, self.isolate);
+            let state_sent = state_slices.as_ref();
             let line = |id: &str| {
                 serde_json::to_string(&StreamRequest {
                     id,
@@ -383,6 +456,7 @@ impl TransformSession for PythonStreamSession {
                     outputs,
                     kwargs,
                     isolate,
+                    state: state_sent,
                     message_shape: match shape {
                         MessageShape::Values => None,
                         MessageShape::RabbitmqPayload => Some("rabbitmq"),
@@ -418,6 +492,16 @@ impl TransformSession for PythonStreamSession {
                 }
                 return Err(TransformError::User(format!("{block}: {message}")));
             }
+            for (block, _, store) in &mut self.state {
+                let changes = reply
+                    .state_updates
+                    .get(block.as_str())
+                    .cloned()
+                    .unwrap_or_default();
+                store
+                    .apply(partition, last, changes)
+                    .map_err(TransformError::Crash)?;
+            }
             let mut outputs = BTreeMap::new();
             for (block, messages) in &reply.outputs {
                 outputs.insert(block.clone(), to_batch(messages, partition)?);
@@ -452,6 +536,24 @@ impl TransformSession for PythonStreamSession {
                 blocks,
             })
         })
+    }
+
+    fn committed<'a>(
+        &'a mut self,
+        commits: &'a [mage_stream_ports::Commit],
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            for (_, _, store) in &mut self.state {
+                store.save(commits)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {
+        for (_, _, store) in &mut self.state {
+            store.revoked(partition.0);
+        }
     }
 
     fn close(&mut self) -> BoxFuture<'_, ()> {

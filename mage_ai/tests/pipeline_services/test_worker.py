@@ -762,3 +762,57 @@ class StreamBranchesTest(WorkerTestCase):
         join = dict(boom, upstream=['nothing', 'other'])
         with self.assertRaisesRegex(worker.BlockError, 'reads 2 blocks'):
             worker.run_stream_batch(dict(chain=[nothing, join], messages=[{}], kwargs={}))
+
+
+class StreamStateTest(WorkerTestCase):
+    """
+    Keyed state in stream blocks: the engine sends the values of the batch's keys, the block
+    changes them, and only the changes go back; a message that fails changes nothing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        worker._STREAM_FUNCTIONS.clear()
+        self.count = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                state = kwargs['state']
+                out = []
+                for m in messages:
+                    seen = state.get(m['card'], 0) + 1
+                    if m.get('fail'):
+                        raise ValueError('a bad message')
+                    state[m['card']] = seen
+                    out.append(dict(m, seen=seen))
+                if 'forget' in state:
+                    del state['forget']
+                return out
+        ''', name='count')
+
+    def stream(self, messages, state, isolate=False):
+        return worker.run_stream_batch(dict(
+            chain=[self.count], messages=messages, isolate=isolate, kwargs={},
+            state={'count': state},
+        ))
+
+    def test_a_block_reads_and_changes_its_keys_state(self):
+        result = self.stream([{'card': 'a'}, {'card': 'a'}, {'card': 'b'}],
+                             {'a': 5, 'c': 1, 'forget': 1})
+        self.assertEqual([m['seen'] for m in result['outputs']['count']], [6, 7, 1])
+        self.assertEqual(result['state_updates'], {'count': {'a': 7, 'b': 1, 'forget': None}})
+
+    def test_a_message_that_fails_on_its_own_leaves_the_state_as_it_was(self):
+        result = self.stream([{'card': 'a'}, {'card': 'b', 'fail': True}, {'card': 'a'}],
+                             {'a': 1}, isolate=True)
+        self.assertEqual([f['row'] for f in result['failures']], [1])
+        # a was counted twice, by the messages that ran; b's failed message left no trace.
+        self.assertEqual(result['state_updates'], {'count': {'a': 3}})
+
+    def test_without_state_there_are_no_state_updates(self):
+        plain = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return messages
+        ''', name='plain')
+        result = worker.run_stream_batch(dict(chain=[plain], messages=[{'n': 1}], kwargs={}))
+        self.assertNotIn('state_updates', result)
