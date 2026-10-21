@@ -195,6 +195,13 @@
   Redshift, Snowflake, Db2 or BigQuery profile) is copied into the block's database with the
   block's schema, but `{{ df_1 }}` named it with the upstream's own database and schema, so
   the query read a table that was not there, or an old one. It now names the copy.
+- SQL Server SQL blocks named their upstream tables and read their own table without a
+  schema, which SQL Server reads from the login's default schema (usually `dbo`), not from
+  `MSSQL_SCHEMA` or the block's schema, where they were written. A profile or block with
+  another schema failed. They are now named with the schema they were written to.
+- A block with its own schema named an upstream SQL table on the same database, which set
+  no schema, as if it were in the block's schema; it is in the profile's default schema,
+  and is now named there.
 
 ### Command line runs
 

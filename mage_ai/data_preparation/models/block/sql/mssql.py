@@ -1,3 +1,9 @@
+"""
+SQL blocks on SQL Server. A name without a schema is the login's default schema (usually
+dbo), not MSSQL_SCHEMA: upstream tables are named with the schema they were written to,
+and the block's table is read back from its schema. Named alone, they were read from the
+default schema, so a profile or block with another schema failed (I-271).
+"""
 from typing import Any, Dict, List
 
 from mage_ai.data_preparation.models.block import Block
@@ -7,10 +13,18 @@ from mage_ai.data_preparation.models.block.sql.utils.shared import (
 from mage_ai.data_preparation.models.block.sql.utils.shared import (
     has_create_or_insert_statement,
     interpolate_input,
+    should_cache_data_from_upstream,
     split_query_string,
 )
 from mage_ai.io.config import ConfigKey
 
+# The profile settings that make two SQL Server SQL blocks use the same database.
+CACHE_KEYS = [
+    ConfigKey.MSSQL_DATABASE,
+    ConfigKey.MSSQL_SCHEMA,
+    ConfigKey.MSSQL_HOST,
+    ConfigKey.MSSQL_PORT,
+]
 
 def create_upstream_block_tables(
     loader,
@@ -31,12 +45,7 @@ def create_upstream_block_tables(
         configuration,
         execution_partition,
         cache_upstream_dbt_models,
-        cache_keys=[
-            ConfigKey.MSSQL_DATABASE,
-            ConfigKey.MSSQL_SCHEMA,
-            ConfigKey.MSSQL_HOST,
-            ConfigKey.MSSQL_PORT,
-        ],
+        cache_keys=CACHE_KEYS,
         no_schema=False,
         query=query,
         schema_name=loader.default_schema(),
@@ -49,13 +58,18 @@ def create_upstream_block_tables(
 def interpolate_input_data(
     block,
     query: str,
+    loader,
     dynamic_block_index: int = None,
     dynamic_upstream_block_uuids: List[str] = None,
 ):
     return interpolate_input(
         block,
         query,
-        lambda db, schema, tn: tn,
+        lambda db, schema, tn: f'{schema}.{tn}' if schema else tn,
+        get_schema=lambda opts: loader.default_schema(),
+        copied=lambda upstream: should_cache_data_from_upstream(
+            block, upstream, ['data_provider'], CACHE_KEYS,
+        ),
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

@@ -87,3 +87,22 @@ class UpstreamTablesTest(unittest.TestCase):
         # Copied into shop with the block's names; read as it is on its own database.
         self.assertEqual(named('shop'), 'SELECT * FROM "shop".public.ledger_v1')
         self.assertEqual(named('finance'), 'SELECT * FROM "shop".raw.ledger_v1')
+
+    def test_a_block_with_its_own_schema_names_an_upstream_table_in_its_schema(self):
+        from unittest.mock import MagicMock
+
+        loader = MagicMock()
+        loader.default_database.return_value = 'shop'
+        loader.default_schema.return_value = 'public'
+        upstream = dict(uuid='orders', language='sql', table_name='orders_v1', configuration=dict(
+            data_provider='postgres', data_provider_profile='shop',
+        ))
+        configuration = dict(data_provider='postgres', data_provider_profile='shop',
+                             data_provider_schema='reports')
+
+        query = sql.interpolate_input(
+            loader, configuration, [upstream], 'SELECT * FROM {{ df_1 }}',
+            copied=sql._copied(configuration, self.io_config, sql.PROVIDERS['postgres']),
+        )
+
+        self.assertEqual(query, 'SELECT * FROM "shop".public.orders_v1')

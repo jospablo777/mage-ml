@@ -195,6 +195,15 @@ def table_name_parts(
     return database, schema, table
 
 
+def _named_schema(configuration: Dict, upstream: Dict) -> Optional[str]:
+    """As Mage's named_schema: the schema an upstream table's name holds, if any."""
+    full = ((configuration.get(CONFIG_KEY_UPSTREAM) or {}).get(upstream['uuid']) or {}).get(
+        'table_name',
+    )
+    parts = (full or upstream['table_name'] or '').split('.')
+    return parts[-2] if len(parts) >= 2 else None
+
+
 def should_upload(
     configuration: Dict, upstream: Dict, io_config: str, profile_keys: Tuple[str, ...],
 ) -> bool:
@@ -372,6 +381,11 @@ def interpolate_input(
                 f'({provider}). Please disable using raw SQL and try again.'
             )
         database, schema, table = table_name_parts(configuration, upstream)
+        reads_as_is = is_sql and same_providers and copied is not None and not copied(upstream)
+        if reads_as_is and not upstream_configuration.get('data_provider_schema') and \
+                not _named_schema(configuration, upstream):
+            # Read as it is, the table is in the upstream's default schema (I-272).
+            schema = None
         table = table or upstream['table_name']
         if table_suffix and upstream['uuid'] in (written or {}):
             table = f'{table}_{table_suffix}'

@@ -373,6 +373,7 @@ def execute_sql_code(
             query_string = mssql.interpolate_input_data(
                 block,
                 query,
+                loader,
                 **interpolate_input_data_kwargs,
             )
 
@@ -406,7 +407,8 @@ def execute_sql_code(
                         loader.load(
                             # Add the limit directly in the SELECT statement
                             # since io.mssql doesn't support enforcing limit
-                            f'SELECT TOP {limit} * FROM {table_name}',
+                            f'SELECT TOP {limit} * FROM '
+                            f'{loader._full_table_name(schema, table_name)}',
                             limit=limit,
                             verbose=False,
                         ),

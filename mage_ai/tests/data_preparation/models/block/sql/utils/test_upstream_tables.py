@@ -300,3 +300,34 @@ class UpstreamTablesTest(DBTestCase):
         # On the upstream's own database, its table is read as it is, in its schema.
         query = postgres.interpolate_input_data(same, 'SELECT * FROM {{ df_1 }}', loader)
         self.assertEqual(query, f'SELECT * FROM "shop".raw.{upstream.table_name}')
+
+    def test_a_block_with_its_own_schema_names_an_upstream_table_in_its_schema(self):
+        """
+        Read as it is, an upstream SQL table without a schema is in the profile's default
+        schema; it was named in the reading block's schema (I-272).
+        """
+        from unittest.mock import MagicMock
+
+        from mage_ai.data_preparation.models.block.sql import postgres
+
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        io_config.write_text(original + (
+            'shop:\n  POSTGRES_DBNAME: shop\n  POSTGRES_HOST: db\n  POSTGRES_PORT: 5432\n'
+        ))
+        shop = dict(data_provider='postgres', data_provider_profile='shop')
+        upstream = self.block('orders_sql', configuration=shop)
+        python = self.block('orders_py', BlockLanguage.PYTHON)
+        block = self.block('report', configuration=dict(shop, data_provider_schema='reports'),
+                           upstream=[upstream, python])
+        loader = MagicMock()
+        loader.default_database.return_value = 'shop'
+        loader.default_schema.return_value = 'public'
+
+        query = postgres.interpolate_input_data(
+            block, 'SELECT * FROM {{ df_1 }} JOIN {{ df_2 }}', loader,
+        )
+        # The SQL upstream's table where it wrote it; the Python output where it is copied.
+        self.assertEqual(query, f'SELECT * FROM "shop".public.{upstream.table_name} '
+                                f'JOIN "shop".reports.{python.table_name}')

@@ -1,7 +1,7 @@
 import inspect
 import re
 from os import path
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from jinja2 import StrictUndefined, Template
 from pandas import DataFrame
@@ -176,6 +176,13 @@ def interpolate_input(
 
         was_copied = is_sql and is_same_data_providers and copied is not None and \
             copied(upstream_block)
+        reads_as_is = is_sql and is_same_data_providers and copied is not None and \
+            not was_copied
+        if reads_as_is and not upstream_block.configuration.get('data_provider_schema') and \
+                not named_schema(block.configuration, upstream_block):
+            # Read as it is, the table is in the upstream's default schema, not in this
+            # block's, which table_name_parts gives for a copy (I-272).
+            schema = None
         config_to_use = configuration if is_same_data_providers and not was_copied \
             else block.configuration
         if not database:
@@ -375,6 +382,15 @@ def table_name_parts(
     table = build_dynamic_table_name(table, dynamic_block_index)
 
     return database, schema, table
+
+
+def named_schema(configuration: Dict, upstream_block) -> Optional[str]:
+    """The schema an upstream table's configured or own name holds, if it holds one."""
+    full_table_name = configuration.get(CONFIG_KEY_UPSTREAM_BLOCK_CONFIGURATION, {}).get(
+        upstream_block.uuid, {},
+    ).get(CONFIG_KEY_UPSTREAM_BLOCK_CONFIGURATION_TABLE_NAME)
+    parts = (full_table_name or upstream_block.table_name or '').split('.')
+    return parts[-2] if len(parts) >= 2 else None
 
 
 def table_name_parts_from_query(
