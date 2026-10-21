@@ -261,6 +261,10 @@ impl TransformSession for WindowSession {
         self.partitions.remove(&partition.0);
         self.pending.remove(&partition.0);
     }
+
+    fn keeps_state(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

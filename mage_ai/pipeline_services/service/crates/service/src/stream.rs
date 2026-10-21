@@ -477,6 +477,9 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     // The transform lane.
     let (lane_tx, mut lane_rx) = mpsc::unbounded_channel::<LaneJob>();
     let mut transform = parts.transform.take();
+    // Only a session that keeps state is asked before a commit: the question waits in the
+    // lane behind the transform in progress, which delayed every commit by one.
+    let keeps_state = transform.as_ref().is_some_and(|s| s.keeps_state());
     let lane_events = tx.clone();
     let lane = tokio::spawn(async move {
         while let Some(job) = lane_rx.recv().await {
@@ -879,7 +882,11 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         // State as of these positions is saved first: a restart then finds
                         // both at the same point, never positions past their state.
                         let (reply, saved) = tokio::sync::oneshot::channel();
-                        let _ = lane_tx.send(LaneJob::Committed(commits.clone(), reply));
+                        if keeps_state {
+                            let _ = lane_tx.send(LaneJob::Committed(commits.clone(), reply));
+                        } else {
+                            let _ = reply.send(Ok(()));
+                        }
                         if let Ok(Err(error)) = saved.await {
                             record_error(
                                 &status,
@@ -1357,6 +1364,79 @@ mod tests {
         fn close(&mut self) -> BoxFuture<'_, ()> {
             Box::pin(async {})
         }
+    }
+
+    /// Holds every batch after the first until the test lets it go.
+    struct Gate {
+        seen: usize,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl TransformSession for Gate {
+        fn transform(
+            &mut self,
+            batch: RecordBatch,
+        ) -> BoxFuture<'_, Result<TransformOutput, TransformError>> {
+            self.seen += 1;
+            let wait = self.seen > 1;
+            let release = self.release.clone();
+            Box::pin(async move {
+                if wait {
+                    release.notified().await;
+                }
+                Ok(TransformOutput {
+                    outputs: [("t".to_string(), batch)].into(),
+                    row_errors: vec![],
+                    blocks: Vec::new(),
+                })
+            })
+        }
+
+        fn close(&mut self) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stream_without_state_commits_while_the_next_batch_transforms() {
+        let source = MemorySource::new(vec![messages(8)], 4, true);
+        let handle = source.handle();
+        let sink = MemorySink::new();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let status = SharedStatus::default();
+        let stream = tokio::spawn(run(
+            StreamParts {
+                name: "orders".into(),
+                source: Box::new(source),
+                sinks: vec![(Arc::new(sink.clone()), Some("t".into()))],
+                dead_letter: None,
+                transform: Some(Box::new(Gate {
+                    seen: 0,
+                    release: release.clone(),
+                })),
+                config: config(1, false, PoisonPolicy::Stop),
+                shutdown_deadline: Duration::from_secs(5),
+                pause: None,
+                tap: false,
+                time: None,
+            },
+            status.clone(),
+            CancellationToken::new(),
+        ));
+        // The first batch is committed while the second waits in its transform: before,
+        // the commit waited in the lane behind it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while handle.committed() != vec![4] && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(handle.committed(), vec![4]);
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(20), stream)
+            .await
+            .expect("the stream finishes")
+            .unwrap();
+        assert_eq!(handle.committed(), vec![8]);
+        assert_eq!(sink.received().len(), 8);
     }
 
     #[tokio::test]

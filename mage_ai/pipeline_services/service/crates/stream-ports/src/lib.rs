@@ -234,4 +234,10 @@ pub trait TransformSession: Send {
 
     /// The partition went to another reader: its state here is no longer current.
     fn revoked(&mut self, _partition: PartitionId) {}
+
+    /// Whether the session keeps state that `committed` saves. A session that keeps none
+    /// is not asked before a commit, so a commit never waits for a transform in progress.
+    fn keeps_state(&self) -> bool {
+        false
+    }
 }

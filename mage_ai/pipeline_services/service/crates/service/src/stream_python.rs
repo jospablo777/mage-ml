@@ -532,6 +532,10 @@ impl TransformSession for PythonStreamSession {
         self.state.revoked(partition.0);
     }
 
+    fn keeps_state(&self) -> bool {
+        !self.state.is_empty()
+    }
+
     fn close(&mut self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
             let _ = std::fs::remove_file(&self.file);

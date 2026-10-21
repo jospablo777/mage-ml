@@ -105,6 +105,10 @@ impl TransformSession for ChainedSession {
             session.revoked(partition);
         }
     }
+
+    fn keeps_state(&self) -> bool {
+        self.runs.iter().any(|(session, _)| session.keeps_state())
+    }
 }
 
 #[cfg(test)]

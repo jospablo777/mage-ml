@@ -813,6 +813,10 @@ impl TransformSession for RustStreamSession {
         self.state.revoked(partition.0);
     }
 
+    fn keeps_state(&self) -> bool {
+        !self.state.is_empty()
+    }
+
     fn close(&mut self) -> BoxFuture<'_, ()> {
         Box::pin(async move {
             if self.live.is_some() {
