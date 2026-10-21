@@ -132,11 +132,12 @@ pub fn profile(path: &str, request: &str) -> Result<Value, AtlasError> {
         )));
     }
     if let Some(segment) = &request.segment
-        && (segment.top < 1 || segment.top > MAX_SEGMENTS) {
-            return Err(AtlasError::invalid(format!(
-                "segments top must be 1 to {MAX_SEGMENTS}"
-            )));
-        }
+        && (segment.top < 1 || segment.top > MAX_SEGMENTS)
+    {
+        return Err(AtlasError::invalid(format!(
+            "segments top must be 1 to {MAX_SEGMENTS}"
+        )));
+    }
     guarded(path, || profile_unguarded(path, &request))
 }
 
