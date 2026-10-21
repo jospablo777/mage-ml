@@ -68,8 +68,9 @@ enum Command {
     Jobs(jobs::JobsArgs),
     /// Exit 0 when the local service answers /healthz; for Docker's HEALTHCHECK.
     Health {
-        #[arg(long, env = "MAGE_SERVICE_PORT", default_value_t = 8080)]
-        port: u16,
+        /// MAGE_SERVICE_PORT, else the platform's PORT, else 8080.
+        #[arg(long, env = "MAGE_SERVICE_PORT")]
+        port: Option<u16>,
     },
 }
 
@@ -142,8 +143,10 @@ enum LogFormat {
 struct ServeArgs {
     #[arg(long, env = "MAGE_SERVICE_HOST", default_value = "127.0.0.1")]
     host: String,
-    #[arg(long, env = "MAGE_SERVICE_PORT", default_value_t = 8080)]
-    port: u16,
+    /// MAGE_SERVICE_PORT, else the PORT a platform sets (Code Engine, Cloud Run, Render),
+    /// else 8080.
+    #[arg(long, env = "MAGE_SERVICE_PORT")]
+    port: Option<u16>,
     /// Run the active time triggers. Off by default, so a service exported next to a running
     /// Mage does not run the same schedule twice.
     #[arg(long, env = "MAGE_SERVICE_SCHEDULES", value_enum, default_value_t = Switch::Off)]
@@ -220,7 +223,7 @@ fn main() -> ExitCode {
             Command::Run(args) => run_once(cli.common, args).await,
             Command::Validate => validate(&cli.common).map(|_| ExitCode::SUCCESS),
             Command::Info => info(&cli.common).map(|_| ExitCode::SUCCESS),
-            Command::Health { port } => Ok(health(port)),
+            Command::Health { port } => Ok(health(listen_port(port))),
             Command::Env => env_report(&cli.common),
             Command::Jobs(args) => {
                 log::to_stderr();
@@ -613,9 +616,10 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
             ingest_token: ingest_token_value,
         },
     };
-    let address: SocketAddr = format!("{}:{}", args.host, args.port)
+    let port = listen_port(args.port);
+    let address: SocketAddr = format!("{}:{}", args.host, port)
         .parse()
-        .map_err(|e| format!("Invalid address {}:{}: {e}", args.host, args.port))?;
+        .map_err(|e| format!("Invalid address {}:{}: {e}", args.host, port))?;
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|e| format!("Could not listen on {address}: {e}"))?;
@@ -955,8 +959,29 @@ fn format_ms(ms: u64) -> String {
     }
 }
 
+/// The port to listen on: MAGE_SERVICE_PORT (or --port), else the PORT a platform sets, else
+/// 8080. Platforms such as Code Engine and Cloud Run route to PORT; a service that ignored
+/// it failed their health checks unless MAGE_SERVICE_PORT repeated it (I-21).
+fn listen_port(configured: Option<u16>) -> u16 {
+    port_from(configured, std::env::var("PORT").ok().as_deref())
+}
+
+fn port_from(configured: Option<u16>, platform: Option<&str>) -> u16 {
+    configured
+        .or_else(|| platform?.trim().parse().ok())
+        .unwrap_or(8080)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_port_is_the_configured_one_else_the_platforms_else_8080() {
+        assert_eq!(super::port_from(Some(9000), Some("7000")), 9000);
+        assert_eq!(super::port_from(None, Some("7000")), 7000);
+        assert_eq!(super::port_from(None, Some("not a port")), 8080);
+        assert_eq!(super::port_from(None, None), 8080);
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
 

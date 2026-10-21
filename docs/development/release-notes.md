@@ -4,6 +4,9 @@
 
 ### Exported services
 
+- A service listens on the `PORT` a platform sets (Code Engine, Cloud Run, Render) when
+  `MAGE_SERVICE_PORT` is unset. It listened on 8080 whatever the platform routed to.
+
 - An export locks its Python packages with uv: `pyproject.toml` pins what the blocks import
   to the versions that ran them, with the project's `requirements.txt` folded in and pinned,
   and `uv.lock` holds every package with its hashes for Linux on amd64 and arm64. The image

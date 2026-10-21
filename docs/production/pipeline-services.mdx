@@ -484,6 +484,8 @@ On serverless platforms without a volume, the run history lasts as long as the i
 
 | Variable | Default | |
 | --- | --- | --- |
+| `MAGE_SERVICE_HOST` | `127.0.0.1`; `0.0.0.0` in the image | Address to listen on |
+| `MAGE_SERVICE_PORT` | `PORT` when a platform sets it, else `8080` | Port to listen on |
 | `MAGE_SERVICE_TOKEN` | required unless on 127.0.0.1 | Token for every API call (`_FILE` works); on 127.0.0.1 a made token goes to `service-token` in the data directory |
 | `MAGE_SERVICE_READ_TOKEN` | none | Read-only token |
 | `MAGE_SERVICE_SCHEDULES` | `off` | `on` runs the time triggers |
