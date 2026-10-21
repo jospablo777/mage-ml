@@ -631,8 +631,8 @@ runs: a second service on the same schema is refused at start, so give each its 
 | A stopped instance | Its running runs are failed when its lease ends (30 seconds without a renewal), at once when it stopped cleanly or its process is gone from the same machine |
 | A stalled instance | Finds its runs failed when it wakes, and cannot change them |
 | Schedules | One instance owns them at a time |
-| Logs | Every instance serves a run's log: the run history keeps its lines, written every quarter second and before the run's status, also after the instance that ran it is gone. Runs from before version 2 of the schema answer 409 with the host that has their file |
-| Outputs | On the data volume of the instance that ran the run |
+| Logs | Every instance serves a run's log, also while the run runs and after the instance that ran it is gone: the run history keeps its lines, written every quarter second and before the run's status. Runs from before version 2 of the schema answer 409 with the host that has their file |
+| Outputs | Every instance serves a block's output up to `MAGE_SERVICE_SHARED_OUTPUT_MB` (16): the run history keeps a copy. A larger one stays on the data volume of the instance that ran the run, and the others answer 409 naming it |
 
 `sslmode` takes libpq's modes (`disable`, `prefer`, `require`, `verify-ca`, `verify-full`)
 and `sslrootcert` a file; the `key=value` form works too. The service makes the schema and
@@ -687,6 +687,7 @@ to it.
 | `MAGE_SERVICE_STREAM_LOG_FILES` | 4 | Rotated stream logs kept |
 | `MAGE_SERVICE_INGEST_TOKEN` | none | A token that can only send messages to webhook streams, for webhook senders |
 | `MAGE_SERVICE_LEDGER_URL` | none | A PostgreSQL run history, shared by instances on several machines; see [Several instances](#several-instances) |
+| `MAGE_SERVICE_SHARED_OUTPUT_MB` | `16` | With a PostgreSQL run history, the largest block output it keeps a copy of, so every instance serves it |
 | `MAGE_SERVICE_LEDGER_SCHEMA` | `mage_service` | Its schema; one service per schema |
 | `MAGE_SERVICE_LEDGER_MIGRATE` | `on` | `off` refuses an older run history instead of migrating it at start |
 | `MAGE_SERVICE_INSTANCE_ID` | none | A stable name for this replica, such as a Kubernetes StatefulSet pod's name. Kafka streams then join their group as static members (`group.instance.id`), so a restart within the session timeout keeps the replica's partitions instead of moving the group's partitions twice |

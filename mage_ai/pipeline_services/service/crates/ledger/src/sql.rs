@@ -17,6 +17,14 @@ pub enum Cell {
     Null,
     Int(i64),
     Text(String),
+    /// BLOB in SQLite, BYTEA in PostgreSQL.
+    Bytes(Vec<u8>),
+}
+
+impl From<Vec<u8>> for Cell {
+    fn from(value: Vec<u8>) -> Cell {
+        Cell::Bytes(value)
+    }
 }
 
 impl From<&str> for Cell {
@@ -98,6 +106,16 @@ impl Row {
             Cell::Null => Ok(None),
             Cell::Text(text) => Ok(Some(text.clone())),
             Cell::Int(value) => Ok(Some(value.to_string())),
+            Cell::Bytes(_) => Err(LedgerError::Data(format!("column {index} is binary"))),
+        }
+    }
+
+    pub fn bytes(&self, index: usize) -> Result<Vec<u8>> {
+        match self.cell(index)? {
+            Cell::Bytes(bytes) => Ok(bytes.clone()),
+            Cell::Text(text) => Ok(text.clone().into_bytes()),
+            Cell::Int(_) => Err(LedgerError::Data(format!("column {index} is a number"))),
+            Cell::Null => Err(LedgerError::Data(format!("column {index} is NULL"))),
         }
     }
 
@@ -108,6 +126,7 @@ impl Row {
                 .parse()
                 .map_err(|_| LedgerError::Data(format!("column {index} is not a number"))),
             Cell::Null => Err(LedgerError::Data(format!("column {index} is NULL"))),
+            Cell::Bytes(_) => Err(LedgerError::Data(format!("column {index} is binary"))),
         }
     }
 }
@@ -189,6 +208,7 @@ impl rusqlite::ToSql for Cell {
             Cell::Null => ToSqlOutput::Owned(Value::Null),
             Cell::Int(value) => ToSqlOutput::Owned(Value::Integer(*value)),
             Cell::Text(text) => ToSqlOutput::Borrowed(ValueRef::Text(text.as_bytes())),
+            Cell::Bytes(bytes) => ToSqlOutput::Borrowed(ValueRef::Blob(bytes)),
         })
     }
 }
@@ -210,9 +230,8 @@ fn sqlite_rows(
                 ValueRef::Null => Cell::Null,
                 ValueRef::Integer(value) => Cell::Int(value),
                 ValueRef::Real(value) => Cell::Int(value as i64),
-                ValueRef::Text(text) | ValueRef::Blob(text) => {
-                    Cell::Text(String::from_utf8_lossy(text).into_owned())
-                }
+                ValueRef::Text(text) => Cell::Text(String::from_utf8_lossy(text).into_owned()),
+                ValueRef::Blob(bytes) => Cell::Bytes(bytes.to_vec()),
             });
         }
         out.push(Row(cells));
@@ -283,6 +302,7 @@ impl tokio_postgres::types::ToSql for Cell {
                 Type::INT2 | Type::INT4 | Type::INT8 => Cell::Int(text.parse()?).to_sql(ty, out),
                 _ => text.as_str().to_sql(ty, out),
             },
+            Cell::Bytes(bytes) => bytes.as_slice().to_sql(ty, out),
         }
     }
 
@@ -302,6 +322,7 @@ fn postgres_row(row: &tokio_postgres::Row) -> Result<Row> {
             Type::INT4 => row.try_get::<_, Option<i32>>(index)?.map(i64::from).into(),
             Type::INT8 => row.try_get::<_, Option<i64>>(index)?.into(),
             Type::BOOL => row.try_get::<_, Option<bool>>(index)?.into(),
+            Type::BYTEA => row.try_get::<_, Option<Vec<u8>>>(index)?.into(),
             // pg_advisory_xact_lock's result.
             Type::VOID => Cell::Null,
             _ => row.try_get::<_, Option<String>>(index)?.into(),

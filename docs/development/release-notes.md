@@ -14,7 +14,8 @@
 - Exported services keep their Rust binary running between runs: a `static` a Rust block
   sets keeps its value for the next run. `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary
   for each run.
-- A PostgreSQL run history moves to schema version 2 (run logs kept for every instance).
+- A PostgreSQL run history moves to schema version 3 (run logs and outputs kept for every
+  instance).
   The first upgraded instance migrates it; an older engine then refuses to start on it, so
   upgrade every instance of a service together, or migrate with
   `mage-service ledger migrate` when the rollout is done.
@@ -83,7 +84,10 @@
 
 - Instances that share a PostgreSQL run history all serve a run's log: its lines are kept
   in the run history (in batches every quarter second, and before the run's status), also
-  after the instance that ran it is gone. They answered 409 with the other host.
+  after the instance that ran it is gone. They answered 409 with the other host. Block
+  outputs up to `MAGE_SERVICE_SHARED_OUTPUT_MB` (16) are kept too, so an Airflow task
+  behind a load balancer gets its output from any instance; another instance's output
+  answered 410 as if the retention period had removed it.
 
 - A stream that keeps no state commits its positions as soon as the sinks confirm a batch.
   Since keyed state, every commit waited behind the next batch's transform, so a crash

@@ -220,6 +220,42 @@ impl Service {
         self.data_dir.join("runs").join(sanitize(run_id))
     }
 
+    /// Copies a block's output files into a shared run history, each up to
+    /// [`shared_output_bytes`], so every instance serves them; larger ones stay on this
+    /// instance's data volume. Nothing happens with a SQLite run history.
+    pub fn keep_outputs(&self, run_id: &str, block: &str, outputs: &[serde_json::Value]) {
+        if !self.ledger.keeps_logs() {
+            return;
+        }
+        let limit = shared_output_bytes();
+        for (index, record) in outputs.iter().enumerate() {
+            // JSON values live in the record itself, which the run history has.
+            if record.get("value").is_some() {
+                continue;
+            }
+            let Some(path) = record.get("path").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            match std::fs::metadata(path) {
+                Ok(meta) if meta.is_file() && meta.len() <= limit => {}
+                _ => continue,
+            }
+            let kept = std::fs::read(path)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    self.ledger
+                        .put_output(run_id, block, index, bytes)
+                        .map_err(|e| e.to_string())
+                });
+            if let Err(error) = kept {
+                crate::log::warn(&format!(
+                    "Run {run_id}: keeping output {index} of {block} in the run history \
+                     failed; only this instance serves it: {error}"
+                ));
+            }
+        }
+    }
+
     pub fn shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::SeqCst)
     }
@@ -874,4 +910,15 @@ fn throughput(recent: &[(String, u64)], window_seconds: i64, windows: usize) -> 
 
 pub fn ensure_dir(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)
+}
+
+/// The largest output file a shared run history keeps: `MAGE_SERVICE_SHARED_OUTPUT_MB`
+/// (16).
+pub fn shared_output_bytes() -> u64 {
+    std::env::var("MAGE_SERVICE_SHARED_OUTPUT_MB")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(16)
+        * 1024
+        * 1024
 }

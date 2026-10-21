@@ -1062,6 +1062,10 @@ fn two_services_share_a_postgresql_run_history() {
                 .any(|line| line["block"] == "load"),
             "{body}"
         );
+        // And its outputs: one instance reads its file, the other the run history's copy.
+        let (status, total) = service.get(&format!("/v1/runs/{id}/output?block=total"));
+        assert_eq!(status, 200, "{total}");
+        assert_eq!(total, json!({"total": 6}), "{total}");
     }
 
     // Whichever instance claimed it, a cancel sent to b stops it.
@@ -1085,6 +1089,28 @@ fn two_services_share_a_postgresql_run_history() {
     let id = run["id"].as_str().unwrap().to_string();
     wait_status(&a, &id, "running");
     b.start(&env);
+    // b follows the running log from the run history (a writes it every quarter second).
+    let started = format!("Run {id} of slow started");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (status, body) = b.get(&format!("/v1/runs/{id}/logs"));
+        let found = status == 200
+            && body["lines"].as_array().is_some_and(|lines| {
+                lines.iter().any(|line| {
+                    line["message"]
+                        .as_str()
+                        .is_some_and(|m| m.starts_with(&started))
+                })
+            });
+        if found {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "b never served the running log: {body}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     a.signal("-KILL");
     let run = wait_status(&b, &id, "failed");
     // a's lines up to its last write are kept, though a is gone.
@@ -1106,6 +1132,31 @@ fn two_services_share_a_postgresql_run_history() {
             .unwrap()
             .contains("stopped while this run was running"),
         "{run}"
+    );
+
+    // Outputs over MAGE_SERVICE_SHARED_OUTPUT_MB stay with the instance that ran the run;
+    // the other names it.
+    b.signal("-TERM");
+    let small = [env[0], env[1], ("MAGE_SERVICE_SHARED_OUTPUT_MB", "0")];
+    let mut c = Service::create(false);
+    c.start(&small);
+    let mut d = Service::create(false);
+    d.start(&small);
+    let (_, run) = c.post("/v1/pipelines/sum/runs?wait=60", json!({}));
+    let id = run["id"].as_str().unwrap().to_string();
+    let mut answers: Vec<(u16, Value)> = [&c, &d]
+        .iter()
+        .map(|service| service.get(&format!("/v1/runs/{id}/output?block=total")))
+        .collect();
+    answers.sort_by_key(|(status, _)| *status);
+    assert_eq!(answers[0], (200, json!({"total": 6})), "{answers:?}");
+    assert_eq!(answers[1].0, 409, "{answers:?}");
+    assert!(
+        answers[1]
+            .1
+            .to_string()
+            .contains("MAGE_SERVICE_SHARED_OUTPUT_MB"),
+        "{answers:?}"
     );
 }
 
@@ -1145,9 +1196,9 @@ fn the_ledger_command_migrates_postgresql_and_imports_a_sqlite_history() {
         (output.status.success(), text)
     };
     let (ok, text) = ledger(&["migrate"]);
-    assert!(ok && text.contains("from version 0 to 2"), "{text}");
+    assert!(ok && text.contains("from version 0 to 3"), "{text}");
     let (ok, text) = ledger(&["migrate"]);
-    assert!(ok && text.contains("is at version 2"), "{text}");
+    assert!(ok && text.contains("is at version 3"), "{text}");
     let history = service.dir.path().join("data/runs.db");
     let history = history.to_str().unwrap();
     let (ok, text) = ledger(&["import", history]);

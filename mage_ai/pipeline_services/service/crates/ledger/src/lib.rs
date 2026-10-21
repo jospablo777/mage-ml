@@ -107,8 +107,9 @@ pub const SQLITE_VERSION: i64 = 1;
 
 /// PostgreSQL migrations, in order: version N is the Nth. Types are the SQLite ones' (text
 /// timestamps in ISO 8601 UTC, integers), so a statement means the same on both. Version 2
-/// keeps run logs (`run_logs`), so every instance serves the log of a run another ran; a
-/// SQLite run history has one instance, whose log files are enough.
+/// keeps run logs (`run_logs`) and version 3 block output files up to a size
+/// (`run_outputs`), so every instance serves what another ran; a SQLite run history has one
+/// instance, whose files are enough.
 const POSTGRES_MIGRATIONS: &[&str] = &[
     r#"
 CREATE TABLE runs (
@@ -175,6 +176,15 @@ CREATE TABLE run_logs (
     seq BIGINT NOT NULL,
     line TEXT NOT NULL,
     PRIMARY KEY (run_id, seq)
+);
+"#,
+    r#"
+CREATE TABLE run_outputs (
+    run_id TEXT NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+    block TEXT NOT NULL,
+    idx BIGINT NOT NULL,
+    data BYTEA NOT NULL,
+    PRIMARY KEY (run_id, block, idx)
 );
 "#,
 ];
@@ -1084,6 +1094,39 @@ impl Ledger {
         })
     }
 
+    /// Keeps a block output's file (its `index`th output); a kept one is replaced. Nothing
+    /// happens in a run history that keeps no logs.
+    pub fn put_output(&self, run_id: &str, block: &str, index: usize, data: Vec<u8>) -> Result<()> {
+        if !self.keeps_logs() {
+            return Ok(());
+        }
+        let (run_id, block) = (run_id.to_string(), block.to_string());
+        self.store.run(move |db| {
+            db.execute(
+                "INSERT INTO run_outputs (run_id, block, idx, data) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT (run_id, block, idx) DO UPDATE SET data = excluded.data",
+                cells![run_id, block, index as i64, data],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// A kept block output's file; None when the run history has none.
+    pub fn output(&self, run_id: &str, block: &str, index: usize) -> Result<Option<Vec<u8>>> {
+        if !self.keeps_logs() {
+            return Ok(None);
+        }
+        let (run_id, block) = (run_id.to_string(), block.to_string());
+        self.store.run(move |db| {
+            db.query_one(
+                "SELECT data FROM run_outputs WHERE run_id = ?1 AND block = ?2 AND idx = ?3",
+                cells![run_id, block, index as i64],
+            )?
+            .map(|row| row.bytes(0))
+            .transpose()
+        })
+    }
+
     /// Copies a SQLite run history into this one (PostgreSQL), skipping runs it has: the
     /// move from one machine's file to a shared database. Returns the runs copied.
     pub fn import_sqlite(&self, path: &Path) -> Result<u64> {
@@ -1397,6 +1440,8 @@ mod tests {
             .append_logs(vec![("r".into(), 0, "{}".into())])
             .unwrap();
         assert_eq!(ledger.logs("r").unwrap(), None);
+        ledger.put_output("r", "b", 0, vec![1]).unwrap();
+        assert_eq!(ledger.output("r", "b", 0).unwrap(), None);
     }
 
     #[test]
@@ -2169,6 +2214,25 @@ mod postgres_tests {
         let pruned = ledger.prune(now() + chrono::Duration::days(1)).unwrap();
         assert_eq!(pruned, vec![id.clone()]);
         assert_eq!(ledger.logs(&id).unwrap(), None);
+        drop_schema(&ledger, &schema);
+    }
+
+    #[test]
+    fn a_postgresql_run_history_keeps_output_files_until_the_run_is_pruned() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let ledger = open(&url, &schema, "a");
+        let variables = Map::new();
+        let (id, _) = ledger.create_run(run(&variables, None, &[])).unwrap();
+        assert_eq!(ledger.output(&id, "load", 0).unwrap(), None);
+        let bytes: Vec<u8> = (0..=255).cycle().take(70_000).collect();
+        ledger.put_output(&id, "load", 0, vec![1, 2]).unwrap();
+        ledger.put_output(&id, "load", 0, bytes.clone()).unwrap();
+        assert_eq!(ledger.output(&id, "load", 0).unwrap(), Some(bytes));
+        assert_eq!(ledger.output(&id, "load", 1).unwrap(), None);
+        ledger.finish_run(&id, RunStatus::Completed, None).unwrap();
+        ledger.prune(now() + chrono::Duration::days(1)).unwrap();
+        assert_eq!(ledger.output(&id, "load", 0).unwrap(), None);
         drop_schema(&ledger, &schema);
     }
 

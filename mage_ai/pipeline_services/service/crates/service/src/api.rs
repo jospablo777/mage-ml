@@ -445,6 +445,63 @@ fn output_path(state: &AppState, record: &Value) -> ApiResult<std::path::PathBuf
     Ok(path)
 }
 
+/// An output another instance wrote, from the shared run history, cached in this
+/// instance's data directory; a 409 naming that instance when the run history does not
+/// keep it, else `missing`, the error the file gave.
+fn shared_output(
+    state: &AppState,
+    run_id: &str,
+    block: &str,
+    index: usize,
+    record: &Value,
+    missing: ApiError,
+) -> ApiResult<std::path::PathBuf> {
+    if let Some(bytes) = state.service.ledger.output(run_id, block, index)? {
+        let extension =
+            std::path::Path::new(record.get("path").and_then(Value::as_str).unwrap_or(""))
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("bin")
+                .to_string();
+        let cache = state
+            .service
+            .data_dir
+            .join("shared-outputs")
+            .join(crate::executor::sanitize(run_id))
+            .join(format!(
+                "{}-{index}.{extension}",
+                crate::executor::sanitize(block)
+            ));
+        if !cache.exists() {
+            let write = || -> std::io::Result<()> {
+                std::fs::create_dir_all(cache.parent().unwrap_or(&cache))?;
+                let temporary = cache.with_extension("tmp");
+                std::fs::write(&temporary, &bytes)?;
+                std::fs::rename(&temporary, &cache)
+            };
+            write().map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+        return Ok(cache);
+    }
+    if let Some((instance, host)) = state.service.ledger.other_owner(run_id)? {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            format!(
+                "Run {run_id} ran on instance {instance}{}; this output is larger than the \
+                 {} MiB the run history keeps (MAGE_SERVICE_SHARED_OUTPUT_MB), so it is on \
+                 that instance's data volume.",
+                if host.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (host {host})")
+                },
+                crate::service::shared_output_bytes() / 1024 / 1024
+            ),
+        ));
+    }
+    Err(missing)
+}
+
 /// The media type an output kind is served as; None for kinds only Python can read.
 fn content_type(record: &Value) -> Option<&'static str> {
     match (
@@ -498,7 +555,16 @@ async fn output(
             ),
         )
     })?;
-    let path = output_path(&state, record)?;
+    let index = query.index.unwrap_or(0);
+    let path = match output_path(&state, record) {
+        Ok(path) => path,
+        // Not on this instance (gone, or another instance's data on this machine): another
+        // instance ran the run.
+        Err(error) if matches!(error.0, StatusCode::GONE | StatusCode::FORBIDDEN) => {
+            shared_output(&state, &id, &query.block, index, record, error)?
+        }
+        Err(error) => return Err(error),
+    };
     if query.format.as_deref() == Some("json") && is_ipc_frame(record) {
         let rows = tokio::task::spawn_blocking(move || ipc_rows_json(&path))
             .await

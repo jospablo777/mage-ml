@@ -520,6 +520,8 @@ impl BlockTask {
                         None,
                         &records,
                     );
+                    self.service
+                        .keep_outputs(&self.run_id, &self.block.uuid, &records);
                     self.log.info(
                         Some(&self.block.uuid),
                         &format!(
@@ -1141,13 +1143,16 @@ impl ChainTask {
                         } else {
                             starts[position + 1]
                         };
+                        let outputs = if last { &records } else { &part.outputs };
                         let _ = self.service.ledger.finish_chained_block(
                             &self.run_id,
                             &block.uuid,
                             starts[position],
                             block_finished,
-                            if last { &records } else { &part.outputs },
+                            outputs,
                         );
+                        self.service
+                            .keep_outputs(&self.run_id, &block.uuid, outputs);
                         let message = if planned {
                             format!(
                                 "Planned in the compiled chain; its work ran with {computed_in}."
