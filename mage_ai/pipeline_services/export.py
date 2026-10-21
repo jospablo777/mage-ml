@@ -146,7 +146,10 @@ class Capture:
 
     @property
     def needs_db2_client(self) -> bool:
-        return any(name.lower().replace('_', '-') == 'ibm-db' for name in self.requirements)
+        return any(name.lower().replace('_', '-') == 'ibm-db' for name in self.requirements) or any(
+            b['language'] == 'sql' and (b.get('configuration') or {}).get('data_provider') == 'db2'
+            for p in self.manifest.get('pipelines') or [] for b in p['blocks']
+        )
 
     @property
     def amd64_only(self) -> List[str]:
@@ -416,9 +419,41 @@ SQL_PROVIDERS = (
 )
 
 
+# The client each database's SQL blocks run with, and the extra that installs it. The image
+# installs what this environment has: an export without the client made an image whose SQL
+# blocks failed on their first run.
+SQL_CLIENTS = {
+    'postgres': ('psycopg2', 'postgres'),
+    'mysql': ('mysql.connector', 'mysql'),
+    'duckdb': ('duckdb', 'duckdb'),
+    'clickhouse': ('clickhouse_connect', 'clickhouse'),
+    'trino': ('trino', 'trino'),
+    'bigquery': ('google.cloud.bigquery', 'bigquery'),
+    'snowflake': ('snowflake.connector', 'snowflake'),
+    'redshift': ('redshift_connector', 'redshift'),
+    'db2': ('ibm_db', 'db2'),
+}
+
+
+def _client_missing(module: str) -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(module) is None
+    except (ImportError, ValueError):
+        return True
+
+
 def _sql_unsupported(block) -> Optional[str]:
     configuration = block.configuration or {}
     provider = configuration.get('data_provider')
+    if provider in SQL_CLIENTS and _client_missing(SQL_CLIENTS[provider][0]):
+        module, extra = SQL_CLIENTS[provider]
+        return (
+            f'a SQL block on {provider}, whose client ({module}) is not installed here, so the '
+            f'image would not have it: install it with uv pip install "mage-ml[{extra}]" and '
+            'export again.'
+        )
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '

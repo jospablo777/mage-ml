@@ -187,10 +187,12 @@ class Db2SqlTest(ExportTestCase):
         out = self.project.parent / f'{self._testMethodName}_out'
         self.addCleanup(__import__('shutil').rmtree, out, True)
 
-        captured = export.capture(self.repo_path, [self.pipeline.uuid])
-        export.write(captured, str(out), force=True)
+        # Whether or not ibm_db is installed where the tests run.
+        with unittest.mock.patch.object(export, '_client_missing', return_value=False):
+            captured = export.capture(self.repo_path, [self.pipeline.uuid])
+            export.write(captured, str(out), force=True)
 
-        self.assertIn('ibm-db', {p.lower().replace('_', '-') for p in captured.requirements})
+        self.assertTrue(captured.needs_db2_client)
         self.assertEqual(captured.platforms, ['linux/amd64'])
         self.assertIn("IBM's Db2 client (ibm_db): IBM publishes it for linux/amd64 only",
                       '\n'.join(captured.notes))
@@ -231,3 +233,14 @@ class Db2SqlTest(ExportTestCase):
                 outputs[block.uuid].reset_index(drop=True),
                 mage_outputs[block.uuid].reset_index(drop=True),
             )
+
+    def test_an_export_without_the_db2_client_installed_is_refused(self):
+        orders = self.add('orders', 'data_loader', ORDERS)
+        self.sql_block('totals', TOTALS, [orders])
+
+        with unittest.mock.patch.object(export, '_client_missing', return_value=True):
+            with self.assertRaises(export.ExportError) as caught:
+                export.capture(self.repo_path, [self.pipeline.uuid])
+
+        self.assertIn('whose client (ibm_db) is not installed here', str(caught.exception.problems))
+        self.assertIn('mage-ml[db2]', str(caught.exception.problems))

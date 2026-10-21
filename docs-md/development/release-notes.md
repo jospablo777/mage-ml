@@ -36,6 +36,9 @@
   name the same account, warehouse and database. Tested the same way as BigQuery's.
 - Redshift SQL blocks run in services too, tested the same way.
 - Db2 SQL blocks run in services, tested against MageML on Db2 in CI and over a stand-in.
+- An export stops when a SQL block's database client is not installed where it runs, and
+  names the extra to install (`mage-ml[db2]` and so on). The image installs what that
+  environment has, so it was left out, and the block failed on the service's first run.
 - An export whose image needs IBM MQ's client or Db2's (`ibm_db`), which IBM publishes for
   `linux/amd64` only, now says so in its notes and names that platform alone in
   `manifest.json`, the README's build commands and the GitHub workflow, whose arm64 build
