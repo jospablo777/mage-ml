@@ -26,6 +26,11 @@
   where the Rust engine compiles many times slower, and merges both platforms into one
   image tagged with the commit. `ARM_RUNNER` names another runner where arm64 ones are not
   available.
+- BigQuery SQL blocks run in services as in MageML: upstream outputs are written to tables
+  of the block's dataset, an upstream BigQuery table on the same project and location is
+  read as it is, and the result is created by the export write policy. The tests compare
+  each request to BigQuery and the rows with MageML's, over a DuckDB stand-in for the
+  client. The export's message for an unsupported database now lists Trino and BigQuery.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
   MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the

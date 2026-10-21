@@ -1,12 +1,13 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
 (mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB,
-ClickHouse and Trino branches):
+ClickHouse, Trino and BigQuery branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
 2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL,
-   catalog.schema.table on Trino, the table alone on MySQL, DuckDB and ClickHouse.
+   catalog.schema.table on Trino, project.dataset.table on BigQuery, the table alone on
+   MySQL, DuckDB and ClickHouse.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -58,7 +59,17 @@ PROVIDERS = {
         no_schema=False,
         full_names=True,
     ),
+    # Two profiles reach the same BigQuery tables when they are the same profile or name
+    # the same project and location (_bigquery_project), not by comparing settings.
+    'bigquery': dict(
+        profile_keys=(),
+        no_schema=False,
+        full_names=True,
+    ),
 }
+# Tries of the read after BigQuery's CREATE TABLE AS: the new table can answer 404 for a
+# moment, as Mage's branch waits for.
+BIGQUERY_READ_TRIES = 5
 SUPPORTED_PROVIDERS = tuple(PROVIDERS)
 
 _statements = None
@@ -185,12 +196,52 @@ def should_upload(
         and configuration.get(k) == upstream_configuration.get(k)
         for k in ('data_provider',)
     )
+    if configuration.get('data_provider') == 'bigquery':
+        return not same_provider or not _bigquery_same_tables(
+            io_config, configuration.get('data_provider_profile'),
+            upstream_configuration.get('data_provider_profile'),
+        )
     same_database = all(
         block_loader.config.get(k) and upstream_loader.config.get(k)
         and block_loader.config.get(k) == upstream_loader.config.get(k)
         for k in profile_keys
     )
     return not same_provider or not same_database
+
+
+def _bigquery_project(io_config: str, profile: Optional[str]) -> Tuple[Optional[str], Any]:
+    """
+    As bigquery_project in Mage's BigQuery branch: the project_id of the profile's service
+    account key (the key, or the file it names) and GOOGLE_LOCATION.
+    """
+    from mage_ai.io.config import ConfigFileLoader, ConfigKey
+
+    config = ConfigFileLoader(io_config, profile)
+    key = config[ConfigKey.GOOGLE_SERVICE_ACC_KEY]
+    if not key and config[ConfigKey.GOOGLE_SERVICE_ACC_KEY_FILEPATH]:
+        try:
+            with open(config[ConfigKey.GOOGLE_SERVICE_ACC_KEY_FILEPATH]) as file:
+                key = json.load(file)
+        except (OSError, ValueError):
+            key = None
+    if isinstance(key, str):
+        try:
+            key = json.loads(key)
+        except ValueError:
+            key = None
+    project = key.get('project_id') if isinstance(key, dict) else None
+    return project, config[ConfigKey.GOOGLE_LOCATION]
+
+
+def _bigquery_same_tables(io_config: str, profile: Optional[str],
+                          upstream_profile: Optional[str]) -> bool:
+    """As reads_upstream_table in Mage's BigQuery branch."""
+    if profile == upstream_profile:
+        return True
+    project, location = _bigquery_project(io_config, profile)
+    return project is not None and (
+        (project, location) == _bigquery_project(io_config, upstream_profile)
+    )
 
 
 def _no_data(value: Any) -> bool:
@@ -259,10 +310,12 @@ def upload_upstream_tables(
 def interpolate_input(
     loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
     quote_database: bool = True, table_suffix: Optional[str] = None, written: Dict = None,
+    default_schema: bool = True,
 ) -> str:
     """
     {{ df_N }} becomes the upstream table's name, as Mage's interpolate_input. With
-    table_suffix, the tables in written are named with it.
+    table_suffix, the tables in written are named with it. Without default_schema, a name
+    with no schema configured has none (Mage's BigQuery branch).
     """
     helpers = statements()
     for index, upstream in enumerate(upstreams):
@@ -295,7 +348,7 @@ def interpolate_input(
                 database = loader.default_database()
                 if quote_database:
                     database = f'"{database}"'
-            if not schema:
+            if not schema and default_schema:
                 schema = loader.default_schema()
             replace_with = '.'.join(p for p in (database, schema, table) if p)
         else:
@@ -378,6 +431,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.trino import Trino
 
         return Trino.with_config(config_loader)
+    if provider == 'bigquery':
+        from mage_ai.io.bigquery import BigQuery
+
+        return BigQuery.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -437,6 +494,9 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
         schema = schema or loader.default_schema()
         return _run_on(loader, name, provider, configuration, upstreams, inputs, query,
                        io_config, variables, schema, table, limit, options)
+    if name == 'bigquery':
+        return _run_on_bigquery(loader, provider, configuration, upstreams, inputs, query,
+                                io_config, variables, schema, table, limit, options)
     if name == 'trino':
         with loader:
             return _run_on_trino(loader, provider, configuration, upstreams, inputs, query,
@@ -533,3 +593,48 @@ def _run_on_trino(loader, provider, configuration, upstreams, inputs, query, io_
                     cursor.fetchall()
                 except Exception as error:
                     print(f'Could not drop the upstream table {full_name}: {error}')
+
+
+def _run_on_bigquery(loader, provider, configuration, upstreams, inputs, query, io_config,
+                     variables, schema, table, limit, options) -> List:
+    """
+    BigQuery: tables are project.dataset.table, the loader is used without a with block, an
+    empty upstream frame is not written (Mage's branch has not tested one), and the new
+    table is read with a few tries while BigQuery answers 404 for it.
+    """
+    database = configuration.get('data_provider_database') or loader.default_database()
+    for index, upstream in enumerate(upstreams):
+        if query and not re.findall(variable_pattern(index + 1), query):
+            continue
+        if not should_upload(configuration, upstream, io_config, provider['profile_keys']):
+            continue
+        value = inputs[index] if index < len(inputs) else None
+        empty_frame = type(value).__name__ == 'DataFrame' and len(value) == 0
+        if empty_frame or _no_data(value):
+            print(f"\n\nNo data in upstream block {upstream['uuid']}.")
+            continue
+        upstream_database, upstream_schema, upstream_table = table_name_parts(
+            configuration, upstream,
+        )
+        upstream_database = upstream_database or database
+        full_name = f'{upstream_schema}.{upstream_table}'
+        print(f"\n\nExporting data from upstream block {upstream['uuid']} to "
+              f'{upstream_database}.{full_name}.')
+        loader.export(value, full_name, database=upstream_database, if_exists='replace',
+                      verbose=False)
+    query = interpolate_input(
+        loader, configuration, upstreams, query, quote_database=False, default_schema=False,
+    )
+    query = render(query, variables)
+    if configuration.get('use_raw_sql'):
+        return execute_raw_sql(loader, query, configuration, limit)
+    loader.export(None, f'{schema}.{table}', database=database, if_exists=options['if_exists'],
+                  query_string=query, verbose=options['verbose'])
+    for attempt in range(1, BIGQUERY_READ_TRIES + 1):
+        time.sleep(attempt - 1)
+        try:
+            return [loader.load(f'SELECT * FROM {database}.{schema}.{table}', limit=limit,
+                                verbose=False)]
+        except Exception as error:
+            if '404' not in str(error) or attempt == BIGQUERY_READ_TRIES:
+                raise

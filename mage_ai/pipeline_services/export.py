@@ -386,7 +386,7 @@ def _apply_environment(capture_: Capture) -> None:
     )
 
 
-SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb', 'clickhouse', 'trino')
+SQL_PROVIDERS = ('postgres', 'mysql', 'duckdb', 'clickhouse', 'trino', 'bigquery')
 
 
 def _sql_unsupported(block) -> Optional[str]:
@@ -395,7 +395,7 @@ def _sql_unsupported(block) -> Optional[str]:
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
-            'PostgreSQL, MySQL, DuckDB and ClickHouse.'
+            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino and BigQuery.'
         )
     if not configuration.get('data_provider_profile'):
         return 'a SQL block without a data provider profile (io_config.yaml).'
@@ -2585,6 +2585,9 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             candidates += ['clickhouse_connect', 'mage_ai.io.clickhouse']
         if 'trino' in providers:
             candidates += ['trino', 'mage_ai.io.trino', 'mage_ai.io.trino_types']
+        if 'bigquery' in providers:
+            # db_dtypes: the client's to_dataframe needs it for DATE and TIME columns.
+            candidates += ['google.cloud.bigquery', 'db_dtypes', 'mage_ai.io.bigquery']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [

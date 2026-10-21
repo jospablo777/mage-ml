@@ -73,6 +73,21 @@ role for the BigQuery dataset.
 9. Enter in this test query: `SELECT 1`.
 10. Run the block.
 
+### Upstream tables
+
+A query reads an upstream block's output as `{{ df_1 }}`, `{{ df_2 }}` and so on, named
+`project.dataset.table`:
+
+- The output of a Python or R block is written to a table in the block's dataset first,
+  replacing the table of the last run. An empty frame is not written, so the query reads
+  the table an earlier run left, or fails when there is none.
+- The table of an upstream BigQuery SQL block is read as it is when both blocks use the
+  same profile, or profiles whose service account keys name the same project, with the
+  same `GOOGLE_LOCATION`. Otherwise it is copied.
+
+BigQuery SQL blocks also run in [pipeline services](/production/pipeline-services), the same
+way.
+
 ## Using Python blocks
 
 1. Create a new pipeline or open an existing pipeline.
