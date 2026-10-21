@@ -169,6 +169,17 @@
   Blocks on the same profile, or on profiles of the same project and location, now read the
   upstream table as it is.
 
+### SQL blocks
+
+- A SQL block on DuckDB, Redshift, Db2, SQL Server, Snowflake or Druid read its SQL upstream
+  block's table into pandas and wrote it back over the same table before each query when
+  the profile left out an optional setting (`DUCKDB_SCHEMA`, `REDSHIFT_CLUSTER_ID`, a
+  schema, a warehouse): the comparison of the two profiles needed every setting present. The
+  round trip changed column types (a DuckDB `DECIMAL(10,2)` became `DOUBLE`), and on
+  Redshift, whose blocks keep at most `limit_in_pipeline_run` rows, it could cut the table to
+  those rows. One profile now always reads its own tables, and a setting unset in both
+  profiles counts as the same.
+
 ### Command line runs
 
 - `mage run` records its run when it ends: a pipeline run of the pipeline's "Command

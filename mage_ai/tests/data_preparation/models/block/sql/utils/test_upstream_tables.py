@@ -194,3 +194,73 @@ class UpstreamTablesTest(DBTestCase):
 
         written = [call.args[1] for call in loader.export.call_args_list]
         self.assertEqual(written, [f'analytics.{python.table_name}'])
+
+    def test_a_profile_with_an_unset_key_reads_its_own_tables(self):
+        """
+        DUCKDB_SCHEMA and REDSHIFT_CLUSTER_ID are optional: a profile without one differed
+        from itself, and the upstream SQL table was read back and written over itself.
+        """
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        io_config.write_text(original + (
+            'redshift:\n  REDSHIFT_HOST: cluster.example.com\n  REDSHIFT_PORT: 5439\n'
+            '  REDSHIFT_DBNAME: dev\n'
+            'redshift_too:\n  REDSHIFT_HOST: cluster.example.com\n  REDSHIFT_PORT: 5439\n'
+            '  REDSHIFT_DBNAME: dev\n'
+            'redshift_other:\n  REDSHIFT_HOST: other.example.com\n  REDSHIFT_PORT: 5439\n'
+            '  REDSHIFT_DBNAME: dev\n'
+            'duckdb:\n  DUCKDB_DATABASE: shop.duckdb\n'
+        ))
+        keys = ['REDSHIFT_CLUSTER_ID', 'REDSHIFT_DBNAME', 'REDSHIFT_HOST', 'REDSHIFT_PORT',
+                'REDSHIFT_SCHEMA']
+
+        def redshift(profile, upstream=()):
+            return self.block(
+                f'rs_{profile}_{len(upstream)}', upstream=upstream,
+                configuration=dict(data_provider='redshift', data_provider_profile=profile),
+            )
+
+        first = redshift('redshift')
+        for profile, copies in [('redshift', False), ('redshift_too', False),
+                                ('redshift_other', True)]:
+            block = redshift(profile, [first])
+            self.assertEqual(
+                should_cache_data_from_upstream(block, first, ['data_provider'], keys), copies,
+                profile,
+            )
+        duckdb = dict(data_provider='duckdb', data_provider_profile='duckdb')
+        up = self.block('duck_up', configuration=duckdb)
+        down = self.block('duck_down', configuration=duckdb, upstream=[up])
+        self.assertFalse(should_cache_data_from_upstream(
+            down, up, ['data_provider'], ['DUCKDB_DATABASE', 'DUCKDB_SCHEMA'],
+        ))
+
+    def test_a_downstream_block_leaves_the_upstream_table_as_it_is(self):
+        """The copy went through pandas and wrote the upstream table over itself as DOUBLE."""
+        import duckdb as duckdb_client
+
+        database = Path(self.repo_path) / f'{self.pipeline.uuid}.duckdb'
+        io_config = Path(self.repo_path) / 'io_config.yaml'
+        original = io_config.read_text()
+        self.addCleanup(io_config.write_text, original)
+        io_config.write_text(original + f'shop_duckdb:\n  DUCKDB_DATABASE: {database}\n')
+        duckdb = dict(data_provider='duckdb', data_provider_profile='shop_duckdb',
+                      export_write_policy='replace')
+        up = self.block('amounts', configuration=duckdb)
+        Path(up.file_path).write_text(
+            'SELECT n, (n * 1.25)::DECIMAL(10, 2) AS amount FROM range(5) t(n)',
+        )
+        down = self.block('total', configuration=duckdb, upstream=[up])
+        Path(down.file_path).write_text('SELECT SUM(amount) AS total FROM {{ df_1 }}')
+        self.pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
+
+        self.pipeline.get_block(up.uuid).execute_sync()
+        self.pipeline.get_block(down.uuid).execute_sync()
+
+        with duckdb_client.connect(str(database), read_only=True) as connection:
+            column_type = connection.execute(
+                'SELECT data_type FROM information_schema.columns '
+                "WHERE table_name = ? AND column_name = 'amount'", [up.table_name],
+            ).fetchone()[0]
+        self.assertEqual(column_type, 'DECIMAL(10,2)')

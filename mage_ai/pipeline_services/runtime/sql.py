@@ -206,10 +206,16 @@ def should_upload(
             io_config, configuration.get('data_provider_profile'),
             upstream_configuration.get('data_provider_profile'),
         )
-    same_database = all(
-        block_loader.config.get(k) and upstream_loader.config.get(k)
-        and block_loader.config.get(k) == upstream_loader.config.get(k)
-        for k in profile_keys
+    # As Mage's same_profile_settings: one profile is one database, and a key unset in both
+    # profiles is the same (I-267).
+    same_database = (
+        configuration.get('data_provider_profile')
+        == upstream_configuration.get('data_provider_profile')
+        or not profile_keys
+        or (
+            all(block_loader.config.get(k) == upstream_loader.config.get(k) for k in profile_keys)
+            and any(block_loader.config.get(k) for k in profile_keys)
+        )
     )
     return not same_provider or not same_database
 

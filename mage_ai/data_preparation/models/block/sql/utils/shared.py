@@ -102,12 +102,25 @@ def should_cache_data_from_upstream(
         block_config.get(k) and
         upstream_block_config.get(k) and
         block_config.get(k) == upstream_block_config.get(k) for k in config_keys
-    ]) or not all([
-        block_loader.config.get(k) and
-        upstream_block_loader.config.get(k) and
-        block_loader.config.get(k) == upstream_block_loader.config.get(k)
-        for k in config_profile_keys
-    ])
+    ]) or not (
+        block_data_provider == upstream_block_data_provider
+        or same_profile_settings(
+            block_loader.config, upstream_block_loader.config, config_profile_keys,
+        )
+    )
+
+
+def same_profile_settings(config: Dict, other: Dict, keys: List[str]) -> bool:
+    """
+    Whether two io_config profiles reach the same database: each key the same, or unset in
+    both, and at least one set. A key a profile leaves unset (DUCKDB_SCHEMA,
+    REDSHIFT_CLUSTER_ID) made it differ from itself, and an upstream SQL block's table was
+    read back and written over itself, through pandas: a DECIMAL column became DOUBLE
+    (I-267). One profile always reaches one database.
+    """
+    if not keys:
+        return True
+    return all(config.get(k) == other.get(k) for k in keys) and any(config.get(k) for k in keys)
 
 
 def interpolate_input(
