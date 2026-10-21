@@ -42,6 +42,24 @@ pub struct ProfileRequest {
     /// Bin edges for numeric columns, such as a baseline's.
     #[serde(default)]
     pub edges: HashMap<String, Vec<f64>>,
+    /// Also profiles the rows of each of the most frequent values of a column, on the
+    /// whole output's bin edges, for monitors that compare segments.
+    #[serde(default)]
+    pub segment: Option<SegmentRequest>,
+}
+
+pub const MAX_SEGMENTS: usize = 50;
+
+fn default_segments() -> usize {
+    10
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentRequest {
+    pub column: String,
+    #[serde(default = "default_segments")]
+    pub top: usize,
 }
 
 fn number(column: &str, dtype: &DataType) -> Expr {
@@ -113,11 +131,30 @@ pub fn profile(path: &str, request: &str) -> Result<Value, AtlasError> {
             "top must be at most {MAX_TOP}"
         )));
     }
+    if let Some(segment) = &request.segment
+        && (segment.top < 1 || segment.top > MAX_SEGMENTS) {
+            return Err(AtlasError::invalid(format!(
+                "segments top must be 1 to {MAX_SEGMENTS}"
+            )));
+        }
     guarded(path, || profile_unguarded(path, &request))
 }
 
 fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, AtlasError> {
     let table = Table::open(path, 0)?;
+    let segment = match &request.segment {
+        Some(segment) => {
+            let found = table.columns().iter().find(|c| c.name == segment.column);
+            if found.is_none() {
+                return Err(AtlasError::invalid(format!(
+                    "The output has no column {}, which the segments name",
+                    segment.column
+                )));
+            }
+            Some(segment)
+        }
+        None => None,
+    };
     let columns: Vec<(String, DataType, Kind)> = table
         .columns()
         .iter()
@@ -144,6 +181,55 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
             )));
         }
     }
+    let (mut whole, edges) = profile_rows(&table, &columns, request, None, &request.edges)?;
+    if let Some(segment) = segment {
+        let key = col(segment.column.as_str()).cast(DataType::String);
+        let frequent = table.collect(
+            table
+                .scan()?
+                .filter(col(segment.column.as_str()).is_not_null())
+                .group_by([key.clone().alias("__segment")])
+                .agg([len().cast(DataType::UInt64).alias("__count")])
+                .sort_by_exprs(
+                    [col("__count"), col("__segment")],
+                    SortMultipleOptions::default().with_order_descending_multi([true, false]),
+                )
+                .limit(segment.top as IdxSize),
+        )?;
+        let values: Vec<String> = frequent
+            .column("__segment")?
+            .str()?
+            .iter()
+            .map(|v| v.unwrap_or("").to_string())
+            .collect();
+        let mut segments = Vec::new();
+        for value in values {
+            let filter = key.clone().eq(lit(value.clone()));
+            let (mut part, _) = profile_rows(&table, &columns, request, Some(filter), &edges)?;
+            part["value"] = json!(shorten(&value));
+            segments.push(part);
+        }
+        whole["segments"] = json!({"column": segment.column, "values": segments});
+    }
+    Ok(whole)
+}
+
+/// The profile of the output's rows, or of those a filter keeps, with the edges its numeric
+/// columns were counted in.
+fn profile_rows(
+    table: &Table,
+    columns: &[(String, DataType, Kind)],
+    request: &ProfileRequest,
+    filter: Option<Expr>,
+    given_edges: &HashMap<String, Vec<f64>>,
+) -> Result<(Value, HashMap<String, Vec<f64>>), AtlasError> {
+    let scan = || -> Result<LazyFrame, AtlasError> {
+        let frame = table.scan()?;
+        Ok(match &filter {
+            Some(keep) => frame.filter(keep.clone()),
+            None => frame,
+        })
+    };
 
     // Rows, missing values, and the quantiles of numeric columns that need edges.
     let mut first = vec![len().cast(DataType::UInt64).alias("__rows")];
@@ -157,7 +243,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
                 .cast(DataType::UInt64)
                 .alias(format!("__missing_{index}")),
         );
-        if *kind == Kind::Numeric && !request.edges.contains_key(name) {
+        if *kind == Kind::Numeric && !given_edges.contains_key(name) {
             let values = number(name, dtype).filter(finite(name, dtype));
             first.push(values.clone().min().alias(format!("__min_{index}")));
             for (q, quantile) in quantiles.iter().enumerate() {
@@ -184,7 +270,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
             );
         }
     }
-    let summary = table.collect(table.scan()?.select(first))?;
+    let summary = table.collect(scan()?.select(first))?;
     let rows = value_u64(&summary, "__rows")?;
 
     // The edges of each numeric column, then all their bin counts in one pass.
@@ -194,7 +280,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
         if *kind != Kind::Numeric {
             continue;
         }
-        let edges = match request.edges.get(name) {
+        let edges = match given_edges.get(name) {
             Some(given) => clean_edges(given.clone()),
             None => {
                 let mut found: Vec<f64> = (0..quantiles.len())
@@ -245,7 +331,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
     let counts = if counting.is_empty() {
         DataFrame::empty()
     } else {
-        table.collect(table.scan()?.select(counting))?
+        table.collect(scan()?.select(counting))?
     };
 
     let mut profiled = Vec::new();
@@ -260,7 +346,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
         });
         match kind {
             Kind::Numeric => {
-                let edges = edges_of.remove(&index).unwrap_or_default();
+                let edges = edges_of.get(&index).cloned().unwrap_or_default();
                 let bins: Vec<u64> = if edges.is_empty() {
                     vec![]
                 } else {
@@ -274,8 +360,7 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
             Kind::String | Kind::Boolean => {
                 let present = finite(name, dtype);
                 let frequent = table.collect(
-                    table
-                        .scan()?
+                    scan()?
                         .filter(present)
                         .group_by([col(name).cast(DataType::String).alias("__value")])
                         .agg([len().cast(DataType::UInt64).alias("__count")])
@@ -315,7 +400,12 @@ fn profile_unguarded(path: &str, request: &ProfileRequest) -> Result<Value, Atla
         }
         profiled.push(entry);
     }
-    Ok(json!({ "rows": rows, "columns": profiled }))
+    let used = edges_of
+        .into_iter()
+        .filter(|(_, e)| !e.is_empty())
+        .map(|(index, e)| (columns[index].0.clone(), e))
+        .collect();
+    Ok((json!({ "rows": rows, "columns": profiled }), used))
 }
 
 #[cfg(test)]

@@ -335,6 +335,19 @@ class MonitorFlowTest(DBTestCase):
         self.assertEqual([r['result'] for r in history][-2:], ['pass', 'fail'])
         self.assertEqual(history[-1]['baseline_run_id'], run.id)
 
+    def test_each_segment_is_compared_with_its_baseline(self):
+        self.set_monitor('segments: {column: segment, top: 5}\n')
+        self.run_pipeline(seed=1)
+        _, block_run = self.run_pipeline(seed=2)
+
+        record = block_run.metrics['monitors'][0]
+        segments = {c['segment'] for c in record['checks'] if c.get('segment')}
+        self.assertEqual(segments, {'segment=a', 'segment=b', 'segment=c'})
+        drift = [c for c in record['checks'] if c.get('segment') and c['check'] == 'drift']
+        self.assertTrue(all(c['result'] == 'pass' for c in drift), drift)
+        self.assertTrue(all(c['detail'].startswith(c['segment'] + ': ') for c in drift))
+        self.assertIn('drift score [segment=a]', monitors.summary(record))
+
     def test_a_monitor_can_fail_the_block_run(self):
         self.set_monitor('fail_block: true\nnotify: false\n')
         newest = datetime.now(timezone.utc).isoformat()

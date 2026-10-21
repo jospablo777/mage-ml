@@ -59,7 +59,8 @@ with a severity per engine, and HTML reports listed in the run's record. The
    accounted for) are not implemented.
 3. **Alerts** can be limited to changes (`notify: on_change`), but there is no
    acknowledgement or silencing with an expiry.
-4. **Per-segment monitors** (drift within each country, say) are not implemented;
-   NannyML covers multivariate drift.
+4. **Segments** cover one column's most frequent values (`segments`), with the
+   missing-value and drift checks only; rows, freshness and performance are checked on the
+   whole output. NannyML covers multivariate drift.
 5. **Engines on remote storage**: Evidently and NannyML read the stored outputs from
    local disk.

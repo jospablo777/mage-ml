@@ -46,6 +46,7 @@ _NAME = re.compile(r'^[A-Za-z0-9][\w.\-]{0,127}$')
 _KEYS = {
     'pipeline', 'block', 'output', 'baseline', 'columns', 'drift', 'missing', 'rows',
     'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top', 'rolling', 'lag',
+    'segments',
     'performance', 'evidently', 'nannyml', 'environment',
 }
 # The engines' versions tested with this fork (pandas 3, NumPy 2, Python 3.12).
@@ -97,6 +98,9 @@ class Monitor:
     # With a previous baseline, the run this many runs back ends the baseline: 7 compares a
     # daily run with the same weekday a week earlier.
     lag: int = 1
+    # {column, top}: each of the column's most frequent values gets the column checks of its
+    # rows, against the baseline's rows of that value.
+    segments: Dict[str, Any] = field(default_factory=dict)
     performance: Dict[str, Any] = field(default_factory=dict)
     evidently: Dict[str, Any] = field(default_factory=dict)
     nannyml: Dict[str, Any] = field(default_factory=dict)
@@ -197,6 +201,20 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         raise MonitorError(f'The lag of monitor {name} is a number of runs, 1 or more.')
     if lag > 1 and baseline != 'previous':
         raise MonitorError(f'The lag of monitor {name} applies to baseline: previous.')
+    segments = document.get('segments') or {}
+    if isinstance(segments, str):
+        segments = dict(column=segments)
+    if not isinstance(segments, dict) or set(segments) - {'column', 'top'} or (
+        segments and not isinstance(segments.get('column'), str)
+    ):
+        raise MonitorError(
+            f'The segments of monitor {name} are a column name, or column and top.'
+        )
+    if segments:
+        top = segments.get('top', 10)
+        if isinstance(top, bool) or not isinstance(top, int) or not 1 <= top <= 50:
+            raise MonitorError(f'The segments top of monitor {name} is 1 to 50.')
+        segments = dict(column=segments['column'], top=top)
     performance = _performance_settings(document.get('performance'), name)
     engines = {}
     for engine in ('evidently', 'nannyml'):
@@ -236,6 +254,7 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         column_rules=column_rules,
         rolling=rolling,
         lag=lag,
+        segments=segments,
         performance=performance,
         evidently=engines['evidently'],
         nannyml=engines['nannyml'],
@@ -563,6 +582,8 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
         baseline = _baseline(pipeline, monitor, pipeline_run.id)
         edges = _reference_edges(pipeline, monitor, baseline)
         request = dict(bins=monitor.bins, top=monitor.top, edges=edges)
+        if monitor.segments:
+            request['segment'] = dict(monitor.segments)
         if monitor.columns:
             columns = list(monitor.columns)
             if monitor.freshness and monitor.freshness['column'] not in columns:
@@ -637,7 +658,8 @@ def summary(record: Dict) -> str:
     for check in record['checks']:
         where = f' {check["column"]}' if check.get('column') else ''
         if check['result'] == 'pass':
-            passed.append(f'{check["check"]}{where}')
+            segment = f' [{check["segment"]}]' if check.get('segment') else ''
+            passed.append(f'{check["check"]}{where}{segment}')
             continue
         lines.append(f'- {check["check"]}{where}: {check["result"]}; {check["detail"]}')
     if passed:

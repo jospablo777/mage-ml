@@ -56,6 +56,10 @@
 - A monitor's `lag` compares with the run that many runs back: `lag: 7` compares a daily
   pipeline's run with the same weekday a week earlier, alone or with `rolling` runs ending
   there. MageML and services pick the same runs.
+- A monitor's `segments` (`column`, `top`) checks missing values and drift for each of a
+  column's most frequent values, against the baseline's rows of that value: a drift in one
+  country that the totals hide fails its own check. MageML and services compute them the
+  same way; `/metrics` labels them with `segment`.
 - `mage-console` shows a pipeline's monitors: how many fail, each one's recent results as a
   strip, and the first check that did not pass. `/v1/snapshot` carries them, and the
   results of earlier runs show after the service restarts.

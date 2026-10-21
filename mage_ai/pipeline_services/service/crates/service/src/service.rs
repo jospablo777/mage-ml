@@ -74,16 +74,16 @@ pub struct Metrics {
 pub struct MonitorMetrics {
     /// 0 pass, 1 hold, 2 warn, 3 fail, 4 error.
     pub result: u8,
-    /// (check, column) -> value.
-    pub checks: Vec<(String, String, f64)>,
+    /// (check, column, segment) -> value.
+    pub checks: Vec<(String, String, String, f64)>,
     pub checked_at: Option<String>,
     pub detail: Option<String>,
     /// Results of recent runs, oldest first, at most MONITOR_HISTORY.
     pub history: std::collections::VecDeque<String>,
 }
 
-/// (check, column, value) of each check of a monitor's record that has a value.
-fn monitor_check_values(record: &Value) -> Vec<(String, String, f64)> {
+/// (check, column, segment, value) of each check of a monitor's record that has a value.
+fn monitor_check_values(record: &Value) -> Vec<(String, String, String, f64)> {
     record["checks"]
         .as_array()
         .into_iter()
@@ -92,6 +92,7 @@ fn monitor_check_values(record: &Value) -> Vec<(String, String, f64)> {
             Some((
                 c["check"].as_str()?.to_string(),
                 c["column"].as_str().unwrap_or("").to_string(),
+                c["segment"].as_str().unwrap_or("").to_string(),
                 c["value"].as_f64()?,
             ))
         })

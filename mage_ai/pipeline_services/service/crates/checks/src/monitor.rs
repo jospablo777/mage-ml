@@ -82,6 +82,23 @@ pub struct Performance {
     pub max_drop: HashMap<String, f64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Segments {
+    /// Empty: no segments.
+    pub column: String,
+    pub top: usize,
+}
+
+impl Default for Segments {
+    fn default() -> Self {
+        Segments {
+            column: String::new(),
+            top: 10,
+        }
+    }
+}
+
 /// A monitor's settings, as MageML's load_monitor gives them (its other settings, such as
 /// the engines, are read and left alone).
 #[derive(Debug, Clone, Deserialize)]
@@ -104,6 +121,8 @@ pub struct Monitor {
     /// With a previous baseline, the run this many runs back ends the baseline: 7 compares
     /// a daily run with the same weekday a week earlier.
     pub lag: usize,
+    /// The column whose most frequent values each get the column checks of their rows.
+    pub segments: Segments,
     pub performance: Performance,
 }
 
@@ -125,6 +144,7 @@ impl Default for Monitor {
             column_rules: HashMap::new(),
             rolling: 1,
             lag: 1,
+            segments: Segments::default(),
             performance: Performance::default(),
         }
     }
@@ -155,6 +175,9 @@ impl Monitor {
     /// and top values, over the reference edges.
     pub fn profile_request(&self, edges: &Value) -> Value {
         let mut request = json!({"bins": self.bins, "top": self.top, "edges": edges});
+        if !self.segments.column.is_empty() {
+            request["segment"] = json!({"column": self.segments.column, "top": self.segments.top});
+        }
         if let Some(columns) = &self.columns {
             let mut columns = columns.clone();
             if let Some(column) = &self.freshness.column
@@ -326,50 +349,17 @@ fn parse_time(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|time| time.and_utc())
 }
 
-/// Each check of the monitor for the current profile against the baseline's.
-pub fn compare(
+/// The missing-value and drift checks of each column of a profile against the baseline's.
+fn column_checks(
     monitor: &Monitor,
     current: &Value,
     baseline: Option<&Value>,
-    execution_date: Option<chrono::DateTime<chrono::Utc>>,
-) -> Value {
-    let mut checks = Vec::new();
-    let rows = current["rows"].as_u64().unwrap_or(0);
-    let baseline_rows = baseline.and_then(|b| b["rows"].as_u64());
-    let enough = rows >= monitor.min_rows && baseline_rows.unwrap_or(0) >= monitor.min_rows;
-
-    if let Some(min) = monitor.rows.min {
-        checks.push(check(
-            "rows",
-            None,
-            json!(rows),
-            if (rows as f64) < min { "fail" } else { "pass" },
-            format!("{rows} rows; at least {}", min.trunc() as i64),
-        ));
-    }
-    if let Some(max_change) = monitor.rows.max_change {
-        match baseline_rows.filter(|b| *b > 0) {
-            None => checks.push(check(
-                "row_change",
-                None,
-                Value::Null,
-                "hold",
-                "no baseline rows to compare with".into(),
-            )),
-            Some(before) => {
-                let change = (rows as f64 - before as f64).abs() / before as f64;
-                checks.push(check(
-                    "row_change",
-                    None,
-                    json!(round_to(change, 4)),
-                    if change > max_change { "fail" } else { "pass" },
-                    format!("{rows} rows against {before} ({} change)", percent(change)),
-                ));
-            }
-        }
-    }
-
+    rows: u64,
+    baseline_rows: Option<u64>,
+    enough: bool,
+) -> Vec<Value> {
     let empty = Vec::new();
+    let mut checks = Vec::new();
     let baseline_columns: HashMap<&str, &Value> = baseline
         .and_then(|b| b["columns"].as_array())
         .unwrap_or(&empty)
@@ -503,6 +493,94 @@ pub fn compare(
         checks.push(entry);
     }
 
+    checks
+}
+
+/// The column checks of each segment of the profile against the baseline's segment of the
+/// same value, labeled with it.
+fn segment_checks(monitor: &Monitor, current: &Value, baseline: Option<&Value>) -> Vec<Value> {
+    let Some(segments) = current.get("segments").filter(|s| s.is_object()) else {
+        return Vec::new();
+    };
+    let column = segments["column"].as_str().unwrap_or("");
+    let empty = Vec::new();
+    let before: HashMap<&str, &Value> = baseline
+        .and_then(|b| b["segments"]["values"].as_array())
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|part| part["value"].as_str().map(|value| (value, part)))
+        .collect();
+    let mut checks = Vec::new();
+    for part in segments["values"].as_array().unwrap_or(&empty) {
+        let value = part["value"].as_str().unwrap_or("");
+        let label = format!("{column}={value}");
+        let reference = before.get(value).copied();
+        let rows = part["rows"].as_u64().unwrap_or(0);
+        let reference_rows = reference.and_then(|r| r["rows"].as_u64());
+        let enough = rows >= monitor.min_rows && reference_rows.unwrap_or(0) >= monitor.min_rows;
+        for mut entry in column_checks(monitor, part, reference, rows, reference_rows, enough) {
+            let detail = entry["detail"].as_str().unwrap_or("").to_string();
+            entry["detail"] = json!(format!("{label}: {detail}"));
+            entry["segment"] = json!(label);
+            checks.push(entry);
+        }
+    }
+    checks
+}
+
+/// Each check of the monitor for the current profile against the baseline's.
+pub fn compare(
+    monitor: &Monitor,
+    current: &Value,
+    baseline: Option<&Value>,
+    execution_date: Option<chrono::DateTime<chrono::Utc>>,
+) -> Value {
+    let mut checks = Vec::new();
+    let rows = current["rows"].as_u64().unwrap_or(0);
+    let baseline_rows = baseline.and_then(|b| b["rows"].as_u64());
+    let enough = rows >= monitor.min_rows && baseline_rows.unwrap_or(0) >= monitor.min_rows;
+
+    if let Some(min) = monitor.rows.min {
+        checks.push(check(
+            "rows",
+            None,
+            json!(rows),
+            if (rows as f64) < min { "fail" } else { "pass" },
+            format!("{rows} rows; at least {}", min.trunc() as i64),
+        ));
+    }
+    if let Some(max_change) = monitor.rows.max_change {
+        match baseline_rows.filter(|b| *b > 0) {
+            None => checks.push(check(
+                "row_change",
+                None,
+                Value::Null,
+                "hold",
+                "no baseline rows to compare with".into(),
+            )),
+            Some(before) => {
+                let change = (rows as f64 - before as f64).abs() / before as f64;
+                checks.push(check(
+                    "row_change",
+                    None,
+                    json!(round_to(change, 4)),
+                    if change > max_change { "fail" } else { "pass" },
+                    format!("{rows} rows against {before} ({} change)", percent(change)),
+                ));
+            }
+        }
+    }
+
+    checks.extend(column_checks(
+        monitor,
+        current,
+        baseline,
+        rows,
+        baseline_rows,
+        enough,
+    ));
+
+    let empty = Vec::new();
     if let Some(name) = &monitor.freshness.column {
         let column = current["columns"]
             .as_array()
@@ -538,6 +616,7 @@ pub fn compare(
         current.get("performance"),
         baseline.and_then(|b| b.get("performance")),
     ));
+    checks.extend(segment_checks(monitor, current, baseline));
     let result = worst(checks.iter().filter_map(|c| c["result"].as_str()));
     json!({"result": result, "checks": checks})
 }
@@ -630,23 +709,12 @@ fn python_number(value: f64) -> String {
     }
 }
 
-/// One baseline record from several, whose profiles share their bin edges: the rolling
-/// baseline of a monitor (records oldest first, each with its profile and run id).
-pub fn merge(records: &[Value]) -> Value {
-    if records.len() == 1 {
-        return records[0].clone();
-    }
-    let Some(newest) = records.last() else {
-        return Value::Null;
-    };
+/// Profiles of several runs, whose numeric columns share their bin edges, added up.
+fn merge_profiles(profiles: &[&Value]) -> Value {
     let mut order: Vec<String> = Vec::new();
     let mut columns: HashMap<String, Value> = HashMap::new();
-    for record in records {
-        for column in record["profile"]["columns"]
-            .as_array()
-            .into_iter()
-            .flatten()
-        {
+    for profile in profiles {
+        for column in profile["columns"].as_array().into_iter().flatten() {
             let name = column["name"].as_str().unwrap_or("").to_string();
             let Some(merged) = columns.get_mut(&name) else {
                 order.push(name.clone());
@@ -684,10 +752,51 @@ pub fn merge(records: &[Value]) -> Value {
             }
         }
     }
-    let mut profile = json!({
-        "rows": records.iter().map(|r| number(&r["profile"]["rows"]) as u64).sum::<u64>(),
+    json!({
+        "rows": profiles.iter().map(|p| number(&p["rows"]) as u64).sum::<u64>(),
         "columns": order.iter().map(|name| columns[name].clone()).collect::<Vec<_>>(),
-    });
+    })
+}
+
+/// One baseline record from several, whose profiles share their bin edges: the rolling
+/// baseline of a monitor (records oldest first, each with its profile and run id).
+pub fn merge(records: &[Value]) -> Value {
+    if records.len() == 1 {
+        return records[0].clone();
+    }
+    let Some(newest) = records.last() else {
+        return Value::Null;
+    };
+    let profiles: Vec<&Value> = records.iter().map(|r| &r["profile"]).collect();
+    let mut profile = merge_profiles(&profiles);
+    if let Some(column) = profiles
+        .iter()
+        .rev()
+        .find_map(|p| p["segments"]["column"].as_str())
+    {
+        // Each segment value over the runs that have it, largest first.
+        let mut by_value: BTreeMap<String, Vec<&Value>> = BTreeMap::new();
+        for p in &profiles {
+            for part in p["segments"]["values"].as_array().into_iter().flatten() {
+                let value = part["value"].as_str().unwrap_or("").to_string();
+                by_value.entry(value).or_default().push(part);
+            }
+        }
+        let mut parts: Vec<Value> = by_value
+            .into_iter()
+            .map(|(value, parts)| {
+                let mut merged = merge_profiles(&parts);
+                merged["value"] = json!(value);
+                merged
+            })
+            .collect();
+        parts.sort_by(|a, b| {
+            number(&b["rows"])
+                .total_cmp(&number(&a["rows"]))
+                .then_with(|| a["value"].as_str().cmp(&b["value"].as_str()))
+        });
+        profile["segments"] = json!({"column": column, "values": parts});
+    }
     let performances: Vec<&Value> = records
         .iter()
         .map(|r| &r["profile"]["performance"])
@@ -1156,5 +1265,98 @@ mod tests {
         assert_eq!(result["roc_auc"], 0.75);
         let expected = -((0.9f64).ln() + (0.4f64).ln() + (0.4f64).ln() + (0.8f64).ln()) / 4.0;
         assert!((result["log_loss"].as_f64().unwrap() - expected).abs() < 1e-12);
+    }
+
+    fn parquet(frame: &mut DataFrame) -> tempfile::NamedTempFile {
+        let file = tempfile::Builder::new()
+            .suffix(".parquet")
+            .tempfile()
+            .unwrap();
+        ParquetWriter::new(std::fs::File::create(file.path()).unwrap())
+            .finish(frame)
+            .unwrap();
+        file
+    }
+
+    /// 200 rows a country; the scores of `shifted` countries move by 5.
+    fn orders(shifted: &[&str]) -> DataFrame {
+        let mut country = Vec::new();
+        let mut score = Vec::new();
+        for name in ["US", "DE"] {
+            for i in 0..200 {
+                country.push(name);
+                let base = (i % 20) as f64 / 20.0;
+                score.push(if shifted.contains(&name) {
+                    base + 5.0
+                } else {
+                    base
+                });
+            }
+        }
+        df!("country" => country, "score" => score).unwrap()
+    }
+
+    #[test]
+    fn segments_are_compared_one_by_one() {
+        let watcher = monitor(json!({
+            "name": "orders", "min_rows": 10, "columns": ["score"],
+            "segments": {"column": "country", "top": 5},
+        }));
+        let first = parquet(&mut orders(&[]));
+        let baseline = crate::profile::profile(
+            first.path().to_str().unwrap(),
+            &watcher.profile_request(&json!({})).to_string(),
+        )
+        .unwrap();
+        let values: Vec<&str> = baseline["segments"]["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["value"].as_str().unwrap())
+            .collect();
+        assert_eq!(values, ["DE", "US"]);
+
+        let edges: serde_json::Map<String, Value> = baseline["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["name"].as_str().unwrap().to_string(), c["edges"].clone()))
+            .collect();
+        let second = parquet(&mut orders(&["DE"]));
+        let current = crate::profile::profile(
+            second.path().to_str().unwrap(),
+            &watcher.profile_request(&Value::Object(edges)).to_string(),
+        )
+        .unwrap();
+        let result = compare(&watcher, &current, Some(&baseline), None);
+        let segment = |label: &str| -> String {
+            result["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["segment"] == label && c["check"] == "drift")
+                .map(|c| c["result"].as_str().unwrap().to_string())
+                .unwrap()
+        };
+        assert_eq!(segment("country=DE"), "fail");
+        assert_eq!(segment("country=US"), "pass");
+        let detail = result["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["segment"] == "country=DE")
+            .unwrap()["detail"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(detail.starts_with("country=DE: "), "{detail}");
+
+        // A rolling baseline adds each segment up over its runs.
+        let record =
+            |profile: &Value, run: u64| json!({"pipeline_run_id": run, "profile": profile});
+        let merged = merge(&[record(&baseline, 1), record(&baseline, 2)]);
+        let parts = merged["profile"]["segments"]["values"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["rows"], 400);
     }
 }

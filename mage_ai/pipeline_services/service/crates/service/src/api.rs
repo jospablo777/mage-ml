@@ -1182,16 +1182,17 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
         );
         let _ = writeln!(out, "# TYPE mage_service_monitor_check gauge");
         for ((pipeline, block, monitor), m) in &monitors {
-            for (check, column, value) in &m.checks {
+            for (check, column, segment, value) in &m.checks {
                 let _ = writeln!(
                     out,
                     "mage_service_monitor_check{{pipeline=\"{}\",block=\"{}\",monitor=\"{}\",\
-                     check=\"{}\",column=\"{}\"}} {value}",
+                     check=\"{}\",column=\"{}\",segment=\"{}\"}} {value}",
                     escape(pipeline),
                     escape(block),
                     escape(monitor),
                     escape(check),
-                    escape(column)
+                    escape(column),
+                    escape(segment)
                 );
             }
         }

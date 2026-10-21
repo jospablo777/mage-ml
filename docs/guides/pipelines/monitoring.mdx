@@ -66,6 +66,9 @@ baseline: previous
 rolling: 7                 # the baseline is the last 7 runs together
 lag: 1                     # 7 for a daily pipeline: compare with the same weekday a week
                            # earlier (with rolling, the 7 runs ending there)
+segments:                  # the missing-value and drift checks for each country too
+  column: country
+  top: 10                  # its 10 most frequent values in each run
 notify: on_change          # notify when the result turns to fail, not on every failed run
 ```
 
@@ -166,6 +169,14 @@ A failed monitor sends the pipeline's notifications (Slack, email, Teams and the
 set in its notification settings), unless `notify: false`. With `fail_block: true` it
 also fails the block run, so downstream blocks don't run.
 
+### Segments
+
+With `segments`, each of the column's most frequent values in the run gets the
+missing-value and drift checks of its rows, against the baseline's rows of the same value,
+on the whole output's bins. A drift in one country that the totals hide fails its own
+check, `drift score` with segment `country=DE` and the detail `country=DE: ...`. A value
+that is new has no baseline and holds. `min_rows` applies to each segment.
+
 ## How drift is measured
 
 - **Numeric columns** are split into 20 bins (`bins:` changes it) at the quantiles of
@@ -199,7 +210,7 @@ each run, with the same Rust code as MageML, so the same data gets the same chec
   MageML's record of that run, taken into the service when it is exported.
 - The result is in the run log, in `monitors.json` next to the block's output, and in
   `/metrics`: `mage_service_monitor_result` (0 pass, 1 hold, 2 warn, 3 fail, 4 error) and
-  `mage_service_monitor_check` (each check's value), for Prometheus or another alerting
-  system. The service sends no notifications itself.
+  `mage_service_monitor_check` (each check's value, with its `segment` label for segment
+  checks), for Prometheus or another alerting system. The service sends no notifications itself.
 - `fail_block: true` fails the block, without retries.
 - Evidently and NannyML run in MageML only.

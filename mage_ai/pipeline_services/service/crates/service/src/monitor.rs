@@ -277,6 +277,9 @@ pub fn summary(record: &Value) -> String {
             label.push_str(column);
         }
         if check["result"] == "pass" {
+            if let Some(segment) = check["segment"].as_str() {
+                label.push_str(&format!(" [{segment}]"));
+            }
             passed.push(label);
         } else {
             lines.push(format!(
