@@ -1637,7 +1637,9 @@ def service_build(
         typer.echo('--push needs --image.', err=True)
         raise typer.Exit(code=1)
     if image:
-        platforms = platform.split(',') if platform else None
+        # The service's platforms, unless --platform names others.
+        platforms = (platform.split(',') if platform
+                     else definitions.load_definition(project, name).get('platforms') or None)
         try:
             export.build_image(box, tag or name, platforms=platforms, push=push)
         except export.ExportError as error:

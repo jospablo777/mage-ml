@@ -35,7 +35,8 @@ PipelineServicePolicy.allow_read(
 )
 
 PipelineServicePolicy.allow_write(
-    ['description', 'include', 'max_runs', 'model_registry', 'models', 'name', 'pipelines'],
+    ['alerts', 'description', 'include', 'max_runs', 'model_registry', 'models', 'name',
+     'pipelines', 'platforms'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE, constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

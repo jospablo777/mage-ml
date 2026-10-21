@@ -196,6 +196,20 @@ class DefinitionsTest(ExportTestCase):
         self.assertEqual(kept[1], dict(name='new', uri='models:/new/1'))
         self.assertIn('alerts', FIELDS)
 
+    def test_an_environment_builds_for_the_services_platforms_unless_it_names_its_own(self):
+        from mage_ai.pipeline_services import local_run
+
+        definitions.save_definition(self.repo_path, 'shop', dict(
+            pipelines=['a'], platforms=['linux/arm64']))
+        folder = Path(self.repo_path) / 'services' / 'shop' / definitions.ENVIRONMENTS_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'prod.yaml').write_text('target: kubernetes\n')
+        (folder / 'edge.yaml').write_text('target: kubernetes\nplatforms: [linux/amd64]\n')
+        self.assertEqual(local_run.environment_settings(self.repo_path, 'shop', 'prod')
+                         ['platforms'], ['linux/arm64'])
+        self.assertEqual(local_run.environment_settings(self.repo_path, 'shop', 'edge')
+                         ['platforms'], ['linux/amd64'])
+
     def test_bad_settings_say_what_to_fix(self):
         for value, message in (
             (dict(pipelines='a'), 'pipelines must be a list'),
@@ -214,6 +228,8 @@ class DefinitionsTest(ExportTestCase):
             (dict(pipelines=['a'], models=[dict(name='m', uri='u', audit=dict(
                 reasons=-1))]), 'audit.reasons is'),
             (dict(pipelines=['a'], alerts=dict(channels=[])), 'at least one channel'),
+            (dict(pipelines=['a'], platforms='linux/amd64'), 'platforms must be a list'),
+            (dict(pipelines=['a'], platforms=['linux/arm/v7']), 'publish no builds'),
             (dict(pipelines=['a'], alerts=dict(channels=[dict(kind='sms', url_env='X')])),
              'a channel kind is one of'),
             (dict(pipelines=['a'], alerts=dict(channels=[dict(
@@ -360,6 +376,19 @@ class ServicesApiTest(ExportTestCase):
         self.assertEqual([s['name'] for s in using['pipeline_services']], ['shop-live'])
         other = self.call(OperationType.LIST, query=dict(pipeline=['another']))
         self.assertEqual(other['pipeline_services'], [])
+
+        # Where the image runs, saved with the service; alerts too, through the API.
+        targeted = self.call(OperationType.UPDATE, pk='shop-live', payload=dict(
+            pipeline_service=dict(
+                platforms=['linux/amd64', 'linux/arm64'],
+                alerts=dict(channels=[dict(kind='slack', url_env='SLACK_WEBHOOK_URL')]),
+            ),
+        ))['pipeline_service']
+        self.assertEqual(targeted['platforms'], ['linux/amd64', 'linux/arm64'])
+        refused = self.call(OperationType.UPDATE, pk='shop-live', payload=dict(
+            pipeline_service=dict(platforms=['linux/s390x']),
+        ))
+        self.assertIn('Polars, pyarrow and the engine', refused['error']['message'])
 
         denied = self.call(OperationType.DELETE, pk='shop-live', user=create_user())
         self.assertEqual(denied['error']['code'], 403)

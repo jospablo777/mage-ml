@@ -51,4 +51,26 @@ test('a pipeline becomes a service and its settings show it', async ({ page }) =
   await page.getByRole('link', { exact: true, name: serviceName }).click();
   await page.waitForURL(`**/services?service=${serviceName}`);
   await expect(page.getByText(`services/${serviceName}/service.yaml`).first()).toBeVisible();
+
+  // Build and ship: the image is for most servers (amd64) until the service says otherwise,
+  // and the choice saves as the service's platforms.
+  await page.getByRole('button', { exact: true, name: 'Export' }).click();
+  await expect(page.getByText('Build and ship the image')).toBeVisible({ timeout: 180_000 });
+  const amd64 = page.getByRole('button', { exact: true, name: 'linux/amd64' });
+  const arm64 = page.getByRole('button', { exact: true, name: 'linux/arm64' });
+  await expect(amd64).toHaveAttribute('aria-pressed', 'true');
+  await expect(arm64).toHaveAttribute('aria-pressed', 'false');
+  await arm64.click();
+  await page.getByRole('button', { name: 'Save as the service\'s platforms' }).click();
+  await expect(page.getByRole('button', { name: 'Save as the service\'s platforms' })).toBeHidden();
+  const { pipeline_service: built } = await api.call('GET', `pipeline_services/${serviceName}`);
+  expect(built.platforms).toEqual(['linux/amd64', 'linux/arm64']);
+  // A new panel reads them from the service.
+  await page.reload();
+  await page.getByRole('button', { exact: true, name: 'Export' }).click();
+  await expect(arm64).toHaveAttribute('aria-pressed', 'true');
+  await amd64.click();
+  await expect(page.getByText('Choose where the image runs.')).toHaveCount(0);
+  await arm64.click();
+  await expect(page.getByText('Choose where the image runs.')).toBeVisible();
 });

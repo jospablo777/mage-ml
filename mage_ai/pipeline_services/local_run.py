@@ -80,7 +80,16 @@ def environment_settings(repo_path: str, name: str, environment: str) -> Dict:
         if environment != 'dev':
             raise LocalRunError(f'Service {name} has no environment {environment} ({path}).')
         return {}
-    return yaml.safe_load(path.read_text()) or {}
+    settings = yaml.safe_load(path.read_text()) or {}
+    # The service's platforms, unless the environment names its own.
+    if not settings.get('platforms'):
+        try:
+            platforms = definitions.load_definition(repo_path, name).get('platforms')
+        except definitions.DefinitionError:
+            platforms = None
+        if platforms:
+            settings['platforms'] = platforms
+    return settings
 
 
 def environment_values(repo_path: str, name: str, environment: str) -> Dict[str, str]:

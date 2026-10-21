@@ -5,7 +5,7 @@ from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
 
 FIELDS = ('alerts', 'description', 'include', 'max_runs', 'model_registry', 'models',
-          'pipelines')
+          'pipelines', 'platforms')
 # A model's settings the Services page does not edit: an update without them keeps them.
 MODEL_SETTINGS = ('challengers', 'shadow', 'audit')
 

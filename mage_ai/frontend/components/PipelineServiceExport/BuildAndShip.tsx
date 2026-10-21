@@ -16,7 +16,13 @@ import { BORDER_RADIUS_SMALL } from '@oracle/styles/units/borders';
 import { FONT_FAMILY_REGULAR, MONO_FONT_FAMILY_REGULAR } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { onSuccess } from '@api/utils/response';
-import { PLATFORMS, REGISTRIES, shipCommands } from './registries';
+import {
+  PLATFORMS,
+  PLATFORM_LABELS,
+  REGISTRIES,
+  platformProgress,
+  shipCommands,
+} from './registries';
 
 const POLL_MS = 700;
 
@@ -83,9 +89,26 @@ const LogStyle = styled(CodeStyle)`
   white-space: pre-wrap;
 `;
 
-// Choose the platforms and the registry; get the commands, or build on the server.
+// Choose where the image runs and the registry; get the commands, or build on the server.
 function BuildAndShip({ name }: { name: string }) {
-  const [platforms, setPlatforms] = useState<string[]>([]);
+  // Where the image runs: the service's saved platforms, else most servers' (amd64). Not
+  // this machine's by default: a laptop's arm64 image does not run on an amd64 server.
+  const [platforms, setPlatforms] = useState<string[]>(['linux/amd64']);
+  const { data: dataService, mutate: reloadService } = api.pipeline_services.detail(
+    name, {}, { revalidateOnFocus: false },
+  );
+  const saved: string[] = dataService?.pipeline_service?.platforms || [];
+  const savedKey = saved.join(',');
+  useEffect(() => {
+    if (saved.length) {
+      setPlatforms(saved);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey]);
+  const [savePlatforms, { isLoading: isSaving }] = useMutation(
+    api.pipeline_services.useUpdate(name),
+    { onSuccess: () => reloadService() },
+  );
   const [registryKey, setRegistryKey] = useState<string>('none');
   const [values, setValues] = useState<{ [key: string]: string }>({});
   const [tag, setTag] = useState<string>('1.0');
@@ -95,12 +118,13 @@ function BuildAndShip({ name }: { name: string }) {
   const registry = REGISTRIES[registryKey];
   const push = registryKey !== 'none';
   const image = registry.image(values, name, tag || 'latest');
-  const { lines, problem } = useMemo(() => shipCommands({
+  const { lines, problem: commandProblem } = useMemo(() => shipCommands({
     image,
     login: registry.login?.(values),
     platforms,
     push,
   }), [image, platforms, push, registry, values]);
+  const problem = platforms.length ? commandProblem : 'Choose where the image runs.';
 
   const { data: dataStatus } = api.pipeline_service_builds.list({}, { revalidateOnFocus: false });
   const server = dataStatus?.pipeline_service_builds?.[0];
@@ -140,29 +164,59 @@ function BuildAndShip({ name }: { name: string }) {
   const togglePlatform = (platform: string) => setPlatforms(prev => (
     prev.includes(platform) ? prev.filter(p => p !== platform) : [...prev, platform]
   ));
+  const native: string = server?.platform;
+  const emulated = native ? platforms.filter(p => p !== native) : [];
+  // The server's own platform alone builds with docker build; others with buildx.
+  const needsBuildx = !server?.buildx && !(platforms.length === 1 && platforms[0] === native);
+  const unsaved = [...platforms].sort().join(',') !== [...saved].sort().join(',');
+  const progress = useMemo(() => platformProgress(job?.lines || []), [job?.lines]);
 
   return (
     <div>
-      <Text muted small>Platforms</Text>
+      <Text muted small>Where will it run?</Text>
       <Spacing mt={0.5}>
-        <ToggleStyle active={!platforms.length} onClick={() => setPlatforms([])} type="button">
-          This machine
-        </ToggleStyle>
         {PLATFORMS.map(platform => (
           <ToggleStyle
             active={platforms.includes(platform)}
+            aria-label={platform}
+            aria-pressed={platforms.includes(platform)}
             key={platform}
             onClick={() => togglePlatform(platform)}
             type="button"
           >
-            {platform}
+            {PLATFORM_LABELS[platform] || platform}
           </ToggleStyle>
         ))}
       </Spacing>
       <Text muted xsmall>
-        amd64 runs on most cloud servers; arm64 on Apple silicon, AWS Graviton and other ARM
-        machines. Both build one image that runs on either.
+        Both build one image that runs on either.
+        {native && ` This server builds ${native} natively`}
+        {native && emulated.length >= 1
+          ? `; ${emulated.join(' and ')} builds under emulation, several times slower. The `
+            + 'CI workflow builds each platform on its own runner.'
+          : native ? '.' : ''}
       </Text>
+      {unsaved && platforms.length >= 1 && (
+        <Spacing mt={0.5}>
+          <FlexContainer alignItems="center">
+            <Text muted xsmall>
+              {saved.length
+                ? `The service builds for ${saved.join(' and ')}.`
+                : 'The service has no platforms saved; its builds follow this machine.'}
+            </Text>
+            <Spacing ml={1} />
+            <Button
+              compact
+              loading={isSaving}
+              // @ts-ignore
+              onClick={() => savePlatforms({ pipeline_service: { platforms } })}
+              small
+            >
+              Save as the service&apos;s platforms
+            </Button>
+          </FlexContainer>
+        </Spacing>
+      )}
 
       <Spacing mt={1.5}>
         <GridStyle>
@@ -245,7 +299,7 @@ function BuildAndShip({ name }: { name: string }) {
         <Spacing mt={2}>
           <FlexContainer alignItems="center">
             <Button
-              disabled={!!problem || running || (platforms.length >= 1 && !server.buildx)}
+              disabled={!!problem || running || needsBuildx}
               loading={running || isStarting}
               // @ts-ignore
               onClick={() => startBuild({
@@ -259,7 +313,7 @@ function BuildAndShip({ name }: { name: string }) {
               {push
                 ? 'Uses the server\'s docker, which must be logged in to the registry.'
                 : 'Uses the server\'s docker.'}
-              {platforms.length >= 1 && !server.buildx ? ' Other platforms need docker buildx.' : ''}
+              {needsBuildx ? ` Platforms other than ${native || 'its own'} need docker buildx.` : ''}
             </Text>
           </FlexContainer>
         </Spacing>
@@ -289,6 +343,15 @@ function BuildAndShip({ name }: { name: string }) {
           {(job.problems || []).map(p => (
             <Spacing key={p} mt={0.5}><Text small>{p}</Text></Spacing>
           ))}
+          {Object.keys(progress).length >= 2 && (
+            <Spacing mt={1}>
+              {Object.entries(progress).map(([platform, { done, failed, total }]) => (
+                <Text danger={failed} key={platform} monospace small>
+                  {platform}: {failed ? `failed at step ${done} of ${total}` : `step ${done} of ${total}`}
+                </Text>
+              ))}
+            </Spacing>
+          )}
           {job.lines?.length >= 1 && (
             <Spacing mt={1}>
               <LogStyle ref={logRef}>{job.lines.join('\n')}</LogStyle>

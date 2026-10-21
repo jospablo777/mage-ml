@@ -402,7 +402,8 @@ class CaptureTest(ExportTestCase):
         )
         self.assertIn('docker buildx build --platform', (out / 'README.md').read_text())
 
-        with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'):
+        with patch.object(export.shutil, 'which', return_value='/usr/bin/docker'), \
+                patch.object(export, 'native_platform', return_value='linux/amd64'):
             [built] = export.build_commands(out, 'shop')
             self.assertEqual(built[1:3], ['build', '-t'])
             [pushed] = export.build_commands(
@@ -421,6 +422,14 @@ class CaptureTest(ExportTestCase):
             ])
             [loaded] = export.build_commands(out, 'shop', platforms=['linux/arm64'])
             self.assertIn('--load', loaded)
+            # The daemon's own platform, named, still builds and pushes without buildx.
+            commands = export.build_commands(
+                out, 'localhost:5000/shop:1', platforms=['linux/amd64'], push=True,
+            )
+            self.assertEqual([c[1:] for c in commands], [
+                ['build', '--platform', 'linux/amd64', '-t', 'localhost:5000/shop:1', str(out)],
+                ['push', 'localhost:5000/shop:1'],
+            ])
             with self.assertRaisesRegex(export.ExportError, 'Several platforms need --push'):
                 export.build_commands(out, 'shop', platforms=['linux/amd64', 'linux/arm64'])
         with patch.object(export.shutil, 'which', return_value=None):

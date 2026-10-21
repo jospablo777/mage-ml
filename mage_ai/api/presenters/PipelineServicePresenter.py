@@ -12,4 +12,5 @@ class PipelineServicePresenter(BasePresenter):
         'name',
         'path',
         'pipelines',
+        'platforms',
     ]

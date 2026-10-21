@@ -490,7 +490,11 @@ def docker_status() -> Dict:
     if not answers('info', '--format', '{{.ServerVersion}}'):
         return dict(docker=False, buildx=False,
                     reason='docker is installed, but its daemon does not answer.')
-    return dict(docker=True, buildx=answers('buildx', 'version'), reason=None)
+    from mage_ai.pipeline_services.export import native_platform
+
+    # The platform docker builds for natively; others build under emulation, slower.
+    return dict(docker=True, buildx=answers('buildx', 'version'), reason=None,
+                platform=native_platform(docker))
 
 
 _builds: Dict[tuple, Dict] = {}

@@ -13,6 +13,14 @@
 
 ### Exported services
 
+- A service names where it runs: `platforms` in `service.yaml` (`linux/amd64`,
+  `linux/arm64` or both), used by Build and ship, `mage service build --image` and deploys
+  whose environment names none. Build and ship no longer builds for the server's own chip
+  by default, which made arm64 images on Apple silicon that amd64 servers cannot start:
+  it starts from the service's platforms, else `linux/amd64`, shows the server's native
+  platform and which ones build under emulation, saves the choice to the service and shows
+  each platform's progress. A single native platform builds with `docker build`, without
+  buildx.
 - `mage data sample` copies a masked sample of production tables (PostgreSQL) for local
   development: keyed hashes that still join, fake names, emails and phones, shifted dates,
   sampling by key, stratum or time window; personal-looking columns without a rule stop the

@@ -27,6 +27,7 @@ service.yaml:
           mask: [ssn]        # columns stored as ***
           hash: [email]      # columns stored as their keyed hash
           reasons: 3         # the top features behind each score (tree models)
+    platforms: [linux/amd64] # where the image runs: linux/amd64, linux/arm64, or both
     alerts:                  # optional: where the service sends alerts
       on: [run_failed, run_late, stream_stopped, stream_lag, monitor_failed]
       channels:
@@ -195,6 +196,16 @@ def normalize(name: str, value: Dict) -> Dict:
         if problem:
             raise DefinitionError(f"Service {name}: model {model['name']}: {problem}")
     alerts = _alerts(name, value.get('alerts'))
+    platforms = value.get('platforms') or []
+    if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
+        raise DefinitionError(f'Service {name}: platforms must be a list, such as '
+                              '[linux/amd64, linux/arm64].')
+    unsupported = [p for p in platforms if p not in SUPPORTED_PLATFORMS]
+    if unsupported:
+        raise DefinitionError(
+            f'Service {name}: {", ".join(unsupported)} is not a platform services build for. '
+            f'They run on {" and ".join(SUPPORTED_PLATFORMS)}: Polars, pyarrow and the engine '
+            'publish no builds for other platforms.')
     if registry is not None and (
         not isinstance(registry, str) or not REGISTRY_URL.match(registry.strip())
     ):
@@ -207,6 +218,7 @@ def normalize(name: str, value: Dict) -> Dict:
         include=list(include),
         max_runs=max_runs,
         alerts=alerts,
+        platforms=list(dict.fromkeys(platforms)),
         model_registry=registry.strip() if registry else None,
         models=[_model(m) for m in models],
         pipelines=list(dict.fromkeys(pipelines)),
@@ -235,6 +247,9 @@ def _challenger_problem(model: Dict) -> Optional[str]:
     return None
 
 
+# Where exported services run: every dependency (Polars, pyarrow, the Rust engine) publishes
+# builds for these.
+SUPPORTED_PLATFORMS = ('linux/amd64', 'linux/arm64')
 ALERT_KINDS = ('run_failed', 'run_late', 'stream_stopped', 'stream_lag', 'monitor_failed')
 CHANNEL_KINDS = ('slack', 'teams', 'google_chat', 'discord', 'webhook')
 _ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -398,6 +413,8 @@ def _compact(value: Dict) -> Dict:
         out['models'] = value['models']
     if value.get('alerts'):
         out['alerts'] = value['alerts']
+    if value.get('platforms'):
+        out['platforms'] = value['platforms']
     return out
 
 

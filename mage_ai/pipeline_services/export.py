@@ -4087,6 +4087,19 @@ def report(capture_: Capture) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def native_platform(docker: str) -> Optional[str]:
+    """The platform docker's daemon builds for natively, such as linux/amd64; None unknown."""
+    try:
+        found = subprocess.run(
+            [docker, 'version', '--format', '{{.Server.Os}}/{{.Server.Arch}}'],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    platform = found.stdout.strip()
+    return platform if found.returncode == 0 and '/' in platform else None
+
+
 def build_commands(
     out_dir: Path,
     tag: str,
@@ -4094,8 +4107,8 @@ def build_commands(
     push: bool = False,
 ) -> List[List[str]]:
     """
-    The docker commands that build the image and push it when asked. This machine's platform
-    builds with docker build, then docker push, as the app shows: docker's own network
+    The docker commands that build the image and push it when asked. This machine's platform,
+    named or not, builds with docker build, then docker push, as the app shows: docker's own network
     reaches a registry on localhost, which a docker-container buildx builder does not. Other
     platforms build with docker buildx; several need push, since Docker keeps one platform of
     an image locally.
@@ -4104,8 +4117,14 @@ def build_commands(
     if not docker:
         raise ExportError(['docker is not installed; build the image with the Dockerfile.'])
     platforms = [p.strip() for p in (platforms or []) if p and p.strip()]
+    if len(platforms) == 1 and platforms[0] == native_platform(docker):
+        # The daemon's own platform needs neither buildx nor its builder.
+        platforms_args = ['--platform', platforms[0]]
+        platforms = []
+    else:
+        platforms_args = []
     if not platforms:
-        commands = [[docker, 'build', '-t', tag, str(out_dir)]]
+        commands = [[docker, 'build', *platforms_args, '-t', tag, str(out_dir)]]
         if push:
             commands.append([docker, 'push', tag])
         return commands

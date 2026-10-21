@@ -10,6 +10,7 @@ class PipelineServiceBuildPresenter(BasePresenter):
         'image',
         'lines',
         'name',
+        'platform',
         'problems',
         'push',
         'reason',

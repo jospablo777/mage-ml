@@ -91,6 +91,38 @@ export const REGISTRIES: { [key: string]: Registry } = {
 
 export const PLATFORMS = ['linux/amd64', 'linux/arm64'];
 
+// What each platform is, in the words of the machines it runs on.
+export const PLATFORM_LABELS: { [platform: string]: string } = {
+  'linux/amd64': 'Linux x86-64 (amd64): most cloud servers',
+  'linux/arm64': 'Linux ARM64: AWS Graviton, Ampere, Apple silicon',
+};
+
+// Per platform, the build's last step and whether it failed, from buildx's lines such as
+// "#12 [linux/arm64 3/9] RUN ..." and "ERROR [linux/arm64 3/9] ...".
+export function platformProgress(lines: string[]): {
+  [platform: string]: { done: number; total: number; failed: boolean };
+} {
+  const progress = {};
+  (lines || []).forEach((line) => {
+    const step = line.match(/\[(linux\/[a-z0-9/]+) (\d+)\/(\d+)\]/);
+    if (step) {
+      const [, platform, done, total] = step;
+      const known = progress[platform] || { done: 0, failed: false, total: 0 };
+      progress[platform] = {
+        ...known,
+        done: Math.max(known.done, Number(done)),
+        total: Number(total),
+      };
+    }
+    const failed = line.match(/ERROR[^[]*\[(linux\/[a-z0-9/]+)/);
+    if (failed) {
+      const known = progress[failed[1]] || { done: 0, failed: false, total: 0 };
+      progress[failed[1]] = { ...known, failed: true };
+    }
+  });
+  return progress;
+}
+
 export function shipCommands({
   image,
   login,

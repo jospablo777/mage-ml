@@ -128,6 +128,31 @@ whether it runs the repository's version, is behind it, or is stopped.
 
 ### Deploy to Kubernetes
 
+### Where the image runs
+
+An image runs on one kind of processor: an image built on an Apple silicon laptop (arm64)
+does not start on most cloud servers (amd64). `platforms` in `service.yaml` names where the
+service runs, and every build follows it:
+
+```yaml
+# services/shop-live/service.yaml
+platforms: [linux/amd64]       # or [linux/amd64, linux/arm64] for both
+```
+
+| Builds | Platforms they use |
+| --- | --- |
+| **Build and ship** after an export | The service's, else `linux/amd64`; **Save as the service's platforms** writes the choice |
+| `mage service build shop-live --image` | `--platform`, else the service's |
+| `mage service deploy --env prod` | The environment's `platforms`, else the service's |
+
+The panel shows the platform the server's docker builds natively. Others build under
+emulation with `docker buildx`, several times slower; the export's GitHub workflow builds
+each platform on its own runner. The server's own platform alone builds with `docker
+build`, so it needs no buildx and pushes to a registry on `localhost`. Two platforms make
+one image that runs on either, and need a registry: Docker keeps one platform of an image
+locally. While a build runs, the panel shows each platform's step. Only `linux/amd64` and
+`linux/arm64` are accepted, since Polars, pyarrow and the engine publish nothing else.
+
 An environment with `target: kubernetes` deploys with kubectl. The context is required, so
 a deploy never goes to whichever cluster happens to be current:
 
@@ -137,7 +162,7 @@ target: kubernetes
 context: prod-cluster          # the kubectl context
 namespace: shop                # default: default; it must exist
 image: icr.io/team/shop-live   # pushed as icr.io/team/shop-live:<lock digest>
-platforms: [linux/amd64]       # optional: the cluster's platform
+platforms: [linux/amd64]       # optional: the cluster's; default the service's platforms
 image_pull_secret: icr         # optional
 storage: 5Gi                   # optional: the run history volume
 storage_class: ibmc-block-gold # optional
