@@ -7,9 +7,16 @@
 - The container starts when the project's `requirements.txt` fails to install, with a
   warning in its log (as Mage 0.9.80 does): stopping left a restart loop, and the file is
   fixed in the editor. `MAGE_STRICT_REQUIREMENTS=1` keeps stopping.
+- Exported services keep their Rust binary running between runs: a `static` a Rust block
+  sets keeps its value for the next run. `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary
+  for each run.
 
 ### Exported services
 
+- Rust blocks in exported services run in a resident program: the service starts its Rust
+  binary once and sends it each run's job, so a model loaded with `mage::onnx::model` stays
+  loaded between runs. A program is replaced after 1,000 jobs, a panic or a timeout.
+  `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary for each run, as before.
 - **Check connections** in a stream's Run tab, and `mage-service check-connections`: the
   engine reports whether the source and each sink answer, read-only, with what the system
   says (Kafka partitions, retention and group lag; PostgreSQL tables, privileges, slots and

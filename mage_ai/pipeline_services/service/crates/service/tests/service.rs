@@ -1198,3 +1198,139 @@ fn check_connections_reports_each_connector_of_a_stream() {
         "{pg}"
     );
 }
+
+/// A program that speaks the resident protocol (mage::serve_jobs) as the SDK does: it
+/// counts the jobs it served, and fails, panics or sleeps when the run asks.
+const RESIDENT_PROGRAM: &str = r#"#!/usr/bin/env python3
+import json, os, sys, time
+
+served = 0
+
+def run(job_dir):
+    global served
+    served += 1
+    job = json.load(open(os.path.join(job_dir, 'job.json')))
+    variables = job.get('variables', {})
+    print(f'job {served} in {os.getpid()}', flush=True)
+    if variables.get('sleep'):
+        time.sleep(float(variables['sleep']))
+    if variables.get('fail') or variables.get('panic'):
+        kind = 'panic' if variables.get('panic') else 'error'
+        json.dump({'kind': kind, 'message': f'asked to {kind}'},
+                  open(os.path.join(job_dir, 'error.json'), 'w'))
+        return kind
+    json.dump({'served': served, 'pid': os.getpid()}, open(os.path.join(job_dir, 'out.json'), 'w'))
+    json.dump({'api_version': 1, 'outputs': [{'kind': 'json', 'path': 'out.json'}], 'tests': []},
+              open(os.path.join(job_dir, 'result.json'), 'w'))
+    return 'ok'
+
+if len(sys.argv) > 1:
+    sys.exit(0 if run(sys.argv[1]) == 'ok' else 1)
+for line in sys.stdin:
+    outcome = run(json.loads(line)['job_dir'])
+    print('\x1emage-job-done', flush=True)
+    print('\x1emage-job-done', file=sys.stderr, flush=True)
+    if outcome == 'panic':
+        sys.exit(1)
+"#;
+
+fn resident_service() -> Service {
+    let manifest = json!({
+        "schema_version": 1,
+        "service": {"name": "resident", "project": "proj", "exported_at": "2026-10-21T00:00:00Z",
+                    "mage_version": "test", "source_sha256": "abc"},
+        "pipelines": [{
+            "uuid": "score", "name": "score", "max_concurrent_runs": 2, "variables": {},
+            "blocks": [{"uuid": "score", "type": "transformer", "language": "rust",
+                        "file": "transformers/score.rs", "sha256": "0", "upstream": [],
+                        "binary": "bin/mage-blocks", "entry": "score"}],
+            "triggers": []
+        }]
+    });
+    let service = Service::with_manifest(&manifest, &[("transformers/score.rs", "")]);
+    let program = service.dir.path().join("bin/mage-blocks");
+    std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+    std::fs::write(&program, RESIDENT_PROGRAM.replace("python3", &python())).unwrap();
+    std::fs::set_permissions(
+        &program,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    service
+}
+
+fn score(service: &Service, variables: Value) -> Value {
+    let (_, run) = service.post(
+        "/v1/pipelines/score/runs?wait=60&output=score",
+        json!({"variables": variables}),
+    );
+    run
+}
+
+#[test]
+fn a_rust_program_stays_resident_between_runs_until_it_panics_or_is_stopped() {
+    let mut service = resident_service();
+    service.start(&[]);
+
+    let first = score(&service, json!({}));
+    let second = score(&service, json!({}));
+    assert_eq!(first["status"], "completed", "{first}");
+    let pid = first["output"]["pid"].clone();
+    assert_eq!(
+        (
+            second["output"]["served"].clone(),
+            second["output"]["pid"].clone()
+        ),
+        (json!(2), pid.clone())
+    );
+
+    // An error fails the run and keeps the program; a panic ends it.
+    let failed = score(&service, json!({"fail": true}));
+    assert_eq!(failed["status"], "failed");
+    assert!(
+        failed["error"].as_str().unwrap().contains("asked to error"),
+        "{failed}"
+    );
+    assert_eq!(score(&service, json!({}))["output"]["pid"], pid);
+    let panicked = score(&service, json!({"panic": true}));
+    assert!(
+        panicked["error"]
+            .as_str()
+            .unwrap()
+            .contains("asked to panic"),
+        "{panicked}"
+    );
+    let after = score(&service, json!({}));
+    assert_ne!(after["output"]["pid"], pid);
+    assert_eq!(after["output"]["served"], 1);
+
+    // Each job's lines are in its own run's log.
+    let (_, logs) = service.get(&format!("/v1/runs/{}/logs", after["id"].as_str().unwrap()));
+    let text = logs.to_string();
+    assert!(text.contains("job 1 in"), "{text}");
+    assert!(!text.contains("job 2 in"), "{text}");
+
+    // A cancelled job takes its program with it.
+    let (_, slow) = service.post(
+        "/v1/pipelines/score/runs",
+        json!({"variables": {"sleep": 30}}),
+    );
+    let id = slow["id"].as_str().unwrap().to_string();
+    wait_status(&service, &id, "running");
+    std::thread::sleep(Duration::from_millis(300));
+    service.post(&format!("/v1/runs/{id}/cancel"), json!({}));
+    wait_status(&service, &id, "cancelled");
+    let fresh = score(&service, json!({}));
+    assert_eq!(fresh["output"]["served"], 1, "{fresh}");
+}
+
+#[test]
+fn without_resident_programs_each_run_starts_its_own() {
+    let mut service = resident_service();
+    service.start(&[("MAGE_SERVICE_RUST_RESIDENT", "off")]);
+    let first = score(&service, json!({}));
+    let second = score(&service, json!({}));
+    assert_eq!(first["status"], "completed", "{first}");
+    assert_ne!(first["output"]["pid"], second["output"]["pid"]);
+    assert_eq!(second["output"]["served"], 1);
+}

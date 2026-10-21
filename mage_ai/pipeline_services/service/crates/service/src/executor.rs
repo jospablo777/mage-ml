@@ -683,18 +683,37 @@ impl BlockTask {
             .iter()
             .map(|entry| ("MAGE_BLOCK".to_string(), entry.clone()))
             .collect();
-        let status = run_rust_binary(
-            &self.service,
-            &binary,
-            &self.output_dir,
-            env,
-            self.block.io_config.as_ref(),
-            &self.log,
-            &self.block.uuid,
-            timeout,
-            &self.cancel,
-        )
-        .await?;
+        let status = match (&self.service.residents, &self.block.entry) {
+            (Some(residents), Some(entry)) => {
+                residents
+                    .run(
+                        &self.service,
+                        &binary,
+                        &self.output_dir,
+                        Some(entry),
+                        rendered_io_config(&self.service, self.block.io_config.as_ref()),
+                        &self.log,
+                        &self.block.uuid,
+                        timeout,
+                        &self.cancel,
+                    )
+                    .await?
+            }
+            _ => {
+                run_rust_binary(
+                    &self.service,
+                    &binary,
+                    &self.output_dir,
+                    env,
+                    self.block.io_config.as_ref(),
+                    &self.log,
+                    &self.block.uuid,
+                    timeout,
+                    &self.cancel,
+                )
+                .await?
+            }
+        };
         let result_path = self.output_dir.join("result.json");
         if status.success() && result_path.exists() {
             let result = read_result(&result_path)?;
@@ -811,19 +830,8 @@ async fn run_rust_binary(
         .env_clear()
         .envs(service.extra_env.iter().cloned())
         .envs(env);
-    if let Some(profile) = io_config_profile {
-        let extra = &service.extra_env;
-        let lookup = |name: &str| {
-            extra
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.clone())
-                .or_else(|| std::env::var(name).ok())
-        };
-        command.env(
-            "MAGE_IO_CONFIG",
-            io_config::render(profile, &lookup).to_string(),
-        );
+    if let Some(profile) = rendered_io_config(service, io_config_profile) {
+        command.env("MAGE_IO_CONFIG", profile);
     }
     let mut child = command
         .spawn()
@@ -898,6 +906,19 @@ async fn run_rust_binary(
         let _ = reader.await;
     }
     Ok(status)
+}
+
+/// A block's connection profile with its variables filled in, as MAGE_IO_CONFIG holds it.
+fn rendered_io_config(service: &Service, profile: Option<&Value>) -> Option<String> {
+    let extra = &service.extra_env;
+    let lookup = |name: &str| {
+        extra
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+            .or_else(|| std::env::var(name).ok())
+    };
+    profile.map(|profile| io_config::render(profile, &lookup).to_string())
 }
 
 /// The marker a chain prints before each block (mage::runtime::BLOCK_MARKER).
@@ -1348,18 +1369,37 @@ impl ChainTask {
             )
         })?;
         let profile = self.blocks.iter().find_map(|b| b.io_config.as_ref());
-        let status = run_rust_binary(
-            &self.service,
-            &binary,
-            &self.output_dir,
-            vec![("MAGE_CHAIN".to_string(), "1".to_string())],
-            profile,
-            &self.log,
-            &head.uuid,
-            timeout,
-            &self.cancel,
-        )
-        .await
+        let status = match &self.service.residents {
+            Some(residents) => {
+                residents
+                    .run(
+                        &self.service,
+                        &binary,
+                        &self.output_dir,
+                        None,
+                        rendered_io_config(&self.service, profile),
+                        &self.log,
+                        &head.uuid,
+                        timeout,
+                        &self.cancel,
+                    )
+                    .await
+            }
+            None => {
+                run_rust_binary(
+                    &self.service,
+                    &binary,
+                    &self.output_dir,
+                    vec![("MAGE_CHAIN".to_string(), "1".to_string())],
+                    profile,
+                    &self.log,
+                    &head.uuid,
+                    timeout,
+                    &self.cancel,
+                )
+                .await
+            }
+        }
         .map_err(|f| (f, None))?;
         let result_path = self.output_dir.join("result.json");
         if status.success() && result_path.exists() {
@@ -1387,14 +1427,14 @@ impl ChainTask {
     }
 }
 
-struct BlockFailure {
+pub(crate) struct BlockFailure {
     message: String,
     details: String,
     retryable: bool,
 }
 
 impl BlockFailure {
-    fn fatal(message: impl Into<String>) -> BlockFailure {
+    pub(crate) fn fatal(message: impl Into<String>) -> BlockFailure {
         BlockFailure {
             message: message.into(),
             details: String::new(),
@@ -1402,7 +1442,7 @@ impl BlockFailure {
         }
     }
 
-    fn retryable(message: impl Into<String>) -> BlockFailure {
+    pub(crate) fn retryable(message: impl Into<String>) -> BlockFailure {
         BlockFailure {
             message: message.into(),
             details: String::new(),

@@ -543,6 +543,8 @@ to it.
 | `MAGE_SERVICE_STRICT_ENV` | `off` | Refuse to start without required variables |
 | `MAGE_SERVICE_CHAINS` | `on` | `off` runs every block on its own |
 | `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
+| `MAGE_SERVICE_RUST_RESIDENT` | `on` | `off` starts the Rust binary for each run instead of keeping it running between runs |
+| `MAGE_SERVICE_RUST_MAX_JOBS` | `1000` | Jobs a resident Rust program serves before it is replaced |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |
 | `MAGE_SERVICE_PASS_ENV` | none | In strict mode, more variables for blocks: names or `PREFIX_*` patterns, separated by commas |
@@ -595,6 +597,14 @@ its log lines and its retry settings. Only the outputs that later blocks or the 
 written; `MAGE_SERVICE_KEEP_OUTPUTS=on` writes every block's output, and
 `MAGE_SERVICE_CHAINS=off` runs every block on its own (`MAGE_SERVICE_RUST_CHAINS=off` for
 Rust blocks only).
+
+Rust blocks run in resident programs: the service starts its Rust binary once and sends it
+the jobs of later runs, so a model a block loads (`mage::onnx::model`) or anything it keeps in
+a `static` stays loaded between runs, as Python's workers keep theirs. A program serves one
+job at a time and is replaced after `MAGE_SERVICE_RUST_MAX_JOBS` jobs; a block that panics or
+runs past its timeout takes its program with it, and the next run starts a new one. Code that
+counts on a fresh process per run (a `static` counter, a global it never resets) sees the
+earlier runs' values: `MAGE_SERVICE_RUST_RESIDENT=off` starts a program per run.
 
 Conditional blocks written in Python run as in MageML. Before a block with conditions runs,
 the worker calls each `@condition` function with the block's inputs and the run's

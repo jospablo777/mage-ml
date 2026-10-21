@@ -54,6 +54,8 @@ pub struct Service {
     pub ingest: Mutex<BTreeMap<String, Arc<crate::streams::HttpIngest>>>,
     /// Cancelled at shutdown: streams stop reading and drain.
     pub stream_stop: CancellationToken,
+    /// Resident Rust block programs for runs; None with MAGE_SERVICE_RUST_RESIDENT=off.
+    pub residents: Option<crate::resident::Residents>,
     max_total_runs: usize,
     wake: Notify,
     shutting_down: AtomicBool,
@@ -184,6 +186,7 @@ impl Service {
             stream_pause: Mutex::new(BTreeMap::new()),
             ingest: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
+            residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
             shutting_down: AtomicBool::new(false),

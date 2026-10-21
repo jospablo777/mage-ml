@@ -516,7 +516,9 @@ let model = mage::onnx::model("models/churn.onnx")?;
 let scores = model.predict(&customers, &["tenure_months", "monthly_spend"])?;
 ```
 
-The first build downloads ONNX Runtime. See [Model inference](../pipelines/model-inference.md).
+The first build downloads ONNX Runtime. `mage::onnx::model` loads a model once per process;
+in an exported service, Rust blocks run in a resident program, so later runs score with the
+session already loaded. See [Model inference](../pipelines/model-inference.md).
 
 ## Templates
 

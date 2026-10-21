@@ -1466,6 +1466,10 @@ class RustBundleTest(unittest.TestCase):
             '    for (_, make) in entries { (make().0)() }\n'
             '    std::process::exit(0)\n'
             '}\n'
+            'pub fn serve_jobs(entries: Vec<(&\'static str, fn() -> ChainBlock)>) -> ! {\n'
+            '    for (name, make) in entries { print!("resident {name}: "); (make().0)() }\n'
+            '    std::process::exit(0)\n'
+            '}\n'
             'pub struct StreamBlock(fn());\n'
             'pub fn stream_block(block: fn()) -> StreamBlock { StreamBlock(block) }\n'
             'pub fn serve_stream(entries: Vec<(&\'static str, fn() -> StreamBlock)>) -> ! {\n'
@@ -1520,6 +1524,12 @@ class RustBundleTest(unittest.TestCase):
         chain = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                env=dict(os.environ, MAGE_CHAIN='1'))
         self.assertEqual((chain.returncode, chain.stdout), (0, 'block a\nblock b\n'))
+        resident = subprocess.run([binary], capture_output=True, text=True,
+                                  env=dict(os.environ, MAGE_RESIDENT='1'))
+        self.assertEqual(
+            (resident.returncode, resident.stdout),
+            (0, f'resident {crates[0]}: block a\nresident {crates[1]}: block b\n'),
+        )
         stream = subprocess.run([binary, 'job'], capture_output=True, text=True,
                                 env=dict(os.environ, MAGE_STREAM='1'))
         self.assertEqual((stream.returncode, stream.stdout), (0, 'stream s\n'))

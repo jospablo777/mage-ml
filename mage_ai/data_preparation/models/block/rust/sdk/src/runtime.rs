@@ -663,6 +663,113 @@ fn run_chain_job(entries: &ChainEntries, job_dir: &Path) -> anyhow::Result<()> {
     )
 }
 
+// ---- resident jobs ----------------------------------------------------------------------
+
+/// The line a resident process prints on stdout and on stderr after each job: every line
+/// before it on each stream is that job's.
+pub const JOB_DONE: &str = "\u{1e}mage-job-done";
+
+/// A boxed block function, run as a block of its own.
+struct Boxed(BlockCall);
+
+/// The `Args` of [`Boxed`]: no block function's argument tuple.
+pub struct BoxedArgs;
+
+impl BlockFn<BoxedArgs> for Boxed {
+    fn call(self, inputs: &mut Inputs<'_>) -> anyhow::Result<Vec<Output>> {
+        (self.0)(inputs)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct JobRequest {
+    job_dir: PathBuf,
+    /// The block to run on its own; without one, the chain job.json lists.
+    #[serde(default)]
+    block: Option<String>,
+}
+
+/// The entry point of a service's resident block program (MAGE_RESIDENT=1): one process
+/// runs the jobs of many runs, so what a block loads once (a model session in a static, a
+/// connection pool) stays loaded between runs. Each line on stdin is a job
+/// (`{"job_dir": ..., "block": <entry> or null for a chain}`), run as the program would
+/// run it on its own, with its result or error in the job directory; then [`JOB_DONE`] on
+/// stdout and stderr. After a panic the process reports it and exits, as its state may be
+/// broken; the service starts another one for the next job.
+pub fn serve_jobs(entries: ChainEntries) -> ! {
+    use std::io::{BufRead, Write};
+
+    install_panic_hook();
+    exit_with_parent();
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else {
+            break;
+        };
+        let request: JobRequest = match serde_json::from_str(&line) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("A resident block program got a request it cannot read: {error}");
+                std::process::exit(2);
+            }
+        };
+        if let Ok(mut slot) = PANIC.lock() {
+            *slot = None;
+        }
+        if let Ok(mut slot) = CURRENT_BLOCK.lock() {
+            *slot = None;
+        }
+        let chained = request.block.is_none();
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| match &request.block {
+            Some(entry) => {
+                let make = entries
+                    .iter()
+                    .find(|(name, _)| name == entry)
+                    .map(|(_, make)| *make)
+                    .ok_or_else(|| anyhow!("This program has no block {entry}"))?;
+                let block = make();
+                run_job(Boxed(block.call), block.tests, &request.job_dir)
+            }
+            None => run_chain_job(&entries, &request.job_dir),
+        }));
+        let panicked = outcome.is_err();
+        let record = match outcome {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(ErrorRecord {
+                kind: "error",
+                message: describe(&error),
+                location: None,
+                block_uuid: if chained { current_block() } else { None },
+            }),
+            Err(_) => Some(
+                PANIC
+                    .lock()
+                    .ok()
+                    .and_then(|mut slot| slot.take())
+                    .unwrap_or(ErrorRecord {
+                        kind: "panic",
+                        message: "The block panicked".to_string(),
+                        location: None,
+                        block_uuid: if chained { current_block() } else { None },
+                    }),
+            ),
+        };
+        if let Some(record) = record
+            && let Err(error) = write_json_atomic(&request.job_dir.join(ERROR_FILE), &record)
+        {
+            eprintln!("Could not report the error to Mage: {error}");
+        }
+        let _ = std::io::stdout().flush();
+        eprintln!("{JOB_DONE}");
+        println!("{JOB_DONE}");
+        let _ = std::io::stdout().flush();
+        if panicked {
+            std::process::exit(1);
+        }
+    }
+    std::process::exit(0)
+}
+
 /// A computed table: the next block takes it as a plan over the data in memory.
 fn materialized(frame: DataFrame, subject: &mut TestSubject) -> Item {
     if subject.frame.is_none() {

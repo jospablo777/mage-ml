@@ -50,7 +50,9 @@ pub mod stream;
 pub use context::{BlockContext, Vars};
 /// The Polars version the SDK uses; add features in the project's Cargo.toml.
 pub use polars;
-pub use runtime::{ChainBlock, ChainEntries, chain_block, main, run_chain, run_job, test};
+pub use runtime::{
+    ChainBlock, ChainEntries, JOB_DONE, chain_block, main, run_chain, run_job, serve_jobs, test,
+};
 pub use stream::{StreamBlock, StreamEntries, serve_stream, stream_block};
 
 pub mod prelude {

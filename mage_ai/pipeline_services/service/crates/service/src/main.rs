@@ -14,6 +14,7 @@ mod ledger_sql;
 mod log;
 mod monitor;
 mod python;
+mod resident;
 mod scheduler;
 mod secrets;
 mod service;
