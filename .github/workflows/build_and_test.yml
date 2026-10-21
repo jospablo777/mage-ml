@@ -371,18 +371,6 @@ jobs:
         with:
           path: ~/.cache/ibm-mq
           key: ibm-mq-client-${{ steps.mq.outputs.sha }}
-      - name: Download the IBM MQ client
-        if: matrix.id == 'streaming'
-        run: |
-          archive=~/.cache/ibm-mq/mq.tar.gz
-          if [ ! -f "$archive" ]; then
-            mkdir -p ~/.cache/ibm-mq
-            curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
-              --max-time 600 -o "$archive" "${{ steps.mq.outputs.url }}"
-          fi
-          echo "${{ steps.mq.outputs.sha }}  $archive" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/mqm" && tar -xzf "$archive" -C "$RUNNER_TEMP/mqm"
-          echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
       # icr.io (Db2, IBM MQ) times out for minutes at a time, which failed the job. Its images
       # are cached by tag and loaded from the cache; the registry is contacted only when a tag
       # changes, with longer waits between tries.
@@ -424,6 +412,30 @@ jobs:
         with:
           path: ~/.cache/icr-images
           key: ${{ steps.icr.outputs.key }}
+      # The cache is evicted when the repository's caches pass 10 GB, and IBM's server then
+      # stalled the download for its full 10 minutes (run 39510263989). The MQ server image the
+      # group runs has the same client libraries: they are used when the download fails.
+      - name: Download the IBM MQ client
+        if: matrix.id == 'streaming'
+        run: |
+          archive=~/.cache/ibm-mq/mq.tar.gz
+          mkdir -p ~/.cache/ibm-mq "$RUNNER_TEMP/mqm"
+          if [ ! -f "$archive" ] && curl -fsSL --retry 3 --retry-all-errors --retry-delay 10 \
+              --connect-timeout 30 --max-time 300 -o "$archive.part" "${{ steps.mq.outputs.url }}"; then
+            mv "$archive.part" "$archive"
+          fi
+          if [ -f "$archive" ]; then
+            echo "${{ steps.mq.outputs.sha }}  $archive" | sha256sum -c -
+            tar -xzf "$archive" -C "$RUNNER_TEMP/mqm"
+          else
+            rm -f "$archive.part"
+            image=$(docker compose -f integration_tests/compose.yaml config --images | grep '^icr\.io/ibm-messaging/mq:')
+            echo "::warning::IBM's MQ client download failed; using the client libraries of $image."
+            container=$(docker create "$image")
+            docker cp "$container:/opt/mqm/." "$RUNNER_TEMP/mqm"
+            docker rm "$container" > /dev/null
+          fi
+          echo "MAGE_TEST_MQ_LIBRARY=$RUNNER_TEMP/mqm/lib64/libmqm_r.so" >> "$GITHUB_ENV"
       # Registries time out now and then: three tries before failing.
       - name: Start the group's services
         if: matrix.services != ''
