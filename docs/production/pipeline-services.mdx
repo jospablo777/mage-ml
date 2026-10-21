@@ -480,6 +480,15 @@ instance that stays up.
 
 On serverless platforms without a volume, the run history lasts as long as the instance.
 
+Two instances can share one run history, as during a rolling update on one node. Each
+holds a lease in the run history, renewed every 5 seconds, and a run belongs to the
+instance that started it. An instance fails another's running runs only when that
+instance's lease ends (30 seconds without a renewal) or its process is gone from the same
+machine. A service that stops ends its lease, so a restart fails what it left at once. A
+process that stalls past its lease finds its runs failed and cannot change them. The run
+history is SQLite in write-ahead-log mode, which needs its instances on one machine; a
+volume shared by several machines needs the PostgreSQL run history, planned for 0.3.
+
 ## Settings
 
 | Variable | Default | |

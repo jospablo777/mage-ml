@@ -250,12 +250,12 @@ impl Service {
         }
         match self.ledger.run(run_id)? {
             Some(detail) if detail.run.status == RunStatus::Queued => {
+                // False when it was claimed in the meantime.
                 self.ledger.finish_run(
                     run_id,
                     RunStatus::Cancelled,
                     Some("Cancelled before it started."),
-                )?;
-                Ok(true)
+                )
             }
             _ => Ok(false),
         }

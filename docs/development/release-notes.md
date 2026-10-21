@@ -10,6 +10,11 @@
 
 ### Exported services
 
+- Two instances on one run history no longer fail each other's runs: each holds a lease,
+  renewed every 5 seconds, and a running run is failed only when its instance's lease ends
+  or its process is gone from the machine. A stalled instance cannot overwrite a run
+  another instance failed. Before, a second instance starting marked every running run
+  failed, and leases compared each host's clock.
 - A service listens on the `PORT` a platform sets (Code Engine, Cloud Run, Render) when
   `MAGE_SERVICE_PORT` is unset. It listened on 8080 whatever the platform routed to.
 

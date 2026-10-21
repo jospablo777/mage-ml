@@ -482,6 +482,7 @@ async fn start_service(
     service::ensure_dir(&data.join("runs"))
         .map_err(|e| format!("Could not create {}: {e}", data.display()))?;
     let ledger = Ledger::open(&data.join("runs.db")).map_err(|e| e.to_string())?;
+    log::info(&format!("Run history instance {}.", ledger.instance()));
     let recovered = ledger.recover_interrupted().map_err(|e| e.to_string())?;
     if !recovered.is_empty() {
         log::warn(&format!(
@@ -692,6 +693,8 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     for stream in streams {
         let _ = tokio::time::timeout(Duration::from_secs(25), stream).await;
     }
+    // A restart recovers what this instance left without waiting for its lease to expire.
+    let _ = service.ledger.release();
     log::info("Stopped.");
     // A connector call stuck in a blocking thread would keep the runtime, and so the process,
     // alive after its shutdown: everything that must finish has finished or timed out.
@@ -854,6 +857,7 @@ async fn run_once(common: Common, args: RunArgs) -> Result<ExitCode, String> {
         .shutdown(Duration::from_secs(if interrupted { 5 } else { 0 }))
         .await;
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
+    let _ = service.ledger.release();
     let detail = service
         .ledger
         .run(&run_id)

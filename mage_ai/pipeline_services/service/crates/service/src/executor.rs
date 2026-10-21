@@ -120,8 +120,17 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
             );
         }
     }
-    if let Err(e) = service.ledger.finish_run(&run_id, status, error.as_deref()) {
-        crate::log::error(&format!("run {run_id}: {e}"));
+    match service.ledger.finish_run(&run_id, status, error.as_deref()) {
+        Ok(true) => {}
+        // Another instance failed it after this one's lease expired; its record stands.
+        Ok(false) => log.warn(
+            None,
+            &format!(
+                "Run {run_id} finished, but the run history no longer gives it to this \
+                 instance (its lease expired); its recorded status stands."
+            ),
+        ),
+        Err(e) => crate::log::error(&format!("run {run_id}: {e}")),
     }
     match &error {
         None => log.info(None, &format!("Run {run_id} completed.")),

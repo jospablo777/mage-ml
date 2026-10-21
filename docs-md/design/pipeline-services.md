@@ -104,10 +104,12 @@ project.
   `GET /v1/runs/{id}/logs`, `GET /v1/snapshot` for the console, `GET /metrics`
   (Prometheus), `GET /healthz`, `POST /v1/control` for pause, resume and concurrency.
 - **Ledger** (SQLite, WAL): runs, block runs, idempotency keys and schedule occurrences.
-  A run is committed before the request is acknowledged. At startup, runs left running by
-  a killed process are marked failed with that reason, or retried when the pipeline allows
-  it. One schedule owner: the ledger holds a lease, so two replicas on one volume do not
-  both fire.
+  A run is committed before the request is acknowledged. Each process is an instance with
+  a lease in database time; a claimed run is its instance's, and the run's writes are
+  fenced on that ownership. Runs of an instance whose lease ended, or whose process is gone
+  from the same host, are marked failed with that reason, or retried when the pipeline
+  allows it; a live instance's runs are left alone. One schedule owner: the ledger holds a
+  lease, so two replicas on one volume do not both fire.
 - **Scheduler**: cron expressions and Mage's named intervals with the trigger's timezone,
   start time and `skip_if_previous_running`; each occurrence has a stable key, so a restart
   does not fire it twice.
