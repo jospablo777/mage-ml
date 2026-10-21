@@ -64,7 +64,7 @@ class DuckBigQuery:
 
     def export(self, df, table_id, database=None, if_exists='replace', query_string=None,
                verbose=True, **kwargs):
-        self.calls.append(('export', database, table_id, if_exists, df is not None))
+        self.calls.append(('export', database, table_id, if_exists, df is not None, query_string))
         name = f'{database}.{table_id}' if database else table_id
         catalog, schema, table = name.split('.')
         self.connection.execute(f'CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}')

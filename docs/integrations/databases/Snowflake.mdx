@@ -62,6 +62,21 @@ SNOWFLAKE_DEFAULT_DB: YOUR_DB_NAME
 SNOWFLAKE_DEFAULT_SCHEMA: YOUR_SCHEMA_NAME
 ```
 
+## Upstream tables
+
+A query reads an upstream block's output as `{{ df_1 }}`, `{{ df_2 }}` and so on, named
+`"DATABASE"."SCHEMA"."TABLE"` in capitals:
+
+- The output of a Python or R block is written to a table in the block's database and
+  schema first, replacing the table of the last run. An empty frame is not written, so the
+  query reads the table an earlier run left, or fails when there is none.
+- The table of an upstream Snowflake SQL block is read as it is when both profiles have the
+  same `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_DEFAULT_WH` and `SNOWFLAKE_DEFAULT_DB`. Otherwise it is
+  copied.
+
+Snowflake SQL blocks also run in [pipeline services](/production/pipeline-services), the
+same way.
+
 ## Using Python block
 
 1. Create a new pipeline or open an existing pipeline.

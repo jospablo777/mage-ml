@@ -31,6 +31,9 @@
   read as it is, and the result is created by the export write policy. The tests compare
   each request to BigQuery and the rows with MageML's, over a DuckDB stand-in for the
   client. The export's message for an unsupported database now lists Trino and BigQuery.
+- Snowflake SQL blocks run in services too: names in capitals and quoted, the client opened
+  on the block's database and schema, and an upstream table copied unless both profiles
+  name the same account, warehouse and database. Tested the same way as BigQuery's.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
   MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the

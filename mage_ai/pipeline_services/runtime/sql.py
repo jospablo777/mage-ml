@@ -1,13 +1,13 @@
 """
 SQL blocks in pipeline services, run as Mage runs them in a pipeline run
 (mage_ai/data_preparation/models/block/sql/__init__.py, the PostgreSQL, MySQL, DuckDB,
-ClickHouse, Trino and BigQuery branches):
+ClickHouse, Trino, BigQuery and Snowflake branches):
 
 1. Upstream outputs that the query names as {{ df_N }} are written to tables, unless the
    upstream is a SQL block on the same database, whose table is used as it is.
 2. {{ df_N }} becomes that table's name: "database".schema.table on PostgreSQL,
-   catalog.schema.table on Trino, project.dataset.table on BigQuery, the table alone on
-   MySQL, DuckDB and ClickHouse.
+   catalog.schema.table on Trino, project.dataset.table on BigQuery, "DATABASE"."SCHEMA".
+   "TABLE" in capitals on Snowflake, the table alone on MySQL, DuckDB and ClickHouse.
 3. The query is rendered with Jinja twice, with the run's variables, variables(),
    env_var(), mage_secret_var() and json_value().
 4. Without raw SQL, CREATE TABLE schema.table AS <query> (or INSERT INTO, or DROP first, by
@@ -63,6 +63,11 @@ PROVIDERS = {
     # the same project and location (_bigquery_project), not by comparing settings.
     'bigquery': dict(
         profile_keys=(),
+        no_schema=False,
+        full_names=True,
+    ),
+    'snowflake': dict(
+        profile_keys=('SNOWFLAKE_ACCOUNT', 'SNOWFLAKE_DEFAULT_WH', 'SNOWFLAKE_DEFAULT_DB'),
         no_schema=False,
         full_names=True,
     ),
@@ -310,12 +315,13 @@ def upload_upstream_tables(
 def interpolate_input(
     loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
     quote_database: bool = True, table_suffix: Optional[str] = None, written: Dict = None,
-    default_schema: bool = True,
+    default_schema: bool = True, name=None,
 ) -> str:
     """
     {{ df_N }} becomes the upstream table's name, as Mage's interpolate_input. With
     table_suffix, the tables in written are named with it. Without default_schema, a name
-    with no schema configured has none (Mage's BigQuery branch).
+    with no schema configured has none (Mage's BigQuery branch). name(database, schema,
+    table) writes the name, as Mage's replace_func.
     """
     helpers = statements()
     for index, upstream in enumerate(upstreams):
@@ -346,11 +352,14 @@ def interpolate_input(
             schema = schema or config_to_use.get('data_provider_schema')
             if not database:
                 database = loader.default_database()
-                if quote_database:
+                if quote_database and name is None:
                     database = f'"{database}"'
             if not schema and default_schema:
                 schema = loader.default_schema()
-            replace_with = '.'.join(p for p in (database, schema, table) if p)
+            if name is not None:
+                replace_with = name(database, schema, table)
+            else:
+                replace_with = '.'.join(p for p in (database, schema, table) if p)
         else:
             replace_with = table
 
@@ -475,6 +484,9 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
         verbose=block.get('type') == 'data_exporter',
     )
 
+    if name == 'snowflake':
+        return _run_on_snowflake(config_loader, provider, configuration, upstreams, inputs,
+                                 query, io_config, variables, schema, table, limit, options)
     loader = _loader(name, config_loader)
     if name == 'clickhouse':
         # Mage's ClickHouse branch: no with block, upstream tables in the block's database.
@@ -638,3 +650,74 @@ def _run_on_bigquery(loader, provider, configuration, upstreams, inputs, query, 
         except Exception as error:
             if '404' not in str(error) or attempt == BIGQUERY_READ_TRIES:
                 raise
+
+
+def table_name_parts_from_query(query: str) -> Optional[Tuple[str, str, str]]:
+    """As Mage's: database, schema and table of a SELECT's first FROM db.schema.table."""
+    match = re.search(r'[^.+]from[\s](\S+)\.(\S+)\.(\S+[^;\s]+)', query, re.IGNORECASE)
+    return None if match is None else match.groups()
+
+
+def _upper(name: Optional[str]) -> Optional[str]:
+    return name.upper() if name else name
+
+
+def _run_on_snowflake(config_loader, provider, configuration, upstreams, inputs, query,
+                      io_config, variables, schema, table, limit, options) -> List:
+    """
+    Snowflake: names are in capitals and quoted, "DATABASE"."SCHEMA"."TABLE"; the client
+    opens on the block's database and schema, which a FROM database.schema.table in the
+    query gives when the block has none; an empty upstream frame is not written.
+    """
+    from mage_ai.io.snowflake import Snowflake
+
+    database = configuration.get('data_provider_database')
+    if not configuration.get('use_raw_sql'):
+        parts = table_name_parts_from_query(query)
+        if parts is not None:
+            database = parts[0] or database
+            schema = parts[1] or schema
+    table = _upper(table)
+    with Snowflake.with_config(config_loader, database=database, schema=schema) as loader:
+        database = _upper(database or loader.default_database())
+        schema = _upper(schema or loader.default_schema())
+        database_default = _upper(
+            configuration.get('data_provider_database') or loader.default_database(),
+        )
+        schema_default = _upper(
+            configuration.get('data_provider_schema') or loader.default_schema(),
+        )
+        for index, upstream in enumerate(upstreams):
+            if query and not re.findall(variable_pattern(index + 1), query):
+                continue
+            if not should_upload(configuration, upstream, io_config, provider['profile_keys']):
+                continue
+            value = inputs[index] if index < len(inputs) else None
+            empty_frame = type(value).__name__ == 'DataFrame' and len(value) == 0
+            if empty_frame or _no_data(value):
+                print(f"\n\nNo data in upstream block {upstream['uuid']}.")
+                continue
+            upstream_database, upstream_schema, upstream_table = table_name_parts(
+                configuration, upstream,
+            )
+            loader.export(
+                value,
+                _upper(upstream_table),
+                _upper(upstream_database) or database_default,
+                _upper(upstream_schema) or schema_default,
+                if_exists='replace',
+                verbose=True,
+            )
+        query = interpolate_input(
+            loader, configuration, upstreams, query,
+            name=lambda db, sc, tn: f'"{db.upper()}"."{sc.upper()}"."{tn.upper()}"',
+        )
+        query = render(query, variables)
+        if configuration.get('use_raw_sql'):
+            return execute_raw_sql(loader, query, configuration, limit)
+        loader.export(None, table, database, schema, if_exists=options['if_exists'],
+                      query_string=query, verbose=options['verbose'])
+        return [loader.load(
+            f'SELECT * FROM "{database}"."{schema}"."{table}"',
+            database=database, schema=schema, table_name=table, limit=limit, verbose=False,
+        )]
