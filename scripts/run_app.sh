@@ -17,18 +17,7 @@ if [[ ! -z "${ULIMIT_NO_FILE}" ]]; then
     ulimit -n "$ULIMIT_NO_FILE"
 fi
 
-REQUIREMENTS_FILE="${PROJECT_PATH}/requirements.txt"
-if [ -f "$REQUIREMENTS_FILE" ]; then
-    echo "$REQUIREMENTS_FILE exists."
-
-    dependency_options=()
-    if [[ -n "${MAGE_RUNTIME_CONSTRAINTS}" ]]; then
-        dependency_options+=(--constraint "$MAGE_RUNTIME_CONSTRAINTS")
-    fi
-    uv pip install --python "$(command -v python3)" \
-        "${dependency_options[@]}" --requirement "$REQUIREMENTS_FILE"
-    uv pip check --python "$(command -v python3)"
-fi
+"$(dirname "$0")/install_project_requirements.sh" "${PROJECT_PATH}/requirements.txt"
 
 mage_args=()
 if [[ ! -z "${PROJECT_UUID}" ]]; then

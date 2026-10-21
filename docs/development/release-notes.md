@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Behavior changes to check before upgrading
+
+- The container starts when the project's `requirements.txt` fails to install, with a
+  warning in its log (as Mage 0.9.80 does): stopping left a restart loop, and the file is
+  fixed in the editor. `MAGE_STRICT_REQUIREMENTS=1` keeps stopping.
+
 ### Exported services
 
 - A service listens on the `PORT` a platform sets (Code Engine, Cloud Run, Render) when

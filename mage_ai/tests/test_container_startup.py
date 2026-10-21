@@ -68,11 +68,25 @@ class ContainerStartupTest(unittest.TestCase):
         self.assertEqual(check[1:3], ['pip', 'check'])
         self.assertEqual(start[1:3], ['start', str(self.project)])
 
-    def test_failed_dependency_install_stops_startup(self):
+    def test_a_failed_dependency_install_is_reported_and_the_server_starts(self):
+        # Stopping left a restart loop, and requirements.txt is fixed in the editor the
+        # server serves (upstream 0.9.80, #6042).
         (self.project / 'requirements.txt').write_text('example-package==1.0\n')
         self.env['STARTUP_EXIT_UV'] = '17'
         result = self.run_startup()
-        self.assertEqual(result.returncode, 17)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('WARNING: installing', result.stderr)
+        install, start = self.read_commands()
+        self.assertEqual(install[1:3], ['pip', 'install'])
+        self.assertEqual(start[1:3], ['start', str(self.project)])
+
+    def test_strict_requirements_stop_startup_on_a_failed_install(self):
+        (self.project / 'requirements.txt').write_text('example-package==1.0\n')
+        self.env['STARTUP_EXIT_UV'] = '17'
+        self.env['MAGE_STRICT_REQUIREMENTS'] = '1'
+        result = self.run_startup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not starting', result.stderr)
         self.assertEqual(len(self.read_commands()), 1)
 
     def test_custom_command_preserves_arguments_and_exit_status(self):

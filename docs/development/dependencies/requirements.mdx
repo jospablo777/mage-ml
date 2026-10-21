@@ -86,6 +86,7 @@ Let's break down this command:
 2. **Project Name**: Replace `[project_name]` with your actual project name in both the `USER_CODE_PATH` and the start command.
 3. **Path Consistency**: Ensure that the path in `USER_CODE_PATH` matches the mount point specified in the `v` flag. In this example, we mount to `/home/src`, so the `USER_CODE_PATH` starts with `/home/src`.
 4. **Working Directory**: The `$(pwd)` in the `v` flag assumes you're running the Docker command from your project's parent directory. Adjust this path if you're running from a different location.
+5. **A failed install**: when `requirements.txt` does not install (a typo, a version that does not exist), the container logs a warning and MageML starts anyway, so you can fix the file in the editor; blocks that import the missing packages fail until then. Set `MAGE_STRICT_REQUIREMENTS=1` to stop the start instead, for deployments that must not run without their packages.
 
 For more information on environment variables, see the [environment variables documentation](/development/variables/environment-variables).
 </Accordion>

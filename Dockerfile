@@ -121,7 +121,8 @@ FROM runtime-base AS runtime
 COPY --from=python-build /opt/mage /opt/mage
 COPY --from=python-build /opt/mage-livy /opt/mage-livy
 COPY --from=python-build /root/.sparkmagic /root/.sparkmagic
-COPY --chmod=0755 scripts/install_other_dependencies.py scripts/run_app.sh /app/
+COPY --chmod=0755 scripts/install_other_dependencies.py scripts/run_app.sh \
+    scripts/install_project_requirements.sh /app/
 # Rust blocks compile in the container. The image has the toolchain and the compiled
 # dependencies of Mage's `mage` crate, built once here, so a project's first Rust block
 # compiles in seconds; the warm-up block itself is removed.
