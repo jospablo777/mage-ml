@@ -103,10 +103,12 @@ in R or Rust, SQL blocks on other databases (BigQuery, Snowflake, Redshift, SQL 
 chunk or batch settings are not supported yet. Chart, markdown and scratchpad blocks are
 notebook only and are left out.
 
-A service runs the blocks, not the checks around them: [data
-contracts](../guides/blocks/data-contracts.md) and [monitors](../guides/pipelines/monitoring.md) are
-not checked in a service yet. The export report lists each one under **Notes**. Keep
-running the pipeline in MageML where those checks must stop bad data.
+A block's [data contract](../guides/blocks/data-contracts.md) goes into the service, and the
+engine checks the block's output against it after every run, with the checker MageML uses:
+`fail` fails the block without retries, `warn` logs the broken rules. The report is kept
+next to the output as `contract.json`. A contract the block pins to another version stops
+the export. [Monitors](../guides/pipelines/monitoring.md) are not run in a service; the export
+report lists each one under **Notes**.
 
 ## 2. Build and run
 

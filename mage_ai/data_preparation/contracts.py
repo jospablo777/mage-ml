@@ -21,8 +21,9 @@ and a block uses it in its configuration (block settings, or metadata.yaml):
       contract: customer_scores                  # or:
       contract: {name: customer_scores, enforcement: warn, version: '1'}
 
-The check runs with the block's tests, after its output is stored, in the Rust engine of
-ColumnAtlas (rust/column_atlas/src/contract.rs). With enforcement `fail` (the default) a
+The check runs with the block's tests, after its output is stored, in Rust: the
+mage-contracts crate (pipeline_services/service/crates/contracts) through ColumnAtlas. An
+exported service checks the same contract with the same crate. With enforcement `fail` (the default) a
 violation fails the block like a failing test, so downstream blocks, exporters included,
 do not run; `warn` reports it and continues; `off` skips the check. Each check's report
 is saved with the pipeline's variables and printed in the block's output and logs.

@@ -26,6 +26,13 @@
   where the Rust engine compiles many times slower, and merges both platforms into one
   image tagged with the commit. `ARM_RUNNER` names another runner where arm64 ones are not
   available.
+- Data contracts are checked in services. The export puts each block's contract in
+  `service.json`, and the engine checks the block's output after it runs, with the checker
+  MageML uses (now the `mage-contracts` crate, which ColumnAtlas wraps): `fail` fails the
+  block without retries and stops what is downstream, `warn` logs the broken rules, and the
+  report is kept as `contract.json`. A block pinned to another contract version stops the
+  export. The engine builds with the checker only when a block has a contract. Exports
+  noted before that the service did not check contracts.
 
 ### PostgreSQL
 

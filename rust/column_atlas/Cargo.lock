@@ -378,6 +378,7 @@ name = "column_atlas_native"
 version = "0.1.0"
 dependencies = [
  "mage-block",
+ "mage-contracts",
  "memchr",
  "polars",
  "pyo3",
@@ -1421,6 +1422,15 @@ dependencies = [
  "serde_json",
  "tokio-postgres-rustls",
  "webpki-roots",
+]
+
+[[package]]
+name = "mage-contracts"
+version = "0.1.0"
+dependencies = [
+ "polars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

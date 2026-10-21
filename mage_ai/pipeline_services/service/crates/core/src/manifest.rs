@@ -358,6 +358,30 @@ pub struct Block {
     /// one returns True.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<String>,
+    /// The data contract the block's output must meet, checked after the block ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<ContractCheck>,
+}
+
+/// A block's data contract, as MageML checks it: the contract document (contracts/<name>
+/// of the project), the output it applies to, and what a violation does.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ContractCheck {
+    pub name: String,
+    /// `fail` fails the block; `warn` logs the violations and keeps the output.
+    pub enforcement: ContractEnforcement,
+    /// The index of the output checked: 0 for output_0.
+    #[serde(default)]
+    pub output: usize,
+    pub document: Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractEnforcement {
+    Fail,
+    Warn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

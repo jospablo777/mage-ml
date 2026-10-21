@@ -1,7 +1,11 @@
 # Data contracts
 
-Status: implemented and tested. The engine is `rust/column_atlas/src/contract.rs` (crate
-tests). The Mage side is `mage_ai/data_preparation/contracts.py`, the check in
+Status: implemented and tested. The engine is the `mage-contracts` crate
+(`mage_ai/pipeline_services/service/crates/contracts`, crate tests), which ColumnAtlas
+wraps for MageML and the service engine links with its `contracts` feature. An exported
+service embeds each block's contract in `service.json`; the engine checks the output after
+the block (`crates/service/src/contract.rs`), and `integration_tests/contracts` compares
+its outcome with MageML's. The Mage side is `mage_ai/data_preparation/contracts.py`, the check in
 `Block.run_tests`, the `data_contracts` API, the block settings section, and the CLI
 `contract-draft` and `contract-check`. Python tests: `test_contracts.py`, which covers
 the notebook, a triggered run where a broken contract stops the exporter, the CLI and
@@ -65,13 +69,10 @@ parsing: unknown fields are errors, so a typo such as `nulable` isn't silently i
 
 ## Remaining gaps
 
-1. **Pipeline services** don't check contracts. The export report lists each one under
-   Notes. The service could link `column_atlas::contract::validate` directly, since it
-   reads a Parquet file and a contract as JSON.
-2. **Dynamic blocks** pass the child's uuid to the check, but no test covers them yet,
+1. **Dynamic blocks** pass the child's uuid to the check, but no test covers them yet,
    and the block settings show only the parent's notebook report.
-3. **No compatibility check in CI** between two versions of a contract. A block's version
+2. **No compatibility check in CI** between two versions of a contract. A block's version
    pin catches a major bump at run time.
-4. **No contracts page.** Contracts are edited as files; the block settings pick one and
+3. **No contracts page.** Contracts are edited as files; the block settings pick one and
    draft one.
-5. **Nested values** (list and struct contents) have type rules only.
+4. **Nested values** (list and struct contents) have type rules only.

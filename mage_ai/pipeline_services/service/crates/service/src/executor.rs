@@ -333,8 +333,11 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
     let by_uuid: HashMap<&str, &Block> = order.iter().map(|b| (b.uuid.as_str(), b)).collect();
     let mut assigned: HashSet<String> = HashSet::new();
     for block in order {
-        // A block with conditions runs on its own, so its conditions see its inputs.
-        let Some(kind) = chain_kind(block).filter(|_| block.conditions.is_empty()) else {
+        // A block with conditions runs on its own, so its conditions see its inputs; one with
+        // a contract too, so its output is written and checked.
+        let Some(kind) =
+            chain_kind(block).filter(|_| block.conditions.is_empty() && block.contract.is_none())
+        else {
             continue;
         };
         if assigned.contains(&block.uuid) || (kind == ChainKind::Rust && rust_off) {
@@ -358,6 +361,7 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
             if chain_kind(next) != Some(kind)
                 || next.upstream.len() != 1
                 || !next.conditions.is_empty()
+                || next.contract.is_some()
                 || !compatible
             {
                 break;
@@ -434,6 +438,25 @@ impl BlockTask {
                     };
                 }
                 Ok(Ran::Outputs(records)) => {
+                    if let Err(message) = crate::contract::check_blocking(
+                        &self.block,
+                        &records,
+                        &self.output_dir,
+                        &self.log,
+                    )
+                    .await
+                    {
+                        // The same data breaks the same rules on every attempt.
+                        self.service.observe_block(
+                            &self.pipeline_uuid,
+                            &self.block.uuid,
+                            started.elapsed(),
+                            false,
+                        );
+                        self.log.error(Some(&self.block.uuid), &message);
+                        last_error = message;
+                        break;
+                    }
                     let _ = self.service.ledger.finish_block(
                         &self.run_id,
                         &self.block.uuid,

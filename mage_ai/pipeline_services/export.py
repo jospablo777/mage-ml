@@ -112,6 +112,8 @@ class Capture:
     stream_files: Set[Path] = field(default_factory=set)
     # The uv that locked the Python packages; the image installs them with the same.
     uv_version: Optional[str] = None
+    # A block has a data contract: the engine builds with its checker (feature contracts).
+    has_contracts: bool = False
 
     @property
     def streams(self) -> List[Dict]:
@@ -132,8 +134,11 @@ class Capture:
 
     @property
     def engine_features(self) -> List[str]:
-        """The engine's optional connectors the streams use."""
-        return sorted(ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES)
+        """The engine's optional connectors the streams use, and its contract checker."""
+        features = {ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES}
+        if self.has_contracts:
+            features.add('contracts')
+        return sorted(features)
 
     @property
     def needs_ibm_mq(self) -> bool:
@@ -1712,6 +1717,7 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
         )
         return None
     _note_unchecked_guards(pipeline, block, project, where, capture_.notes)
+    contract = _contract_check(block, project, where, problems, capture_.notes)
     path = Path(block.file_path).resolve()
     if not path.is_file():
         problems.append(f'{where}: its file {path} is missing.')
@@ -1738,6 +1744,9 @@ def _block_entry(pipeline, block, project: Path, repo_config, capture_: Capture,
     )
     if conditions:
         entry['conditions'] = conditions
+    if contract is not None:
+        entry['contract'] = contract
+        capture_.has_contracts = True
     timeout = getattr(block, 'timeout', None)
     if timeout:
         entry['timeout_seconds'] = int(timeout)
@@ -1777,21 +1786,46 @@ def _conditional_entry(conditional, project: Path, prefix: str,
 
 
 def _note_unchecked_guards(pipeline, block, project: Path, where: str, notes: List[str]):
-    """Services run the blocks only: a data contract or monitor on a block is not checked."""
-    from mage_ai.data_preparation import contracts
+    """Services run the blocks and check their contracts; a monitor is not run."""
     from mage_ai.orchestration import monitors
+
+    for monitor in monitors.monitors_for(str(project), pipeline.uuid, block.uuid):
+        notes.append(f'{where}: the service does not run monitor {monitor.name}.')
+
+
+def _contract_check(block, project: Path, where: str, problems: List[str],
+                    notes: List[str]) -> Optional[Dict]:
+    """
+    The block's data contract for the service to check after the block, as MageML runs
+    check it: the contract document, the output and the enforcement. None without one.
+    """
+    from mage_ai.data_preparation import contracts
 
     try:
         binding = contracts.binding_of(block)
-    except contracts.ContractError:
-        binding = None
-    if binding is not None and binding.enforcement != 'off':
-        notes.append(
-            f'{where}: the service does not check data contract {binding.name}; check the '
-            'output downstream or run the pipeline in MageML.'
+        if binding is None or binding.enforcement == 'off':
+            return None
+        document = contracts.load_contract(binding.name, str(project))
+    except contracts.ContractError as error:
+        problems.append(f'{where}: {error}')
+        return None
+    if binding.version and not contracts._version_matches(document.get('version'),
+                                                          binding.version):
+        problems.append(
+            f'{where} expects version {binding.version} of contract {binding.name}, which is '
+            f'at version {document.get("version") or "(none)"}.'
         )
-    for monitor in monitors.monitors_for(str(project), pipeline.uuid, block.uuid):
-        notes.append(f'{where}: the service does not run monitor {monitor.name}.')
+        return None
+    notes.append(
+        f'{where}: the service checks its output against contract {binding.name} '
+        f'({binding.enforcement}).'
+    )
+    return dict(
+        name=binding.name,
+        enforcement=binding.enforcement,
+        output=int(binding.output.split('_')[1]),
+        document=document,
+    )
 
 
 def _json_safe(value):

@@ -3,6 +3,7 @@
 mod api;
 mod aws;
 mod azure;
+mod contract;
 mod environment;
 mod executor;
 mod gcp;

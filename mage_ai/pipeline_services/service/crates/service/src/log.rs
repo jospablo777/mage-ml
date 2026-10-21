@@ -213,6 +213,10 @@ impl RunLog {
         self.write("info", block, None, message);
     }
 
+    pub fn warn(&self, block: Option<&str>, message: &str) {
+        self.write("warning", block, None, message);
+    }
+
     pub fn error(&self, block: Option<&str>, message: &str) {
         self.write("error", block, None, message);
     }

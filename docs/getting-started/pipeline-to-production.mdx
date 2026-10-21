@@ -269,12 +269,14 @@ The report lists the blocks, triggers, files and packages. Read its notes:
 
 ```text
 Notes:
-  - Pipeline regional_revenue_python, block monthly_revenue_py: the service does not check data contract monthly_revenue; check the output downstream or run the pipeline in MageML.
+  - Pipeline regional_revenue_python, block monthly_revenue_py: the service checks its output against contract monthly_revenue (fail).
   - Pipeline regional_revenue_python, block monthly_revenue_py: the service does not run monitor monthly_revenue.
 ```
 
-A service runs the blocks, not the checks around them. Keep running the pipeline in
-MageML where the contract must stop bad data, or check the output where it lands.
+The service checks the contract as MageML does: a broken rule fails the block, without
+retries, and the exporter does not run. The report is kept next to the block's output as
+`contract.json`. Monitors stay in MageML: keep the pipeline's runs there, or watch the
+output where it lands.
 
 Build the image and run the pipeline once:
 

@@ -48,6 +48,19 @@ def stream_service_binary(release: bool = False) -> Path:
     return STREAM_TARGET / ('release' if release else 'debug') / 'mage-service'
 
 
+# The engine with the data contract checker (polars), in its own target folder.
+CONTRACT_TARGET = SERVICE / 'target' / 'contracts'
+
+
+def contract_service_binary() -> Path:
+    """The engine an exported service with a data contract builds: feature contracts."""
+    subprocess.run(
+        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', 'contracts'],
+        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(CONTRACT_TARGET)),
+    )
+    return CONTRACT_TARGET / 'debug' / 'mage-service'
+
+
 def run_exported(project, pipeline: str, out: Path, variables=None, timeout: int = 600):
     """Exports the pipeline to out, runs it once and returns the run; every block must
     complete."""
@@ -87,14 +100,15 @@ def build_rust_blocks(directory: Path) -> None:
         shutil.copy2(target / 'release' / binary, directory / 'bin' / binary)
 
 
-def run_service(directory: Path, pipeline: str, out: Path, variables=None, timeout: int = 600):
+def run_service(directory: Path, pipeline: str, out: Path, variables=None, timeout: int = 600,
+                binary: Path = None, complete: bool = True):
     """Runs the exported service's pipeline once and returns the run; every block must
-    complete."""
+    complete, unless complete is False."""
     arguments = []
     for key, value in (variables or {}).items():
         arguments += ['--var', f'{key}={value}']
     result = subprocess.run(
-        [str(service_binary()), 'run', pipeline, '--json', *arguments],
+        [str(binary or service_binary()), 'run', pipeline, '--json', *arguments],
         capture_output=True, text=True, timeout=timeout,
         env=dict(
             os.environ,
@@ -107,6 +121,8 @@ def run_service(directory: Path, pipeline: str, out: Path, variables=None, timeo
             PYTHONPATH=os.pathsep.join([str(directory / 'python'), str(REPO)]),
         ),
     )
+    if not complete:
+        return json.loads(result.stdout[result.stdout.index('{'):])
     assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-3000:]
     run = json.loads(result.stdout[result.stdout.index('{'):])
     assert {b['status'] for b in run['blocks']} == {'completed'}, run

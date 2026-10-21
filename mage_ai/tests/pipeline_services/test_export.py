@@ -146,20 +146,70 @@ class CaptureTest(ExportTestCase):
         self.assertIn('is a sensor block', problems)
         self.assertIn('missing_pipeline', problems)
 
-    def test_contracts_and_monitors_the_service_does_not_check_are_noted(self):
-        _, summary, _ = self.chain()
-        summary.configuration = dict(contract='regions')
+    def test_a_contract_goes_in_the_manifest_and_a_monitor_is_noted(self):
+        load, summary, _ = self.chain()
+        summary.configuration = dict(contract=dict(name='regions', enforcement='warn'))
         self.pipeline.save()
+        contracts = self.project / 'contracts'
+        contracts.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, contracts, True)
+        (contracts / 'regions.yaml').write_text(
+            'version: 2.1.0\ncolumns:\n  region: {type: string, nullable: false}\n'
+            'unique: region\n'
+        )
         (self.project / 'monitors').mkdir(exist_ok=True)
         monitor = self.project / 'monitors' / f'{self.pipeline.uuid}.yaml'
         monitor.write_text(f'pipeline: {self.pipeline.uuid}\nblock: {summary.uuid}\n')
         self.addCleanup(monitor.unlink)
 
-        notes = '\n'.join(export.capture(self.repo_path, [self.pipeline.uuid]).notes)
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
 
-        self.assertIn(f'block {summary.uuid}: the service does not check data contract '
-                      'regions', notes)
+        blocks = {b['uuid']: b for b in captured.manifest['pipelines'][0]['blocks']}
+        contract = blocks[summary.uuid]['contract']
+        self.assertEqual(
+            {k: contract[k] for k in ('name', 'enforcement', 'output')},
+            dict(name='regions', enforcement='warn', output=0),
+        )
+        self.assertEqual(contract['document']['version'], '2.1.0')
+        self.assertEqual(contract['document']['unique'], ['region'])
+        self.assertEqual(contract['document']['columns'][0]['name'], 'region')
+        self.assertNotIn('contract', blocks[load.uuid])
+        self.assertIn('contracts', captured.engine_features)
+        notes = '\n'.join(captured.notes)
+        self.assertIn(f'block {summary.uuid}: the service checks its output against contract '
+                      'regions (warn)', notes)
         self.assertIn(f'the service does not run monitor {self.pipeline.uuid}.', notes)
+
+        # The engine builds without the checker when no block has a contract.
+        summary.configuration = dict(contract=dict(name='regions', enforcement='off'))
+        self.pipeline.save()
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+        self.assertFalse(any('contract' in b for b in captured.manifest['pipelines'][0]['blocks']))
+        self.assertNotIn('contracts', captured.engine_features)
+
+    def test_a_missing_contract_or_another_version_is_refused(self):
+        _, summary, _ = self.chain()
+        contracts = self.project / 'contracts'
+        contracts.mkdir(exist_ok=True)
+        self.addCleanup(shutil.rmtree, contracts, True)
+        (contracts / 'regions.yaml').write_text('version: 2.1.0\ncolumns: {region: string}\n')
+
+        for setting, expected in [
+            ('missing', 'Contract missing does not exist'),
+            (dict(name='regions', version='1'), 'expects version 1 of contract regions, which '
+             'is at version 2.1.0'),
+            (dict(name='regions', enforcement='always'), 'must be one of fail, warn, off'),
+        ]:
+            summary.configuration = dict(contract=setting)
+            self.pipeline.save()
+            with self.assertRaises(export.ExportError) as caught:
+                export.capture(self.repo_path, [self.pipeline.uuid])
+            self.assertIn(expected, '\n'.join(caught.exception.problems))
+
+        summary.configuration = dict(contract=dict(name='regions', version='2'))
+        self.pipeline.save()
+        self.assertIn('contracts', export.capture(self.repo_path, [self.pipeline.uuid])
+                      .engine_features)
 
     def test_model_files_the_blocks_name_and_includes_go_in_the_image(self):
         import joblib

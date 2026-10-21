@@ -92,6 +92,12 @@ pub struct Rows {
     pub rows: Vec<Vec<Option<String>>>,
 }
 
+/// Whether a file is Arrow IPC (by its extension), not Parquet.
+pub(crate) fn is_ipc(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".arrow") || lower.ends_with(".ipc") || lower.ends_with(".feather")
+}
+
 impl Table {
     /// Opens the file. Every query of the table turns a panic of the engine into an
     /// error, so a file the engine cannot read fails its request, not the process.
@@ -122,6 +128,9 @@ impl Table {
 
     /// The GeoParquet metadata of the file, empty when it has none.
     fn geo_metadata(&self) -> String {
+        if is_ipc(&self.path) {
+            return String::new();
+        }
         let Ok(file) = std::fs::File::open(&self.path) else {
             return String::new();
         };
@@ -143,6 +152,15 @@ impl Table {
     }
 
     pub(crate) fn scan(&self) -> Result<LazyFrame, AtlasError> {
+        if is_ipc(&self.path) {
+            // Arrow IPC files: the outputs of exported services.
+            return LazyFrame::scan_ipc(
+                PlRefPath::from(self.path.as_str()),
+                Default::default(),
+                Default::default(),
+            )
+            .map_err(|error| self.error(error));
+        }
         LazyFrame::scan_parquet(
             PlRefPath::from(self.path.as_str()),
             ScanArgsParquet::default(),
