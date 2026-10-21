@@ -13,6 +13,12 @@
 
 ### Exported services
 
+- Alerts from exported services: `alerts` in `service.yaml` sends failed runs (with the
+  failing block and error), late runs, stopped or lagging streams and failed monitors to
+  Slack, Teams, Google Chat, Discord or a webhook, with a cooldown. Channel URLs come from
+  environment variables, never the export.
+- The Services page kept only the fields it edits when saving: alerts, and a model's
+  challengers, shadow sample and audit settings, written in `service.yaml` were removed.
 - Audit records: with `audit` on a service's model, every input `predict` scores gets an
   append-only record (key, model version and digest, code and run, features as configured,
   output, reason codes from CatBoost, XGBoost or LightGBM), chained by hash per file.

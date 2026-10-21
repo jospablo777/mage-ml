@@ -27,6 +27,14 @@ service.yaml:
           mask: [ssn]        # columns stored as ***
           hash: [email]      # columns stored as their keyed hash
           reasons: 3         # the top features behind each score (tree models)
+    alerts:                  # optional: where the service sends alerts
+      on: [run_failed, run_late, stream_stopped, stream_lag, monitor_failed]
+      channels:
+        - kind: slack        # slack, teams, google_chat, discord or webhook
+          url_env: SLACK_WEBHOOK_URL   # the variable holding the URL, never the URL
+      cooldown_minutes: 10
+      run_minutes: 60        # a run still running after this is late
+      stream_lag: 100000     # messages behind above which a stream alerts
 
 The Services page edits these files, and the `mage service` commands use them. Services in
 the earlier single file, pipeline_services.yaml, are still read; saving one moves it to its
@@ -186,6 +194,7 @@ def normalize(name: str, value: Dict) -> Dict:
         problem = _challenger_problem(model) or _audit_problem(model)
         if problem:
             raise DefinitionError(f"Service {name}: model {model['name']}: {problem}")
+    alerts = _alerts(name, value.get('alerts'))
     if registry is not None and (
         not isinstance(registry, str) or not REGISTRY_URL.match(registry.strip())
     ):
@@ -197,6 +206,7 @@ def normalize(name: str, value: Dict) -> Dict:
         description=value.get('description') or '',
         include=list(include),
         max_runs=max_runs,
+        alerts=alerts,
         model_registry=registry.strip() if registry else None,
         models=[_model(m) for m in models],
         pipelines=list(dict.fromkeys(pipelines)),
@@ -223,6 +233,51 @@ def _challenger_problem(model: Dict) -> Optional[str]:
     if isinstance(sample, bool) or not isinstance(sample, (int, float)) or not 0 < sample <= 1:
         return 'shadow.sample must be a share of inputs above 0 and at most 1, such as 0.25.'
     return None
+
+
+ALERT_KINDS = ('run_failed', 'run_late', 'stream_stopped', 'stream_lag', 'monitor_failed')
+CHANNEL_KINDS = ('slack', 'teams', 'google_chat', 'discord', 'webhook')
+_ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]*$')
+
+
+def _alerts(name: str, value) -> Optional[Dict]:
+    """The service's alert settings, checked; None without any."""
+    if value is None:
+        return None
+
+    def problem(text):
+        return DefinitionError(f'Service {name}: alerts: {text}')
+
+    if not isinstance(value, dict):
+        raise problem('must be a mapping with channels, such as '
+                      '{channels: [{kind: slack, url_env: SLACK_WEBHOOK_URL}]}.')
+    kinds = value.get('on', list(ALERT_KINDS))
+    if not isinstance(kinds, list) or any(k not in ALERT_KINDS for k in kinds):
+        raise problem(f'on lists alerts among {", ".join(ALERT_KINDS)}.')
+    channels = value.get('channels') or []
+    if not isinstance(channels, list) or not channels:
+        raise problem('need at least one channel.')
+    for channel in channels:
+        if not isinstance(channel, dict) or channel.get('kind') not in CHANNEL_KINDS:
+            raise problem(f'a channel kind is one of {", ".join(CHANNEL_KINDS)}.')
+        if 'url' in channel:
+            raise problem('a channel names the variable holding its URL (url_env), not the '
+                          'URL: a webhook URL is a credential and would be in Git and the '
+                          'image.')
+        if not _ENV_NAME.match(str(channel.get('url_env') or '')):
+            raise problem('url_env is an environment variable name, such as '
+                          'SLACK_WEBHOOK_URL.')
+    out = dict(on=list(kinds),
+               channels=[dict(kind=c['kind'], url_env=c['url_env']) for c in channels])
+    for field, kind in (('cooldown_minutes', int), ('run_minutes', (int, float)),
+                        ('stream_lag', int)):
+        if value.get(field) is None:
+            continue
+        number = value[field]
+        if isinstance(number, bool) or not isinstance(number, kind) or number < 0:
+            raise problem(f'{field} must be a number of at least 0.')
+        out[field] = number
+    return out
 
 
 def _audit_problem(model: Dict) -> Optional[str]:
@@ -341,6 +396,8 @@ def _compact(value: Dict) -> Dict:
         out['model_registry'] = value['model_registry']
     if value.get('models'):
         out['models'] = value['models']
+    if value.get('alerts'):
+        out['alerts'] = value['alerts']
     return out
 
 

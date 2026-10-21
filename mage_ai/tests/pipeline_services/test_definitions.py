@@ -153,7 +153,10 @@ class DefinitionsTest(ExportTestCase):
         self.assertEqual(churn['challengers'], [dict(name='v4', uri='models:/churn/4')])
         self.assertEqual(churn['shadow'], dict(sample=0.25))
         self.assertEqual(fraud['shadow'], dict(sample=definitions.DEFAULT_SHADOW_SAMPLE))
-        from mage_ai.pipeline_services.exports import audit_settings, challenger_settings
+        from mage_ai.pipeline_services.exports import (
+            audit_settings,
+            challenger_settings,
+        )
         self.assertEqual(challenger_settings(saved['models'])['churn'], dict(
             sample=0.25, challengers=[dict(name='v4', uri='models:/churn/4')]))
         self.assertEqual(audit_settings(saved['models']), {})
@@ -166,6 +169,32 @@ class DefinitionsTest(ExportTestCase):
         [churn] = definitions.load_definition(self.repo_path, 'scoring')['models']
         self.assertEqual(churn['audit'], dict(features='values', mask=['ssn'], hash=[],
                                               reasons=3))
+
+    def test_alerts_are_saved_with_the_service(self):
+        definitions.save_definition(self.repo_path, 'scoring', dict(pipelines=['a'], alerts=dict(
+            channels=[dict(kind='slack', url_env='SLACK_WEBHOOK_URL')], run_minutes=30,
+        )))
+        alerts = definitions.load_definition(self.repo_path, 'scoring')['alerts']
+        self.assertEqual(alerts['channels'], [dict(kind='slack', url_env='SLACK_WEBHOOK_URL')])
+        self.assertEqual(alerts['on'], list(definitions.ALERT_KINDS))
+        self.assertEqual(alerts['run_minutes'], 30)
+        self.assertEqual(self.service_yaml('scoring')['alerts'], alerts)
+
+    def test_a_page_save_keeps_the_settings_the_page_does_not_edit(self):
+        """The Services page sends models as name and uri; challengers and audit stayed out."""
+        from mage_ai.api.resources.PipelineServiceResource import (
+            FIELDS,
+            _keep_model_settings,
+        )
+
+        earlier = [dict(name='churn', uri='models:/churn/1', audit=dict(reasons=3),
+                        challengers=[dict(name='v2', uri='models:/churn/2')],
+                        shadow=dict(sample=0.5))]
+        kept = _keep_model_settings([dict(name='churn', uri='models:/churn/3'),
+                                     dict(name='new', uri='models:/new/1')], earlier)
+        self.assertEqual(kept[0], dict(earlier[0], uri='models:/churn/3'))
+        self.assertEqual(kept[1], dict(name='new', uri='models:/new/1'))
+        self.assertIn('alerts', FIELDS)
 
     def test_bad_settings_say_what_to_fix(self):
         for value, message in (
@@ -184,6 +213,13 @@ class DefinitionsTest(ExportTestCase):
                 features='all'))]), 'audit.features is'),
             (dict(pipelines=['a'], models=[dict(name='m', uri='u', audit=dict(
                 reasons=-1))]), 'audit.reasons is'),
+            (dict(pipelines=['a'], alerts=dict(channels=[])), 'at least one channel'),
+            (dict(pipelines=['a'], alerts=dict(channels=[dict(kind='sms', url_env='X')])),
+             'a channel kind is one of'),
+            (dict(pipelines=['a'], alerts=dict(channels=[dict(
+                kind='slack', url='https://hooks.slack.com/x')])), 'not the URL'),
+            (dict(pipelines=['a'], alerts=dict(on=['always'], channels=[dict(
+                kind='slack', url_env='X')])), 'on lists alerts'),
             (dict(pipelines=['a'], model_registry='mlflow:5000'), 'such as http://mlflow:5000'),
         ):
             with self.subTest(message=message):

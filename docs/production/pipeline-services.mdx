@@ -521,6 +521,39 @@ When the alias moves to a version trained on another feature service, the next e
 reads the new features with no code change. The Services page shows the feature service
 of each model.
 
+## Alerts
+
+A service sends alerts to Slack, Microsoft Teams, Google Chat, Discord or any webhook:
+
+```yaml
+    alerts:
+      on: [run_failed, run_late, stream_stopped, stream_lag, monitor_failed]   # the default
+      channels:
+        - kind: slack
+          url_env: SLACK_WEBHOOK_URL
+        - kind: webhook             # the alert as JSON, for an incident tool
+          url_env: ONCALL_WEBHOOK_URL
+      cooldown_minutes: 10
+      run_minutes: 60
+      stream_lag: 100000
+```
+
+| Alert | When |
+| --- | --- |
+| `run_failed` | A run failed: the message names the block that failed and the error's first lines |
+| `run_late` | A run is still running after `run_minutes` |
+| `stream_stopped` | A stream stopped on an error that needs a person, with the error |
+| `stream_lag` | A stream is more than `stream_lag` messages behind its source |
+| `monitor_failed` | A monitor of a block's output failed, with the checks that failed |
+
+- Each channel names the environment variable that holds its URL. A webhook URL is a
+  credential: the export refuses a URL written in `service.yaml`, and the service reads the
+  variable when it sends.
+- Each message says what happened, where (pipeline, block, run), the error's first lines,
+  and what to do. With `MAGE_SERVICE_PUBLIC_URL` set, it links the run and its log.
+- The same alert (kind and pipeline) again within `cooldown_minutes` is held; the next one
+  sent says how many were held. Sending never slows a run, and is tried three times.
+
 ## Feature stores and APIs
 
 Blocks that call HTTP APIs run unchanged: the export pins the client packages they import,
@@ -623,6 +656,7 @@ to it.
 | `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
 | `MAGE_SERVICE_RUST_RESIDENT` | `on` | `off` starts the Rust binary for each run instead of keeping it running between runs |
 | `MAGE_SERVICE_RUST_MAX_JOBS` | `1000` | Jobs a resident Rust program serves before it is replaced |
+| `MAGE_SERVICE_PUBLIC_URL` | none | The service's address, for links in alerts |
 | `MAGE_SERVICE_AUDIT_RETENTION_DAYS` | `365` | Days audit records are kept; 0 keeps them |
 | `MAGE_SERVICE_AUDIT_KEY` | none | The key of hashed audit columns (HMAC-SHA-256) |
 | `MAGE_SERVICE_R_RESIDENT` | `on` | `off` starts Rscript for each R block run instead of keeping an R session in each Python worker |

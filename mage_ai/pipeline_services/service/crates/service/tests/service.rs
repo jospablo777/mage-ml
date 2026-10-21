@@ -1334,3 +1334,139 @@ fn without_resident_programs_each_run_starts_its_own() {
     assert_ne!(first["output"]["pid"], second["output"]["pid"]);
     assert_eq!(second["output"]["served"], 1);
 }
+
+/// A webhook that records each request's body; answers 200.
+fn webhook_receiver() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let store = received.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 8192];
+            while let Ok(n) = stream.read(&mut buffer) {
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= length {
+                        if let Ok(value) = serde_json::from_str(&body[..length]) {
+                            store.lock().unwrap().push(value);
+                        }
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    (port, received)
+}
+
+fn wait_for_alerts(received: &std::sync::Mutex<Vec<Value>>, count: usize) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        let alerts = received.lock().unwrap().clone();
+        if alerts.len() >= count {
+            return alerts;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    received.lock().unwrap().clone()
+}
+
+#[test]
+fn a_failed_run_and_a_late_one_send_alerts_once_per_cooldown() {
+    let (port, received) = webhook_receiver();
+    let mut manifest = manifest(false);
+    manifest["alerts"] = json!({
+        "on": ["run_failed", "run_late"],
+        "channels": [{"kind": "webhook", "url_env": "TEST_ALERT_URL"}],
+        "cooldown_minutes": 10,
+        "run_minutes": 0.02,
+    });
+    let mut service = Service::create(false);
+    std::fs::write(
+        service.dir.path().join("service.json"),
+        manifest.to_string(),
+    )
+    .unwrap();
+    let url = format!("http://127.0.0.1:{port}/hook");
+    service.start(&[
+        ("TEST_ALERT_URL", url.as_str()),
+        ("MAGE_SERVICE_PUBLIC_URL", "https://scoring.example.org"),
+        ("MAGE_SERVICE_ALERT_CHECK_SECONDS", "0.2"),
+    ]);
+
+    let (_, run) = service.post("/v1/pipelines/fails/runs?wait=60", json!({}));
+    assert_eq!(run["status"], "failed");
+    let alerts = wait_for_alerts(&received, 1);
+    let alert = &alerts[0];
+    assert_eq!(
+        (
+            alert["kind"].as_str(),
+            alert["pipeline"].as_str(),
+            alert["block"].as_str()
+        ),
+        (Some("run_failed"), Some("fails"), Some("broken")),
+        "{alert}"
+    );
+    let text = alert["text"].as_str().unwrap();
+    assert!(text.contains("this block always fails"), "{text}");
+    let link = format!(
+        "https://scoring.example.org/v1/runs/{}",
+        run["id"].as_str().unwrap()
+    );
+    assert_eq!(alert["link"], json!(link));
+    assert!(text.contains("What to do:"), "{text}");
+
+    // The same failure again within the cooldown is held.
+    service.post("/v1/pipelines/fails/runs?wait=60", json!({}));
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        received
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|a| a["kind"] == "run_failed")
+            .count(),
+        1
+    );
+
+    // A run past run_minutes (1.2 s) is reported late, once.
+    let markers = service.markers();
+    let (_, slow) = service.post(
+        "/v1/pipelines/slow/runs",
+        json!({"variables": {"marker_dir": markers, "seconds": 6}}),
+    );
+    let alerts = wait_for_alerts(&received, 2);
+    let late = alerts
+        .iter()
+        .find(|a| a["kind"] == "run_late")
+        .expect("a late alert");
+    assert_eq!(late["run_id"], slow["id"]);
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(
+        received
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|a| a["kind"] == "run_late")
+            .count(),
+        1
+    );
+}

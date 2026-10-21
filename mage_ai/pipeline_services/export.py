@@ -204,6 +204,7 @@ def capture(
     includes: Optional[List[str]] = None,
     challengers: Optional[Dict[str, Dict]] = None,
     audits: Optional[Dict[str, Dict]] = None,
+    alerts: Optional[Dict] = None,
 ) -> Capture:
     """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
@@ -274,6 +275,8 @@ def capture(
         pipelines=pipelines,
     )
     capture_.manifest['environment'] = _environment(capture_)
+    if alerts:
+        capture_.manifest['alerts'] = alerts
     if capture_.needs_r:
         capture_.r_project = _r_project(project_path)
     capture_.models = _models(capture_, models or [])

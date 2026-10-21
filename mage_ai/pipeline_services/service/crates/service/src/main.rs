@@ -1,5 +1,6 @@
 //! mage-service: runs pipelines exported from a Mage project, without Mage.
 
+mod alerts;
 mod api;
 mod audit;
 mod aws;
@@ -893,6 +894,7 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
 
     let dispatcher = tokio::spawn(service.clone().dispatch());
     let streams = streams::start(&service);
+    alerts::watch(service.clone());
     if schedules_enabled {
         let owner = format!("{}-{}", hostname(), std::process::id());
         tokio::spawn(scheduler::run(service.clone(), owner));

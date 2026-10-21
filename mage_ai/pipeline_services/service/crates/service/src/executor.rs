@@ -139,6 +139,28 @@ pub async fn execute_run(service: Arc<Service>, run_id: String, cancel: Cancella
             &format!("Run {run_id} {}: {message}", status.as_str()),
         ),
     }
+    if status == RunStatus::Failed
+        && let (Some(alerts), Some(message)) = (&service.alerts, &error)
+    {
+        let failed = service
+            .ledger
+            .run(&run_id)
+            .ok()
+            .flatten()
+            .and_then(|detail| {
+                detail
+                    .blocks
+                    .into_iter()
+                    .find(|b| b.status == BlockStatus::Failed)
+                    .map(|b| (b.block, b.error))
+            });
+        let (block, detail) = match failed {
+            Some((block, Some(detail))) => (Some(block), detail),
+            Some((block, None)) => (Some(block), message.clone()),
+            None => (None, message.clone()),
+        };
+        alerts.run_failed(&pipeline.uuid, &run_id, block.as_deref(), &detail);
+    }
     service.run_finished(&pipeline.uuid, &run_id, status);
 }
 

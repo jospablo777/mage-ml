@@ -4,7 +4,26 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
 
-FIELDS = ('description', 'include', 'max_runs', 'model_registry', 'models', 'pipelines')
+FIELDS = ('alerts', 'description', 'include', 'max_runs', 'model_registry', 'models',
+          'pipelines')
+# A model's settings the Services page does not edit: an update without them keeps them.
+MODEL_SETTINGS = ('challengers', 'shadow', 'audit')
+
+
+def _keep_model_settings(models, previous_models):
+    """The models with the settings their earlier versions had and the payload left out."""
+    if not isinstance(models, list):
+        return models
+    earlier = {m.get('name'): m for m in previous_models or [] if isinstance(m, dict)}
+    kept = []
+    for model in models:
+        if isinstance(model, dict):
+            model = dict(model)
+            for key in MODEL_SETTINGS:
+                if key not in model and key in earlier.get(model.get('name'), {}):
+                    model[key] = earlier[model['name']][key]
+        kept.append(model)
+    return kept
 
 
 def _with_export(
@@ -131,6 +150,7 @@ class PipelineServiceResource(GenericResource):
         previous = self.model['name']
         name = payload.get('name') or previous
         merged = {k: payload[k] if k in payload else self.model.get(k) for k in FIELDS}
+        merged['models'] = _keep_model_settings(merged.get('models'), self.model.get('models'))
         try:
             value = definitions.save_definition(repo_path, name, merged, previous_name=previous)
         except definitions.DefinitionError as error:

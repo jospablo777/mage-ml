@@ -113,6 +113,11 @@ fn check(
             _ => log.warn(Some(&block.uuid), &text),
         }
         service.observe_monitor(pipeline, &block.uuid, &monitor.name, &record);
+        if record["result"] == "fail"
+            && let Some(alerts) = &service.alerts
+        {
+            alerts.monitor_failed(pipeline, &block.uuid, run_id, &text);
+        }
         if record["result"] == "fail" && record["fail_block"] == true {
             failing.push(text);
         }

@@ -70,6 +70,7 @@ def capture(repo_path: str, name: str) -> export.Capture:
             includes=saved['include'],
             challengers=exports.challenger_settings(saved['models']),
             audits=exports.audit_settings(saved['models']),
+            alerts=saved.get('alerts'),
         )
 
 

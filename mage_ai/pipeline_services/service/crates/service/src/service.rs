@@ -56,6 +56,8 @@ pub struct Service {
     pub stream_stop: CancellationToken,
     /// Resident Rust block programs for runs; None with MAGE_SERVICE_RUST_RESIDENT=off.
     pub residents: Option<crate::resident::Residents>,
+    /// Where alerts go, when the manifest has some.
+    pub alerts: Option<crate::alerts::Alerter>,
     max_total_runs: usize,
     wake: Notify,
     shutting_down: AtomicBool,
@@ -171,6 +173,10 @@ impl Service {
         ledger: Ledger,
         python: Option<Arc<PythonPool>>,
     ) -> Arc<Service> {
+        let alerts = manifest
+            .alerts
+            .clone()
+            .map(|alerts| crate::alerts::Alerter::new(alerts, &manifest.service.name));
         Arc::new(Service {
             manifest,
             service_dir: config.service_dir,
@@ -187,6 +193,7 @@ impl Service {
             ingest: Mutex::new(BTreeMap::new()),
             stream_stop: CancellationToken::new(),
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
+            alerts,
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
             shutting_down: AtomicBool::new(false),

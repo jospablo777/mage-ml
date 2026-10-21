@@ -28,6 +28,80 @@ pub struct Manifest {
     /// ML models embedded in the image, from MLflow.
     #[serde(default)]
     pub models: Vec<Model>,
+    /// Where the service sends alerts, and for what.
+    #[serde(default)]
+    pub alerts: Option<Alerts>,
+}
+
+/// Alerts a service sends (service.yaml `alerts`). A channel names the environment
+/// variable that holds its URL: a webhook URL is a credential, never in the export.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Alerts {
+    #[serde(default = "default_alert_on")]
+    pub on: Vec<AlertKind>,
+    pub channels: Vec<AlertChannel>,
+    /// The same alert (kind and pipeline) again within this time is counted and reported
+    /// with the next one.
+    #[serde(default)]
+    pub cooldown_minutes: Option<u64>,
+    /// A run still running after this many minutes is late.
+    #[serde(default)]
+    pub run_minutes: Option<f64>,
+    /// Messages behind the end of a stream's source above which it alerts.
+    #[serde(default)]
+    pub stream_lag: Option<i64>,
+}
+
+fn default_alert_on() -> Vec<AlertKind> {
+    vec![
+        AlertKind::RunFailed,
+        AlertKind::RunLate,
+        AlertKind::StreamStopped,
+        AlertKind::StreamLag,
+        AlertKind::MonitorFailed,
+    ]
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertKind {
+    RunFailed,
+    RunLate,
+    StreamStopped,
+    StreamLag,
+    MonitorFailed,
+}
+
+impl AlertKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlertKind::RunFailed => "run_failed",
+            AlertKind::RunLate => "run_late",
+            AlertKind::StreamStopped => "stream_stopped",
+            AlertKind::StreamLag => "stream_lag",
+            AlertKind::MonitorFailed => "monitor_failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AlertChannel {
+    pub kind: ChannelKind,
+    /// The environment variable that holds the channel's URL.
+    pub url_env: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    Slack,
+    Teams,
+    GoogleChat,
+    Discord,
+    /// The alert as JSON, for anything else.
+    Webhook,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -595,6 +669,24 @@ impl Manifest {
         }
         if self.pipelines.is_empty() {
             problems.push("The service has no pipelines.".into());
+        }
+        if let Some(alerts) = &self.alerts {
+            if alerts.channels.is_empty() {
+                problems.push("Alerts need at least one channel.".into());
+            }
+            for channel in &alerts.channels {
+                let name = &channel.url_env;
+                if name.is_empty()
+                    || !name
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                {
+                    problems.push(format!(
+                        "Alert channel url_env {name:?} is not an environment variable name, \
+                         such as SLACK_WEBHOOK_URL."
+                    ));
+                }
+            }
         }
         let mut model_names = BTreeSet::new();
         for model in &self.models {
