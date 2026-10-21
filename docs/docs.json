@@ -388,6 +388,7 @@
               "guides/blocks/replicate-blocks",
               "guides/blocks/transformer-blocks",
               "guides/blocks/data-contracts",
+              "guides/blocks/development-data",
               "guides/blocks/custom-blocks",
               "guides/blocks/markdown-blocks",
               "guides/blocks/sql-blocks",

@@ -1403,6 +1403,32 @@ app.add_typer(service_app, name='service')
 
 SERVICE_PROJECT = typer.Option('.', '--project', '-p', help='path of the MageML project.')
 
+data_app = typer.Typer(
+    cls=OrderCommands,
+    help='Data for local development: masked samples of production tables.',
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(data_app, name='data')
+
+
+@data_app.command('sample')
+def data_sample(
+    name: str = typer.Argument(..., help='the sample, data_samples/<name>.yaml.'),
+    project: str = SERVICE_PROJECT,
+):
+    """Copies a masked sample of production tables to .mage/dev_data/<name>/."""
+    from mage_ai import data_samples
+
+    try:
+        record = data_samples.run(os.path.abspath(project), name)
+    except data_samples.SampleError as error:
+        _service_error(error)
+    for table in record['tables']:
+        masked = sorted(c for c, rule in table['rules'].items() if rule != 'keep')
+        typer.echo(f"{table['table']}: {table['rows']} rows, masked {', '.join(masked) or '-'}")
+    typer.echo(f'Written to {os.path.relpath(os.path.join(project, ".mage", "dev_data", name))}'
+               ' (Parquet, dev.duckdb and record.json).')
+
 
 def _service_error(error: Exception) -> None:
     problems = getattr(error, 'problems', None) or [str(error)]

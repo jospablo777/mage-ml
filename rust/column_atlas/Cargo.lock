@@ -383,6 +383,7 @@ dependencies = [
  "memchr",
  "polars",
  "pyo3",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

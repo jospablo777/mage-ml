@@ -235,6 +235,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Replicating blocks](guides/blocks/replicate-blocks.md)
 - [Transformer blocks](guides/blocks/transformer-blocks.md)
 - [Data contracts](guides/blocks/data-contracts.md)
+- [Development data](guides/blocks/development-data.md)
 - [Custom blocks](guides/blocks/custom-blocks.md)
 - [Markdown blocks](guides/blocks/markdown-blocks.md)
 - [SQL blocks](guides/blocks/sql-blocks.md)

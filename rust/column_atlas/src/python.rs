@@ -266,6 +266,23 @@ fn log_search(
     json(&found)
 }
 
+/// Masks a table for a development copy (`mage data sample`): reads `input` (Parquet or
+/// Arrow IPC), applies `rules` (JSON, column -> rule) with `key`, writes Parquet to
+/// `output`; returns the rows and each column's rule (JSON).
+#[pyfunction]
+fn mask_table(
+    py: Python<'_>,
+    input: String,
+    output: String,
+    rules: String,
+    key: String,
+) -> PyResult<String> {
+    let report = py
+        .detach(|| crate::mask::mask(&input, &output, &rules, &key))
+        .map_err(to_python)?;
+    json(&report)
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(log_window, module)?)?;
@@ -286,6 +303,7 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(compare_profiles, module)?)?;
     module.add_function(wrap_pyfunction!(merge_monitor_records, module)?)?;
     module.add_function(wrap_pyfunction!(monitor_performance, module)?)?;
+    module.add_function(wrap_pyfunction!(mask_table, module)?)?;
     module.add("MAX_ROWS", crate::engine::MAX_ROWS)?;
     module.add("MAX_COLUMNS", crate::engine::MAX_COLUMNS)?;
     module.add("MAX_SUMMARY_COLUMNS", crate::engine::MAX_SUMMARY_COLUMNS)?;

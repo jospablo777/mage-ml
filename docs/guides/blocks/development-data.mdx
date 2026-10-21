@@ -1,0 +1,79 @@
+---
+title: "Development data"
+sidebarTitle: "Development data"
+icon: "user-secret"
+description: "Copy a masked sample of production tables to your machine: hashed keys that still join, fake names and emails, shifted dates."
+---
+
+## Overview
+
+`mage data sample <name>` copies a sample of production tables to
+`.mage/dev_data/<name>/`, with the columns that identify people masked. Keys are replaced
+by keyed hashes, so tables still join on them. The same masking key gives the same values
+on every copy, and without the key a masked value cannot be checked against a guess.
+
+## Define a sample
+
+`data_samples/<name>.yaml` in the project:
+
+```yaml
+source:
+  profile: production_readonly       # an io_config.yaml profile (PostgreSQL)
+key_env: MAGE_SAMPLE_KEY             # the variable with the masking key, 16 characters or more
+tables:
+  - table: public.customers
+    key: id                          # rows are drawn by a hash of this column
+    sample: {fraction: 0.05}         # or {rows: 1000}, or {stratify: country, rows: 100}
+    where: "created_at >= now() - interval '90 days'"
+    columns:
+      id: hash
+      email: {fake: email}
+      full_name: {fake: name}
+      ssn: null
+      notes: mask
+      birth_date: {shift_days: 30, by: id}
+    keep:
+      country: "a country is not personal at this granularity"
+  - table: public.orders
+    key: id
+    follow: {table: public.customers, column: customer_id}
+    columns: {customer_id: hash}
+```
+
+| Rule | What the copy holds |
+| --- | --- |
+| `hash` | A keyed hash: an integer for integer columns, so keys stay integers; hex text otherwise |
+| `fake: name`, `email`, `phone`, `text` | A made-up value, the same for the same original |
+| `null` | Missing |
+| `mask` | `***` for text, missing otherwise |
+| `shift_days: N`, `by: <column>` | Dates moved up to N days either way, by the same amount for the same `by` value |
+| `keep` (with the reason) | The value as it is |
+
+Missing values stay missing whatever the rule.
+
+## Which rows
+
+- `fraction` keeps the rows whose key hashes into that share, in the source's SQL. Tables
+  sampled with the same fraction on the same key values keep the same entities.
+- `rows` keeps that many rows, the same ones each time; with `stratify`, that many per
+  value of the column.
+- `follow` keeps the rows whose column holds a key the other table's sample has: the
+  orders of the sampled customers.
+- `where` narrows the rows first, such as a time window.
+
+## What it refuses
+
+- A column whose name looks personal (email, phone, names, address, postal code, birth
+  date, national ids, card, password, token, IP address, salary...) with no rule stops
+  the copy before anything is written. Give it a rule, or keep it with the reason.
+- A masking key shorter than 16 characters, or none. Keep the key as a secret, out of the
+  project.
+
+## What it writes
+
+`.mage/dev_data/<name>/` holds one Parquet file per table, `dev.duckdb` with the tables,
+and `record.json`: when, by whom, from which profile, and each table's rows, rules,
+kept columns and sampling. The copy adds `.mage/dev_data/` to the project's `.gitignore`,
+so it stays out of Git.
+
+Masking runs in Rust, in the same extension as the block output explorer.

@@ -33,6 +33,8 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 # use too.
 mage-checks = { path = "../../mage_ai/pipeline_services/service/crates/checks" }
 memchr = "2"
+# Keyed hashes of masked development copies (src/mask.rs).
+ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

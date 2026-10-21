@@ -13,6 +13,10 @@
 
 ### Exported services
 
+- `mage data sample` copies a masked sample of production tables (PostgreSQL) for local
+  development: keyed hashes that still join, fake names, emails and phones, shifted dates,
+  sampling by key, stratum or time window; personal-looking columns without a rule stop the
+  copy. Masking runs in Rust (ColumnAtlas).
 - `mage service models` shows each model's built version and the registry's; `mage service
   promote` makes a challenger, a version or a moved alias the one a service embeds,
   records it in `promotions.yaml`, and with `--env` deploys it with the usual checks.

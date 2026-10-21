@@ -73,7 +73,7 @@ secrets: {}
 # Generated builds, local runs, development runs from the editor (I-204), deploy state and
 # local secret files.
 GITIGNORE_LINES = ('.mage/build/', '.mage/run/', '.mage/dev/', '.mage/deploy/',
-                   'services/*/.env*')
+                   '.mage/dev_data/', 'services/*/.env*')
 _NAME = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 
