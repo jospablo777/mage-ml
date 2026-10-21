@@ -461,6 +461,27 @@ scores = predict('churn', customers, uri='models:/churn-classifier@champion',
 
 In MageML, `predict` scores with the model alone.
 
+### Promote a model
+
+`mage service models scoring` shows each model's version in the last build, the version its
+uri points to in the registry now, and its challengers'. A model whose alias moved since the
+build is marked `moved`.
+
+```bash
+mage service promote scoring --model churn --challenger v4 --reason "better recall"
+mage service promote scoring --model churn                 # follow an alias that moved
+mage service promote scoring --model churn --version 7 --env prod
+```
+
+- A uri with a version (`models:/churn/3`) is rewritten to the promoted version. A uri with
+  an alias keeps it: the alias already points to the version, or `--move-alias` moves it in
+  the registry (a registry write; a team that moves aliases elsewhere leaves it off).
+- A promoted challenger leaves the challengers.
+- `services/<name>/promotions.yaml` records each promotion: when, who (Git's user), the
+  model, from and to which version, how, and the reason. Commit it with `service.yaml`.
+- With `--env`, the service is built, tested and deployed as `mage service deploy` does,
+  with its health check and rollback; the deployment records the promotion as its reason.
+
 ### Audit records
 
 With `audit` on a model, every input `predict` scores gets a record, written before

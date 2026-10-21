@@ -1846,6 +1846,71 @@ def _refuse_uncommitted(project: str, name: str, captured, reason: Union[str, No
     raise typer.Exit(code=1)
 
 
+@service_app.command('models')
+def service_models(
+    name: str = typer.Argument(...),
+    project: str = SERVICE_PROJECT,
+):
+    """Each model of the service: the version built, the registry's now, its challengers."""
+    from mage_ai.pipeline_services import definitions, lifecycle
+
+    try:
+        rows = lifecycle.models_status(project, name)
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    if not rows:
+        typer.echo(f'{name} embeds no models.')
+        return
+    for row in rows:
+        line = (f"{row['name']}: {row['uri']}, built {row['built'] or '-'}, registry "
+                f"{row['registry'] or '-'}")
+        if row['status'] == 'moved':
+            line += (f" (moved: `mage service promote {name} --model {row['name']}` "
+                     'rebuilds with it)')
+        typer.echo(line)
+        for challenger in row['challengers']:
+            typer.echo(f"  challenger {challenger['name']}: {challenger['uri']}, version "
+                       f"{challenger['version'] or '-'}")
+        if row.get('problem'):
+            typer.echo(f"  the registry did not answer: {row['problem']}", err=True)
+
+
+@service_app.command('promote')
+def service_promote(
+    name: str = typer.Argument(...),
+    model: str = typer.Option(..., '--model', help='the model, by its name in service.yaml.'),
+    challenger: Union[str, None] = typer.Option(
+        None, '--challenger', help="promote this challenger's version."),
+    version: Union[str, None] = typer.Option(None, '--version', help='promote this version.'),
+    move_alias: bool = typer.Option(
+        False, '--move-alias', help="move the uri's alias to the version in the registry."),
+    reason: Union[str, None] = typer.Option(None, '--reason', help='recorded with it.'),
+    env: Union[str, None] = typer.Option(
+        None, '--env', help='then build, test and deploy to this environment.'),
+    project: str = SERVICE_PROJECT,
+):
+    """
+    Makes a model version the one the service embeds, records who did it and when in
+    services/<name>/promotions.yaml, and with --env deploys it (with the checks and the
+    rollback of `mage service deploy`).
+    """
+    from mage_ai.pipeline_services import definitions, lifecycle
+
+    try:
+        record = lifecycle.promote(project, name, model, challenger=challenger, version=version,
+                                   move_alias=move_alias, reason=reason)
+    except definitions.DefinitionError as error:
+        _service_error(error)
+    typer.echo(f"{model}: version {record['from_version'] or '-'} to {record['to_version']} "
+               f"({record['how']}), recorded in services/{name}/{lifecycle.PROMOTIONS_FILE}.")
+    if env is None:
+        typer.echo(f'Deploy it with `mage service deploy {name} --env <environment>`.')
+        return
+    service_deploy(name=name, env=env, project=project, timeout=120, allow_uncommitted=(
+        f"promote {model} to version {record['to_version']}"), if_changed=False,
+        from_env=None, allow_breaking=None, skip_tests=None)
+
+
 @service_app.command('status')
 def service_status(
     name: Union[str, None] = typer.Argument(None),

@@ -13,6 +13,9 @@
 
 ### Exported services
 
+- `mage service models` shows each model's built version and the registry's; `mage service
+  promote` makes a challenger, a version or a moved alias the one a service embeds,
+  records it in `promotions.yaml`, and with `--env` deploys it with the usual checks.
 - Alerts from exported services: `alerts` in `service.yaml` sends failed runs (with the
   failing block and error), late runs, stopped or lagging streams and failed monitors to
   Slack, Teams, Google Chat, Discord or a webhook, with a cooldown. Channel URLs come from

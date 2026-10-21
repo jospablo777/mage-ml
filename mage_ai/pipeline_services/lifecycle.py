@@ -10,6 +10,7 @@ a reviewer what moved: the project files, the requirements, a model version, the
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -401,3 +402,189 @@ def affected(repo_path: str, paths: List[str]) -> List[str]:
         if _touches(paths, inputs):
             found.append(name)
     return found
+
+
+# ---- promoting a model ---------------------------------------------------------------------
+
+PROMOTIONS_FILE = 'promotions.yaml'
+_MODELS_URI = re.compile(r'^models:/([^/@]+)(?:/(\d+)|@(.+))$')
+
+
+class PromoteError(definitions.DefinitionError):
+    pass
+
+
+def _registry(repo_path: str, name: str):
+    saved = definitions.load_definition(repo_path, name)
+    registry = None if os.environ.get('MLFLOW_TRACKING_URI') else saved['model_registry']
+    return saved, exports.model_registry(registry, exports.CHECK_LIMITS)
+
+
+def _version_of(uri: str) -> Optional[str]:
+    from mage_ai.pipeline_services import model_export
+
+    return model_export._registry_details(uri).get('version')
+
+
+def models_status(repo_path: str, name: str) -> List[Dict]:
+    """
+    Each model of the service: the version its last build embedded (service.lock), the
+    version its uri points to in the registry now, and its challengers' versions. A
+    `moved` model's alias points to another version than the one built: promoting it is
+    a rebuild.
+    """
+    saved, registry = _registry(repo_path, name)
+    built = {m['name']: m for m in (read_lock(repo_path, name) or {}).get('models') or []}
+    rows = []
+    with registry:
+        for model in saved['models']:
+            row = dict(name=model['name'], uri=model['uri'],
+                       built=built.get(model['name'], {}).get('version'))
+            try:
+                row['registry'] = _version_of(model['uri'])
+            except Exception as error:
+                row['registry'] = None
+                row['problem'] = f'{type(error).__name__}: {error}'
+            row['challengers'] = []
+            for challenger in model.get('challengers') or []:
+                try:
+                    version = _version_of(challenger['uri'])
+                except Exception:
+                    version = None
+                row['challengers'].append(dict(name=challenger['name'], uri=challenger['uri'],
+                                               version=version))
+            if row['built'] is None:
+                row['status'] = 'not built'
+            elif row['registry'] and row['registry'] != row['built']:
+                row['status'] = 'moved'
+            else:
+                row['status'] = 'current'
+            rows.append(row)
+    return rows
+
+
+def _who(repo_path: str) -> str:
+    for key in ('user.email', 'user.name'):
+        try:
+            found = _git(repo_path, 'config', key).strip()
+        except Exception:
+            found = ''
+        if found:
+            return found
+    import getpass
+
+    return getpass.getuser()
+
+
+def promotions(repo_path: str, name: str) -> List[Dict]:
+    path = definitions.service_path(repo_path, name) / PROMOTIONS_FILE
+    if not path.is_file():
+        return []
+    return yaml.safe_load(path.read_text()) or []
+
+
+def promote(
+    repo_path: str,
+    name: str,
+    model: str,
+    challenger: Optional[str] = None,
+    version: Optional[str] = None,
+    move_alias: bool = False,
+    reason: Optional[str] = None,
+) -> Dict:
+    """
+    Makes a model version the one the service embeds, and records who did it, when and
+    why in services/<name>/promotions.yaml. The version is a challenger's, `version`, or,
+    with neither, the one the model's alias points to now (an alias that moved). A uri
+    with a version is rewritten to the new version; a uri with an alias keeps it, and the
+    alias moves in the registry only with move_alias (a registry write the team may want
+    to do there instead). A promoted challenger leaves the challengers. Returns the record;
+    building and deploying is the caller's next step.
+    """
+    from datetime import datetime, timezone
+
+    saved, registry = _registry(repo_path, name)
+    found = next((m for m in saved['models'] if m['name'] == model), None)
+    if found is None:
+        raise PromoteError(f'Service {name} embeds no model {model}.')
+    match = _MODELS_URI.match(found['uri'])
+    if match is None:
+        raise PromoteError(
+            f"Model {model} comes from {found['uri']}, not a registry uri (models:/...): "
+            'change its uri in service.yaml to promote another version.')
+    registered, pinned, alias = match.groups()
+    built = {m['name']: m for m in (read_lock(repo_path, name) or {}).get('models') or []}
+    previous = built.get(model, {}).get('version') or pinned
+    promoted_challenger = None
+    with registry:
+        if challenger is not None:
+            promoted_challenger = next(
+                (c for c in found.get('challengers') or [] if c['name'] == challenger), None)
+            if promoted_challenger is None:
+                raise PromoteError(f'Model {model} has no challenger {challenger}.')
+            target = _version_of(promoted_challenger['uri'])
+            target_name = _MODELS_URI.match(promoted_challenger['uri'])
+            if target_name and target_name.group(1) != registered:
+                raise PromoteError(
+                    f"Challenger {challenger} is {target_name.group(1)}, another registered "
+                    f'model than {registered}: change the uri in service.yaml instead.')
+        elif version is not None:
+            target = str(version)
+        elif alias:
+            target = _version_of(found['uri'])
+        else:
+            raise PromoteError(
+                f'Model {model} is pinned to version {pinned}: name the version to promote '
+                '(--version) or a challenger (--challenger).')
+        if not target:
+            raise PromoteError(f'The registry has no version to promote for {model}.')
+        how = 'pinned'
+        if alias:
+            current = _version_of(found['uri'])
+            if current == target:
+                how = 'alias followed'
+            elif move_alias:
+                from mlflow.tracking import MlflowClient
+
+                MlflowClient().set_registered_model_alias(registered, alias, target)
+                how = f'alias {alias} moved'
+            else:
+                raise PromoteError(
+                    f'{found["uri"]} points to version {current}, not {target}. Move the alias '
+                    f'in the registry (--move-alias does it), or pin the version in '
+                    'service.yaml.')
+        if previous is not None and str(previous) == str(target) and how != f'alias {alias} moved':
+            raise PromoteError(f'Service {name} already embeds version {target} of {model}.')
+    models = []
+    for entry in saved['models']:
+        entry = dict(entry)
+        if entry['name'] == model:
+            if how == 'pinned':
+                entry['uri'] = f'models:/{registered}/{target}'
+            if promoted_challenger is not None:
+                entry['challengers'] = [c for c in entry.get('challengers') or []
+                                        if c['name'] != challenger]
+                if not entry['challengers']:
+                    entry.pop('challengers')
+                    entry.pop('shadow', None)
+        models.append(entry)
+    definitions.save_definition(repo_path, name, dict(saved, models=models))
+    record = dict(
+        at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        by=_who(repo_path),
+        model=model,
+        registered=registered,
+        from_version=None if previous is None else str(previous),
+        to_version=str(target),
+        how=how,
+    )
+    if challenger:
+        record['challenger'] = challenger
+    if reason:
+        record['reason'] = reason
+    path = definitions.service_path(repo_path, name) / PROMOTIONS_FILE
+    history = promotions(repo_path, name) + [record]
+    path.write_text(
+        '# Generated by mage service promote: each model promotion, who did it and when.\n'
+        + yaml.safe_dump(history, sort_keys=False, default_flow_style=False))
+    return record
