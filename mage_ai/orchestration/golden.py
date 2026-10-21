@@ -292,7 +292,6 @@ def _count_sql(probe: Dict, repo_path: str) -> int:
     import importlib
 
     from mage_ai.io.config import ConfigFileLoader
-    from mage_ai.settings.repo import get_repo_config
 
     provider = probe.get('data_provider')
     if provider not in SQL_PROVIDERS:
@@ -300,8 +299,10 @@ def _count_sql(probe: Dict, repo_path: str) -> int:
                           f'{", ".join(sorted(SQL_PROVIDERS))}.')
     module_name, class_name = SQL_PROVIDERS[provider].rsplit('.', 1)
     loader_class = getattr(importlib.import_module(module_name), class_name)
-    config_path = os.path.join(repo_path, get_repo_config(repo_path).io_config_path or
-                               'io_config.yaml')
+    # Where SQL blocks read it: the project's io_config.yaml (or .yml).
+    config_path = os.path.join(repo_path, 'io_config.yaml')
+    if not os.path.exists(config_path) and os.path.exists(config_path[:-len('yaml')] + 'yml'):
+        config_path = config_path[:-len('yaml')] + 'yml'
     loader = loader_class.with_config(ConfigFileLoader(config_path,
                                                        probe.get('profile', 'default')))
     with loader:

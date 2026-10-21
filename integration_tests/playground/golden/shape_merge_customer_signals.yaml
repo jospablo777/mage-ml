@@ -1,0 +1,77 @@
+version: 1
+pipeline: shape_merge_customer_signals
+recorded_from_run: 5
+blocks:
+  merge_customer_signals:
+    output_0:
+      kind: table
+      rows: 1000
+      columns:
+      - - customer_id
+        - integer
+      - - segment
+        - string
+      - - country
+        - string
+      - - is_active
+        - boolean
+      - - orders
+        - integer
+      - - last_order
+        - datetime_tz
+      - - sessions
+        - integer
+      - - events
+        - integer
+      - - engagement
+        - float
+      content: d0c526ec6cc9efbe667d5daa8df290a76f79a32e45bc03b3cdcf4dc5c9c22da6
+      order: 9415a4f84d1487552616186edc2354581a278a1641bdf7c82428d1b42c3f69d5
+  merge_customers:
+    output_0:
+      kind: table
+      rows: 1000
+      columns:
+      - - customer_id
+        - integer
+      - - segment
+        - string
+      - - country
+        - string
+      - - is_active
+        - boolean
+      content: c93a7ed0272b359f3adbb1fc9f82653277830718405264a4d4e478660be88a3b
+      order: 2e867cfc7d2f5e3049a87dc1904d77649f84c8e8455be48527db6abfe3926dc9
+  merge_export_customer_signals: {}
+  merge_order_stats:
+    output_0:
+      kind: table
+      rows: 770
+      columns:
+      - - customer_id
+        - integer
+      - - orders
+        - integer
+      - - last_order
+        - datetime_tz
+      content: f13a36f0a5a3401de3ff2e6836f2f5b11dec6e6538edcfa88f55c1a3ea3f69d3
+      order: bb96f0d7db6ae0f3c82448ce4293e8678b65bc81bd91c0b3c6aa8e8f292c2515
+  merge_web_stats:
+    output_0:
+      kind: table
+      rows: 614
+      columns:
+      - - customer_id
+        - integer
+      - - sessions
+        - integer
+      - - events
+        - integer
+      content: ecaf469a862c4dd94bd2b48f0cad42046344df941dd5d56821ef85d9632ac040
+      order: 1de3167ae954932b1cec142318fb8824831a9338890c7e729ff361771d11afaf
+effects:
+  customer_signals:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.customer_signals
+    count: 1000

@@ -1,0 +1,90 @@
+version: 1
+pipeline: pandas_sales
+recorded_from_run: 1
+blocks:
+  pandas_category_margin:
+    output_0:
+      kind: table
+      rows: 32
+      columns:
+      - - category
+        - string
+      - - segment
+        - string
+      - - order_lines
+        - integer
+      - - sales
+        - float
+      - - costs
+        - float
+      - - margin_pct
+        - float
+      content: 95a4ed2c39ebcaa5cba57660363d522128b8d46c8a9b8b787cb771d314d8eea5
+      order: 1392392d07432bfa3103bd3667033f52f14caf3e25b51f8722ffb8845ecd0220
+  pandas_daily_revenue:
+    output_0:
+      kind: table
+      rows: 1180
+      columns:
+      - - order_date
+        - date
+      - - channel
+        - string
+      - - orders
+        - integer
+      - - units
+        - integer
+      - - revenue
+        - float
+      - - mean_rating
+        - float
+      - - revenue_per_order
+        - float
+      content: 27d46d9e2b7e7f4f89b718c2a621070f6d952571d851e9bbdc9bb8581a8aca6e
+      order: 8c23dee15e1c398a954e3b727bbd953e5c3d85392eefbdb218b97005fc7985d2
+  pandas_export_category_margin: {}
+  pandas_export_daily_revenue: {}
+  pandas_load_order_lines:
+    output_0:
+      kind: table
+      rows: 22872
+      columns:
+      - - order_id
+        - integer
+      - - ordered_at
+        - datetime_tz
+      - - status
+        - string
+      - - channel
+        - string
+      - - discount_pct
+        - float
+      - - shipping_cost
+        - decimal
+      - - rating
+        - integer
+      - - line_number
+        - integer
+      - - product_id
+        - integer
+      - - quantity
+        - integer
+      - - unit_price
+        - decimal
+      - - segment
+        - string
+      - - country
+        - string
+      content: 281a298df1864a7dcc8043f6040b4f0079b34427ad014865fdc4b1a3b6265b36
+      order: 6bcd9f0758ec2165ff8b304a47c71c81022ff878b10e73cb808c8c903e3fd016
+effects:
+  pandas_category_margin:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.pandas_category_margin
+    count: 32
+  pandas_daily_revenue:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.pandas_daily_revenue
+    count: 1180

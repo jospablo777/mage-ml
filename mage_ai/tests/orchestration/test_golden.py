@@ -192,3 +192,25 @@ class GoldenRunTest(DBTestCase):
         with self.assertRaises(golden.GoldenError) as raised:
             golden.compare(self.pipeline, run)
         self.assertIn('mage golden record', str(raised.exception))
+
+    def test_a_sql_probe_counts_rows_through_the_projects_io_config(self):
+        import duckdb
+
+        database = Path(self.repo_path) / 'golden_probe.duckdb'
+        with duckdb.connect(str(database)) as connection:
+            connection.execute('CREATE OR REPLACE TABLE written AS SELECT * FROM range(7)')
+        config = Path(self.repo_path) / 'io_config.yaml'
+        kept = config.read_text() if config.exists() else None
+        config.write_text(f'default:\n  DUCKDB_DATABASE: {database}\n')
+        try:
+            self.assertEqual(golden.count_effect(dict(
+                data_provider='duckdb', sql='SELECT count(*) FROM written',
+            ), self.repo_path), 7)
+            with self.assertRaises(golden.GoldenError):
+                golden.count_effect(dict(data_provider='sqlite', sql='SELECT 1'),
+                                    self.repo_path)
+        finally:
+            if kept is None:
+                config.unlink()
+            else:
+                config.write_text(kept)

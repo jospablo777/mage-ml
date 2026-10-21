@@ -1,0 +1,86 @@
+version: 1
+pipeline: rust_postgres_margins
+recorded_from_run: 3
+blocks:
+  rust_category_margin:
+    output_0:
+      kind: table
+      rows: 3175
+      columns:
+      - - day
+        - date
+      - - category
+        - string
+      - - orders
+        - integer
+      - - units
+        - integer
+      - - gross_revenue
+        - decimal
+      - - net_revenue
+        - float
+      - - cost
+        - decimal
+      - - margin
+        - float
+      content: f44400472c41e9acf7f02ea77d013264caa702a21ee7756f09f0f1b1991b93a7
+      order: 17ae562a07f57327a858e52594578fb4e450a24320aeeec81d5fde3cd693f37e
+  rust_customer_value:
+    output_0:
+      kind: table
+      rows: 701
+      columns:
+      - - customer_id
+        - integer
+      - - orders
+        - integer
+      - - spent
+        - decimal
+      - - last_order_at
+        - datetime_tz
+      - - recency_days
+        - integer
+      - - tier
+        - string
+      content: 30b584c639fa54262c441b1ef0bb5cefb277ba64e7eee76f41a39ad1c8e7db1d
+      order: 6b7f9d859071b9dd02a4df506a75f5526393508d7facb3712ffcec9df53a71a1
+  rust_pg_export_category_margin: {}
+  rust_pg_export_customer_value: {}
+  rust_pg_order_lines:
+    output_0:
+      kind: table
+      rows: 24084
+      columns:
+      - - order_id
+        - integer
+      - - customer_id
+        - integer
+      - - ordered_at
+        - datetime_tz
+      - - status
+        - string
+      - - channel
+        - string
+      - - discount_pct
+        - float
+      - - category
+        - string
+      - - quantity
+        - integer
+      - - unit_price
+        - decimal
+      - - cost
+        - decimal
+      content: 8151eacb608ddd89e298065c61d68f48a54d49e58083bc11815bebca8df5337d
+      order: 776de682297e50117f9227b26f8c53f725f36d493d870fbaa4c017bf307fd77e
+effects:
+  rust_category_margin:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.rust_category_margin
+    count: 3175
+  rust_customer_value:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.rust_customer_value
+    count: 701

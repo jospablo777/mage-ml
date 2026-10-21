@@ -1,0 +1,154 @@
+version: 1
+pipeline: polars_customer_360
+recorded_from_run: 2
+blocks:
+  polars_customer_360:
+    output_0:
+      kind: table
+      rows: 1000
+      columns:
+      - - customer_id
+        - integer
+      - - full_name
+        - string
+      - - city
+        - string
+      - - country
+        - string
+      - - segment
+        - string
+      - - signed_up_at
+        - datetime_tz
+      - - is_active
+        - boolean
+      - - lifetime_value
+        - decimal
+      - - orders
+        - integer
+      - - last_order_at
+        - datetime_tz
+      - - sessions
+        - integer
+      - - events
+        - integer
+      - - purchases
+        - integer
+      - - last_seen_at
+        - datetime_tz
+      - - main_device
+        - string
+      - - mean_session_length
+        - other
+      - - conversion_rate
+        - float
+      - - profile
+        - string
+      content: fddd700bdf3b5f334f4859234364c67089988705b16859e66c7fa5b84ae71fdc
+      order: df4549cef7f3e8512322be386b6ddb7c72efca16286b0836b9d6cad66388c233
+  polars_customer_engagement:
+    output_0:
+      kind: table
+      rows: 614
+      columns:
+      - - customer_id
+        - integer
+      - - sessions
+        - integer
+      - - events
+        - integer
+      - - purchases
+        - integer
+      - - last_seen_at
+        - datetime_tz
+      - - main_device
+        - string
+      - - mean_session_length
+        - other
+      - - conversion_rate
+        - float
+      content: 5618d59a93dad0a21fbbdcada025c7ee042eaa0c8b0baeadeaad742fbd690efb
+      order: c78ca868ea936862330f1821b7a0945586b8150ec0fd8041aa1036a3fe3f328a
+  polars_export_customer_360: {}
+  polars_load_customers:
+    output_0:
+      kind: table
+      rows: 1000
+      columns:
+      - - customer_id
+        - integer
+      - - full_name
+        - string
+      - - city
+        - string
+      - - country
+        - string
+      - - segment
+        - string
+      - - signed_up_at
+        - datetime_tz
+      - - is_active
+        - boolean
+      - - lifetime_value
+        - decimal
+      - - orders
+        - integer
+      - - last_order_at
+        - datetime_tz
+      content: 4927f0f18246fc8bfe38186886303d867e3a1b026a19804eef916a2927ed44ba
+      order: a75f4767c47ad0af37e07fb4351337603d05548104b8fa919c2339ac8399e1ee
+  polars_load_web_events:
+    output_0:
+      kind: table
+      rows: 20000
+      columns:
+      - - event_id
+        - integer
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - occurred_at
+        - datetime_tz
+      - - event_type
+        - string
+      - - page
+        - string
+      - - device
+        - string
+      - - duration_ms
+        - integer
+      - - scroll_depth
+        - float
+      content: 1ab848c21e811eed20a09b13372ae5b3f7b991bb9f96f2d69d778a27bf8d2d17
+      order: 48a2c3f35c19a11bdbb46f015774dd1aecda0cbbb5e5c1cf43c4085507a5e56a
+  polars_sessions:
+    output_0:
+      kind: table
+      rows: 3334
+      columns:
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - started_at
+        - datetime_tz
+      - - length
+        - other
+      - - events
+        - integer
+      - - purchases
+        - integer
+      - - device
+        - string
+      - - median_duration_ms
+        - float
+      - - mean_scroll_depth
+        - float
+      content: ecfc299f7e6011d0b6d2dbf074eaa0cfdde101c1b8a12f58241c17ba1da6d009
+      order: dc78594fbfb436011789f553a9fee19efa2a054d007c318b0562e0961cee0627
+effects:
+  polars_customer_360:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.polars_customer_360
+    count: 1000

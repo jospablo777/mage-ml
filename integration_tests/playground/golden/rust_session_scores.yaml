@@ -1,0 +1,86 @@
+version: 1
+pipeline: rust_session_scores
+recorded_from_run: 4
+blocks:
+  rust_engagement_score:
+    output_0:
+      kind: table
+      rows: 3334
+      columns:
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - device
+        - string
+      - - events
+        - integer
+      - - pages
+        - integer
+      - - duration_ms
+        - integer
+      - - max_scroll_depth
+        - float
+      - - started_at
+        - datetime_tz
+      - - purchased
+        - boolean
+      - - engagement
+        - float
+      content: 70d1d854d3069735b31a8dc958febf25397f9c50d05ecf433bf5bc373c474019
+      order: c1641083ad8038a9400220c6f0d6b86629dc40ea4a4e3815cab9e482d73a3171
+  rust_export_session_scores: {}
+  rust_load_web_events:
+    output_0:
+      kind: table
+      rows: 20000
+      columns:
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - occurred_at
+        - datetime_tz
+      - - event_type
+        - string
+      - - page
+        - string
+      - - device
+        - string
+      - - duration_ms
+        - integer
+      - - scroll_depth
+        - float
+      content: fcb3d2ca74b82c9100d5711d01923527c387351ab7cb19aec503ae8071ea8938
+      order: 7af478618173a5bac781169fa2b1ed07b91770fbeb022e49a908683958d53a48
+  rust_sessions:
+    output_0:
+      kind: table
+      rows: 3334
+      columns:
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - device
+        - string
+      - - events
+        - integer
+      - - pages
+        - integer
+      - - duration_ms
+        - integer
+      - - max_scroll_depth
+        - float
+      - - started_at
+        - datetime_tz
+      - - purchased
+        - boolean
+      content: aa0ba6d8b26b10ac07b2f029a22847aebb4938c561deccec87d5cc02afab7c19
+      order: ce3293c33b289eb6788ca5310d81d425a07f1e823921a89381c92af6acd499ef
+effects:
+  rust_session_scores:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.rust_session_scores
+    count: 3334
