@@ -52,6 +52,12 @@ test('a pipeline becomes a service and its settings show it', async ({ page }) =
   await page.waitForURL(`**/services?service=${serviceName}`);
   await expect(page.getByText(`services/${serviceName}/service.yaml`).first()).toBeVisible();
 
+  // The DAG that runs the pipeline from Airflow through the service.
+  await expect(page.getByText('Run it from Airflow')).toBeVisible();
+  await expect(page.getByText(`pipeline='${pipelineUUID}',`)).toBeVisible();
+  await expect(page.getByText(`"host": "http://${serviceName}:8080"`, { exact: false }))
+    .toBeVisible();
+
   // Build and ship: the image is for most servers (amd64) until the service says otherwise,
   // and the choice saves as the service's platforms.
   await page.getByRole('button', { exact: true, name: 'Export' }).click();

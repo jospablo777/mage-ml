@@ -1565,8 +1565,48 @@ function Workbench({
           </Section>
         </TwoColumnsStyle>
       </Spacing>
+
+      {draft.pipelines.length >= 1 && (
+        <Spacing mt={2}>
+          <Section
+            subtitle="Airflow schedules the run and the service runs it, with its own packages: they never share a Python environment."
+            title="Run it from Airflow"
+          >
+            <CheckRow
+              detail="Install mageml-airflow in Airflow and add a MageML service connection: the service URL as its host, MAGE_SERVICE_TOKEN as its password. Retries never start a second run, the run's log lines go to the task log, and clearing the task cancels the run."
+              title="A DAG task per pipeline"
+              tone="note"
+            >
+              <Spacing mt={1}>
+                <CommandStyle>
+                  {airflowSnippet(draft.pipelines[0], slug)}
+                </CommandStyle>
+              </Spacing>
+            </CheckRow>
+          </Section>
+        </Spacing>
+      )}
     </div>
   );
+}
+
+// The DAG that runs a pipeline of the service from Airflow (packages/mageml-airflow).
+export function airflowSnippet(pipeline: string, slug: string): string {
+  const name = slug || 'service';
+  return [
+    '# AIRFLOW_CONN_MAGEML_DEFAULT=\'{"conn_type": "mageml_service", '
+      + `"host": "http://${name}:8080", "password": "<MAGE_SERVICE_TOKEN>"}'`,
+    'from airflow.sdk import DAG',
+    'from mageml_airflow.operators import MageMLServiceRunOperator',
+    '',
+    `with DAG('${pipeline}', schedule='@daily'):`,
+    '    MageMLServiceRunOperator(',
+    `        task_id='${pipeline}',`,
+    `        pipeline='${pipeline}',`,
+    '        variables={\'day\': \'{{ ds }}\'},',
+    '        deferrable=True,',
+    '    )',
+  ].join('\n');
 }
 
 function StartAfter({
