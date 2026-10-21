@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
+mage-pg = { path = "../pg" }
 serde_json = { workspace = true }
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
@@ -21,7 +22,6 @@ chrono = { version = "0.4", default-features = false, features = ["alloc", "cloc
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 tokio-postgres-rustls = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "1"
 
 [dev-dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "time", "sync"] }

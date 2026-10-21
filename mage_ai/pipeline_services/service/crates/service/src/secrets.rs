@@ -399,19 +399,10 @@ impl Secrets {
     }
 }
 
-pub fn redact(text: &str, values: &[String]) -> String {
-    let mut out = text.to_string();
-    for value in values {
-        if out.contains(value.as_str()) {
-            out = out.replace(value.as_str(), "***");
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mage_service_core::redact::redact;
     use serde_json::json;
 
     fn manifest() -> Manifest {

@@ -3346,6 +3346,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures-util",
+ "mage-pg",
  "mage-stream-core",
  "mage-stream-ports",
  "postgres-protocol",
@@ -3356,7 +3357,6 @@ dependencies = [
  "tokio-postgres",
  "tokio-postgres-rustls",
  "tokio-rustls",
- "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -3424,6 +3424,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-ledger"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "libc",
+ "mage-log",
+ "mage-pg",
+ "mage-service-core",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-postgres",
+ "uuid",
+]
+
+[[package]]
+name = "mage-log"
+version = "0.1.0"
+dependencies = [
+ "mage-service-core",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "mage-pg"
+version = "0.1.0"
+dependencies = [
+ "mage-stream-ports",
+ "rustls",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "webpki-roots 1.0.10",
+]
+
+[[package]]
 name = "mage-service"
 version = "0.1.0"
 dependencies = [
@@ -3455,6 +3495,8 @@ dependencies = [
  "mage-connector-rabbitmq",
  "mage-connector-search",
  "mage-connector-sqs",
+ "mage-ledger",
+ "mage-log",
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",
@@ -3475,6 +3517,7 @@ dependencies = [
 name = "mage-service-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

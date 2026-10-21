@@ -1,0 +1,15 @@
+[package]
+name = "mage-pg"
+description = "PostgreSQL connections for Mage pipeline services: libpq connection strings, TLS modes and root certificates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mage-stream-ports = { path = "../stream-ports" }
+tokio = { version = "1.47", features = ["rt"] }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+tokio-postgres-rustls = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"

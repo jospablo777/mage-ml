@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 mage-service-core = { path = "../core" }
+mage-log = { path = "../log" }
+mage-ledger = { path = "../ledger" }
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 mage-connector-local = { path = "../connector-local" }

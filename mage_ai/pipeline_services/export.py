@@ -4,7 +4,7 @@
 The export reads the project and writes a build context:
 
     <out>/
-      service.json         what the service runs (see rust/mage_service/crates/core)
+      service.json         what the service runs (see pipeline_services/service/crates/core)
       <project>/           the block files, shared code, io_config.yaml
       python/mage_ai/      the part of Mage that blocks import, and the block worker
       rust/                the Rust blocks' crates, built in the image

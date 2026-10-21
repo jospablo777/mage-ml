@@ -45,6 +45,13 @@ const LAYERS: &[Layer] = &[
         banned: HEAVY,
     },
     Layer {
+        name: "support",
+        crates: &["mage-log", "mage-pg"],
+        may_depend_on: &["domain"],
+        isolated: true,
+        banned: &[],
+    },
+    Layer {
         name: "adapters",
         crates: &[
             "mage-checks",
@@ -63,15 +70,16 @@ const LAYERS: &[Layer] = &[
             "mage-connector-rabbitmq",
             "mage-connector-search",
             "mage-connector-sqs",
+            "mage-ledger",
         ],
-        may_depend_on: &["domain"],
+        may_depend_on: &["domain", "support"],
         isolated: true,
         banned: &[],
     },
     Layer {
         name: "binaries",
         crates: &["mage-console", "mage-service"],
-        may_depend_on: &["domain", "adapters"],
+        may_depend_on: &["domain", "support", "adapters"],
         isolated: true,
         banned: &[],
     },

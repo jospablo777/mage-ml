@@ -25,16 +25,18 @@
 //! database file and syncs it, which held the ledger's lock for 0.2 to 0.9 s and stalled
 //! the runs behind it. A background thread checkpoints on its own connection instead.
 
+pub mod sql;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use mage_service_core::protocol::{BlockRunSummary, BlockStatus, RunDetail, RunStatus, RunSummary};
 use rusqlite::Connection;
 use serde_json::{Map, Value};
 
-use crate::ledger_sql::{Db, Postgres, Row, cells};
+use crate::sql::{Db, Postgres, Row, cells};
 
 /// SQLite's schema at version 1, the first versioned one. Ledgers from 0.2 (version 0) have
 /// these tables without the later columns, which version 1 adds in place.
@@ -170,13 +172,7 @@ CREATE TABLE service (
 pub const INSTANCE_LEASE_SECONDS: i64 = 30;
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
 
-pub fn now() -> DateTime<Utc> {
-    Utc::now()
-}
-
-pub fn timestamp(time: DateTime<Utc>) -> String {
-    time.to_rfc3339_opts(SecondsFormat::Millis, true)
-}
+pub use mage_service_core::time::{now, timestamp};
 
 fn parse_time(text: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(text)
@@ -378,7 +374,7 @@ fn migrate_postgres(db: &mut dyn Db, schema: &str, apply: bool) -> Result<Postgr
         if !exists {
             db.batch(&format!(
                 "CREATE SCHEMA {}",
-                crate::ledger_sql::quote_identifier(schema)
+                crate::sql::quote_identifier(schema)
             ))?;
         }
         db.batch(
@@ -581,7 +577,7 @@ impl Ledger {
 
     /// Runs a statement as is, for tests that set up states the API does not make.
     #[cfg(test)]
-    pub fn sql(&self, sql: &str, params: &[crate::ledger_sql::Cell]) -> u64 {
+    pub fn sql(&self, sql: &str, params: &[crate::sql::Cell]) -> u64 {
         let (sql, params) = (sql.to_string(), params.to_vec());
         self.store.run(move |db| db.execute(&sql, &params)).unwrap()
     }
@@ -662,7 +658,7 @@ impl Ledger {
     /// Finishes a queued run, or a running run this instance holds; false when the run is
     /// another instance's or already finished (its recovery, a cancel), which then stands.
     pub fn finish_run(&self, id: &str, status: RunStatus, error: Option<&str>) -> Result<bool> {
-        let error = error.map(crate::log::redact);
+        let error = error.map(mage_log::redact);
         let (id, instance) = (id.to_string(), self.instance.to_string());
         self.store.run(move |db| {
             Ok(db.execute(
@@ -742,7 +738,7 @@ impl Ledger {
     ) -> Result<()> {
         let outputs =
             serde_json::to_string(outputs).map_err(|e| LedgerError::Data(e.to_string()))?;
-        let error = error.map(crate::log::redact);
+        let error = error.map(mage_log::redact);
         let (run_id, block) = (run_id.to_string(), block.to_string());
         let instance = self.instance.to_string();
         self.store.run(move |db| {
@@ -1071,7 +1067,7 @@ impl Ledger {
         ];
         let mut runs = 0;
         for (index, (insert, select)) in tables.into_iter().enumerate() {
-            let rows: Vec<Vec<crate::ledger_sql::Cell>> = source
+            let rows: Vec<Vec<crate::sql::Cell>> = source
                 .query(&select, &[])?
                 .into_iter()
                 .map(Row::into_cells)
@@ -1264,20 +1260,20 @@ fn start_heartbeats(ledger: Ledger) {
                 };
                 match ledger.heartbeat() {
                     Ok(true) => {}
-                    Ok(false) => crate::log::warn(
+                    Ok(false) => mage_log::warn(
                         "This instance's lease in the run history had expired; runs it was \
                          running may have been failed by another instance.",
                     ),
-                    Err(e) => crate::log::warn(&format!("The run history heartbeat failed: {e}")),
+                    Err(e) => mage_log::warn(&format!("The run history heartbeat failed: {e}")),
                 }
                 match ledger.recover_interrupted() {
-                    Ok(ids) if !ids.is_empty() => crate::log::warn(&format!(
+                    Ok(ids) if !ids.is_empty() => mage_log::warn(&format!(
                         "Failed {} run(s) of an instance that stopped: {}",
                         ids.len(),
                         ids.join(", ")
                     )),
                     Ok(_) => {}
-                    Err(e) => crate::log::warn(&format!("Recovering runs failed: {e}")),
+                    Err(e) => mage_log::warn(&format!("Recovering runs failed: {e}")),
                 }
             }
         })
@@ -1295,7 +1291,7 @@ fn start_checkpoints(connection: Connection, wal: PathBuf, ledger: Weak<Store>) 
                     break;
                 }
                 if let Err(e) = checkpoint(&connection, &wal, WAL_LIMIT) {
-                    crate::log::warn(&format!("The run history checkpoint failed: {e}"));
+                    mage_log::warn(&format!("The run history checkpoint failed: {e}"));
                 }
             }
         })

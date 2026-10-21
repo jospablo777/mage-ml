@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use crate::ledger::{LedgerError, Result};
+use crate::{LedgerError, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cell {
@@ -70,7 +70,7 @@ impl<T: Into<Cell>> From<Option<T>> for Cell {
 /// Parameters of a statement: `cells![a, b]`.
 macro_rules! cells {
     ($($value:expr),* $(,)?) => {
-        &[$($crate::ledger_sql::Cell::from($value)),*]
+        &[$($crate::sql::Cell::from($value)),*]
     };
 }
 pub(crate) use cells;
@@ -396,10 +396,7 @@ impl PostgresConnection {
             self.statements.clear();
             let client = self
                 .runtime
-                .block_on(mage_connector_postgres::connect_url(
-                    &self.url,
-                    "mage-service",
-                ))
+                .block_on(mage_pg::connect_url(&self.url, "mage-service"))
                 .map_err(LedgerError::Postgres)?;
             // The schema may not exist yet: migrating makes it.
             let schema = quote_identifier(&self.schema);

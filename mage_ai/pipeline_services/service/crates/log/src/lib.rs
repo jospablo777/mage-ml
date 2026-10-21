@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
 
-use crate::ledger::{now, timestamp};
+use mage_service_core::time::{now, timestamp};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Format {
@@ -29,7 +29,7 @@ pub fn set_redactions(values: Vec<String>) {
 
 pub fn redact(text: &str) -> String {
     match REDACTED.get() {
-        Some(values) if !values.is_empty() => crate::secrets::redact(text, values),
+        Some(values) if !values.is_empty() => mage_service_core::redact::redact(text, values),
         _ => text.to_string(),
     }
 }

@@ -1,5 +1,8 @@
 //! mage-service: runs pipelines exported from a Mage project, without Mage.
 
+use mage_ledger as ledger;
+use mage_log as log;
+
 mod alerts;
 mod api;
 mod audit;
@@ -12,9 +15,6 @@ mod gcp;
 mod ibm;
 mod jobs;
 mod keyed_state;
-mod ledger;
-mod ledger_sql;
-mod log;
 mod monitor;
 mod python;
 mod resident;
