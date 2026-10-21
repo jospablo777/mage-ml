@@ -1,6 +1,7 @@
 //! mage-service: runs pipelines exported from a Mage project, without Mage.
 
 mod api;
+mod audit;
 mod aws;
 mod azure;
 mod contract;
@@ -731,6 +732,19 @@ async fn start_service(
             env: [
                 ("MAGE_SERVICE".to_string(), "1".to_string()),
                 ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
+                // Audit records of predictions (models.audit), searched at /v1/audit.
+                (
+                    "MAGE_SERVICE_AUDIT_DIR".to_string(),
+                    data.join("audit").display().to_string(),
+                ),
+                (
+                    "MAGE_SERVICE_NAME".to_string(),
+                    manifest.service.name.clone(),
+                ),
+                (
+                    "MAGE_SERVICE_SOURCE_SHA256".to_string(),
+                    manifest.service.source_sha256.clone(),
+                ),
                 // Challengers' shadow records (models.predict), compared at /v1/models.
                 (
                     "MAGE_SERVICE_SHADOW_DIR".to_string(),

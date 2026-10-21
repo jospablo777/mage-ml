@@ -516,6 +516,8 @@ def predict(name: str, data, uri: Optional[str] = None, key: Optional[str] = Non
     started = time.perf_counter()
     output = _call(model, method, _features(data, features))
     champion_ms = round((time.perf_counter() - started) * 1000, 3)
+    if os.environ.get(AUDIT_DIR_ENV):
+        audit(name, data, output, key=key, features=features, flavor=flavor, model=model)
     settings = challengers(name)
     if not settings['challengers'] or not os.environ.get(SHADOW_DIR_ENV):
         return output
@@ -566,3 +568,159 @@ def wait_for_challengers(timeout: float = 30) -> None:
         if _shadow_queue.unfinished_tasks == 0:
             return
         time.sleep(0.01)
+
+
+# ---- audit records -------------------------------------------------------------------------
+
+AUDIT_DIR_ENV = 'MAGE_SERVICE_AUDIT_DIR'
+AUDIT_FILE = 'audit.json'
+# Keyed hashes of hashed features, so a guessed value cannot be checked against a record.
+AUDIT_KEY_ENV = 'MAGE_SERVICE_AUDIT_KEY'
+
+_decision_context: Dict[str, Any] = {}
+# Per process: the last record's hash, so each file is a chain a reader can verify.
+_chain: Dict[str, str] = {}
+
+
+def set_decision_context(**values) -> None:
+    """The run and block a worker runs now, named by the audit records of its predictions."""
+    _decision_context.clear()
+    _decision_context.update({k: v for k, v in values.items() if v is not None})
+
+
+def audit_settings(name: str) -> Optional[Dict]:
+    """The model's audit settings in this service, or None when it is not audited."""
+    embedded = _embedded(name)
+    if embedded is None or not (embedded / AUDIT_FILE).is_file():
+        return None
+    return json.loads((embedded / AUDIT_FILE).read_text())
+
+
+def _hash_value(value) -> str:
+    import hashlib
+    import hmac
+
+    text = json.dumps(_plain(value), sort_keys=True, default=str).encode()
+    secret = os.environ.get(AUDIT_KEY_ENV)
+    if secret:
+        return hmac.new(secret.encode(), text, hashlib.sha256).hexdigest()
+    return hashlib.sha256(text).hexdigest()
+
+
+def _feature_rows(data, features: Optional[List[str]], count: int) -> List[Dict]:
+    frame = _features(data, features)
+    if hasattr(frame, 'to_dict') and hasattr(frame, 'iloc'):
+        return frame.to_dict('records')
+    if hasattr(frame, 'to_dicts'):
+        return frame.to_dicts()
+    if hasattr(frame, 'tolist'):
+        return [dict(enumerate(row)) if isinstance(row, list) else {'0': row}
+                for row in frame.tolist()]
+    return [dict(row) if isinstance(row, dict) else {'0': row} for row in list(frame)[:count]]
+
+
+def _reasons(model, data, features, top: int) -> Optional[List[List[Dict]]]:
+    """
+    Each row's `top` features by contribution to the score (SHAP values), from the model's
+    own explainer: CatBoost, XGBoost and LightGBM compute them exactly, without shap. None
+    for other models.
+    """
+    frame = _features(data, features)
+    names = list(getattr(frame, 'columns', [])) or [str(i) for i in range(frame.shape[1])]
+    contributions = None
+    kind = type(model).__module__.split('.')[0]
+    if kind == 'catboost':
+        contributions = model.get_feature_importance(data=_catboost_pool(frame),
+                                                     type='ShapValues')[:, :-1]
+    elif kind == 'xgboost':
+        import xgboost
+
+        booster = model.get_booster() if hasattr(model, 'get_booster') else model
+        matrix = xgboost.DMatrix(frame)
+        contributions = booster.predict(matrix, pred_contribs=True)[:, :-1]
+    elif kind == 'lightgbm':
+        booster = model.booster_ if hasattr(model, 'booster_') else model
+        contributions = booster.predict(frame, pred_contrib=True)[:, :-1]
+    if contributions is None:
+        return None
+    rows = []
+    for values in contributions:
+        ranked = sorted(zip(names, values), key=lambda pair: abs(pair[1]), reverse=True)[:top]
+        rows.append([dict(feature=str(f), contribution=round(float(v), 9)) for f, v in ranked])
+    return rows
+
+
+def _catboost_pool(frame):
+    import catboost
+
+    return catboost.Pool(frame)
+
+
+def audit(name: str, data, output, key: Optional[str] = None,
+          features: Optional[List[str]] = None, flavor: Optional[str] = None,
+          model=None) -> None:
+    """
+    Writes one append-only record per scored input, before predict returns: when, the input
+    key, the model (name, version, digest), the service, pipeline, block (and its code
+    digest) and run, the features as the model saw them (or their keyed hash, or masked, by
+    column), the output, and the reason codes when the settings ask for them. Each worker
+    process writes its own file of the day, and each record carries the hash of the one
+    before it there, so a removed or changed record shows.
+    """
+    settings = audit_settings(name)
+    if settings is None:
+        return
+    import hashlib
+    from datetime import datetime, timezone
+
+    count = _length(data)
+    keys = _keys(data, key)
+    outputs = _rows(output, count)
+    rows = _feature_rows(data, features, count)
+    stored = settings.get('features', 'values')
+    masked = set(settings.get('mask') or [])
+    hashed = set(settings.get('hash') or [])
+    reasons = None
+    if settings.get('reasons') and model is not None:
+        try:
+            reasons = _reasons(model, data, features, int(settings['reasons']))
+        except Exception as error:
+            reasons = [[dict(error=f'{type(error).__name__}: {error}')]] * count
+    metadata = model_metadata(name) if _embedded(name) is not None else {}
+    at = datetime.now(timezone.utc)
+    common = dict(
+        model=name, version=metadata.get('version'), model_sha256=metadata.get('sha256'),
+        service=os.environ.get('MAGE_SERVICE_NAME'),
+        service_sha256=os.environ.get('MAGE_SERVICE_SOURCE_SHA256'),
+        **_decision_context,
+    )
+    folder = Path(os.environ[AUDIT_DIR_ENV]) / name
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{at.strftime('%Y-%m-%d')}-{os.getpid()}.jsonl"
+    lines = []
+    with _write_lock:
+        previous = _chain.get(str(path))
+        if previous is None and path.exists():
+            text = path.read_text().rstrip('\n')
+            last = text.rsplit('\n', 1)[-1] if text else ''
+            previous = hashlib.sha256(last.encode()).hexdigest() if last else None
+        for position in range(count):
+            record = dict(at=at.isoformat(timespec='milliseconds'), key=_plain(keys[position]),
+                          **common, output=outputs[position])
+            values = {str(k): _plain(v) for k, v in rows[position].items()}
+            if stored == 'hash':
+                record['features_sha256'] = _hash_value(values)
+            elif stored == 'values':
+                record['features'] = {
+                    k: '***' if k in masked else _hash_value(v) if k in hashed else v
+                    for k, v in values.items()
+                }
+            if reasons is not None:
+                record['reasons'] = reasons[position]
+            record['previous'] = previous
+            line = json.dumps(record, default=str, sort_keys=True)
+            previous = hashlib.sha256(line.encode()).hexdigest()
+            lines.append(line)
+        with open(path, 'a', encoding='utf-8') as file:
+            file.write(''.join(f'{line}\n' for line in lines))
+        _chain[str(path)] = previous

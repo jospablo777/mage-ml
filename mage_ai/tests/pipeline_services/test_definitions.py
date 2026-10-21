@@ -153,9 +153,19 @@ class DefinitionsTest(ExportTestCase):
         self.assertEqual(churn['challengers'], [dict(name='v4', uri='models:/churn/4')])
         self.assertEqual(churn['shadow'], dict(sample=0.25))
         self.assertEqual(fraud['shadow'], dict(sample=definitions.DEFAULT_SHADOW_SAMPLE))
-        from mage_ai.pipeline_services.exports import challenger_settings
+        from mage_ai.pipeline_services.exports import audit_settings, challenger_settings
         self.assertEqual(challenger_settings(saved['models'])['churn'], dict(
             sample=0.25, challengers=[dict(name='v4', uri='models:/churn/4')]))
+        self.assertEqual(audit_settings(saved['models']), {})
+
+    def test_a_models_audit_settings_are_saved_with_it(self):
+        definitions.save_definition(self.repo_path, 'scoring', dict(pipelines=['a'], models=[
+            dict(name='churn', uri='models:/churn/1',
+                 audit=dict(mask=['ssn'], reasons=3)),
+        ]))
+        [churn] = definitions.load_definition(self.repo_path, 'scoring')['models']
+        self.assertEqual(churn['audit'], dict(features='values', mask=['ssn'], hash=[],
+                                              reasons=3))
 
     def test_bad_settings_say_what_to_fix(self):
         for value, message in (
@@ -170,6 +180,10 @@ class DefinitionsTest(ExportTestCase):
                 dict(name='c', uri='x'), dict(name='c', uri='y')])]), 'same name'),
             (dict(pipelines=['a'], models=[dict(name='m', uri='u', challengers=[
                 dict(name='c', uri='x')], shadow=dict(sample=2))]), 'shadow.sample must be'),
+            (dict(pipelines=['a'], models=[dict(name='m', uri='u', audit=dict(
+                features='all'))]), 'audit.features is'),
+            (dict(pipelines=['a'], models=[dict(name='m', uri='u', audit=dict(
+                reasons=-1))]), 'audit.reasons is'),
             (dict(pipelines=['a'], model_registry='mlflow:5000'), 'such as http://mlflow:5000'),
         ):
             with self.subTest(message=message):

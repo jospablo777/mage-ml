@@ -52,6 +52,9 @@ pub struct Model {
     pub challengers: Vec<Challenger>,
     #[serde(default)]
     pub shadow_sample: Option<f64>,
+    /// How its predictions are audited (models.audit), when they are.
+    #[serde(default)]
+    pub audit: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

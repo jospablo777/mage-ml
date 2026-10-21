@@ -13,6 +13,10 @@
 
 ### Exported services
 
+- Audit records: with `audit` on a service's model, every input `predict` scores gets an
+  append-only record (key, model version and digest, code and run, features as configured,
+  output, reason codes from CatBoost, XGBoost or LightGBM), chained by hash per file.
+  `GET /v1/audit/<model>?key=` finds an input's records and `/verify` checks the chains.
 - Champion and challengers: a service's model can name challengers in `service.yaml`.
   `predict` returns the champion's output and scores a sample of the inputs, chosen by
   key, with each challenger in the background; `GET /v1/models` compares them (agreement,

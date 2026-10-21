@@ -69,6 +69,7 @@ def capture(repo_path: str, name: str) -> export.Capture:
             models=[f"{m['name']}={m['uri']}" for m in saved['models']],
             includes=saved['include'],
             challengers=exports.challenger_settings(saved['models']),
+            audits=exports.audit_settings(saved['models']),
         )
 
 

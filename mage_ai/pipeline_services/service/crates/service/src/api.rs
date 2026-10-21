@@ -56,6 +56,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/runs/{id}/cancel", post(cancel))
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/models", get(models))
+        .route("/v1/audit/{model}", get(audit_records))
+        .route("/v1/audit/{model}/verify", get(audit_verify))
         .route("/v1/streams", get(streams))
         .route("/v1/streams/{pipeline}", get(stream_detail))
         .route("/v1/streams/{pipeline}/tap", get(stream_tap))
@@ -987,6 +989,65 @@ async fn models(
         }));
     }
     Ok(Json(json!({"models": models})))
+}
+
+#[derive(Deserialize)]
+struct AuditQuery {
+    key: String,
+    days: Option<u32>,
+    limit: Option<usize>,
+}
+
+/// The audit records of one input key, newest first.
+async fn audit_records(
+    State(state): State<AppState>,
+    Path(model): Path<String>,
+    Query(query): Query<AuditQuery>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    known_model(&state, &model)?;
+    let dir = state.service.data_dir.join("audit");
+    let (days, limit) = (
+        query.days.unwrap_or(30).clamp(1, 3660),
+        query.limit.unwrap_or(100).clamp(1, 10_000),
+    );
+    let records = tokio::task::spawn_blocking(move || {
+        crate::audit::find(&dir, &model, &query.key, days, limit)
+    })
+    .await
+    .unwrap_or_default();
+    Ok(Json(json!({ "records": records })))
+}
+
+/// Whether every audit file of the model is an unbroken chain.
+async fn audit_verify(
+    State(state): State<AppState>,
+    Path(model): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Json<Value>> {
+    authorize(&state, &headers, Access::Read)?;
+    known_model(&state, &model)?;
+    let dir = state.service.data_dir.join("audit");
+    let chains = tokio::task::spawn_blocking(move || crate::audit::verify(&dir, &model))
+        .await
+        .unwrap_or_default();
+    let intact = chains.iter().all(|c| c.broken_at.is_none());
+    Ok(Json(json!({ "intact": intact, "files": chains })))
+}
+
+fn known_model(state: &AppState, model: &str) -> ApiResult<()> {
+    if state
+        .service
+        .manifest
+        .models
+        .iter()
+        .any(|m| m.name == model)
+    {
+        Ok(())
+    } else {
+        Err(ApiError(StatusCode::NOT_FOUND, format!("no model {model}")))
+    }
 }
 
 async fn snapshot(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {

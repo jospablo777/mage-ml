@@ -781,6 +781,7 @@ fn worker_block(service: &Service, block: &Block, pipeline_uuid: &str) -> Value 
         },
         "pipeline_uuid": pipeline_uuid,
         "sql": block.sql,
+        "sha256": block.sha256,
     })
 }
 

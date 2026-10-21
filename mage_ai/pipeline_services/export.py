@@ -101,6 +101,8 @@ class Capture:
     models: List[Tuple[str, str]] = field(default_factory=list)
     # Per model: {sample, challengers: [{name, uri}]}, scored in the shadow (item 79).
     challengers: Dict[str, Dict] = field(default_factory=dict)
+    # Per model: its audit settings (item 80).
+    audits: Dict[str, Dict] = field(default_factory=dict)
     # Whether the copied Cargo.lock matches the exported crates, so the image builds --locked.
     rust_locked: bool = False
     # The rv environment R blocks run with (rproject.toml and rv.lock).
@@ -201,6 +203,7 @@ def capture(
     models: Optional[List[str]] = None,
     includes: Optional[List[str]] = None,
     challengers: Optional[Dict[str, Dict]] = None,
+    audits: Optional[Dict[str, Dict]] = None,
 ) -> Capture:
     """Reads the pipelines and everything they need; raises ExportError with every problem."""
     from mage_ai.settings.repo import set_repo_path
@@ -275,10 +278,14 @@ def capture(
         capture_.r_project = _r_project(project_path)
     capture_.models = _models(capture_, models or [])
     capture_.challengers = dict(challengers or {})
+    capture_.audits = dict(audits or {})
     missing = [m for m in capture_.challengers if m not in dict(capture_.models)]
-    if missing:
-        raise ExportError([f'Model {m} has challengers but the service embeds no model {m}.'
-                           for m in missing])
+    unaudited = [m for m in capture_.audits if m not in dict(capture_.models)]
+    if missing or unaudited:
+        raise ExportError(
+            [f'Model {m} has challengers but the service embeds no model {m}.' for m in missing]
+            + [f'Model {m} is audited but the service embeds no model {m}.' for m in unaudited]
+        )
     if capture_.needs_python:
         capture_.requirements = _requirements(capture_)
         if capture_.environment is not None:
@@ -3206,6 +3213,10 @@ def _embed_models(capture_: Capture, out_dir: Path) -> List[str]:
             size_bytes=metadata.get('size_bytes'),
         )
         capture_.manifest['models'].append(entry)
+        if name in capture_.audits:
+            (out_dir / 'models' / name / 'audit.json').write_text(
+                json.dumps(capture_.audits[name], indent=2) + '\n')
+            entry['audit'] = capture_.audits[name]
         shadow = capture_.challengers.get(name)
         if shadow:
             embedded = []

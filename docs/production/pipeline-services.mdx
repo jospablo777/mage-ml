@@ -464,6 +464,42 @@ scores = predict('churn', customers, uri='models:/churn-classifier@champion',
 
 In MageML, `predict` scores with the model alone.
 
+### Audit records
+
+With `audit` on a model, every input `predict` scores gets a record, written before
+`predict` returns:
+
+```yaml
+    models:
+      - name: churn
+        uri: models:/churn-classifier@champion
+        audit:
+          features: values   # the features as the model saw them; hash: one keyed hash; none
+          mask: [ssn]        # stored as ***
+          hash: [email]      # stored as a keyed hash (MAGE_SERVICE_AUDIT_KEY)
+          reasons: 3         # the three features that moved each score most
+```
+
+| In each record | |
+| --- | --- |
+| When, and the input `key` | |
+| The model | Name, version and the digest of its files |
+| The code | The service and its source digest, the pipeline, the block and the digest of its code |
+| The run | `run_id` |
+| The features | As configured above; secrets never belong in them, so mask or hash those columns |
+| The output | The model's output for that input |
+| Reason codes | The top features by SHAP contribution, computed by CatBoost, XGBoost or LightGBM themselves; other models have none |
+
+- Records go to `<data>/audit/<model>/<day>-<process>.jsonl`. Each record holds the SHA-256
+  of the record before it in its file, so a removed or changed record breaks the chain.
+- `GET /v1/audit/<model>?key=<key>` (`&days=30&limit=100`) returns an input's records,
+  newest first. `GET /v1/audit/<model>/verify` checks every file's chain and names the
+  first broken line.
+- Files older than `MAGE_SERVICE_AUDIT_RETENTION_DAYS` (365; 0 keeps them) are removed.
+- A record that cannot be written fails the prediction: no decision goes unrecorded.
+- With `MAGE_SERVICE_AUDIT_KEY` set, hashed columns use HMAC-SHA-256 with it, so a guessed
+  value cannot be checked against a record without the key.
+
 ### Features that follow the model
 
 Feast's [MLflow integration](https://docs.feast.dev/reference/mlflow) tags a model version
@@ -587,6 +623,8 @@ to it.
 | `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
 | `MAGE_SERVICE_RUST_RESIDENT` | `on` | `off` starts the Rust binary for each run instead of keeping it running between runs |
 | `MAGE_SERVICE_RUST_MAX_JOBS` | `1000` | Jobs a resident Rust program serves before it is replaced |
+| `MAGE_SERVICE_AUDIT_RETENTION_DAYS` | `365` | Days audit records are kept; 0 keeps them |
+| `MAGE_SERVICE_AUDIT_KEY` | none | The key of hashed audit columns (HMAC-SHA-256) |
 | `MAGE_SERVICE_R_RESIDENT` | `on` | `off` starts Rscript for each R block run instead of keeping an R session in each Python worker |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |

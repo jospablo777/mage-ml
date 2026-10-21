@@ -22,6 +22,11 @@ service.yaml:
             uri: models:/churn/4
         shadow:
           sample: 0.25       # the share of inputs the challengers score (default 0.1)
+        audit:               # optional: a record of every prediction
+          features: values   # values, hash (one keyed hash of them) or none
+          mask: [ssn]        # columns stored as ***
+          hash: [email]      # columns stored as their keyed hash
+          reasons: 3         # the top features behind each score (tree models)
 
 The Services page edits these files, and the `mage service` commands use them. Services in
 the earlier single file, pipeline_services.yaml, are still read; saving one moves it to its
@@ -178,7 +183,7 @@ def normalize(name: str, value: Dict) -> Dict:
             '{name: churn, uri: "models:/churn@champion"}.'
         )
     for model in models:
-        problem = _challenger_problem(model)
+        problem = _challenger_problem(model) or _audit_problem(model)
         if problem:
             raise DefinitionError(f"Service {name}: model {model['name']}: {problem}")
     if registry is not None and (
@@ -220,8 +225,32 @@ def _challenger_problem(model: Dict) -> Optional[str]:
     return None
 
 
+def _audit_problem(model: Dict) -> Optional[str]:
+    audit = model.get('audit')
+    if audit is None:
+        return None
+    if not isinstance(audit, dict):
+        return 'audit must be a mapping, such as {features: values, mask: [ssn], reasons: 3}.'
+    if audit.get('features', 'values') not in ('values', 'hash', 'none'):
+        return 'audit.features is values, hash or none.'
+    for field in ('mask', 'hash'):
+        columns = audit.get(field) or []
+        if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+            return f'audit.{field} must be a list of column names.'
+    reasons = audit.get('reasons', 0)
+    if isinstance(reasons, bool) or not isinstance(reasons, int) or not 0 <= reasons <= 50:
+        return 'audit.reasons is the number of top features per score, 0 to 50.'
+    return None
+
+
 def _model(model: Dict) -> Dict:
     out = dict(name=model['name'], uri=model['uri'])
+    if model.get('audit') is not None:
+        audit = model['audit']
+        out['audit'] = dict(features=audit.get('features', 'values'),
+                            mask=list(audit.get('mask') or []),
+                            hash=list(audit.get('hash') or []),
+                            reasons=int(audit.get('reasons', 0)))
     if model.get('challengers'):
         out['challengers'] = [dict(name=c['name'], uri=c['uri']) for c in model['challengers']]
         out['shadow'] = dict(sample=float(

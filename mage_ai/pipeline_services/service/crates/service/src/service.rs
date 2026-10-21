@@ -802,8 +802,19 @@ impl Service {
         })
     }
 
-    /// Deletes finished runs older than the retention period with their files.
+    /// Deletes finished runs older than the retention period with their files, and audit
+    /// records older than MAGE_SERVICE_AUDIT_RETENTION_DAYS (365; 0 keeps them).
     pub fn prune(&self) {
+        let audit_days = std::env::var("MAGE_SERVICE_AUDIT_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(365);
+        let removed = crate::audit::prune(&self.data_dir.join("audit"), audit_days);
+        if removed > 0 {
+            crate::log::info(&format!(
+                "Removed {removed} audit file(s) older than {audit_days} days."
+            ));
+        }
         if self.retention_days == 0 {
             return;
         }

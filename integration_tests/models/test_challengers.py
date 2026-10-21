@@ -1,5 +1,6 @@
 """
-Champion and challenger in an exported service (item 79), end to end: two versions of a
+Champion and challenger in an exported service (item 79), with audit records (item 80), end
+to end: two versions of a
 model registered in MLflow (the test server), a service whose definition names the
 second as a challenger of the first, requests over HTTP that get the champion's scores
 only, and the comparison at /v1/models from the challenger's shadow records.
@@ -71,6 +72,7 @@ def test_a_challenger_scores_in_the_shadow_and_is_compared(mage_project, mlflow_
         challengers=dict(churn=dict(sample=1.0, challengers=[
             dict(name='v2', uri=f'models:/{registered}/2'),
         ])),
+        audits=dict(churn=dict(features='values', mask=[], hash=[], reasons=0)),
     )
     directory = export.write(captured, str(tmp_path / 'service'), force=True)
     manifest = json.loads((directory / 'service.json').read_text())
@@ -107,5 +109,14 @@ def test_a_challenger_scores_in_the_shadow_and_is_compared(mage_project, mlflow_
         assert comparison['agreement'] == 0
         assert comparison['mean_abs_diff'] == pytest.approx(3.0)  # mean of 1..5
         assert comparison['challenger_ms']['p50'] is not None
+
+        # Every scored input has its audit record, written by the worker, found by key
+        # and checked by the engine.
+        [record] = service.get('/v1/audit/churn?key=4')['records']
+        assert (record['output'], record['features'], record['version']) == (
+            pytest.approx(8.0), {'x': 4.0}, '1')
+        assert record['pipeline'] == pipeline and record['run_id']
+        verified = service.get('/v1/audit/churn/verify')
+        assert verified['intact'] and sum(f['records'] for f in verified['files']) == 5
     finally:
         service.stop()
