@@ -224,17 +224,38 @@ function ButtonItems({
   // SQL and R come first, as one entry each, so that they stay in view above the long
   // list of Python templates; R opens its templates.
   const buildNonPythonItems = useCallback((blockType: BlockTypeEnum): FlyoutMenuItemType[] => [
-    {
-      label: () => 'SQL',
-      onClick: () => {
-        addNewBlock({
-          language: BlockLanguageEnum.SQL,
-          type: blockType,
-        });
+    // The SQL templates of the block type, when it has some, under the base template.
+    blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.SQL]?.items?.length >= 1
+      ? {
+        items: [
+          {
+            label: () => 'Base template (generic)',
+            onClick: () => {
+              addNewBlock({
+                language: BlockLanguageEnum.SQL,
+                type: blockType,
+              });
+            },
+            uuid: `${BlockLanguageEnum.SQL}/${blockType}/Base template (generic)`,
+          },
+          ...flattenTemplateGroups(
+            blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.SQL]?.items,
+          ),
+        ],
+        label: () => 'SQL',
+        uuid: `${BlockLanguageEnum.SQL}/${blockType}`,
+      }
+      : {
+        label: () => 'SQL',
+        onClick: () => {
+          addNewBlock({
+            language: BlockLanguageEnum.SQL,
+            type: blockType,
+          });
+        },
+        tooltip: () => 'A SQL block from the base template',
+        uuid: `${BlockLanguageEnum.SQL}/${blockType}/Base template (generic)`,
       },
-      tooltip: () => 'A SQL block from the base template',
-      uuid: `${BlockLanguageEnum.SQL}/${blockType}/Base template (generic)`,
-    },
     {
       items: [
         {

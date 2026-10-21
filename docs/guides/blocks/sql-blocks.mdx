@@ -39,6 +39,24 @@ Follow the steps for the database or data warehouse of your choice:
 
 ---
 
+### Start from a template
+
+**All blocks** > **Data loader** or **Transformer** > **SQL** lists templates next to the
+base template:
+
+| Template | What it does | Databases |
+| --- | --- | --- |
+| Incremental load | The rows changed since the run's `{{ execution_date }}` | Any |
+| Files with DuckDB | Parquet, CSV or JSON files, local or on S3, with `read_parquet` | DuckDB |
+| Deduplicate | The latest row of each key, with `DISTINCT ON` | PostgreSQL, DuckDB |
+| Data quality report | Counts of missing ids, repeated ids and negative amounts | Any |
+| Date spine | A row per day with zeros on days without rows, with `generate_series` | PostgreSQL, DuckDB |
+| Running total | A running sum per key in time order, with a window function | Any with window functions |
+
+Each names its columns in comments to change to yours, and each runs in the tests on
+PostgreSQL and DuckDB. [Block templates](/guides/blocks/block-templates) lists every
+language's templates.
+
 ## Configure SQL block
 
 There are 4 - 5 fields that must be configured for each SQL block:

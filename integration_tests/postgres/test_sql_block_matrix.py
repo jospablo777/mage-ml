@@ -1084,3 +1084,31 @@ def test_without_a_write_policy_a_blocks_table_and_output_accumulate(
     run_pipeline(pipeline)
     run = run_pipeline(pipeline)
     assert sorted(output(pipeline, run, 'load')['id'].tolist()) == [1, 1, 2, 2, 3, 3]
+
+
+def test_the_sql_templates_run_on_postgresql(mage_project, pg, profile_schema):
+    from integration_tests.sql_templates import check_sql_templates
+
+    check_sql_templates(mage_project, PG)
+
+
+def test_the_incremental_load_template_reads_rows_since_the_run(
+    mage_project, pg, profile_schema,
+):
+    from integration_tests.sql_templates import sql_template
+
+    execute(pg, f'CREATE TABLE {profile_schema}.orders_src (id INT, updated_at TIMESTAMP)')
+    execute(pg, f"INSERT INTO {profile_schema}.orders_src VALUES "
+                f"(1, now() - INTERVAL '1 day'), (2, now() + INTERVAL '1 day')")
+    code = sql_template('data_loaders/sql/incremental.sql').replace(
+        'your_table', f'{profile_schema}.orders_src',
+    )
+    pipeline = build(mage_project, [
+        dict(uuid='changes', type='data_loader', language='sql', code=code,
+             config=dict(PG, export_write_policy='replace')),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    frame = output(pipeline, run, 'changes')
+    ids = frame['id'].to_list() if hasattr(frame, 'to_list') else list(frame['id'])
+    assert ids == [2]

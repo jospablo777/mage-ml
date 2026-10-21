@@ -15,11 +15,12 @@ from mage_ai.data_preparation.models.constants import BlockLanguage, BlockType
 from mage_ai.data_preparation.templates.constants import TEMPLATES
 
 TEMPLATES_DIR = os.path.dirname(__file__)
-LANGUAGES = (BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.RUST)
+LANGUAGES = (BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.RUST, BlockLanguage.SQL)
 LANGUAGE_NAMES = {
     BlockLanguage.PYTHON: 'Python',
     BlockLanguage.R: 'R',
     BlockLanguage.RUST: 'Rust',
+    BlockLanguage.SQL: 'SQL',
 }
 BLOCK_TYPE_NAMES = {
     BlockType.DATA_LOADER: 'Data loaders',
@@ -98,6 +99,9 @@ def problems(record: Dict) -> List[str]:
     elif language == 'r':
         if not re.search(rf'#\*\s*@{block_type}\b', code):
             return [f"{name}: {record['path']} has no #* @{block_type} function."]
+    elif language == 'sql':
+        if '{{ df_1 }}' not in code and block_type != 'data_loader':
+            return [f"{name}: {record['path']} reads no upstream block ({{{{ df_1 }}}})."]
     elif language == 'rust':
         function = RUST_FUNCTIONS.get(record['block_type'])
         if function and not re.search(rf'\bfn\s+{function}\s*\(', code):

@@ -1119,6 +1119,51 @@ def _python_source_templates() -> list:
     return records
 
 
+def _sql_template(block_type, name, file_name, description, groups):
+    folder = {
+        BlockType.DATA_LOADER: 'data_loaders',
+        BlockType.TRANSFORMER: 'transformers',
+    }[block_type]
+    return dict(
+        block_type=block_type,
+        description=description,
+        groups=groups,
+        language=BlockLanguage.SQL,
+        name=name,
+        path=f'{folder}/sql/{file_name}',
+    )
+
+
+# The templates of SQL blocks, which run with the connection the block chooses.
+SQL_TEMPLATES = [
+    _sql_template(
+        BlockType.DATA_LOADER, 'Incremental load', 'incremental.sql',
+        'The rows changed since the run\'s execution date.', [GROUP_DATABASES],
+    ),
+    _sql_template(
+        BlockType.DATA_LOADER, 'Files with DuckDB', 'files.sql',
+        'Parquet, CSV or JSON files, local or on S3, read by DuckDB.', [GROUP_FILES],
+    ),
+    _sql_template(
+        BlockType.TRANSFORMER, 'Deduplicate', 'deduplicate.sql',
+        'Keep the latest row of each key.', [GROUP_DATA_CLEANING],
+    ),
+    _sql_template(
+        BlockType.TRANSFORMER, 'Data quality report', 'quality.sql',
+        'Counts of missing ids, repeated ids and negative amounts.', [GROUP_DATA_CLEANING],
+    ),
+    _sql_template(
+        BlockType.TRANSFORMER, 'Date spine', 'date_spine.sql',
+        'A row per day with zeros on days without rows.', [GROUP_AGGREGATE],
+    ),
+    _sql_template(
+        BlockType.TRANSFORMER, 'Running total', 'running_total.sql',
+        'A running sum per key in time order, with a window function.',
+        [GROUP_FEATURE_EXTRACTION],
+    ),
+]
+TEMPLATES += SQL_TEMPLATES
+
 PYTHON_SOURCE_TEMPLATES = _python_source_templates()
 TEMPLATES += PYTHON_SOURCE_TEMPLATES
 # The records above hold the Python sources and base templates the newer menus listed
@@ -1138,6 +1183,6 @@ TEMPLATES_BY_UUID = index_by(
     lambda x: x['name'],
     [
         t for t in TEMPLATES + TEMPLATES_ONLY_FOR_V2
-        if t['language'] not in (BlockLanguage.R, BlockLanguage.RUST)
+        if t['language'] not in (BlockLanguage.R, BlockLanguage.RUST, BlockLanguage.SQL)
     ],
 )

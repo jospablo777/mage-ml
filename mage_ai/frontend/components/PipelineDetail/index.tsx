@@ -519,7 +519,9 @@ df = get_variable('${pipeline.uuid}', '${block.uuid}', 'output_0')
         }
       }
 
-      if (BlockLanguageEnum.SQL === newBlock.language) {
+      // A SQL block from a template starts with the template, which the server writes; the
+      // note would take its place.
+      if (BlockLanguageEnum.SQL === newBlock.language && !newBlock.config?.template_path) {
         content = addSqlBlockNote(content);
       }
       content = addScratchpadNote(newBlock, content);

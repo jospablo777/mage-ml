@@ -163,3 +163,34 @@ def test_types_round_trip_through_pandas(mage_project, duck):
     assert row[:5] == (9223372036854775807, None, '12345678901234567.89', 'ü', '2024-02-29')
     assert list(row[5]) == [1, 2, None]
     assert dict(row[6]) == {'a': 1, 'b': 'x'}
+
+
+def test_the_sql_templates_run_on_duckdb(mage_project, duck):
+    from integration_tests.sql_templates import check_sql_templates
+
+    check_sql_templates(mage_project, DUCK)
+
+
+def test_the_files_template_reads_parquet_with_duckdb(mage_project, duck):
+    from pathlib import Path
+
+    import pandas as pd
+
+    from integration_tests.sql_templates import sql_template
+
+    data = Path(mage_project) / 'data'
+    data.mkdir(exist_ok=True)
+    pd.DataFrame({'id': [1, 2]}).to_parquet(data / 'files_template_a.parquet')
+    pd.DataFrame({'id': [3]}).to_parquet(data / 'files_template_b.parquet')
+    code = sql_template('data_loaders/sql/files.sql').replace(
+        "'data/*.parquet'", f"'{data}/files_template_*.parquet'",
+    )
+    pipeline = build(mage_project, [
+        dict(uuid='files', type='data_loader', language='sql', code=code,
+             config=dict(DUCK, export_write_policy='replace')),
+    ])
+    run = execute_pipeline(pipeline)
+    assert run.status.value == 'completed', error_of(run)
+    frame = output(pipeline, run, 'files')
+    ids = frame['id'].to_list() if hasattr(frame, 'to_list') else list(frame['id'])
+    assert sorted(ids) == [1, 2, 3]

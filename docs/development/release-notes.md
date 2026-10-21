@@ -34,6 +34,9 @@
 
 ### Block templates
 
+- SQL templates: incremental load by execution date, files with DuckDB, deduplicate, a
+  data quality report, a date spine and running totals, under **SQL** in the block menus.
+  A SQL block made from a template used to start with only a docs note.
 - R templates: deduplicate, data quality checks, date features, one-hot encoding and
   train a model (a tidymodels random forest, saved for the Model inference template).
 - Rust templates for cloud storage (S3, Google Cloud Storage, Azure: lazy Parquet or CSV

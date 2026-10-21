@@ -43,3 +43,19 @@ test('Python sources are listed by family and make their blocks', async ({ page 
   await expect(page.getByText('from mage_ai.io.postgres import Postgres').first())
     .toBeVisible();
 });
+
+test('SQL templates are listed under SQL and make their blocks', async ({ page }) => {
+  // The editor asks for the templates a few seconds after it opens.
+  await page.waitForResponse(response => response.url().includes('/api/block_templates'));
+  await page.getByText('All blocks').first().click();
+  await visible(page, 'Transformer').hover();
+  // The menu item; the page has other SQL text.
+  await page.getByRole('menuitem', { exact: true, name: 'SQL' })
+    .filter({ visible: true }).first().hover();
+  for (const name of ['Base template (generic)', 'Deduplicate', 'Date spine', 'Running total']) {
+    await expect(visible(page, name)).toBeVisible();
+  }
+  await visible(page, 'Deduplicate').click();
+  await page.getByRole('button', { name: 'Save and add' }).click();
+  await expect(page.getByText('SELECT DISTINCT ON (id) *').first()).toBeVisible();
+});

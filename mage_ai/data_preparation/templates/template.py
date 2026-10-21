@@ -19,7 +19,6 @@ from mage_ai.data_preparation.templates.utils import (
 )
 from mage_ai.io.base import DataSource
 
-
 MAP_DATASOURCE_TO_HANDLER = {
     DataSource.BIGQUERY: 'BigQuery',
     DataSource.POSTGRES: 'Postgres',
@@ -59,6 +58,13 @@ def fetch_template_source(
     pipeline_type: PipelineType = PipelineType.PYTHON,
 ) -> str:
     template_source = ''
+
+    if language == BlockLanguage.SQL:
+        # A SQL template is the file as it is: its {{ df_1 }} and {{ execution_date }}
+        # are filled in when the block runs, not when it is made.
+        if 'template_path' not in config:
+            return template_source
+        return template_env.loader.get_source(template_env, config['template_path'])[0]
 
     if language not in [
         BlockLanguage.PYTHON, BlockLanguage.R, BlockLanguage.RUST, BlockLanguage.YAML,

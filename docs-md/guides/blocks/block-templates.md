@@ -20,62 +20,62 @@ there.
 
 ### Data loaders
 
-| Family | Python | R | Rust |
-| --- | --- | --- | --- |
-| APIs | Airtable, Amplitude, API | API | API |
-| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse |
-| Databases | Druid, DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, Pinot, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL |
-| Databases (NoSQL) | MongoDB | none yet | MongoDB |
-| Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet |
-| Files | Local file | Local file | Local file |
-| Orchestration | Trigger pipeline | none yet | none yet |
-| Search | Algolia | none yet | none yet |
-| Spreadsheets | Google Sheets | none yet | none yet |
-| Vector databases | Chroma, Qdrant, Weaviate | none yet | none yet |
-| Other | Base template (generic) | none yet | none yet |
+| Family | Python | R | Rust | SQL |
+| --- | --- | --- | --- | --- |
+| APIs | Airtable, Amplitude, API | API | API | none yet |
+| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage | none yet |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse | none yet |
+| Databases | Druid, DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, Pinot, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL | Incremental load |
+| Databases (NoSQL) | MongoDB | none yet | MongoDB | none yet |
+| Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet | none yet |
+| Files | Local file | Local file | Local file | Files with DuckDB |
+| Orchestration | Trigger pipeline | none yet | none yet | none yet |
+| Search | Algolia | none yet | none yet | none yet |
+| Spreadsheets | Google Sheets | none yet | none yet | none yet |
+| Vector databases | Chroma, Qdrant, Weaviate | none yet | none yet | none yet |
+| Other | Base template (generic) | none yet | none yet | none yet |
 
 ### Transformers
 
-| Family | Python | R | Rust |
-| --- | --- | --- | --- |
-| Aggregate | none yet | Aggregate | Aggregate |
-| Combine | none yet | Join | Join |
-| Compute | none yet | none yet | Parallel computation |
-| Data cleaning | none yet | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
-| Databases | PostgreSQL | none yet | none yet |
-| Feature extraction | none yet | Date features, One-hot encoding | Model features |
-| Formatting | none yet | none yet | Cast types |
-| Machine learning | none yet | Model inference, Train a model | ONNX model inference |
-| Reshape | none yet | Reshape | Unpivot |
-| Other | Base template (generic) | none yet | none yet |
+| Family | Python | R | Rust | SQL |
+| --- | --- | --- | --- | --- |
+| Aggregate | none yet | Aggregate | Aggregate | Date spine |
+| Combine | none yet | Join | Join | none yet |
+| Compute | none yet | none yet | Parallel computation | none yet |
+| Data cleaning | none yet | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate | Data quality report, Deduplicate |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet | none yet |
+| Databases | PostgreSQL | none yet | none yet | none yet |
+| Feature extraction | none yet | Date features, One-hot encoding | Model features | Running total |
+| Formatting | none yet | none yet | Cast types | none yet |
+| Machine learning | none yet | Model inference, Train a model | ONNX model inference | none yet |
+| Reshape | none yet | Reshape | Unpivot | none yet |
+| Other | Base template (generic) | none yet | none yet | none yet |
 
 ### Data exporters
 
-| Family | Python | R | Rust |
-| --- | --- | --- | --- |
-| APIs | Amplitude | API | API |
-| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse |
-| Databases | DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL |
-| Databases (NoSQL) | MongoDB | none yet | MongoDB |
-| Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet |
-| Files | Local file | Local file | Local file |
-| Orchestration | Trigger pipeline | none yet | none yet |
-| Search | Algolia | none yet | none yet |
-| Spreadsheets | Google Sheets | none yet | none yet |
-| Vector databases | Chroma, Qdrant, Weaviate | none yet | none yet |
-| Other | Base template (generic) | none yet | none yet |
+| Family | Python | R | Rust | SQL |
+| --- | --- | --- | --- | --- |
+| APIs | Amplitude | API | API | none yet |
+| Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage | none yet |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse | none yet |
+| Databases | DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL | none yet |
+| Databases (NoSQL) | MongoDB | none yet | MongoDB | none yet |
+| Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet | none yet |
+| Files | Local file | Local file | Local file | none yet |
+| Orchestration | Trigger pipeline | none yet | none yet | none yet |
+| Search | Algolia | none yet | none yet | none yet |
+| Spreadsheets | Google Sheets | none yet | none yet | none yet |
+| Vector databases | Chroma, Qdrant, Weaviate | none yet | none yet | none yet |
+| Other | Base template (generic) | none yet | none yet | none yet |
 
 ### Sensors
 
-| Family | Python | R | Rust |
-| --- | --- | --- | --- |
-| Cloud storage | Amazon S3, Google Cloud Storage | none yet | none yet |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet |
-| Databases | MySQL, PostgreSQL | none yet | none yet |
-| Other | Base template (generic) | none yet | none yet |
+| Family | Python | R | Rust | SQL |
+| --- | --- | --- | --- | --- |
+| Cloud storage | Amazon S3, Google Cloud Storage | none yet | none yet | none yet |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet | none yet |
+| Databases | MySQL, PostgreSQL | none yet | none yet | none yet |
+| Other | Base template (generic) | none yet | none yet | none yet |
 
 SQL blocks start from the connection you choose: the query is yours. Streaming pipelines
 have their own source and sink templates, listed in
