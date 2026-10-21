@@ -53,6 +53,7 @@ export type FolderSharedProps = {
   ) => void;
   onClickFile?: (path: string, file: FileType) => void;
   onClickFolder?: (path: string, file: FileType) => void;
+  onLoadFolder?: (path: string) => Promise<FileType[]>;
   openFile?: (path: string, file: FileType) => void;
   openSidekickView?: (newView: ViewKeyEnum, pushHistory?: boolean) => void;
   renderAfterContent?: (file: FileType) => any;
@@ -156,6 +157,7 @@ function Folder({
   level,
   onClickFile,
   onClickFolder,
+  onLoadFolder,
   onSelectBlockFile,
   onlyShowChildren,
   onlyShowFolders,
@@ -201,6 +203,9 @@ function Folder({
   const refChevron = useRef(null);
   const refExpandState = useRef(uuid in folderStates ? folderStates[uuid] : level === 0);
   const refExpandCount = useRef(0);
+  const loadedChildrenRef = useRef<FileType[]>(null);
+  const loadedChildrenRenderedRef = useRef(false);
+  const loadingChildrenRef = useRef(false);
   const expanded = refExpandState?.current;
 
   if (!name && !allowEmptyFolders) {
@@ -260,6 +265,7 @@ function Folder({
           level={onlyShowChildren ? level : level + 1}
           onClickFile={onClickFile}
           onClickFolder={onClickFolder}
+          onLoadFolder={onLoadFolder}
           onSelectBlockFile={onSelectBlockFile}
           onlyShowFolders={onlyShowFolders}
           openFile={openFile}
@@ -292,6 +298,7 @@ function Folder({
       level,
       onClickFile,
       onClickFolder,
+      onLoadFolder,
       onSelectBlockFile,
       onlyShowFolders,
       onlyShowChildren,
@@ -313,6 +320,44 @@ function Folder({
     ],
   );
 
+  const childrenEmpty = useMemo(
+    () => [
+      {
+        disabled: true,
+        name: 'Empty',
+        parent: file,
+        isNotFolder: true,
+        uuid: uuidCombinedUse,
+      },
+    ],
+    [file, uuidCombinedUse],
+  );
+
+  const renderChildren = useCallback(
+    (items: FileType[], idleTimeout: number = 1) => {
+      if (!refRoot.current) {
+        const domNode = document.getElementById(refChildren?.current?.id);
+        if (!domNode) return;
+        refRoot.current = createRoot(domNode);
+      }
+      // A separate React root: RouterRoot gives the links in it Next's router.
+      refRoot.current.render(
+        <RouterRoot>
+          {items?.length >= 1 ? (
+            <DeferredRender idleTimeout={idleTimeout}>
+              {buildChildrenFiles(items)}
+            </DeferredRender>
+          ) : isFolder ? (
+            buildChildrenFiles(childrenEmpty as any[])
+          ) : (
+            <div />
+          )}
+        </RouterRoot>,
+      );
+    },
+    [buildChildrenFiles, childrenEmpty, isFolder],
+  );
+
   const toggleExpandsion = useCallback(
     (expand: boolean = null, idleTimeout: number = null) => {
       if (typeof expand === 'undefined' || expand === null) {
@@ -327,26 +372,36 @@ function Folder({
           : 'collapsed_children';
         refChevron.current.className = refExpandState?.current ? 'expanded' : 'collapsed';
       }
-      if (refExpandCount?.current === 0) {
-        if (!refRoot?.current) {
-          const domNode = document.getElementById(refChildren?.current?.id);
-          refRoot.current = createRoot(domNode);
+      if (
+        refExpandState.current && file.children_loaded === false &&
+        loadedChildrenRef.current === null && onLoadFolder
+      ) {
+        if (!loadingChildrenRef.current) {
+          loadingChildrenRef.current = true;
+          renderChildren([{ disabled: true, isNotFolder: true, name: 'Loading...' }]);
+          onLoadFolder(filePathToUse)
+            .then(items => {
+              loadedChildrenRef.current = items;
+              loadingChildrenRef.current = false;
+              if (refExpandState.current) {
+                renderChildren(items);
+                loadedChildrenRenderedRef.current = true;
+              }
+            })
+            .catch(() => {
+              loadingChildrenRef.current = false;
+              if (refExpandState.current) {
+                renderChildren([{ disabled: true, isNotFolder: true, name: 'Load failed; reopen to retry' }]);
+              }
+            });
         }
-
-        refRoot?.current?.render(
-          <RouterRoot>
-            {children?.length >= 1 ? (
-              <DeferredRender idleTimeout={idleTimeout ? idleTimeout : 1}>
-                {buildChildrenFiles(children)}
-              </DeferredRender>
-            ) : // @ts-ignore
-            isFolder ? (
-              buildChildrenFiles(childrenEmpty as any[])
-            ) : (
-              <div />
-            )}
-          </RouterRoot>,
-        );
+      } else if (
+        refExpandState.current &&
+        (refExpandCount.current === 0 ||
+          (loadedChildrenRef.current !== null && !loadedChildrenRenderedRef.current))
+      ) {
+        renderChildren(loadedChildrenRef.current || children, idleTimeout || 1);
+        if (loadedChildrenRef.current !== null) loadedChildrenRenderedRef.current = true;
       }
 
       getSetUpdate(LOCAL_STORAGE_KEY_FOLDERS_STATE, {
@@ -355,7 +410,7 @@ function Folder({
       refExpandCount.current += 1;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [children, isFolder, uuid],
+    [children, filePathToUse, file.children_loaded, onLoadFolder, renderChildren, uuid],
   );
 
   useEffect(() => {
@@ -380,19 +435,6 @@ function Folder({
       }
     };
   }, [isFolder, level, toggleExpandsion, uuid]);
-
-  const childrenEmpty = useMemo(
-    () => [
-      {
-        disabled: true,
-        name: 'Empty',
-        parent: file,
-        isNotFolder: true,
-        uuid: uuidCombinedUse,
-      },
-    ],
-    [file, uuidCombinedUse],
-  );
 
   const lineEls = useMemo(() => {
     const arr = [];
@@ -420,30 +462,8 @@ function Folder({
   useEffect(() => {
     setTimeout(() => {
       if (expanded && refExpandCount?.current === 0 && refChildren?.current?.id) {
-        refExpandCount.current = 1;
-
         try {
-          if (!refRoot?.current) {
-            const domNode = document.getElementById(refChildren?.current?.id);
-            refRoot.current = createRoot(domNode);
-          }
-
-          refRoot?.current?.render(
-            <RouterRoot>
-              {children?.length >= 1 ? (
-                <DeferredRender idleTimeout={100 * level}>
-                  {buildChildrenFiles(children)}
-                </DeferredRender>
-              ) : !children?.length ? (
-                isFolder ? (
-                  // @ts-ignore
-                  buildChildrenFiles(childrenEmpty)
-                ) : (
-                  <div />
-                )
-              ) : null}
-            </RouterRoot>,
-          );
+          toggleExpandsion(true, 100 * level);
         } catch (err) {
           console.log(err);
         }

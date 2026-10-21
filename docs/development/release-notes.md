@@ -238,6 +238,13 @@
   no schema, as if it were in the block's schema; it is in the profile's default schema,
   and is now named there.
 
+### Files
+
+- The file browser lists one folder at a time and loads a folder when you open it, and the
+  Files API scans in a worker thread instead of on the server's event loop: a large project
+  no longer holds every request while its whole tree is read (from Mage 0.9.80, #6190).
+  Folder paths stay under the project's path in a project reached through a symlink.
+
 ### Data contracts
 
 - `mage contract-compat <project> <name> --base <revision>` compares a contract with its
