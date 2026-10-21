@@ -101,6 +101,9 @@ pub struct Monitor {
     pub top: usize,
     pub column_rules: HashMap<String, ColumnRules>,
     pub rolling: usize,
+    /// With a previous baseline, the run this many runs back ends the baseline: 7 compares
+    /// a daily run with the same weekday a week earlier.
+    pub lag: usize,
     pub performance: Performance,
 }
 
@@ -121,6 +124,7 @@ impl Default for Monitor {
             top: 20,
             column_rules: HashMap::new(),
             rolling: 1,
+            lag: 1,
             performance: Performance::default(),
         }
     }
@@ -130,6 +134,17 @@ impl Monitor {
     pub fn parse(text: &str) -> Result<Monitor, Error> {
         serde_json::from_str(text)
             .map_err(|error| Error::invalid(format!("Invalid monitor settings: {error}")))
+    }
+
+    /// The earlier runs (of `count`, oldest first) a previous baseline adds up: `rolling`
+    /// runs ending `lag` runs back. Empty while there are fewer than `lag` runs.
+    pub fn baseline_window(&self, count: usize) -> std::ops::Range<usize> {
+        let lag = self.lag.max(1);
+        if count < lag {
+            return 0..0;
+        }
+        let end = count + 1 - lag;
+        end.saturating_sub(self.rolling.max(1))..end
     }
 
     pub fn has_performance(&self) -> bool {
@@ -1058,6 +1073,21 @@ mod tests {
         );
         let rows = &result["checks"][0];
         assert_eq!(rows["detail"], "2 rows; at least 3");
+    }
+
+    #[test]
+    fn the_baseline_window_ends_lag_runs_back() {
+        let watcher = |rolling, lag| Monitor {
+            rolling,
+            lag,
+            ..Default::default()
+        };
+        assert_eq!(watcher(1, 1).baseline_window(5), 4..5);
+        assert_eq!(watcher(3, 1).baseline_window(5), 2..5);
+        assert_eq!(watcher(1, 3).baseline_window(5), 2..3);
+        assert_eq!(watcher(2, 3).baseline_window(5), 1..3);
+        assert_eq!(watcher(1, 7).baseline_window(6), 0..0);
+        assert_eq!(watcher(9, 2).baseline_window(4), 0..3);
     }
 
     #[test]

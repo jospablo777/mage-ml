@@ -198,8 +198,7 @@ fn run_one(
     let (baseline, reference) = match &check.baseline {
         Some(fixed) => (Some(fixed.clone()), Some(fixed.clone())),
         None => {
-            let start = earlier.len().saturating_sub(settings.rolling.max(1));
-            let window = &earlier[start..];
+            let window = &earlier[settings.baseline_window(earlier.len())];
             let baseline = (!window.is_empty()).then(|| monitor::merge(window));
             (baseline, earlier.first().cloned())
         }

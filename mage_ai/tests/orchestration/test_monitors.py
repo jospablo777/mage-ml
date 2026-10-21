@@ -119,6 +119,37 @@ class ExpandedCompareTest(TestCase):
         self.assertEqual(dict(s['top']), {'a': 6, 'b': 6})
         self.assertEqual(merged['baseline_runs'], [1, 2])
 
+    def test_a_lag_ends_the_baseline_runs_back(self):
+        from unittest.mock import patch
+
+        records = [
+            dict(pipeline_run_id=i, profile=dict(rows=10, columns=[])) for i in range(1, 6)
+        ]
+
+        def baseline(**settings):
+            monitor = monitors.Monitor(name='m', pipeline='p', block='b', **settings)
+            with patch.object(monitors, 'saved', return_value=records):
+                return monitors._baseline(None, monitor, 6)
+
+        self.assertEqual(baseline()['pipeline_run_id'], 5)
+        self.assertEqual(baseline(lag=3)['pipeline_run_id'], 3)
+        self.assertEqual(baseline(lag=3, rolling=2)['baseline_runs'], [2, 3])
+        self.assertIsNone(baseline(lag=7))
+
+    def test_a_lag_needs_a_previous_baseline(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as project:
+            folder = Path(project) / 'monitors'
+            folder.mkdir()
+            (folder / 'm.yaml').write_text('pipeline: p\nblock: b\nbaseline: run:3\nlag: 7\n')
+            with self.assertRaises(monitors.MonitorError) as caught:
+                monitors.load_monitor('m', project)
+            self.assertIn('applies to baseline: previous', str(caught.exception))
+            (folder / 'm.yaml').write_text('pipeline: p\nblock: b\nlag: 0\n')
+            with self.assertRaises(monitors.MonitorError):
+                monitors.load_monitor('m', project)
+
     def test_performance_settings_are_checked(self):
         with self.assertRaises(monitors.MonitorError) as caught:
             monitors._performance_settings(

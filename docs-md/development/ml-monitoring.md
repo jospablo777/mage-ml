@@ -54,8 +54,9 @@ with a severity per engine, and HTML reports listed in the run's record. The
 ## Remaining gaps
 
 1. **No streaming or event windows**, as above.
-2. **Seasonality**: baselines are a fixed run or the last N runs. Comparing with "the
-   same weekday last week" needs a baseline selector.
+2. **Seasonality** by run count only: `lag: 7` compares a daily pipeline's run with the
+   one seven runs back. Calendar selectors ("the same weekday", skipped or extra runs
+   accounted for) are not implemented.
 3. **Alerts** can be limited to changes (`notify: on_change`), but there is no
    acknowledgement or silencing with an expiry.
 4. **Per-segment monitors** (drift within each country, say) are not implemented;

@@ -45,7 +45,7 @@ RECORDS_FOLDER = '.monitoring'
 _NAME = re.compile(r'^[A-Za-z0-9][\w.\-]{0,127}$')
 _KEYS = {
     'pipeline', 'block', 'output', 'baseline', 'columns', 'drift', 'missing', 'rows',
-    'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top', 'rolling',
+    'freshness', 'min_rows', 'fail_block', 'notify', 'description', 'bins', 'top', 'rolling', 'lag',
     'performance', 'evidently', 'nannyml', 'environment',
 }
 # The engines' versions tested with this fork (pandas 3, NumPy 2, Python 3.12).
@@ -94,6 +94,9 @@ class Monitor:
     column_rules: Dict[str, Dict] = field(default_factory=dict)
     # The baseline is the sum of this many earlier runs (previous baseline only).
     rolling: int = 1
+    # With a previous baseline, the run this many runs back ends the baseline: 7 compares a
+    # daily run with the same weekday a week earlier.
+    lag: int = 1
     performance: Dict[str, Any] = field(default_factory=dict)
     evidently: Dict[str, Any] = field(default_factory=dict)
     nannyml: Dict[str, Any] = field(default_factory=dict)
@@ -189,6 +192,11 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
     rolling = document.get('rolling', 1)
     if isinstance(rolling, bool) or not isinstance(rolling, int) or rolling < 1:
         raise MonitorError(f'The rolling of monitor {name} is a number of runs, 1 or more.')
+    lag = document.get('lag', 1)
+    if isinstance(lag, bool) or not isinstance(lag, int) or lag < 1:
+        raise MonitorError(f'The lag of monitor {name} is a number of runs, 1 or more.')
+    if lag > 1 and baseline != 'previous':
+        raise MonitorError(f'The lag of monitor {name} applies to baseline: previous.')
     performance = _performance_settings(document.get('performance'), name)
     engines = {}
     for engine in ('evidently', 'nannyml'):
@@ -227,6 +235,7 @@ def load_monitor(name: str, repo_path: str) -> Monitor:
         top=int(document.get('top', 20)),
         column_rules=column_rules,
         rolling=rolling,
+        lag=lag,
         performance=performance,
         evidently=engines['evidently'],
         nannyml=engines['nannyml'],
@@ -425,7 +434,12 @@ def _baseline(pipeline, monitor: Monitor, run_id: int) -> Optional[Dict]:
     records = [r for r in saved(pipeline, monitor) if r['pipeline_run_id'] != run_id]
     if monitor.baseline == 'previous':
         earlier = [r for r in records if r['pipeline_run_id'] < run_id]
-        return _merged(earlier[-monitor.rolling:]) if earlier else None
+        # rolling runs ending lag runs back, as the service's baseline_window.
+        if len(earlier) < monitor.lag:
+            return None
+        end = len(earlier) + 1 - monitor.lag
+        window = earlier[max(0, end - monitor.rolling):end]
+        return _merged(window) if window else None
     wanted = int(monitor.baseline.split(':', 1)[1])
     return next((r for r in records if r['pipeline_run_id'] == wanted), None)
 

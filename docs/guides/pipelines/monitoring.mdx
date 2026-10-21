@@ -64,6 +64,8 @@ columns:                   # a mapping instead of a list sets rules per column
     missing: {max: 0.9}
 baseline: previous
 rolling: 7                 # the baseline is the last 7 runs together
+lag: 1                     # 7 for a daily pipeline: compare with the same weekday a week
+                           # earlier (with rolling, the 7 runs ending there)
 notify: on_change          # notify when the result turns to fail, not on every failed run
 ```
 
@@ -191,7 +193,8 @@ counts, frequent values, missing counts), not the data.
 A [pipeline service](/production/pipeline-services) runs the monitors of its blocks after
 each run, with the same Rust code as MageML, so the same data gets the same checks:
 
-- `baseline: previous` compares with the service's own earlier runs (the last `rolling`),
+- `baseline: previous` compares with the service's own earlier runs (`rolling` of them,
+  ending `lag` runs back),
   kept in `<data>/monitors/<pipeline>/<monitor>/`. `baseline: run:<id>` compares with
   MageML's record of that run, taken into the service when it is exported.
 - The result is in the run log, in `monitors.json` next to the block's output, and in

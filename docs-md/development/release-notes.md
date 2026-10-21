@@ -53,6 +53,9 @@
   `mage_service_monitor_check`); `fail_block` fails the block. Evidently and NannyML run in
   MageML only. The `mage-contracts` crate is now `mage-checks`, and the engine feature
   `checks`.
+- A monitor's `lag` compares with the run that many runs back: `lag: 7` compares a daily
+  pipeline's run with the same weekday a week earlier, alone or with `rolling` runs ending
+  there. MageML and services pick the same runs.
 - `mage-console` shows a pipeline's monitors: how many fail, each one's recent results as a
   strip, and the first check that did not pass. `/v1/snapshot` carries them, and the
   results of earlier runs show after the service restarts.
