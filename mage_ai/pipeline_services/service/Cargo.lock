@@ -3430,6 +3430,7 @@ dependencies = [
  "arrow-array",
  "arrow-ipc",
  "arrow-json",
+ "arrow-select",
  "axum",
  "base64 0.22.1",
  "bytes",

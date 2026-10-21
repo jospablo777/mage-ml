@@ -15,6 +15,15 @@ class KafkaTests(TestCase):
             ))
             mock_init_client.assert_called_once()
 
+    def test_an_event_time_for_the_engine_is_not_a_kafka_setting(self):
+        """A source block with event_time (read by services) failed to load in MageML."""
+        with patch.object(KafkaSource, 'init_client'):
+            source = KafkaSource(dict(
+                connector_type='kafka', bootstrap_server='test_server', consumer_group='test',
+                topic='test_topic', event_time=dict(field='at', lateness_seconds=5),
+            ))
+        self.assertEqual(source.config.topic, 'test_topic')
+
     def test_init_client_with_topic(self):
         kafka_config = dict(
             connector_type='kafka',

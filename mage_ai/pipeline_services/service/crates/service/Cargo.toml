@@ -54,6 +54,7 @@ base64 = "0.22"
 arrow-array = { version = "60", default-features = false }
 arrow-ipc = { version = "60", default-features = false, features = ["lz4", "zstd"] }
 arrow-json = { version = "60", default-features = false }
+arrow-select = { version = "60", default-features = false }
 
 [features]
 kafka = ["dep:mage-connector-kafka"]

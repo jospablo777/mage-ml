@@ -553,6 +553,7 @@ fn parts(service: &Arc<Service>, pipeline: &Pipeline, log: RunLog) -> Result<Str
         shutdown_deadline: Duration::from_secs(20),
         pause: None,
         tap,
+        time: stream.time.clone().map(crate::stream_time::Lateness::new),
     })
 }
 

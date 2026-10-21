@@ -35,6 +35,11 @@ pub struct StreamStatus {
     pub dead_lettered_batches: u64,
     /// Messages that failed on their own and went to the dead-letter sink.
     pub dead_lettered_messages: u64,
+    /// Messages behind their partition's watermark, and messages without an event time.
+    pub late: u64,
+    pub untimed: u64,
+    /// Per partition this instance reads: its watermark, when the stream has event time.
+    pub watermarks: BTreeMap<u32, String>,
     pub alerts: u64,
     pub last_error: Option<String>,
     /// Per partition: the last acknowledged position, as text.
@@ -193,6 +198,8 @@ pub struct StreamParts {
     pub pause: Option<tokio::sync::watch::Receiver<bool>>,
     /// Keep the last messages at each tap point (MAGE_SERVICE_TAP=on, development runs).
     pub tap: bool,
+    /// Event time and late messages (manifest `time`).
+    pub time: Option<crate::stream_time::Lateness>,
 }
 
 enum Internal {
@@ -480,6 +487,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     });
 
     let mut inputs: HashMap<BatchId, (RecordBatch, BatchMeta)> = HashMap::new();
+    // With event time: a batch's on-time messages, when some were late, with the row in
+    // the batch of each, and the late ones for the dead-letter sink.
+    let mut on_time: HashMap<BatchId, (RecordBatch, Vec<usize>, Vec<RowError>)> = HashMap::new();
+    let mut time = parts.time.take();
     let mut outputs: HashMap<BatchId, std::collections::BTreeMap<String, RecordBatch>> =
         HashMap::new();
     // Messages of a batch that failed on their own, by their row in the batch.
@@ -538,6 +549,16 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                         }
                     });
                     outputs.insert(id, output.outputs);
+                    let mut output_errors = output.row_errors;
+                    if let Some((_, kept, late)) = on_time.get(&id) {
+                        // The blocks saw the on-time messages: their rows, back to the batch's.
+                        for error in &mut output_errors {
+                            error.row = kept.get(error.row).copied().unwrap_or(error.row);
+                        }
+                        output_errors.extend(late.iter().cloned());
+                        output_errors.sort_by_key(|e| e.row);
+                    }
+                    let output = TransformOutput { row_errors: output_errors, ..TransformOutput::default() };
                     if !output.row_errors.is_empty() {
                         let first = output.row_errors[0].error.clone();
                         events.push(Event::RowsRejected {
@@ -573,6 +594,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     match operation {
                         Operation::Transform(id) => {
                             if let Some((batch, _)) = inputs.get(&id) {
+                                let batch = on_time.get(&id).map_or(batch, |(kept, _, _)| kept);
                                 let _ = lane_tx.send((id, batch.clone()));
                             }
                         }
@@ -661,6 +683,38 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                     if tapping {
                         tap(&status, "source", &batch);
                     }
+                    if let Some(lateness) = time.as_mut() {
+                        match lateness.split(&batch) {
+                            Ok(split) => {
+                                let watermarks = lateness.watermarks();
+                                count(&status, |s| {
+                                    s.late += split.late;
+                                    s.untimed += split.untimed;
+                                    for (partition, watermark) in watermarks {
+                                        s.watermarks.insert(
+                                            partition,
+                                            chrono::DateTime::from_timestamp_millis(watermark)
+                                                .map(|t| {
+                                                    t.to_rfc3339_opts(
+                                                        chrono::SecondsFormat::Millis,
+                                                        true,
+                                                    )
+                                                })
+                                                .unwrap_or_default(),
+                                        );
+                                    }
+                                });
+                                if let Some(kept) = split.on_time {
+                                    on_time.insert(meta.id, (kept, split.kept, split.errors));
+                                }
+                            }
+                            Err(error) => record_error(
+                                &status,
+                                &parts.name,
+                                &format!("reading the event times: {error}"),
+                            ),
+                        }
+                    }
                     inputs.insert(meta.id, (batch, meta.clone()));
                     events.push(Event::BatchRead(meta));
                 }
@@ -673,6 +727,12 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 }
                 Ok(SourceEvent::Revoking { partition, epoch, within }) => {
                     assigned.remove(&partition);
+                    if let Some(lateness) = time.as_mut() {
+                        lateness.forget(partition);
+                    }
+                    count(&status, |s| {
+                        s.watermarks.remove(&partition.0);
+                    });
                     events.push(Event::Revoking { partition, epoch });
                     let tx = tx.clone();
                     tokio::spawn(async move {
@@ -702,7 +762,21 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                 match effect {
                     Effect::Transform(id) => {
                         if let Some((batch, _)) = inputs.get(&id) {
-                            let _ = lane_tx.send((id, batch.clone()));
+                            match on_time.get(&id) {
+                                // Every message was late: nothing for the blocks.
+                                Some((kept, _, _)) if kept.num_rows() == 0 => {
+                                    let _ = tx.send(Internal::Transformed(
+                                        id,
+                                        Ok(TransformOutput::default()),
+                                    ));
+                                }
+                                Some((kept, _, _)) => {
+                                    let _ = lane_tx.send((id, kept.clone()));
+                                }
+                                None => {
+                                    let _ = lane_tx.send((id, batch.clone()));
+                                }
+                            }
                         }
                     }
                     Effect::Write { id, sink } => {
@@ -713,7 +787,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             // The output of the block the sink follows; a block that made
                             // nothing of this batch writes an empty batch, which confirms it.
                             let batch = match sink_after.get(index).cloned().flatten() {
-                                None => input.clone(),
+                                None => on_time.get(&id).map_or(input, |(kept, _, _)| kept).clone(),
                                 Some(block) => outputs
                                     .get(&id)
                                     .and_then(|o| o.get(&block))
@@ -786,6 +860,7 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                             && meta.last <= commit.position)
                                     });
                                     outputs.retain(|id, _| inputs.contains_key(id));
+                                    on_time.retain(|id, _| inputs.contains_key(id));
                                     rejected.retain(|id, _| inputs.contains_key(id));
                                     count(&status, |s| {
                                         s.acknowledged.insert(id_partition, position);
@@ -1030,6 +1105,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1053,6 +1129,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn late_messages_go_to_dead_letters_and_the_sinks_get_the_rest() {
+        let times = [
+            r#"{"at": 100}"#,
+            r#"{"at": 101}"#,
+            r#"{"at": 98}"#,
+            r#"{"at": 102}"#,
+            r#"{"x": 1}"#,
+        ];
+        let partition: Vec<Envelope> = times
+            .iter()
+            .map(|v| Envelope {
+                value: v.as_bytes().to_vec(),
+                ..Envelope::default()
+            })
+            .collect();
+        let source = MemorySource::new(vec![partition], 2, true);
+        let handle = source.handle();
+        let (sink, dead) = (MemorySink::new(), MemorySink::new());
+        let status = drive(StreamParts {
+            name: "events".into(),
+            source: Box::new(source),
+            sinks: vec![(Arc::new(sink.clone()), None)],
+            dead_letter: Some(Arc::new(dead.clone())),
+            transform: None,
+            config: config(1, true, PoisonPolicy::DeadLetter),
+            shutdown_deadline: Duration::from_secs(5),
+            pause: None,
+            tap: false,
+            time: Some(crate::stream_time::Lateness::new(
+                mage_service_core::manifest::EventTime {
+                    field: Some("at".into()),
+                    format: mage_service_core::manifest::TimeFormat::EpochS,
+                    lateness_ms: 1_000,
+                    on_late: mage_service_core::manifest::LatePolicy::DeadLetter,
+                },
+            )),
+        })
+        .await;
+
+        assert_eq!(status.state, StreamState::Finished, "{status:?}");
+        assert_eq!(values(&sink), [times[0], times[1], times[3]]);
+        let late = dead.received();
+        let mut dead_values: Vec<String> = late
+            .iter()
+            .map(|m| String::from_utf8(m.value.clone()).unwrap())
+            .collect();
+        dead_values.sort();
+        assert_eq!(dead_values, [times[2], times[4]]);
+        let reasons: Vec<String> = late
+            .iter()
+            .flat_map(|m| m.headers.iter())
+            .map(|h| String::from_utf8_lossy(&h.value).into_owned())
+            .collect();
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.contains("before partition 0's watermark")),
+            "{reasons:?}"
+        );
+        assert!(
+            reasons.iter().any(|r| r.contains("no event time in at")),
+            "{reasons:?}"
+        );
+        assert_eq!((status.late, status.untimed), (1, 1));
+        assert_eq!(status.watermarks[&0], "1970-01-01T00:01:41.000Z");
+        assert_eq!(handle.committed(), vec![5]);
+    }
+
+    #[tokio::test]
     async fn a_paused_stream_reads_nothing_new_until_it_resumes() {
         let source = MemorySource::new(vec![messages(20)], 4, true);
         let handle = source.handle();
@@ -1070,6 +1215,7 @@ mod tests {
                 shutdown_deadline: Duration::from_secs(5),
                 pause: Some(receiver),
                 tap: false,
+                time: None,
             },
             status.clone(),
             CancellationToken::new(),
@@ -1181,6 +1327,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1210,6 +1357,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: true,
+            time: None,
         })
         .await;
 
@@ -1234,6 +1382,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1297,6 +1446,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1475,6 +1625,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1511,6 +1662,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1545,6 +1697,7 @@ mod tests {
             shutdown_deadline: Duration::from_millis(200),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1569,6 +1722,7 @@ mod tests {
             shutdown_deadline: Duration::from_millis(200),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1593,6 +1747,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1624,6 +1779,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1649,6 +1805,7 @@ mod tests {
             shutdown_deadline: Duration::from_secs(5),
             pause: None,
             tap: false,
+            time: None,
         })
         .await;
 
@@ -1681,6 +1838,7 @@ mod tests {
                 shutdown_deadline: Duration::from_millis(50),
                 pause: None,
                 tap: false,
+                time: None,
             },
             status.clone(),
             shutdown.clone(),
@@ -1710,6 +1868,7 @@ mod tests {
                 shutdown_deadline: Duration::from_secs(5),
                 pause: None,
                 tap: false,
+                time: None,
             },
             SharedStatus::default(),
             shutdown,

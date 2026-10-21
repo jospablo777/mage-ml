@@ -1472,6 +1472,8 @@ def _stream_connector_settings(block, kinds: Dict[str, str], role: str, pipeline
     connector_type = config.pop('connector_type', None)
     # Read by _marked_dead_letter; not a connector setting.
     config.pop('dead_letter', None)
+    # Read by _event_time; not a connector setting.
+    config.pop('event_time', None)
     # Read by sample capture, which redacts them; not a connector setting.
     config.pop('secret_fields', None)
     if connector_type not in kinds:
@@ -1700,6 +1702,10 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         errors['dead_letter'] = dead_letters[0]
     if not sink_entries and not problems:
         problems.append(f'{prefix} has only a dead-letter sink; it needs a sink for its messages.')
+    stream = dict(source=source, sinks=sink_entries, batch=batch, errors=errors)
+    time = _event_time(source_block, pipeline, prefix, bool(dead_letters), problems)
+    if time is not None:
+        stream['time'] = time
     return dict(
         uuid=pipeline.uuid,
         name=pipeline.name or pipeline.uuid,
@@ -1708,8 +1714,55 @@ def _stream_pipeline_entry(pipeline, project: Path, repo_config, capture_: Captu
         variables=_json_safe(getattr(pipeline, 'variables', None) or {}),
         blocks=blocks,
         triggers=[],
-        stream=dict(source=source, sinks=sink_entries, batch=batch, errors=errors),
+        stream=stream,
     )
+
+
+TIME_FORMATS = ('epoch_ms', 'epoch_s', 'rfc3339')
+
+
+def _event_time(source_block, pipeline, prefix: str, has_dead_letter: bool,
+                problems: List[str]) -> Optional[Dict]:
+    """
+    The stream's event time, from the source block's `event_time`:
+
+        event_time:
+          field: created_at     # without it, the source's timestamp
+          format: rfc3339       # epoch_ms (default), epoch_s or rfc3339
+          lateness_seconds: 30  # how late an event may arrive and be on time
+          on_late: dead_letter  # or pass: keep late messages and count them
+    """
+    try:
+        config = compile_stream_config(Path(source_block.file_path).read_text(),
+                                       getattr(pipeline, 'variables', None))
+    except (OSError, ValueError):
+        return None
+    value = config.get('event_time')
+    if value is None:
+        return None
+    where = f'{prefix}, source {source_block.uuid}: event_time'
+    if not isinstance(value, dict):
+        problems.append(f'{where} is a mapping, such as {{field: created_at, '
+                        'lateness_seconds: 30}.')
+        return None
+    time = dict(format=value.get('format') or 'epoch_ms',
+                on_late=value.get('on_late') or 'dead_letter')
+    if value.get('field'):
+        time['field'] = str(value['field'])
+    if time['format'] not in TIME_FORMATS:
+        problems.append(f'{where}: format is one of {", ".join(TIME_FORMATS)}.')
+    if time['on_late'] not in ('dead_letter', 'pass'):
+        problems.append(f'{where}: on_late is dead_letter or pass.')
+    lateness = value.get('lateness_seconds', 0)
+    if isinstance(lateness, bool) or not isinstance(lateness, (int, float)) or lateness < 0:
+        problems.append(f'{where}: lateness_seconds is a number of seconds, 0 or more.')
+    else:
+        time['lateness_ms'] = int(lateness * 1000)
+    if time['on_late'] == 'dead_letter' and not has_dead_letter:
+        problems.append(
+            f'{where}: late messages go to the dead-letter sink, and the stream has none. Add '
+            'a sink with dead_letter: true, or set on_late: pass to keep them and count them.')
+    return time
 
 
 def _apply_object_buffers(prefix: str, source: Dict, sinks: List[Dict], batch: Dict,

@@ -1176,6 +1176,14 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                 "Batches sent to the dead-letter sink.",
             ),
             (
+                "late",
+                "Messages behind their partition's watermark when they arrived.",
+            ),
+            (
+                "untimed",
+                "Messages without an event time, in a stream with event time.",
+            ),
+            (
                 "alerts",
                 "Alerts a stream raised, such as a sink failing repeatedly.",
             ),
@@ -1189,6 +1197,8 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                     "batches" => s.batches,
                     "retries" => s.retries,
                     "dead_lettered_batches" => s.dead_lettered_batches,
+                    "late" => s.late,
+                    "untimed" => s.untimed,
                     _ => s.alerts,
                 };
                 let _ = writeln!(
@@ -1211,6 +1221,24 @@ async fn metrics(State(state): State<AppState>) -> ApiResult<Response> {
                     "mage_service_stream_lag_messages{{pipeline=\"{}\",partition=\"{partition}\"}} {lag}",
                     escape(pipeline)
                 );
+            }
+        }
+        let _ = writeln!(
+            out,
+            "# HELP mage_service_stream_watermark_seconds Each partition's watermark, as Unix \
+             time: no event before it is still expected."
+        );
+        let _ = writeln!(out, "# TYPE mage_service_stream_watermark_seconds gauge");
+        for (pipeline, s) in &streams {
+            for (partition, watermark) in &s.watermarks {
+                if let Ok(time) = chrono::DateTime::parse_from_rfc3339(watermark) {
+                    let _ = writeln!(
+                        out,
+                        "mage_service_stream_watermark_seconds{{pipeline=\"{}\",partition=\"{partition}\"}} {:.3}",
+                        escape(pipeline),
+                        time.timestamp_millis() as f64 / 1000.0
+                    );
+                }
             }
         }
         let _ = writeln!(out, "# HELP mage_service_stream_up 1 while a stream runs.");

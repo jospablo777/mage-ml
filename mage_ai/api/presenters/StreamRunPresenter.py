@@ -14,6 +14,7 @@ class StreamRunPresenter(BasePresenter):
         'error',
         'exit_code',
         'lag',
+        'late',
         'lag_history',
         'last_error',
         'logs',
@@ -29,4 +30,6 @@ class StreamRunPresenter(BasePresenter):
         'started_at',
         'state',
         'tap',
+        'untimed',
+        'watermarks',
     ]

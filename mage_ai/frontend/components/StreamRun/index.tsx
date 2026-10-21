@@ -54,6 +54,10 @@ export type StreamRunType = {
   exit_code?: number;
   lag?: { [partition: string]: number };
   lag_history?: number[];
+  // Messages behind their partition's watermark, and without an event time.
+  late?: number;
+  untimed?: number;
+  watermarks?: { [partition: string]: string };
   last_error?: string;
   logs?: string[];
   messages_in?: number;
@@ -365,6 +369,7 @@ function StreamRun({ blocks, pipelineUUID }: StreamRunProps) {
     ['Batches', run?.batches],
     ['Retries', run?.retries],
     ['Dead-lettered', run?.dead_lettered_messages],
+    ['Late', run?.late],
     ['Alerts', run?.alerts],
   ];
 

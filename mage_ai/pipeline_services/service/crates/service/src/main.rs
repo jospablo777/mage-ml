@@ -25,6 +25,7 @@ mod stream;
 mod stream_chain;
 mod stream_python;
 mod stream_rust;
+mod stream_time;
 mod streams;
 
 use std::net::SocketAddr;

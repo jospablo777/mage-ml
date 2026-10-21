@@ -42,6 +42,10 @@
 - R blocks in exported services run in an R session each Python worker keeps: a one-row R
   block over HTTP went from 627 ms to 8 ms p50. `MAGE_SERVICE_R_RESIDENT=off` starts Rscript
   for each run.
+- Streams have event time: `event_time` on a source reads each message's time from a field
+  or the source's timestamp, keeps a watermark per partition, and sends late messages (and
+  messages without a time) to the dead-letter sink with the reason, or passes and counts
+  them. The first step of stateful streams (windows and keyed state follow).
 - **Check connections** in a stream's Run tab, and `mage-service check-connections`: the
   engine reports whether the source and each sink answer, read-only, with what the system
   says (Kafka partitions, retention and group lag; PostgreSQL tables, privileges, slots and

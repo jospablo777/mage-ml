@@ -215,6 +215,45 @@ pub struct Stream {
     pub batch: BatchPolicy,
     #[serde(default)]
     pub errors: ErrorPolicy,
+    /// Event time and late messages; without it, messages are taken as they come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<EventTime>,
+}
+
+/// Where a message's event time is, how late it may arrive, and what happens to it after.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EventTime {
+    /// The message's field holding the event time (`a.b` for a nested one); without it,
+    /// the source's timestamp.
+    #[serde(default)]
+    pub field: Option<String>,
+    #[serde(default)]
+    pub format: TimeFormat,
+    /// How far behind a partition's latest event time an event may arrive and be on time.
+    #[serde(default)]
+    pub lateness_ms: u64,
+    #[serde(default)]
+    pub on_late: LatePolicy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeFormat {
+    #[default]
+    EpochMs,
+    EpochS,
+    Rfc3339,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LatePolicy {
+    /// Late messages, and messages without an event time, go to the dead-letter sink.
+    #[default]
+    DeadLetter,
+    /// They stay in the stream and are counted.
+    Pass,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -890,6 +929,15 @@ impl Pipeline {
                 "Pipeline {name}: the dead-letter sink {} receives failed messages of any \
                  block; it cannot follow one.",
                 dead_letter.name
+            ));
+        }
+        if let Some(time) = &stream.time
+            && time.on_late == LatePolicy::DeadLetter
+            && stream.errors.dead_letter.is_none()
+        {
+            problems.push(format!(
+                "Pipeline {name}: late messages go to the dead-letter sink (on_late: \
+                 dead_letter), and the stream has none: add one, or set on_late: pass."
             ));
         }
         let batch = &stream.batch;

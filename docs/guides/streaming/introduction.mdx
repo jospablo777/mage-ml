@@ -179,6 +179,39 @@ stream sequence) and time, secret fields redacted as in samples.
   were received, once the block is fixed. It is a write to production, so you type its name
   to confirm. A NATS source subject with wildcards cannot be replayed to.
 
+## Event time and late messages
+
+A message often says when its event happened: an order's `created_at`, a reading's `at`.
+With `event_time` on the source, an exported service and the local engine judge each
+message by it:
+
+```yaml
+connector_type: kafka
+topic: readings
+consumer_group: readings
+event_time:
+  field: at              # a field of the message (a.b for a nested one); without it, the
+                         # source's own timestamp
+  format: epoch_s        # epoch_ms (the default), epoch_s or rfc3339
+  lateness_seconds: 30   # how far behind the latest event an event may still arrive
+  on_late: dead_letter   # or pass
+```
+
+Each partition has a watermark: the latest event time it has seen, less
+`lateness_seconds`. A message older than its partition's watermark is late.
+
+- With `on_late: dead_letter` (the default), late messages, and messages without an event
+  time, leave the batch before the blocks and every sink and go to the dead-letter sink,
+  with the reason: "event time 2026-10-21T10:00:05Z is before partition 0's watermark
+  2026-10-21T10:00:10Z". The stream needs a dead-letter sink.
+- With `on_late: pass` they stay in the stream and are counted.
+
+The Run tab counts late messages, `/v1/streams/<pipeline>` shows each partition's
+watermark, and `/metrics` has `mage_service_stream_late_total` and
+`mage_service_stream_watermark_seconds`. A watermark lives with its partition on the
+instance that reads it, and starts again when a partition moves or the service restarts.
+MageML's own streaming takes messages as they come and ignores `event_time`.
+
 ## Run pipeline in production
 Create the trigger in [triggers page](/design/data-pipeline-management#create-trigger) to run streaming pipelines in production.
 

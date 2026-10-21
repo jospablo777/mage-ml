@@ -1470,3 +1470,51 @@ fn a_failed_run_and_a_late_one_send_alerts_once_per_cooldown() {
         1
     );
 }
+
+#[test]
+fn a_stream_with_event_time_counts_late_messages_and_shows_its_watermark() {
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    manifest["pipelines"][0]["stream"]["time"] =
+        json!({"field": "at", "format": "epoch_s", "lateness_ms": 1000, "on_late": "pass"});
+    let mut service = Service::with_manifest(&manifest, &[("transformers/tag.py", TAG_BLOCK)]);
+    service.start(&[("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")]);
+    wait_for_stream(&service, "hooks");
+    for (key, body) in [
+        ("a", r#"[{"at": 100}, {"at": 105}]"#),
+        ("b", r#"[{"at": 101}, {"x": 1}]"#),
+    ] {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    }
+    let (_, detail) = service.get("/v1/streams/hooks");
+    assert_eq!(
+        (detail["late"].clone(), detail["untimed"].clone()),
+        (json!(1), json!(1)),
+        "{detail}"
+    );
+    // With pass, every message went on to the sink.
+    let log = std::fs::read_to_string(service.dir.path().join("service.log")).unwrap();
+    assert_eq!(log.matches("tagged").count(), 4, "{log}");
+    let (_, metrics) = service
+        .request("GET", "/metrics", Some(TOKEN), None)
+        .unwrap();
+    let text = metrics.as_str().unwrap_or_default().to_string();
+    assert!(
+        text.contains(r#"mage_service_stream_late_total{pipeline="hooks"} 1"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            r#"mage_service_stream_watermark_seconds{pipeline="hooks",partition="0"} 104.000"#
+        ),
+        "{text}"
+    );
+}

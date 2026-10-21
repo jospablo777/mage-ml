@@ -390,6 +390,49 @@ class DeadLetterExportTest(StreamExportTestCase):
         self.assertIn('has 2 dead-letter sinks', self.problems())
 
 
+class EventTimeExportTest(StreamExportTestCase):
+    def source_with(self, event_time: str) -> str:
+        return (textwrap.dedent(SOURCE).strip() + '\n'
+                + textwrap.dedent(event_time).strip() + '\n')
+
+    def test_the_sources_event_time_becomes_the_streams_time(self):
+        source = self.stream(source=self.source_with('''
+            event_time:
+              field: created_at
+              format: rfc3339
+              lateness_seconds: 2.5
+        '''))
+        self.add('dead', 'data_exporter', DeadLetterExportTest.DEAD, upstream=[source],
+                 language='yaml')
+
+        stream = export.capture(self.repo_path, [self.pipeline.uuid]).manifest[
+            'pipelines'][0]['stream']
+
+        self.assertEqual(stream['time'], dict(field='created_at', format='rfc3339',
+                                              lateness_ms=2500, on_late='dead_letter'))
+        self.assertNotIn('event_time', stream['source']['config'])
+
+    def test_event_time_says_what_to_fix(self):
+        self.stream(source=self.source_with('''
+            event_time:
+              format: iso
+              lateness_seconds: -1
+        '''))
+        problems = self.problems()
+        self.assertIn('format is one of epoch_ms, epoch_s, rfc3339', problems)
+        self.assertIn('lateness_seconds is a number of seconds', problems)
+        self.assertIn('late messages go to the dead-letter sink, and the stream has none',
+                      problems)
+
+    def test_with_pass_no_dead_letter_sink_is_needed(self):
+        self.stream(source=self.source_with('''
+            event_time: {on_late: pass}
+        '''))
+        stream = export.capture(self.repo_path, [self.pipeline.uuid]).manifest[
+            'pipelines'][0]['stream']
+        self.assertEqual(stream['time'], dict(format='epoch_ms', on_late='pass', lateness_ms=0))
+
+
 class RabbitmqExportTest(StreamExportTestCase):
     SOURCE = '''
         connector_type: rabbitmq

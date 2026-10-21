@@ -14,6 +14,7 @@
 
 mod ids;
 mod runner;
+mod time;
 mod tracker;
 
 pub use ids::{AssignmentEpoch, BatchId, BatchMeta, PartitionId, Position, SinkId};
@@ -21,4 +22,5 @@ pub use runner::{
     Effect, Event, FailureKind, Operation, PoisonPolicy, RetryPolicy, RunnerConfig, RunnerMachine,
     StopReason,
 };
+pub use time::EventClock;
 pub use tracker::{AckTracker, Admission, Commit, ReceiptOutcome, StaleAssignment, TrackerConfig};
