@@ -853,3 +853,113 @@ def run_rscript(
     if timed_out.is_set():
         raise TimeoutError(f'The R block ran longer than {config.timeout:g} seconds.')
     return code
+
+
+# The line a resident R session prints after each job (resident_runner.R).
+JOB_DONE = '\x1emage-job-done'
+
+
+@dataclass
+class _Session:
+    process: subprocess.Popen
+    jobs: int = 0
+
+
+_sessions: Dict[str, _Session] = {}
+_sessions_lock = threading.Lock()
+
+
+def _session_key(config: RConfig, env: Dict[str, str], cwd: Path) -> str:
+    digest = hashlib.sha256()
+    for part in (str(config.rscript), str(cwd), *sorted(f'{k}={v}' for k, v in env.items())):
+        digest.update(part.encode())
+        digest.update(b'\0')
+    return digest.hexdigest()
+
+
+def _stop_session(key: str) -> None:
+    session = _sessions.pop(key, None)
+    if session is not None:
+        stop_process_group(session.process)
+
+
+def run_r_job(
+    config: RConfig,
+    runner: Path,
+    resident_runner: Path,
+    job_dir: str,
+    env: Dict[str, str],
+    cwd: Path,
+) -> int:
+    """
+    Runs the R job in job_dir and returns its exit code. With MAGE_R_RESIDENT=1 (a
+    pipeline service's worker) the job goes to an R session kept between runs, so R and the
+    packages a block loads start once: 391 ms per run of a small block before. A session
+    serves MAGE_R_MAX_JOBS jobs (1000); a timeout or an interruption stops it, and the next
+    job starts a new one. Otherwise each job starts Rscript.
+    """
+    if os.getenv('MAGE_R_RESIDENT') != '1':
+        return run_rscript(config, runner, [job_dir], env=env, cwd=cwd)
+    key = _session_key(config, env, cwd)
+    with _sessions_lock:
+        session = _sessions.get(key)
+        if session is not None and session.process.poll() is not None:
+            _sessions.pop(key, None)
+            session = None
+        if session is None:
+            process = subprocess.Popen(
+                supervised_command(
+                    [_executable(config.rscript, 'Rscript'), '--vanilla', str(resident_runner)],
+                ),
+                cwd=cwd,
+                env=tool_env(config, env),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                start_new_session=HAS_PROCESS_GROUPS,
+            )
+            session = _Session(process=process)
+            _sessions[key] = session
+        timed_out = threading.Event()
+        timer = None
+        if config.timeout:
+            def stop():
+                timed_out.set()
+                stop_process_group(session.process)
+
+            timer = threading.Timer(config.timeout, stop)
+            timer.daemon = True
+            timer.start()
+        process = session.process
+        try:
+            process.stdin.write(f'{job_dir}\n')
+            process.stdin.flush()
+            done = False
+            for line in process.stdout:
+                if line.rstrip('\n') == JOB_DONE:
+                    done = True
+                    break
+                sys.stdout.write(readable_marker(line))
+        except BrokenPipeError:
+            done = False
+        except BaseException:
+            _stop_session(key)
+            raise
+        finally:
+            if timer is not None:
+                timer.cancel()
+        if timed_out.is_set():
+            _stop_session(key)
+            raise TimeoutError(f'The R block ran longer than {config.timeout:g} seconds.')
+        if not done:
+            # R exited (the block quit R, or it crashed): its code, and a new session next.
+            _sessions.pop(key, None)
+            return process.wait() or 1
+        session.jobs += 1
+        if session.jobs >= int(os.getenv('MAGE_R_MAX_JOBS') or 1000):
+            _stop_session(key)
+        return 1 if os.path.exists(os.path.join(job_dir, 'error.txt')) else 0
+

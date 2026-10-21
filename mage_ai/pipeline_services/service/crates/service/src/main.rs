@@ -730,6 +730,16 @@ async fn start_service(
             env: [
                 ("MAGE_SERVICE".to_string(), "1".to_string()),
                 ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
+                // R blocks run in an R session kept between runs (runtime.run_r_job).
+                (
+                    "MAGE_R_RESIDENT".to_string(),
+                    if std::env::var("MAGE_SERVICE_R_RESIDENT").is_ok_and(|v| v == "off") {
+                        "0"
+                    } else {
+                        "1"
+                    }
+                    .to_string(),
+                ),
                 (
                     "MAGE_SERVICE_MODELS_DIR".to_string(),
                     common.dir.join("models").display().to_string(),

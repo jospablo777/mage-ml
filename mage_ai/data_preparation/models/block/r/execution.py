@@ -19,6 +19,7 @@ from mage_ai.shared.error_hints import describe_exit, r_hint
 from . import exchange, runtime
 
 RUNNER = Path(__file__).parent / 'runner.R'
+RESIDENT_RUNNER = Path(__file__).parent / 'resident_runner.R'
 BLOCK_TYPES = (
     BlockType.DATA_LOADER, BlockType.TRANSFORMER, BlockType.DATA_EXPORTER, BlockType.CUSTOM,
 )
@@ -138,7 +139,7 @@ def execute_r_chain(
         env['MAGE_R_MAGEML_LIBRARY'] = str(libraries.mageml)
         env['TZ'] = os.getenv('MAGE_R_TZ') or 'UTC'
         cwd = repo_path if repo_path and os.path.isdir(repo_path) else job_dir
-        exit_code = runtime.run_rscript(config, RUNNER, [job_dir], env=env, cwd=cwd)
+        exit_code = runtime.run_r_job(config, RUNNER, RESIDENT_RUNNER, job_dir, env, cwd)
         if exit_code != 0:
             message = _read_text(os.path.join(job_dir, 'error.txt'))
             block = _read_text(os.path.join(job_dir, 'error_block.txt')) or None
@@ -229,7 +230,7 @@ def execute_r_code(
         # R reads naive timestamps as UTC and shows them in the session's time zone.
         env['TZ'] = os.getenv('MAGE_R_TZ') or 'UTC'
         cwd = repo_path if repo_path and os.path.isdir(repo_path) else job_dir
-        exit_code = runtime.run_rscript(config, RUNNER, [job_dir], env=env, cwd=cwd)
+        exit_code = runtime.run_r_job(config, RUNNER, RESIDENT_RUNNER, job_dir, env, cwd)
         if exit_code != 0:
             message = _read_text(os.path.join(job_dir, 'error.txt'))
             calls = _read_text(os.path.join(job_dir, 'traceback.txt'))

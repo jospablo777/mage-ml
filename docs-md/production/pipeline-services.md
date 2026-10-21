@@ -542,6 +542,7 @@ to it.
 | `MAGE_SERVICE_RUST_CHAINS` | `on` | `off` runs Rust blocks on their own |
 | `MAGE_SERVICE_RUST_RESIDENT` | `on` | `off` starts the Rust binary for each run instead of keeping it running between runs |
 | `MAGE_SERVICE_RUST_MAX_JOBS` | `1000` | Jobs a resident Rust program serves before it is replaced |
+| `MAGE_SERVICE_R_RESIDENT` | `on` | `off` starts Rscript for each R block run instead of keeping an R session in each Python worker |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |
 | `MAGE_SERVICE_PASS_ENV` | none | In strict mode, more variables for blocks: names or `PREFIX_*` patterns, separated by commas |
@@ -602,6 +603,12 @@ job at a time and is replaced after `MAGE_SERVICE_RUST_MAX_JOBS` jobs; a block t
 runs past its timeout takes its program with it, and the next run starts a new one. Code that
 counts on a fresh process per run (a `static` counter, a global it never resets) sees the
 earlier runs' values: `MAGE_SERVICE_RUST_RESIDENT=off` starts a program per run.
+
+R blocks run the same way: each Python worker keeps an R session, so R and the packages
+blocks load start once. Each block runs in a fresh environment, but a package a block
+attaches with `library()` stays attached for the blocks after it in that session. One row through an
+exported service took 627 ms per request with Rscript per run and 8 ms resident (Rust ONNX
+scoring: 22 ms and 8 ms). `MAGE_SERVICE_R_RESIDENT=off` starts Rscript for each run.
 
 Conditional blocks written in Python run as in MageML. Before a block with conditions runs,
 the worker calls each `@condition` function with the block's inputs and the run's

@@ -17,6 +17,9 @@
   binary once and sends it each run's job, so a model loaded with `mage::onnx::model` stays
   loaded between runs. A program is replaced after 1,000 jobs, a panic or a timeout.
   `MAGE_SERVICE_RUST_RESIDENT=off` starts the binary for each run, as before.
+- R blocks in exported services run in an R session each Python worker keeps: a one-row R
+  block over HTTP went from 627 ms to 8 ms p50. `MAGE_SERVICE_R_RESIDENT=off` starts Rscript
+  for each run.
 - **Check connections** in a stream's Run tab, and `mage-service check-connections`: the
   engine reports whether the source and each sink answer, read-only, with what the system
   says (Kafka partitions, retention and group lag; PostgreSQL tables, privileges, slots and

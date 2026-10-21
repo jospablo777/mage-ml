@@ -51,7 +51,8 @@ def request(port: int, pipeline: str, block: str, a: float) -> dict:
         return json.loads(response.read())
 
 
-def latencies(directory: Path, data: Path, pipeline: str, block: str, **env) -> list:
+def latencies(directory: Path, data: Path, pipeline: str, block: str, check=None,
+              **env) -> list:
     service = RunningService(service_binary(), directory, data, **env)
     service.start()
     try:
@@ -64,16 +65,21 @@ def latencies(directory: Path, data: Path, pipeline: str, block: str, **env) -> 
                 time.sleep(0.25)
         run = request(service.port, pipeline, block, 0.0)  # warm: the first start
         assert run['status'] == 'completed', run
-        assert set(run['output'][0]) == {'label', 'probabilities_0', 'probabilities_1'}, run
+        (check or check_scores)(run)
         times = []
         for i in range(REQUESTS):
             started = time.perf_counter()
             run = request(service.port, pipeline, block, float(i % 6))
             times.append((time.perf_counter() - started) * 1000)
             assert run['status'] == 'completed', run
+            (check or check_scores)(run)
         return times
     finally:
         service.stop()
+
+
+def check_scores(run: dict) -> None:
+    assert set(run['output'][0]) == {'label', 'probabilities_0', 'probabilities_1'}, run
 
 
 def summary(times: list) -> str:

@@ -609,3 +609,76 @@ class RunRscriptTest(TestCase):
         process.wait()
 
         self.assertTrue(_wait_for(lambda: not _alive(pid), 10), 'R is still running')
+
+
+# Speaks resident_runner.R's protocol without mageml: counts its jobs, fails or quits R
+# when the job directory asks.
+RESIDENT_SCRIPT = '''
+served <- 0
+input <- file("stdin", open = "r")
+repeat {
+  job_dir <- readLines(input, n = 1)
+  if (length(job_dir) == 0) break
+  served <- served + 1
+  cat(sprintf("job %d in %d\\n", served, Sys.getpid()))
+  if (file.exists(file.path(job_dir, "quit"))) quit(status = 3, save = "no")
+  if (file.exists(file.path(job_dir, "fail"))) {
+    writeLines("asked to fail", file.path(job_dir, "error.txt"))
+  }
+  cat("\\u001emage-job-done\\n")
+  flush(stdout())
+}
+'''
+
+
+@unittest.skipUnless(shutil.which('Rscript'), 'needs Rscript')
+class ResidentRTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        self.resident = self.directory / 'resident.R'
+        self.resident.write_text(RESIDENT_SCRIPT)
+        self.runner = self.directory / 'runner.R'
+        self.runner.write_text('cat("own session\\n")')
+        self.config = runtime.RConfig(project_dir=None, rscript='Rscript', rv='rv')
+        self.addCleanup(lambda: [runtime._stop_session(k) for k in list(runtime._sessions)])
+
+    def job(self, *flags) -> str:
+        job_dir = Path(tempfile.mkdtemp(dir=self.directory))
+        for flag in flags:
+            (job_dir / flag).write_text('')
+        return str(job_dir)
+
+    def run_job(self, job_dir):
+        output = io.StringIO()
+        with patch.object(runtime.sys, 'stdout', output):
+            code = runtime.run_r_job(
+                self.config, self.runner, self.resident, job_dir, env={}, cwd=self.directory,
+            )
+        return code, output.getvalue()
+
+    def test_jobs_share_one_session_until_r_quits(self):
+        with patch.dict(os.environ, MAGE_R_RESIDENT='1'):
+            first = self.run_job(self.job())
+            second = self.run_job(self.job())
+            failed = self.run_job(self.job('fail'))
+            quit_ = self.run_job(self.job('quit'))
+            fresh = self.run_job(self.job())
+        pid = first[1].split()[-1]
+        self.assertEqual(first, (0, f'job 1 in {pid}\n'))
+        self.assertEqual(second, (0, f'job 2 in {pid}\n'))
+        self.assertEqual(failed, (1, f'job 3 in {pid}\n'))
+        self.assertEqual(quit_, (3, f'job 4 in {pid}\n'))
+        self.assertEqual(fresh[0], 0)
+        self.assertTrue(fresh[1].startswith('job 1 in '), fresh)
+        self.assertNotEqual(fresh[1].split()[-1], pid)
+
+    def test_a_session_is_replaced_after_its_jobs(self):
+        with patch.dict(os.environ, MAGE_R_RESIDENT='1', MAGE_R_MAX_JOBS='2'):
+            outputs = [self.run_job(self.job())[1] for _ in range(3)]
+        self.assertEqual([o.split()[1] for o in outputs], ['1', '2', '1'])
+
+    def test_without_resident_sessions_each_job_starts_r(self):
+        with patch.dict(os.environ, MAGE_R_RESIDENT='0'):
+            self.assertEqual(self.run_job(self.job()), (0, 'own session\n'))
