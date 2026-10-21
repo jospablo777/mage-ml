@@ -616,7 +616,88 @@ fn draw_details(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         draw_recent_runs(frame, columns[0], p);
     }
-    draw_failure(frame, columns[2], p);
+    if p.monitors.is_empty() {
+        draw_failure(frame, columns[2], p);
+    } else {
+        // Two lines a monitor, the headline and the panel's frame, first; the failure
+        // detail keeps three rows at least.
+        let wanted = (p.monitors.len() as u16)
+            .saturating_mul(2)
+            .saturating_add(3);
+        let height = wanted.min(columns[2].height.saturating_sub(3));
+        let right =
+            Layout::vertical([Constraint::Length(height), Constraint::Fill(1)]).split(columns[2]);
+        draw_monitors(frame, right[0], p);
+        draw_failure(frame, right[1], p);
+    }
+}
+
+fn monitor_color(result: &str) -> Color {
+    match result {
+        "pass" => palette().green,
+        "warn" => palette().warning,
+        "fail" | "error" => palette().error,
+        _ => palette().muted,
+    }
+}
+
+/// The monitors of the pipeline's blocks: the headline says whether any fails; each
+/// monitor has its result, its recent runs as a strip, oldest first, and the first check
+/// that did not pass.
+fn draw_monitors(frame: &mut Frame, area: Rect, p: &PipelineSnapshot) {
+    let failing = p
+        .monitors
+        .iter()
+        .filter(|m| matches!(m.result.as_str(), "fail" | "error"))
+        .count();
+    let warning = p.monitors.iter().filter(|m| m.result == "warn").count();
+    let (headline, color) = if failing > 0 {
+        (
+            format!("{failing} of {} failing", p.monitors.len()),
+            palette().error,
+        )
+    } else if warning > 0 {
+        (
+            format!("{warning} of {} warning", p.monitors.len()),
+            palette().warning,
+        )
+    } else if p.monitors.iter().all(|m| m.result == "none") {
+        ("No run checked yet".to_string(), palette().muted)
+    } else {
+        ("No monitor failing".to_string(), palette().green)
+    };
+    let mut lines = vec![Line::from(Span::styled(headline, strong(color)))];
+    for monitor in &p.monitors {
+        let mut spans = vec![
+            Span::styled(
+                format!("{:<5} ", monitor.result),
+                strong(monitor_color(&monitor.result)),
+            ),
+            Span::styled(clean(&monitor.name, 40), style(palette().text)),
+            Span::raw(" "),
+        ];
+        spans.extend(
+            monitor
+                .history
+                .iter()
+                .map(|result| Span::styled("▮", style(monitor_color(result)))),
+        );
+        lines.push(Line::from(spans));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "      {}",
+                clean(
+                    monitor.detail.as_deref().unwrap_or("every check passed"),
+                    200
+                )
+            ),
+            style(palette().muted),
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines).block(panel(" Monitors ").padding(Padding::new(1, 1, 0, 0))),
+        area,
+    );
 }
 
 /// Milliseconds since the epoch of an RFC 3339 UTC time such as 2026-10-10T07:01:23.334Z.
@@ -1716,6 +1797,26 @@ mod tests {
             .find(|line| line.contains("warehouse_export") && line.contains("81"))
             .expect("export counters must be visible without selecting it");
         assert!(export_row.contains("paused"));
+    }
+
+    #[test]
+    fn the_selected_pipeline_shows_its_monitors() {
+        let mut app = App::new(Mode::Demo, false);
+        let mut snapshot = demo_snapshot();
+        snapshot.pipelines[0].monitors[0].result = "fail".into();
+        snapshot.pipelines[0].monitors[0].detail =
+            Some("drift tenure: fail; Jensen-Shannon divergence 0.4012".into());
+        app.update(snapshot).unwrap();
+        let output = render(&app, 160, 40);
+        for expected in [
+            " Monitors ",
+            "1 of 1 failing",
+            "customer_drift",
+            "drift tenure: fail",
+            "▮▮▮▮▮▮",
+        ] {
+            assert!(output.contains(expected), "missing {expected}:\n{output}");
+        }
     }
 
     #[test]

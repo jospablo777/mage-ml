@@ -5,11 +5,15 @@ gets the same checks. A failed monitor with fail_block fails the block.
 """
 import json
 import shutil
+import time
+import urllib.request
 from pathlib import Path
 
 import pytest
 
 from integration_tests.exported_services import (
+    TOKEN,
+    RunningService,
     checks_service_binary,
     export_service,
     run_service,
@@ -111,6 +115,36 @@ def test_a_service_monitor_finds_the_drift_mageml_finds(mage_project, monitors_f
     # MageML on the same data: the same checks, value for value.
     mageml_record(uuid, shift=0)
     assert checks(mageml_record(uuid, shift=3)) == checks(second)
+
+    # Served again, the engine shows the monitor's runs in its snapshot (the console's
+    # source) and its last result in /metrics.
+    service = RunningService(binary, directory, tmp_path / 'data')
+    service.start()
+    try:
+        snapshot = None
+        for _ in range(120):
+            try:
+                snapshot = service.get('/v1/snapshot')
+                break
+            except OSError:
+                time.sleep(0.5)
+        assert snapshot is not None, service.log.read_text()[-3000:]
+        shown = snapshot['pipelines'][0]['monitors'][0]
+        assert (shown['name'], shown['result'], shown['history']) == (uuid, 'fail',
+                                                                       ['hold', 'fail'])
+        assert 'drift' in shown['detail']
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{service.port}/metrics',
+            headers={'Authorization': f'Bearer {TOKEN}'},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            metrics = response.read().decode()
+        block = block_uuid(uuid, 'orders')
+        assert (f'mage_service_monitor_result{{pipeline="{uuid}",block="{block}",'
+                f'monitor="{uuid}"}} 3') in metrics, metrics[-2000:]
+        assert 'mage_service_monitor_check{' in metrics
+    finally:
+        service.stop()
 
 
 @pytest.mark.timeout(1800)

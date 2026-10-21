@@ -50,6 +50,9 @@
   `mage_service_monitor_check`); `fail_block` fails the block. Evidently and NannyML run in
   MageML only. The `mage-contracts` crate is now `mage-checks`, and the engine feature
   `checks`.
+- `mage-console` shows a pipeline's monitors: how many fail, each one's recent results as a
+  strip, and the first check that did not pass. `/v1/snapshot` carries them, and the
+  results of earlier runs show after the service restarts.
 - Data contracts are checked in services. The export puts each block's contract in
   `service.json`, and the engine checks the block's output after it runs, with the checker
   MageML uses (now the `mage-checks` crate, which ColumnAtlas wraps): `fail` fails the

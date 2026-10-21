@@ -188,6 +188,24 @@ pub struct PipelineSnapshot {
     /// A streaming pipeline's live state; batch pipelines have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<StreamSnapshot>,
+    /// The monitors of the pipeline's blocks, with their latest results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monitors: Vec<MonitorSnapshot>,
+}
+
+/// A monitor and its latest checks: `pass`, `hold`, `warn`, `fail` or `error`, or `none`
+/// before its first run.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct MonitorSnapshot {
+    pub name: String,
+    pub block: String,
+    pub result: String,
+    pub checked_at: Option<String>,
+    /// The first check that did not pass, as the run log shows it.
+    pub detail: Option<String>,
+    /// Results of recent runs, oldest first.
+    #[serde(default)]
+    pub history: Vec<String>,
 }
 
 /// A stream as the service runs it: counters since the service started, lag per partition

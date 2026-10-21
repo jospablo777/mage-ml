@@ -55,6 +55,7 @@ never holds the full token, and falls back to `MAGE_SERVICE_TOKEN`.
 | Run duration | The durations of the latest completed runs, with their 95th percentile |
 | Throughput | Finished runs per minute over the last hour |
 | Recent runs | Status, what started each run (`api`, `schedule:<trigger>`), start time, duration and error |
+| Monitors | For a pipeline whose blocks have [monitors](/guides/pipelines/monitoring#in-exported-services): how many fail, each monitor's result with its recent runs as a strip (green pass, yellow warn, red fail, gray hold), and the first check that did not pass |
 | Failure detail | The last failure's time and error, in full |
 | Service totals | Active and queued runs, paused pipelines and failures across all pipelines, and the embedded models |
 | Session | Read only or controls enabled |

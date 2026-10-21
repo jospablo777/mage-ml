@@ -176,7 +176,7 @@ service answers [inference requests](../guides/pipelines/model-inference.md).
 | `POST /v1/runs/{id}/cancel` | Cancel a queued or running run |
 | `GET /v1/pipelines` | The pipelines, their blocks and triggers |
 | `GET /v1/models` | Embedded models and their MLflow metadata |
-| `GET /v1/snapshot` | Counts, durations and triggers per pipeline |
+| `GET /v1/snapshot` | Counts, durations, triggers and monitor results per pipeline |
 | `POST /v1/control` | Pause, resume, change a pipeline's concurrency |
 | `POST /v1/streams/{pipeline}/messages` | Messages for a stream with a webhook source; answered once its sinks took them ([webhooks](stream-services.md#webhooks)) |
 | `GET /v1/streams` | Each stream's state, message counts, acknowledged positions, lag per partition and last error |

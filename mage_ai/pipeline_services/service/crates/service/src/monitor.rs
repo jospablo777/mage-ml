@@ -25,7 +25,6 @@ use crate::service::Service;
 const KEPT_RECORDS: usize = 500;
 
 /// Where a monitor's records are kept.
-#[cfg(feature = "checks")]
 pub fn records_dir(service: &Service, pipeline: &str, monitor: &str) -> std::path::PathBuf {
     service
         .data_dir

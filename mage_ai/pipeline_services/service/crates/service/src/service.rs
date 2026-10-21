@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use mage_service_core::manifest::{Manifest, Pipeline, TriggerKind};
 use mage_service_core::protocol::{
-    API_VERSION, ModelSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot, StreamSnapshot,
-    TriggerSnapshot,
+    API_VERSION, ModelSnapshot, MonitorSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot,
+    StreamSnapshot, TriggerSnapshot,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
@@ -76,6 +76,67 @@ pub struct MonitorMetrics {
     pub result: u8,
     /// (check, column) -> value.
     pub checks: Vec<(String, String, f64)>,
+    pub checked_at: Option<String>,
+    pub detail: Option<String>,
+    /// Results of recent runs, oldest first, at most MONITOR_HISTORY.
+    pub history: std::collections::VecDeque<String>,
+}
+
+/// (check, column, value) of each check of a monitor's record that has a value.
+fn monitor_check_values(record: &Value) -> Vec<(String, String, f64)> {
+    record["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            Some((
+                c["check"].as_str()?.to_string(),
+                c["column"].as_str().unwrap_or("").to_string(),
+                c["value"].as_f64()?,
+            ))
+        })
+        .collect()
+}
+
+/// Results of each monitor's recent runs kept for the console.
+pub const MONITOR_HISTORY: usize = 20;
+
+/// A monitor's record as the console shows it: result, time and the first check that did
+/// not pass.
+fn monitor_entry(record: &Value) -> (u8, String, Option<String>, Option<String>) {
+    let name = record["result"].as_str().unwrap_or("error").to_string();
+    let code = match name.as_str() {
+        "pass" => 0,
+        "hold" => 1,
+        "warn" => 2,
+        "fail" => 3,
+        _ => 4,
+    };
+    let detail = record["error"].as_str().map(str::to_string).or_else(|| {
+        record["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|c| c["result"] != "pass")
+            .map(|c| {
+                let column = c["column"]
+                    .as_str()
+                    .map(|c| format!(" {c}"))
+                    .unwrap_or_default();
+                format!(
+                    "{}{column}: {}; {}",
+                    c["check"].as_str().unwrap_or(""),
+                    c["result"].as_str().unwrap_or(""),
+                    c["detail"].as_str().unwrap_or("")
+                )
+            })
+    });
+    (
+        code,
+        name,
+        record["checked_at"].as_str().map(str::to_string),
+        detail,
+    )
 }
 
 pub const BUCKETS: [f64; 12] = [
@@ -423,31 +484,121 @@ impl Service {
             Some("fail") => 3,
             _ => 4,
         };
-        let checks = record["checks"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|c| {
-                Some((
-                    c["check"].as_str()?.to_string(),
-                    c["column"].as_str().unwrap_or("").to_string(),
-                    c["value"].as_f64()?,
-                ))
-            })
-            .collect();
+        let checks = monitor_check_values(record);
+        let (_, name, checked_at, detail) = monitor_entry(record);
         let mut metrics = self.metrics.lock().unwrap_or_else(|p| p.into_inner());
-        metrics.monitors.insert(
-            (pipeline.to_string(), block.to_string(), monitor.to_string()),
-            MonitorMetrics { result, checks },
-        );
+        let entry = metrics
+            .monitors
+            .entry((pipeline.to_string(), block.to_string(), monitor.to_string()))
+            .or_default();
+        entry.result = result;
+        entry.checks = checks;
+        entry.checked_at = checked_at;
+        entry.detail = detail;
+        entry.history.push_back(name);
+        while entry.history.len() > MONITOR_HISTORY {
+            entry.history.pop_front();
+        }
     }
 
+    /// A monitor this process has not run yet gets its records on disk, read once, so the
+    /// snapshot and `/metrics` show its last results after a restart.
+    fn load_monitors(&self) {
+        for pipeline in &self.manifest.pipelines {
+            for block in &pipeline.blocks {
+                for monitor in &block.monitors {
+                    let key = (
+                        pipeline.uuid.clone(),
+                        block.uuid.clone(),
+                        monitor.name.clone(),
+                    );
+                    let known = self
+                        .metrics
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .monitors
+                        .contains_key(&key);
+                    if !known {
+                        let entry = self.monitor_history(&pipeline.uuid, &monitor.name);
+                        self.metrics
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .monitors
+                            .entry(key)
+                            .or_insert(entry);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The pipeline's monitors for the snapshot.
+    fn monitor_snapshots(&self, pipeline: &Pipeline) -> Vec<MonitorSnapshot> {
+        self.load_monitors();
+        let metrics = self.metrics.lock().unwrap_or_else(|p| p.into_inner());
+        let mut snapshots = Vec::new();
+        for block in &pipeline.blocks {
+            for monitor in &block.monitors {
+                let key = (
+                    pipeline.uuid.clone(),
+                    block.uuid.clone(),
+                    monitor.name.clone(),
+                );
+                let entry = metrics.monitors.get(&key).cloned().unwrap_or_default();
+                snapshots.push(MonitorSnapshot {
+                    name: monitor.name.clone(),
+                    block: block.uuid.clone(),
+                    result: entry
+                        .history
+                        .back()
+                        .cloned()
+                        .unwrap_or_else(|| "none".into()),
+                    checked_at: entry.checked_at,
+                    detail: entry.detail,
+                    history: entry.history.into_iter().collect(),
+                });
+            }
+        }
+        snapshots
+    }
+
+    /// A monitor's recent records on disk, oldest first.
+    fn monitor_history(&self, pipeline: &str, monitor: &str) -> MonitorMetrics {
+        let directory = crate::monitor::records_dir(self, pipeline, monitor);
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&directory)
+            .map(|entries| entries.filter_map(Result::ok).map(|e| e.path()).collect())
+            .unwrap_or_default();
+        files.retain(|p| p.extension().is_some_and(|e| e == "json"));
+        files.sort();
+        let start = files.len().saturating_sub(MONITOR_HISTORY);
+        let mut entry = MonitorMetrics::default();
+        for path in &files[start..] {
+            let Some(record) = std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            else {
+                continue;
+            };
+            let (code, name, checked_at, detail) = monitor_entry(&record);
+            entry.result = code;
+            entry.checked_at = checked_at;
+            entry.detail = detail;
+            entry.checks = monitor_check_values(&record);
+            entry.history.push_back(name);
+        }
+        entry
+    }
+
+    /// The monitors that have results, for `/metrics`.
     pub fn monitor_metrics(&self) -> BTreeMap<(String, String, String), MonitorMetrics> {
-        self.metrics
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        self.load_monitors();
+        let metrics = self.metrics.lock().unwrap_or_else(|p| p.into_inner());
+        metrics
             .monitors
-            .clone()
+            .iter()
+            .filter(|(_, m)| !m.history.is_empty())
+            .map(|(k, m)| (k.clone(), m.clone()))
+            .collect()
     }
 
     pub fn block_metrics(&self) -> BTreeMap<(String, String), BlockMetrics> {
@@ -522,6 +673,7 @@ impl Service {
             triggers,
             blocks: pipeline.blocks.iter().map(|b| b.uuid.clone()).collect(),
             stream,
+            monitors: self.monitor_snapshots(pipeline),
         })
     }
 

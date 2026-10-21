@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::KeyCode;
 use mage_service_core::protocol::{
-    ControlCommand, ControlRequest, PipelineSnapshot, Snapshot, StreamSnapshot,
+    ControlCommand, ControlRequest, MonitorSnapshot, PipelineSnapshot, Snapshot, StreamSnapshot,
 };
 
 pub const MAX_RESPONSE_BYTES: u64 = 1_048_576;
@@ -289,6 +289,16 @@ pub fn validate_snapshot(snapshot: &Snapshot) -> Result<(), String> {
         {
             return Err("Error detail exceeds 16 KiB".into());
         }
+        if pipeline.monitors.len() > 64
+            || pipeline.monitors.iter().any(|m| {
+                m.name.len() > 256
+                    || m.block.len() > 256
+                    || m.history.len() > 120
+                    || m.detail.as_ref().is_some_and(|d| d.len() > 4_096)
+            })
+        {
+            return Err("Monitors exceed their bounds".into());
+        }
         if let Some(stream) = &pipeline.stream {
             if stream.rate_in.len() > 120
                 || stream.rate_out.len() > 120
@@ -333,6 +343,16 @@ pub fn demo_snapshot() -> Snapshot {
                 last_error: Some("2026-10-09T08:14:00Z: upstream request timed out".into()),
                 config_revision: 8,
                 max_in_flight: 8,
+                monitors: vec![MonitorSnapshot {
+                    name: "customer_drift".into(),
+                    block: "build_features".into(),
+                    result: "warn".into(),
+                    checked_at: Some("2026-10-09T08:15:02Z".into()),
+                    detail: Some("drift tenure: warn; Jensen-Shannon divergence 0.1312".into()),
+                    history: ["pass", "pass", "pass", "hold", "pass", "warn"]
+                        .map(String::from)
+                        .to_vec(),
+                }],
                 ..Default::default()
             },
             PipelineSnapshot {
