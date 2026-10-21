@@ -13,3 +13,7 @@ local_mageml_state <- function(block_type = NULL,
   assign("globals", globals, envir = state)
   invisible(state)
 }
+
+state_keys_of <- function(step) {
+  sort(ls(step$state, all.names = TRUE))
+}

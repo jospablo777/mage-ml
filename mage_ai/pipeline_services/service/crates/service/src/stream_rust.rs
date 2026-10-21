@@ -10,6 +10,10 @@
 //! batch goes as a header frame and one frame per message value, unchanged; the answer is a
 //! header frame and the messages of each block a sink writes. A frame is a little-endian u32
 //! length and its bytes. The block's stdout and stderr go to the stream's log.
+//!
+//! Blocks with keyed state (`state_key`) get the values of the batch's keys in the batch's
+//! header (`state`) and send back what changed in the answer's (`state_updates`); the
+//! engine keeps and saves the state (keyed_state.rs).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -54,6 +58,7 @@ pub struct RustStreamSession {
     cancel: CancellationToken,
     live: Option<Live>,
     next_id: u64,
+    state: crate::keyed_state::BlockStates,
 }
 
 /// What runs the blocks.
@@ -104,6 +109,9 @@ pub struct RustSessionOptions {
     pub isolate: bool,
     /// For R blocks: the Python worker that says how to start R.
     pub pool: Option<Arc<PythonPool>>,
+    /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
+    pub state_dir: PathBuf,
+    pub stable_positions: bool,
 }
 
 impl RustStreamSession {
@@ -136,6 +144,11 @@ impl RustStreamSession {
             }
         };
         let label = program.label();
+        let state = crate::keyed_state::BlockStates::new(
+            order,
+            &options.state_dir,
+            options.stable_positions,
+        );
         let mut chain = Vec::with_capacity(order.len());
         for (position, block) in order.iter().enumerate() {
             let expected: Vec<&str> = order[..position]
@@ -155,13 +168,18 @@ impl RustStreamSession {
                     block.uuid
                 ));
             }
+            let state_key = state.key_field(&block.uuid);
             if r {
-                chain.push(json!({
+                let mut step = json!({
                     "block_uuid": block.uuid,
                     "block_type": block.block_type.as_str(),
                     "file": service.project_dir().join(&block.file),
                     "send": options.outputs.contains(&block.uuid),
-                }));
+                });
+                if let Some(key) = state_key {
+                    step["state_key"] = json!(key);
+                }
+                chain.push(step);
                 continue;
             }
             if block.io_config != first.io_config {
@@ -175,12 +193,17 @@ impl RustStreamSession {
                 .entry
                 .as_ref()
                 .ok_or_else(|| format!("Rust block {} has no entry", block.uuid))?;
-            chain.push(json!({
+            let mut step = json!({
                 "block_uuid": block.uuid,
                 "block_type": block.block_type.as_str(),
                 "entry": entry,
                 "send": options.outputs.contains(&block.uuid),
-            }));
+            });
+            // Only then: a program built before keyed state refuses fields it does not know.
+            if let Some(key) = state_key {
+                step["state_key"] = json!(key);
+            }
+            chain.push(step);
         }
         let timeout = order
             .iter()
@@ -209,6 +232,7 @@ impl RustStreamSession {
             service,
             live: None,
             next_id: 0,
+            state,
         })
     }
 
@@ -382,9 +406,18 @@ impl RustStreamSession {
         }
     }
 
-    async fn exchange(&mut self, id: u64, values: &[Vec<u8>]) -> std::io::Result<Reply> {
+    async fn exchange(
+        &mut self,
+        id: u64,
+        values: &[Vec<u8>],
+        state: Option<&Value>,
+    ) -> std::io::Result<Reply> {
         let live = self.live.as_mut().expect("started");
-        let header = json!({"id": id, "count": values.len()}).to_string();
+        let mut header = json!({"id": id, "count": values.len()});
+        if let Some(state) = state {
+            header["state"] = state.clone();
+        }
+        let header = header.to_string();
         write_frame(&mut live.writer, header.as_bytes()).await?;
         for value in values {
             write_frame(&mut live.writer, value).await?;
@@ -426,6 +459,9 @@ struct Reply {
     failures: Vec<Failure>,
     #[serde(default)]
     error: Option<Failure>,
+    /// Per block: the keys whose state changed, null for a removed one.
+    #[serde(default)]
+    state_updates: BTreeMap<String, crate::keyed_state::Changes>,
     #[serde(skip)]
     messages: Vec<Vec<Vec<u8>>>,
 }
@@ -622,7 +658,17 @@ impl TransformSession for RustStreamSession {
             let mut undecoded = Vec::new();
             let mut rows = Vec::with_capacity(envelopes.len());
             let mut values: Vec<Vec<u8>> = Vec::with_capacity(envelopes.len());
+            // With keyed state and offsets: messages the saved state already holds (read
+            // again after a restart) are done; they are not run again.
+            let held = self.state.held(partition).map_err(TransformError::Crash)?;
+            let mut batch_keys = self.state.batch();
             for (row, envelope) in envelopes.into_iter().enumerate() {
+                if let (Some(held), Some(position)) = (held, envelope.position)
+                    && position <= held
+                {
+                    continue;
+                }
+                self.state.note(&mut batch_keys, &envelope);
                 match crate::stream_python::decode_error(&envelope) {
                     Some(error) => undecoded.push(RowError { row, error }),
                     None => {
@@ -631,6 +677,14 @@ impl TransformSession for RustStreamSession {
                     }
                 }
             }
+            if values.is_empty() && !self.state.is_empty() && undecoded.is_empty() {
+                // Every message was held already.
+                return Ok(TransformOutput::default());
+            }
+            let state = self
+                .state
+                .slices(partition, &batch_keys)
+                .map_err(TransformError::Crash)?;
             if self.live.is_none() {
                 self.live = Some(self.start().await.map_err(TransformError::Crash)?);
             }
@@ -643,10 +697,12 @@ impl TransformSession for RustStreamSession {
             let exchanged = tokio::select! {
                 result = async {
                     match limit {
-                        Some(limit) => tokio::time::timeout(limit, self.exchange(id, &values))
-                            .await
-                            .map_err(|_| limit),
-                        None => Ok(self.exchange(id, &values).await),
+                        Some(limit) => {
+                            tokio::time::timeout(limit, self.exchange(id, &values, state.as_ref()))
+                                .await
+                                .map_err(|_| limit)
+                        }
+                        None => Ok(self.exchange(id, &values, state.as_ref()).await),
                     }
                 } => result,
                 _ = cancel.cancelled() => {
@@ -685,6 +741,9 @@ impl TransformSession for RustStreamSession {
                     error.block_uuid, error.message
                 )));
             }
+            self.state
+                .apply(partition, &batch_keys, &reply.state_updates)
+                .map_err(TransformError::Crash)?;
             let micros = started.elapsed().as_micros() as u64;
             let mut outputs = BTreeMap::new();
             for (output, messages) in reply.outputs.iter().zip(reply.messages) {
@@ -719,6 +778,17 @@ impl TransformSession for RustStreamSession {
                 blocks,
             })
         })
+    }
+
+    fn committed<'a>(
+        &'a mut self,
+        commits: &'a [mage_stream_ports::Commit],
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async move { self.state.save(commits) })
+    }
+
+    fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {
+        self.state.revoked(partition.0);
     }
 
     fn close(&mut self) -> BoxFuture<'_, ()> {

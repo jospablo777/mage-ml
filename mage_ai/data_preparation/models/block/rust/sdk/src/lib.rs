@@ -53,10 +53,11 @@ pub use polars;
 pub use runtime::{
     ChainBlock, ChainEntries, JOB_DONE, chain_block, main, run_chain, run_job, serve_jobs, test,
 };
-pub use stream::{StreamBlock, StreamEntries, serve_stream, stream_block};
+pub use stream::{State, StreamBlock, StreamEntries, serve_stream, stream_block};
 
 pub mod prelude {
     pub use crate::context::{BlockContext, Vars};
+    pub use crate::stream::State;
     pub use anyhow::{Context as _, Result, anyhow, bail, ensure};
     pub use polars::prelude::*;
     pub use serde_json::{Value, json};

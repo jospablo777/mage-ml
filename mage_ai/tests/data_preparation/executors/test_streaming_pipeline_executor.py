@@ -19,13 +19,17 @@ class FakeSource:
 
     consume_method = SourceConsumeMethod.BATCH_READ
 
-    def __init__(self):
-        self.messages = [dict(id=1), dict(id=2)]
+    def __init__(self, later=(), first=None):
+        self.messages = first or [dict(id=1), dict(id=2)]
         self.after_handler = None
+        # Batches after the first.
+        self.later = list(later)
 
     def batch_read(self, handler):
         handler(self.messages)
         self.after_handler = [dict(m) for m in self.messages]
+        for batch in self.later:
+            handler(batch)
 
     def destroy(self):
         pass
@@ -42,17 +46,21 @@ class FakeSink:
         pass
 
 
-class StreamingPipelineExecutorTest(DBTestCase):
-    def add(self, name, kind, content, upstream=(), language=BlockLanguage.PYTHON):
+class StreamRunCase(DBTestCase):
+    """Builds a streaming pipeline and runs it with a fake source and sinks."""
+
+    def add(self, name, kind, content, upstream=(), language=BlockLanguage.PYTHON,
+            configuration=None):
         block = Block.create(
             f'{self.pipeline.uuid}_{name}', kind, self.repo_path, language=language,
+            configuration=configuration,
         )
         Path(block.file_path).write_text(textwrap.dedent(content))
         self.pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
         return block
 
-    def run_pipeline(self, sink_names):
-        source = FakeSource()
+    def run_pipeline(self, sink_names, later=(), first=None):
+        source = FakeSource(later, first)
         sinks = {name: FakeSink() for name in sink_names}
         pipeline = Pipeline.get(self.pipeline.uuid, repo_path=self.repo_path)
         with patch(
@@ -65,6 +73,8 @@ class StreamingPipelineExecutorTest(DBTestCase):
             StreamingPipelineExecutor(pipeline).execute(retry_config=dict(retries=0))
         return source, sinks
 
+
+class StreamingPipelineExecutorTest(StreamRunCase):
     def build(self, mutate, transformer_last):
         """
         A source with a transformer, which changes the messages, and a sink; the block
@@ -210,6 +220,81 @@ class StreamingPipelineExecutorTest(DBTestCase):
         _, sinks = self.run_pipeline(['sink'])
 
         self.assertEqual(sinks['sink'].batches, [[dict(id=1, r=True), dict(id=2, r=True)]])
+
+
+class KeyedStateRunTest(StreamRunCase):
+    """In the editor, keyed state lives in memory for the run, from empty."""
+
+    BLOCKS = {
+        BlockLanguage.PYTHON: '''
+            @transformer
+            def count(messages, *args, **kwargs):
+                state = kwargs['state']
+                for m in messages:
+                    state[m['card']] = state.get(m['card'], 0) + 1
+                    m['seen'] = state[m['card']]
+                return messages
+        ''',
+        BlockLanguage.RUST: '''
+            use mage::prelude::*;
+
+            fn transform(messages: Vec<Value>, state: State) -> Result<Vec<Value>> {
+                messages
+                    .into_iter()
+                    .map(|mut m| {
+                        let key = state.key_of(&m);
+                        let seen = state.get::<u64>(&key)?.unwrap_or(0) + 1;
+                        state.set(&key, seen)?;
+                        m["seen"] = json!(seen);
+                        Ok(m)
+                    })
+                    .collect()
+            }
+        ''',
+        BlockLanguage.R: '''
+            #* @transformer
+            count <- function(messages, ...) {
+              messages$seen <- vapply(messages$card, function(card) {
+                seen <- state_get(card, default = 0) + 1
+                state_set(card, seen)
+                seen
+              }, numeric(1))
+              messages
+            }
+        ''',
+    }
+
+    def counts(self, language):
+        self.pipeline = Pipeline.create(
+            f'{self._testMethodName}_{language}', repo_path=self.repo_path,
+            pipeline_type=PipelineType.STREAMING,
+        )
+        self.addCleanup(self.pipeline.delete)
+        source = self.add('source', 'data_loader', 'connector_type: kafka\n',
+                          language=BlockLanguage.YAML)
+        count = self.add('count', 'transformer', self.BLOCKS[language], upstream=[source],
+                         language=language, configuration=dict(state_key='card'))
+        self.add('sink', 'data_exporter', 'connector_type: dummy\nname: sink\n',
+                 upstream=[count], language=BlockLanguage.YAML)
+
+        _, sinks = self.run_pipeline(
+            ['sink'],
+            first=[dict(id=1, card='a'), dict(id=2, card='a')],
+            later=[[dict(id=3, card='a')], [dict(id=4, card='b')]],
+        )
+        return [(m['card'], m['seen']) for batch in sinks['sink'].batches for m in batch]
+
+    EXPECTED = [('a', 1), ('a', 2), ('a', 3), ('b', 1)]
+
+    def test_python_blocks_count_across_batches(self):
+        self.assertEqual(self.counts(BlockLanguage.PYTHON), self.EXPECTED)
+
+    def test_rust_blocks_count_across_batches(self):
+        self.assertEqual(self.counts(BlockLanguage.RUST), self.EXPECTED)
+
+    @unittest.skipUnless(shutil.which('Rscript'), 'needs Rscript, with arrow and jsonlite')
+    def test_r_blocks_count_across_batches(self):
+        self.assertEqual(self.counts(BlockLanguage.R), self.EXPECTED)
 
 
 class DevelopmentRunTest(DBTestCase):

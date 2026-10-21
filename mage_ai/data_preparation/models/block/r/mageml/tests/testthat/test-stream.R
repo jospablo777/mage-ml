@@ -2,8 +2,16 @@ raw_messages <- function(...) {
   lapply(c(...), charToRaw)
 }
 
-stream_step <- function(f, uuid = "block", send = TRUE) {
-  list(uuid = uuid, f = f, env = globalenv(), context = list(), send = send)
+stream_step <- function(f, uuid = "block", send = TRUE, state_key = NULL) {
+  list(
+    uuid = uuid,
+    f = f,
+    env = globalenv(),
+    context = list(),
+    send = send,
+    state_key = state_key,
+    state = new.env(parent = emptyenv())
+  )
 }
 
 test_that("messages become a tibble with every digit of large integers", {
@@ -91,4 +99,82 @@ test_that("frames round trip and end cleanly", {
   expect_equal(rawToChar(read_frame(input)), "hello")
   expect_equal(read_frame(input), raw(0))
   expect_null(read_frame(input))
+})
+
+count_cards <- function(m, ...) {
+  if (is.null(m[["card"]]) || anyNA(m[["card"]])) stop("card is missing")
+  m$seen <- vapply(m$card, function(card) {
+    seen <- state_get(card, default = 0) + 1
+    state_set(card, seen)
+    seen
+  }, numeric(1))
+  if ("forget" %in% names(m)) {
+    for (card in m$card[m$forget %in% TRUE]) state_remove(card)
+  }
+  m
+}
+
+test_that("a block keeps state per key and sends back what changed", {
+  step <- stream_step(count_cards, "count", state_key = "card")
+  restore_state(step, list(a = 4, b = 1, c = 9))
+
+  result <- run_stream_batch(
+    list(step),
+    raw_messages(
+      '{"card": "a"}',
+      '{"card": "a"}',
+      '{"card": "d"}',
+      '{"card": "c", "forget": true}'
+    ),
+    FALSE
+  )
+
+  expect_true(result$reply$ok)
+  expect_equal(
+    vapply(
+      result$outputs[[1]],
+      function(m) jsonlite::fromJSON(rawToChar(m))$seen,
+      numeric(1)
+    ),
+    c(5, 6, 1, 10)
+  )
+  updates <- result$reply$state_updates$count
+  expect_equal(updates$a, 6)
+  expect_equal(updates$d, 1)
+  expect_true("c" %in% names(updates) && is.null(updates$c))
+  expect_false("b" %in% names(updates))
+  expect_equal(state_keys_of(step), c("a", "b", "d"))
+  expect_match(
+    as.character(jsonlite::toJSON(
+      result$reply$state_updates,
+      auto_unbox = TRUE,
+      null = "null"
+    )),
+    '"c":null',
+    fixed = TRUE
+  )
+})
+
+test_that("a failing message leaves the state as it was", {
+  step <- stream_step(count_cards, "count", state_key = "card")
+  batch <- raw_messages('{"card": "a"}', '{"other": 1}', '{"card": "b"}')
+
+  isolated <- run_stream_batch(list(step), batch, TRUE)
+  expect_true(isolated$reply$ok)
+  expect_equal(isolated$reply$failures[[1]]$row, 1L)
+  expect_equal(isolated$reply$state_updates$count, list(a = 1, b = 1))
+
+  restore_state(step, list())
+  failed <- run_stream_batch(list(step), batch, FALSE)
+  expect_false(failed$reply$ok)
+  expect_null(failed$reply$state_updates)
+  expect_length(state_keys_of(step), 0)
+})
+
+test_that("a block without a state_key cannot keep state", {
+  step <- stream_step(count_cards, "count")
+  result <- run_stream_batch(list(step), raw_messages('{"card": "a"}'), FALSE)
+  expect_false(result$reply$ok)
+  expect_match(result$reply$error$message, "has no state_key")
+  expect_error(state_get("a"), "while they run")
 })

@@ -182,6 +182,20 @@ def _chain_entry(pipeline, block, upstream: List[str]) -> Dict:
     )
 
 
+def _state_key(block) -> Optional[str]:
+    """The source messages' field that keys the block's state, from its configuration."""
+    key = (block.configuration or {}).get('state_key')
+    return key if isinstance(key, str) and key else None
+
+
+def _empty_state(chain: List[Dict]) -> Dict[str, Dict]:
+    """
+    Per block with keyed state, no values: a sample run starts from empty state, as a
+    service does on its first message.
+    """
+    return {b['uuid']: {} for b in chain if (b.get('configuration') or {}).get('state_key')}
+
+
 def _chain(pipeline, block_uuid: str) -> List[Dict]:
     """The stream's transformers from the source down to block_uuid, in run order."""
     blocks = pipeline.blocks_by_uuid
@@ -252,7 +266,7 @@ def run_on_sample(
     kwargs.update(variables or {})
     request = dict(
         op='stream', chain=chain, messages=messages,
-        outputs=[b['uuid'] for b in chain], kwargs=kwargs,
+        outputs=[b['uuid'] for b in chain], kwargs=kwargs, state=_empty_state(chain),
     )
     started = time.monotonic()
     worker = _worker(repo_path)
@@ -308,12 +322,14 @@ def _run_rust(repo_path: str, pipeline, block_uuid: str, chain: List, messages: 
                 program = rust_sample.RustStreamProgram(
                     binary, block.uuid, pipeline.uuid, kwargs, repo_path,
                     rust_sample.program_env(block), RUN_TIMEOUT_SECONDS,
+                    state_key=_state_key(block),
                 )
         except Exception as error:
             result['error'] = dict(block_uuid=block.uuid, message=str(error), details=None)
             break
         try:
-            reply = program.run(current)
+            state = {block.uuid: {}} if _state_key(block) else None
+            reply = program.run(current, state=state)
             result['logs'] += _logs(program.take_lines())
             if not reply.get('ok'):
                 error = reply.get('error') or {}
@@ -371,7 +387,8 @@ def _run_language_runs(repo_path: str, pipeline, block_uuid: str, runs: List[Lis
             chain = [_chain_entry(pipeline, block, [run[i - 1].uuid] if i else [])
                      for i, block in enumerate(run)]
             request = dict(op='stream', chain=chain, messages=current,
-                           outputs=[b['uuid'] for b in chain], kwargs=kwargs)
+                           outputs=[b['uuid'] for b in chain], kwargs=kwargs,
+                           state=_empty_state(chain))
             worker = _worker(repo_path)
             reply = worker.request(request, RUN_TIMEOUT_SECONDS)
             part = dict(logs=_logs(reply.get('output') or []))

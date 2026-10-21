@@ -27,17 +27,40 @@
 //! `Result` of these. Code at the top of the file, such as a model in a `LazyLock`, loads
 //! once: the program stays up for the stream.
 //!
+//! A block with `state_key` in its configuration keeps a JSON value per key between batches
+//! and takes [`State`] after its messages:
+//!
+//! ```ignore
+//! fn velocity(messages: Vec<Value>, state: State) -> Result<Vec<Value>> {
+//!     messages
+//!         .into_iter()
+//!         .map(|mut m| {
+//!             let key = state.key_of(&m);
+//!             let count = state.get::<u64>(&key)?.unwrap_or(0) + 1;
+//!             state.set(&key, count)?;
+//!             m["payments_today"] = json!(count);
+//!             Ok(m)
+//!         })
+//!         .collect()
+//! }
+//! ```
+//!
 //! The program connects to the Unix socket `stream.json` names and says it is ready. For each
 //! batch the engine sends a header frame and one frame per message; the program answers
 //! with a header frame, then the messages of each block the engine asked for, in order. A
 //! frame is a little-endian u32 length and its bytes.
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Instant;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Map;
 
 use crate::context::{BlockContext, Vars};
 use crate::prelude::*;
@@ -127,20 +150,103 @@ impl FromMessages for LazyFrame {
     }
 }
 
+/// A stream block's keyed state: a JSON value per key, kept between batches. A block has it
+/// when its configuration names `state_key`, the field of the source's messages that keys
+/// it. It holds the values of the keys of the batch's messages; the engine saves what
+/// changed with the positions the state reflects. A message that fails on its own leaves
+/// the state as it was. A clone is the same state.
+#[derive(Debug, Clone, Default)]
+pub struct State {
+    values: Rc<RefCell<Map<String, Value>>>,
+    key: Option<String>,
+    block: String,
+}
+
+impl State {
+    /// The key's value converted to `T`; None when the key has none.
+    pub fn get<T: DeserializeOwned>(&self, key: &str) -> anyhow::Result<Option<T>> {
+        match self.values.borrow().get(key) {
+            None => Ok(None),
+            Some(value) => serde_json::from_value(value.clone())
+                .map(Some)
+                .with_context(|| format!("The state of {key} is {value}, of another type")),
+        }
+    }
+
+    /// The key's value as JSON.
+    pub fn value(&self, key: &str) -> Option<Value> {
+        self.values.borrow().get(key).cloned()
+    }
+
+    /// Sets the key's value, which must be JSON.
+    pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> anyhow::Result<()> {
+        let Some(_) = &self.key else {
+            bail!(
+                "Block {} has no state_key in its configuration: name the field of the \
+                 messages that keys its state",
+                self.block
+            );
+        };
+        let value = serde_json::to_value(value).context("The state's value is not JSON")?;
+        self.values.borrow_mut().insert(key.into(), value);
+        Ok(())
+    }
+
+    /// Removes the key's value, returning it.
+    pub fn remove(&self, key: &str) -> Option<Value> {
+        self.values.borrow_mut().remove(key)
+    }
+
+    /// The keys with a value in this batch.
+    pub fn keys(&self) -> Vec<String> {
+        self.values.borrow().keys().cloned().collect()
+    }
+
+    /// A message's key, as the engine reads it: the `state_key` field (a dotted path reaches
+    /// into objects), a string as it is and other JSON as its text; "null" when missing.
+    pub fn key_of(&self, message: &Value) -> String {
+        let Some(field) = &self.key else {
+            return String::new();
+        };
+        match field
+            .split('.')
+            .try_fold(message, |value, part| value.get(part))
+        {
+            None => "null".into(),
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+        }
+    }
+
+    fn snapshot(&self) -> Map<String, Value> {
+        self.values.borrow().clone()
+    }
+
+    fn restore(&self, values: Map<String, Value>) {
+        *self.values.borrow_mut() = values;
+    }
+}
+
 /// What a stream block takes after its messages.
 pub trait FromContext: Sized {
-    fn from_context(context: &BlockContext) -> Self;
+    fn from_context(context: &BlockContext, state: &State) -> Self;
 }
 
 impl FromContext for Vars {
-    fn from_context(context: &BlockContext) -> Self {
+    fn from_context(context: &BlockContext, _state: &State) -> Self {
         context.variables.clone()
     }
 }
 
 impl FromContext for BlockContext {
-    fn from_context(context: &BlockContext) -> Self {
+    fn from_context(context: &BlockContext, _state: &State) -> Self {
         context.clone()
+    }
+}
+
+impl FromContext for State {
+    fn from_context(_context: &BlockContext, state: &State) -> Self {
+        state.clone()
     }
 }
 
@@ -224,11 +330,16 @@ impl<T: IntoMessages, E: Into<anyhow::Error>> IntoMessages for Result<T, E> {
 #[diagnostic::on_unimplemented(
     message = "this function cannot be a Mage stream block function",
     label = "check its parameters and return type",
-    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then optionally Vars or BlockContext",
+    note = "it takes Vec<Value>, DataFrame, LazyFrame, Vec<String> or Vec<Vec<u8>>, then up to two of Vars, BlockContext and State",
     note = "it returns Vec<Value>, Value, DataFrame, LazyFrame, Vec<String>, Vec<Vec<u8>>, (), or an Option or Result of these"
 )]
 pub trait StreamFn<Args> {
-    fn call(&mut self, messages: &[Vec<u8>], context: &BlockContext) -> anyhow::Result<Raw>;
+    fn call(
+        &mut self,
+        messages: &[Vec<u8>],
+        context: &BlockContext,
+        state: &State,
+    ) -> anyhow::Result<Raw>;
 }
 
 impl<F, R, M> StreamFn<(M,)> for F
@@ -237,7 +348,12 @@ where
     M: FromMessages,
     R: IntoMessages,
 {
-    fn call(&mut self, messages: &[Vec<u8>], _context: &BlockContext) -> anyhow::Result<Raw> {
+    fn call(
+        &mut self,
+        messages: &[Vec<u8>],
+        _context: &BlockContext,
+        _state: &State,
+    ) -> anyhow::Result<Raw> {
         (self)(M::from_messages(messages)?).into_messages()
     }
 }
@@ -249,8 +365,17 @@ where
     C1: FromContext,
     R: IntoMessages,
 {
-    fn call(&mut self, messages: &[Vec<u8>], context: &BlockContext) -> anyhow::Result<Raw> {
-        (self)(M::from_messages(messages)?, C1::from_context(context)).into_messages()
+    fn call(
+        &mut self,
+        messages: &[Vec<u8>],
+        context: &BlockContext,
+        state: &State,
+    ) -> anyhow::Result<Raw> {
+        (self)(
+            M::from_messages(messages)?,
+            C1::from_context(context, state),
+        )
+        .into_messages()
     }
 }
 
@@ -262,17 +387,22 @@ where
     C2: FromContext,
     R: IntoMessages,
 {
-    fn call(&mut self, messages: &[Vec<u8>], context: &BlockContext) -> anyhow::Result<Raw> {
+    fn call(
+        &mut self,
+        messages: &[Vec<u8>],
+        context: &BlockContext,
+        state: &State,
+    ) -> anyhow::Result<Raw> {
         (self)(
             M::from_messages(messages)?,
-            C1::from_context(context),
-            C2::from_context(context),
+            C1::from_context(context, state),
+            C2::from_context(context, state),
         )
         .into_messages()
     }
 }
 
-type StreamCall = Box<dyn FnMut(&[Vec<u8>], &BlockContext) -> anyhow::Result<Raw>>;
+type StreamCall = Box<dyn FnMut(&[Vec<u8>], &BlockContext, &State) -> anyhow::Result<Raw>>;
 
 /// A stream block's function, for [`serve_stream`]: what a block's generated library
 /// returns from `mage_stream_block`.
@@ -286,7 +416,7 @@ where
     F: StreamFn<Args> + 'static,
 {
     StreamBlock {
-        call: Box::new(move |messages, context| function.call(messages, context)),
+        call: Box::new(move |messages, context, state| function.call(messages, context, state)),
     }
 }
 
@@ -297,6 +427,7 @@ struct Step {
     block: StreamBlock,
     context: BlockContext,
     send: bool,
+    state: State,
 }
 
 #[derive(Serialize)]
@@ -312,7 +443,13 @@ struct Ready<'a> {
 struct Request {
     id: u64,
     count: usize,
+    /// Per block with keyed state: the values of the batch's keys.
+    #[serde(default)]
+    state: BTreeMap<String, Map<String, Value>>,
 }
+
+/// Per block, the keys whose state changed: the new value, or null for a removed key.
+type StateUpdates = BTreeMap<String, BTreeMap<String, Option<Value>>>;
 
 #[derive(Serialize)]
 struct Reply {
@@ -326,6 +463,8 @@ struct Reply {
     failures: Vec<Failure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<Failure>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    state_updates: StateUpdates,
 }
 
 #[derive(Serialize)]
@@ -394,6 +533,11 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
                 scratch_dir: scratch_dir.clone(),
             },
             send: step.send,
+            state: State {
+                values: Rc::default(),
+                key: step.state_key.clone(),
+                block: step.block_uuid.clone(),
+            },
         });
     }
     let socket = std::os::unix::net::UnixStream::connect(&job.socket)
@@ -419,6 +563,14 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
         for _ in 0..request.count {
             messages.push(read_frame(&mut reader)?.ok_or_else(|| anyhow!("A batch ended early"))?);
         }
+        for step in &steps {
+            let values = request
+                .state
+                .get(&step.context.block_uuid)
+                .cloned()
+                .unwrap_or_default();
+            step.state.restore(values);
+        }
         let (reply, outputs) = run_batch(&mut steps, request.id, messages, job.isolate);
         std::io::stdout().flush().ok();
         write_frame(&mut writer, &serde_json::to_vec(&reply)?)?;
@@ -432,17 +584,67 @@ fn serve(entries: &StreamEntries, directory: &std::path::Path) -> anyhow::Result
 }
 
 fn run_batch(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (Reply, Vec<Raw>) {
+    let before = snapshot(steps);
+    let (mut reply, outputs) = run_messages(steps, id, messages, isolate);
+    if reply.ok {
+        reply.state_updates = state_updates(steps, &before);
+    } else {
+        restore(steps, before);
+    }
+    (reply, outputs)
+}
+
+fn snapshot(steps: &[Step]) -> Vec<Map<String, Value>> {
+    steps.iter().map(|s| s.state.snapshot()).collect()
+}
+
+fn restore(steps: &[Step], values: Vec<Map<String, Value>>) {
+    for (step, values) in steps.iter().zip(values) {
+        step.state.restore(values);
+    }
+}
+
+/// Per block with keyed state, the keys that changed since `before`.
+fn state_updates(steps: &[Step], before: &[Map<String, Value>]) -> StateUpdates {
+    let mut updates = StateUpdates::new();
+    for (step, before) in steps.iter().zip(before) {
+        if step.state.key.is_none() {
+            continue;
+        }
+        let after = step.state.values.borrow();
+        let mut changed: BTreeMap<String, Option<Value>> = after
+            .iter()
+            .filter(|(key, value)| before.get(*key) != Some(value))
+            .map(|(key, value)| (key.clone(), Some(value.clone())))
+            .collect();
+        changed.extend(
+            before
+                .keys()
+                .filter(|key| !after.contains_key(*key))
+                .map(|key| (key.clone(), None)),
+        );
+        if !changed.is_empty() {
+            updates.insert(step.context.block_uuid.clone(), changed);
+        }
+    }
+    updates
+}
+
+fn run_messages(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (Reply, Vec<Raw>) {
     let sent: Vec<String> = steps
         .iter()
         .filter(|s| s.send)
         .map(|s| s.context.block_uuid.clone())
         .collect();
+    let before_attempt = snapshot(steps);
     let (outputs, blocks, failures) = match run_chain(steps, &messages) {
         Ok((outputs, blocks)) => (outputs, blocks, Vec::new()),
         Err(error) if !isolate || messages.len() <= 1 => {
             return (failed(id, error), Vec::new());
         }
         Err(error) => {
+            // The failed attempt's changes are undone; each message's run keeps its own.
+            restore(steps, before_attempt);
             let (outputs, failures) = isolated(steps, &messages, 0);
             if failures.len() == messages.len() {
                 // Every message failing is a problem of the code, not of the messages.
@@ -465,6 +667,7 @@ fn run_batch(steps: &mut [Step], id: u64, messages: Raw, isolate: bool) -> (Repl
         blocks,
         failures,
         error: None,
+        state_updates: StateUpdates::new(),
     };
     (reply, outputs)
 }
@@ -477,6 +680,7 @@ fn failed(id: u64, error: Failure) -> Reply {
         blocks: Vec::new(),
         failures: Vec::new(),
         error: Some(error),
+        state_updates: StateUpdates::new(),
     }
 }
 
@@ -496,8 +700,9 @@ fn run_chain(steps: &mut [Step], messages: &Raw) -> Result<(Vec<Raw>, Vec<Timing
             set_current_block(uuid);
             println!("{BLOCK_MARKER}{uuid}");
             let started = Instant::now();
-            let outcome =
-                panic::catch_unwind(AssertUnwindSafe(|| (step.block.call)(input, &step.context)));
+            let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+                (step.block.call)(input, &step.context, &step.state)
+            }));
             let output = match outcome {
                 Ok(Ok(output)) => output,
                 Ok(Err(error)) => {
@@ -533,26 +738,28 @@ fn run_chain(steps: &mut [Step], messages: &Raw) -> Result<(Vec<Raw>, Vec<Timing
 /// a failing batch is split in halves until each failure is one message.
 fn isolated(steps: &mut [Step], messages: &[Vec<u8>], offset: usize) -> (Vec<Raw>, Vec<Failure>) {
     let batch = messages.to_vec();
-    match run_chain(steps, &batch) {
-        Ok((outputs, _)) => (outputs, Vec::new()),
-        Err(mut failure) if messages.len() == 1 => {
-            failure.row = Some(offset);
-            (
-                vec![Vec::new(); steps.iter().filter(|s| s.send).count()],
-                vec![failure],
-            )
-        }
-        Err(_) => {
-            let middle = messages.len() / 2;
-            let (mut left, mut failures) = isolated(steps, &messages[..middle], offset);
-            let (right, right_failures) = isolated(steps, &messages[middle..], offset + middle);
-            for (into, more) in left.iter_mut().zip(right) {
-                into.extend(more);
-            }
-            failures.extend(right_failures);
-            (left, failures)
-        }
+    let before = snapshot(steps);
+    let mut failure = match run_chain(steps, &batch) {
+        Ok((outputs, _)) => return (outputs, Vec::new()),
+        Err(failure) => failure,
+    };
+    // A failed run leaves the state as it was.
+    restore(steps, before);
+    if messages.len() == 1 {
+        failure.row = Some(offset);
+        return (
+            vec![Vec::new(); steps.iter().filter(|s| s.send).count()],
+            vec![failure],
+        );
     }
+    let middle = messages.len() / 2;
+    let (mut left, mut failures) = isolated(steps, &messages[..middle], offset);
+    let (right, right_failures) = isolated(steps, &messages[middle..], offset + middle);
+    for (into, more) in left.iter_mut().zip(right) {
+        into.extend(more);
+    }
+    failures.extend(right_failures);
+    (left, failures)
 }
 
 fn write_frame(writer: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {
@@ -595,6 +802,11 @@ mod tests {
                 scratch_dir: std::env::temp_dir(),
             },
             send,
+            state: State {
+                values: Rc::default(),
+                key: None,
+                block: uuid.into(),
+            },
         }
     }
 
@@ -673,6 +885,91 @@ mod tests {
         assert!(reply.error.unwrap().message.contains("bad model"));
         let mut steps = vec![step(stream_block(double), "double", true)];
         assert!(run_batch(&mut steps, 2, raw(&[r#"{"n":1}"#]), false).0.ok);
+    }
+
+    fn counted(messages: Vec<Value>, state: State) -> Result<Vec<Value>> {
+        messages
+            .into_iter()
+            .map(|mut m| {
+                ensure!(m["fail"].is_null(), "this message fails");
+                let key = state.key_of(&m);
+                let count = state.get::<u64>(&key)?.unwrap_or(0) + 1;
+                state.set(&key, count)?;
+                if m["forget"].as_bool() == Some(true) {
+                    state.remove(&key);
+                }
+                m["count"] = json!(count);
+                Ok(m)
+            })
+            .collect()
+    }
+
+    fn stateful(key: &str) -> Vec<Step> {
+        let mut counting = step(stream_block(counted), "counted", true);
+        counting.state.key = Some(key.into());
+        vec![counting]
+    }
+
+    #[test]
+    fn a_block_keeps_state_per_key_and_sends_back_what_changed() {
+        let mut steps = stateful("card.id");
+        steps[0].state.restore(Map::from_iter([
+            ("a".to_string(), json!(4)),
+            ("b".to_string(), json!(1)),
+            ("c".to_string(), json!(9)),
+        ]));
+        let batch = raw(&[
+            r#"{"card":{"id":"a"}}"#,
+            r#"{"card":{"id":"a"}}"#,
+            r#"{"card":{"id":7}}"#,
+            r#"{"card":{"id":"c"},"forget":true}"#,
+        ]);
+        let (reply, outputs) = run_batch(&mut steps, 1, batch, false);
+        assert!(reply.ok);
+        assert_eq!(outputs[0][1], br#"{"card":{"id":"a"},"count":6}"#.to_vec());
+        assert_eq!(
+            reply.state_updates["counted"],
+            BTreeMap::from_iter([
+                ("7".to_string(), Some(json!(1))),
+                ("a".to_string(), Some(json!(6))),
+                ("c".to_string(), None),
+            ])
+        );
+        // "b" did not change and is not sent.
+        assert!(!reply.state_updates["counted"].contains_key("b"));
+    }
+
+    #[test]
+    fn a_failing_message_leaves_the_state_as_it_was() {
+        let mut steps = stateful("k");
+        let batch = raw(&[r#"{"k":"a"}"#, r#"{"k":"a","fail":true}"#, r#"{"k":"b"}"#]);
+        let (reply, _) = run_batch(&mut steps, 1, batch.clone(), true);
+        assert!(reply.ok);
+        assert_eq!(reply.failures[0].row, Some(1));
+        assert_eq!(
+            reply.state_updates["counted"],
+            BTreeMap::from_iter([
+                ("a".to_string(), Some(json!(1))),
+                ("b".to_string(), Some(json!(1))),
+            ])
+        );
+        // Without isolation the batch fails and keeps nothing.
+        steps[0].state.restore(Map::new());
+        let (reply, _) = run_batch(&mut steps, 2, batch, false);
+        assert!(!reply.ok && reply.state_updates.is_empty());
+        assert!(steps[0].state.keys().is_empty());
+    }
+
+    #[test]
+    fn a_block_without_a_state_key_cannot_keep_state() {
+        let mut steps = vec![step(stream_block(counted), "counted", true)];
+        let (reply, _) = run_batch(&mut steps, 1, raw(&[r#"{"k":"a"}"#]), false);
+        let error = reply.error.unwrap();
+        assert!(
+            error.message.contains("has no state_key"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

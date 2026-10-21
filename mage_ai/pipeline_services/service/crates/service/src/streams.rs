@@ -703,6 +703,16 @@ fn region_session(
     log: RunLog,
 ) -> Result<Box<dyn TransformSession>, String> {
     let cancel = service.stream_stop.child_token();
+    // Where blocks with keyed state keep it, and whether positions stay the same across
+    // restarts (offsets and log positions do; queue tags do not).
+    let state_dir = service
+        .data_dir
+        .join("state")
+        .join(crate::executor::sanitize(&pipeline.uuid));
+    let stable_positions = matches!(
+        pipeline.stream.as_ref().map(|s| s.source.kind),
+        Some(ConnectorKind::Kafka | ConnectorKind::Postgres)
+    );
     if blocks[0].language == Language::Window {
         let block = &blocks[0];
         let spec: mage_stream_core::window::WindowSpec =
@@ -741,6 +751,8 @@ fn region_session(
                 cancel,
                 isolate,
                 pool: service.python.clone(),
+                state_dir,
+                stable_positions,
             },
         )?));
     }
@@ -760,14 +772,8 @@ fn region_session(
             // Messages that fail on their own go to the dead-letter sink when there is one.
             isolate,
             shape,
-            state_dir: service
-                .data_dir
-                .join("state")
-                .join(crate::executor::sanitize(&pipeline.uuid)),
-            stable_positions: matches!(
-                pipeline.stream.as_ref().map(|s| s.source.kind),
-                Some(ConnectorKind::Kafka | ConnectorKind::Postgres)
-            ),
+            state_dir,
+            stable_positions,
         },
     )))
 }

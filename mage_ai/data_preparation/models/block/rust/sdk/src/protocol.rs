@@ -185,6 +185,9 @@ pub struct StreamStep {
     /// The engine wants the block's messages (a sink writes them).
     #[serde(default)]
     pub send: bool,
+    /// The source messages' field that keys the block's state (configuration `state_key`).
+    #[serde(default)]
+    pub state_key: Option<String>,
 }
 
 impl StreamJob {

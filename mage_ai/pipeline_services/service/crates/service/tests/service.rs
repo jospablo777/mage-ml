@@ -1698,3 +1698,126 @@ fn a_python_block_keeps_keyed_state_over_a_restart() {
     send(&service, "3", r#"[{"card": "a"}, {"card": "b"}]"#);
     assert_eq!(seen(&service), [("a".into(), 4), ("b".into(), 2)]);
 }
+
+/// A program that speaks the stream protocol (mage::serve_stream) as the SDK does, with a
+/// block that counts messages per key in its keyed state.
+const STATE_STREAM_PROGRAM: &str = r#"#!/usr/bin/env python3
+import json, os, socket, struct, sys
+
+job = json.load(open(os.path.join(sys.argv[1], 'stream.json')))
+[step] = job['chain']
+key_field = step['state_key']
+connection = socket.socket(socket.AF_UNIX)
+connection.connect(job['socket'])
+stream = connection.makefile('rwb')
+
+def frame(data):
+    stream.write(struct.pack('<I', len(data)) + data)
+
+def read():
+    head = stream.read(4)
+    if len(head) < 4:
+        return None
+    return stream.read(struct.unpack('<I', head)[0])
+
+frame(json.dumps({'type': 'ready', 'protocol': 1}).encode())
+stream.flush()
+while True:
+    header = read()
+    if header is None:
+        break
+    header = json.loads(header)
+    state = header.get('state', {}).get(step['block_uuid'], {})
+    before = dict(state)
+    out = []
+    for _ in range(header['count']):
+        message = json.loads(read())
+        key = message[key_field]
+        state[key] = state.get(key, 0) + 1
+        out.append(json.dumps(dict(message, seen=state[key])).encode())
+    changed = {k: v for k, v in state.items() if before.get(k) != v}
+    frame(json.dumps({'id': header['id'], 'ok': True,
+                      'outputs': [{'block_uuid': step['block_uuid'], 'count': len(out)}],
+                      'state_updates': {step['block_uuid']: changed}}).encode())
+    for message in out:
+        frame(message)
+    stream.flush()
+"#;
+
+#[test]
+fn a_rust_block_keeps_keyed_state_over_a_restart() {
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    manifest["pipelines"][0]["blocks"][0] = json!({
+        "uuid": "tag", "type": "transformer", "language": "rust",
+        "file": "transformers/tag.rs", "sha256": "0", "upstream": [],
+        "binary": "bin/mage-blocks", "entry": "tag",
+        "configuration": {"state_key": "card"}
+    });
+    let mut service = Service::with_manifest(&manifest, &[("transformers/tag.rs", "")]);
+    let program = service.dir.path().join("bin/mage-blocks");
+    std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+    std::fs::write(&program, STATE_STREAM_PROGRAM.replace("python3", &python())).unwrap();
+    std::fs::set_permissions(
+        &program,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let env = [("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")];
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    let send = |service: &Service, key: &str, body: &str| {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    };
+    let seen = |service: &Service| -> Vec<(String, u64)> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("\"seen\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .map(|r| {
+                let value = r.get("value").cloned().unwrap_or(r);
+                (
+                    value["card"].as_str().unwrap().to_string(),
+                    value["seen"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    send(
+        &service,
+        "1",
+        r#"[{"card": "a"}, {"card": "a"}, {"card": "b"}]"#,
+    );
+    send(&service, "2", r#"[{"card": "a"}]"#);
+    assert_eq!(
+        seen(&service),
+        [
+            ("a".into(), 1),
+            ("a".into(), 2),
+            ("b".into(), 1),
+            ("a".into(), 3)
+        ]
+    );
+    service.signal("-TERM");
+    assert!(
+        service
+            .dir
+            .path()
+            .join("data/state/hooks/tag/partition-0.json")
+            .is_file()
+    );
+    std::fs::write(service.dir.path().join("service.log"), "").unwrap();
+    service.start(&env);
+    wait_for_stream(&service, "hooks");
+    send(&service, "3", r#"[{"card": "a"}, {"card": "b"}]"#);
+    assert_eq!(seen(&service), [("a".into(), 4), ("b".into(), 2)]);
+}

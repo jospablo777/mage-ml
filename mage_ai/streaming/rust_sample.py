@@ -128,9 +128,15 @@ class StreamProgram:
             return None
         return self._read_exact(struct.unpack('<I', head)[0])
 
-    def run(self, messages: List[bytes]) -> Dict:
-        """The block's reply to one batch, with its messages (`messages`) as bytes."""
-        header = json.dumps(dict(id=1, count=len(messages))).encode()
+    def run(self, messages: List[bytes], state: Optional[Dict] = None) -> Dict:
+        """
+        The block's reply to one batch, with its messages (`messages`) as bytes. `state`: per
+        block with keyed state, the values of the batch's keys, as the engine sends them.
+        """
+        request = dict(id=1, count=len(messages))
+        if state is not None:
+            request['state'] = state
+        header = json.dumps(request).encode()
         frames = [struct.pack('<I', len(header)), header]
         for message in messages:
             frames += [struct.pack('<I', len(message)), message]
@@ -205,14 +211,24 @@ def program_env(block) -> Dict[str, str]:
     return env
 
 
+def _with_state_key(step: Dict, state_key: Optional[str]) -> Dict:
+    """The chain step with the field that keys its state; a program built before keyed
+    state refuses fields it does not know, so only then."""
+    return dict(step, state_key=state_key) if state_key else step
+
+
 class RustStreamProgram(StreamProgram):
     """One Rust block's program (its own binary, entry `block`)."""
 
     def __init__(self, binary: Path, block_uuid: str, pipeline_uuid: str, variables: Dict,
-                 cwd: str, env: Dict[str, str], timeout: float):
+                 cwd: str, env: Dict[str, str], timeout: float,
+                 state_key: Optional[str] = None):
         super().__init__(
             [str(binary)],
-            [dict(block_uuid=block_uuid, block_type='transformer', entry='block', send=True)],
+            [_with_state_key(
+                dict(block_uuid=block_uuid, block_type='transformer', entry='block', send=True),
+                state_key,
+            )],
             pipeline_uuid, variables, cwd, env, timeout,
         )
 
@@ -227,7 +243,10 @@ class RStreamProgram(StreamProgram):
         command = stream_command(repo_path)
         super().__init__(
             command['command'],
-            [dict(block_uuid=block.uuid, block_type='transformer', file=block.file_path,
-                  send=True)],
+            [_with_state_key(
+                dict(block_uuid=block.uuid, block_type='transformer', file=block.file_path,
+                     send=True),
+                (block.configuration or {}).get('state_key'),
+            )],
             pipeline_uuid, variables, command['cwd'], command['env'], timeout, tcp=True,
         )

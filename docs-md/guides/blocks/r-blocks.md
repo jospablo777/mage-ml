@@ -380,6 +380,8 @@ transform <- function(messages, ...) {
 - Every message must be a JSON object. An error is the block's error: the batch is retried,
   then stops the stream, or with a dead-letter sink only the messages that fail go there.
   If R exits, the next batch starts it again.
+- With `state_key` in its configuration, a block keeps a value per key between batches with
+  `state_get()` and `state_set()` ([keyed state](../streaming/introduction.md#keyed-state)).
 - R blocks mix with Python and Rust blocks in one chain (each block reading the one before).
 - In the editor, sample runs and **Execute pipeline** run each R block the same way;
   [exported services](../../production/stream-services.md) run the stream's

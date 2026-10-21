@@ -9,7 +9,9 @@
 #' with the token it holds. For each batch the engine sends a header frame and
 #' one frame per message; the program answers with a header frame, then the
 #' messages of each block the engine asked for. A frame is a little-endian
-#' 32-bit length and its bytes.
+#' 32-bit length and its bytes. A block with keyed state gets the values of
+#' the batch's keys in the header and sends back what changed
+#' ([state_get()]).
 #'
 #' @param dir The directory that holds `stream.json`.
 #' @return Does not return: R quits when the engine closes the connection.
@@ -40,10 +42,13 @@ serve_stream <- function(dir) {
     if (is.null(header)) {
       break
     }
-    request <- jsonlite::fromJSON(rawToChar(header))
+    request <- jsonlite::fromJSON(rawToChar(header), simplifyVector = FALSE)
     messages <- vector("list", request$count)
     for (i in seq_len(request$count)) {
       messages[[i]] <- read_frame(con)
+    }
+    for (step in steps) {
+      restore_state(step, request$state[[step$uuid]])
     }
     result <- run_stream_batch(steps, messages, isTRUE(job$isolate))
     reply <- c(list(id = request$id), result$reply)
@@ -63,7 +68,7 @@ serve_stream <- function(dir) {
 
 #' Run a stream block's code once and keep its function
 #'
-#' @param step The block: `block_uuid`, `file` and `send`.
+#' @param step The block: `block_uuid`, `file`, `send` and `state_key`.
 #' @param job The stream's job.
 #' @return A list with the block's uuid, function and whether to send its
 #'   messages.
@@ -86,7 +91,9 @@ load_stream_block <- function(step, job) {
     f = block_function(env, "transformer"),
     env = env,
     context = state$context,
-    send = isTRUE(step$send)
+    send = isTRUE(step$send),
+    state_key = step$state_key,
+    state = new.env(parent = emptyenv())
   )
 }
 
@@ -99,9 +106,29 @@ load_stream_block <- function(step, job) {
 #'   send.
 #' @noRd
 run_stream_batch <- function(steps, messages, isolate) {
+  before <- snapshot_states(steps)
+  result <- run_stream_messages(steps, messages, isolate)
+  if (isTRUE(result$reply$ok)) {
+    updates <- state_updates(steps, before)
+    if (length(updates) > 0) {
+      result$reply$state_updates <- updates
+    }
+  } else {
+    restore_states(steps, before)
+  }
+  result
+}
+
+#' Run the blocks on a batch's messages
+#'
+#' @noRd
+run_stream_messages <- function(steps, messages, isolate) {
   sent <- vapply(Filter(function(s) s$send, steps), function(s) s$uuid, "")
+  before <- snapshot_states(steps)
   run <- run_stream_chain(steps, messages)
   if (!is.null(run$error)) {
+    # The failed attempt's changes are undone; each message's run keeps its own.
+    restore_states(steps, before)
     failed <- list(
       reply = list(ok = FALSE, error = run$error),
       outputs = list()
@@ -150,6 +177,7 @@ run_stream_chain <- function(steps, messages) {
       cat("\036mage-block ", step$uuid, "\n", sep = "")
       started <- Sys.time()
       state$context <- step$context
+      state$keyed <- step
       value <- tryCatch(
         list(messages = call_stream_block(step, current)),
         error = function(e) {
@@ -159,6 +187,7 @@ run_stream_chain <- function(steps, messages) {
           ))
         }
       )
+      state$keyed <- NULL
       if (!is.null(value$error)) {
         return(list(error = value$error))
       }
@@ -254,11 +283,14 @@ frame_messages <- function(value) {
 #'
 #' @noRd
 isolate_messages <- function(steps, messages, offset) {
+  before <- snapshot_states(steps)
   run <- run_stream_chain(steps, messages)
   sent <- sum(vapply(steps, function(s) s$send, TRUE))
   if (is.null(run$error)) {
     return(list(outputs = run$outputs, failures = list()))
   }
+  # A failed run leaves the state as it was.
+  restore_states(steps, before)
   if (length(messages) == 1) {
     failure <- c(list(row = offset), run$error)
     return(list(outputs = rep(list(list()), sent), failures = list(failure)))
@@ -275,6 +307,153 @@ isolate_messages <- function(steps, messages, offset) {
     function(i) c(left$outputs[[i]], right$outputs[[i]])
   )
   list(outputs = outputs, failures = c(left$failures, right$failures))
+}
+
+#' Keyed state of a stream block
+#'
+#' A stream block with `state_key` in its configuration keeps a value per key
+#' between batches: a count per card, the last reading of a device. `state_key`
+#' names the field of the source's messages that keys it. During a batch the
+#' block holds the values of the keys of the batch's messages:
+#' `state_get()` reads one, `state_set()` sets it, `state_remove()` removes
+#' it and `state_keys()` lists them. Keys are text (`as.character()` for
+#' numbers); values are anything JSON holds. A message that fails on its own
+#' leaves the state as it was, and the engine saves the state with the
+#' positions it reflects.
+#'
+#' @param key The key, such as a message's `card`.
+#' @param default The value when the key has none.
+#' @param value The key's new value.
+#' @return `state_get()` the value or `default`; `state_keys()` a character
+#'   vector; the others the state's previous value, invisibly.
+#' @export
+#' @examples
+#' \dontrun{
+#' transformer(function(messages) {
+#'   messages$seen <- vapply(messages$card, function(card) {
+#'     seen <- state_get(card, default = 0) + 1
+#'     state_set(card, seen)
+#'     seen
+#'   }, numeric(1))
+#'   messages
+#' })
+#' }
+state_get <- function(key, default = NULL) {
+  values <- keyed_values()
+  key <- state_key_text(key)
+  if (exists(key, envir = values, inherits = FALSE)) {
+    get(key, envir = values, inherits = FALSE)
+  } else {
+    default
+  }
+}
+
+#' @rdname state_get
+#' @export
+state_set <- function(key, value) {
+  values <- keyed_values(change = TRUE)
+  key <- state_key_text(key)
+  previous <- state_get(key)
+  assign(key, value, envir = values)
+  invisible(previous)
+}
+
+#' @rdname state_get
+#' @export
+state_remove <- function(key) {
+  values <- keyed_values()
+  key <- state_key_text(key)
+  previous <- state_get(key)
+  if (exists(key, envir = values, inherits = FALSE)) {
+    rm(list = key, envir = values)
+  }
+  invisible(previous)
+}
+
+#' @rdname state_get
+#' @export
+state_keys <- function() {
+  sort(ls(keyed_values(), all.names = TRUE))
+}
+
+#' The running block's state values
+#'
+#' @noRd
+keyed_values <- function(change = FALSE) {
+  step <- state$keyed
+  if (is.null(step)) {
+    stop("Keyed state is for stream blocks while they run.", call. = FALSE)
+  }
+  if (change && is.null(step$state_key)) {
+    stop(
+      paste0(
+        "Block ", step$uuid, " has no state_key in its configuration: name ",
+        "the field of the messages that keys its state."
+      ),
+      call. = FALSE
+    )
+  }
+  step$state
+}
+
+#' @noRd
+state_key_text <- function(key) {
+  if (length(key) != 1 || is.na(key)) {
+    stop("A state key is one value that is not NA.", call. = FALSE)
+  }
+  as.character(key)
+}
+
+#' Set a block's state values to those the engine sent
+#'
+#' @noRd
+restore_state <- function(step, values) {
+  rm(list = ls(step$state, all.names = TRUE), envir = step$state)
+  if (length(values) > 0) {
+    list2env(values, envir = step$state)
+  }
+  invisible(NULL)
+}
+
+#' @noRd
+snapshot_states <- function(steps) {
+  lapply(steps, function(step) as.list(step$state, all.names = TRUE))
+}
+
+#' @noRd
+restore_states <- function(steps, snapshots) {
+  for (i in seq_along(steps)) {
+    restore_state(steps[[i]], snapshots[[i]])
+  }
+}
+
+#' Per block with keyed state, the keys that changed: the new value, or NULL
+#' (null) for a removed key
+#'
+#' @noRd
+state_updates <- function(steps, snapshots) {
+  updates <- list()
+  for (i in seq_along(steps)) {
+    step <- steps[[i]]
+    if (is.null(step$state_key)) {
+      next
+    }
+    before <- snapshots[[i]]
+    after <- as.list(step$state, all.names = TRUE)
+    changed <- list()
+    for (key in names(after)) {
+      if (!key %in% names(before) || !identical(before[[key]], after[[key]])) {
+        changed[key] <- list(after[[key]])
+      }
+    }
+    for (key in setdiff(names(before), names(after))) {
+      changed[key] <- list(NULL)
+    }
+    if (length(changed) > 0) {
+      updates[[step$uuid]] <- changed
+    }
+  }
+  updates
 }
 
 #' Write a frame: a little-endian 32-bit length, then the bytes

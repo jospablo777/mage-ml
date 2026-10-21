@@ -181,6 +181,131 @@ impl KeyedState {
     }
 }
 
+/// The keyed state of a stream's blocks, for a session that runs them: which blocks keep
+/// state and by what field, the messages each batch skips, the values it sends and the
+/// changes it gets back.
+pub struct BlockStates {
+    /// Per block with keyed state: its uuid, the source messages' field that keys it, the
+    /// store.
+    blocks: Vec<(String, String, KeyedState)>,
+    /// Whether positions stay the same across restarts (offsets), so held ones are skipped.
+    stable: bool,
+}
+
+/// A batch's messages as keyed state sees them.
+#[derive(Default)]
+pub struct BatchKeys {
+    /// The last position of the messages that run.
+    pub last: Option<i64>,
+    /// Per block, the keys of the messages that run.
+    keys: Vec<std::collections::BTreeSet<String>>,
+}
+
+impl BlockStates {
+    /// The blocks with `state_key` in their configuration, keeping state under `state_dir`.
+    pub fn new(
+        order: &[mage_service_core::manifest::Block],
+        state_dir: &std::path::Path,
+        stable: bool,
+    ) -> BlockStates {
+        let blocks = order
+            .iter()
+            .filter_map(|block| {
+                let key = block.configuration.get("state_key")?.as_str()?.to_string();
+                Some((
+                    block.uuid.clone(),
+                    key,
+                    KeyedState::new(state_dir.join(crate::executor::sanitize(&block.uuid))),
+                ))
+            })
+            .collect();
+        BlockStates { blocks, stable }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// The field that keys a block's state.
+    pub fn key_field(&self, block: &str) -> Option<&str> {
+        self.blocks
+            .iter()
+            .find(|(uuid, _, _)| uuid == block)
+            .map(|(_, field, _)| field.as_str())
+    }
+
+    /// The last position the state holds in the partition, when positions are stable: a
+    /// message at or before it was run before a restart and is not run again.
+    pub fn held(&mut self, partition: u32) -> Result<Option<i64>, String> {
+        match self.blocks.first_mut() {
+            Some((_, _, store)) if self.stable => store.applied(partition),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn batch(&self) -> BatchKeys {
+        BatchKeys {
+            last: None,
+            keys: vec![Default::default(); self.blocks.len()],
+        }
+    }
+
+    /// Notes a message that runs: its position, and its key for each block.
+    pub fn note(&self, batch: &mut BatchKeys, envelope: &mage_stream_ports::Envelope) {
+        if self.blocks.is_empty() {
+            return;
+        }
+        batch.last = envelope.position.or(batch.last);
+        let value: Value = serde_json::from_slice(&envelope.value).unwrap_or(Value::Null);
+        for (index, (_, field, _)) in self.blocks.iter().enumerate() {
+            batch.keys[index].insert(mage_stream_core::window::key_of(&value, Some(field)));
+        }
+    }
+
+    /// Per block, the values of the batch's keys; None without keyed state.
+    pub fn slices(&mut self, partition: u32, batch: &BatchKeys) -> Result<Option<Value>, String> {
+        if self.blocks.is_empty() {
+            return Ok(None);
+        }
+        let mut slices = Map::new();
+        for (index, (block, _, store)) in self.blocks.iter_mut().enumerate() {
+            let wanted: Vec<String> = batch.keys[index].iter().cloned().collect();
+            slices.insert(
+                block.clone(),
+                Value::Object(store.slice(partition, &wanted)?),
+            );
+        }
+        Ok(Some(Value::Object(slices)))
+    }
+
+    /// The changes a batch made, per block, as of the batch's last position.
+    pub fn apply(
+        &mut self,
+        partition: u32,
+        batch: &BatchKeys,
+        updates: &BTreeMap<String, Changes>,
+    ) -> Result<(), String> {
+        for (block, _, store) in &mut self.blocks {
+            let changes = updates.get(block.as_str()).cloned().unwrap_or_default();
+            store.apply(partition, batch.last, changes)?;
+        }
+        Ok(())
+    }
+
+    pub fn save(&mut self, commits: &[Commit]) -> Result<(), String> {
+        for (_, _, store) in &mut self.blocks {
+            store.save(commits)?;
+        }
+        Ok(())
+    }
+
+    pub fn revoked(&mut self, partition: u32) {
+        for (_, _, store) in &mut self.blocks {
+            store.revoked(partition);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mage_stream_ports::{AssignmentEpoch, PartitionId};

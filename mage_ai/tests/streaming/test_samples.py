@@ -2,6 +2,7 @@
 Stream samples for the editor: files of JSON lines next to the pipeline, and blocks run on
 them with the service engine's Python worker.
 """
+import json
 import shutil
 import textwrap
 import unittest
@@ -31,10 +32,10 @@ class StreamSampleTestCase(DBTestCase):
         self.addCleanup(self.pipeline.delete)
         self.source = self.add('source', 'data_loader', SOURCE, language='yaml')
 
-    def add(self, name, kind, code, upstream=(), language='python'):
+    def add(self, name, kind, code, upstream=(), language='python', configuration=None):
         block = Block.create(
             f'{self.pipeline.uuid}_{name}', kind, self.repo_path, language=language,
-            pipeline=self.pipeline,
+            pipeline=self.pipeline, configuration=configuration,
         )
         Path(block.file_path).write_text(textwrap.dedent(code))
         self.pipeline.add_block(block, upstream_block_uuids=[b.uuid for b in upstream])
@@ -156,6 +157,25 @@ class RunOnSampleTest(StreamSampleTestCase):
         self.assertEqual([b['block_uuid'] for b in result['blocks']],
                          [self.clean.uuid, self.score.uuid])
         self.assertIn(dict(block_uuid=self.clean.uuid, line='cleaning 3'), result['logs'])
+
+    def test_a_block_with_keyed_state_starts_from_empty_state(self):
+        count = self.add('count', 'transformer', '''
+            @transformer
+            def f(messages, *args, **kwargs):
+                state = kwargs['state']
+                for m in messages:
+                    state[m['card']] = state.get(m['card'], 0) + 1
+                    m['seen'] = state[m['card']]
+                return messages
+        ''', [self.source], configuration=dict(state_key='card'))
+
+        result = sample_runner.run_on_sample(
+            self.repo_path, self.pipeline.uuid, count.uuid,
+            [{'card': 'a'}, {'card': 'a'}, {'card': 'b'}],
+        )
+
+        self.assertNotIn('error', result, result)
+        self.assertEqual([m['seen'] for m in result['outputs'][count.uuid]], [1, 2, 1])
 
     def test_a_failure_points_at_the_first_message_that_fails(self):
         messages = [{'amount': 4}, {'amount': 0}, {'amount': 5}]
@@ -378,6 +398,45 @@ class RSampleRunTest(StreamSampleTestCase):
 
         self.assertIn('an amount is missing', result['error']['message'])
         self.assertEqual(result['failing_message'], dict(index=1, message={'id': 7}))
+
+    def test_an_r_block_keeps_keyed_state_as_the_engine_sends_it(self):
+        from mage_ai.data_preparation.models.block.r.stream import stream_command
+        from mage_ai.streaming.rust_sample import StreamProgram
+
+        block = Path(self.repo_path) / 'transformers' / 'count_cards.R'
+        block.parent.mkdir(parents=True, exist_ok=True)
+        block.write_text(textwrap.dedent('''
+            #* @transformer
+            transform <- function(messages, ...) {
+              messages$seen <- vapply(messages$card, function(card) {
+                seen <- state_get(card, default = 0) + 1
+                state_set(card, seen)
+                seen
+              }, numeric(1))
+              state_remove("gone")
+              messages
+            }
+        '''))
+        command = stream_command(self.repo_path)
+        program = StreamProgram(
+            command['command'],
+            [dict(block_uuid='count', block_type='transformer', file=str(block), send=True,
+                  state_key='card')],
+            self.pipeline.uuid, {}, command['cwd'], command['env'], 120, tcp=True,
+        )
+        try:
+            reply = program.run(
+                [b'{"card": "a"}', b'{"card": "a"}', b'{"card": "b"}'],
+                state={'count': {'a': 4, 'gone': {'kept': [1, 2]}}},
+            )
+            self.assertTrue(reply['ok'], reply)
+            self.assertEqual([json.loads(m)['seen'] for m in reply['messages']], [5, 6, 1])
+            self.assertEqual(reply['state_updates'], {'count': {'a': 6, 'b': 1, 'gone': None}})
+            # The next batch starts from what the engine sends, not from what R kept.
+            reply = program.run([b'{"card": "a"}'], state={'count': {}})
+            self.assertEqual(reply['state_updates'], {'count': {'a': 1}})
+        finally:
+            program.close()
 
 
 class RedactTest(unittest.TestCase):

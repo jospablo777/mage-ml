@@ -13,6 +13,12 @@
 
 ### Exported services
 
+- Keyed state in Rust and R stream blocks, as in Python ones: a Rust block takes `State`
+  (`get`, `set`, `remove`, `key_of`), an R block calls `state_get()`, `state_set()`,
+  `state_remove()` and `state_keys()`. The engine sends the values of each batch's keys
+  and saves what changed with the positions it reflects. In the editor, sample runs start
+  from empty state and **Execute pipeline** keeps it in memory for the run; before, a
+  block with `state_key` failed there.
 - A service names where it runs: `platforms` in `service.yaml` (`linux/amd64`,
   `linux/arm64` or both), used by Build and ship, `mage service build --image` and deploys
   whose environment names none. Build and ship no longer builds for the server's own chip

@@ -40,11 +40,8 @@ pub struct PythonStreamSession {
     /// then a batch goes as a JSON lines file Polars reads in one pass.
     frames: Option<bool>,
     file: std::path::PathBuf,
-    /// Blocks with keyed state (configuration `state_key`): the uuid, the source messages'
-    /// field that keys it, and the store.
-    state: Vec<(String, String, crate::keyed_state::KeyedState)>,
-    /// Whether positions stay the same across restarts (offsets), so held ones are skipped.
-    stable: bool,
+    /// Blocks with keyed state (configuration `state_key`).
+    state: crate::keyed_state::BlockStates,
 }
 
 static FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -94,19 +91,7 @@ impl PythonStreamSession {
             state_dir,
             stable_positions,
         } = options;
-        let state = order
-            .iter()
-            .filter_map(|block| {
-                let key = block.configuration.get("state_key")?.as_str()?.to_string();
-                Some((
-                    block.uuid.clone(),
-                    key,
-                    crate::keyed_state::KeyedState::new(
-                        state_dir.join(crate::executor::sanitize(&block.uuid)),
-                    ),
-                ))
-            })
-            .collect();
+        let state = crate::keyed_state::BlockStates::new(order, &state_dir, stable_positions);
         let chain = order
             .iter()
             .map(|block| {
@@ -139,7 +124,6 @@ impl PythonStreamSession {
             shape,
             frames: None,
             state,
-            stable: stable_positions,
             file: std::env::temp_dir().join(format!(
                 "mage-stream-{}-{}.ndjson",
                 std::process::id(),
@@ -370,29 +354,15 @@ impl TransformSession for PythonStreamSession {
             let mut messages = Vec::with_capacity(envelopes.len());
             // With keyed state and offsets: messages the saved state already holds (read
             // again after a restart) are done; they are not run again.
-            let held = match self.state.first_mut() {
-                Some((_, _, store)) if self.stable => {
-                    store.applied(partition).map_err(TransformError::Crash)?
-                }
-                _ => None,
-            };
-            let mut last = None;
-            let mut keys: Vec<std::collections::BTreeSet<String>> =
-                vec![Default::default(); self.state.len()];
+            let held = self.state.held(partition).map_err(TransformError::Crash)?;
+            let mut batch_keys = self.state.batch();
             for (row, envelope) in envelopes.iter().enumerate() {
                 if let (Some(held), Some(position)) = (held, envelope.position)
                     && position <= held
                 {
                     continue;
                 }
-                if !self.state.is_empty() {
-                    last = envelope.position.or(last);
-                    let value: Value =
-                        serde_json::from_slice(&envelope.value).unwrap_or(Value::Null);
-                    for (index, (_, field, _)) in self.state.iter().enumerate() {
-                        keys[index].insert(mage_stream_core::window::key_of(&value, Some(field)));
-                    }
-                }
+                self.state.note(&mut batch_keys, envelope);
                 if let Some(reason) = decode_error(envelope) {
                     undecoded.push(mage_stream_ports::RowError { row, error: reason });
                     continue;
@@ -427,19 +397,10 @@ impl TransformSession for PythonStreamSession {
                 // Every message was held already.
                 return Ok(TransformOutput::default());
             }
-            let state_slices = if self.state.is_empty() {
-                None
-            } else {
-                let mut slices = serde_json::Map::new();
-                for (index, (block, _, store)) in self.state.iter_mut().enumerate() {
-                    let wanted: Vec<String> = keys[index].iter().cloned().collect();
-                    let slice = store
-                        .slice(partition, &wanted)
-                        .map_err(TransformError::Crash)?;
-                    slices.insert(block.clone(), Value::Object(slice));
-                }
-                Some(Value::Object(slices))
-            };
+            let state_slices = self
+                .state
+                .slices(partition, &batch_keys)
+                .map_err(TransformError::Crash)?;
             let sent: &[Box<RawValue>] = if file.is_some() { &[] } else { &messages };
             let shape = self.shape;
             let (chain, outputs, kwargs, isolate) =
@@ -492,16 +453,9 @@ impl TransformSession for PythonStreamSession {
                 }
                 return Err(TransformError::User(format!("{block}: {message}")));
             }
-            for (block, _, store) in &mut self.state {
-                let changes = reply
-                    .state_updates
-                    .get(block.as_str())
-                    .cloned()
-                    .unwrap_or_default();
-                store
-                    .apply(partition, last, changes)
-                    .map_err(TransformError::Crash)?;
-            }
+            self.state
+                .apply(partition, &batch_keys, &reply.state_updates)
+                .map_err(TransformError::Crash)?;
             let mut outputs = BTreeMap::new();
             for (block, messages) in &reply.outputs {
                 outputs.insert(block.clone(), to_batch(messages, partition)?);
@@ -542,18 +496,11 @@ impl TransformSession for PythonStreamSession {
         &'a mut self,
         commits: &'a [mage_stream_ports::Commit],
     ) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move {
-            for (_, _, store) in &mut self.state {
-                store.save(commits)?;
-            }
-            Ok(())
-        })
+        Box::pin(async move { self.state.save(commits) })
     }
 
     fn revoked(&mut self, partition: mage_stream_ports::PartitionId) {
-        for (_, _, store) in &mut self.state {
-            store.revoked(partition.0);
-        }
+        self.state.revoked(partition.0);
     }
 
     fn close(&mut self) -> BoxFuture<'_, ()> {

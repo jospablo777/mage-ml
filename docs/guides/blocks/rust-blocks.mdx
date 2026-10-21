@@ -601,7 +601,8 @@ fn transform(messages: Vec<Value>, vars: Vars) -> Result<Vec<Value>> {
 | `Vec<String>` | its text |
 | `Vec<Vec<u8>>` | its bytes, for binary messages |
 
-`Vars` and `BlockContext` can follow the messages. The block returns its messages in any of
+`Vars`, `BlockContext` and `State` (a block's [keyed state](/guides/streaming/introduction#keyed-state),
+with `state_key` in its configuration) can follow the messages. The block returns its messages in any of
 those forms, one `Value` (an array is its messages, `null` none), `()`, or an `Option` or
 `Result` of these. `Vec<String>` and `Vec<Vec<u8>>` are written as they are; the others as
 JSON.
