@@ -62,10 +62,28 @@ def _watched_child(directory):
     time.sleep(120)
 
 
-def _parent_of_watched_child(directory):
-    child = multiprocessing.get_context('spawn').Process(target=_watched_child, args=(directory,))
+def _parent_of_watched_child(directory, target=None):
+    child = multiprocessing.get_context('spawn').Process(
+        target=target or _watched_child, args=(directory,),
+    )
     child.start()
     child.join()
+
+
+def _parent_of_stuck_child(directory):
+    _parent_of_watched_child(directory, _child_with_stuck_cleanup)
+
+
+def _child_with_stuck_cleanup(directory):
+    from mage_ai.shared import processes
+
+    processes.CLEANUP_SECONDS = 1.0
+    # A cleanup that never returns, as a job manager waiting on busy workers.
+    exit_with_parent(lambda: time.sleep(600), interval=0.2)
+    grandchild = subprocess.Popen(SLEEPER)
+    _write(os.path.join(directory, 'child.tmp'), f'{os.getpid()} {grandchild.pid}')
+    os.replace(os.path.join(directory, 'child.tmp'), os.path.join(directory, 'child'))
+    time.sleep(120)
 
 
 def _terminated_child(directory):
@@ -93,6 +111,18 @@ class ProcessLifetimeTest(unittest.TestCase):
 
         self.assertEqual(_wait_gone([child, grandchild]), [])
         self.assertTrue(os.path.exists(os.path.join(self.directory, 'cleaned')))
+
+    def test_a_cleanup_that_never_returns_does_not_keep_the_children(self):
+        """CI: a killed server left spawned workers behind while its scheduler's cleanup
+        waited."""
+        parent = self.context.Process(target=_parent_of_stuck_child, args=(self.directory,))
+        parent.start()
+        child, grandchild = _read_pids(os.path.join(self.directory, 'child'), 2)
+
+        parent.kill()
+        parent.join()
+
+        self.assertEqual(_wait_gone([child, grandchild]), [])
 
     def test_child_stays_while_its_parent_lives(self):
         parent = self.context.Process(target=_parent_of_watched_child, args=(self.directory,))

@@ -49,13 +49,26 @@ def terminate_descendants(timeout: float = TERMINATE_TIMEOUT_SECONDS) -> None:
             pass
 
 
-def _run_cleanup(cleanup: Optional[Callable[[], None]]) -> None:
+# How long a cleanup before exit may take: one that blocks (a job manager waiting on its
+# workers under load) kept the processes it should have stopped running for good.
+CLEANUP_SECONDS = 10.0
+
+
+def _run_cleanup(cleanup: Optional[Callable[[], None]], timeout: float = CLEANUP_SECONDS) -> None:
     if cleanup is None:
         return
-    try:
-        cleanup()
-    except Exception as error:
-        print(f'[WARNING] Cleanup before exit failed: {error}')
+
+    def run():
+        try:
+            cleanup()
+        except Exception as error:
+            print(f'[WARNING] Cleanup before exit failed: {error}')
+
+    thread = threading.Thread(target=run, daemon=True, name='cleanup-before-exit')
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        print(f'[WARNING] Cleanup before exit took over {timeout:g} seconds; exiting without it.')
 
 
 def _parent_identity():

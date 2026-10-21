@@ -962,4 +962,3 @@ def run_r_job(
         if session.jobs >= int(os.getenv('MAGE_R_MAX_JOBS') or 1000):
             _stop_session(key)
         return 1 if os.path.exists(os.path.join(job_dir, 'error.txt')) else 0
-
