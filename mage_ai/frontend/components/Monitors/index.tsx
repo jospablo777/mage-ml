@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useMutation } from 'react-query';
 import styled from 'styled-components';
 
 import Button from '@oracle/elements/Button';
@@ -11,6 +12,7 @@ import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { displayTimestamp } from '@utils/timestamp';
+import { onSuccess } from '@api/utils/response';
 import { shouldDisplayLocalTimezone } from '@components/settings/workspace/utils';
 
 type CheckType = {
@@ -18,7 +20,14 @@ type CheckType = {
   column?: string;
   detail?: string;
   result: string;
+  segment?: string;
   value?: number;
+};
+
+type SilenceType = {
+  by?: string;
+  reason?: string;
+  until: string;
 };
 
 type HistoryType = {
@@ -28,6 +37,7 @@ type HistoryType = {
   engines?: { [engine: string]: { error?: string; reports?: string[] } };
   pipeline_run_id: number;
   result: string;
+  silenced_until?: string;
 };
 
 type MonitorType = {
@@ -38,6 +48,7 @@ type MonitorType = {
   name: string;
   pipeline_uuid?: string;
   runs?: number;
+  silence?: SilenceType;
 };
 
 const RUNS_SHOWN = 20;
@@ -88,11 +99,60 @@ function ResultText({ result }: { result: string }) {
 }
 
 function checkKey(check: CheckType): string {
-  return [check.check, check.column].filter(Boolean).join(' · ');
+  return [check.check, check.column, check.segment && `[${check.segment}]`]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const SILENCE_HOURS = 24;
+
+// While a known failure is worked on: the checks still run, and fail_block still fails the
+// block; only the notifications stop.
+function SilenceControl({ monitor, onChanged }: {
+  monitor: MonitorType;
+  onChanged: () => void;
+}) {
+  const [update, { isLoading }] = useMutation(
+    (silence: { hours: number; reason: string } | null) => api.monitors.useUpdate(
+      monitor.name,
+    )({ monitor: { silence } }),
+    { onSuccess: (response: any) => onSuccess(response, { callback: onChanged }) },
+  );
+  const silence = monitor.silence;
+
+  return (
+    <FlexContainer alignItems="center">
+      <Text muted={!silence} small warning={!!silence}>
+        {silence
+          ? `Notifications silenced until ${displayTimestamp(silence.until, shouldDisplayLocalTimezone())}`
+            + (silence.reason ? `: ${silence.reason}` : '')
+          : 'A failed run sends the pipeline\'s notifications.'}
+      </Text>
+      <Spacing ml={2} />
+      {silence ? (
+        <Button compact disabled={isLoading} onClick={() => update(null)}>
+          Notify again
+        </Button>
+      ) : (
+        <Button
+          compact
+          disabled={isLoading}
+          onClick={() => update({
+            hours: SILENCE_HOURS,
+            reason: typeof window === 'undefined'
+              ? ''
+              : (window.prompt('Why? (shown with the silence)') || ''),
+          })}
+        >
+          Silence for a day
+        </Button>
+      )}
+    </FlexContainer>
+  );
 }
 
 function MonitorDetail({ name, onBack }: { name: string; onBack: () => void }) {
-  const { data } = api.monitors.detail(name);
+  const { data, mutate } = api.monitors.detail(name);
   const monitor: MonitorType = data?.monitor;
   const runs = useMemo(
     () => (monitor?.history || []).slice(-RUNS_SHOWN).reverse(),
@@ -120,6 +180,9 @@ function MonitorDetail({ name, onBack }: { name: string; onBack: () => void }) {
           Block {monitor.block_uuid} of pipeline {monitor.pipeline_uuid}; {monitor.runs} checked
           runs. Each column is a pipeline run, newest first; each row a check, with its value.
         </Text>
+      </Spacing>
+      <Spacing mt={1}>
+        <SilenceControl monitor={monitor} onChanged={() => mutate()} />
       </Spacing>
       {runs.length === 0 ? (
         <Spacing mt={2}><Text muted>No run checked yet.</Text></Spacing>
@@ -174,11 +237,20 @@ function MonitorDetail({ name, onBack }: { name: string; onBack: () => void }) {
 // one monitor's checks across runs.
 function Monitors() {
   const [selected, setSelected] = useState<string>(null);
-  const { data } = api.monitors.list();
+  const { data, mutate } = api.monitors.list();
   const monitors: MonitorType[] = useMemo(() => data?.monitors || [], [data]);
 
   if (selected) {
-    return <MonitorDetail name={selected} onBack={() => setSelected(null)} />;
+    // The list is read again on the way back: a silence set in the detail shows there.
+    return (
+      <MonitorDetail
+        name={selected}
+        onBack={() => {
+          setSelected(null);
+          mutate();
+        }}
+      />
+    );
   }
 
   return (
@@ -231,6 +303,13 @@ function Monitors() {
                             </>
                           )
                           : <Text muted small>not run yet</Text>}
+                      {monitor.silence && (
+                        <Text muted small>
+                          silenced until {displayTimestamp(
+                            monitor.silence.until, shouldDisplayLocalTimezone(),
+                          )}
+                        </Text>
+                      )}
                     </td>
                     <td>
                       <Text muted small>

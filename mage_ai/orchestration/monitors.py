@@ -35,7 +35,7 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -442,6 +442,52 @@ def saved(pipeline, monitor: Monitor) -> List[Dict]:
     return [storage.read_json_file(os.path.join(folder, f'{i}.json')) for i in ids]
 
 
+SILENCE_FILE = 'silence.json'
+MAX_SILENCE_HOURS = 24 * 30
+
+
+def silence(pipeline, monitor: Monitor, hours: Optional[float], reason: str = '',
+            by: Optional[str] = None) -> Optional[Dict]:
+    """
+    Stops the monitor's notifications for hours (at most 30 days), a known failure being
+    worked on; None clears it. Checks still run, and fail_block still fails the block.
+    """
+    storage = pipeline.variable_manager.storage
+    path = os.path.join(_records_dir(pipeline, monitor), SILENCE_FILE)
+    if hours is None:
+        if storage.path_exists(path):
+            storage.remove(path)
+        return None
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not (
+        0 < hours <= MAX_SILENCE_HOURS
+    ):
+        raise MonitorError(f'A silence lasts more than 0 and at most {MAX_SILENCE_HOURS} hours.')
+    now = datetime.now(timezone.utc)
+    entry = dict(
+        until=(now + timedelta(hours=hours)).isoformat(timespec='seconds'),
+        reason=str(reason or '')[:500],
+        by=by,
+        set_at=now.isoformat(timespec='seconds'),
+    )
+    storage.makedirs(_records_dir(pipeline, monitor), exist_ok=True)
+    storage.write_json_file(path, entry)
+    return entry
+
+
+def silenced(pipeline, monitor: Monitor) -> Optional[Dict]:
+    """The monitor's silence while it lasts, None otherwise."""
+    storage = pipeline.variable_manager.storage
+    path = os.path.join(_records_dir(pipeline, monitor), SILENCE_FILE)
+    if not storage.path_exists(path):
+        return None
+    try:
+        entry = storage.read_json_file(path) or {}
+        until = datetime.fromisoformat(entry['until'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return entry if until > datetime.now(timezone.utc) else None
+
+
 def _merged(records: List[Dict]) -> Dict:
     """One baseline record from several, whose profiles share their bin edges."""
     import column_atlas_native
@@ -618,6 +664,7 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
         result['result'] = _worst([c['result'] for c in result['checks']])
         previous = saved(pipeline, monitor)
         earlier = [r for r in previous if r['pipeline_run_id'] < pipeline_run.id]
+        quiet = silenced(pipeline, monitor)
         turned = result['result'] == 'fail' and (
             not earlier or earlier[-1].get('result') != 'fail'
         )
@@ -630,9 +677,10 @@ def check_block_run(pipeline, block_uuid: str, pipeline_run, block_run_id: int) 
             partition=pipeline_run.execution_partition,
             engines={name: dict(reports=o.get('reports') or [], error=o.get('error'))
                      for name, o in engines.items()},
-            should_notify=result['result'] == 'fail' and (
+            should_notify=result['result'] == 'fail' and not quiet and (
                 monitor.notify is True or (monitor.notify == 'on_change' and turned)
             ),
+            silenced_until=(quiet or {}).get('until'),
             checked_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
             result=result['result'],
             checks=result['checks'],

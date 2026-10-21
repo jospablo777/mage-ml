@@ -52,3 +52,38 @@ class MonitorResourceTest(AsyncDBTestCase):
         ).execute())['monitor']
         rows = [next(c for c in h['checks'] if c['check'] == 'rows') for h in detail['history']]
         self.assertEqual([(c['value'], c['result']) for c in rows], [(100, 'pass'), (10, 'fail')])
+
+    async def test_an_editor_silences_a_monitor_and_a_viewer_cannot(self):
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        block = Block.create(f'{pipeline.uuid}_load', 'data_loader', self.repo_path,
+                             pipeline=pipeline)
+        Path(block.file_path).write_text(textwrap.dedent(LOAD))
+        folder = Path(self.repo_path, 'monitors')
+        folder.mkdir(exist_ok=True)
+        path = folder / f'{pipeline.uuid}.yaml'
+        path.write_text(f'pipeline: {pipeline.uuid}\nblock: {block.uuid}\n')
+        self.addCleanup(path.unlink)
+        owner = create_user(_owner=True)
+
+        updated = (await BaseOperation(
+            action=OperationType.UPDATE, pk=pipeline.uuid, resource='monitors', user=owner,
+            payload=dict(monitor=dict(silence=dict(hours=2, reason='known outage'))),
+        ).execute())['monitor']
+        self.assertEqual(updated['silence']['reason'], 'known outage')
+        detail = (await BaseOperation(
+            action=OperationType.DETAIL, pk=pipeline.uuid, resource='monitors', user=owner,
+        ).execute())['monitor']
+        self.assertEqual(detail['silence']['until'], updated['silence']['until'])
+
+        # A user who is no editor is refused.
+        refused = await BaseOperation(
+            action=OperationType.UPDATE, pk=pipeline.uuid, resource='monitors',
+            user=create_user(), payload=dict(monitor=dict(silence=None)),
+        ).execute()
+        self.assertEqual(refused['error']['code'], 403)
+
+        cleared = (await BaseOperation(
+            action=OperationType.UPDATE, pk=pipeline.uuid, resource='monitors', user=owner,
+            payload=dict(monitor=dict(silence=None)),
+        ).execute())['monitor']
+        self.assertIsNone(cleared['silence'])

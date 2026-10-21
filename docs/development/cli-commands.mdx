@@ -28,6 +28,7 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`release-promote`](#release-promote) | Evaluate a model version and move the release alias to it |
 | [`release-rollback`](#release-rollback) | Give the release alias back to the previous version |
 | [`monitor-status`](#monitor-status) | Show a monitor's checks for the latest pipeline runs |
+| [`monitor-silence`](#monitor-silence) | Silence a monitor's notifications for a while |
 | [`verify-fusion`](#verify-fusion) | Run a pipeline block by block and fused, and compare the outputs |
 | [`r setup`, `r init`, `r sync`, `r status`](#r-blocks) | Manage the rv environment that R blocks run in |
 | [`rust init`, `rust build`, `rust status`](#rust-blocks) | Manage the Cargo workspace that Rust blocks build in |
@@ -338,6 +339,16 @@ mage monitor-status <project_path> <monitor> [--runs 10]
 ```
 
 ---
+
+#### `monitor-silence`
+
+Silence a monitor's notifications for a while, a known failure being worked on. Its checks still run and `fail_block` still fails the block.
+
+**Usage:**
+```bash
+mage monitor-silence <project_path> <monitor> --hours 6 [--reason "..."]
+mage monitor-silence <project_path> <monitor> --clear
+```
 
 ## Block fusion
 

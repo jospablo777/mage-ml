@@ -335,6 +335,32 @@ class MonitorFlowTest(DBTestCase):
         self.assertEqual([r['result'] for r in history][-2:], ['pass', 'fail'])
         self.assertEqual(history[-1]['baseline_run_id'], run.id)
 
+    def test_a_silenced_monitor_checks_without_notifying(self):
+        self.set_monitor()
+        received = self.slack_webhook()
+        newest = datetime.now(timezone.utc).isoformat()
+        self.run_pipeline(seed=1, newest=newest)
+        definition = monitors.load_monitor(self.pipeline.uuid, self.repo_path)
+        entry = monitors.silence(self.pipeline, definition, 6, 'migrating the source')
+        self.assertEqual(monitors.silenced(self.pipeline, definition)['reason'],
+                         'migrating the source')
+
+        _, quiet = self.run_pipeline(seed=2, shift=2, newest=newest)
+        record = quiet.metrics['monitors'][0]
+        self.assertEqual(record['result'], 'fail')
+        self.assertFalse(record['should_notify'])
+        self.assertEqual(record['silenced_until'], entry['until'])
+        self.assertEqual(received, [])
+
+        monitors.silence(self.pipeline, definition, None)
+        self.assertIsNone(monitors.silenced(self.pipeline, definition))
+        # Back to the first data: it drifts from the shifted run before it.
+        _, loud = self.run_pipeline(seed=3, newest=newest)
+        self.assertTrue(loud.metrics['monitors'][0]['should_notify'])
+        self.assertEqual(len(received), 1)
+        with self.assertRaises(monitors.MonitorError):
+            monitors.silence(self.pipeline, definition, 0)
+
     def test_each_segment_is_compared_with_its_baseline(self):
         self.set_monitor('segments: {column: segment, top: 5}\n')
         self.run_pipeline(seed=1)

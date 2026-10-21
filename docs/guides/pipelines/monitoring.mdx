@@ -169,6 +169,11 @@ A failed monitor sends the pipeline's notifications (Slack, email, Teams and the
 set in its notification settings), unless `notify: false`. With `fail_block: true` it
 also fails the block run, so downstream blocks don't run.
 
+While a known failure is worked on, silence the monitor: **Silence for a day** on its page
+(with a reason), or `mage monitor-silence <project> <monitor> --hours 6 --reason "..."`
+(at most 720 hours; `--clear` ends it). The checks still run and `fail_block` still fails
+the block; only the notifications stop, and each run's record says until when.
+
 ### Segments
 
 With `segments`, each of the column's most frequent values in the run gets the

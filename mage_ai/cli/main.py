@@ -782,6 +782,39 @@ def monitor_status(
         typer.echo(f'Pipeline run {record["pipeline_run_id"]}: ' + monitors.summary(record))
 
 
+@app.command('monitor-silence')
+def monitor_silence(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    monitor: str = typer.Argument(..., help='name of the monitor (monitors/<name>.yaml).'),
+    hours: Union[float, None] = typer.Option(
+        None, help='how long its notifications stop, at most 720 hours.',
+    ),
+    reason: str = typer.Option('', help='why, shown with the silence.'),
+    clear: bool = typer.Option(False, '--clear', help='end the silence now.'),
+):
+    """
+    Silence a monitor's notifications for a while, a known failure being worked on. Its
+    checks still run and fail_block still fails the block.
+    """
+    from mage_ai.orchestration import monitors
+
+    project_path = os.path.abspath(project_path)
+    if clear == (hours is not None):
+        print('[red]Pass --hours or --clear.[/red]')
+        raise typer.Exit(code=2)
+    try:
+        definition = monitors.load_monitor(monitor, project_path)
+        pipeline = _run_records_setup(project_path, definition.pipeline)
+        entry = monitors.silence(pipeline, definition, None if clear else hours, reason)
+    except monitors.MonitorError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    if entry is None:
+        typer.echo(f'Monitor {monitor} notifies again.')
+    else:
+        typer.echo(f'Monitor {monitor} is silenced until {entry["until"]}.')
+
+
 @app.command('verify-fusion')
 def verify_fusion(
     project_path: str = typer.Argument(..., help='path of the MageML project.'),

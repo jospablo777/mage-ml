@@ -60,6 +60,10 @@
   column's most frequent values, against the baseline's rows of that value: a drift in one
   country that the totals hide fails its own check. MageML and services compute them the
   same way; `/metrics` labels them with `segment`.
+- A monitor can be silenced for a while (up to 30 days, with a reason): **Silence for a day**
+  on its page, `mage monitor-silence`, or `PUT /api/monitors/<name>`. Its checks still run
+  and `fail_block` still fails the block; only its notifications stop. The Monitors page
+  also tells segment checks apart, which the API had dropped.
 - `mage-console` shows a pipeline's monitors: how many fail, each one's recent results as a
   strip, and the first check that did not pass. `/v1/snapshot` carries them, and the
   results of earlier runs show after the service restarts.

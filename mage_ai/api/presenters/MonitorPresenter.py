@@ -12,4 +12,5 @@ class MonitorPresenter(BasePresenter):
         'name',
         'pipeline_uuid',
         'runs',
+        'silence',
     ]
