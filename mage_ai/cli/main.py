@@ -506,6 +506,44 @@ def contract_check(
         raise typer.Exit(code=1)
 
 
+@app.command('contract-compat')
+def contract_compat(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    name: str = typer.Argument(..., help='name of the contract (contracts/<name>.yaml).'),
+    base: str = typer.Option(
+        'HEAD', help='the git revision to compare with, such as origin/master in CI.',
+    ),
+):
+    """
+    Compare a contract with its version at a git revision: the changes, which ones break
+    what readers rely on, and whether the version number fits. Exits with 1 when a
+    breaking change keeps the major version or a change keeps the version, 2 when the
+    comparison cannot run.
+    """
+    from mage_ai.data_preparation import contracts
+
+    try:
+        result = contracts.compatibility(name, os.path.abspath(project_path), base=base)
+    except contracts.ContractError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    if result.get('new'):
+        typer.echo(f'Contract {name} is new since {base}.')
+        return
+    if not result['changes']:
+        typer.echo(f'Contract {name} has not changed since {base}.')
+        return
+    typer.echo(
+        f"Contract {name}: {result['old_version'] or 'no version'} at {base}, "
+        f"{result['new_version'] or 'no version'} now."
+    )
+    for change in result['changes']:
+        typer.echo(f"- {'breaking' if change['breaking'] else 'compatible'}: {change['message']}")
+    if result['problem']:
+        print(f"[red]{_e(result['problem'].capitalize())}.[/red]")
+        raise typer.Exit(code=1)
+
+
 def _run_records_setup(project_path: str, pipeline_uuid: str):
     from mage_ai.settings.repo import set_repo_path
 

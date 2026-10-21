@@ -162,8 +162,13 @@ def _json_safe(value: Any) -> Any:
 
 def load_contract(name: str, repo_path: str) -> Dict:
     path = contract_path(name, repo_path)
+    return parse_contract(name, path.read_text(), path.name)
+
+
+def parse_contract(name: str, text: str, file_name: str) -> Dict:
+    """A contract file's text as the engine takes it, checked by the engine."""
     try:
-        document = yaml.safe_load(path.read_text()) or {}
+        document = yaml.safe_load(text) or {}
     except yaml.YAMLError as error:
         raise ContractError(f'Contract {name} is not valid YAML: {error}')
     if not isinstance(document, dict):
@@ -171,7 +176,7 @@ def load_contract(name: str, repo_path: str) -> Dict:
     declared = document.get('name')
     if declared is not None and str(declared) != name:
         raise ContractError(
-            f'The file {path.name} names the contract {declared}; rename the file or the '
+            f'The file {file_name} names the contract {declared}; rename the file or the '
             'contract so they match.'
         )
     contract = dict(document, name=name, columns=_columns(name, document.get('columns')))
@@ -187,6 +192,44 @@ def load_contract(name: str, repo_path: str) -> Dict:
     except ValueError as error:
         raise ContractError(f'Contract {name}: {error}')
     return contract
+
+
+def compatibility(name: str, repo_path: str, base: str = 'HEAD') -> Dict:
+    """
+    The changes to a contract since the git revision base (HEAD: the last commit), each
+    marked breaking when it weakens what readers can rely on, and whether the new version
+    number fits them: a breaking change needs a new major version, any change a new
+    version. A contract that base does not have is new, with nothing to compare.
+    """
+    import subprocess
+
+    import column_atlas_native
+
+    path = contract_path(name, repo_path)
+    try:
+        top = subprocess.run(
+            ['git', '-C', str(path.parent), 'rev-parse', '--show-toplevel'],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        raise ContractError(f'{path.parent} is not in a git repository to compare with.')
+    relative = path.resolve().relative_to(Path(top).resolve()).as_posix()
+    shown = subprocess.run(
+        ['git', '-C', top, 'show', f'{base}:{relative}'], capture_output=True, text=True,
+    )
+    current = load_contract(name, repo_path)
+    if shown.returncode != 0:
+        if 'exists on disk, but not in' in shown.stderr or 'does not exist in' in shown.stderr:
+            return dict(contract=name, old_version=None, new_version=current.get('version'),
+                        changes=[], problem=None, new=True)
+        raise ContractError(f'git could not read {relative} at {base}: {shown.stderr.strip()}')
+    previous = parse_contract(name, shown.stdout, f'{relative} at {base}')
+    try:
+        return json.loads(column_atlas_native.contract_compatibility(
+            json.dumps(previous), json.dumps(current),
+        ))
+    except ValueError as error:
+        raise ContractError(f'Contract {name}: {error}')
 
 
 def list_contracts(repo_path: str) -> List[Dict]:

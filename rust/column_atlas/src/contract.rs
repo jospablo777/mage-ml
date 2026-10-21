@@ -34,3 +34,12 @@ pub fn validate(path: &str, contract: &str, examples: usize) -> Result<Report, A
 pub fn infer(path: &str, name: &str) -> Result<Value, AtlasError> {
     Ok(mage_checks::contract::infer(path, name)?)
 }
+
+/// The differences between two versions of a contract and whether the new version number
+/// fits them.
+pub fn compatibility(
+    old: &str,
+    new: &str,
+) -> Result<mage_checks::contract::Compatibility, AtlasError> {
+    Ok(mage_checks::contract::compatibility(old, new)?)
+}

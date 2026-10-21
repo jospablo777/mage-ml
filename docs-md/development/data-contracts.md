@@ -71,8 +71,6 @@ parsing: unknown fields are errors, so a typo such as `nulable` isn't silently i
 
 1. **Dynamic blocks**: each child is checked with its own output (by its index, as Mage
    stores it), but the block settings show only the parent's notebook report.
-2. **No compatibility check in CI** between two versions of a contract. A block's version
-   pin catches a major bump at run time.
-3. **No contracts page.** Contracts are edited as files; the block settings pick one and
+2. **No contracts page.** Contracts are edited as files; the block settings pick one and
    draft one.
-4. **Nested values** (list and struct contents) have type rules only.
+3. **Nested values** (list and struct contents) have type rules only.

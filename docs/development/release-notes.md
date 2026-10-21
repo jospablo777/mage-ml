@@ -220,6 +220,10 @@
 
 ### Data contracts
 
+- `mage contract-compat <project> <name> --base <revision>` compares a contract with its
+  version at a git revision: each change, breaking when it weakens what readers rely on,
+  and whether the version number fits (a breaking change needs a new major version). It
+  exits with 1 otherwise, for CI.
 - A contract on a dynamic block's children failed every child with "output_0 is dict": the
   check looked the child's output up by its uuid, while Mage stores it by the child's
   index. Each child is now checked with its own output.

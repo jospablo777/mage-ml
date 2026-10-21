@@ -13,7 +13,7 @@ import yaml
 from mage_ai.data_preparation import contracts
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.pipeline import Pipeline
-from mage_ai.tests.base_test import DBTestCase
+from mage_ai.tests.base_test import DBTestCase, TestCase
 
 CONTRACT = '''
 version: 1.2.0
@@ -354,3 +354,74 @@ class DataContractTest(DBTestCase):
 
         self.assertIn('broke contract customer_scores', str(error), printed)
         self.assertIn('score has values above the max 1 (2 of 3 rows)', printed)
+
+
+class ContractCompatibilityTest(TestCase):
+    """mage contract-compat: a contract against its version at a git revision."""
+
+    def setUp(self):
+        import subprocess
+        import tempfile
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.project = Path(directory.name) / 'shop'
+        (self.project / 'contracts').mkdir(parents=True)
+        self.git = lambda *args: subprocess.run(
+            ['git', '-C', str(self.project), *args], check=True, capture_output=True,
+        )
+        self.git('init', '-q')
+        self.git('config', 'user.email', 'tests@example.com')
+        self.git('config', 'user.name', 'tests')
+        self.write('1.2.0', 'score: {type: float, min: 0, max: 1}')
+        self.git('add', '.')
+        self.git('commit', '-q', '-m', 'contract')
+
+    def write(self, version, score):
+        (self.project / 'contracts' / 'scores.yaml').write_text(
+            f'version: {version}\ncolumns:\n  id: {{type: integer, nullable: false}}\n'
+            f'  {score}\n'
+        )
+
+    def compat(self, *extra):
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        return CliRunner().invoke(app, ['contract-compat', str(self.project), 'scores', *extra])
+
+    def test_a_breaking_change_needs_a_new_major_version(self):
+        unchanged = self.compat()
+        self.assertEqual(unchanged.exit_code, 0, unchanged.output)
+        self.assertIn('has not changed since HEAD', unchanged.output)
+
+        self.write('1.3.0', 'score: {type: float, min: -1, max: 1}')
+        widened = self.compat()
+        self.assertEqual(widened.exit_code, 1, widened.output)
+        self.assertIn('- breaking: the min of score changed from 0 to -1', widened.output)
+        self.assertIn('needs a new major version', widened.output)
+
+        self.write('2.0.0', 'score: {type: float, min: -1, max: 1}')
+        self.assertEqual(self.compat().exit_code, 0)
+
+        self.write('1.2.1', 'score: {type: float, min: 0, max: 0.9}')
+        tightened = self.compat()
+        self.assertEqual(tightened.exit_code, 0, tightened.output)
+        self.assertIn('- compatible: the max of score changed from 1 to 0.9', tightened.output)
+
+        self.write('1.2.0', 'score: {type: float, min: 0, max: 0.9}')
+        kept = self.compat()
+        self.assertEqual(kept.exit_code, 1, kept.output)
+        self.assertIn('its version is still 1.2.0', kept.output)
+
+    def test_a_new_contract_and_a_missing_revision(self):
+        (self.project / 'contracts' / 'fresh.yaml').write_text('columns: {id: integer}\n')
+        from typer.testing import CliRunner
+
+        from mage_ai.cli.main import app
+
+        fresh = CliRunner().invoke(app, ['contract-compat', str(self.project), 'fresh'])
+        self.assertEqual(fresh.exit_code, 0, fresh.output)
+        self.assertIn('is new since HEAD', fresh.output)
+        missing = self.compat('--base', 'no-such-branch')
+        self.assertEqual(missing.exit_code, 2, missing.output)

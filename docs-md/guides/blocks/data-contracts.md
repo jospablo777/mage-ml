@@ -93,6 +93,24 @@ With `version: '1'`, the block fails with a message as soon as the contract move
 2.0.0. Bump the major version when a change can break the blocks that read the data, and
 update each block's setting after you check it.
 
+`mage contract-compat` says which changes break readers. It compares a contract with its
+version at a git revision; a change that weakens a guarantee (a column removed or
+retyped, missing values allowed, a wider range or more allowed values, a unique key
+dropped) is breaking and needs a new major version, and any change needs a new version:
+
+```bash
+mage contract-compat . customer_scores --base origin/master
+```
+
+```text
+Contract customer_scores: 1.2.0 at origin/master, 1.3.0 now.
+- breaking: segment allows new values: churned
+- compatible: column region was added, optional
+A breaking change needs a new major version; 1.2.0 to 1.3.0 keeps major 1.
+```
+
+It exits with 1 then, so a pull request's CI can run it for each contract that changed.
+
 Contracts apply to pandas and Polars DataFrame outputs of data loaders, transformers, data
 exporters and custom blocks, in Python, R, SQL and Rust.
 

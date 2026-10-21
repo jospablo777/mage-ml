@@ -107,6 +107,13 @@ fn infer_contract(py: Python<'_>, path: String, name: String) -> PyResult<String
     json(&draft)
 }
 
+/// The changes (JSON) between two versions of a contract, and whether the new version
+/// number fits them.
+#[pyfunction]
+fn contract_compatibility(old: String, new: String) -> PyResult<String> {
+    json(&crate::contract::compatibility(&old, &new).map_err(to_python)?)
+}
+
 /// Column profiles of a Parquet file (JSON), for monitoring: missing values, bin counts
 /// of numeric columns, frequent values, temporal ranges.
 #[pyfunction]
@@ -274,6 +281,7 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(validate_contract, module)?)?;
     module.add_function(wrap_pyfunction!(infer_contract, module)?)?;
     module.add_function(wrap_pyfunction!(check_contract, module)?)?;
+    module.add_function(wrap_pyfunction!(contract_compatibility, module)?)?;
     module.add_function(wrap_pyfunction!(profile_columns, module)?)?;
     module.add_function(wrap_pyfunction!(compare_profiles, module)?)?;
     module.add_function(wrap_pyfunction!(merge_monitor_records, module)?)?;

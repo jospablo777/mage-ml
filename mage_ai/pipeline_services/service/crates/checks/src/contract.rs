@@ -718,6 +718,332 @@ pub fn infer(path: &str, name: &str) -> Result<Value, AtlasError> {
     })
 }
 
+/// One difference between two versions of a contract. Breaking changes weaken what readers
+/// of the data can rely on; the others keep or tighten it.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Change {
+    pub breaking: bool,
+    pub column: Option<String>,
+    pub message: String,
+}
+
+/// How a new version of a contract relates to the old one, and whether its version number
+/// says so: a breaking change needs a new major version, any change a new version.
+#[derive(Debug, Serialize)]
+pub struct Compatibility {
+    pub contract: String,
+    pub old_version: Option<String>,
+    pub new_version: Option<String>,
+    pub changes: Vec<Change>,
+    /// Why the version number does not fit the changes; None when it does.
+    pub problem: Option<String>,
+}
+
+fn major(version: &Option<String>) -> Option<u64> {
+    version.as_deref()?.split('.').next()?.trim().parse().ok()
+}
+
+fn ordered(old: &Value, new: &Value) -> Option<std::cmp::Ordering> {
+    match (old, new) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64()?.partial_cmp(&b.as_f64()?),
+        (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
+        _ => None,
+    }
+}
+
+fn shown(value: &Option<Value>) -> String {
+    match value {
+        None => "none".into(),
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => other.to_string(),
+    }
+}
+
+/// The differences between two versions of a contract, each JSON as MageML loads it, and
+/// whether the new version number fits them.
+pub fn compatibility(old: &str, new: &str) -> Result<Compatibility, AtlasError> {
+    let old = Contract::parse(old)?;
+    let new = Contract::parse(new)?;
+    let mut changes = Vec::new();
+    let mut change = |breaking: bool, column: Option<&str>, message: String| {
+        changes.push(Change {
+            breaking,
+            column: column.map(str::to_string),
+            message,
+        });
+    };
+    let columns: std::collections::HashMap<&str, &ColumnRule> =
+        new.columns.iter().map(|c| (c.name.as_str(), c)).collect();
+    for before in &old.columns {
+        let name = before.name.as_str();
+        let Some(after) = columns.get(name) else {
+            change(
+                before.required,
+                Some(name),
+                format!(
+                    "column {name} was removed{}",
+                    if before.required {
+                        ""
+                    } else {
+                        "; it was optional"
+                    }
+                ),
+            );
+            continue;
+        };
+        if before.dtype != after.dtype {
+            change(
+                true,
+                Some(name),
+                format!(
+                    "the type of {name} changed from {} to {}",
+                    before.dtype.as_deref().unwrap_or("any"),
+                    after.dtype.as_deref().unwrap_or("any")
+                ),
+            );
+        }
+        if before.required != after.required {
+            change(
+                before.required,
+                Some(name),
+                format!(
+                    "{name} is {} required",
+                    if after.required { "now" } else { "no longer" }
+                ),
+            );
+        }
+        if before.nullable != after.nullable {
+            change(
+                after.nullable,
+                Some(name),
+                format!(
+                    "{name} {} missing values",
+                    if after.nullable {
+                        "now allows"
+                    } else {
+                        "no longer allows"
+                    }
+                ),
+            );
+        }
+        if before.unique != after.unique {
+            change(
+                before.unique,
+                Some(name),
+                format!(
+                    "{name} values are {} unique",
+                    if after.unique { "now" } else { "no longer" }
+                ),
+            );
+        }
+        for (rule, lower) in [("min", true), ("max", false)] {
+            let (was, is) = if lower {
+                (&before.min, &after.min)
+            } else {
+                (&before.max, &after.max)
+            };
+            if was == is {
+                continue;
+            }
+            // Wider is breaking: a lower min, a higher max, or the bound gone.
+            let breaking = match (was, is) {
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (Some(a), Some(b)) => match ordered(a, b) {
+                    Some(order) => {
+                        if lower {
+                            order == std::cmp::Ordering::Greater
+                        } else {
+                            order == std::cmp::Ordering::Less
+                        }
+                    }
+                    None => true,
+                },
+                (None, None) => false,
+            };
+            change(
+                breaking,
+                Some(name),
+                format!(
+                    "the {rule} of {name} changed from {} to {}",
+                    shown(was),
+                    shown(is)
+                ),
+            );
+        }
+        if before.values != after.values {
+            let breaking = match (&before.values, &after.values) {
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (Some(was), Some(is)) => is.iter().any(|v| !was.contains(v)),
+                (None, None) => false,
+            };
+            let message = match (&before.values, &after.values) {
+                (Some(was), Some(is)) => {
+                    let added: Vec<String> = is
+                        .iter()
+                        .filter(|v| !was.contains(v))
+                        .map(|v| shown(&Some(v.clone())))
+                        .collect();
+                    if added.is_empty() {
+                        format!("{name} allows fewer values")
+                    } else {
+                        format!("{name} allows new values: {}", added.join(", "))
+                    }
+                }
+                (Some(_), None) => format!("{name} allows any value"),
+                _ => format!("{name} allows only listed values"),
+            };
+            change(breaking, Some(name), message);
+        }
+        for (rule, was, is, lower) in [
+            ("min_length", before.min_length, after.min_length, true),
+            ("max_length", before.max_length, after.max_length, false),
+        ] {
+            if was == is {
+                continue;
+            }
+            let breaking = match (was, is) {
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (Some(a), Some(b)) => {
+                    if lower {
+                        b < a
+                    } else {
+                        b > a
+                    }
+                }
+                (None, None) => false,
+            };
+            change(
+                breaking,
+                Some(name),
+                format!(
+                    "the {rule} of {name} changed from {} to {}",
+                    was.map_or("none".into(), |v| v.to_string()),
+                    is.map_or("none".into(), |v| v.to_string())
+                ),
+            );
+        }
+        if before.pattern != after.pattern {
+            change(
+                before.pattern.is_some(),
+                Some(name),
+                format!(
+                    "the pattern of {name} changed from {} to {}",
+                    before.pattern.as_deref().unwrap_or("none"),
+                    after.pattern.as_deref().unwrap_or("none")
+                ),
+            );
+        }
+    }
+    let previous: std::collections::HashSet<&str> =
+        old.columns.iter().map(|c| c.name.as_str()).collect();
+    for added in new
+        .columns
+        .iter()
+        .filter(|c| !previous.contains(c.name.as_str()))
+    {
+        change(
+            false,
+            Some(&added.name),
+            format!(
+                "column {} was added{}",
+                added.name,
+                if added.required { "" } else { ", optional" }
+            ),
+        );
+    }
+    if old.unique != new.unique {
+        // A key that is a superset of the old one guarantees less.
+        let breaking = !old.unique.is_empty()
+            && (new.unique.is_empty() || !new.unique.iter().all(|c| old.unique.contains(c)));
+        change(
+            breaking,
+            None,
+            format!(
+                "the unique key changed from [{}] to [{}]",
+                old.unique.join(", "),
+                new.unique.join(", ")
+            ),
+        );
+    }
+    if old.extra_columns != new.extra_columns {
+        change(
+            new.extra_columns == ExtraColumns::Allow,
+            None,
+            format!(
+                "extra columns are {}",
+                if new.extra_columns == ExtraColumns::Allow {
+                    "now allowed"
+                } else {
+                    "no longer allowed"
+                }
+            ),
+        );
+    }
+    for (rule, was, is, lower) in [
+        ("min_rows", old.min_rows, new.min_rows, true),
+        ("max_rows", old.max_rows, new.max_rows, false),
+    ] {
+        if was == is {
+            continue;
+        }
+        let breaking = match (was, is) {
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (Some(a), Some(b)) => {
+                if lower {
+                    b < a
+                } else {
+                    b > a
+                }
+            }
+            (None, None) => false,
+        };
+        change(
+            breaking,
+            None,
+            format!(
+                "{rule} changed from {} to {}",
+                was.map_or("none".into(), |v| v.to_string()),
+                is.map_or("none".into(), |v| v.to_string())
+            ),
+        );
+    }
+
+    let breaking = changes.iter().any(|c| c.breaking);
+    let problem = if changes.is_empty() {
+        None
+    } else if old.version == new.version {
+        Some(format!(
+            "the contract changed but its version is still {}; {}",
+            new.version.as_deref().unwrap_or("unset"),
+            if breaking {
+                "a breaking change needs a new major version"
+            } else {
+                "give it a new version"
+            }
+        ))
+    } else if breaking && major(&old.version) == major(&new.version) {
+        Some(format!(
+            "a breaking change needs a new major version; {} to {} keeps major {}",
+            old.version.as_deref().unwrap_or("unset"),
+            new.version.as_deref().unwrap_or("unset"),
+            major(&new.version).map_or("unset".into(), |m| m.to_string())
+        ))
+    } else {
+        None
+    };
+    Ok(Compatibility {
+        contract: new.name,
+        old_version: old.version,
+        new_version: new.version,
+        changes,
+        problem,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,5 +1255,95 @@ mod tests {
             json!({"name": "score", "type": "float", "nullable": true})
         );
         assert_eq!(columns[4]["type"], "date");
+    }
+
+    #[test]
+    fn breaking_changes_need_a_new_major_version() {
+        let old = json!({"name": "scores", "version": "1.2.0", "columns": [
+            {"name": "id", "type": "integer", "nullable": false, "unique": true},
+            {"name": "score", "type": "float", "min": 0, "max": 1},
+            {"name": "segment", "type": "string", "values": ["new", "active"]},
+        ], "unique": ["id"]});
+        let tightened = json!({"name": "scores", "version": "1.3.0", "columns": [
+            {"name": "id", "type": "integer", "nullable": false, "unique": true},
+            {"name": "score", "type": "float", "min": 0, "max": 0.9},
+            {"name": "segment", "type": "string", "values": ["new"]},
+            {"name": "region", "type": "string", "required": false},
+        ], "unique": ["id"]});
+        let result = compatibility(&old.to_string(), &tightened.to_string()).unwrap();
+        assert!(
+            result.changes.iter().all(|c| !c.breaking),
+            "{:?}",
+            result.changes
+        );
+        assert_eq!(result.problem, None);
+
+        let widened = json!({"name": "scores", "version": "1.3.0", "columns": [
+            {"name": "id", "type": "integer", "unique": true},
+            {"name": "score", "type": "float", "min": -1, "max": 1},
+            {"name": "segment", "type": "string", "values": ["new", "active", "churned"]},
+        ]});
+        let result = compatibility(&old.to_string(), &widened.to_string()).unwrap();
+        let breaking: Vec<&str> = result
+            .changes
+            .iter()
+            .filter(|c| c.breaking)
+            .map(|c| c.message.as_str())
+            .collect();
+        assert!(
+            breaking.contains(&"id now allows missing values"),
+            "{breaking:?}"
+        );
+        assert!(
+            breaking.contains(&"the min of score changed from 0 to -1"),
+            "{breaking:?}"
+        );
+        assert!(
+            breaking.contains(&"segment allows new values: churned"),
+            "{breaking:?}"
+        );
+        assert!(
+            breaking.contains(&"the unique key changed from [id] to []"),
+            "{breaking:?}"
+        );
+        assert!(
+            result
+                .problem
+                .unwrap()
+                .contains("needs a new major version")
+        );
+
+        let bumped = json!({"name": "scores", "version": "2.0.0", "columns": [
+            {"name": "id", "type": "string"},
+        ]});
+        let result = compatibility(&old.to_string(), &bumped.to_string()).unwrap();
+        assert!(
+            result
+                .changes
+                .iter()
+                .any(|c| c.message == "column score was removed")
+        );
+        assert!(
+            result
+                .changes
+                .iter()
+                .any(|c| c.message == "the type of id changed from integer to string")
+        );
+        assert_eq!(result.problem, None);
+
+        let same_version = json!({"name": "scores", "version": "1.2.0", "columns": [
+            {"name": "id", "type": "integer", "nullable": false, "unique": true},
+            {"name": "score", "type": "float", "min": 0, "max": 1},
+            {"name": "segment", "type": "string", "values": ["new"]},
+        ], "unique": ["id"]});
+        let result = compatibility(&old.to_string(), &same_version.to_string()).unwrap();
+        assert!(
+            result
+                .problem
+                .unwrap()
+                .contains("its version is still 1.2.0")
+        );
+        let unchanged = compatibility(&old.to_string(), &old.to_string()).unwrap();
+        assert!(unchanged.changes.is_empty() && unchanged.problem.is_none());
     }
 }

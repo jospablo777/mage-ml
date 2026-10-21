@@ -18,6 +18,7 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`create-spark-cluster`](#create-spark-cluster) | Create an EMR cluster from the project's EMR config |
 | [`contract-draft`](#contract-draft) | Draft a data contract from a block's stored output |
 | [`contract-check`](#contract-check) | Check a block's stored output against its data contract |
+| [`contract-compat`](#contract-compat) | Compare a contract with its version at a git revision |
 | [`run-diff`](#run-diff) | Compare what two runs of a pipeline ran with |
 | [`reproduce`](#reproduce) | Run a pipeline run again with its recorded code and compare the outputs |
 | [`release-status`](#release-status) | Show a model's release policy, alias holder and release log |
@@ -249,6 +250,18 @@ Check a block's stored output against its data contract. Exits with 1 when the o
 ```bash
 mage contract-check <project_path> <pipeline_uuid> <block_uuid> [--partition <execution_partition>]
 ```
+
+#### `contract-compat`
+
+Compare a contract with its version at a git revision: each change, marked breaking when it weakens what readers of the data rely on, and whether the version number fits. Exits with 1 when a breaking change keeps the major version or a change keeps the version, 2 when the comparison cannot run.
+
+**Usage:**
+```bash
+mage contract-compat <project_path> <name> [--base <git_revision>]
+```
+
+**Options:**
+- `--base` (optional): The revision to compare with (default: `HEAD`, the last commit); `origin/master` in a pull request's CI
 
 ---
 
