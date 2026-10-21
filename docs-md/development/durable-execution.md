@@ -58,10 +58,11 @@ So the implementation adds attempts to block runs instead of a new queue.
 2. **Stale outputs.** Outputs are stored per partition and block without an attempt, so a
    superseded worker can still overwrite the files of a newer attempt before its status
    write is rejected.
-3. **Locks are not leases.** The scheduler's per-run Redis lock is now held for a tick and
-   released after it (60 s expiry for a holder that died), but it is not renewed, so a
-   tick longer than a minute allows a second replica in; without `REDIS_URL` replicas
-   share no job ownership at all.
+3. **Without `REDIS_URL`, replicas share no job ownership.** The scheduler's per-run Redis
+   lock is a lease (`DistributedLock.held`): held for a tick, renewed every third of its
+   60 s expiry while the tick runs, released after it; the expiry only frees the lock of a
+   holder that died. A holder that stalls past the expiry (a paused process) logs that it
+   lost the lock, and a second replica can act meanwhile.
 4. **Integration pipelines and Kubernetes.** Stream jobs (whose running jobs the scheduler
    now finds, after a job id mismatch) and Kubernetes block runs write
    status on other paths that are not fenced yet.

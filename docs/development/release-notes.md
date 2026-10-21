@@ -218,6 +218,11 @@
   no schema, as if it were in the block's schema; it is in the profile's default schema,
   and is now named there.
 
+### Scheduler
+
+- The per-run scheduler lock in Redis is renewed while a tick runs. It expired after 60
+  seconds, so a longer tick let a second replica act on the same pipeline run.
+
 ### Command line runs
 
 - `mage run` records its run when it ends: a pipeline run of the pipeline's "Command

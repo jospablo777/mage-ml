@@ -22,11 +22,15 @@ class FakeRedisClient:
         self.values[key] = value
         return True
 
-    def eval(self, script, numkeys, key, value):
-        if self.values.get(key) == value:
-            del self.values[key]
+    def eval(self, script, numkeys, key, value, *args):
+        if self.values.get(key) != value:
+            return 0
+        if 'expire' in script:
+            self.renewals = getattr(self, 'renewals', 0) + 1
+            self.expiry = args[0]
             return 1
-        return 0
+        del self.values[key]
+        return 1
 
 
 class DistributedLockTest(unittest.TestCase):
@@ -108,10 +112,6 @@ class DistributedLockTest(unittest.TestCase):
         self.assertFalse(lock.try_acquire_lock('pipeline_schedule_1'))
         self.assertEqual(client.set_calls, 1)
 
-
-if __name__ == '__main__':
-    unittest.main()
-
     def test_keys_are_namespaced_by_the_metadata_database(self):
         """Deployments that share a Redis server took each other's locks."""
         client = FakeRedisClient()
@@ -121,3 +121,47 @@ if __name__ == '__main__':
         with patch('mage_ai.orchestration.db.db_connection_url', 'postgresql://a/two'):
             self.assertTrue(lock.try_acquire_lock('pipeline_schedule_1'))
         self.assertEqual(len(client.values), 2)
+
+    def test_a_held_lock_is_renewed_while_the_work_runs_and_released_after(self):
+        import time
+
+        client = FakeRedisClient()
+        lock = self.build_lock(client)
+        other = self.build_lock(client)
+
+        with lock.held('pipeline_run_1', timeout=1) as acquired:
+            self.assertTrue(acquired)
+            time.sleep(1.2)
+            # Another replica is kept out past the first expiry.
+            self.assertFalse(other.try_acquire_lock('pipeline_run_1'))
+
+        self.assertGreaterEqual(client.renewals, 2)
+        self.assertEqual(client.expiry, 1)
+        self.assertTrue(other.try_acquire_lock('pipeline_run_1'))
+
+    def test_a_held_lock_that_is_taken_or_lost_says_so(self):
+        import time
+
+        client = FakeRedisClient()
+        lock = self.build_lock(client)
+        other = self.build_lock(client)
+        self.assertTrue(other.try_acquire_lock('pipeline_run_2'))
+        with lock.held('pipeline_run_2', timeout=1) as acquired:
+            self.assertFalse(acquired)
+        other.release_lock('pipeline_run_2')
+
+        with self.assertLogs('mage_ai.orchestration.utils.distributed_lock', 'WARNING') as logs:
+            with lock.held('pipeline_run_2', timeout=1) as acquired:
+                self.assertTrue(acquired)
+                client.values.clear()  # expired while the holder stalled
+                time.sleep(0.5)
+        self.assertIn('was lost while held', '\n'.join(logs.output))
+
+    def test_a_held_lock_without_redis_is_granted(self):
+        lock = DistributedLock(redis_url='')
+        with lock.held('pipeline_run_3') as acquired:
+            self.assertTrue(acquired)
+
+
+if __name__ == '__main__':
+    unittest.main()

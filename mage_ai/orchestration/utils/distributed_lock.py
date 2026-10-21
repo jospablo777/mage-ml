@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import os
 import threading
@@ -25,6 +26,13 @@ REDIS_RECONNECT_INTERVAL = _int_from_env('REDIS_LOCK_RECONNECT_INTERVAL', 10)
 RELEASE_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
     return redis.call('del', KEYS[1])
+end
+return 0
+"""
+# Extends the key's expiry only while the caller still holds it.
+RENEW_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
 end
 return 0
 """
@@ -112,6 +120,63 @@ class DistributedLock:
             self.__tokens[key] = token
 
         return True
+
+    def renew_lock(self, key, timeout: int = None) -> bool:
+        """Extends a held lock's expiry; False when this holder lost it."""
+        if not self.coordination_required:
+            return True
+
+        with self.__tokens_lock:
+            token = self.__tokens.get(key)
+
+        client = self.__client()
+        if token is None or client is None:
+            return False
+
+        try:
+            renewed = client.eval(
+                RENEW_SCRIPT, 1, self.__lock_key(key), token, int(timeout or self.lock_timeout),
+            )
+        except Exception as error:
+            self.__drop_client(error)
+            return False
+        return bool(renewed)
+
+    @contextlib.contextmanager
+    def held(self, key, timeout: int = None):
+        """
+        Holds the lock for the block's work, a lease: renewed every third of its expiry
+        while the work runs, so a long tick keeps it, and expiring only when the holder
+        died. Yields whether it was acquired. A lock that expired during the work (a
+        holder stalled past its expiry) is logged; the work is not stopped.
+        """
+        timeout = int(timeout or self.lock_timeout)
+        if not self.try_acquire_lock(key, timeout=timeout):
+            yield False
+            return
+        if not self.coordination_required:
+            try:
+                yield True
+            finally:
+                self.release_lock(key)
+            return
+
+        stop = threading.Event()
+
+        def renew():
+            while not stop.wait(max(timeout / 3, 0.05)):
+                if not self.renew_lock(key, timeout):
+                    logger.warning('Lock %s was lost while held; another holder may act.', key)
+                    return
+
+        thread = threading.Thread(target=renew, name=f'lock-{key}', daemon=True)
+        thread.start()
+        try:
+            yield True
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+            self.release_lock(key)
 
     def release_lock(self, key) -> None:
         if not self.coordination_required:

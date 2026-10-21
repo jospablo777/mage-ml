@@ -236,17 +236,14 @@ class PipelineScheduler:
 
     @safe_db_query
     def schedule(self, block_runs: List[BlockRun] = None) -> None:
-        # Held for the tick and released after it. It used to expire after 10 seconds
-        # without a release, which skipped every tick in between, also the one a finished
-        # job wakes the scheduler for, and let another replica in during a longer tick.
-        # The expiry only frees the lock of a process that died holding it.
+        # Held for the tick and released after it, renewed while the tick runs: it used to
+        # expire after 10 seconds without a release, which skipped every tick in between,
+        # and a tick longer than its expiry let another replica in. The expiry only frees
+        # the lock of a process that died holding it.
         key = f'pipeline_run_{self.pipeline_run.id}'
-        if not lock.try_acquire_lock(key, timeout=SCHEDULE_LOCK_SECONDS):
-            return
-        try:
-            self.__schedule(block_runs)
-        finally:
-            lock.release_lock(key)
+        with lock.held(key, timeout=SCHEDULE_LOCK_SECONDS) as acquired:
+            if acquired:
+                self.__schedule(block_runs)
 
     def __schedule(self, block_runs: List[BlockRun] = None) -> None:
         self.__run_heartbeat()

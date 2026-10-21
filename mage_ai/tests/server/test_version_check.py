@@ -172,10 +172,6 @@ class UpdateCheckSettingTests(unittest.TestCase):
                     self.assertFalse(update_check_enabled())
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class ClientSessionTests(unittest.TestCase):
     def test_sessions_use_proxy_settings_and_a_short_timeout(self):
         """Sign-in and update checks ignored HTTPS_PROXY (upstream #5748)."""
@@ -186,3 +182,6 @@ class ClientSessionTests(unittest.TestCase):
                 return session.trust_env, session.timeout.total
 
         self.assertEqual(run(make()), (True, 30))
+
+if __name__ == '__main__':
+    unittest.main()

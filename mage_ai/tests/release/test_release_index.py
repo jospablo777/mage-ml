@@ -295,10 +295,6 @@ class ReleaseIndexTests(unittest.TestCase):
             index.load_previous(path, REPOSITORY)
 
 
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
-
-
 class EngineWheelTests(unittest.TestCase):
     def test_engine_wheels_are_a_known_project(self) -> None:
         """The mageml-engine wheels (ADR-0017) were refused as an unexpected project."""
@@ -309,3 +305,6 @@ class EngineWheelTests(unittest.TestCase):
             project, version, tags, _ = index.wheel_identity(filename)
             self.assertEqual((project, version), ('mageml-engine', '0.1.0'))
             self.assertEqual(len(tags), 1)
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
