@@ -4,7 +4,9 @@ resource called without its parent, and members that did not load.
 """
 from mage_ai.api.operations.base import BaseOperation
 from mage_ai.api.operations.constants import OperationType
-from mage_ai.api.resources.ConfigurationOptionResource import ConfigurationOptionResource
+from mage_ai.api.resources.ConfigurationOptionResource import (
+    ConfigurationOptionResource,
+)
 from mage_ai.api.resources.OauthAccessTokenResource import OauthAccessTokenResource
 from mage_ai.orchestration.db.models.oauth import Oauth2AccessToken, Oauth2Application
 from mage_ai.tests.base_test import AsyncDBTestCase

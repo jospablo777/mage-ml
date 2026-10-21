@@ -160,7 +160,7 @@ jobs:
         run: cargo fmt --all --check
       # librdkafka (the kafka feature) includes curl's header for its OAuth support.
       - name: Libraries the Kafka connector builds against
-        run: sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list && sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
       - name: Pipeline service clippy
         working-directory: mage_ai/pipeline_services/service
         # --all-features includes the Kafka connector (librdkafka, built with cmake).
@@ -220,7 +220,7 @@ jobs:
       # The engine (mageml-engine) builds librdkafka with CMake, which includes curl's
       # header for its OAuth support.
       - name: Install the engine's build libraries
-        run: sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list && sudo apt-get update -q && sudo apt-get install -y -q cmake libcurl4-openssl-dev
       - name: Build sdist and wheel
         run: uv build --all-packages
 
@@ -370,6 +370,7 @@ jobs:
           names = [e if isinstance(e, str) else e["name"] for e in entries]
           print(" ".join(names))' > /tmp/r-sysdeps
           if [ -s /tmp/r-sysdeps ]; then
+            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
             sudo apt-get update
             sudo apt-get install -y $(cat /tmp/r-sysdeps)
           fi
@@ -383,6 +384,7 @@ jobs:
       - name: Build the engine with its stream connectors
         if: matrix.id == 'streaming' || matrix.id == 'sql'
         run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
           sudo apt-get update -q
           sudo apt-get install -y -q cmake libcurl4-openssl-dev
           cd mage_ai/pipeline_services/service
@@ -593,6 +595,7 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: ${{ env.pythonLocation }}
         run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
           sudo apt-get update
           sudo apt-get install -y freetds-dev unixodbc-dev libmagic1 libkrb5-dev
           uv sync --locked --group dev --extra all --extra integrations \
