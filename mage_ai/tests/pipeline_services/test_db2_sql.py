@@ -140,7 +140,9 @@ class Db2SqlTest(ExportTestCase):
             b.uuid: manager.get_variable(pipeline.uuid, b.uuid, 'output_0') for b in blocks
         }
 
-        manifest = export.capture(self.repo_path, [self.pipeline.uuid]).manifest
+        # Whether or not ibm_db is installed where the tests run.
+        with unittest.mock.patch.object(export, '_client_missing', return_value=False):
+            manifest = export.capture(self.repo_path, [self.pipeline.uuid]).manifest
         entries = {b['uuid']: b for b in manifest['pipelines'][0]['blocks']}
         service = DuckDb2()
         outputs = {}

@@ -80,10 +80,10 @@ class CliContractTest(unittest.TestCase):
         self.assertEqual(
             self.command_names,
             ['init', 'start', 'run', 'clean-cached-variables', 'clean-old-logs',
-             'create-spark-cluster', 'contract-draft', 'contract-check', 'run-diff',
-             'reproduce', 'reproduce-run', 'release-status', 'release-promote',
-             'release-rollback', 'monitor-status', 'verify-fusion', 'r', 'rust', 'examples',
-             'export', 'service'],
+             'create-spark-cluster', 'contract-draft', 'contract-check', 'contract-compat',
+             'run-diff', 'reproduce', 'reproduce-run', 'release-status', 'release-promote',
+             'release-rollback', 'monitor-status', 'monitor-silence', 'verify-fusion', 'r',
+             'rust', 'examples', 'export', 'service'],
         )
 
     def test_rust_commands(self):
