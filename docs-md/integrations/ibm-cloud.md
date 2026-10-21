@@ -321,7 +321,9 @@ templates (`mage_ai.io.db2.Db2` in code).
   `MERGE` statements. Db2 requires the columns of a unique constraint to be `NOT NULL`, so they
   are created that way.
 - **SQL blocks** write their upstream outputs as tables in `DB2_SCHEMA`, which the connection
-  sets as the current schema, so blocks name them without a schema. They run the same way in
+  sets as the current schema, so blocks name them without a schema. An upstream Db2 SQL
+  block's own table is named with the schema it sets, and a block's schema is where its own
+  table goes. They run the same way in
   exported services, whose image then builds for `linux/amd64` only: `mage export` sets the
   platform in the manifest, the README's commands and the GitHub workflow, and the
   Dockerfile stops an arm64 build with the reason.

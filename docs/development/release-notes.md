@@ -186,6 +186,11 @@
   Redshift, whose blocks keep at most `limit_in_pipeline_run` rows, it could cut the table to
   those rows. One profile now always reads its own tables, and a setting unset in both
   profiles counts as the same.
+- A Db2 SQL block whose schema was not the profile's wrote its upstream tables to its
+  schema and its own table there, then read both from the profile's schema, and failed or
+  read another table. Upstream tables now go to the profile's schema, named alone; an
+  upstream Db2 SQL block's table is named with its schema; the block's own table is read
+  back from its schema.
 
 ### Command line runs
 

@@ -1,5 +1,10 @@
-"""SQL blocks on IBM Db2. Upstream outputs become tables in the profile's schema, which the
-connection sets as current, so blocks name them without a schema."""
+"""
+SQL blocks on IBM Db2. Upstream outputs become tables in the profile's schema, which the
+connection sets as current, so blocks name them without a schema; an upstream Db2 SQL
+block's own table is named with the schema it set. A block's schema is where its own table
+goes. Both went to the block's schema and were read from the current one, so a block whose
+schema was not the profile's failed (I-269).
+"""
 from typing import Any, Dict, List
 
 from mage_ai.data_preparation.models.block import Block
@@ -30,7 +35,7 @@ def create_upstream_block_tables(
         loader,
         block,
         cascade_on_drop,
-        configuration,
+        without_schema(configuration if configuration else block.configuration),
         execution_partition,
         cache_upstream_dbt_models,
         cache_keys=[
@@ -48,6 +53,22 @@ def create_upstream_block_tables(
     )
 
 
+def without_schema(configuration: Dict) -> Dict:
+    """The block's configuration as its upstream tables see it: in the current schema."""
+    return {k: v for k, v in (configuration or {}).items() if k != 'data_provider_schema'}
+
+
+class _InCurrentSchema:
+    """The block, with its upstream tables named as they were written."""
+
+    def __init__(self, block):
+        self._block = block
+        self.configuration = without_schema(block.configuration)
+
+    def __getattr__(self, name):
+        return getattr(self._block, name)
+
+
 def interpolate_input_data(
     block,
     query: str,
@@ -55,9 +76,9 @@ def interpolate_input_data(
     dynamic_upstream_block_uuids: List[str] = None,
 ):
     return interpolate_input(
-        block,
+        _InCurrentSchema(block),
         query,
-        lambda db, schema, tn: tn,
+        lambda db, schema, tn: f'{schema}.{tn}' if schema else tn,
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
     )

@@ -335,13 +335,14 @@ def upload_upstream_tables(
 def interpolate_input(
     loader, configuration: Dict, upstreams: List[Dict], query: str, full_names: bool = True,
     quote_database: bool = True, table_suffix: Optional[str] = None, written: Dict = None,
-    default_schema: bool = True, name=None,
+    default_schema: bool = True, name=None, default_database: bool = True,
 ) -> str:
     """
     {{ df_N }} becomes the upstream table's name, as Mage's interpolate_input. With
     table_suffix, the tables in written are named with it. Without default_schema, a name
     with no schema configured has none (Mage's BigQuery branch). name(database, schema,
-    table) writes the name, as Mage's replace_func.
+    table) writes the name, as Mage's replace_func. Without default_database, a name with no
+    database configured has none (Mage's Db2 branch).
     """
     helpers = statements()
     for index, upstream in enumerate(upstreams):
@@ -370,7 +371,7 @@ def interpolate_input(
             config_to_use = config if same_providers else configuration
             database = database or config_to_use.get('data_provider_database')
             schema = schema or config_to_use.get('data_provider_schema')
-            if not database:
+            if not database and default_database:
                 database = loader.default_database()
                 if quote_database and name is None:
                     database = f'"{database}"'
@@ -543,17 +544,28 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
                                  io_config, variables, schema, table, limit, options)
     with loader:
         if name == 'db2':
+            # Upstream tables in the current schema, named alone; an upstream Db2 SQL
+            # block's table with the schema it set; the block's table in its schema (I-269).
+            in_current_schema = {
+                k: v for k, v in configuration.items() if k != 'data_provider_schema'
+            }
             upload_upstream_tables(
-                loader, configuration, upstreams, inputs, query, io_config, provider,
+                loader, in_current_schema, upstreams, inputs, query, io_config, provider,
             )
             raw_content = query
-            query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
+            query = interpolate_input(
+                loader, in_current_schema, upstreams, query, default_schema=False,
+                default_database=False, name=lambda db, sc, tn: f'{sc}.{tn}' if sc else tn,
+            )
             schema = schema or loader.default_schema()
             query = render(query, variables)
             if configuration.get('use_raw_sql'):
                 return _execute_raw_sql_on_db2(loader, query, raw_content, configuration, limit)
             loader.export(None, schema, table, query_string=query, **options)
-            return [loader.load(f'SELECT * FROM {table}', limit=limit, verbose=False)]
+            return [loader.load(
+                f'SELECT * FROM {loader._full_table_name(schema, table)}', limit=limit,
+                verbose=False,
+            )]
         if name == 'redshift':
             # Mage's Redshift branch: names database.schema.table, the database unquoted.
             upload_upstream_tables(

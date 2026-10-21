@@ -64,6 +64,9 @@ class DuckDb2:
     def default_schema(self) -> str:
         return 'shop'
 
+    def _full_table_name(self, schema_name, table_name):
+        return f'{schema_name}.{table_name}' if schema_name else table_name
+
     def export(self, df, schema_name=None, table_name=None, query_string=None,
                if_exists='append', **kwargs):
         self.calls.append(('export', schema_name, table_name, if_exists, df is not None,
@@ -203,3 +206,28 @@ class Db2SqlTest(ExportTestCase):
         readme = (out / 'README.md').read_text()
         self.assertIn('--platform linux/amd64 -t', readme)
         self.assertNotIn('linux/arm64', readme)
+
+    def test_a_block_with_its_own_schema_reads_its_upstream_and_its_table_there(self):
+        """
+        A block whose schema is not the profile's wrote its upstream table to its schema and
+        its own table there, then read both from the current schema (I-269).
+        """
+        orders = self.add('orders', 'data_loader', ORDERS)
+        totals = self.sql_block('totals', TOTALS, [orders], data_provider_schema='reports')
+        top = self.sql_block('top', TOP, [totals])
+
+        mage, mage_outputs, service, outputs = self.run_both(
+            [orders, totals, top], dict(min_amount=5),
+        )
+
+        self.assertEqual(service.calls, mage.calls)
+        self.assertEqual(mage_outputs[totals.uuid]['region'].tolist(),
+                         ['east', 'north', 'south'])
+        written = [c for c in mage.calls if c[0] == 'export' and not c[4]]
+        self.assertEqual(written[0][1], 'reports')
+        self.assertEqual(mage_outputs[top.uuid]['region'].tolist(), ['north'])
+        for block in (totals, top):
+            pd.testing.assert_frame_equal(
+                outputs[block.uuid].reset_index(drop=True),
+                mage_outputs[block.uuid].reset_index(drop=True),
+            )

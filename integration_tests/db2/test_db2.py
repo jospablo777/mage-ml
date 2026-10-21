@@ -179,3 +179,54 @@ def test_an_exported_service_runs_the_db2_sql_blocks_as_mageml(mage_project, db2
     run_exported(mage_project, pipeline, tmp_path)
 
     assert rows(connection, query) == expected == [(2, 40, 'Bern'), (3, 60, 'Basel')]
+
+
+def test_a_sql_block_with_its_own_schema_reads_its_upstream_and_writes_there(
+    mage_project, db2_schema, tmp_path,
+):
+    """Its upstream table went to its schema and was read from the current one (I-269)."""
+    from integration_tests.exported_services import run_exported
+
+    schema, connection = db2_schema
+    reports = f'{schema}_R'
+    pipeline = build(mage_project, [
+        dict(uuid='load', type='data_loader', code='''
+            import pandas as pd
+
+
+            @data_loader
+            def load(*args, **kwargs):
+                return pd.DataFrame({'id': [1, 2, 3], 'amount': [10, 20, 30]})
+        '''),
+        dict(
+            uuid='big', type='transformer', language='sql', upstream=['load'],
+            config=dict(DB2, data_provider_schema=reports, export_write_policy='replace'),
+            code='SELECT id, amount * 2 AS doubled FROM {{ df_1 }} WHERE amount > 10',
+        ),
+        dict(
+            uuid='top', type='transformer', language='sql', upstream=['big'],
+            config=dict(DB2, export_write_policy='replace'),
+            code='SELECT MAX(doubled) AS top FROM {{ df_1 }}',
+        ),
+    ])
+    try:
+        run = execute_pipeline(pipeline)
+        assert run.status.value == 'completed', error_of(run)
+        assert sorted(output(pipeline, run, 'big')['doubled'].tolist()) == [40, 60]
+        assert output(pipeline, run, 'top')['top'].tolist() == [60]
+        big_table = f'{pipeline}_big_{pipeline.split("_")[-1]}'
+        assert rows(connection, f'SELECT COUNT(*) FROM {reports}.{big_table}_v1') == [(2,)]
+
+        run_exported(mage_project, pipeline, tmp_path)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = ? AND TYPE = 'T'",
+                (reports,),
+            )
+            for (table,) in cursor.fetchall():
+                cursor.execute(f'DROP TABLE "{reports}"."{table}"')
+            cursor.execute('SELECT 1 FROM SYSCAT.SCHEMATA WHERE SCHEMANAME = ?', (reports,))
+            if cursor.fetchone():
+                cursor.execute(f'DROP SCHEMA "{reports}" RESTRICT')
+        connection.commit()
