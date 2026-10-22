@@ -20,7 +20,6 @@ from mage_ai.settings import (
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.hash import merge_dict
 
-
 # What a caller who has not signed in reads, when authentication is on.
 PUBLIC_KEYS = ('require_user_authentication', 'require_user_permissions')
 

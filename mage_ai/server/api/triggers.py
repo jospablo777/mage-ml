@@ -14,7 +14,6 @@ from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.errors import UnauthenticatedRequestException
 from mage_ai.shared.requests import get_bearer_auth_token_from_headers
 
-
 # What an API trigger's caller may set on the run it starts.
 RUN_KEYS = ('variables', 'execution_date')
 
