@@ -72,6 +72,8 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- The editor kernel's event stream (`/event-streams/<uuid>`) needs a signed-in editor; it
+  answered anyone who could reach the server.
 - Downloading a block's output, its statistics and a pipeline's documentation files need
   read access to the pipeline; any signed-in user could read them.
 - `POST /api/runs/<token>` runs blocks of the token's trigger's pipeline only; any trigger's

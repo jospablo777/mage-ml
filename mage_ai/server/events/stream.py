@@ -9,7 +9,7 @@ import simplejson
 from mage_ai.kernels.magic.constants import EventStreamType
 from mage_ai.kernels.magic.models import EventStream
 from mage_ai.kernels.magic.queues.manager import get_execution_result_queue_async
-from mage_ai.server.api.base import BaseHandler
+from mage_ai.server.api.base import BaseHandler, EditorMixin
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.queues import Empty
 from mage_ai.shared.queues import Queue as FasterQueue
@@ -17,7 +17,15 @@ from mage_ai.shared.queues import Queue as FasterQueue
 SLEEP_SECONDS = 0.1
 
 
-class EventStreamHandler(BaseHandler):
+class EventStreamHandler(EditorMixin, BaseHandler):
+    """
+    Execution results of the editor's kernel, as server-sent events. It answered anyone who
+    could reach the server, with the output of the code run under the uuid; with
+    authentication on, an editor only.
+    """
+
+    editors_only_read = True
+
     active_connections = defaultdict(list)
     consecutive_sleep_count = defaultdict(int)
 

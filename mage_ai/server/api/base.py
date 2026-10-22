@@ -211,13 +211,16 @@ class EditorMixin(SignedInMixin):
     delete event matchers.
     """
 
+    # Reads too, where what is read is code output.
+    editors_only_read = False
+
     def prepare(self):
         from mage_ai import settings
 
         super().prepare()
         if self._finished or not settings.REQUIRE_USER_AUTHENTICATION:
             return
-        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS') and not self.editors_only_read:
             return
         from mage_ai.api.utils import has_at_least_editor_role
         from mage_ai.data_preparation.repo_manager import get_project_uuid

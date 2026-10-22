@@ -1,3 +1,4 @@
+import { OAUTH2_APPLICATION_CLIENT_ID } from '@api/constants';
 import { queryString } from '@utils/url';
 
 export const DEFAULT_HOST: string = 'localhost';
@@ -92,7 +93,8 @@ export function getEventStreamsUrl(uuid?: string): string {
   if (windowDefined && window.location.protocol?.match(/https/)) {
     prefix = 'https://';
   }
-  return `${prefix}${host}/event-streams/${uuid || ''}`;
+  // EventSource sends no headers: the API key goes in the query, the session in its cookie.
+  return `${prefix}${host}/event-streams/${uuid || ''}?api_key=${OAUTH2_APPLICATION_CLIENT_ID}`;
 }
 
 export function buildUrl(

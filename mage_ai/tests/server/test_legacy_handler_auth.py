@@ -118,3 +118,39 @@ class LegacyHandlerAuthTest(AsyncHTTPTestCase, DBTestCase):
             response = self.fetch('/api/pipelines/orders/blocks/load_orders/analyses')
         self.assertEqual(response.code, 403)
         self.assertNotIn(b'analyses', response.body)
+
+
+class EventStreamAuthTest(AsyncHTTPTestCase, DBTestCase):
+    """The editor kernel's execution results answered anyone who could reach the server."""
+
+    def setUp(self):
+        DBTestCase.setUp(self)
+        AsyncHTTPTestCase.setUp(self)
+        for target in ('mage_ai.settings.REQUIRE_USER_AUTHENTICATION',
+                       'mage_ai.api.middleware.REQUIRE_USER_AUTHENTICATION',
+                       'mage_ai.api.utils.REQUIRE_USER_AUTHENTICATION'):
+            patcher = patch(target, True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def get_app(self):
+        from mage_ai.server.events.stream import EventStreamHandler
+
+        return Application([(r'/event-streams/(?P<uuid>[\w\-\%2f\.]+)', EventStreamHandler)])
+
+    def test_only_an_editor_reads_the_stream(self):
+        from mage_ai.api.middleware import OAuthMiddleware
+        from mage_ai.orchestration.db.models.oauth import Role
+        from mage_ai.tests.factory import create_user
+
+        self.assertEqual(self.fetch('/event-streams/abc').code, 401)
+
+        Role.create_default_roles()
+        viewer = create_user(roles_new=[Role.get_role('Viewer')])
+
+        def prepare(handler):
+            handler.request.current_user = viewer
+            handler.request.error = None
+
+        with patch.object(OAuthMiddleware, 'prepare', prepare):
+            self.assertEqual(self.fetch('/event-streams/abc').code, 403)
