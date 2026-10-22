@@ -39,6 +39,8 @@ pub struct Service {
     pub data_dir: PathBuf,
     pub ledger: Ledger,
     pub python: Option<Arc<PythonPool>>,
+    /// The manifest's Python workers' pools, by alias: blocks with `python_worker` run there.
+    pub python_workers: BTreeMap<String, Arc<PythonPool>>,
     pub schedules_enabled: bool,
     pub environment: String,
     pub started_at: chrono::DateTime<Utc>,
@@ -177,6 +179,7 @@ impl Service {
         config: Config,
         ledger: Ledger,
         python: Option<Arc<PythonPool>>,
+        python_workers: BTreeMap<String, Arc<PythonPool>>,
     ) -> Arc<Service> {
         let alerts = manifest
             .alerts
@@ -189,6 +192,7 @@ impl Service {
             data_dir: config.data_dir,
             ledger,
             python,
+            python_workers,
             schedules_enabled: config.schedules_enabled,
             environment: config.environment,
             started_at: Utc::now(),
@@ -253,6 +257,17 @@ impl Service {
                      failed; only this instance serves it: {error}"
                 ));
             }
+        }
+    }
+
+    /// The pool a block runs in: its Python worker's, or the image's own Python.
+    pub fn python_for(
+        &self,
+        block: &mage_service_core::manifest::Block,
+    ) -> Option<&Arc<PythonPool>> {
+        match &block.python_worker {
+            Some(alias) => self.python_workers.get(alias),
+            None => self.python.as_ref(),
         }
     }
 

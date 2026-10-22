@@ -303,7 +303,7 @@ jobs:
           - id: pipelines
             name: "MageML: compiled and polyglot pipelines"
             services: postgres mysql minio api
-            tests: integration_tests/chains integration_tests/checks integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/benchmark/test_resident_rust_latency.py integration_tests/r
+            tests: integration_tests/chains integration_tests/checks integration_tests/workers integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/benchmark/test_resident_rust_latency.py integration_tests/r
             r: true
             # This group saves the shared Rust blocks cache: DuckDB (18 minutes of C++) is
             # warmed here so the SQL group finds it built.

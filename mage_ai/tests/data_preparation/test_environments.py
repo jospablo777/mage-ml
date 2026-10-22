@@ -4,6 +4,7 @@ packages its requirements file lists. Builds with uv, from its cache when it has
 packages; skipped where uv is not installed.
 """
 import asyncio
+import importlib.metadata
 import shutil
 import sys
 import tempfile
@@ -424,20 +425,49 @@ class NamedWorkerTest(DBTestCase):
         with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'has no uv.lock'):
             environments.prepare(worker, log=lambda line: None)
 
-    def test_an_export_takes_the_worker_its_blocks_share_and_refuses_a_mixture(self):
+    def test_an_export_takes_the_worker_its_blocks_share(self):
         from mage_ai.pipeline_services import export
 
         self.worker()
         shared, _, _ = self.pipeline(environment=dict(worker='legacy'))
         captured = export.capture(self.repo_path, [shared.uuid])
         self.assertEqual(captured.requirements['six'], '1.16.0')
+        self.assertNotIn('python_workers', captured.manifest)
 
+    def test_an_export_of_blocks_in_several_workers_builds_each_into_the_image(self):
+        from mage_ai.pipeline_services import export
+
+        self.worker()
         mixed, load, transform = self.pipeline(load_worker='legacy')
+        captured = export.capture(self.repo_path, [mixed.uuid])
+        # The transformer selects no worker: the image's Python has MageML's packages.
+        self.assertEqual(captured.requirements['six'], importlib.metadata.version('six'))
+        self.assertEqual(captured.manifest['python_workers'],
+                         {'legacy': 'workers/legacy/.venv/bin/python'})
+        blocks = {b['uuid']: b for b in captured.manifest['pipelines'][0]['blocks']}
+        self.assertEqual(blocks[load].get('python_worker'), 'legacy')
+        self.assertNotIn('python_worker', blocks[transform])
+
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        with patch.object(export, '_write_python_lock'):
+            export.write(captured, str(out), force=True)
+        self.assertTrue((out / 'workers' / 'legacy' / 'uv.lock').is_file())
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('COPY workers/legacy/ /srv/mage-service/workers/legacy/', dockerfile)
+        self.assertIn('uv sync --locked --no-dev', dockerfile)
+
+    def test_an_extra_worker_needs_a_lock_and_the_images_python(self):
+        from mage_ai.pipeline_services import export
+
+        folder = self.worker(name='other', lock=False)
+        (folder / '.python-version').write_text('3.11\n')
+        mixed, load, _ = self.pipeline(load_worker='other')
         with self.assertRaises(export.ExportError) as caught:
             export.capture(self.repo_path, [mixed.uuid])
         problems = '\n'.join(caught.exception.problems)
-        self.assertIn('run in different Python workers', problems)
-        self.assertIn(f'{load} (legacy), {transform} (MageML)', problems)
+        self.assertIn('Python worker other has no uv.lock', problems)
+        self.assertIn('Python worker other uses Python 3.11', problems)
 
 
 class WorkersCommandTest(unittest.TestCase):

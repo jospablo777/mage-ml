@@ -728,7 +728,7 @@ async fn start_service(
         let cpus = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(2);
-        Some(PythonPool::new(PythonConfig {
+        Some(PythonConfig {
             executable: common.python.clone(),
             worker_script: worker,
             project_dir: common.dir.join(&manifest.service.project),
@@ -774,10 +774,32 @@ async fn start_service(
             .into_iter()
             .chain(extra_env.iter().cloned())
             .collect(),
-        }))
+        })
     } else {
         None
     };
+    // Each Python worker of the manifest is a pool of its own interpreter (its virtual
+    // environment in the image), started when one of its blocks first runs.
+    let python_workers: std::collections::BTreeMap<_, _> = match &python {
+        Some(config) => manifest
+            .python_workers
+            .iter()
+            .map(|(alias, executable)| {
+                let executable = if std::path::Path::new(executable).is_absolute() {
+                    executable.clone()
+                } else {
+                    common.dir.join(executable).display().to_string()
+                };
+                let pool = PythonPool::new(PythonConfig {
+                    executable,
+                    ..config.clone()
+                });
+                (alias.clone(), pool)
+            })
+            .collect(),
+        None => Default::default(),
+    };
+    let python = python.map(PythonPool::new);
     let service = Service::new(
         manifest,
         Config {
@@ -791,6 +813,7 @@ async fn start_service(
         },
         ledger,
         python.clone(),
+        python_workers,
     );
     if let Some(python) = python {
         match warm {

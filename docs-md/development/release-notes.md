@@ -82,6 +82,11 @@
 
 ### Exported services
 
+- A service exports a pipeline whose blocks run in different Python workers: each worker
+  other than the image's own environment is a virtual environment in the image, built
+  from its `uv.lock`, and the engine runs each block in its worker (a Feast block on
+  pandas 2 next to pandas 3 blocks, for example). Such a pipeline was refused.
+
 - Instances that share a PostgreSQL run history all serve a run's log: its lines are kept
   in the run history (in batches every quarter second, and before the run's status), also
   after the instance that ran it is gone. They answered 409 with the other host. Block

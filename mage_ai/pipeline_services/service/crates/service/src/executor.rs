@@ -399,6 +399,7 @@ fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainK
                     _ => true,
                 };
             if chain_kind(next) != Some(kind)
+                || (kind == ChainKind::Worker && next.python_worker != block.python_worker)
                 || next.upstream.len() != 1
                 || !next.conditions.is_empty()
                 || next.contract.is_some()
@@ -601,11 +602,13 @@ impl BlockTask {
     async fn run_once(&self) -> Result<Ran, BlockFailure> {
         let timeout = self.block.timeout_seconds.map(Duration::from_secs);
         let pool = || {
-            self.service.python.as_ref().ok_or_else(|| {
-                BlockFailure::fatal(
-                    "this image has no Python runtime for Python, R and SQL blocks or for \
-                     conditional blocks",
-                )
+            self.service.python_for(&self.block).ok_or_else(|| {
+                BlockFailure::fatal(match &self.block.python_worker {
+                    Some(alias) => format!("this image has no Python worker {alias}"),
+                    None => "this image has no Python runtime for Python, R and SQL blocks or \
+                             for conditional blocks"
+                        .to_string(),
+                })
             })
         };
         match self.block.language {
@@ -1290,7 +1293,8 @@ impl ChainTask {
         timeout: Option<Duration>,
     ) -> Result<(Vec<Value>, Vec<ChainBlockResult>), (BlockFailure, Option<String>)> {
         let head = &self.blocks[0];
-        let pool = self.service.python.as_ref().ok_or_else(|| {
+        // A chain's blocks share their worker: chains split where it changes.
+        let pool = self.service.python_for(head).ok_or_else(|| {
             (
                 BlockFailure::fatal(
                     "this image has no Python runtime for Python, R and SQL blocks",

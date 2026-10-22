@@ -135,9 +135,12 @@ blocks:
 - Tables cross between a worker and MageML's Python as Arrow, so a worker that returns
   pandas frames needs pyarrow. A worker does not import MageML: blocks in it can't import
   `mage_ai` helpers unless the worker has their packages.
-- A service exports the worker when every Python block of its pipelines runs in it, with
-  the worker's locked packages in the image. Pipelines whose blocks run in different
-  workers are refused, with each block's worker named; export them as separate services.
+- A service exports the workers its blocks use. The blocks without a worker (or, when
+  every block has one, the worker most of them select) run in the image's Python, with
+  that environment's packages; each other worker becomes a virtual environment of its own
+  in the image, built from its `uv.lock`, and its blocks run there. Each worker needs a
+  `uv.lock` and the image's Python version. A chain of Python blocks splits where the
+  worker changes. Stream pipelines still need one worker for all their Python blocks.
 
 ## Pipeline services
 

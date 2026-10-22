@@ -34,6 +34,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,6 +110,10 @@ class Capture:
     r_project: Optional[Path] = None
     # The pipeline environment (metadata.yaml `environment`) the Python blocks run in.
     environment: Optional[Any] = None
+    # Python workers besides that environment, by alias: each a virtual environment in the
+    # image, for the blocks that select it (block_workers: (pipeline, block) -> alias).
+    extra_workers: Dict[str, Any] = field(default_factory=dict)
+    block_workers: Dict[Tuple[str, str], str] = field(default_factory=dict)
     # Modules that read the included model files (.cbm: catboost), for the requirements.
     artifact_modules: Set[str] = field(default_factory=set)
     # Stream source and sink YAML files: their settings are in the manifest and only the
@@ -241,13 +246,19 @@ def capture(
                                 max_concurrent_runs)
         if entry:
             pipelines.append(entry)
-        environments[uuid] = _pipeline_environment(pipeline, problems)
+        environments[uuid] = _pipeline_environment(pipeline, problems, capture_)
+    for entry in pipelines:
+        for block in entry.get('blocks') or []:
+            alias = capture_.block_workers.get((entry['uuid'], block['uuid']))
+            if alias:
+                block['python_worker'] = alias
     _check_after_runs(pipelines, notes, problems)
     for entry in pipelines:
         _check_integers(entry, problems)
     if problems:
         raise ExportError(problems)
     capture_.environment = _shared_environment(environments, problems)
+    _check_extra_workers(capture_, problems)
     if problems:
         raise ExportError(problems)
 
@@ -275,6 +286,11 @@ def capture(
         pipelines=pipelines,
     )
     capture_.manifest['environment'] = _environment(capture_)
+    if capture_.extra_workers:
+        capture_.manifest['python_workers'] = {
+            alias: f'workers/{alias}/.venv/bin/python'
+            for alias in sorted(capture_.extra_workers)
+        }
     if alerts:
         capture_.manifest['alerts'] = alerts
     if capture_.needs_r:
@@ -366,10 +382,13 @@ def _check_after_runs(entries: List[Dict], notes: List[str], problems: List[str]
             break
 
 
-def _pipeline_environment(pipeline, problems: List[str]):
+def _pipeline_environment(pipeline, problems: List[str], capture_: Capture = None):
     """
     The Python environment the pipeline's Python blocks run in: its Python worker when
-    they all select the same one, or its requirements environment; None for Mage's.
+    they all select the same one, or its requirements environment; None for Mage's. When
+    its blocks select several workers, the blocks without one (or, when all have one, the
+    worker most of them select) run in that environment, and each other worker becomes a
+    virtual environment of its own in the image (capture_.extra_workers).
     """
     from mage_ai.data_preparation import environments
 
@@ -385,26 +404,65 @@ def _pipeline_environment(pipeline, problems: List[str]):
         workers = {s for s in selections.values() if s not in (None, 'mage')}
         if not workers:
             return environments.pipeline_environment(pipeline)
-        if len(set(selections.values())) > 1:
+        named = environments.named_workers(pipeline.repo_path)
+        missing = sorted(alias for alias in workers if alias not in named)
+        for alias in missing:
+            problems.append(f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which '
+                            'does not exist.')
+        if missing:
+            return None
+        if len(set(selections.values())) == 1:
+            [alias] = workers
+            return named[alias]
+        streaming = str(getattr(pipeline.type, 'value', pipeline.type)) == 'streaming'
+        if streaming or capture_ is None:
             described = ', '.join(
                 f'{uuid} ({selected if selected not in (None, "mage") else "MageML"})'
                 for uuid, selected in selections.items()
             )
             problems.append(
-                f'The Python blocks of pipeline {pipeline.uuid} run in different Python '
-                f'workers and a service has one Python environment: {described}. Select one '
-                'worker for all of them, or export them as separate services.'
+                f'The Python blocks of stream {pipeline.uuid} run in different Python '
+                f'workers and a stream runs in one: {described}. Select one worker for all '
+                'of them.'
             )
             return None
-        [alias] = workers
-        worker = environments.named_workers(pipeline.repo_path).get(alias)
-        if worker is None:
-            problems.append(f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which '
-                            'does not exist.')
-        return worker
+        defaults = [uuid for uuid, selected in selections.items() if selected in (None, 'mage')]
+        if defaults:
+            primary_alias, primary = None, environments.pipeline_environment(pipeline)
+        else:
+            counts = Counter(selections.values())
+            primary_alias = sorted(counts, key=lambda alias: (-counts[alias], alias))[0]
+            primary = named[primary_alias]
+        for uuid, alias in selections.items():
+            if alias in (None, 'mage', primary_alias):
+                continue
+            capture_.block_workers[(pipeline.uuid, uuid)] = alias
+            capture_.extra_workers[alias] = named[alias]
+        return primary
     except environments.PipelineEnvironmentError as error:
         problems.append(str(error))
         return None
+
+
+def _check_extra_workers(capture_: Capture, problems: List[str]) -> None:
+    """
+    Each extra Python worker builds from its uv.lock on the image's Python: it needs a lock
+    and the same Python version.
+    """
+    image_python = (capture_.environment.python if capture_.environment is not None
+                    else f'{sys.version_info.major}.{sys.version_info.minor}')
+    for alias, worker in sorted(capture_.extra_workers.items()):
+        if not (Path(worker.definition) / 'uv.lock').is_file():
+            problems.append(
+                f'Python worker {alias} has no uv.lock: run uv lock in '
+                f'{worker.relative_definition()}; the image installs exactly what it locks.'
+            )
+        if worker.python != image_python:
+            problems.append(
+                f'Python worker {alias} uses Python {worker.python} and the image Python '
+                f'{image_python}; a service builds its workers on the image\'s Python. '
+                f'Set {worker.relative_definition()}/.python-version to {image_python}.'
+            )
 
 
 def _shared_environment(environments: Dict[str, Any], problems: List[str]):
@@ -460,6 +518,12 @@ def _apply_environment(capture_: Capture) -> None:
         f'The Python blocks run in the pipeline environment {environment.directory.name} '
         f'(Python {environment.python}); the image installs its packages.'
     )
+
+
+# Where the image keeps the virtual environments of extra Python workers: workers/<alias>/
+# in the service directory, beside the worker's pyproject.toml and uv.lock, so an export
+# runs with the engine outside a container too (uv sync in that folder).
+SERVICE_DIR = '/srv/mage-service'
 
 
 SQL_PROVIDERS = (
@@ -3024,6 +3088,11 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         dependencies += model_requirements
         dependencies += _project_requirements(capture_, set(capture_.requirements))
         _write_python_lock(capture_, out_dir, dependencies)
+    for alias, worker in sorted(capture_.extra_workers.items()):
+        target = out_dir / 'workers' / alias
+        target.mkdir(parents=True, exist_ok=True)
+        for name in ('pyproject.toml', 'uv.lock'):
+            shutil.copy2(Path(worker.definition) / name, target / name)
     if capture_.rust_blocks:
         _copy_rust_workspace(capture_, out_dir / 'rust')
     if capture_.r_project is not None:
@@ -3034,7 +3103,8 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     _copy_service_source(out_dir / 'build' / 'mage_service')
     (out_dir / 'Dockerfile').write_text(_dockerfile(capture_))
     (out_dir / '.dockerignore').write_text(
-        '**/__pycache__\n**/target\ndata/\n.tekton/\n.github/\n.git/\ndeploy/\n.env\n.env.*\n'
+        '**/__pycache__\n**/target\n**/.venv\ndata/\n.tekton/\n.github/\n.git/\ndeploy/\n.env\n'
+        '.env.*\n'
         'uv.env\n'
     )
     (out_dir / '.gitignore').write_text(
@@ -3779,6 +3849,27 @@ def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
     return False
 
 
+def _worker_installs(capture_: Capture, uv_version: str) -> str:
+    """The image's extra Python workers: each a virtual environment on the image's Python,
+    built from its uv.lock."""
+    steps = []
+    for alias in sorted(capture_.extra_workers):
+        steps.append(
+            f'# Python worker {alias}: the blocks that select it run in this environment.\n'
+            f'COPY workers/{alias}/ {SERVICE_DIR}/workers/{alias}/\n'
+            'RUN --mount=type=secret,id=uv-env,required=false \\\n'
+            f'    pip install uv=={uv_version} && \\\n'
+            f'    cd {SERVICE_DIR}/workers/{alias} && \\\n'
+            '    if [ -f /run/secrets/uv-env ]; then \\\n'
+            '      set -a; . /run/secrets/uv-env; set +a; fi && \\\n'
+            '    UV_PYTHON_DOWNLOADS=never uv venv .venv --python /usr/local/bin/python3 && \\\n'
+            '    uv sync --locked --no-dev --no-install-project --no-cache \\\n'
+            '      --compile-bytecode && \\\n'
+            '    pip uninstall -y uv\n'
+        )
+    return ''.join(steps)
+
+
 def _dockerfile(capture_: Capture) -> str:
     project = capture_.project.name
     uv_version = capture_.uv_version or UV_VERSION
@@ -3881,7 +3972,7 @@ RUN --mount=type=secret,id=uv-env,required=false \\
     UV_PROJECT_ENVIRONMENT=/usr/local uv sync --locked --no-dev --no-install-project \\
       --no-cache --compile-bytecode && \\
     pip uninstall -y uv && rm -rf /tmp/service-python
-{r_install}'''
+{_worker_installs(capture_, uv_version)}{r_install}'''
         python_env = (
             ' \\\n    PYTHONPATH=/srv/mage-service/python'
             ' \\\n    MAGE_SERVICE_PYTHON=python3'

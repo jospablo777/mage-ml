@@ -2035,3 +2035,96 @@ fn an_idle_service_stays_within_its_memory_budget() {
         IDLE_RSS_BUDGET_KIB / 1024
     );
 }
+
+const WORKER_FIRST: &str = "import os\n\n@data_loader\ndef first(*args, **kwargs):\n    return {'first': os.environ.get('MAGE_TEST_WORKER', 'image')}\n";
+const WORKER_MIDDLE: &str = "import os\n\n@transformer\ndef middle(data, *args, **kwargs):\n    return dict(data, middle=os.environ.get('MAGE_TEST_WORKER', 'image'))\n";
+const WORKER_LAST: &str = "import os\n\n@transformer\ndef last(data, *args, **kwargs):\n    return dict(data, last=os.environ.get('MAGE_TEST_WORKER', 'image'))\n";
+
+/// A pipeline whose middle block selects another Python worker: each block runs in its own
+/// interpreter, and the chain of three Python blocks splits where the worker changes.
+#[test]
+fn a_block_runs_in_the_python_worker_it_selects() {
+    let block = |uuid: &str, kind: &str, file: &str, upstream: &[&str]| {
+        json!({"uuid": uuid, "type": kind, "language": "python", "file": file, "sha256": "0",
+               "upstream": upstream})
+    };
+    let mut middle = block(
+        "middle",
+        "transformer",
+        "transformers/middle.py",
+        &["first"],
+    );
+    middle["python_worker"] = json!("other");
+    let manifest = json!({
+        "schema_version": 1,
+        "service": {"name": "workers", "project": "proj", "exported_at": "2026-10-21T00:00:00Z",
+                    "mage_version": "test", "source_sha256": "abc"},
+        "python_workers": {"other": "workers/other/python"},
+        "pipelines": [{
+            "uuid": "mixed", "name": "mixed", "max_concurrent_runs": 1,
+            "blocks": [block("first", "data_loader", "data_loaders/first.py", &[]), middle,
+                       block("last", "transformer", "transformers/last.py", &["middle"])],
+            "triggers": []
+        }]
+    });
+    let mut service = Service::with_manifest(
+        &manifest,
+        &[
+            ("data_loaders/first.py", WORKER_FIRST),
+            ("transformers/middle.py", WORKER_MIDDLE),
+            ("transformers/last.py", WORKER_LAST),
+        ],
+    );
+    // The worker's interpreter: the same Python, marked, as a virtual environment would be.
+    let interpreter = service.dir.path().join("workers/other/python");
+    std::fs::create_dir_all(interpreter.parent().unwrap()).unwrap();
+    std::fs::write(
+        &interpreter,
+        format!(
+            "#!/bin/sh\nMAGE_TEST_WORKER=other exec \"{}\" \"$@\"\n",
+            python()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &interpreter,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    service.start(&[]);
+
+    let (status, run) = service.post("/v1/pipelines/mixed/runs?wait=60", json!({}));
+    assert_eq!(
+        (status, run["status"].clone()),
+        (201, json!("completed")),
+        "{run}"
+    );
+    let id = run["id"].as_str().unwrap();
+    let (_, output) = service.get(&format!("/v1/runs/{id}/output?block=last"));
+    assert_eq!(
+        output,
+        json!({"first": "image", "middle": "other", "last": "image"})
+    );
+
+    // A worker the manifest does not have is refused before the service starts.
+    service.signal("-TERM");
+    let mut broken = manifest.clone();
+    broken["python_workers"] = json!({});
+    std::fs::write(service.dir.path().join("service.json"), broken.to_string()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mage-service"))
+        .arg("serve")
+        .env("MAGE_SERVICE_DIR", service.dir.path())
+        .env("MAGE_SERVICE_PYTHON", python())
+        .env("MAGE_SERVICE_WORKER", worker())
+        .env("MAGE_SERVICE_PORT", "0")
+        .env("MAGE_SERVICE_TOKEN", TOKEN)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout).to_string()
+        + &String::from_utf8_lossy(&output.stderr);
+    assert!(
+        text.contains("runs in Python worker other, which the service does not have"),
+        "{text}"
+    );
+}

@@ -31,6 +31,10 @@ pub struct Manifest {
     /// Where the service sends alerts, and for what.
     #[serde(default)]
     pub alerts: Option<Alerts>,
+    /// Python workers besides the image's own Python, by alias: the interpreter of each
+    /// (its virtual environment in the image). A block with `python_worker` runs in it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub python_workers: BTreeMap<String, String>,
 }
 
 /// Alerts a service sends (service.yaml `alerts`). A channel names the environment
@@ -501,6 +505,10 @@ pub struct Block {
     /// A window block's windows and aggregates (mage_stream_core::window::WindowSpec).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<Value>,
+    /// The Python worker (an alias of the manifest's `python_workers`) a Python block runs
+    /// in; None for the image's own Python.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_worker: Option<String>,
 }
 
 /// A monitor of the block's output, as MageML runs it: its settings (the monitor file as
@@ -728,6 +736,36 @@ impl Manifest {
                     problems.push(format!(
                         "Alert channel url_env {name:?} is not an environment variable name, \
                          such as SLACK_WEBHOOK_URL."
+                    ));
+                }
+            }
+        }
+        for (alias, python) in &self.python_workers {
+            if !valid_id(alias) {
+                problems.push(format!(
+                    "Python worker alias {alias:?} must use letters, digits, '_', '-' and '.'."
+                ));
+            }
+            if python.is_empty() {
+                problems.push(format!("Python worker {alias} has no interpreter."));
+            }
+        }
+        for pipeline in &self.pipelines {
+            for block in &pipeline.blocks {
+                let Some(alias) = &block.python_worker else {
+                    continue;
+                };
+                if block.language != Language::Python {
+                    problems.push(format!(
+                        "Block {} of {} is not a Python block and cannot select Python \
+                         worker {alias}.",
+                        block.uuid, pipeline.uuid
+                    ));
+                } else if !self.python_workers.contains_key(alias) {
+                    problems.push(format!(
+                        "Block {} of {} runs in Python worker {alias}, which the service \
+                         does not have.",
+                        block.uuid, pipeline.uuid
                     ));
                 }
             }
