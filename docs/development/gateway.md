@@ -35,7 +35,7 @@ database (SQLite, or PostgreSQL in UTC) and compares the two as JSON. The server
 for these routes is read whole before it is sent, and asked for uncompressed.
 Runs move on while they are read, so when the two answers differ the gateway reads the
 server's answer again and computes its own again, up to twice, 100 ms apart.
-`/__gateway/shadow`, from loopback only, gives the counts per route (equal, equal after a
+`/__gateway/shadow`, from loopback only and not through a reverse proxy, gives the counts per route (equal, equal after a
 reread, different, failed) and the last 20 differences with the first path where they
 differ; each difference is also logged. The database URL reaches the gateway in its environment
 (`MAGE_GATEWAY_METADATA_DB`), so `ps` does not show its password.

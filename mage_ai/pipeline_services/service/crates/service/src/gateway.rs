@@ -51,6 +51,21 @@ const SCHEDULER_SHADOW_EVERY: Duration = Duration::from_secs(15);
 /// The gateway's own page: its shadow reads, from loopback only.
 const SHADOW_REPORT: &str = "/__gateway/shadow";
 
+/// A caller on this machine: from loopback, and not through a reverse proxy, which also
+/// connects from loopback when it runs on the same host. The report carries values of the
+/// answers it compared, such as a run's variables.
+fn local_caller(peer: std::net::SocketAddr, headers: &HeaderMap) -> bool {
+    peer.ip().is_loopback()
+        && ![
+            "forwarded",
+            "x-forwarded-for",
+            "x-real-ip",
+            "x-forwarded-host",
+        ]
+        .iter()
+        .any(|name| headers.contains_key(*name))
+}
+
 /// Exits once the process that started the gateway is gone: a stopped or killed MageML
 /// server leaves no gateway holding its port.
 pub fn exit_with_parent() {
@@ -151,7 +166,7 @@ async fn forward(
 ) -> Response<Body> {
     if request.uri().path() == SHADOW_REPORT {
         return match &upstream.shadow {
-            Some(shadow) if peer.ip().is_loopback() => json_answer(&shadow.report()),
+            Some(shadow) if local_caller(peer, request.headers()) => json_answer(&shadow.report()),
             _ => answer(StatusCode::NOT_FOUND, "Not found."),
         };
     }
@@ -675,6 +690,19 @@ mod tests {
         .await;
         assert!(text.starts_with("HTTP/1.1 502"), "{text}");
         assert!(text.contains("did not answer"));
+    }
+
+    #[test]
+    fn the_report_is_for_callers_on_this_machine_only() {
+        let local: std::net::SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let remote: std::net::SocketAddr = "10.0.0.8:5000".parse().unwrap();
+        let none = HeaderMap::new();
+        assert!(local_caller(local, &none));
+        assert!(!local_caller(remote, &none));
+        // A reverse proxy on the same host connects from loopback too.
+        let mut proxied = HeaderMap::new();
+        proxied.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        assert!(!local_caller(local, &proxied));
     }
 
     #[test]
