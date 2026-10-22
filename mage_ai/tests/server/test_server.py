@@ -80,14 +80,17 @@ class ServerTests(AsyncDBTestCase):
     @patch('mage_ai.server.server.REQUESTS_BASE_PATH', 'random-test-string-1hasdfh')
     @patch('mage_ai.server.server.get_variables_dir')
     def test_replace_base_path(self, mock_variables_dir):
-        mock_variables_dir.return_value = os.path.dirname(server_module.__file__)
+        # A folder of its own: in the package folder, two workers wrote the same one at once.
+        variables_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, variables_dir, True)
+        mock_variables_dir.return_value = variables_dir
         with patch(
             'mage_ai.server.server.BASE_PATH_EXPORTS_FOLDER',
             'base_path_test',
         ):
             replace_base_path(base_path='test_prefix')
 
-        test_dir = os.path.join(os.path.dirname(server_module.__file__), 'base_path_test')
+        test_dir = os.path.join(variables_dir, 'base_path_test')
         self.assertTrue(len(os.listdir(test_dir)) > 0)
         with open(os.path.join(test_dir, 'index.html'), 'r') as f:
             self.assertNotEqual(f.read().find('random-test-string-1hasdfh'), 0)
@@ -96,8 +99,10 @@ class ServerTests(AsyncDBTestCase):
     @patch('mage_ai.server.server.REQUESTS_BASE_PATH', 'test_prefix')
     @patch('mage_ai.server.server.get_variables_dir')
     def test_replace_base_path_directory_exists(self, mock_variables_dir):
-        mock_variables_dir.return_value = os.path.dirname(server_module.__file__)
-        test_dir = os.path.join(os.path.dirname(server_module.__file__), 'base_path_test')
+        variables_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, variables_dir, True)
+        mock_variables_dir.return_value = variables_dir
+        test_dir = os.path.join(variables_dir, 'base_path_test')
         os.makedirs(test_dir)
         with patch(
             'mage_ai.server.server.BASE_PATH_EXPORTS_FOLDER',

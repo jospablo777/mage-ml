@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
+from mage_ai.orchestration.db import db_connection
 from mage_ai.orchestration.db.errors import DoesNotExistError
 from mage_ai.orchestration.db.models.oauth import User, UserRole
 from mage_ai.tests.api.operations.test_base import BaseApiTestCase
@@ -29,6 +30,8 @@ TestUserRoleResource.register_parent_resource(UserResource)
 class DatabaseResourceTest(BaseApiTestCase):
     def bootstrap(self):
         self.options = dict(lightning=4, rock=5)
+        # Also when an assertion fails, so the next test starts without these users.
+        self.addCleanup(self.cleanup)
 
         user1 = User.create(username=self.faker.unique.name())
         user2 = User.create(username=self.faker.unique.name())
@@ -41,6 +44,9 @@ class DatabaseResourceTest(BaseApiTestCase):
     def cleanup(self):
         User.query.delete()
         UserRole.query.delete()
+        # The deleted users' objects left in the session collided with new users that
+        # SQLite gave the same ids ("Identity map already had an identity").
+        db_connection.session.expunge_all()
 
     async def test_process_collection(self):
         self.bootstrap()
