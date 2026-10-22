@@ -126,3 +126,18 @@ class AuditTest(unittest.TestCase):
         [record] = [json.loads(line) for line in self.records()]
         self.assertEqual([r['feature'] for r in record['reasons']], ['a'])
         self.assertNotIn('features', record)
+
+
+class AuditStoreFeatureTest(unittest.TestCase):
+    def test_a_service_with_audits_builds_with_object_storage(self):
+        """MAGE_SERVICE_AUDIT_URL needs the engine's object-store feature at run time."""
+        from mage_ai.pipeline_services.export import Capture
+
+        plain = Capture(name='scores', project=Path('.'), manifest={'pipelines': []})
+        audited = Capture(
+            name='scores', project=Path('.'), manifest={'pipelines': []},
+            audits={'churn': {'features': 'values'}},
+        )
+
+        self.assertEqual(plain.engine_features, [])
+        self.assertEqual(audited.engine_features, ['object-store'])

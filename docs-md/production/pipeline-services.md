@@ -522,6 +522,24 @@ With `audit` on a model, every input `predict` scores gets a record, written bef
   first broken line.
 - Files older than `MAGE_SERVICE_AUDIT_RETENTION_DAYS` (365; 0 keeps them) are removed.
 - A record that cannot be written fails the prediction: no decision goes unrecorded.
+
+A container's disk goes when it restarts or moves, and its audit records with it. With
+`MAGE_SERVICE_AUDIT_URL` (`s3://bucket/prefix`, `gs://`, `az://`, `file://`), the service
+copies them to an object store every `MAGE_SERVICE_AUDIT_SHIP_SECONDS` (30), and the last
+ones when it stops:
+
+```text
+<prefix>/<service>/<instance>/<model>/<day>-<process>/000000000000.jsonl
+                                                      000000001520.jsonl
+```
+
+Each object holds the complete lines a file gained since the copy before; its name is the
+number of lines before it. Joined in name order, a file's objects are the file, so its
+chain checks the same way. A failed copy is retried at the next pass, and retention keeps
+a file until it is copied. Credentials come from the provider's usual variables
+(`AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, `AZURE_STORAGE_ACCOUNT_NAME`), and
+`AWS_ENDPOINT_URL` names an S3-compatible store such as MinIO or IBM Cloud Object Storage.
+A service whose models keep audit records is built with object storage support.
 - With `MAGE_SERVICE_AUDIT_KEY` set, hashed columns use HMAC-SHA-256 with it, so a guessed
   value cannot be checked against a record without the key.
 
@@ -692,6 +710,8 @@ to it.
 | `MAGE_SERVICE_PUBLIC_URL` | none | The service's address, for links in alerts |
 | `MAGE_SERVICE_AUDIT_RETENTION_DAYS` | `365` | Days audit records are kept; 0 keeps them |
 | `MAGE_SERVICE_AUDIT_KEY` | none | The key of hashed audit columns (HMAC-SHA-256) |
+| `MAGE_SERVICE_AUDIT_URL` | none | An object store (`s3://`, `gs://`, `az://`, `file://`) audit records are copied to |
+| `MAGE_SERVICE_AUDIT_SHIP_SECONDS` | `30` | How often audit records are copied to `MAGE_SERVICE_AUDIT_URL` |
 | `MAGE_SERVICE_R_RESIDENT` | `on` | `off` starts Rscript for each R block run instead of keeping an R session in each Python worker |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |
 | `MAGE_SERVICE_WORKER_ENV` | default | What block code sees; see below. `strict` passes only system variables, the variables the export lists, and `MAGE_SERVICE_PASS_ENV` |

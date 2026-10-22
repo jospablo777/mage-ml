@@ -109,8 +109,9 @@ pub fn verify(audit_dir: &Path, model: &str) -> Vec<Chain> {
     chains
 }
 
-/// Removes the files of days older than `days` days; returns how many.
-pub fn prune(audit_dir: &Path, days: u32) -> usize {
+/// Removes the files of days older than `days` days; returns how many. With
+/// `keep_unshipped`, a file not yet copied to the audit store whole (audit_ship.rs) stays.
+pub fn prune(audit_dir: &Path, days: u32, keep_unshipped: bool) -> usize {
     if days == 0 {
         return 0;
     }
@@ -122,8 +123,11 @@ pub fn prune(audit_dir: &Path, days: u32) -> usize {
         .filter_map(Result::ok)
     {
         for path in files(audit_dir, &model.file_name().to_string_lossy()) {
-            if day_of(&path).is_some_and(|day| day < cutoff) && std::fs::remove_file(&path).is_ok()
+            if day_of(&path).is_some_and(|day| day < cutoff)
+                && !(keep_unshipped && !crate::audit_ship::is_shipped(&path))
+                && std::fs::remove_file(&path).is_ok()
             {
+                crate::audit_ship::forget(&path);
                 removed += 1;
             }
         }
@@ -132,7 +136,7 @@ pub fn prune(audit_dir: &Path, days: u32) -> usize {
 }
 
 /// SHA-256 with ring, which the engine has for SigV4.
-mod sha2_lite {
+pub(crate) mod sha2_lite {
     pub fn sha256_hex(bytes: &[u8]) -> String {
         let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
         digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -210,7 +214,7 @@ mod tests {
         let today_chain = chains.iter().find(|c| c.file.starts_with(&today)).unwrap();
         assert_eq!(today_chain.broken_at, Some(2));
 
-        assert_eq!(prune(dir.path(), 365), 1);
+        assert_eq!(prune(dir.path(), 365, false), 1);
         // The day of 2000 is gone; today's file keeps its two records of 42.
         assert_eq!(find(dir.path(), "churn", "42", 100_000, 10).len(), 2);
     }

@@ -35,6 +35,8 @@ pub struct Config {
     /// Where streams save their state when it is not the data directory
     /// (MAGE_SERVICE_STATE_URL).
     pub state_store: Option<Arc<crate::state_files::StoreHandle>>,
+    /// Copies audit records to an object store (MAGE_SERVICE_AUDIT_URL).
+    pub audit_shipper: Option<Arc<crate::audit_ship::Shipper>>,
 }
 
 pub struct Service {
@@ -70,6 +72,9 @@ pub struct Service {
     /// The object store streams save their state in (MAGE_SERVICE_STATE_URL); None keeps it
     /// in the data directory.
     pub state_store: Option<Arc<crate::state_files::StoreHandle>>,
+    /// Copies audit records to an object store (MAGE_SERVICE_AUDIT_URL); None keeps them on
+    /// the instance only.
+    pub audit_shipper: Option<Arc<crate::audit_ship::Shipper>>,
     /// Run logs kept in a shared (PostgreSQL) run history too; None with SQLite.
     pub shared_logs: Option<Arc<crate::run_logs::SharedLogs>>,
     max_total_runs: usize,
@@ -213,6 +218,7 @@ impl Service {
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
             alerts,
             state_store: config.state_store,
+            audit_shipper: config.audit_shipper,
             shared_logs,
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
@@ -893,13 +899,18 @@ impl Service {
     }
 
     /// Deletes finished runs older than the retention period with their files, and audit
-    /// records older than MAGE_SERVICE_AUDIT_RETENTION_DAYS (365; 0 keeps them).
+    /// records older than MAGE_SERVICE_AUDIT_RETENTION_DAYS (365; 0 keeps them) that are
+    /// copied to the audit store when there is one.
     pub fn prune(&self) {
         let audit_days = std::env::var("MAGE_SERVICE_AUDIT_RETENTION_DAYS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(365);
-        let removed = crate::audit::prune(&self.data_dir.join("audit"), audit_days);
+        let removed = crate::audit::prune(
+            &self.data_dir.join("audit"),
+            audit_days,
+            self.audit_shipper.is_some(),
+        );
         if removed > 0 {
             crate::log::info(&format!(
                 "Removed {removed} audit file(s) older than {audit_days} days."

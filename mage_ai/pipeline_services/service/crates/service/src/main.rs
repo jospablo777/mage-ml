@@ -6,6 +6,7 @@ use mage_log as log;
 mod alerts;
 mod api;
 mod audit;
+mod audit_ship;
 mod aws;
 mod azure;
 mod contract;
@@ -861,10 +862,14 @@ async fn start_service(
         None => Default::default(),
     };
     let python = python.map(PythonPool::new);
+    let audit_shipper =
+        crate::audit_ship::open(data.join("audit"), &manifest.service.name, &hostname())?
+            .map(Arc::new);
     let service = Service::new(
         manifest,
         Config {
             state_store: crate::state_files::open_store()?,
+            audit_shipper,
             service_dir: common.dir.clone(),
             data_dir: data,
             schedules_enabled,
@@ -996,6 +1001,9 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
     });
+    if let Some(shipper) = service.audit_shipper.clone() {
+        tokio::spawn(audit_ship_loop(shipper));
+    }
 
     let shutdown_service = service.clone();
     let deadline = Duration::from_secs(args.shutdown_seconds);
@@ -1023,6 +1031,14 @@ async fn serve(common: Common, args: ServeArgs) -> Result<ExitCode, String> {
     let _ = tokio::time::timeout(Duration::from_secs(15), dispatcher).await;
     for stream in streams {
         let _ = tokio::time::timeout(Duration::from_secs(25), stream).await;
+    }
+    // The records of the last seconds, before the instance and its disk go.
+    if let Some(shipper) = service.audit_shipper.clone() {
+        let last = tokio::task::spawn_blocking(move || shipper.ship());
+        match tokio::time::timeout(Duration::from_secs(20), last).await {
+            Ok(Ok(shipped)) => report_audit_shipped(&shipped, &mut false),
+            _ => log::warn("The last audit records were not copied to the audit store in 20 s."),
+        }
     }
     // A restart recovers what this instance left without waiting for its lease to expire.
     let _ = service.ledger.release();
@@ -1123,6 +1139,35 @@ fn health(port: u16) -> ExitCode {
     } else {
         eprintln!("{}", response.lines().next().unwrap_or("No response."));
         ExitCode::FAILURE
+    }
+}
+
+/// Copies the audit records every MAGE_SERVICE_AUDIT_SHIP_SECONDS.
+async fn audit_ship_loop(shipper: Arc<crate::audit_ship::Shipper>) {
+    let every = crate::audit_ship::interval();
+    let mut failing = false;
+    loop {
+        tokio::time::sleep(every).await;
+        let pass = shipper.clone();
+        if let Ok(shipped) = tokio::task::spawn_blocking(move || pass.ship()).await {
+            report_audit_shipped(&shipped, &mut failing);
+        }
+    }
+}
+
+/// Logs the first failure of a run of them and the recovery, not every pass.
+fn report_audit_shipped(shipped: &crate::audit_ship::Shipped, failing: &mut bool) {
+    if let Some(error) = shipped.errors.first() {
+        if !*failing {
+            log::error(&format!(
+                "Copying audit records to the audit store failed; they stay on this instance \
+                 and are copied when it works again: {error}"
+            ));
+        }
+        *failing = true;
+    } else if *failing {
+        log::info("Copying audit records to the audit store works again.");
+        *failing = false;
     }
 }
 

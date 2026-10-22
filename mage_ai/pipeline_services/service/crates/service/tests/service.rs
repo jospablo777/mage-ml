@@ -2339,3 +2339,68 @@ fn a_stream_runs_each_block_in_its_python_worker() {
         );
     }
 }
+
+/// With MAGE_SERVICE_AUDIT_URL, audit records leave the instance: what the workers wrote is
+/// copied while the service runs, and the last lines when it stops.
+#[cfg(feature = "object-store")]
+#[test]
+fn audit_records_are_copied_to_the_audit_store_and_the_last_ones_at_shutdown() {
+    let shared = tempfile::tempdir().unwrap();
+    let url = format!("file://{}/audit", shared.path().display());
+    let mut service = Service::create(false);
+    let file = service
+        .dir
+        .path()
+        .join("data/audit/churn/2026-10-22-41.jsonl");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "{\"key\":1}\n{\"key\":2}\n").unwrap();
+    service.start(&[
+        ("MAGE_SERVICE_AUDIT_URL", url.as_str()),
+        ("MAGE_SERVICE_AUDIT_SHIP_SECONDS", "1"),
+    ]);
+
+    let copied = |count: usize| -> String {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut objects: Vec<PathBuf> = walk(&shared.path().join("audit"));
+            objects.sort();
+            let text: String = objects
+                .iter()
+                .map(|p| std::fs::read_to_string(p).unwrap())
+                .collect();
+            if text.lines().count() >= count || Instant::now() > deadline {
+                return text;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    assert_eq!(copied(2), "{\"key\":1}\n{\"key\":2}\n");
+
+    // Restarted with no pass due for an hour: the line written before it stops goes up
+    // at shutdown, after the two copied before the restart.
+    service.signal("-TERM");
+    service.start(&[
+        ("MAGE_SERVICE_AUDIT_URL", url.as_str()),
+        ("MAGE_SERVICE_AUDIT_SHIP_SECONDS", "3600"),
+    ]);
+    std::fs::write(&file, "{\"key\":1}\n{\"key\":2}\n{\"key\":3}\n").unwrap();
+    service.signal("-TERM");
+    assert_eq!(copied(3), "{\"key\":1}\n{\"key\":2}\n{\"key\":3}\n");
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(walk(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found
+}

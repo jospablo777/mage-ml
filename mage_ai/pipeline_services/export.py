@@ -147,6 +147,9 @@ class Capture:
         features = {ENGINE_FEATURES[k] for k in self.connector_kinds if k in ENGINE_FEATURES}
         if self.has_checks:
             features.add('checks')
+        # Audit records can be copied off the instance (MAGE_SERVICE_AUDIT_URL).
+        if self.audits:
+            features.add('object-store')
         return sorted(features)
 
     @property
