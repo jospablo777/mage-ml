@@ -72,6 +72,9 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- Global hooks need an admin, and Git, compute clusters and connections an editor, as their
+  policies state: an override meant for the user permissions mode let any signed-in user,
+  one with no role too, change them.
 - The editor kernel's event stream (`/event-streams/<uuid>`) needs a signed-in editor; it
   answered anyone who could reach the server.
 - Downloading a block's output, its statistics and a pipeline's documentation files need

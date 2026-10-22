@@ -79,6 +79,7 @@ FilePolicy.allow_query(
     on_action=[
         constants.LIST,
     ],
-    condition=lambda policy: policy.has_at_least_editor_role_and_pipeline_edit_access(),
+    # Listing is reading: viewers list files, and the file browser sends these.
+    condition=lambda policy: policy.has_at_least_viewer_role(),
     override_permission_condition=lambda _policy: True,
 )

@@ -634,7 +634,12 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
             if validation:
                 break
 
-        if not validation and override_permission_conditions:
+        # The overrides belong to the user permissions mode, where rules come from permission
+        # records: they let these resources through there. Without that mode they made every
+        # condition pass (they are all lambda _policy: True), so any signed-in user, one
+        # with no role too, created global hooks, pushed to Git and changed compute
+        # clusters.
+        if not validation and override_permission_conditions and REQUIRE_USER_PERMISSIONS:
             for condition in override_permission_conditions:
                 validation = condition(self)
                 if validation is not None and inspect.isawaitable(validation):
