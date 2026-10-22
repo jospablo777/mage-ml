@@ -21,10 +21,44 @@ const DEFAULT_LIMIT: i64 = 40;
 
 /// MageML's metadata database: the SQLite file or PostgreSQL URL of the server's
 /// db_connection_url.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Metadata {
     Sqlite(PathBuf),
-    Postgres(String),
+    Postgres(std::sync::Arc<Pg>),
+}
+
+impl std::fmt::Debug for Metadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Metadata::Sqlite(path) => write!(f, "Sqlite({})", path.display()),
+            // Never the password.
+            Metadata::Postgres(pg) => write!(f, "Postgres({})", redact_url(&pg.url)),
+        }
+    }
+}
+
+/// One PostgreSQL connection for the shadow reads, opened on the first and opened again
+/// after an error: the run page asks every few seconds, and each new connection is a
+/// server process.
+pub struct Pg {
+    url: String,
+    client: tokio::sync::Mutex<Option<std::sync::Arc<tokio_postgres::Client>>>,
+}
+
+impl Pg {
+    async fn client(&self) -> Result<std::sync::Arc<tokio_postgres::Client>, String> {
+        let mut client = self.client.lock().await;
+        if let Some(open) = client.as_ref().filter(|c| !c.is_closed()) {
+            return Ok(open.clone());
+        }
+        let open = std::sync::Arc::new(mage_pg::connect_url(&self.url, "mageml-gateway").await?);
+        *client = Some(open.clone());
+        Ok(open)
+    }
+
+    async fn forget(&self) {
+        *self.client.lock().await = None;
+    }
 }
 
 impl Metadata {
@@ -34,7 +68,10 @@ impl Metadata {
             return Ok(Metadata::Sqlite(PathBuf::from(path)));
         }
         if url.starts_with("postgresql://") || url.starts_with("postgres://") {
-            return Ok(Metadata::Postgres(url.to_string()));
+            return Ok(Metadata::Postgres(std::sync::Arc::new(Pg {
+                url: url.to_string(),
+                client: tokio::sync::Mutex::new(None),
+            })));
         }
         Err(format!(
             "The metadata database {} is neither sqlite:/// nor postgresql://.",
@@ -358,9 +395,14 @@ async fn block_runs(metadata: &Metadata, query: &Query) -> Result<Value, String>
             format!(" WHERE {}", filters.join(" AND "))
         }
     );
+    // PostgreSQL keeps the status as an enum type of its own; it reads as text.
+    let status = match metadata {
+        Metadata::Postgres(_) => "a.status::text",
+        Metadata::Sqlite(_) => "a.status",
+    };
     let rows_sql = format!(
         "SELECT a.block_uuid, a.completed_at, a.created_at, a.id, a.pipeline_run_id, \
-         a.started_at, a.status, a.updated_at, c.id, c.name {from} ORDER BY {order} LIMIT {} OFFSET {}",
+         a.started_at, {status}, a.updated_at, c.id, c.name {from} ORDER BY {order} LIMIT {} OFFSET {}",
         limit + 1,
         offset
     );
@@ -374,7 +416,13 @@ async fn block_runs(metadata: &Metadata, query: &Query) -> Result<Value, String>
             .await
             .map_err(|e| e.to_string())??
         }
-        Metadata::Postgres(url) => postgres_block_runs(url, &count_sql, &rows_sql, &params).await?,
+        Metadata::Postgres(pg) => {
+            let found = postgres_block_runs(pg, &count_sql, &rows_sql, &params).await;
+            if found.is_err() {
+                pg.forget().await;
+            }
+            found?
+        }
     };
     let has_next = rows.len() as i64 > limit;
     let shown: Vec<Value> = rows.into_iter().take(limit.max(0) as usize).collect();
@@ -516,13 +564,13 @@ fn postgres_time(at: Option<chrono::DateTime<chrono::Utc>>) -> Value {
 }
 
 async fn postgres_block_runs(
-    url: &str,
+    pg: &Pg,
     count_sql: &str,
     rows_sql: &str,
     params: &[Param],
 ) -> Result<(i64, Vec<Value>), String> {
     use tokio_postgres::types::ToSql;
-    let client = mage_pg::connect_url(url, "mageml-gateway").await?;
+    let client = pg.client().await?;
     let owned: Vec<Box<dyn ToSql + Sync + Send>> = params
         .iter()
         .map(|p| -> Box<dyn ToSql + Sync + Send> {
@@ -540,38 +588,37 @@ async fn postgres_block_runs(
         .query_one(count_sql, &refs)
         .await
         .map_err(|e| e.to_string())?
-        .get(0);
+        .try_get(0)
+        .map_err(|e| e.to_string())?;
     let rows = client
         .query(rows_sql, &refs)
         .await
         .map_err(|e| e.to_string())?
         .iter()
-        .map(|row| {
-            let time = |i| postgres_time(row.get::<_, Option<chrono::DateTime<chrono::Utc>>>(i));
+        .map(|row| -> Result<Value, String> {
+            let time =
+                |i| pg_get::<Option<chrono::DateTime<chrono::Utc>>>(row, i).map(postgres_time);
             let text = |i| {
-                row.get::<_, Option<String>>(i)
-                    .map(Value::String)
-                    .unwrap_or(Value::Null)
+                pg_get::<Option<String>>(row, i)
+                    .map(|v| v.map(Value::String).unwrap_or(Value::Null))
             };
             let int = |i| {
-                row.get::<_, Option<i32>>(i)
-                    .map(Value::from)
-                    .unwrap_or(Value::Null)
+                pg_get::<Option<i32>>(row, i).map(|v| v.map(Value::from).unwrap_or(Value::Null))
             };
-            block_run([
-                text(0),
-                time(1),
-                time(2),
-                int(3),
-                int(4),
-                time(5),
-                text(6),
-                time(7),
-                int(8),
-                text(9),
-            ])
+            Ok(block_run([
+                text(0)?,
+                time(1)?,
+                time(2)?,
+                int(3)?,
+                int(4)?,
+                time(5)?,
+                text(6)?,
+                time(7)?,
+                int(8)?,
+                text(9)?,
+            ]))
         })
-        .collect();
+        .collect::<Result<Vec<_>, String>>()?;
     Ok((count, rows))
 }
 
@@ -712,8 +759,12 @@ async fn pipeline_run(metadata: &Metadata, id: i64) -> Result<Value, String> {
             .await
             .map_err(|e| e.to_string())??
         }
-        Metadata::Postgres(url) => {
-            postgres_run(url, id, &run_sql, &blocks_sql, &schedule_sql).await?
+        Metadata::Postgres(pg) => {
+            let found = postgres_run(pg, id, &run_sql, &blocks_sql, &schedule_sql).await;
+            if found.is_err() {
+                pg.forget().await;
+            }
+            found?
         }
     };
     let mut run = object(RUN_FIELDS, run)?;
@@ -790,26 +841,36 @@ fn sqlite_run(
     Ok((run, blocks, schedule))
 }
 
-fn postgres_raw(row: &tokio_postgres::Row, i: usize, kind: Kind) -> Raw {
+/// A column's value, or an error that names it: a type the gateway does not expect counts
+/// as a failed shadow read, where `Row::get` panicked.
+fn pg_get<'a, T: tokio_postgres::types::FromSql<'a>>(
+    row: &'a tokio_postgres::Row,
+    i: usize,
+) -> Result<T, String> {
+    row.try_get(i).map_err(|e| {
+        let name = row.columns().get(i).map(|c| c.name()).unwrap_or("?");
+        format!("column {name}: {e}")
+    })
+}
+
+fn postgres_raw(row: &tokio_postgres::Row, i: usize, kind: Kind) -> Result<Raw, String> {
     let raw = match kind {
-        Kind::Int => row.get::<_, Option<i32>>(i).map(|v| Raw::Int(v.into())),
-        Kind::Bool => row.get::<_, Option<bool>>(i).map(Raw::Bool),
-        Kind::Time => row
-            .get::<_, Option<chrono::DateTime<chrono::Utc>>>(i)
-            .map(Raw::Time),
-        Kind::Text | Kind::Json | Kind::Enum => row.get::<_, Option<String>>(i).map(Raw::Text),
+        Kind::Int => pg_get::<Option<i32>>(row, i)?.map(|v| Raw::Int(v.into())),
+        Kind::Bool => pg_get::<Option<bool>>(row, i)?.map(Raw::Bool),
+        Kind::Time => pg_get::<Option<chrono::DateTime<chrono::Utc>>>(row, i)?.map(Raw::Time),
+        Kind::Text | Kind::Json | Kind::Enum => pg_get::<Option<String>>(row, i)?.map(Raw::Text),
     };
-    raw.unwrap_or(Raw::Null)
+    Ok(raw.unwrap_or(Raw::Null))
 }
 
 async fn postgres_run(
-    url: &str,
+    pg: &Pg,
     id: i64,
     run_sql: &str,
     blocks_sql: &str,
     schedule_sql: &str,
 ) -> Result<RunRows, String> {
-    let client = mage_pg::connect_url(url, "mageml-gateway").await?;
+    let client = pg.client().await?;
     let id = i32::try_from(id).map_err(|_| format!("run {id} is out of range"))?;
     let row = client
         .query_one(run_sql, &[&id])
@@ -819,8 +880,8 @@ async fn postgres_run(
         .iter()
         .enumerate()
         .map(|(i, (_, kind))| postgres_raw(&row, i, *kind))
-        .collect();
-    let schedule_id: Option<i32> = row.get(RUN_SCHEDULE);
+        .collect::<Result<_, _>>()?;
+    let schedule_id: Option<i32> = pg_get(&row, RUN_SCHEDULE)?;
     let blocks = client
         .query(blocks_sql, &[&id])
         .await
@@ -831,20 +892,21 @@ async fn postgres_run(
                 .iter()
                 .enumerate()
                 .map(|(i, (_, kind))| postgres_raw(row, i, *kind))
-                .collect()
+                .collect::<Result<Vec<_>, _>>()
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     let schedule = match schedule_id {
         Some(schedule_id) => client
             .query_opt(schedule_sql, &[&schedule_id])
             .await
             .map_err(|e| e.to_string())?
-            .map(|row| {
-                (
-                    i64::from(row.get::<_, i32>(0)),
-                    row.get::<_, Option<String>>(1),
-                )
-            }),
+            .map(|row| -> Result<_, String> {
+                Ok((
+                    i64::from(pg_get::<i32>(&row, 0)?),
+                    pg_get::<Option<String>>(&row, 1)?,
+                ))
+            })
+            .transpose()?,
         None => None,
     };
     Ok((run, blocks, schedule))
@@ -953,6 +1015,98 @@ mod tests {
         assert_eq!(
             redact_url("postgresql://u:secret@h:5432/db"),
             "postgresql://...@h:5432/db"
+        );
+    }
+}
+
+#[cfg(test)]
+mod postgres_tests {
+    use super::*;
+
+    /// MageML's three tables in a schema of their own, with statuses as a PostgreSQL enum
+    /// as SQLAlchemy makes them.
+    const SCHEMA: &str = "
+        CREATE TYPE blockrunstatus AS ENUM ('INITIAL', 'RUNNING', 'COMPLETED', 'FAILED');
+        CREATE TYPE pipelinerunstatus AS ENUM ('INITIAL', 'RUNNING', 'COMPLETED', 'FAILED');
+        CREATE TYPE executortype AS ENUM ('LOCAL_PYTHON', 'K8S');
+        CREATE TABLE pipeline_schedule (id serial PRIMARY KEY, name varchar(255),
+            pipeline_uuid varchar(255));
+        CREATE TABLE pipeline_run (id serial PRIMARY KEY, created_at timestamptz,
+            updated_at timestamptz, pipeline_schedule_id integer, pipeline_uuid varchar(255),
+            execution_date timestamptz, status pipelinerunstatus, completed_at timestamptz,
+            variables json, passed_sla boolean, event_variables json, metrics json,
+            backfill_id integer, executor_type executortype, started_at timestamptz);
+        CREATE TABLE block_run (id serial PRIMARY KEY, created_at timestamptz,
+            updated_at timestamptz, pipeline_run_id integer, block_uuid varchar(255),
+            status blockrunstatus, completed_at timestamptz, started_at timestamptz,
+            metrics json, attempt integer NOT NULL DEFAULT 0);
+        INSERT INTO pipeline_schedule (name, pipeline_uuid) VALUES ('daily', 'etl');
+        INSERT INTO pipeline_run (created_at, updated_at, pipeline_schedule_id, pipeline_uuid,
+            execution_date, status, variables, passed_sla, metrics, executor_type)
+            VALUES ('2026-10-22 02:15:08+00', '2026-10-22 02:15:09+00', 1, 'etl',
+            '2026-10-22 02:15:08.797857+00', 'COMPLETED', '{\"day\": 1}', false, null,
+            'LOCAL_PYTHON');
+        INSERT INTO block_run (created_at, updated_at, pipeline_run_id, block_uuid, status,
+            started_at, completed_at, metrics, attempt) VALUES
+            ('2026-10-22 02:15:08+00', '2026-10-22 02:15:09+00', 1, 'load', 'COMPLETED',
+             '2026-10-22 02:15:08.934197+00', '2026-10-22 02:15:09.069058+00', '{\"rows\": 3}', 1),
+            ('2026-10-22 02:15:08+00', '2026-10-22 02:15:09+00', 1, 'export', 'FAILED',
+             null, null, null, 0);
+    ";
+
+    #[tokio::test]
+    async fn postgres_answers_and_one_connection_for_every_read() {
+        let Ok(url) = std::env::var("MAGE_TEST_POSTGRES_URL") else {
+            eprintln!("MAGE_TEST_POSTGRES_URL is not set: skipped");
+            return;
+        };
+        let schema = format!("shadow_{}", uuid::Uuid::new_v4().simple());
+        let admin = mage_pg::connect_url(&url, "test").await.unwrap();
+        admin
+            .batch_execute(&format!(
+                "CREATE SCHEMA {schema}; SET search_path TO {schema}; {SCHEMA}"
+            ))
+            .await
+            .unwrap();
+        let separator = if url.contains('?') { '&' } else { '?' };
+        let metadata = Metadata::parse(&format!(
+            "{url}{separator}options=-c%20search_path%3D{schema}"
+        ))
+        .unwrap();
+
+        let listed = block_runs(&metadata, &Query::parse("pipeline_uuid=etl")).await;
+        let detail = pipeline_run(&metadata, 1).await;
+        let Metadata::Postgres(pg) = &metadata else {
+            unreachable!()
+        };
+        let first = pg.client().await.unwrap();
+        let again = block_runs(&metadata, &Query::parse("")).await.unwrap();
+        let second = pg.client().await.unwrap();
+        admin
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .unwrap();
+
+        let listed = listed.unwrap();
+        assert_eq!(listed["metadata"], json!({"count": 2, "next": false}));
+        // Newest first by started_at, and PostgreSQL puts a missing one first.
+        assert_eq!(listed["block_runs"][0]["block_uuid"], "export");
+        assert_eq!(
+            listed["block_runs"][1]["completed_at"],
+            "2026-10-22T02:15:09.069058+00:00"
+        );
+        assert_eq!(listed["block_runs"][1]["status"], "completed");
+        let run = &detail.unwrap()["pipeline_run"];
+        assert_eq!(run["execution_date"], "2026-10-22 02:15:08.797857+00:00");
+        assert_eq!(run["executor_type"], "local_python");
+        assert_eq!(run["variables"], json!({"day": 1}));
+        assert_eq!(run["passed_sla"], false);
+        assert_eq!(run["block_runs"][0]["metrics"], json!({"rows": 3}));
+        assert_eq!(run["block_runs"][1]["pipeline_schedule_name"], "daily");
+        assert_eq!(again["metadata"]["count"], 2);
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &second),
+            "a second connection was opened"
         );
     }
 }
