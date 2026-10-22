@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::header::{self, HeaderMap, HeaderName, HeaderValue};
 use hyper::{Request, Response, StatusCode, Uri};
@@ -41,6 +41,8 @@ const HOP_BY_HOP: &[&str] = &[
 struct Upstream {
     authority: String,
     client: Client<HttpConnector, Incoming>,
+    /// Reads a shadowed route's answer again (gateway_shadow.rs).
+    rereads: Client<HttpConnector, Empty<Bytes>>,
     shadow: Option<Arc<Shadow>>,
 }
 
@@ -95,7 +97,8 @@ pub async fn serve(
         authority: upstream,
         client: Client::builder(TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
-            .build(connector),
+            .build(connector.clone()),
+        rereads: Client::builder(TokioExecutor::new()).build(connector),
         shadow: shadow.map(Arc::new),
     };
     crate::log::info(&format!(
@@ -145,6 +148,8 @@ async fn forward(
         .as_ref()
         .and_then(|shadow| shadow.route_for(request.method(), request.uri().path()));
     let query = request.uri().query().unwrap_or_default().to_string();
+    let route_path = request.uri().path().to_string();
+    let reread_uri = request.uri().clone();
     let upgrade = wants_upgrade(request.headers());
     let client_side = upgrade.then(|| hyper::upgrade::on(&mut request));
     let (mut parts, body) = request.into_parts();
@@ -152,6 +157,7 @@ async fn forward(
         // Compared as JSON, so the server sends it uncompressed.
         parts.headers.remove(header::ACCEPT_ENCODING);
     }
+    let reread_headers = parts.headers.clone();
     let path = parts
         .uri
         .path_and_query()
@@ -209,13 +215,48 @@ async fn forward(
             }
         };
         let (shadow, compared) = (shadow.clone(), served.clone());
-        tokio::spawn(async move { shadow.compare(route, &query, &compared).await });
+        let reread = reread(upstream, &reread_uri, &reread_headers);
+        tokio::spawn(async move {
+            shadow
+                .compare(route, &route_path, &query, &compared, reread)
+                .await
+        });
         return Response::from_parts(
             parts,
             Full::new(served).map_err(|never| match never {}).boxed(),
         );
     }
     Response::from_parts(parts, body.boxed())
+}
+
+/// The same GET again, with the same headers, for a shadow read to compare once more.
+fn reread(upstream: &Upstream, uri: &Uri, headers: &HeaderMap) -> crate::gateway_shadow::Reread {
+    let (client, headers) = (upstream.rereads.clone(), headers.clone());
+    let target = format!(
+        "http://{}{}",
+        upstream.authority,
+        uri.path_and_query().map(|p| p.as_str()).unwrap_or("/")
+    );
+    Box::new(move || {
+        let (client, headers, target) = (client.clone(), headers.clone(), target.clone());
+        Box::pin(async move {
+            let mut request = Request::get(target).body(Empty::new()).ok()?;
+            *request.headers_mut() = headers;
+            let response = client.request(request).await.ok()?;
+            if response.status() != StatusCode::OK {
+                return None;
+            }
+            Some(
+                response
+                    .into_body()
+                    .collect()
+                    .await
+                    .ok()?
+                    .to_bytes()
+                    .to_vec(),
+            )
+        })
+    })
 }
 
 fn json_answer(value: &serde_json::Value) -> Response<Body> {

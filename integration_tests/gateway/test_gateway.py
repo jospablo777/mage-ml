@@ -19,6 +19,7 @@ import pytest
 import requests
 
 SPEC = Path(__file__).resolve().parents[2] / 'contracts' / 'openapi.json'
+COUNTS = ('equal', 'equal_after_reread', 'different', 'failed')
 # Answers that hold the time or a counter, so two calls in a row differ without a gateway.
 VOLATILE = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?|\b\d{10,}(\.\d+)?\b')
 
@@ -38,16 +39,19 @@ def ports(tmp_path_factory):
         engine = engine_path()
     except EngineNotFound as error:
         pytest.skip(str(error))
-    project = tmp_path_factory.mktemp('gateway') / 'project'
+    folder = tmp_path_factory.mktemp('gateway')
+    project = folder / 'project'
     port = free_port()
     env = dict(
         os.environ, MAGE_GATEWAY='on', MAGE_ENGINE_PATH=str(engine),
-        DISABLE_AUTO_BROWSER_OPEN='true',
+        DISABLE_AUTO_BROWSER_OPEN='true', MAGE_DATA_DIR=str(folder / 'data'),
     )
+    # From the checkout, MageML would use the development database in
+    # mage_ai/orchestration/db and find the runs of earlier test sessions there.
     process = subprocess.Popen(
         [sys.executable, '-c', 'from mage_ai.cli.main import app; app()', 'start',
          str(project), '--port', str(port)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=folder,
     )
     lines = []
     threading.Thread(target=lambda: lines.extend(process.stdout), daemon=True).start()
@@ -214,11 +218,12 @@ def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
     def counts():
         report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
         found = report['routes'].get('block_runs', {})
-        return {k: found.get(k, 0) for k in ('equal', 'different', 'failed')}, report
+        return {k: found.get(k, 0) for k in COUNTS}, report
 
     # The scheduler makes a run's block runs when it starts it.
     deadline = time.monotonic() + 120
-    while call('GET', 'block_runs')['metadata']['count'] < 8:
+    while any(call('GET', f'block_runs?pipeline_uuid={uuid}')['metadata']['count'] < 4
+              for uuid in pipelines):
         assert time.monotonic() < deadline, 'the scheduler made no block runs'
         time.sleep(1)
     before, _ = counts()
@@ -231,4 +236,39 @@ def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
         if sum(added.values()) >= len(queries) or time.monotonic() > deadline:
             break
         time.sleep(0.2)
-    assert added == dict(equal=len(queries), different=0, failed=0), report
+    # Equal, at once or once read again after a run moved on between the two reads.
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0
+
+
+def test_run_details_read_from_the_database_equal_the_servers(ports, signed_in):
+    """The shadow read of GET /api/pipeline_runs/<id>, after the runs of the test above."""
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    runs = signed_in.get(f'{base}/pipeline_runs?_limit=100', timeout=60).json()['pipeline_runs']
+    assert len(runs) >= 4
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('pipeline_run', {})
+        return {k: found.get(k, 0) for k in COUNTS}, report
+
+    before, _ = counts()
+    blocks = 0
+    for run in runs:
+        detail = signed_in.get(f"{base}/pipeline_runs/{run['id']}", timeout=60)
+        assert detail.status_code == 200
+        blocks += len(detail.json()['pipeline_run']['block_runs'])
+    assert blocks >= 8
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(runs) or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    # Equal, at once or once read again after a run moved on between the two reads.
+    assert added['equal'] + added['equal_after_reread'] == len(runs), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0

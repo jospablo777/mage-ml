@@ -29,9 +29,12 @@
 - `MAGE_GATEWAY=on` serves MageML's web server through a Rust gateway, the first step of
   moving the API to Rust: every request, stream and WebSocket passes through unchanged, in
   under 1 ms at p95. Off by default. See [Rust gateway](/development/gateway).
-- With the gateway on, `GET /api/block_runs` is also answered by the gateway from the
-  metadata database and compared with the server's answer (shadow reads); the counts and
-  differences are at `/__gateway/shadow` from the same machine.
+- With the gateway on, `GET /api/block_runs` and `GET /api/pipeline_runs/<id>` are also
+  answered by the gateway from the metadata database and compared with the server's answer
+  (shadow reads); the counts and differences are at `/__gateway/shadow` from the same
+  machine.
+- The block runs list breaks ties by id: block runs created together share their times,
+  and pages of the list repeated or skipped rows between requests.
 - Listing integration sources and destinations no longer imports every connector into the
   web server. After the integration lists loaded, each new terminal died as it started
   (SIGSEGV between fork and exec); terminals now start, and a shell that exits at start

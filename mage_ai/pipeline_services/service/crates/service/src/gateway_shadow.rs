@@ -5,7 +5,8 @@
 //! after its shadow reads stay equal.
 //!
 //! Routes: `block_runs` (GET /api/block_runs, with pipeline_run_id, pipeline_uuid,
-//! order_by, _limit and _offset as BlockRunResource reads them).
+//! order_by, _limit and _offset as BlockRunResource reads them) and `pipeline_run`
+//! (GET /api/pipeline_runs/<id>, the run page's detail with its block runs).
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -14,6 +15,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value, json};
 
 const RECENT_DIFFERENCES: usize = 20;
+const ROUTES: &[&str] = &["block_runs", "pipeline_run"];
 /// DatabaseResource.DEFAULT_LIMIT.
 const DEFAULT_LIMIT: i64 = 40;
 
@@ -53,9 +55,20 @@ fn redact_url(url: &str) -> String {
 #[derive(Debug, Default, Clone, Copy, serde::Serialize)]
 struct Counts {
     equal: u64,
+    /// Equal once read again: the rows changed between the server's read and the gateway's.
+    equal_after_reread: u64,
     different: u64,
     failed: u64,
 }
+
+/// The server's answer read again, for the same request; None when it did not answer 200.
+pub type Reread = Box<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<u8>>> + Send>>
+        + Send
+        + Sync,
+>;
+const REREADS: u32 = 2;
+const REREAD_AFTER: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub struct Shadow {
     metadata: Metadata,
@@ -67,8 +80,11 @@ pub struct Shadow {
 impl Shadow {
     pub fn new(metadata: Metadata, routes: Vec<String>) -> Result<Shadow, String> {
         for route in &routes {
-            if route != "block_runs" {
-                return Err(format!("No shadow read for {route}; there is block_runs."));
+            if !ROUTES.contains(&route.as_str()) {
+                return Err(format!(
+                    "No shadow read for {route}; there are {}.",
+                    ROUTES.join(", ")
+                ));
             }
         }
         Ok(Shadow {
@@ -84,38 +100,64 @@ impl Shadow {
         if method != hyper::Method::GET {
             return None;
         }
-        match path.trim_end_matches('/') {
-            "/api/block_runs" if self.routes.iter().any(|r| r == "block_runs") => {
-                Some("block_runs")
-            }
-            _ => None,
+        let enabled = |route: &str| self.routes.iter().any(|r| r == route);
+        let path = path.trim_end_matches('/');
+        if path == "/api/block_runs" && enabled("block_runs") {
+            return Some("block_runs");
         }
+        let run = path.strip_prefix("/api/pipeline_runs/")?;
+        (enabled("pipeline_run") && !run.is_empty() && run.bytes().all(|b| b.is_ascii_digit()))
+            .then_some("pipeline_run")
     }
 
     /// Compares the server's answer with the gateway's own and counts the outcome.
-    pub async fn compare(&self, route: &'static str, query: &str, served: &[u8]) {
-        let outcome = match serde_json::from_slice::<Value>(served) {
-            Ok(served) => match self.answer(route, query).await {
-                Ok(own) => Some((served, own)),
+    /// Compares the server's answer with the gateway's own and counts the outcome. Rows
+    /// change between the two reads while runs run, so a difference is read again from both,
+    /// up to REREADS times, before it counts.
+    pub async fn compare(
+        &self,
+        route: &'static str,
+        path: &str,
+        query: &str,
+        served: &[u8],
+        reread: Reread,
+    ) {
+        let mut served = served.to_vec();
+        let mut attempt = 0;
+        let outcome = loop {
+            let pair = match serde_json::from_slice::<Value>(&served) {
+                Ok(served) => match self.answer(route, path, query).await {
+                    Ok(own) => Ok((served, own)),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(format!("The server's answer is not JSON: {error}")),
+            };
+            match pair {
+                Ok((served, own)) if served == own => break Ok(attempt),
+                Ok(pair) if attempt == REREADS => break Err(Some(pair)),
+                Ok(_) => {}
                 Err(error) => {
                     self.note(
                         route,
                         json!({"route": route, "query": query, "failed": error}),
                     );
-                    None
+                    break Err(None);
                 }
-            },
-            Err(error) => {
-                self.note(route, json!({"route": route, "query": query, "failed": format!("The server's answer is not JSON: {error}")}));
-                None
+            }
+            attempt += 1;
+            tokio::time::sleep(REREAD_AFTER).await;
+            match reread().await {
+                Some(again) => served = again,
+                None => break Err(None),
             }
         };
         let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
         let entry = counts.entry(route.to_string()).or_default();
         match outcome {
-            None => entry.failed += 1,
-            Some((served, own)) if served == own => entry.equal += 1,
-            Some((served, own)) => {
+            Ok(0) => entry.equal += 1,
+            Ok(_) => entry.equal_after_reread += 1,
+            Err(None) => entry.failed += 1,
+            Err(Some((served, own))) => {
                 entry.different += 1;
                 drop(counts);
                 self.note(route, json!({"route": route, "query": query, "difference": first_difference(&served, &own)}));
@@ -150,9 +192,18 @@ impl Shadow {
         json!({"routes": counts, "recent_differences": recent})
     }
 
-    async fn answer(&self, route: &str, query: &str) -> Result<Value, String> {
+    async fn answer(&self, route: &str, path: &str, query: &str) -> Result<Value, String> {
         match route {
             "block_runs" => block_runs(&self.metadata, &Query::parse(query)).await,
+            "pipeline_run" => {
+                let id = path
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .and_then(|id| id.parse::<i64>().ok())
+                    .ok_or_else(|| format!("{path} names no run"))?;
+                pipeline_run(&self.metadata, id).await
+            }
             _ => Err(format!("No shadow read for {route}.")),
         }
     }
@@ -292,9 +343,11 @@ async fn block_runs(metadata: &Metadata, query: &Query) -> Result<Value, String>
                     "order_by {order_by} is not a block run column and direction"
                 ));
             }
-            format!("a.{column} {}", direction.to_uppercase())
+            let direction = direction.to_uppercase();
+            format!("a.{column} {direction}, a.id {direction}")
         }
-        None => "a.started_at DESC, a.created_at DESC, a.completed_at DESC".to_string(),
+        // The id last breaks ties, as BlockRunResource orders them.
+        None => "a.started_at DESC, a.created_at DESC, a.completed_at DESC, a.id DESC".to_string(),
     };
     let from = format!(
         "FROM block_run AS a JOIN pipeline_run AS b ON a.pipeline_run_id = b.id \
@@ -522,6 +575,281 @@ async fn postgres_block_runs(
     Ok((count, rows))
 }
 
+/// How a column's value reads in an answer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Kind {
+    Int,
+    Text,
+    /// A datetime as `str(datetime)` writes it (BaseModel.to_dict).
+    Time,
+    Json,
+    /// An Enum stored by member name and shown by value, the name in lower case.
+    Enum,
+    Bool,
+}
+
+/// PipelineRunPresenter's default attributes, the detail's fields besides block_runs.
+const RUN_FIELDS: &[(&str, Kind)] = &[
+    ("backfill_id", Kind::Int),
+    ("completed_at", Kind::Time),
+    ("created_at", Kind::Time),
+    ("event_variables", Kind::Json),
+    ("execution_date", Kind::Time),
+    ("executor_type", Kind::Enum),
+    ("id", Kind::Int),
+    ("metrics", Kind::Json),
+    ("passed_sla", Kind::Bool),
+    ("pipeline_schedule_id", Kind::Int),
+    ("pipeline_uuid", Kind::Text),
+    ("started_at", Kind::Time),
+    ("status", Kind::Enum),
+    ("updated_at", Kind::Time),
+    ("variables", Kind::Json),
+];
+/// Where pipeline_schedule_id is in RUN_FIELDS.
+const RUN_SCHEDULE: usize = 9;
+
+/// Every column of block_run, as BaseModel.to_dict gives them.
+const BLOCK_RUN_FIELDS: &[(&str, Kind)] = &[
+    ("id", Kind::Int),
+    ("created_at", Kind::Time),
+    ("updated_at", Kind::Time),
+    ("pipeline_run_id", Kind::Int),
+    ("block_uuid", Kind::Text),
+    ("status", Kind::Enum),
+    ("completed_at", Kind::Time),
+    ("started_at", Kind::Time),
+    ("metrics", Kind::Json),
+    ("attempt", Kind::Int),
+];
+
+fn select_list(metadata: &Metadata, fields: &[(&str, Kind)]) -> String {
+    fields
+        .iter()
+        .map(|(name, kind)| match (metadata, kind) {
+            // PostgreSQL keeps Enums as types of their own and JSON as json; both read as text.
+            (Metadata::Postgres(_), Kind::Enum | Kind::Json) => format!("{name}::text"),
+            _ => name.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A value read from either database, before it takes its field's kind.
+enum Raw {
+    Null,
+    Int(i64),
+    Text(String),
+    Bool(bool),
+    Time(chrono::DateTime<chrono::Utc>),
+}
+
+fn field_value(kind: Kind, raw: Raw) -> Result<Value, String> {
+    Ok(match (kind, raw) {
+        (_, Raw::Null) => Value::Null,
+        (Kind::Int, Raw::Int(v)) => Value::from(v),
+        (Kind::Bool, Raw::Bool(v)) => Value::Bool(v),
+        (Kind::Bool, Raw::Int(v)) => Value::Bool(v != 0),
+        (Kind::Text, Raw::Text(v)) => Value::String(v),
+        (Kind::Enum, Raw::Text(v)) => Value::String(v.to_lowercase()),
+        (Kind::Json, Raw::Text(v)) => {
+            serde_json::from_str(&v).map_err(|e| format!("JSON {v}: {e}"))?
+        }
+        (Kind::Time, Raw::Text(v)) => str_time_sqlite(&v),
+        (Kind::Time, Raw::Time(at)) => str_time_utc(at),
+        (kind, _) => return Err(format!("A {kind:?} column held another type")),
+    })
+}
+
+/// `str(datetime)` of the naive datetime SQLAlchemy reads from SQLite text: the date, a
+/// space, the time, and the microseconds only when they are not zero.
+fn str_time_sqlite(text: &str) -> Value {
+    match sqlite_time(Some(text.to_string())) {
+        Value::String(iso) => Value::String(iso.replacen('T', " ", 1)),
+        other => other,
+    }
+}
+
+/// `str(datetime)` of an aware datetime in UTC, as PostgreSQL gives it to SQLAlchemy.
+fn str_time_utc(at: chrono::DateTime<chrono::Utc>) -> Value {
+    match postgres_time(Some(at)) {
+        Value::String(iso) => Value::String(iso.replacen('T', " ", 1)),
+        other => other,
+    }
+}
+
+fn object(fields: &[(&str, Kind)], raws: Vec<Raw>) -> Result<Map<String, Value>, String> {
+    let mut row = Map::new();
+    for ((name, kind), raw) in fields.iter().zip(raws) {
+        row.insert(name.to_string(), field_value(*kind, raw)?);
+    }
+    Ok(row)
+}
+
+/// GET /api/pipeline_runs/<id>: the run's presenter attributes, and its block runs with
+/// the trigger's id and name, ordered by created_at as the presenter sorts them.
+async fn pipeline_run(metadata: &Metadata, id: i64) -> Result<Value, String> {
+    let run_sql = format!(
+        "SELECT {} FROM pipeline_run WHERE id = {}",
+        select_list(metadata, RUN_FIELDS),
+        placeholder(metadata, 1)
+    );
+    let blocks_sql = format!(
+        "SELECT {} FROM block_run WHERE pipeline_run_id = {} ORDER BY id",
+        select_list(metadata, BLOCK_RUN_FIELDS),
+        placeholder(metadata, 1)
+    );
+    let schedule_sql = format!(
+        "SELECT id, name FROM pipeline_schedule WHERE id = {}",
+        placeholder(metadata, 1)
+    );
+    let (run, blocks, schedule) = match metadata {
+        Metadata::Sqlite(path) => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || {
+                sqlite_run(&path, id, &run_sql, &blocks_sql, &schedule_sql)
+            })
+            .await
+            .map_err(|e| e.to_string())??
+        }
+        Metadata::Postgres(url) => {
+            postgres_run(url, id, &run_sql, &blocks_sql, &schedule_sql).await?
+        }
+    };
+    let mut run = object(RUN_FIELDS, run)?;
+    let (schedule_id, schedule_name) = schedule.ok_or("The run's trigger is gone")?;
+    let schedule_name = schedule_name.map(Value::String).unwrap_or(Value::Null);
+    let mut block_runs = blocks
+        .into_iter()
+        .map(|raws| {
+            let mut block = object(BLOCK_RUN_FIELDS, raws)?;
+            block.insert("pipeline_schedule_id".into(), Value::from(schedule_id));
+            block.insert("pipeline_schedule_name".into(), schedule_name.clone());
+            Ok(Value::Object(block))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    // Python's sorted() by created_at, stable on equal times.
+    block_runs.sort_by(|a, b| {
+        let at = |v: &Value| v["created_at"].as_str().unwrap_or_default().to_string();
+        at(a).cmp(&at(b))
+    });
+    run.insert("block_runs".into(), Value::Array(block_runs));
+    // The detail's envelope carries metadata, null.
+    Ok(json!({ "pipeline_run": run, "metadata": null }))
+}
+
+type RunRows = (Vec<Raw>, Vec<Vec<Raw>>, Option<(i64, Option<String>)>);
+
+fn sqlite_raw(value: rusqlite::types::ValueRef<'_>) -> Raw {
+    use rusqlite::types::ValueRef;
+    match value {
+        ValueRef::Null => Raw::Null,
+        ValueRef::Integer(v) => Raw::Int(v),
+        ValueRef::Real(v) => Raw::Text(v.to_string()),
+        ValueRef::Text(v) | ValueRef::Blob(v) => Raw::Text(String::from_utf8_lossy(v).into_owned()),
+    }
+}
+
+fn sqlite_run(
+    path: &std::path::Path,
+    id: i64,
+    run_sql: &str,
+    blocks_sql: &str,
+    schedule_sql: &str,
+) -> Result<RunRows, String> {
+    use rusqlite::OpenFlags;
+    let connection = rusqlite::Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| format!("{}: {e}", path.display()))?;
+    let read = |row: &rusqlite::Row<'_>, n: usize| -> rusqlite::Result<Vec<Raw>> {
+        (0..n).map(|i| row.get_ref(i).map(sqlite_raw)).collect()
+    };
+    let run = connection
+        .query_row(run_sql, [id], |row| read(row, RUN_FIELDS.len()))
+        .map_err(|e| e.to_string())?;
+    let schedule_id = match &run[RUN_SCHEDULE] {
+        Raw::Int(v) => Some(*v),
+        _ => None,
+    };
+    let mut statement = connection.prepare(blocks_sql).map_err(|e| e.to_string())?;
+    let blocks = statement
+        .query_map([id], |row| read(row, BLOCK_RUN_FIELDS.len()))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let schedule = match schedule_id {
+        Some(schedule_id) => connection
+            .query_row(schedule_sql, [schedule_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .ok(),
+        None => None,
+    };
+    Ok((run, blocks, schedule))
+}
+
+fn postgres_raw(row: &tokio_postgres::Row, i: usize, kind: Kind) -> Raw {
+    let raw = match kind {
+        Kind::Int => row.get::<_, Option<i32>>(i).map(|v| Raw::Int(v.into())),
+        Kind::Bool => row.get::<_, Option<bool>>(i).map(Raw::Bool),
+        Kind::Time => row
+            .get::<_, Option<chrono::DateTime<chrono::Utc>>>(i)
+            .map(Raw::Time),
+        Kind::Text | Kind::Json | Kind::Enum => row.get::<_, Option<String>>(i).map(Raw::Text),
+    };
+    raw.unwrap_or(Raw::Null)
+}
+
+async fn postgres_run(
+    url: &str,
+    id: i64,
+    run_sql: &str,
+    blocks_sql: &str,
+    schedule_sql: &str,
+) -> Result<RunRows, String> {
+    let client = mage_pg::connect_url(url, "mageml-gateway").await?;
+    let id = i32::try_from(id).map_err(|_| format!("run {id} is out of range"))?;
+    let row = client
+        .query_one(run_sql, &[&id])
+        .await
+        .map_err(|e| e.to_string())?;
+    let run: Vec<Raw> = RUN_FIELDS
+        .iter()
+        .enumerate()
+        .map(|(i, (_, kind))| postgres_raw(&row, i, *kind))
+        .collect();
+    let schedule_id: Option<i32> = row.get(RUN_SCHEDULE);
+    let blocks = client
+        .query(blocks_sql, &[&id])
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|row| {
+            BLOCK_RUN_FIELDS
+                .iter()
+                .enumerate()
+                .map(|(i, (_, kind))| postgres_raw(row, i, *kind))
+                .collect()
+        })
+        .collect();
+    let schedule = match schedule_id {
+        Some(schedule_id) => client
+            .query_opt(schedule_sql, &[&schedule_id])
+            .await
+            .map_err(|e| e.to_string())?
+            .map(|row| {
+                (
+                    i64::from(row.get::<_, i32>(0)),
+                    row.get::<_, Option<String>>(1),
+                )
+            }),
+        None => None,
+    };
+    Ok((run, blocks, schedule))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +873,52 @@ mod tests {
             .unwrap()
             .to_utc();
         assert_eq!(postgres_time(Some(at)), "2026-10-22T02:15:09.069058+00:00");
+    }
+
+    #[test]
+    fn to_dict_times_have_a_space() {
+        assert_eq!(
+            str_time_sqlite("2026-10-22 02:15:09.069058"),
+            "2026-10-22 02:15:09.069058"
+        );
+        assert_eq!(
+            str_time_sqlite("2026-10-22 02:15:09.000000"),
+            "2026-10-22 02:15:09"
+        );
+        let at = chrono::DateTime::parse_from_rfc3339("2026-10-22T02:15:09Z")
+            .unwrap()
+            .to_utc();
+        assert_eq!(str_time_utc(at), "2026-10-22 02:15:09+00:00");
+        assert_eq!(
+            field_value(Kind::Enum, Raw::Text("LOCAL_PYTHON".into())).unwrap(),
+            "local_python"
+        );
+        assert_eq!(field_value(Kind::Bool, Raw::Int(0)).unwrap(), false);
+        assert_eq!(
+            field_value(Kind::Json, Raw::Text("null".into())).unwrap(),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn run_paths_are_digits() {
+        let shadow =
+            Shadow::new(Metadata::Sqlite("/x".into()), vec!["pipeline_run".into()]).unwrap();
+        let get = hyper::Method::GET;
+        assert_eq!(
+            shadow.route_for(&get, "/api/pipeline_runs/12"),
+            Some("pipeline_run")
+        );
+        assert_eq!(
+            shadow.route_for(&get, "/api/pipeline_runs/12/block_runs"),
+            None
+        );
+        assert_eq!(shadow.route_for(&get, "/api/pipeline_runs/"), None);
+        assert_eq!(shadow.route_for(&get, "/api/block_runs"), None);
+        assert_eq!(
+            shadow.route_for(&hyper::Method::PUT, "/api/pipeline_runs/12"),
+            None
+        );
     }
 
     #[test]
