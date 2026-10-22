@@ -713,6 +713,8 @@ impl BlockTask {
             "inputs": inputs,
             "variables": *self.kwargs,
             "output_dir": ".",
+            // Audit records of the block's scores name its code (mage::models::audit).
+            "block_sha256": self.block.sha256,
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string())
             .map_err(|e| BlockFailure::retryable(format!("could not write the job: {e}")))?;
@@ -869,6 +871,7 @@ async fn run_rust_binary(
         // Only the block environment: the service's own credentials are not inherited.
         .env_clear()
         .envs(service.extra_env.iter().cloned())
+        .envs(service.model_env.iter().cloned())
         .envs(env);
     if let Some(profile) = rendered_io_config(service, io_config_profile) {
         command.env("MAGE_IO_CONFIG", profile);
@@ -1393,6 +1396,7 @@ impl ChainTask {
                     "block_type": b.block_type.as_str(),
                     "entry": b.entry,
                     "keep_output": keep_outputs(),
+                    "block_sha256": b.sha256,
                 })
             })
             .collect();
@@ -1405,6 +1409,7 @@ impl ChainTask {
             "variables": *self.kwargs,
             "output_dir": ".",
             "chain": steps,
+            "block_sha256": head.sha256,
         });
         std::fs::write(self.output_dir.join("job.json"), job.to_string()).map_err(|e| {
             (

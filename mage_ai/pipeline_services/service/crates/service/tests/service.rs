@@ -822,6 +822,7 @@ fn block_code_never_sees_the_services_credentials() {
     service.start(&[
         ("IBM_CLOUD_API_KEY", "ibm-secret"),
         ("USER_SETTING", "kept"),
+        ("MAGE_SERVICE_AUDIT_KEY", "audit-secret"),
     ]);
 
     let names = block_environment(&service);
@@ -842,6 +843,9 @@ fn block_code_never_sees_the_services_credentials() {
         "PATH",
         "MAGE_SERVICE_MODELS_DIR",
         "MAGE_REPO_PATH",
+        // models.predict hashes audited columns with it; it never reached the workers.
+        "MAGE_SERVICE_AUDIT_KEY",
+        "MAGE_SERVICE_AUDIT_DIR",
     ] {
         assert!(
             names.iter().any(|n| n == kept),

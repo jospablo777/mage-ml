@@ -29,6 +29,8 @@ pub mod duckdb;
 pub mod extract;
 #[cfg(feature = "feast")]
 pub mod feast;
+#[cfg(feature = "models")]
+pub mod models;
 #[cfg(feature = "mongodb")]
 pub mod mongodb;
 #[cfg(feature = "mysql")]

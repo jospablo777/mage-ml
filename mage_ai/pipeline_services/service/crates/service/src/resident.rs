@@ -106,6 +106,7 @@ impl Residents {
             // Only the block environment: the service's own credentials are not inherited.
             .env_clear()
             .envs(service.extra_env.iter().cloned())
+            .envs(service.model_env.iter().cloned())
             .env("MAGE_RESIDENT", "1");
         if let Some(profile) = &key.io_config {
             command.env("MAGE_IO_CONFIG", profile);

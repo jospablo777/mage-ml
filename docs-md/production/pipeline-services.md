@@ -522,6 +522,25 @@ With `audit` on a model, every input `predict` scores gets a record, written bef
   first broken line.
 - Files older than `MAGE_SERVICE_AUDIT_RETENTION_DAYS` (365; 0 keeps them) are removed.
 - A record that cannot be written fails the prediction: no decision goes unrecorded.
+- Rust blocks write the same records with `mage::models::audit`, after scoring with their
+  own code, for example an ONNX model of the service: `mage::models::dir("churn")` is
+  the embedded model's folder, its files under `artifacts/`.
+
+```rust
+use mage::prelude::*;
+
+fn transform(customers: DataFrame, context: BlockContext) -> Result<DataFrame> {
+    let model = mage::onnx::model(mage::models::dir("churn")?.join("artifacts/model.onnx"))?;
+    let features = ["tenure", "monthly_spend", "tickets"];
+    let scores = model.predict(&customers, &features)?;
+    let score = scores.get_columns()[0].as_materialized_series();
+    mage::models::audit(&context, "churn", &customers, "customer_id", &features, score)?;
+    Ok(customers.hstack(scores.get_columns())?)
+}
+```
+
+  The records name the block's code digest and run as Python's do, and a column hashed in
+  Rust gives the hash Python gives the same value.
 
 A container's disk goes when it restarts or moves, and its audit records with it. With
 `MAGE_SERVICE_AUDIT_URL` (`s3://bucket/prefix`, `gs://`, `az://`, `file://`), the service

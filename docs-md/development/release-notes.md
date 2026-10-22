@@ -70,6 +70,11 @@
   Snowflake and BigQuery as well as PostgreSQL (`source.kind`).
 - The Services page promotes a model version: the version a moved alias names, or a
   challenger's, with a reason, recorded in `promotions.yaml` with the signed-in user.
+- Rust blocks of exported services record their decisions too: `mage::models::audit`
+  writes the records Python's `predict` writes, chained and hashed the same way, and
+  `mage::models::dir` finds an embedded model's files, such as an ONNX model.
+- `MAGE_SERVICE_AUDIT_KEY` reaches the blocks that write audit records: hashed columns were
+  plain SHA-256 though the key was set, so a guessed value could be checked against them.
 - Exported services copy their audit records to an object store or a PostgreSQL table
   (`MAGE_SERVICE_AUDIT_URL`) every 30 seconds and when they stop: the records were only on
   the instance's disk, lost when a container restarts. The copies keep the hash chain, and

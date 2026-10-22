@@ -239,7 +239,8 @@ def crate_name(block_uuid: str) -> str:
 
 # The modules of MageML's crate that need one of its features, by the feature's name.
 SDK_FEATURE_MODULES = (
-    'clickhouse', 'duckdb', 'feast', 'mongodb', 'mysql', 'onnx', 'postgres', 'redis', 'storage',
+    'clickhouse', 'duckdb', 'feast', 'models', 'mongodb', 'mysql', 'onnx', 'postgres', 'redis',
+    'storage',
 )
 
 

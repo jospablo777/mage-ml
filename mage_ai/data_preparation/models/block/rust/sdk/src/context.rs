@@ -47,4 +47,6 @@ pub struct BlockContext {
     pub variables: Vars,
     /// A directory the block can use for scratch files; Mage removes it after the run.
     pub scratch_dir: PathBuf,
+    /// The digest of the block's code, in a pipeline service; audit records name it.
+    pub block_sha256: Option<String>,
 }

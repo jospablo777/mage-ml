@@ -750,6 +750,34 @@ async fn start_service(
     )
     .collect();
     let data = data_dir(common);
+    // What blocks need to score with the embedded models and record their decisions
+    // (models.predict in Python, mage::models in Rust). Blocks inherit no MAGE_SERVICE_
+    // variable, so the audit key goes on here: without it, hashed audit columns were plain
+    // SHA-256 though MAGE_SERVICE_AUDIT_KEY was set.
+    let model_env: Vec<(String, String)> = [
+        (
+            "MAGE_SERVICE_AUDIT_DIR",
+            data.join("audit").display().to_string(),
+        ),
+        ("MAGE_SERVICE_NAME", manifest.service.name.clone()),
+        (
+            "MAGE_SERVICE_SOURCE_SHA256",
+            manifest.service.source_sha256.clone(),
+        ),
+        (
+            "MAGE_SERVICE_MODELS_DIR",
+            common.dir.join("models").display().to_string(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value))
+    .chain(
+        std::env::var("MAGE_SERVICE_AUDIT_KEY")
+            .ok()
+            .filter(|key| !key.is_empty())
+            .map(|key| ("MAGE_SERVICE_AUDIT_KEY".to_string(), key)),
+    )
+    .collect();
     service::ensure_dir(&data.join("runs"))
         .map_err(|e| format!("Could not create {}: {e}", data.display()))?;
     let location = ledger_location(common, &manifest.service.name)?;
@@ -801,19 +829,6 @@ async fn start_service(
             env: [
                 ("MAGE_SERVICE".to_string(), "1".to_string()),
                 ("MLFLOW_DISABLE_AGENT_HINT".to_string(), "1".to_string()),
-                // Audit records of predictions (models.audit), searched at /v1/audit.
-                (
-                    "MAGE_SERVICE_AUDIT_DIR".to_string(),
-                    data.join("audit").display().to_string(),
-                ),
-                (
-                    "MAGE_SERVICE_NAME".to_string(),
-                    manifest.service.name.clone(),
-                ),
-                (
-                    "MAGE_SERVICE_SOURCE_SHA256".to_string(),
-                    manifest.service.source_sha256.clone(),
-                ),
                 // Challengers' shadow records (models.predict), compared at /v1/models.
                 (
                     "MAGE_SERVICE_SHADOW_DIR".to_string(),
@@ -829,12 +844,9 @@ async fn start_service(
                     }
                     .to_string(),
                 ),
-                (
-                    "MAGE_SERVICE_MODELS_DIR".to_string(),
-                    common.dir.join("models").display().to_string(),
-                ),
             ]
             .into_iter()
+            .chain(model_env.iter().cloned())
             .chain(extra_env.iter().cloned())
             .collect(),
         })
@@ -871,6 +883,7 @@ async fn start_service(
         Config {
             state_store: crate::state_files::open_store()?,
             audit_shipper,
+            model_env: model_env.clone(),
             service_dir: common.dir.clone(),
             data_dir: data,
             schedules_enabled,

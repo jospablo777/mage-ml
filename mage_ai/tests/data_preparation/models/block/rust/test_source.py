@@ -169,6 +169,10 @@ class WorkspaceTest(TestCase):
         )
         self.assertEqual(ws.sdk_features([code]), ['duckdb', 'feast', 'storage'])
         self.assertEqual(ws.sdk_features(['use mage::prelude::*;']), [])
+        self.assertEqual(
+            ws.sdk_features(['mage::models::audit(&context, "churn", &f, "id", &[], &s)?;']),
+            ['models'],
+        )
         workspace = ws.init(tempfile.mkdtemp())
         directory = ws.write_block_crate(workspace, 'block_s3', {'main.rs': code})
         manifest = (directory / 'Cargo.toml').read_text()

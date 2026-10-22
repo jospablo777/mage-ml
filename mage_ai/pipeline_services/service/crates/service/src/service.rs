@@ -37,6 +37,8 @@ pub struct Config {
     pub state_store: Option<Arc<crate::state_files::StoreHandle>>,
     /// Copies audit records to an object store (MAGE_SERVICE_AUDIT_URL).
     pub audit_shipper: Option<Arc<crate::audit_ship::Shipper>>,
+    /// The embedded models' and audit records' variables, for block processes.
+    pub model_env: Vec<(String, String)>,
 }
 
 pub struct Service {
@@ -75,6 +77,9 @@ pub struct Service {
     /// Copies audit records to an object store (MAGE_SERVICE_AUDIT_URL); None keeps them on
     /// the instance only.
     pub audit_shipper: Option<Arc<crate::audit_ship::Shipper>>,
+    /// The embedded models' and audit records' variables, which Rust block processes get
+    /// as the Python workers do.
+    pub model_env: Vec<(String, String)>,
     /// Run logs kept in a shared (PostgreSQL) run history too; None with SQLite.
     pub shared_logs: Option<Arc<crate::run_logs::SharedLogs>>,
     max_total_runs: usize,
@@ -219,6 +224,7 @@ impl Service {
             alerts,
             state_store: config.state_store,
             audit_shipper: config.audit_shipper,
+            model_env: config.model_env,
             shared_logs,
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),

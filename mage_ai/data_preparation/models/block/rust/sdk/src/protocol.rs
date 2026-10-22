@@ -29,6 +29,9 @@ pub struct Job {
     pub variables: Map<String, Value>,
     /// Where outputs go; relative to the job directory.
     pub output_dir: PathBuf,
+    /// The digest of the block's code, which a pipeline service sends for audit records.
+    #[serde(default)]
+    pub block_sha256: Option<String>,
     /// A chain of blocks to run in this process, each taking the previous block's output
     /// in memory (see `run_chain`); `block_uuid` and `block_type` are the first block's.
     #[serde(default)]
@@ -46,6 +49,8 @@ pub struct ChainStep {
     /// Write the block's output, for Mage to store, though the chain does not need it.
     #[serde(default)]
     pub keep_output: bool,
+    #[serde(default)]
+    pub block_sha256: Option<String>,
 }
 
 /// What a chain reports: the last block's outputs, every block's tests (named

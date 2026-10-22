@@ -40,6 +40,9 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 # ONNX models for blocks (mage::onnx), behind the onnx feature. ONNX Runtime is downloaded
 # at build time and linked into the block's program.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-rustls"], optional = true }
+# Audit records of embedded models' scores (mage::models), behind the models feature.
+sha2 = { version = "0.11", optional = true }
+hmac = { version = "0.13", optional = true }
 
 [features]
 # Object storage for blocks (mage::storage): S3 and S3-compatible stores, Google Cloud Storage
@@ -54,6 +57,7 @@ redis = ["dep:redis", "dep:chrono", "dep:rustls"]
 postgres = ["dep:postgres", "dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 feast = ["dep:ureq", "dep:chrono"]
 onnx = ["dep:ort"]
+models = ["dep:sha2", "dep:hmac", "dep:chrono"]
 
 [dev-dependencies]
 tempfile = "3"
