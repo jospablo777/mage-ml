@@ -108,6 +108,9 @@ On this page, you can:
 | Admin | Can do everything a viewer can, an editor can, and manage users who are viewers/editors (update usernames, emails, passwords, and make viewers editors or vice versa. |
 | Owner | In addition to what admins can do, add and delete users. Manage all users, including admins/owners. Make other users any role, including admins/owners. |
 
+[Who may do what](access.md) lists, for each resource of the API, the
+lowest role each action needs.
+
 ## Authenticated requests
 
 When user authentication is on (the default), each API request the front-end client makes to the backend server will include an API key

@@ -15,6 +15,7 @@ file differs from what the code records.
 import json
 import os
 import queue
+import subprocess
 import sys
 import tempfile
 import threading
@@ -53,6 +54,10 @@ def main() -> int:
     matrix = policy_matrix.build(policy_matrix.make_users())
     CONTRACTS.mkdir(exist_ok=True)
     (CONTRACTS / 'policy_matrix.json').write_text(policy_matrix.dumps(matrix))
+    # The docs page of who may do what, from the same matrix.
+    subprocess.run(
+        [sys.executable, str(ROOT / 'scripts' / 'docs' / 'role_access.py')], check=True,
+    )
     print(f"policy_matrix.json: {matrix['policies']} policies, {len(matrix['actions'])} "
           f"action rows, {len(matrix['attributes'])} attribute rows")
 

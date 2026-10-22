@@ -400,6 +400,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 ### Authentication
 
 - [User authentication](production/authentication/overview.md)
+- [Who may do what](production/authentication/access.md)
 - [Sign in with Okta](production/authentication/okta.md)
 - [Sign in with Microsoft Entra ID aka Active Directory](production/authentication/microsoft.md)
 - [Sign in with Google](production/authentication/google.md)

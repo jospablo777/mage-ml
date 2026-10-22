@@ -8,7 +8,8 @@ must match when they take over each route and policy.
 | `openapi.json` | Every route and operation the server answers, with response schemas inferred from live responses of a seeded scratch project | `mage_ai/api/contracts/openapi.py` |
 | `policy_matrix.json` | For each policy, action and attribute: the roles allowed, by `DISABLE_NOTEBOOK_EDIT_ACCESS` mode | `mage_ai/api/contracts/policy_matrix.py` |
 
-Regenerate both after changing a resource, a policy, a presenter or a route:
+Regenerate both after changing a resource, a policy, a presenter or a route (the recorder
+also rewrites `docs/production/authentication/access.mdx`):
 
 ```bash
 uv run python scripts/contracts/record.py

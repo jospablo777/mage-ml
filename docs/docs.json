@@ -636,6 +636,7 @@
             "group": "Authentication",
             "pages": [
               "production/authentication/overview",
+              "production/authentication/access",
               "production/authentication/okta",
               "production/authentication/microsoft",
               "production/authentication/google",

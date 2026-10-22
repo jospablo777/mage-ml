@@ -21,6 +21,21 @@ class PolicyMatrixTest(DBTestCase):
             'scripts/contracts/record.py and commit the file.',
         )
 
+    def test_the_docs_page_shows_the_checked_in_matrix(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            'role_access', MATRIX.parents[1] / 'scripts' / 'docs' / 'role_access.py',
+        )
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        text = script.PAGE.read_text()
+        self.assertEqual(
+            text, script.written(text, script.table(json.loads(MATRIX.read_text()))),
+            'docs/production/authentication/access.mdx is out of date: run '
+            'scripts/docs/role_access.py.',
+        )
+
     def test_every_policy_and_action_has_a_row_per_mode(self):
         self.assertEqual(self.matrix['policies'], len(policy_matrix.policy_classes()))
         modes = {}
