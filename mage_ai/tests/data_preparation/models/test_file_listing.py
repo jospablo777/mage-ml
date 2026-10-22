@@ -99,6 +99,7 @@ class FileListingAsyncTest(unittest.IsolatedAsyncioTestCase):
                     'has_at_least_editor_role_and_pipeline_edit_access',
                     return_value=False,
                 ), \
+                patch.object(FilePolicy, 'has_at_least_viewer_role', return_value=True), \
                 patch.object(FilePolicy, 'current_scope', return_value=OauthScope.CLIENT_PRIVATE):
             await policy.authorize_query(
                 {

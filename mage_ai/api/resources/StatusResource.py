@@ -113,7 +113,10 @@ class StatusResource(GenericResource):
 
             status = merge_dict(status, activity_details)
 
-        if REQUIRE_USER_AUTHENTICATION and user is None:
+        # The API layer's flag, which its policies read.
+        from mage_ai.api.policies import BasePolicy as policies
+
+        if policies.REQUIRE_USER_AUTHENTICATION and user is None:
             # Before sign-in the app reads whether to sign in; the server's paths, process
             # ids, scheduler and activity went to anyone who could reach it.
             status = {

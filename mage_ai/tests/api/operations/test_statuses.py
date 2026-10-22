@@ -17,7 +17,7 @@ class StatusOperationTests(BaseApiTestCase):
         self.assertNotIn('error', response, response)
         return response['statuses'][0]
 
-    @patch('mage_ai.api.resources.StatusResource.REQUIRE_USER_AUTHENTICATION', True)
+    @patch('mage_ai.api.policies.BasePolicy.REQUIRE_USER_AUTHENTICATION', True)
     async def test_a_caller_who_has_not_signed_in_reads_whether_to_sign_in_only(self):
         public = await self.status(None)
         self.assertTrue(public['require_user_authentication'])
