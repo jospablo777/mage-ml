@@ -402,6 +402,11 @@ def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
         '&_limit=30&_offset=0',
         f'pipeline_uuid={tagged}&disable_retries_grouping=true&include_pipeline_tags=true',
         'status=completed', 'status[]=completed,failed', 'order_by[]=id%20asc',
+        # The overview page: types, a start time, failures first by creation.
+        f'_limit=50&include_pipeline_type=1&order_by[]=created_at%20desc'
+        f'&start_timestamp={int(time.time()) - 7 * 86400}&status=failed',
+        f'start_timestamp={int(time.time()) - 3600}&end_timestamp={int(time.time()) + 60}'
+        '&include_pipeline_type=1',
     ]
     before = settled(counts)
     for query in queries + ['pipeline_type=python']:

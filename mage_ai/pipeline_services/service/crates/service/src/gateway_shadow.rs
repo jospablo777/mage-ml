@@ -1191,6 +1191,7 @@ pub(crate) async fn read_rows(
                         Raw::Int(v) => Box::new(*v as i32),
                         Raw::Text(v) => Box::new(v.clone()),
                         Raw::Bool(v) => Box::new(*v),
+                        Raw::Time(v) => Box::new(*v),
                         _ => Box::new(Option::<String>::None),
                     }
                 })
@@ -1253,9 +1254,6 @@ pub(crate) fn pipeline_runs_unsupported(
         "pipeline_tag[]",
         "pipeline_type",
         "global_data_product_uuid",
-        "start_timestamp",
-        "end_timestamp",
-        "include_pipeline_type",
     ] {
         if query.get(key).is_some() {
             return Some("a filter the gateway does not read");
@@ -1332,6 +1330,20 @@ async fn pipeline_runs(
             .map(|s| param(Raw::Text(s.to_uppercase()), &mut params))
             .collect();
         filters.push(format!("{status_text} IN ({})", ps.join(", ")));
+    }
+    // get_query_timestamps: Unix seconds as a UTC time without a zone, compared with
+    // created_at; SQLite compares SQLAlchemy's text of it.
+    for (key, operator) in [("start_timestamp", ">="), ("end_timestamp", "<=")] {
+        if let Some(text) = query.get(key) {
+            let seconds = text.parse::<i64>().map_err(|_| format!("{key} {text}"))?;
+            let at = chrono::DateTime::from_timestamp(seconds, 0).ok_or(format!("{key} {text}"))?;
+            let raw = match metadata {
+                Metadata::Sqlite(_) => Raw::Text(at.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
+                Metadata::Postgres(_) => Raw::Time(at),
+            };
+            let p = param(raw, &mut params);
+            filters.push(format!("r.created_at {operator} {p}"));
+        }
     }
     let order = match query.get("order_by[]") {
         Some(order_by) => {
@@ -1426,6 +1438,7 @@ async fn pipeline_runs(
     }
 
     let tags = query.get("include_pipeline_tags").is_some();
+    let types = query.get("include_pipeline_type").is_some();
     let mut runs = Vec::new();
     for mut raws in rows {
         let extra = raws.split_off(RUN_FIELDS.len());
@@ -1451,17 +1464,17 @@ async fn pipeline_runs(
         );
         run.insert("repo_path".into(), text(&extra[3]));
         // Both keys are in every item of the LIST format; null unless asked for.
-        let tag_value = if tags {
-            let uuid = run["pipeline_uuid"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            pipeline_tags(repo_path, &uuid)
-        } else {
-            Value::Null
+        let uuid = run["pipeline_uuid"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let config = (tags || types).then(|| pipeline_config(repo_path, &uuid));
+        let pick = |wanted: bool, get: fn(&PipelineConfig) -> Value| match (&config, wanted) {
+            (Some(Some(config)), true) => get(config),
+            _ => Value::Null,
         };
-        run.insert("pipeline_tags".into(), tag_value);
-        run.insert("pipeline_type".into(), Value::Null);
+        run.insert("pipeline_tags".into(), pick(tags, |c| c.tags.clone()));
+        run.insert("pipeline_type".into(), pick(types, |c| c.kind.clone()));
         runs.push(Value::Object(run));
     }
     let mut meta = Map::new();
@@ -1490,43 +1503,69 @@ fn pipeline_names(repo_path: &std::path::Path) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// PipelineRun.pipeline_tags: the tags of the pipeline's metadata.yaml, or null without
-/// them (or without the file).
-fn pipeline_tags(repo_path: &std::path::Path, uuid: &str) -> Value {
-    // Read again only when the file changed: a runs page lists thirty runs a few times a
-    // minute, mostly of the same pipelines.
-    static TAGS: std::sync::LazyLock<Mutex<BTreeMap<PathBuf, (std::time::SystemTime, Value)>>> =
-        std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
-    let path = repo_path.join("pipelines").join(uuid).join("metadata.yaml");
-    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
-        return Value::Null;
-    };
-    if let Some((at, tags)) = TAGS.lock().unwrap_or_else(|p| p.into_inner()).get(&path)
-        && *at == modified
-    {
-        return tags.clone();
-    }
-    let tags = read_pipeline_tags(&path);
-    TAGS.lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(path, (modified, tags.clone()));
-    tags
+/// What the runs list reads of a pipeline's metadata.yaml.
+#[derive(Clone)]
+struct PipelineConfig {
+    /// PipelineRun.pipeline_tags: the tags, or null without them.
+    tags: Value,
+    /// PipelineRun.pipeline_type: the type, python when the file names none.
+    kind: Value,
 }
 
-fn read_pipeline_tags(path: &std::path::Path) -> Value {
+/// The pipeline's config, None when its folder is gone (Pipeline.get with check_if_exists,
+/// then null tags and type). Read again only when the file changed: a runs page lists
+/// thirty runs a few times a minute, mostly of the same pipelines.
+fn pipeline_config(repo_path: &std::path::Path, uuid: &str) -> Option<PipelineConfig> {
+    type Cache = BTreeMap<PathBuf, (std::time::SystemTime, PipelineConfig)>;
+    static CONFIGS: std::sync::LazyLock<Mutex<Cache>> =
+        std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+    let path = repo_path.join("pipelines").join(uuid).join("metadata.yaml");
+    let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+    if let Some((at, config)) = CONFIGS.lock().unwrap_or_else(|p| p.into_inner()).get(&path)
+        && *at == modified
+    {
+        return Some(config.clone());
+    }
+    let config = read_pipeline_config(&path);
+    CONFIGS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(path, (modified, config.clone()));
+    Some(config)
+}
+
+fn read_pipeline_config(path: &std::path::Path) -> PipelineConfig {
+    let unread = PipelineConfig {
+        tags: Value::Null,
+        kind: Value::String("python".into()),
+    };
     let Ok(text) = std::fs::read_to_string(path) else {
-        return Value::Null;
+        return unread;
     };
     let Ok(documents) = yaml_rust2::YamlLoader::load_from_str(&text) else {
-        return Value::Null;
+        return unread;
     };
-    match documents.first().map(|doc| &doc["tags"]) {
-        Some(yaml_rust2::Yaml::Array(items)) => {
-            Value::Array(items.iter().map(yaml_value).collect())
-        }
-        Some(yaml_rust2::Yaml::BadValue) | None | Some(yaml_rust2::Yaml::Null) => Value::Null,
-        Some(other) => yaml_value(other),
-    }
+    let Some(doc) = documents.first() else {
+        return unread;
+    };
+    let tags = match &doc["tags"] {
+        yaml_rust2::Yaml::Array(items) => Value::Array(items.iter().map(yaml_value).collect()),
+        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null => Value::Null,
+        other => yaml_value(other),
+    };
+    let kind = match &doc["type"] {
+        yaml_rust2::Yaml::String(kind) if !kind.is_empty() => Value::String(kind.clone()),
+        _ => Value::String("python".into()),
+    };
+    PipelineConfig { tags, kind }
+}
+
+/// The tags alone, as the tests read them.
+#[cfg(test)]
+fn pipeline_tags(repo_path: &std::path::Path, uuid: &str) -> Value {
+    pipeline_config(repo_path, uuid)
+        .map(|c| c.tags)
+        .unwrap_or(Value::Null)
 }
 
 fn yaml_value(yaml: &yaml_rust2::Yaml) -> Value {
@@ -1627,6 +1666,8 @@ mod tests {
         );
         assert!(pipeline_runs_unsupported(page, None).is_some());
         assert!(pipeline_runs_unsupported("pipeline_tag[]=a", Some(repo)).is_some());
+        let overview = "include_pipeline_type=1&start_timestamp=1&status=failed";
+        assert_eq!(pipeline_runs_unsupported(overview, Some(repo)), None);
         assert!(pipeline_runs_unsupported("status=last_run_failed", Some(repo)).is_some());
         // One pipeline's runs come with their retries grouped unless told not to.
         assert!(pipeline_runs_unsupported("pipeline_uuid=p", Some(repo)).is_some());
@@ -1646,7 +1687,7 @@ mod tests {
         };
         write("block", "name: a\ntags:\n- nightly\n- finance\n");
         write("inline", "tags: [one, 2]\n");
-        write("none", "name: c\n");
+        write("none", "name: c\ntype: streaming\n");
         assert_eq!(
             pipeline_tags(folder.path(), "block"),
             json!(["nightly", "finance"])
@@ -1654,6 +1695,10 @@ mod tests {
         assert_eq!(pipeline_tags(folder.path(), "inline"), json!(["one", 2]));
         assert_eq!(pipeline_tags(folder.path(), "none"), Value::Null);
         assert_eq!(pipeline_tags(folder.path(), "missing"), Value::Null);
+        let kind = |uuid: &str| pipeline_config(folder.path(), uuid).map(|c| c.kind);
+        assert_eq!(kind("block"), Some(json!("python")));
+        assert_eq!(kind("none"), Some(json!("streaming")));
+        assert_eq!(kind("missing"), None);
         let mut names: Vec<Value> = pipeline_names(folder.path());
         names.sort_by_key(|v| v.as_str().unwrap_or_default().to_string());
         assert_eq!(names, vec![json!("block"), json!("inline"), json!("none")]);
