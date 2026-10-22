@@ -12,10 +12,12 @@ chain, an exporter, or has tests, monitors or a data contract, or when the pipel
 every block's output (keep_block_outputs). A planned block keeps its block run, logs and
 status; its stored output is the plan, as JSON, which any later reader can run.
 
-DuckDB SQL blocks chain too: a planned block whose table is replaced on each run
-(export_write_policy replace) becomes a view of its query instead of a table, and the
-block that needs its output writes its table from a query DuckDB plans across the views,
-as one statement. A block that appends keeps its table, as the rows it accumulates are
+DuckDB and PostgreSQL SQL blocks chain too: a planned block whose table is replaced on
+each run (export_write_policy replace) becomes a view of its query instead of a table, and
+the block that needs its output writes its table from a query the database plans across
+the views, as one statement. PostgreSQL views carry a comment that marks them, so a block
+that replaces a table read by chain views drops those views (the run creates them again)
+and never a view of the user's. A block that appends keeps its table, as the rows it accumulates are
 what the blocks after it read.
 """
 import contextvars
@@ -93,7 +95,8 @@ VIEW_KEY = '__mage_view__'
 def chains_with(block, following) -> bool:
     """
     Whether the block may plan for the next block of its stage: both Rust, both R, or a
-    DuckDB SQL block that replaces its table followed by a DuckDB SQL block of its profile.
+    DuckDB or PostgreSQL SQL block that replaces its table followed by a SQL block of the
+    same database and profile.
     """
     from mage_ai.data_preparation.models.constants import BlockLanguage
 
@@ -102,15 +105,18 @@ def chains_with(block, following) -> bool:
     if block.language in (BlockLanguage.RUST, BlockLanguage.R):
         return following.language == block.language
     if block.language == BlockLanguage.SQL and following.language == BlockLanguage.SQL:
-        return sql_view_problem(block) is None and _duckdb(following) and (
+        return sql_view_problem(block) is None and _provider(following) == _provider(block) and (
             (block.configuration or {}).get('data_provider_profile')
             == (following.configuration or {}).get('data_provider_profile')
         )
     return False
 
 
-def _duckdb(block) -> bool:
-    return (block.configuration or {}).get('data_provider') == 'duckdb'
+VIEW_PROVIDERS = ('duckdb', 'postgres')
+
+
+def _provider(block) -> Optional[str]:
+    return (block.configuration or {}).get('data_provider')
 
 
 def sql_view_problem(block) -> Optional[str]:
@@ -122,8 +128,8 @@ def sql_view_problem(block) -> Optional[str]:
     )
 
     configuration = block.configuration or {}
-    if not _duckdb(block):
-        return 'For now, compiling SQL block chains supports only DuckDB.'
+    if _provider(block) not in VIEW_PROVIDERS:
+        return 'For now, compiling SQL block chains supports DuckDB and PostgreSQL.'
     if configuration.get('use_raw_sql'):
         return 'It runs raw SQL, which can hold several statements.'
     if str(configuration.get('export_write_policy') or 'append') != 'replace':

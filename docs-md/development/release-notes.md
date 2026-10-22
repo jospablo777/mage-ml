@@ -31,6 +31,10 @@
   from one query DuckDB plans across them. A four-block chain over 30 million rows ran in
   1 s instead of 20 s and wrote 1 MB instead of 952 MB. The Compile panel lists the
   chains and the SQL blocks left out, with the reason.
+- PostgreSQL SQL chains compile the same way. A four-block chain over 5 million rows ran in
+  3 s instead of 17 s and stored 16 kB instead of 613 MB. Chain views carry a comment that
+  marks them, so a block that replaces a table read by chain views drops them first (the
+  run creates them again), and a view of the user's is never dropped.
 
 ### Airflow
 

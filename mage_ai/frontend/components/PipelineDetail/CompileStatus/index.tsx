@@ -503,7 +503,7 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
             ))}
             {summary?.sql_chains?.length >= 1 && (
               <Text muted xsmall>
-                In production runs, every block of a chain but the last becomes a DuckDB view,
+                In production runs, every block of a chain but the last becomes a view,
                 and the last one writes its table from one query across them.
               </Text>
             )}

@@ -123,6 +123,9 @@ class BaseSQL(BaseSQLConnection):
     def default_database(self) -> str:
         return None
 
+    def _before_drop_table(self, cursor, full_table_name: str) -> None:
+        """Runs before export drops a table it replaces, in the same transaction."""
+
     def default_schema(self) -> str:
         return None
 
@@ -380,6 +383,7 @@ class BaseSQL(BaseSQLConnection):
                         )
                     elif ExportWritePolicy.REPLACE == if_exists:
                         if drop_table_on_replace:
+                            self._before_drop_table(cur, full_table_name)
                             cmd = f'DROP TABLE {full_table_name}'
                             if cascade_on_drop:
                                 cmd = f'{cmd} CASCADE'

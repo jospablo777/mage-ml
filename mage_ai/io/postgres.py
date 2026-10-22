@@ -74,6 +74,10 @@ def register_numpy_adapters() -> None:
 register_numpy_adapters()
 
 
+# The comment on a view a compiled chain made (block/plans.py), which the chain may drop
+# and create again; other views are the user's.
+CHAIN_VIEW_COMMENT = 'MageML compiled chain view'
+
 # A name PostgreSQL reads unquoted: it folds it to lower case, as SQL that writes the
 # name unquoted would.
 _PLAIN_IDENTIFIER = re.compile(r'[A-Za-z_\u0080-\U0010ffff][A-Za-z0-9_$\u0080-\U0010ffff]*')
@@ -533,6 +537,103 @@ class Postgres(BaseSQL):
             f'SELECT {", ".join(values)}\nFROM ({query_string}) AS mage_append_query'
         )
 
+    def relation_kind(self, schema_name: Optional[str], name: str) -> Optional[str]:
+        """'table', 'view', or another pg_class kind letter; None when nothing has the name."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                'SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace '
+                'WHERE n.nspname = %s AND c.relname = %s',
+                (stored_name(schema_name or self.default_schema()), stored_name(name)),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(r='table', p='table', v='view').get(row[0], row[0])
+
+    def _drop_chain_views_reading(self, cursor, full_name: str) -> List[str]:
+        """
+        Drops the compiled chain views that read the relation, directly or through other
+        views, so it can be dropped: the run that replaces it creates them again, as they
+        come after it. When something else reads it (a view or materialized view of the
+        user's), nothing is dropped, and dropping the relation fails as it did before.
+        """
+        cursor.execute(
+            """
+            WITH RECURSIVE readers(oid) AS (
+                SELECT r.ev_class FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
+                WHERE d.refobjid = %(name)s::regclass AND r.ev_class <> %(name)s::regclass
+                UNION
+                SELECT r.ev_class FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid
+                JOIN readers ON d.refobjid = readers.oid WHERE r.ev_class <> readers.oid
+            )
+            SELECT format('%%I.%%I', n.nspname, c.relname),
+                   c.relkind = 'v' AND obj_description(c.oid, 'pg_class') = %(comment)s
+            FROM readers JOIN pg_class c ON c.oid = readers.oid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            """,
+            dict(name=full_name, comment=CHAIN_VIEW_COMMENT),
+        )
+        readers = cursor.fetchall()
+        if not readers or not all(chain_view for _, chain_view in readers):
+            return []
+        names = sorted(name for name, _ in readers)
+        cursor.execute(f'DROP VIEW IF EXISTS {", ".join(names)} CASCADE')
+        print(f'Dropped the compiled chain views that read {full_name}: {", ".join(names)}. '
+              'The blocks after it create them again.')
+        return names
+
+    def create_view(self, schema_name: Optional[str], name: str, query_string: str) -> None:
+        """
+        Makes the name a view of the query, in place of a table or an earlier view of the
+        name: a compiled chain's intermediate block (block/plans.py), which PostgreSQL plans
+        with the block that reads it. One transaction: a reader sees the old relation or the
+        new view.
+        """
+        schema_name = schema_name or self.default_schema()
+        full_name = self._full_table_name(schema_name, name)
+        query = query_string.strip().rstrip(';').rstrip()
+        kind = self.relation_kind(schema_name, name)
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(self.build_create_schema_command(schema_name))
+                if kind in ('table', 'view'):
+                    self._drop_chain_views_reading(cursor, full_name)
+                    cursor.execute(f'DROP {kind.upper()} {full_name}')
+                cursor.execute(f'CREATE VIEW {full_name} AS\n{query}')
+                cursor.execute(
+                    f'COMMENT ON VIEW {full_name} IS %s', (CHAIN_VIEW_COMMENT,),
+                )
+            self.conn.commit()
+        except BaseException:
+            self._rollback()
+            raise
+
+    def drop_view(self, schema_name: Optional[str], name: str) -> None:
+        """
+        Drops the compiled chain view of the name, so a block that ran as a view writes its
+        table again. A view the user made is left alone.
+        """
+        schema_name = schema_name or self.default_schema()
+        if self.relation_kind(schema_name, name) != 'view':
+            return
+        full_name = self._full_table_name(schema_name, name)
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT obj_description(%s::regclass, 'pg_class')", (full_name,),
+                )
+                if cursor.fetchone()[0] != CHAIN_VIEW_COMMENT:
+                    return
+                self._drop_chain_views_reading(cursor, full_name)
+                cursor.execute(f'DROP VIEW {full_name}')
+            self.conn.commit()
+        except BaseException:
+            self._rollback()
+            raise
+
+    def _before_drop_table(self, cursor, full_table_name: str) -> None:
+        self._drop_chain_views_reading(cursor, full_table_name)
+
     def _full_table_name(self, schema_name: Optional[str], table_name: str) -> str:
         if schema_name:
             return f'{identifier(schema_name)}.{identifier(table_name)}'
@@ -703,6 +804,7 @@ class Postgres(BaseSQL):
                         raise ValueError(f'Table \'{full_table_name}\' already exists in database.')
                     elif ExportWritePolicy.REPLACE == if_exists:
                         if drop_table_on_replace:
+                            self._before_drop_table(cursor, full_table_name)
                             command = f'DROP TABLE {full_table_name}'
                             if cascade_on_drop:
                                 command = f'{command} CASCADE'

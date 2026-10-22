@@ -124,3 +124,21 @@ class DuckDBChainTest(DBTestCase):
         [left_out] = summary['sql_left_out']
         self.assertEqual(left_out['block'], double.uuid)
         self.assertIn('set its write policy to replace', left_out['reason'])
+
+    def test_postgres_blocks_chain_and_blocks_of_two_databases_do_not(self):
+        def configured(block, provider, profile=PROFILE):
+            block.configuration = dict(
+                block.configuration, data_provider=provider, data_provider_profile=profile,
+            )
+            return block
+
+        load, double, total = self.chain()
+        configured(load, 'postgres')
+        configured(double, 'postgres')
+        self.assertTrue(plans.chains_with(load, double))
+        # A DuckDB block reads PostgreSQL views it cannot see.
+        self.assertFalse(plans.chains_with(double, total))
+        configured(total, 'postgres', 'another')
+        self.assertFalse(plans.chains_with(double, total))
+        configured(total, 'mysql')
+        self.assertIn('supports DuckDB and PostgreSQL', plans.sql_view_problem(total))

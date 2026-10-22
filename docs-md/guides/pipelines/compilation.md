@@ -19,7 +19,7 @@ unchanged.
 | Python | Each block is checked for syntax errors; a block without its decorated function gets a warning |
 | R | Each block is parsed with R; the project's R environment is checked and prepared |
 | Rust | Consecutive Rust blocks build into one program whose queries Polars plans together; a Rust block that something else needs on its own (it has tests, it is an exporter, it uses another database profile) builds as its own program |
-| SQL | Consecutive DuckDB SQL blocks that replace their tables chain: each but the last becomes a view, and the last writes its table from one query DuckDB plans across them ([below](#duckdb-sql-chains)). Other databases run each block as written |
+| SQL | Consecutive DuckDB or PostgreSQL SQL blocks that replace their tables chain: each but the last becomes a view, and the last writes its table from one query the database plans across them ([below](#sql-chains)). Other databases run each block as written |
 
 In production runs, blocks of the same language that follow each other run as one chain:
 consecutive Rust blocks as one program, consecutive R blocks in one R session, and Python
@@ -27,20 +27,23 @@ blocks in one process. Each switch between languages ends a chain and converts t
 a pipeline in one language runs fastest. See
 [Pipeline performance](../../production/pipeline-performance.md) for the measurements.
 
-## DuckDB SQL chains
+## SQL chains
 
-In a production run, a DuckDB SQL block followed in its stage by a DuckDB SQL block of the
-same connection profile becomes a view of its query instead of a table, when nothing needs
-its own rows. The block that needs them, such as an exporter, writes its table from one
-query: DuckDB inlines the views and plans the chain as one statement, so filters and
-column choices reach the first block's source and no intermediate table is written.
+In a production run, a DuckDB or PostgreSQL SQL block followed in its stage by a SQL block
+of the same database and connection profile becomes a view of its query instead of a
+table, when nothing needs its own rows. The block that needs them, such as an exporter,
+writes its table from one query: the database inlines the views and plans the chain as one
+statement, so filters and column choices reach the first block's source and no
+intermediate table is written.
 
-A chain of four blocks over 30 million rows, on a laptop (Apple M4 Pro):
+A chain of four blocks, on a laptop (Apple M4 Pro):
 
-| Run | Time | Database file |
-| --- | --- | --- |
-| Each block writes its table (`MAGE_COMPILED_CHAINS=off`) | 20 s | 952 MB |
-| Compiled: three views and the exporter's table | 1.0 s | 1 MB |
+| Database | Run | Time | Stored |
+| --- | --- | --- | --- |
+| DuckDB, 30 million rows | Each block writes its table (`MAGE_COMPILED_CHAINS=off`) | 20 s | 952 MB |
+| | Compiled: three views and the exporter's table | 1.0 s | 1 MB |
+| PostgreSQL 16, 5 million rows | Each block writes its table | 16 to 19 s | 613 MB |
+| | Compiled | 2.6 to 3.5 s | 16 kB |
 
 - Only blocks that replace their tables chain (write policy **replace**). A block that
   appends keeps its table, because the rows it accumulates over runs are what the blocks
@@ -48,9 +51,16 @@ A chain of four blocks over 30 million rows, on a laptop (Apple M4 Pro):
 - A block whose own rows are needed writes its table: an exporter, a block with a data
   contract or monitors, or every block when the pipeline keeps every output.
 - Raw SQL blocks, dynamic blocks and other databases run each block as written. The
-  Compile panel says so: for now, compiling SQL block chains supports only DuckDB.
+  Compile panel says so: for now, compiling SQL block chains supports DuckDB and
+  PostgreSQL.
 - The views keep the blocks' table names, so other readers of the database still find
   them. Running a block in the editor writes its table again in place of its view.
+- PostgreSQL does not drop a table or view that a view reads. MageML marks its chain
+  views with a comment (`MageML compiled chain view`), and a block that replaces its
+  table first drops the chain views that read it; the blocks after it create them again
+  in the same run. A view of your own over a chain block is never dropped: the run fails
+  instead, and PostgreSQL's error names the view. Build such views on the exporter's
+  table, which stays a table.
 - `MAGE_COMPILED_CHAINS=off` turns chains off for Rust, R and SQL.
 
 ## Single-language and polyglot pipelines
