@@ -83,6 +83,7 @@ with the gateway and checks:
 | The runs list shadowed for eight query shapes, one pipeline tagged | All equal; a type filter counted as unsupported |
 | Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
+| The same suite with `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs` | 38 passed, 4 skipped; the gateway answered 50 of the pages' reads (46 runs lists, the overview's included), none unsupported |
 
 ## Next
 
