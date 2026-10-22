@@ -10,6 +10,7 @@ from google.protobuf.duration_pb2 import Duration
 
 from mage_ai.server.logger import Logger
 from mage_ai.services.gcp.cloud_run.config import CloudRunConfig
+from mage_ai.shared.processes import sigterm_raises
 
 logger = Logger().new_server_logger(__name__)
 
@@ -88,16 +89,40 @@ def run_job(command: str, job_id: str, cloud_run_config: CloudRunConfig) -> Dict
         name=job_name,
     ))
     logger.info('Waiting for run_job operation to complete...')
-    response = operation.result(timeout=cloud_run_config.timeout_seconds)
+    try:
+        with sigterm_raises():
+            response = operation.result(timeout=cloud_run_config.timeout_seconds)
+    except BaseException:
+        # A wait that timed out or a block run stopped by the scheduler (SIGTERM) left the
+        # execution running and the job in place; a retry ran the block twice.
+        cancel_execution(operation, credentials)
+        raise
+    finally:
+        delete_job(jobs_client, job_name)
     logger.info(json.dumps(response, indent=4, default=str))
 
-    # Delete the job after job completes
-    delete_request = run_v2.DeleteJobRequest(
-        name=job_name,
-    )
-    delete_operation = jobs_client.delete_job(request=delete_request)
-    delete_response = delete_operation.result()
-    logger.info('Waiting for delete_job operation to complete...')
-    logger.info(json.dumps(delete_response, indent=4, default=str))
-
     return response
+
+
+def cancel_execution(operation, credentials=None) -> None:
+    try:
+        name = getattr(operation.metadata, 'name', None)
+        if name:
+            run_v2.ExecutionsClient(credentials=credentials).cancel_execution(
+                request=run_v2.CancelExecutionRequest(name=name),
+            )
+            logger.info(f'Cancelled execution {name}.')
+    except Exception as error:
+        logger.warning(f'Could not cancel the Cloud Run execution: {error}')
+
+
+def delete_job(jobs_client, job_name: str) -> None:
+    try:
+        delete_operation = jobs_client.delete_job(
+            request=run_v2.DeleteJobRequest(name=job_name),
+        )
+        logger.info('Waiting for delete_job operation to complete...')
+        delete_response = delete_operation.result()
+        logger.info(json.dumps(delete_response, indent=4, default=str))
+    except Exception as error:
+        logger.warning(f'Could not delete Cloud Run job {job_name}: {error}')

@@ -120,6 +120,13 @@
   passes with "The process died while this block ran, 3 times": the crash limit counted
   controllers, whose job ends while the block runs they created still run. A destination
   block with no stream settings of its own failed its controller.
+- A block run stopped by a timeout or a cancel stops the ECS task, Kubernetes Job, Cloud
+  Run execution or Azure container group it started. The scheduler stops the block's
+  process with SIGTERM, which ended it without cleanup, and the task kept running; a retry
+  ran the block twice.
+- The Azure Container Instances executor waits for the block's container to finish. It
+  deleted the container group once it was created, which stopped the block, and a block
+  whose container failed counted as a success.
 - Block timeouts apply to data integration pipelines: a stream's block that runs past its
   timeout fails and its stream stops. Integration streams ignored them (upstream #5133).
 - `INCREMENTAL` streams of data integration blocks in batch pipelines read in more than one

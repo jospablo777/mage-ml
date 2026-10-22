@@ -20,6 +20,7 @@ from mage_ai.services.azure.constants import (
     ENV_VAR_SUBSCRIPTION_ID,
 )
 from mage_ai.services.azure.container_instance.config import ContainerInstanceConfig
+from mage_ai.shared.processes import sigterm_raises
 
 logger = Logger().new_server_logger(__name__)
 
@@ -83,24 +84,45 @@ def run_job(command: str, job_id: str, container_instance_config: ContainerInsta
     )
     logger.info(f'Begin creating or updating the job {job_id}')
 
-    # Wait for the container create operation to complete. The operation is
-    # "done" when the container group provisioning state is one of:
-    # Succeeded, Canceled, Failed
-    while result.done() is False:
-        time.sleep(5)
-
-    # Get the provisioning state of the container group.
-    container_group = aci_client.container_groups.get(resource_group_name,
-                                                      job_id)
-    if str(container_group.provisioning_state).lower() == 'succeeded':
-        logger.info(f'Executing job {job_id} succeeded.')
-    else:
-        logger.info(f'Executing job {job_id} failed.'
-                    f'Provisioning state is: {container_group.provisioning_state}')
-
-    # Delete the container group
+    # The create operation is done once the group is provisioned (Succeeded, Canceled or
+    # Failed); the container runs after that. The group was deleted at that point, which
+    # stopped the block, and a failed block counted as a success.
     try:
-        aci_client.container_groups.begin_delete(resource_group_name,
-                                                 job_id)
-    except Exception:
-        traceback.print_exc()
+        with sigterm_raises():
+            while result.done() is False:
+                time.sleep(5)
+
+            container_group = aci_client.container_groups.get(resource_group_name, job_id)
+            if str(container_group.provisioning_state).lower() != 'succeeded':
+                raise Exception(
+                    f'Container group {job_id} was not provisioned: '
+                    f'{container_group.provisioning_state}.',
+                )
+
+            state = container_state(container_group)
+            while state is None or str(state.state).lower() != 'terminated':
+                time.sleep(5)
+                container_group = aci_client.container_groups.get(resource_group_name, job_id)
+                state = container_state(container_group)
+
+            if state.exit_code != 0:
+                raise Exception(
+                    f'Job {job_id} failed with exit code {state.exit_code}'
+                    + (f': {state.detail_status}' if state.detail_status else '.'),
+                )
+            logger.info(f'Executing job {job_id} succeeded.')
+    finally:
+        # Also when the block run is stopped (SIGTERM) or the wait fails: the container
+        # group kept running otherwise.
+        try:
+            aci_client.container_groups.begin_delete(resource_group_name, job_id)
+        except Exception:
+            traceback.print_exc()
+
+
+def container_state(container_group):
+    """The state of the group's container: Waiting, Running or Terminated, and exit code."""
+    containers = container_group.containers or []
+    if not containers or containers[0].instance_view is None:
+        return None
+    return containers[0].instance_view.current_state

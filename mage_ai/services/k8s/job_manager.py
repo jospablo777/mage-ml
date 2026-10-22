@@ -15,6 +15,7 @@ from mage_ai.services.k8s.constants import (
     KUBE_POD_NAMESPACE_ENV_VAR,
 )
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.processes import sigterm_raises
 
 # A Job's body holds its environment: keep it out of logs and error messages.
 safe_diagnostics.protect()
@@ -85,14 +86,21 @@ class JobManager():
 
         api_response = None
         succeeded = None
-        while succeeded is None:
-            api_response = self.batch_api_client.read_namespaced_job(
-                name=self.job_name,
-                namespace=self.namespace
-            )
-            succeeded = job_outcome(api_response.status)
-            if succeeded is None:
-                time.sleep(5)
+        try:
+            with sigterm_raises():
+                while succeeded is None:
+                    api_response = self.batch_api_client.read_namespaced_job(
+                        name=self.job_name,
+                        namespace=self.namespace
+                    )
+                    succeeded = job_outcome(api_response.status)
+                    if succeeded is None:
+                        time.sleep(5)
+        except BaseException:
+            # A block run stopped by the scheduler (timeout, cancel) or a failed read left
+            # the Job running, unseen; a retry ran the block twice.
+            self.delete_job()
+            raise
 
         # Read before the Job and its pods are deleted: a failure gave no reason (#6086).
         reasons = [] if succeeded else self.failure_reasons()

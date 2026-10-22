@@ -62,3 +62,22 @@ class RunTaskTest(TestCase):
 
         with self.assertRaisesRegex(Exception, 'RESOURCE:CPU'):
             self.run_task(client)
+
+    def test_a_job_stopped_with_sigterm_stops_the_task(self):
+        """The scheduler stops a block run's job with SIGTERM, which ended the process
+        without running any cleanup: the task kept running."""
+        import os
+        import signal
+
+        client = self.client()
+        client.get_waiter.return_value.wait.side_effect = (
+            lambda **kwargs: os.kill(os.getpid(), signal.SIGTERM)
+        )
+        previous = signal.getsignal(signal.SIGTERM)
+
+        with self.assertRaises(SystemExit) as raised:
+            self.run_task(client)
+
+        self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+        client.stop_task.assert_called_once()
+        self.assertIs(signal.getsignal(signal.SIGTERM), previous)

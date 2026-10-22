@@ -583,3 +583,20 @@ class JobOutcomeTest(TestCase):
             manager.run_job('mage run')
 
         manager.delete_job.assert_called_once()
+
+    def test_a_job_stopped_with_sigterm_deletes_the_kubernetes_job(self):
+        """The scheduler stops a block run's job with SIGTERM (timeout, cancel), which ended
+        the process without cleanup: the Kubernetes Job kept running."""
+        import signal
+
+        manager = self.manager([self.status(), self.status()])
+        previous = signal.getsignal(signal.SIGTERM)
+
+        with patch(
+            'mage_ai.services.k8s.job_manager.time.sleep',
+            side_effect=lambda _seconds: os.kill(os.getpid(), signal.SIGTERM),
+        ), self.assertRaises(SystemExit):
+            manager.run_job('mage run')
+
+        manager.delete_job.assert_called_once()
+        self.assertIs(signal.getsignal(signal.SIGTERM), previous)

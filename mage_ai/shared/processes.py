@@ -12,7 +12,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, List, Optional, Sequence
+from contextlib import contextmanager
+from typing import Callable, Iterator, List, Optional, Sequence
 
 import psutil
 
@@ -138,6 +139,29 @@ def stop_on_terminate(cleanup: Optional[Callable[[], None]] = None) -> None:
         os._exit(128 + signum)
 
     signal.signal(signal.SIGTERM, handle)
+
+
+@contextmanager
+def sigterm_raises() -> Iterator[None]:
+    """
+    SIGTERM raises SystemExit here. The scheduler stops a block run's job with SIGTERM,
+    whose default action ends the process at once: no except or finally ran, and the ECS
+    task or Kubernetes Job the block started kept running. The previous handler is back
+    afterwards.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        # Only the main thread can set a handler.
+        yield
+        return
+
+    def raise_exit(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, raise_exit)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def supervised_command(args: Sequence[str]) -> List[str]:

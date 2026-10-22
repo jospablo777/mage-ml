@@ -3,6 +3,7 @@ from typing import Dict, List, Union
 
 from mage_ai.services.aws import get_aws_boto3_client
 from mage_ai.services.aws.ecs.config import EcsConfig
+from mage_ai.shared.processes import sigterm_raises
 
 
 def run_task(
@@ -33,7 +34,8 @@ def run_task(
                 'MaxAttempts': int(ecs_config.wait_timeout / 15),
             }
         try:
-            waiter.wait(**wait_kwargs)
+            with sigterm_raises():
+                waiter.wait(**wait_kwargs)
         except BaseException as error:
             # The task kept running when the wait timed out or the run was cancelled: it
             # used resources unseen, and a retry ran the block twice (upstream #4655).
