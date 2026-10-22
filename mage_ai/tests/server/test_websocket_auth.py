@@ -4,6 +4,7 @@ once its user is signed in: by the session cookie of its handshake or by a messa
 valid token.
 """
 import json
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -113,3 +114,26 @@ class WebSocketAuthTest(AsyncHTTPTestCase):
             self.assertIsNone(await self.received(editor))
         self.assertEqual(self.terms.terminals, {})
         editor.close()
+
+    @gen_test
+    async def test_a_shell_that_exits_as_it_starts_is_reported(self):
+        def write(_):
+            raise OSError(5, 'Input/output error')
+
+        dead = SimpleNamespace(
+            clients=[], read_buffer=deque(),
+            ptyproc=SimpleNamespace(write=write), kill=lambda: None,
+        )
+
+        async def get_terminal_async(name, **kwargs):
+            return dead
+
+        with patch.object(self.terms, 'get_terminal_async', get_terminal_async):
+            editor = await self.connect('/websocket/terminal?term_name=admin',
+                                        cookie='oauth_token=good')
+            self.assertEqual(json.loads(await self.received(editor, 5)), ['setup', {}])
+            # The connection used to drop here, with no message.
+            kind, text = json.loads(await self.received(editor, 5))
+            self.assertEqual(kind, 'stdout')
+            self.assertIn('exited as it started', text)
+            editor.close()

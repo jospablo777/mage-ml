@@ -254,5 +254,13 @@ class TerminalWebsocketServer(terminado.TermSocket):
 
         # Turn enable-bracketed-paste off since it can mess up the output.
         if self.term_command == 'bash':
-            self.terminal.ptyproc.write(
-                "bind 'set enable-bracketed-paste off' # Mage terminal settings command\r")
+            try:
+                self.terminal.ptyproc.write(
+                    "bind 'set enable-bracketed-paste off' # Mage terminal settings command\r")
+            except (OSError, ValueError) as error:
+                # The shell exited as it started; the connection used to drop with no word.
+                self._logger.error('Terminal %s: its shell exited at start: %s', term_name, error)
+                self.send_json_message(['stdout', (
+                    f'The terminal\'s shell ({self.term_command}) exited as it started. '
+                    'Reload the page to start another; the server log has the details.\r\n'
+                )])
