@@ -173,6 +173,14 @@ WHERE table_name = '{table_name}' AND table_schema = '{database_name}'
     def clean_column_name(self, column_name: str):
         return clean_column_name(column_name, lower_case=self.use_lowercase)
 
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        return [f'TRUNCATE TABLE {database_name}.{table_name}']
+
     def does_table_exist(
         self,
         schema_name: str,

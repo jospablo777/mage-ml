@@ -365,7 +365,9 @@ class PipelineScheduler:
 
                 self.on_pipeline_run_failure(error_msg)
             elif PipelineType.INTEGRATION == self.pipeline.type:
-                self.__schedule_integration_streams(block_runs)
+                # Integration streams ignored block timeouts (upstream #5133).
+                if not self.__check_block_run_timeout():
+                    self.__schedule_integration_streams(block_runs)
             elif self.pipeline.run_pipeline_in_one_process:
                 # Block timeouts were checked only for block-by-block runs (upstream #5133).
                 if not self.__check_block_run_timeout(kill_pipeline_run=True):
@@ -651,7 +653,9 @@ class PipelineScheduler:
                         )
                         self.on_block_failure(block_run.block_uuid)
                         job_manager = get_job_manager()
-                        if kill_pipeline_run:
+                        if PipelineType.INTEGRATION == self.pipeline.type:
+                            self.__kill_integration_stream_of(block_run)
+                        elif kill_pipeline_run:
                             job_manager.kill_pipeline_run_job(self.pipeline_run.id)
                         else:
                             job_manager.kill_block_run_job(block_run.id)
@@ -659,6 +663,21 @@ class PipelineScheduler:
             except Exception:
                 pass
         return any_block_run_timed_out
+
+    def __kill_integration_stream_of(self, block_run: BlockRun) -> None:
+        """
+        Stop the job that runs a block run's stream: its own job when the stream runs in
+        parallel, the pipeline run's job that runs the other streams in turn otherwise.
+        Integration block run UUIDs are [block UUID]:[stream]:[index].
+        """
+        parts = block_run.block_uuid.split(':')
+        tap_stream_id = parts[-2] if len(parts) >= 3 else None
+        stream = find(lambda s: s.get('tap_stream_id') == tap_stream_id, self.streams or [])
+        job_manager = get_job_manager()
+        if stream and stream.get('run_in_parallel'):
+            job_manager.kill_integration_stream_job(self.pipeline_run.id, tap_stream_id)
+        else:
+            job_manager.kill_pipeline_run_job(self.pipeline_run.id)
 
     def __schedule_blocks(self, block_runs: List[BlockRun] = None) -> None:
         """Schedule the block runs for execution.
@@ -1096,7 +1115,12 @@ class PipelineScheduler:
                 continue
             metrics = dict(br.metrics or {})
             message = None
-            if br.status == BlockRun.BlockRunStatus.RUNNING:
+            if metrics.get('controller'):
+                # A data integration controller's job ends while the block runs it created
+                # still run; it runs again on each pass until they finish. Counted as a
+                # crash, a sync longer than three passes failed.
+                pass
+            elif br.status == BlockRun.BlockRunStatus.RUNNING:
                 launched_by = metrics.get('launched_by')
                 if launcher and launched_by and launched_by != launcher:
                     # The scheduler process that ran it stopped (a restart, a deploy, a

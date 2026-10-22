@@ -924,6 +924,28 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         self.assertIn('3 times', block_run.metrics['error']['message'])
 
+    def test_a_data_integration_controller_runs_again_without_counting_crashes(self):
+        """
+        A controller's job ends while the block runs it created run, and it runs again on
+        each pass. Counted as crashes, a batch pipeline sync longer than three passes failed.
+        """
+        pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid='test_pipeline')
+        pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+        scheduler = PipelineScheduler(pipeline_run=pipeline_run)
+        block_run = BlockRun.get(pipeline_run_id=pipeline_run.id, block_uuid='block1')
+        block_run.update(metrics=dict(controller=1, original_block_uuid='block1'))
+        fetch = scheduler._PipelineScheduler__fetch_crashed_block_runs
+        job_manager = pipeline_scheduler_original.get_job_manager()
+
+        with patch.object(job_manager, 'has_block_run_job', return_value=False):
+            for _ in range(5):
+                block_run.update(status=BlockRun.BlockRunStatus.RUNNING)
+                self.assertEqual([b.id for b in fetch()], [block_run.id])
+                block_run.refresh()
+                self.assertEqual(block_run.status, BlockRun.BlockRunStatus.INITIAL)
+
+        self.assertNotIn('crashes', block_run.metrics)
+
     def test_a_block_run_completed_during_the_crash_check_is_not_run_again(self):
         """
         The scheduler read a block run as RUNNING, its process completed it and exited, and
@@ -1682,6 +1704,45 @@ class PipelineSchedulerTests(DBTestCase):
         self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
         # The pipeline run's job runs every block, so it is the one stopped.
         job_manager.kill_pipeline_run_job.assert_any_call(pipeline_run.id)
+
+    @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')
+    def test_block_run_timeout_in_an_integration_stream(self, mock_get_job_manager):
+        """Integration streams ignored block timeouts (upstream #5133)."""
+        from mage_ai.data_preparation.models.pipeline import Pipeline
+        from mage_ai.orchestration.db import db_connection
+
+        job_manager = mock_get_job_manager()
+        job_manager.add_job = MagicMock()
+        pipeline = Pipeline.get(self.integration_pipeline.uuid)
+        exporter = pipeline.data_exporter
+        exporter.update(data=dict(timeout=60))
+
+        for run_in_parallel in [False, True]:
+            job_manager.reset_mock()
+            pipeline_run = create_pipeline_run_with_schedule(pipeline_uuid=pipeline.uuid)
+            block_run = BlockRun.create(
+                block_uuid=f'{exporter.uuid}:customers:0',
+                pipeline_run_id=pipeline_run.id,
+                started_at=datetime.now(tz=pytz.UTC) - timedelta(seconds=120),
+                status=BlockRun.BlockRunStatus.RUNNING,
+            )
+            pipeline_run.update(status=PipelineRun.PipelineRunStatus.RUNNING)
+            db_connection.session.expire_all()
+            scheduler = PipelineScheduler(pipeline_run=PipelineRun.get_by_id(pipeline_run.id))
+            scheduler.streams = [dict(tap_stream_id='customers', run_in_parallel=run_in_parallel)]
+
+            scheduler.schedule()
+
+            block_run.refresh()
+            self.assertEqual(block_run.status, BlockRun.BlockRunStatus.FAILED)
+            if run_in_parallel:
+                # The stream's own job.
+                job_manager.kill_integration_stream_job.assert_any_call(
+                    pipeline_run.id, 'customers',
+                )
+            else:
+                # The job that runs the sequential streams in turn.
+                job_manager.kill_pipeline_run_job.assert_any_call(pipeline_run.id)
 
     @freeze_time('2023-05-01 01:20:33')
     @patch('mage_ai.orchestration.pipeline_scheduler_original.get_job_manager')

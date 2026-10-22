@@ -9,6 +9,11 @@ import pandas as pd
 import simplejson
 import yaml
 
+from mage_ai.data_integrations.destinations.truncate import (
+    CONFIG_KEY_TRUNCATE_BEFORE_FULL_TABLE_SYNC,
+    should_truncate,
+    truncate_destination_table,
+)
 from mage_ai.data_integrations.logger.utils import (
     print_log_from_line,
     print_logs_from_output,
@@ -149,9 +154,10 @@ def extract_stream_ids_from_streams(streams: List[Dict]) -> List[str]:
 
 
 def get_streams_from_catalog(catalog: Dict, streams: List[str]) -> List[Dict]:
+    # A destination block has no catalog until its stream settings are saved.
     return list(filter(
         lambda x: x.get('tap_stream_id') in streams or x.get('stream') in streams,
-        catalog.get('streams', []),
+        (catalog or {}).get('streams') or [],
     ))
 
 
@@ -470,18 +476,22 @@ def execute_data_integration(
                             bookmarks=bookmark_values_by_block_uuid.get(block.uuid),
                         )
 
+                # Every batch reads from the bookmark the batch count used: the state the
+                # previous run's last batch ended with. Each batch read the state its own
+                # index wrote in the previous run, so batches overlapped and skipped rows.
                 if not state_data and execution_partition_previous:
                     state_data = get_state_data(
                         block,
                         catalog,
                         data_integration_uuid=data_integration_uuid,
                         from_notebook=from_notebook,
-                        index=index,
                         partition=execution_partition_previous,
                         stream_id=stream,
                     )
-            else:
-                query_data['_offset'] = batch_fetch_limit * index
+
+            # Batches run in any order from the same bookmark, so each reads its own slice
+            # of the rows the source orders by bookmark and key.
+            query_data['_offset'] = batch_fetch_limit * index
 
             if not is_last_block_run:
                 query_data['_limit'] = batch_fetch_limit
@@ -733,9 +743,13 @@ def __execute_destination(
     logging_tags: Dict = None,
     partition: str = None,
     run_settings: Dict = None,
+    truncate_only: bool = False,
     **kwargs,
 ) -> List:
     # Parameters
+
+    # truncate_only: empty the stream's table when the destination config asks for it on a
+    #   FULL_TABLE stream, and write nothing. Returns True when it truncated.
 
     # stream: this is typically the name of the upstream block UUID or
     #   the name of 1 of the streams from an upstream source block.
@@ -834,7 +848,9 @@ def __execute_destination(
 
     output_file_path = None
 
-    if IngestMode.DISK == ingest_mode:
+    if truncate_only:
+        pass
+    elif IngestMode.DISK == ingest_mode:
         block_for_variable = None
         data_integration_uuid_for_variable = None
 
@@ -923,7 +939,9 @@ def __execute_destination(
                 state_file_path,
             ]
 
-    if output_file_path:
+    if truncate_only:
+        pass
+    elif output_file_path:
         args += [
             '--input_file_path',
             output_file_path,
@@ -1030,6 +1048,22 @@ def __execute_destination(
         ),
     ]
 
+    if truncate_only:
+        replication_method = None
+        if catalog or catalog_from_source:
+            replication_method = stream_settings_final.get(KEY_REPLICATION_METHOD)
+        if not should_truncate(config, replication_method):
+            return False
+
+        truncate_destination_table(
+            args,
+            config,
+            logger=logger,
+            logging_tags=logging_tags,
+            tags=tags,
+        )
+        return True
+
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     for line in proc.stdout:
@@ -1042,6 +1076,51 @@ def __execute_destination(
         )
 
     return proc
+
+
+def truncate_destination_before_sync(
+    block,
+    stream: str,
+    dynamic_block_index: int = None,
+    dynamic_upstream_block_uuids: List[str] = None,
+    global_vars: Dict = None,
+    logger: Logger = None,
+    logging_tags: Dict = None,
+    parent_stream: str = None,
+    partition: str = None,
+) -> bool:
+    """Empty a destination block's table for one stream before its batches run.
+
+    The stream's child controller calls this once, before it creates the batch block runs:
+    those run in any order and in parallel, so none of them may truncate.
+    """
+    data_integration_settings = block.get_data_integration_settings(
+        dynamic_block_index=dynamic_block_index,
+        dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+        global_vars=global_vars,
+        partition=partition,
+    )
+    config = data_integration_settings.get('config') or {}
+    if not config.get(CONFIG_KEY_TRUNCATE_BEFORE_FULL_TABLE_SYNC):
+        return False
+
+    return __execute_destination(
+        block,
+        data_integration_settings,
+        destination_module_file_path(data_integration_settings.get('data_integration_uuid')),
+        dynamic_block_index=dynamic_block_index,
+        dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+        global_vars=global_vars,
+        logger=logger,
+        logging_tags=logging_tags,
+        partition=partition,
+        run_settings=dict(
+            index=0,
+            parent_stream=parent_stream,
+            selected_streams=[stream],
+        ),
+        truncate_only=True,
+    )
 
 
 def get_output_file_paths(

@@ -130,6 +130,44 @@ class Destination(BaseDestination):
 
         self.logger.info('Export data completed.', tags=tags)
 
+    def truncate_table(self) -> None:
+        database_name = self.config.get(self.DATABASE_CONFIG_KEY)
+        schema_name = self.config.get(self.SCHEMA_CONFIG_KEY)
+        table_name = self.config.get(self.TABLE_CONFIG_KEY)
+        friendly_table_name = '.'.join([x for x in [
+            database_name,
+            schema_name,
+            table_name,
+        ] if x])
+
+        commands = self.build_truncate_table_commands(
+            database_name=database_name,
+            schema_name=schema_name,
+            table_name=table_name,
+        )
+        if not self.does_table_exist(
+            database_name=database_name,
+            schema_name=schema_name,
+            table_name=table_name,
+        ):
+            self.logger.info(
+                f'Table {friendly_table_name} does not exist yet, nothing to truncate.',
+            )
+            return
+
+        self.build_connection().execute(commands, commit=True)
+        self.logger.info(f'Truncated table {friendly_table_name} before the FULL_TABLE sync.')
+
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        raise Exception(
+            f'{self.__class__.__name__} cannot truncate its table before a FULL_TABLE sync.',
+        )
+
     def build_query_strings(
         self,
         record_data: List[Dict],

@@ -102,7 +102,9 @@ Here are the steps you can optionally go through:
      fails midway, these bookmark columns are used to track the record that was
      most recently successful.
 5. Replication method
-   - `FULL_TABLE`: synchronize the entire set of records from the source.
+   - `FULL_TABLE`: synchronize the entire set of records from the source. Rows are
+     added to the destination table; to replace its contents, see
+     [Replace the table on a full table sync](#replace-the-table-on-a-full-table-sync).
    - `INCREMENTAL`: synchronize the records starting after the most recent
      bookmarked record from the previous synchronization run.
 6. Unique conflict method: choose how to handle duplicate records
@@ -153,6 +155,31 @@ sync process if you have a large number of streams.
       `PASSWORD` key in your environment variables.
    2. `"{{ variables('PASSWORD') }}"`: this will extract the value from the
       `PASSWORD` key in your runtime variables.
+
+### Replace the table on a full table sync
+
+A `FULL_TABLE` stream adds its rows to the destination table. Rows deleted at the source
+stay, and without unique columns every sync adds another copy. To empty the table before
+each sync, add this to the destination configuration:
+
+```yaml
+truncate_before_full_table_sync: true
+```
+
+The table is emptied once per run, before the stream's first batch is written; batches of
+the same stream never empty each other's rows. `INCREMENTAL` and `LOG_BASED` streams are
+not affected, and a table that does not exist yet is created as usual.
+
+| Destination | Statement |
+| --- | --- |
+| BigQuery, Doris, MySQL, Oracle, PostgreSQL, Redshift, Snowflake, SQL Server | `TRUNCATE TABLE` |
+| Teradata | `DELETE FROM ... ALL` |
+| Trino | `DELETE FROM` |
+
+With this setting, other destinations fail the sync with a message that they cannot
+truncate their table.
+The table is empty from the truncate until the first batch commits; readers that must
+never see it empty need a staging table and a swap instead.
 
 ---
 

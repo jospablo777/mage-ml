@@ -7,7 +7,9 @@ from mage_integrations.destinations.constants import (
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
 from mage_integrations.destinations.sql.base import Destination, main
-from mage_integrations.destinations.sql.utils import build_insert_columns
+from mage_integrations.destinations.sql.utils import (
+    build_insert_columns,
+)
 from mage_integrations.destinations.sql.utils import (
     column_type_mapping as column_type_mapping_orig,
 )
@@ -304,6 +306,14 @@ WHERE TableName = '{table_name}' AND DatabaseName = '{database_name}'
 
     def convert_array(self, value: str, column_type_dict: Dict) -> str:
         return json.dumps(value)
+
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        return [f'DELETE FROM {self.full_table_name(database_name, table_name)} ALL']
 
     def does_table_exist(
         self,

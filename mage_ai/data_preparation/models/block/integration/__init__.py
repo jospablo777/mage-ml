@@ -9,6 +9,10 @@ from typing import Callable, Dict, Generator, List
 import pandas as pd
 
 from mage_ai.data_cleaner.transformer_actions.utils import clean_column_name
+from mage_ai.data_integrations.destinations.truncate import (
+    should_truncate,
+    truncate_destination_table,
+)
 from mage_ai.data_integrations.logger.utils import print_log_from_line
 from mage_ai.data_integrations.utils.config import (
     build_config,
@@ -369,7 +373,7 @@ class IntegrationBlock(Block):
                 override=override,
             )
 
-            proc = subprocess.Popen([
+            destination_args = [
                 PYTHON_COMMAND,
                 self.pipeline.destination_file_path,
                 '--config_json',
@@ -383,9 +387,24 @@ class IntegrationBlock(Block):
                     destination_table=destination_table,
                     stream=stream,
                 ),
-                '--input_file_path',
-                source_output_file_path,
-            ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            ]
+
+            # A stream's batches run one after another here, so the first one empties the
+            # table for the whole sync.
+            if index == 0 and should_truncate(config, stream_catalog.get('replication_method')):
+                truncate_destination_table(
+                    destination_args,
+                    config,
+                    logger=logger,
+                    logging_tags=logging_tags,
+                    tags=tags,
+                )
+
+            proc = subprocess.Popen(
+                destination_args + ['--input_file_path', source_output_file_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
 
             for line in proc.stdout:
                 print_log_from_line(

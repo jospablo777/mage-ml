@@ -273,7 +273,8 @@ def build_block_run_metadata(
     if not block.is_data_integration():
         return block_run_metadata
 
-    data_integration_settings or block.get_data_integration_settings(
+    # The settings were read and dropped, so a call without them failed on None.
+    data_integration_settings = data_integration_settings or block.get_data_integration_settings(
         dynamic_block_index=dynamic_block_index,
         dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
         from_notebook=False,

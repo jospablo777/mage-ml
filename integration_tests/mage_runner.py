@@ -114,3 +114,35 @@ def run_pipeline(pipeline_uuid: str, **variables):
     assert set(statuses.values()) == {'completed'}, statuses
     assert run.status == PipelineRun.PipelineRunStatus.COMPLETED
     return run
+
+
+def run_scheduled_pipeline(pipeline_uuid: str, **variables):
+    """Run a pipeline through the scheduler, its jobs in this process: data integration
+    blocks in batch pipelines need the scheduler's callbacks and controller runs."""
+    from unittest.mock import patch
+
+    from mage_ai.orchestration import pipeline_scheduler_original
+    from mage_ai.orchestration.db.models.schedules import PipelineRun
+    from mage_ai.orchestration.pipeline_scheduler import PipelineScheduler
+    from mage_ai.orchestration.triggers.api import trigger_pipeline
+
+    run = trigger_pipeline(pipeline_uuid, variables=variables)
+    jobs = []
+    job_manager = pipeline_scheduler_original.get_job_manager()
+    with patch.object(job_manager, 'add_job', side_effect=lambda _type, _uid, target, *a, **k:
+                      jobs.append((target, a, k))), \
+            patch.object(job_manager, 'has_pipeline_run_job', return_value=False), \
+            patch.object(job_manager, 'has_block_run_job', return_value=False):
+        scheduler = PipelineScheduler(run)
+        scheduler.start(should_schedule=False)
+        for _ in range(60):
+            scheduler.schedule()
+            run.refresh()
+            if run.status != PipelineRun.PipelineRunStatus.RUNNING:
+                break
+            while jobs:
+                target, args, kwargs = jobs.pop(0)
+                target(*args, **kwargs)
+    statuses = {b.block_uuid: b.status.value for b in run.block_runs}
+    assert run.status == PipelineRun.PipelineRunStatus.COMPLETED, statuses
+    return run

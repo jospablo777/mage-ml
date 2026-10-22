@@ -22,6 +22,7 @@ from mage_ai.data_preparation.models.block.data_integration.utils import (
     get_streams_from_catalog,
     get_streams_from_output_directory,
     source_module_file_path,
+    truncate_destination_before_sync,
 )
 from mage_ai.data_preparation.models.block.dynamic.child import DynamicChildController
 from mage_ai.data_preparation.models.block.dynamic.factory import DynamicBlockFactory
@@ -287,8 +288,11 @@ class BlockExecutor:
                     self.block.template_runtime_configuration['selected_streams'] = [
                         stream,
                     ]
+                    # is_last_block_run: the last batch reads to the end of the stream; without
+                    # it, rows beyond the count at the start of the run were never read.
                     for key in [
                         'index',
+                        'is_last_block_run',
                         'parent_stream',
                     ]:
                         if key in data_integration_metadata:
@@ -980,6 +984,28 @@ class BlockExecutor:
                             pipeline_run=pipeline_run,
                             selected_streams=[stream],
                         )
+                        batch_block_uuids = [
+                            f'{original_block_uuid}:{data_integration_uuid}:{stream}:'
+                            f'{br_metadata.get("index") or 0}'
+                            for br_metadata in block_run_metadata
+                        ]
+                        # Batches run in any order, so the table is emptied here, once,
+                        # before the first of them exists.
+                        if not self.block.is_source() and not any(
+                            u in block_run_block_uuids for u in batch_block_uuids
+                        ):
+                            truncate_destination_before_sync(
+                                self.block,
+                                stream,
+                                dynamic_block_index=dynamic_block_index,
+                                dynamic_upstream_block_uuids=dynamic_upstream_block_uuids,
+                                global_vars=global_vars,
+                                logger=self.logger,
+                                logging_tags=logging_tags,
+                                parent_stream=data_integration_metadata.get('parent_stream'),
+                                partition=self.execution_partition,
+                            )
+
                         for br_metadata in block_run_metadata:
                             index = br_metadata.get('index') or 0
                             number_of_batches = br_metadata.get('number_of_batches') or 0

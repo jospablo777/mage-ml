@@ -236,6 +236,14 @@ DESCRIBE {schema_name}.{table_name}
 
         return records_inserted, 0
 
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        return [f'DELETE FROM {schema_name}.{table_name}']
+
     def does_table_exist(
         self,
         schema_name: str,

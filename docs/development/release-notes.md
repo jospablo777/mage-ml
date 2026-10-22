@@ -110,6 +110,23 @@
 
 ### Pipelines
 
+- Data integration destinations can empty their table before a `FULL_TABLE` sync:
+  `truncate_before_full_table_sync: true` in the destination config (upstream #4708).
+  Rows deleted at the source no longer stay in the destination. The table is emptied once
+  per run, before the stream's first batch; in batch pipelines, whose batches run in any
+  order, the stream's controller does it before it creates them. Supported on BigQuery,
+  Doris, MySQL, Oracle, PostgreSQL, Redshift, Snowflake, SQL Server, Teradata and Trino.
+- Data integration blocks in batch pipelines failed any sync longer than three scheduler
+  passes with "The process died while this block ran, 3 times": the crash limit counted
+  controllers, whose job ends while the block runs they created still run. A destination
+  block with no stream settings of its own failed its controller.
+- Block timeouts apply to data integration pipelines: a stream's block that runs past its
+  timeout fails and its stream stops. Integration streams ignored them (upstream #5133).
+- `INCREMENTAL` streams of data integration blocks in batch pipelines read in more than one
+  batch lost rows and read others twice: every batch started at the same bookmark with no
+  offset, and each took the bookmark its own batch number wrote in the previous run. All
+  batches now start at the bookmark the previous run ended with and read their own slice,
+  and the last batch reads to the end of the stream.
 - `mage run` runs each block's tests by default, as triggered runs do; `--no-test` skips
   them. A block whose test failed passed on the command line and failed when scheduled.
 - Exported services run Druid SQL blocks (raw SQL, as Mage runs them), with `pydruid` in

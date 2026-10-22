@@ -125,6 +125,7 @@ class Destination(ABC):
         show_templates: bool = False,
         state_file_path: str = None,
         test_connection: bool = False,
+        truncate_table: bool = False,
     ):
         if argument_parser:
             argument_parser.add_argument('--catalog_json', type=str, default=None)
@@ -137,6 +138,7 @@ class Destination(ABC):
             argument_parser.add_argument('--show_templates', action='store_true')
             argument_parser.add_argument('--state', type=str, default=None)
             argument_parser.add_argument('--test_connection', action='store_true')
+            argument_parser.add_argument('--truncate_table', action='store_true')
             args = argument_parser.parse_args()
 
             if args.catalog_json:
@@ -159,6 +161,8 @@ class Destination(ABC):
                 state_file_path = args.state
             if args.test_connection:
                 test_connection = args.test_connection
+            if args.truncate_table:
+                truncate_table = args.truncate_table
 
         self.catalog = catalog
         self.config = config
@@ -177,6 +181,7 @@ class Destination(ABC):
         self.settings_file_path = settings_file_path
         self.state_file_path = state_file_path
         self.should_test_connection = test_connection
+        self.should_truncate_table = truncate_table
         self.show_templates = show_templates
         self.unique_conflict_methods = None
         self.unique_constraints = None
@@ -240,6 +245,13 @@ class Destination(ABC):
     @abstractmethod
     def test_connection(self) -> None:
         raise NotImplementedError('Subclasses must implement the test_connection method.')
+
+    def truncate_table(self) -> None:
+        # Empties the configured table before a FULL_TABLE sync writes its first batch. The
+        # orchestrator calls it once per sync, before any batch runs.
+        raise Exception(
+            f'{self.__class__.__name__} cannot truncate its table before a FULL_TABLE sync.',
+        )
 
     def before_process(self) -> None:   # noqa: B027
         pass
@@ -412,6 +424,8 @@ class Destination(ABC):
             if self.should_test_connection:
                 self.logger.info('Testing connection...')
                 self.test_connection()
+            elif self.should_truncate_table:
+                self.truncate_table()
             elif self.show_templates:
                 json.dump(self.templates(), sys.stdout)
             else:

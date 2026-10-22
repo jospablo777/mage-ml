@@ -980,6 +980,19 @@ When you choose 1 or more bookmark values in a stream, the value from that prope
 saved after each successful sync. The next sync will use that value to compare to the next
 batch of records that need to be synced.
 
+A stream with more rows than the source's `batch_fetch_limit` (50,000 by default) is read in
+batches, which run in any order. Every batch of a sync starts at the bookmark the previous
+sync ended with and reads its own slice of the rows, ordered by the bookmark and key
+columns; the last batch reads to the end of the stream.
+
+### Replace the table on a full table sync
+
+A `FULL_TABLE` stream adds its rows to the destination table. To empty the table before
+each sync, set `truncate_before_full_table_sync: true` in the destination block's
+configuration. The stream's controller empties the table once, before it creates the
+batches. See [Replace the table on a full table sync](/guides/data-integration-pipeline#replace-the-table-on-a-full-table-sync)
+for the destinations that support it.
+
 ### Override bookmark values
 
 If you want to change the last saved bookmark value for the next sync, you can do this in 2 ways:

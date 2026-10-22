@@ -174,6 +174,14 @@ WHERE TABLE_NAME = '{table_name}' AND TABLE_SCHEMA = '{schema_name}'
             '\n'.join(commands),
         ]
 
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        return [f'TRUNCATE TABLE {schema_name}.{table_name}']
+
     def does_table_exist(
         self,
         schema_name: str,

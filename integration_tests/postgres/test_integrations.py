@@ -204,3 +204,38 @@ def test_upserts_on_unique_constraints(postgres_settings, pg, schema, source_tab
     total, distinct = fetch_one(pg, f'SELECT count(*), count(DISTINCT id) FROM {schema}.dst')
     assert total == distinct
     assert fetch_one(pg, f'SELECT c_text FROM {schema}.dst WHERE id = 1')[0] == "changed 'here'"
+
+
+def truncate(postgres_settings, schema, table, tmp_path):
+    config = json.dumps(connection_config(postgres_settings, schema, table=table))
+    return run([DESTINATION, '--config_json', config, '--log_to_stdout', '1',
+                '--state', tmp_path / 'state_out.json', '--truncate_table'])
+
+
+def test_truncate_before_a_full_table_sync(
+    postgres_settings, pg, schema, source_table, source_rows, tmp_path,
+):
+    """A FULL_TABLE sync kept the rows deleted at the source since the last one (upstream
+    #4708)."""
+    config, catalog = discover(postgres_settings, schema, tmp_path)
+    catalog_path = select(catalog, tmp_path)
+    write(postgres_settings, schema, 'dst', sync(config, catalog_path), tmp_path)
+    with pg.cursor() as cursor:
+        cursor.execute(f'DELETE FROM {schema}.src WHERE id = 1')
+    pg.commit()
+    messages = sync(config, catalog_path)
+
+    write(postgres_settings, schema, 'dst', messages, tmp_path)
+    assert fetch_one(pg, f'SELECT count(*) FROM {schema}.dst')[0] == len(source_rows)
+
+    truncate(postgres_settings, schema, 'dst', tmp_path)
+    write(postgres_settings, schema, 'dst', messages, tmp_path)
+
+    assert fetch_one(pg, f'SELECT count(*) FROM {schema}.dst')[0] == len(source_rows) - 1
+    assert fetch_one(pg, f'SELECT count(*) FROM {schema}.dst WHERE id = 1')[0] == 0
+    assert mismatches(pg, schema) == {}
+
+
+def test_truncate_without_a_table_does_nothing(postgres_settings, schema, tmp_path):
+    output = truncate(postgres_settings, schema, 'not_created_yet', tmp_path)
+    assert 'does not exist yet, nothing to truncate' in output

@@ -274,6 +274,16 @@ WHERE TABLE_SCHEMA = '{schema_name}' AND TABLE_NAME ILIKE '%{table_name}%'
 
         return f'"{database_name}"."{schema_name}"."temp_{table_name}"'
 
+    def build_truncate_table_commands(
+        self,
+        database_name: str,
+        schema_name: str,
+        table_name: str,
+    ) -> List[str]:
+        return [
+            f'TRUNCATE TABLE {self.full_table_name(database_name, schema_name, table_name)}',
+        ]
+
     def does_table_exist(
         self,
         schema_name: str,

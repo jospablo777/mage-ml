@@ -208,3 +208,36 @@ def test_upserts_on_unique_constraints(mysql_settings, my, mysql_source, mysql_d
     total, distinct = fetch_one(my, 'SELECT COUNT(*), COUNT(DISTINCT id) FROM dst')
     assert total == distinct
     assert fetch_one(my, 'SELECT c_text FROM dst WHERE id = 1')[0] == "changed 'here' \\"
+
+
+def test_truncate_before_a_full_table_sync(
+    mysql_settings, my, mysql_source, mysql_database, tmp_path,
+):
+    """A FULL_TABLE sync kept the rows deleted at the source since the last one (upstream
+    #4708)."""
+    def count(where='TRUE'):
+        with my.cursor() as cursor:
+            cursor.execute(f'SELECT count(*) FROM {mysql_database}.dst WHERE {where}')
+            result = cursor.fetchone()[0]
+        my.rollback()
+        return result
+
+    config, catalog = discover(mysql_settings, mysql_database, tmp_path)
+    catalog_path = select(catalog, tmp_path)
+    write(mysql_settings, mysql_database, 'dst', sync(config, catalog_path), tmp_path)
+    rows = count()
+    with my.cursor() as cursor:
+        cursor.execute(f'DELETE FROM {mysql_database}.src WHERE id = 1')
+    my.commit()
+    messages = sync(config, catalog_path)
+
+    write(mysql_settings, mysql_database, 'dst', messages, tmp_path)
+    assert count() == rows
+
+    config_json = json.dumps(connection_config(mysql_settings, mysql_database, table='dst'))
+    run([DESTINATION, '--config_json', config_json, '--state', tmp_path / 'state_out.json',
+         '--truncate_table'])
+    write(mysql_settings, mysql_database, 'dst', messages, tmp_path)
+
+    assert count() == rows - 1
+    assert count('id = 1') == 0
