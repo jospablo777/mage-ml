@@ -32,10 +32,31 @@ class AsyncSpawnMixin:
         return term
 
 
+def _alive(term) -> bool:
+    """Whether a terminal's shell still runs and its pty is open."""
+    process = getattr(term, 'ptyproc', None)
+    if process is None:
+        return True
+    try:
+        return not process.closed and process.isalive()
+    except Exception:
+        return False
+
+
 class MageTermManager(AsyncSpawnMixin, terminado.NamedTermManager):
+    def _live(self, term_name: str):
+        """The named terminal while its shell runs; a dead one is dropped, so the next
+        connection gets a new shell instead of a pty that refuses every write."""
+        term = self.terminals.get(term_name)
+        if term is not None and not _alive(term):
+            self.log.info('Terminal %s exited; starting a new one.', term_name)
+            self.terminals.pop(term_name, None)
+            return None
+        return term
+
     async def get_terminal_async(self, term_name: str, **kwargs):
         assert term_name is not None
-        if term_name in self.terminals:
+        if self._live(term_name) is not None:
             return self.terminals[term_name]
         if self.max_terminals and len(self.terminals) >= self.max_terminals:
             raise terminado.management.MaxTerminalsReached(self.max_terminals)
@@ -54,7 +75,7 @@ class MageTermManager(AsyncSpawnMixin, terminado.NamedTermManager):
     def get_terminal(self, term_name: str, **kwargs):
         assert term_name is not None
 
-        if term_name in self.terminals:
+        if self._live(term_name) is not None:
             return self.terminals[term_name]
 
         if self.max_terminals and len(self.terminals) >= self.max_terminals:

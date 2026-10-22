@@ -42,3 +42,23 @@ class TerminalSpawnTest(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(reads, 1)
         self.assertEqual(list(manager.terminals), ['tty'])
+
+    def test_a_terminal_whose_shell_exited_is_started_again(self):
+        manager = MageTermManager(shell_command=['bash'], max_terminals=2)
+        dead = SimpleNamespace(ptyproc=SimpleNamespace(closed=True, isalive=lambda: False),
+                               kill=lambda: None)
+        fresh = SimpleNamespace(ptyproc=SimpleNamespace(closed=False, isalive=lambda: True),
+                                kill=lambda: None)
+        manager.terminals['tty'] = dead
+
+        async def scenario():
+            with patch.object(manager, 'new_terminal', return_value=fresh), \
+                    patch.object(manager, 'start_reading'):
+                return await manager.get_terminal_async('tty')
+
+        self.assertIs(asyncio.run(scenario()), fresh)
+        self.assertIs(manager.terminals['tty'], fresh)
+        # A live one is kept.
+        with patch.object(manager, 'new_terminal') as new_terminal:
+            self.assertIs(manager.get_terminal('tty'), fresh)
+        new_terminal.assert_not_called()
