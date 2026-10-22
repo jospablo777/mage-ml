@@ -508,16 +508,20 @@ impl Shadow {
     /// server's answer to it.
     pub async fn compare_authorization(
         &self,
+        method: &hyper::Method,
         path: &str,
         query: &str,
         headers: &hyper::HeaderMap,
+        payload: &[u8],
         served: &[u8],
     ) {
         use crate::gateway_auth::{Caller, caller, viewer};
-        use crate::gateway_policy::{checked_names, matrix, mode, server_decision};
+        use crate::gateway_policy::{
+            checked_names, matrix, mode, payload_attributes, server_decision,
+        };
 
         let Some(settings) = &self.auth else { return };
-        let Some((resource, action)) = matrix().target(path) else {
+        let Some((resource, action)) = matrix().target_for(method, path) else {
             return;
         };
         let Some(server) = server_decision(served) else {
@@ -552,7 +556,12 @@ impl Shadow {
             }
         };
         let names = checked_names(&parsed.0);
-        match matrix().decide(&resource, action, mode(), role, &names) {
+        let Some(attributes) = payload_attributes(payload) else {
+            count(|c| &mut c.uncovered);
+            return;
+        };
+        let attributes: Vec<&str> = attributes.iter().map(String::as_str).collect();
+        match matrix().decide_write(&resource, action, mode(), role, &names, &attributes) {
             None => count(|c| &mut c.uncovered),
             Some(gateway) if gateway == server => count(|c| &mut c.agree),
             Some(gateway) => {
@@ -560,6 +569,7 @@ impl Shadow {
                 self.note(
                     "authorization",
                     json!({"authorization": key, "role": role, "query": names,
+                           "attributes": attributes,
                            "server": if server { "allowed" } else { "refused" },
                            "gateway": if gateway { "allowed" } else { "refused" }}),
                 );

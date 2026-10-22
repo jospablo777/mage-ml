@@ -40,7 +40,7 @@ const HOP_BY_HOP: &[&str] = &[
 #[derive(Clone)]
 struct Upstream {
     authority: String,
-    client: Client<HttpConnector, Incoming>,
+    client: Client<HttpConnector, Body>,
     /// Reads a shadowed route's answer again (gateway_shadow.rs).
     rereads: Client<HttpConnector, Empty<Bytes>>,
     shadow: Option<Arc<Shadow>>,
@@ -204,10 +204,15 @@ async fn forward(
     }
     let upgrade = wants_upgrade(request.headers());
     let client_side = upgrade.then(|| hyper::upgrade::on(&mut request));
-    // Every other API read's authorization, decided from the recorded policies.
+    // Every other API request's authorization, decided from the recorded policies.
+    let method = request.method().clone();
     let authz_read = shadowed.is_none()
-        && request.method() == hyper::Method::GET
+        && !upgrade
         && route_path.starts_with("/api/")
+        && matches!(
+            method,
+            hyper::Method::GET | hyper::Method::POST | hyper::Method::PUT | hyper::Method::DELETE
+        )
         && upstream
             .shadow
             .as_ref()
@@ -217,6 +222,34 @@ async fn forward(
         // Compared as JSON, so the server sends it uncompressed.
         parts.headers.remove(header::ACCEPT_ENCODING);
     }
+    // A write's JSON payload is read whole, for the attributes it writes; any other body
+    // (a file upload) goes through as it comes, and the request is not counted.
+    let json_payload = authz_read
+        && method != hyper::Method::GET
+        && parts
+            .headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_none_or(|t| t.starts_with("application/json") || t.starts_with("text/plain"));
+    let authz_read = authz_read && (method == hyper::Method::GET || json_payload);
+    let (body, payload) = if json_payload {
+        match body.collect().await {
+            Ok(collected) => {
+                let bytes = collected.to_bytes();
+                (
+                    Full::new(bytes.clone())
+                        .map_err(|never| match never {})
+                        .boxed(),
+                    bytes,
+                )
+            }
+            Err(error) => {
+                return answer(StatusCode::BAD_REQUEST, &format!("{error}"));
+            }
+        }
+    } else {
+        (body.boxed(), hyper::body::Bytes::new())
+    };
     let reread_headers = parts.headers.clone();
     let path = parts
         .uri
@@ -321,7 +354,14 @@ async fn forward(
             let (shadow, compared) = (shadow.clone(), served.clone());
             tokio::spawn(async move {
                 shadow
-                    .compare_authorization(&route_path, &query, &reread_headers, &compared)
+                    .compare_authorization(
+                        &method,
+                        &route_path,
+                        &query,
+                        &reread_headers,
+                        &payload,
+                        &compared,
+                    )
                     .await;
                 drop(permit);
             });

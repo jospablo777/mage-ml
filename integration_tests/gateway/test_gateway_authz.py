@@ -1,8 +1,9 @@
 """
-MAGE_GATEWAY_AUTHZ_SHADOW: the gateway decides every API read from the recorded policies
-(contracts/policy_matrix.json) and compares its decision with the server's answer. Every
-recorded GET, read as the owner, an editor, a viewer, a user with no role and a caller
-without a session, is decided as the server decides it.
+MAGE_GATEWAY_AUTHZ_SHADOW: the gateway decides every API request from the recorded
+policies (contracts/policy_matrix.json) and compares its decision with the server's answer.
+Every recorded GET, and writes whose payload attributes a role may or may not write, by the
+owner, an editor, a viewer, a user with no role and a caller without a session, are decided
+as the server decides them.
 """
 import json
 import time
@@ -84,6 +85,23 @@ def test_every_recorded_read_is_decided_as_the_server_decides_it(authz):
         for path in paths:
             session.get(f'http://127.0.0.1:{gateway}{path}', timeout=60)
 
+    # Writes: a pipeline each, then a backfill with a name only (an editor may create
+    # one), and one with interval units too (only the owner may write them on create).
+    api = f'http://127.0.0.1:{gateway}/api'
+    pipeline = sessions['owner'].post(f'{api}/pipelines', json=dict(pipeline=dict(
+        name='authz_writes', type='python',
+    )), timeout=60).json()['pipeline']['uuid']
+    for name, session in sessions.items():
+        session.post(f'{api}/pipelines', json=dict(pipeline=dict(
+            name=f'authz_{name}', type='python',
+        )), timeout=60)
+        session.post(f'{api}/pipelines/{pipeline}/backfills', json=dict(
+            backfill=dict(name=f'by {name}'),
+        ), timeout=60)
+        session.post(f'{api}/pipelines/{pipeline}/backfills', json=dict(
+            backfill=dict(name=f'units by {name}', interval_units=2),
+        ), timeout=60)
+
     def report():
         return requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
 
@@ -101,5 +119,8 @@ def test_every_recorded_read_is_decided_as_the_server_decides_it(authz):
     disagreements = [d for d in found['recent_differences'] if 'authorization' in d]
     assert total['disagree'] == 0, json.dumps(disagreements, indent=1)
     assert total['failed'] == 0, counts
-    # Most reads are decided: every role, most recorded routes.
+    # Most requests are decided: every role, most recorded routes.
     assert total['agree'] >= len(paths) * 3, total
+    writes = {k: c for k, c in counts.items() if k.endswith(' create')}
+    assert writes['backfills create']['agree'] == 2 * len(sessions), writes
+    assert writes['pipelines create']['agree'] >= len(sessions), writes
