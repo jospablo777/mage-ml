@@ -70,3 +70,33 @@ class UserAccessTests(DBTestCase):
         # The user's permissions list shows both too.
         listed = sorted((p.entity_id, p.access) for p in user.permissions())
         self.assertEqual(listed, [('orders', 8), (project, 4)])
+
+
+class PolicyEntityTests(DBTestCase):
+    def test_each_resource_of_a_response_is_checked_for_its_own_entity(self):
+        from types import SimpleNamespace
+
+        from mage_ai.api.policies.PipelinePolicy import PipelinePolicy
+        from mage_ai.api.resources.PipelineResource import PipelineResource
+        from mage_ai.api.result_set import ResultSet
+        from mage_ai.data_preparation.repo_manager import get_project_uuid
+        from mage_ai.orchestration.db.models.oauth import Permission, User, UserRole
+
+        user = User.create(email=f'{uuid.uuid4().hex}@example.com', username=uuid.uuid4().hex)
+        role = Role.create(name=f'viewers_{uuid.uuid4().hex}')
+        UserRole.create(user_id=user.id, role_id=role.id)
+        Permission.create(
+            entity=Entity.PROJECT, entity_id=get_project_uuid(), access=8, role_id=role.id,
+        )
+        # Nothing on this pipeline, which the project's permission would otherwise give.
+        Permission.create(entity=Entity.PIPELINE, entity_id='denied', access=0, role_id=role.id)
+
+        resources = [
+            PipelineResource(SimpleNamespace(uuid=name), user) for name in ('allowed', 'denied')
+        ]
+        ResultSet(resources)
+        allowed, denied = (PipelinePolicy(r, user) for r in resources)
+
+        self.assertTrue(allowed.has_at_least_viewer_role())
+        # The first pipeline's answer was kept for the whole response, under the check's name.
+        self.assertFalse(denied.has_at_least_viewer_role())

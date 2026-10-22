@@ -350,7 +350,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
             )
 
         return self.__get_and_set_user_role_validation(
-            'has_at_least_editor_role_and_notebook_edit_access',
+            f'has_at_least_editor_role_and_notebook_edit_access:{disable_notebook}',
             _validate,
         )
 
@@ -377,7 +377,7 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
             )
 
         return self.__get_and_set_user_role_validation(
-            'has_at_least_editor_role_and_pipeline_edit_access',
+            f'has_at_least_editor_role_and_pipeline_edit_access:{disable_notebook}',
             _validate,
         )
 
@@ -711,6 +711,10 @@ class BasePolicy(UserPermissionMixIn, ResultSetMixIn):
         key: str,
         condition: Callable,
     ) -> bool:
+        # Per entity: the resources of one response share this cache, and each can be
+        # another pipeline. Keyed by the check alone, the first resource's answer stood for
+        # all of them, so a pipeline a permission denied was shown with the others.
+        key = (key, self.entity)
         mapping = self.result_set().context.data.get(CONTEXT_DATA_KEY_USER_ROLE_VALIDATIONS) or {}
         if key in mapping:
             return mapping.get(key)

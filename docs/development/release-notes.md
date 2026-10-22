@@ -26,6 +26,9 @@
 
 ### Server
 
+- Security: in a list, each resource is checked for its own pipeline. The role checks of a
+  response were cached under the check's name, so a pipeline a permission denied was
+  shown with the others.
 - A role keeps its own permissions when others are linked to it on the roles page: the
   linked ones replaced them, so an editor role lost its project access.
 - `MAGE_GATEWAY=on` serves MageML's web server through a Rust gateway, the first step of
