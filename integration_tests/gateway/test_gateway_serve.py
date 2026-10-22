@@ -1,6 +1,6 @@
 """
-MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail and the runs
-list itself when
+MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail, the runs list
+and the triggers list itself when
 its own decision allows the read, with what the server answers, and leaves refusals to the
 server, which answers them as before.
 """
@@ -12,7 +12,7 @@ import requests
 
 from integration_tests.gateway.test_gateway import LOAD, run_server
 
-ROUTES = 'block_runs,pipeline_run,pipeline_runs'
+ROUTES = 'block_runs,pipeline_run,pipeline_runs,pipeline_schedules'
 
 
 @pytest.fixture(scope='module')
@@ -67,7 +67,9 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
                  # The run page's poll, a format of three fields.
                  f"pipeline_runs/{run['id']}?_format=with_basic_details",
                  'pipeline_runs?disable_retries_grouping=true&include_pipeline_tags=true'
-                 '&include_pipeline_uuids=true&_limit=30'):
+                 '&include_pipeline_uuids=true&_limit=30',
+                 'pipeline_schedules?_limit=30&_offset=0&order_by=created_at',
+                 f'pipelines/{uuid}/pipeline_schedules?_limit=40&_offset=0'):
         through = owner.get(f'{api}/{path}', timeout=60)
         direct = owner.get(f'http://127.0.0.1:{server}/api/{path}', timeout=60)
         assert through.status_code == direct.status_code == 200
@@ -117,6 +119,10 @@ def test_served_reads_are_quicker_than_the_servers(served):
         '&include_pipeline_uuids=true&_limit=30'
     direct, through = p95(server, page), p95(gateway, page)
     print(f'runs page list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
+    assert through < direct, (through, direct)
+    triggers = 'pipeline_schedules?_limit=30&_offset=0&order_by=created_at'
+    direct, through = p95(server, triggers), p95(gateway, triggers)
+    print(f'triggers page list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
     assert through < direct, (through, direct)
 
 

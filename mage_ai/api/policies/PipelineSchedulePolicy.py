@@ -126,6 +126,8 @@ PipelineSchedulePolicy.allow_read(PipelineSchedulePresenter.default_attributes +
     'next_pipeline_run_date',
     'pipeline_in_progress_runs_count',
     'pipeline_runs_count',
+    # _format=with_runtime_average, as on the detail.
+    'runtime_average',
     'tags',
 ], scopes=[
     OauthScope.CLIENT_PRIVATE,

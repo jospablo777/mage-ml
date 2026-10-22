@@ -53,10 +53,14 @@
   answered by the gateway from the metadata database and compared with the server's answer
   (shadow reads); the counts and differences are at `/__gateway/shadow` from the same
   machine.
-- `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs` has the gateway answer those
-  reads itself when its own decision allows them: the runs page's list in about a quarter
-  of the server's time. The server answers the rest, refusals and the queries the gateway
+- `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs,pipeline_schedules` has the
+  gateway answer those reads itself when its own decision allows them: the runs page's list
+  in about a quarter of the server's time, the triggers list included. The server answers the rest, refusals and the queries the gateway
   does not read yet included.
+- A trigger's next run date is the one the scheduler keeps: a landing time still ahead
+  today is the next one, a monthly landing time keeps its day, and a start time ahead is
+  respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets
+  users who are not owners search, and answers `_format=with_runtime_average`.
 - The block runs list breaks ties by id: block runs created together share their times,
   and pages of the list repeated or skipped rows between requests.
 - Listing integration sources and destinations no longer imports every connector into the

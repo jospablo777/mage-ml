@@ -132,6 +132,43 @@ pub async fn may_view(
     user: i64,
     entity: Entity<'_>,
 ) -> Result<bool, String> {
+    Ok(viewer(metadata, settings, user).await?.may_view(entity))
+}
+
+/// What has_at_least_viewer_role reads about a user, read once for several entities.
+pub struct Viewer {
+    everything: bool,
+    grants: BTreeMap<i64, Vec<Grant>>,
+    project: i64,
+    project_uuid: String,
+}
+
+impl Viewer {
+    pub fn may_view(&self, entity: Entity<'_>) -> bool {
+        if self.everything {
+            return true;
+        }
+        let on_entity = match entity {
+            Entity::Pipeline(uuid) => {
+                access(&self.grants, "PIPELINE", Some(uuid), &self.project_uuid)
+            }
+            Entity::Project => self.project,
+        };
+        on_entity & (OWNER | ADMIN | EDITOR | VIEWER) != 0
+    }
+}
+
+pub async fn viewer(
+    metadata: &Metadata,
+    settings: &AuthSettings,
+    user: i64,
+) -> Result<Viewer, String> {
+    let nobody = |everything| Viewer {
+        everything,
+        grants: BTreeMap::new(),
+        project: 0,
+        project_uuid: settings.project_uuid.clone(),
+    };
     let users = read_rows(
         metadata,
         "SELECT owner, roles FROM \"user\" WHERE id = {1}",
@@ -139,7 +176,7 @@ pub async fn may_view(
     )
     .await?;
     let Some(row) = users.first() else {
-        return Ok(false);
+        return Ok(nobody(false));
     };
     let owner_flag = matches!(row[0], Raw::Bool(true) | Raw::Int(1));
     let legacy_roles = match row[1] {
@@ -147,7 +184,7 @@ pub async fn may_view(
         _ => 0,
     };
     if owner_flag || legacy_roles & 0b111 != 0 {
-        return Ok(true);
+        return Ok(nobody(true));
     }
     let permissions = read_rows(
         metadata,
@@ -174,14 +211,12 @@ pub async fn may_view(
         Some(&settings.project_uuid),
         &settings.project_uuid,
     );
-    if has_roles && project & OWNER != 0 {
-        return Ok(true);
-    }
-    let on_entity = match entity {
-        Entity::Pipeline(uuid) => access(&grants, "PIPELINE", Some(uuid), &settings.project_uuid),
-        Entity::Project => project,
-    };
-    Ok(on_entity & (OWNER | ADMIN | EDITOR | VIEWER) != 0)
+    Ok(Viewer {
+        everything: has_roles && project & OWNER != 0,
+        grants,
+        project,
+        project_uuid: settings.project_uuid.clone(),
+    })
 }
 
 const OWNER: i64 = 1;
@@ -284,7 +319,7 @@ fn parts_prefix(encoded: &str) -> Option<&str> {
 }
 
 /// A SQLite DATETIME (naive, UTC) as a UTC time.
-fn naive_utc(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn naive_utc(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let text = text.trim();
     [
         "%Y-%m-%d %H:%M:%S%.f",

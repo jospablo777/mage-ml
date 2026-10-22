@@ -426,3 +426,69 @@ def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
     page = signed_in.get(f'{base}/pipeline_runs?pipeline_uuid={tagged}'
                          '&disable_retries_grouping=1&include_pipeline_tags=1', timeout=60).json()
     assert page['pipeline_runs'][0]['pipeline_tags'] == ['nightly', 'finance']
+
+
+def test_trigger_lists_read_from_the_database_equal_the_servers(ports, signed_in):
+    """
+    GET /api/pipeline_schedules as the triggers pages ask for it, with next run dates of
+    presets, a landing time, a start time ahead and a cron expression.
+    """
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    uuid = signed_in.post(f'{base}/pipelines', json=dict(pipeline=dict(
+        name='gateway triggers', type='python',
+    )), timeout=60).json()['pipeline']['uuid']
+    ahead = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(time.time() + 3 * 86400))
+    for trigger in [
+        dict(name='GW daily landing', schedule_type='time', schedule_interval='@daily',
+             start_time='2024-01-05T22:25:00', status='active', tags=['b', 'a'],
+             settings=dict(landing_time_enabled=True)),
+        dict(name='GW cron ahead', schedule_type='time', schedule_interval='*/5 * * * *',
+             start_time=ahead, status='inactive'),
+        dict(name='GW weekly', schedule_type='time', schedule_interval='@weekly',
+             start_time='2024-01-01T00:00:00', status='inactive', tags=['a']),
+        dict(name='gw api', schedule_type='api', status='active'),
+    ]:
+        response = signed_in.post(f'{base}/pipelines/{uuid}/pipeline_schedules', json=dict(
+            pipeline_schedule=trigger,
+        ), timeout=60).json()
+        assert 'error' not in response, response
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('pipeline_schedules', {})
+        return {k: found.get(k, 0) for k in COUNTS + ('unsupported',)}, report
+
+    queries = [
+        'pipeline_schedules', 'pipeline_schedules?_limit=2&_offset=1',
+        # The triggers page, its orders and search.
+        'pipeline_schedules?_limit=30&_offset=0&order_by=created_at',
+        'pipeline_schedules?order_by=name', 'pipeline_schedules?order_by=status',
+        'pipeline_schedules?order_by=schedule_type', 'pipeline_schedules?search=gw',
+        # A pipeline's triggers page and its filters.
+        f'pipelines/{uuid}/pipeline_schedules?_limit=40&_offset=0',
+        f'pipelines/{uuid}/pipeline_schedules?status[]=active&schedule_type[]=time',
+        f'pipelines/{uuid}/pipeline_schedules?schedule_interval[]=%40weekly',
+        f'pipelines/{uuid}/pipeline_schedules?tag[]=a',
+        # The services page.
+        'pipeline_schedules?schedule_type[]=after_run&_limit=1000',
+    ]
+    before = settled(counts)
+    for query in queries + ['pipeline_schedules?_format=with_runtime_average']:
+        response = signed_in.get(f'{base}/{query}', timeout=60).json()
+        assert 'error' not in response, (query, response)
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0
+    assert added['unsupported'] == 1
+    found = signed_in.get(f'{base}/pipelines/{uuid}/pipeline_schedules?tag[]=a',
+                          timeout=60).json()['pipeline_schedules']
+    assert sorted(t['name'] for t in found) == ['GW daily landing', 'GW weekly']
+    assert [t['tags'] for t in found if t['name'] == 'GW daily landing'] == [['a', 'b']]

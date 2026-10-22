@@ -199,3 +199,22 @@ class PipelineScheduleOperationTests(BaseApiTestCase):
                 found = response['pipeline_schedules']
                 self.assertEqual([s['id'] for s in found], [s.id for s in schedules])
                 self.assertEqual(found[0]['tags'], ['alpha', 'mid', 'zeta'])
+
+    async def test_list_with_runtime_average(self):
+        """The list's items are dicts, which the format took for models and failed on."""
+        user = create_user(email=self.faker.email(), roles=1)
+        name = f'average {self.faker.uuid4()}'
+        schedule = PipelineSchedule.create(
+            name=name,
+            pipeline_uuid=self.pipeline.uuid,
+            repo_path=get_repo_path(),
+            schedule_type=ScheduleType.API,
+        )
+        response = await self.build_list_operation(
+            meta=dict(_format='with_runtime_average'), query=dict(search=[name]), user=user,
+        ).execute()
+        self.assertNotIn('error', response, response)
+        found = response['pipeline_schedules']
+        self.assertEqual([s['id'] for s in found], [schedule.id])
+        self.assertIn('runtime_average', found[0])
+        self.assertEqual(found[0]['tags'], [])

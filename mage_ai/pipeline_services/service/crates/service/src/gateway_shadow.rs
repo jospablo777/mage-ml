@@ -18,7 +18,12 @@ const RECENT_DIFFERENCES: usize = 20;
 /// One served answer in this many is also asked of the server and compared, so serving a
 /// route keeps checking it.
 pub const SERVED_CHECK_EVERY: u64 = 10;
-const ROUTES: &[&str] = &["block_runs", "pipeline_run", "pipeline_runs"];
+const ROUTES: &[&str] = &[
+    "block_runs",
+    "pipeline_run",
+    "pipeline_runs",
+    "pipeline_schedules",
+];
 /// DatabaseResource.DEFAULT_LIMIT.
 const DEFAULT_LIMIT: i64 = 40;
 
@@ -128,6 +133,8 @@ pub struct Shadow {
     serve: Vec<String>,
     /// The project's folder (MAGE_GATEWAY_REPO_PATH), for the pipelines' names and tags.
     repo_path: Option<PathBuf>,
+    /// HIDE_API_TRIGGER_TOKEN, as the server reads it (MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN).
+    hide_token: bool,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
@@ -174,6 +181,7 @@ impl Shadow {
             repo_path: std::env::var("MAGE_GATEWAY_REPO_PATH")
                 .ok()
                 .map(PathBuf::from),
+            hide_token: std::env::var("MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN").as_deref() == Ok("1"),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -191,6 +199,11 @@ impl Shadow {
         }
         if path == "/api/pipeline_runs" && enabled("pipeline_runs") {
             return Some("pipeline_runs");
+        }
+        if enabled("pipeline_schedules")
+            && (path == "/api/pipeline_schedules" || schedules_pipeline(path).is_some())
+        {
+            return Some("pipeline_schedules");
         }
         let run = path.strip_prefix("/api/pipeline_runs/")?;
         (enabled("pipeline_run") && !run.is_empty() && run.bytes().all(|b| b.is_ascii_digit()))
@@ -260,6 +273,7 @@ impl Shadow {
         }
         let mut served = served.to_vec();
         let mut attempt = 0;
+        let mut unsupported_rows = false;
         let outcome = loop {
             let pair = match serde_json::from_slice::<Value>(&served) {
                 Ok(served) => match self.answer(route, path, query).await {
@@ -272,6 +286,11 @@ impl Shadow {
                 Ok((served, own)) if served == own => break Ok(attempt),
                 Ok(pair) if attempt == REREADS => break Err(Some(pair)),
                 Ok(_) => {}
+                // Found unsupported only on reading the rows (a trigger's schedule).
+                Err(error) if error.starts_with(crate::gateway_schedules::UNSUPPORTED) => {
+                    unsupported_rows = true;
+                    break Err(None);
+                }
                 Err(error) => {
                     self.note(
                         route,
@@ -292,6 +311,7 @@ impl Shadow {
         match outcome {
             Ok(0) => entry.equal += 1,
             Ok(_) => entry.equal_after_reread += 1,
+            Err(None) if unsupported_rows => entry.unsupported += 1,
             Err(None) => entry.failed += 1,
             Err(Some((served, own))) => {
                 entry.different += 1;
@@ -347,6 +367,26 @@ impl Shadow {
             Caller::Public | Caller::Refused(_) => return Ok(Some(false)),
             Caller::User(user) => user,
         };
+        if route == "pipeline_schedules" {
+            // The list is the project's; then each trigger's attributes are authorized on
+            // its pipeline, and one the user may not view refuses the whole answer. A user
+            // kept from any pipeline with triggers is left to the server.
+            let viewer = crate::gateway_auth::viewer(&self.metadata, settings, user).await?;
+            if !viewer.may_view(Entity::Project) {
+                return Ok(Some(false));
+            }
+            let pipelines = read_rows(
+                &self.metadata,
+                "SELECT DISTINCT pipeline_uuid FROM pipeline_schedule",
+                &[],
+            )
+            .await?;
+            let all = pipelines.iter().all(|row| match row.first() {
+                Some(Raw::Text(uuid)) => viewer.may_view(Entity::Pipeline(uuid)),
+                _ => true,
+            });
+            return Ok(all.then_some(true));
+        }
         let pipeline = match route {
             "block_runs" | "pipeline_runs" => query.get("pipeline_uuid").map(str::to_string),
             "pipeline_run" => {
@@ -418,6 +458,31 @@ impl Shadow {
 
     async fn answer(&self, route: &str, path: &str, query: &str) -> Result<Value, String> {
         match route {
+            "pipeline_schedules" => {
+                let repo = self.repo_path.as_deref().ok_or("no repository path")?;
+                let pipeline = schedules_pipeline(path);
+                if let Some(uuid) = &pipeline
+                    && !repo
+                        .join("pipelines")
+                        .join(uuid)
+                        .join("metadata.yaml")
+                        .is_file()
+                {
+                    // The server answers a pipeline it cannot load with an error.
+                    return Err(format!(
+                        "{}no pipeline {uuid}",
+                        crate::gateway_schedules::UNSUPPORTED
+                    ));
+                }
+                let lister = crate::gateway_schedules::Lister {
+                    metadata: &self.metadata,
+                    repo_path: repo,
+                    pipeline: pipeline.as_deref(),
+                    hide_token: self.hide_token,
+                    now: chrono::Utc::now(),
+                };
+                crate::gateway_schedules::pipeline_schedules(&lister, query).await
+            }
             "block_runs" => block_runs(&self.metadata, &Query::parse(query)).await,
             "pipeline_runs" => {
                 let repo = self.repo_path.as_deref().ok_or("no repository path")?;
@@ -475,10 +540,10 @@ fn first_difference(served: &Value, own: &Value) -> Value {
 }
 
 /// The query string as Tornado reads it: each name's first value.
-struct Query(BTreeMap<String, String>);
+pub(crate) struct Query(BTreeMap<String, String>);
 
 impl Query {
-    fn parse(query: &str) -> Query {
+    pub(crate) fn parse(query: &str) -> Query {
         let mut values = BTreeMap::new();
         for pair in query.split('&').filter(|p| !p.is_empty()) {
             let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -491,7 +556,7 @@ impl Query {
 
     /// A value Mage reads with `query.get(name, [None])[0]` and then tests for truth. The
     /// operation reads `false` as False (BaseOperation.query).
-    fn get(&self, name: &str) -> Option<&str> {
+    pub(crate) fn get(&self, name: &str) -> Option<&str> {
         self.0
             .get(name)
             .map(String::as_str)
@@ -520,6 +585,17 @@ fn route_names(route: &str) -> &'static [&'static str] {
             "pipeline_uuid",
         ],
         "pipeline_run" => &["_format"],
+        "pipeline_schedules" => &[
+            "_limit",
+            "_offset",
+            "global_data_product_uuid",
+            "order_by",
+            "schedule_interval[]",
+            "schedule_type[]",
+            "search",
+            "status[]",
+            "tag[]",
+        ],
         "pipeline_runs" => &[
             "_limit",
             "_offset",
@@ -541,6 +617,15 @@ fn route_names(route: &str) -> &'static [&'static str] {
     }
 }
 
+/// The pipeline of /api/pipelines/<uuid>/pipeline_schedules.
+fn schedules_pipeline(path: &str) -> Option<String> {
+    let uuid = path
+        .trim_end_matches('/')
+        .strip_prefix("/api/pipelines/")?
+        .strip_suffix("/pipeline_schedules")?;
+    (!uuid.is_empty() && !uuid.contains('/')).then(|| percent_decode(uuid))
+}
+
 /// Why the gateway leaves a query of a route to the server; None when it answers it.
 pub(crate) fn unsupported(
     route: &str,
@@ -557,6 +642,9 @@ pub(crate) fn unsupported(
     }
     match route {
         "pipeline_runs" => pipeline_runs_unsupported(query, repo_path),
+        "pipeline_schedules" if repo_path.is_none() => {
+            Some("no repository path (or the project platform)")
+        }
         "pipeline_run" => match parsed.get("_format") {
             None | Some("with_basic_details") => None,
             Some(_) => Some("a _format the gateway does not answer"),
@@ -565,7 +653,7 @@ pub(crate) fn unsupported(
     }
 }
 
-fn percent_decode(text: &str) -> String {
+pub(crate) fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -888,7 +976,7 @@ async fn postgres_block_runs(
 
 /// How a column's value reads in an answer.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Kind {
+pub(crate) enum Kind {
     Int,
     Text,
     /// A datetime as `str(datetime)` writes it (BaseModel.to_dict).
@@ -956,7 +1044,7 @@ pub(crate) enum Raw {
     Time(chrono::DateTime<chrono::Utc>),
 }
 
-fn field_value(kind: Kind, raw: Raw) -> Result<Value, String> {
+pub(crate) fn field_value(kind: Kind, raw: Raw) -> Result<Value, String> {
     Ok(match (kind, raw) {
         (_, Raw::Null) => Value::Null,
         (Kind::Int, Raw::Int(v)) => Value::from(v),
@@ -983,14 +1071,17 @@ fn str_time_sqlite(text: &str) -> Value {
 }
 
 /// `str(datetime)` of an aware datetime in UTC, as PostgreSQL gives it to SQLAlchemy.
-fn str_time_utc(at: chrono::DateTime<chrono::Utc>) -> Value {
+pub(crate) fn str_time_utc(at: chrono::DateTime<chrono::Utc>) -> Value {
     match postgres_time(Some(at)) {
         Value::String(iso) => Value::String(iso.replacen('T', " ", 1)),
         other => other,
     }
 }
 
-fn object(fields: &[(&str, Kind)], raws: Vec<Raw>) -> Result<Map<String, Value>, String> {
+pub(crate) fn object(
+    fields: &[(&str, Kind)],
+    raws: Vec<Raw>,
+) -> Result<Map<String, Value>, String> {
     let mut row = Map::new();
     for ((name, kind), raw) in fields.iter().zip(raws) {
         row.insert(name.to_string(), field_value(*kind, raw)?);

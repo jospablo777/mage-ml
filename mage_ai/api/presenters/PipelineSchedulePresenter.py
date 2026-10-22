@@ -1,6 +1,7 @@
 from mage_ai.api.operations import constants
 from mage_ai.api.presenters.BasePresenter import BasePresenter
 from mage_ai.settings.server import HIDE_API_TRIGGER_TOKEN
+from mage_ai.shared.hash import ignore_keys
 
 
 class PipelineSchedulePresenter(BasePresenter):
@@ -33,6 +34,13 @@ class PipelineSchedulePresenter(BasePresenter):
             ])
             data['tags'] = sorted([tag.name for tag in self.get_tag_associations])
             data['next_pipeline_run_date'] = self.model.next_execution_date()
+        elif 'with_runtime_average' == display_format and isinstance(self.model, dict):
+            # A list's item, which the collection made a dict: its schedule's average.
+            from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+            data = ignore_keys(self.model, ['event_matchers'])
+            schedule = PipelineSchedule.get_by_id(self.model.get('id'))
+            data['runtime_average'] = schedule.runtime_average() if schedule else None
         elif 'with_runtime_average' == display_format:
             data = self.model.to_dict()
             data['runtime_average'] = self.model.runtime_average()
