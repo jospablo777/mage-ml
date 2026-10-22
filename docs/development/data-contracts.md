@@ -31,7 +31,7 @@ diagnostics. Its documents plan a registry service, receipts, Arrow kernels, a
   failing test fails the block run, so downstream blocks never start. A contract is a
   declarative test, so it runs in `run_tests`. That covers the notebook, triggers,
   retries, block fusion, and R, SQL and Rust blocks without a new execution path. Runs
-  without tests (`mage run` without `--test`, fused stages) call `run_tests` with
+  without tests (`mage run --no-test`, fused stages) call `run_tests` with
   `contracts_only`, so the contract is still checked; a violation raises
   `ContractViolation`, which `mage run` prints and exits with 1.
 - **A registry service is unnecessary.** Contracts are files in the project, versioned and

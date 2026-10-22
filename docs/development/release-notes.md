@@ -42,6 +42,8 @@
 
 ### Pipelines
 
+- `mage run` runs each block's tests by default, as triggered runs do; `--no-test` skips
+  them. A block whose test failed passed on the command line and failed when scheduled.
 - Exported services run Druid SQL blocks (raw SQL, as Mage runs them), with `pydruid` in
   the image; `mage-ml[druid]` installs the client. Opening a Druid connection no longer
   prints its settings, password included, into the block's log.

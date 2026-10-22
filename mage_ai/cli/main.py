@@ -75,7 +75,12 @@ RUN_PROJECT_PATH_DEFAULT = typer.Argument(
     ..., help='path of the MageML project that contains the pipeline.'
 )
 RUN_PIPELINE_UUID_DEFAULT = typer.Argument(..., help='uuid of the pipeline to be run.')
-RUN_TEST_DEFAULT = typer.Option(False, help='specify if tests should be run.')
+# On, as in runs a trigger starts: a pipeline run from the command line skipped its blocks'
+# tests unless asked, so a block whose test failed passed here and failed when scheduled.
+RUN_TEST_DEFAULT = typer.Option(
+    True, '--test/--no-test',
+    help="run each block's tests, as triggered runs do; --no-test skips them.",
+)
 RUN_BLOCK_UUID_DEFAULT = typer.Option(None, help='uuid of the block to be run.')
 RUN_EXECUTION_PARTITION_DEFAULT = typer.Option(None, help='')
 RUN_EXECUTOR_TYPE_DEFAULT = typer.Option(None, help='')

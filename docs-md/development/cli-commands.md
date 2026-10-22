@@ -153,8 +153,8 @@ mage run /path/to/project my_pipeline_uuid --block-uuid my_block_uuid
 mage run /path/to/project my_pipeline_uuid --runtime-vars '{"key": "value"}'
 mage run /path/to/project my_pipeline_uuid --var date=2026-01-31 --var limit=1000
 
-# Run with tests
-mage run /path/to/project my_pipeline_uuid --test
+# Without the blocks' tests (they run by default, as in triggered runs)
+mage run /path/to/project my_pipeline_uuid --no-test
 
 # One stage at a time, outputs under their own partition
 mage run /path/to/project my_pipeline_uuid --max-parallel 1 --execution-partition run_42

@@ -61,6 +61,22 @@ class RunTests(TestCase):
 
     @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
     @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
+    def test_tests_run_by_default_and_no_test_skips_them(
+        self, mock_executor_factory, mock_pipeline,
+    ):
+        mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
+        execute = mock_executor_factory.get_pipeline_executor.return_value.execute
+
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic'])
+        assert result.exit_code == 0, result.output
+        assert execute.call_args.kwargs['run_tests'] is True
+
+        result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic', '--no-test'])
+        assert result.exit_code == 0, result.output
+        assert execute.call_args.kwargs['run_tests'] is False
+
+    @mock.patch('mage_ai.data_preparation.models.pipeline.Pipeline')
+    @mock.patch('mage_ai.data_preparation.executors.executor_factory.ExecutorFactory')
     def test_no_record_leaves_the_run_unrecorded(self, mock_executor_factory, mock_pipeline):
         mock_pipeline.get_all_pipelines.return_value = ['load_titanic']
         result = runner.invoke(app, ['run', 'my_mage_project', 'load_titanic', '--no-record'])

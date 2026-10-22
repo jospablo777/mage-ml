@@ -142,7 +142,7 @@ It exits with 1 when the output breaks the contract, and 2 when the check can't 
 ## When the check runs
 
 - In every production run: triggered runs, backfills, retries, block fusion stages and
-  `mage run`, with or without `--test`. A contract is a guarantee about the data, not an
+  `mage run`, with or without `--no-test`. A contract is a guarantee about the data, not an
   optional test, so a run without tests still checks it. `mage run` exits with 1 and
   prints the broken rules when the output breaks the contract.
 - In the notebook, when you run the block with its tests.
