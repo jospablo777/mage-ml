@@ -32,6 +32,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 # Data contracts and monitors: the checks of the engine's workspace, which exported services
 # use too.
 mage-checks = { path = "../../mage_ai/pipeline_services/service/crates/checks" }
+mage-log-window = { path = "../../mage_ai/pipeline_services/service/crates/log-window" }
 memchr = "2"
 # Keyed hashes of masked development copies (src/mask.rs).
 ring = "0.17"

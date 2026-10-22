@@ -13,6 +13,7 @@ mod environment;
 mod executor;
 mod gateway;
 mod gateway_auth;
+mod gateway_logs;
 mod gateway_schedules;
 mod gateway_shadow;
 mod gcp;

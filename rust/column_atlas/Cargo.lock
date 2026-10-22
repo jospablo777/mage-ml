@@ -380,6 +380,7 @@ dependencies = [
  "chrono",
  "mage-block",
  "mage-checks",
+ "mage-log-window",
  "memchr",
  "polars",
  "pyo3",
@@ -1434,6 +1435,14 @@ dependencies = [
  "polars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mage-log-window"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]

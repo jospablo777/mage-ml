@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 import requests
@@ -492,3 +493,86 @@ def test_trigger_lists_read_from_the_database_equal_the_servers(ports, signed_in
                           timeout=60).json()['pipeline_schedules']
     assert sorted(t['name'] for t in found) == ['GW daily landing', 'GW weekly']
     assert [t['tags'] for t in found if t['name'] == 'GW daily landing'] == [['a', 'b']]
+
+
+PRINT = """
+@data_loader
+def load(*args, **kwargs):
+    for n in range(5):
+        print(f'gateway-needle line {n}')
+    return {'n': 1}
+"""
+
+
+def test_logs_read_from_disk_equal_the_servers(ports, signed_in):
+    """
+    GET /api/pipelines/<uuid>/logs as the logs page asks for it: runs' and block runs'
+    logs, an editor log, filters, a text search and the lines before a window.
+    """
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+
+    def call(method, path, **body):
+        response = signed_in.request(method, f'{base}/{path}', json=body or None, timeout=60)
+        response.raise_for_status()
+        return response.json()
+
+    uuid = call('POST', 'pipelines', pipeline=dict(name='gateway logs', type='python'))[
+        'pipeline']['uuid']
+    block = call('POST', f'pipelines/{uuid}/blocks', block=dict(
+        name='printer', type='data_loader', language='python', content=PRINT,
+    ))['block']['uuid']
+    schedule = call('POST', f'pipelines/{uuid}/pipeline_schedules', pipeline_schedule=dict(
+        name='logs trigger', schedule_type='api', status='active',
+    ))['pipeline_schedule']
+    for _ in range(2):
+        call('POST', f"pipeline_schedules/{schedule['id']}/pipeline_runs",
+             pipeline_run=dict(variables={}))
+    deadline = time.monotonic() + 180
+    while True:
+        runs = call('GET', f'pipeline_runs?pipeline_uuid={uuid}&disable_retries_grouping=1')[
+            'pipeline_runs']
+        if len(runs) == 2 and all(r['status'] == 'completed' for r in runs):
+            break
+        assert time.monotonic() < deadline, runs
+        time.sleep(1)
+
+    logs = call('GET', f'pipelines/{uuid}/logs')['logs'][0]
+    block_log = next(i for i in logs['block_run_logs'] if 'gateway-needle' in i['content'])
+    # An editor log of the block, named by its time, and a file that is not one.
+    root = block_log['path'].split('/.logs/')[0] + '/.logs'
+    editor = os.path.join(root, 'edit_pipeline', block)
+    os.makedirs(editor, exist_ok=True)
+    with open(os.path.join(editor, '20260101T120000.log'), 'w') as f:
+        f.write('2026-01-01T12:00:00 editor gateway-needle\n')
+    with open(os.path.join(editor, 'notes.txt'), 'w') as f:
+        f.write('not a log\n')
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('logs', {})
+        return {k: found.get(k, 0) for k in COUNTS + ('unsupported',)}, report
+
+    queries = [
+        '', f'start_timestamp={int(time.time()) - 86400}', '_limit=1', 'level[]=error',
+        'text=GATEWAY-NEEDLE', 'text=absent-text', f"pipeline_run_id[]={runs[0]['id']}",
+        f"pipeline_schedule_id[]={schedule['id']}", f'block_uuid[]={block}',
+        f"log_path={quote(block_log['path'])}&before_line=3&lines=2",
+    ]
+    before = settled(counts)
+    for query in queries + ['_format=x']:
+        response = signed_in.get(f'{base}/pipelines/{uuid}/logs?{query}', timeout=60).json()
+        assert 'error' not in response, (query, response)
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0
+    assert added['unsupported'] == 1
+    found = call('GET', f'pipelines/{uuid}/logs?text=gateway-needle')['logs'][0]
+    assert any('editor gateway-needle' in i['content'] for i in found['block_run_logs'])

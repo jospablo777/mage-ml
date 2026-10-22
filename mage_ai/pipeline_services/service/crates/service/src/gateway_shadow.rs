@@ -20,6 +20,7 @@ const RECENT_DIFFERENCES: usize = 20;
 pub const SERVED_CHECK_EVERY: u64 = 10;
 const ROUTES: &[&str] = &[
     "block_runs",
+    "logs",
     "pipeline_run",
     "pipeline_runs",
     "pipeline_schedules",
@@ -135,6 +136,9 @@ pub struct Shadow {
     repo_path: Option<PathBuf>,
     /// HIDE_API_TRIGGER_TOKEN, as the server reads it (MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN).
     hide_token: bool,
+    /// Where the server keeps run logs (MAGE_GATEWAY_LOGS_DIR); None when they are kept
+    /// elsewhere (S3, GCS), which the gateway leaves to the server.
+    logs_dir: Option<String>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
@@ -182,6 +186,9 @@ impl Shadow {
                 .ok()
                 .map(PathBuf::from),
             hide_token: std::env::var("MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN").as_deref() == Ok("1"),
+            logs_dir: std::env::var("MAGE_GATEWAY_LOGS_DIR")
+                .ok()
+                .filter(|d| !d.is_empty()),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -200,8 +207,12 @@ impl Shadow {
         if path == "/api/pipeline_runs" && enabled("pipeline_runs") {
             return Some("pipeline_runs");
         }
+        if enabled("logs") && pipeline_child(path, "logs").is_some() {
+            return Some("logs");
+        }
         if enabled("pipeline_schedules")
-            && (path == "/api/pipeline_schedules" || schedules_pipeline(path).is_some())
+            && (path == "/api/pipeline_schedules"
+                || pipeline_child(path, "pipeline_schedules").is_some())
         {
             return Some("pipeline_schedules");
         }
@@ -388,6 +399,7 @@ impl Shadow {
             return Ok(all.then_some(true));
         }
         let pipeline = match route {
+            "logs" => pipeline_child(path, "logs"),
             "block_runs" | "pipeline_runs" => query.get("pipeline_uuid").map(str::to_string),
             "pipeline_run" => {
                 let id = path
@@ -458,9 +470,26 @@ impl Shadow {
 
     async fn answer(&self, route: &str, path: &str, query: &str) -> Result<Value, String> {
         match route {
+            "logs" => {
+                let repo = self.repo_path.as_deref().ok_or("no repository path")?;
+                let logs_dir = self.logs_dir.as_deref().ok_or_else(|| {
+                    format!(
+                        "{}logs kept elsewhere than on the server's disk",
+                        crate::gateway_schedules::UNSUPPORTED
+                    )
+                })?;
+                let pipeline = pipeline_child(path, "logs").ok_or("no pipeline")?;
+                let lister = crate::gateway_logs::LogLister {
+                    metadata: &self.metadata,
+                    repo_path: repo,
+                    logs_dir,
+                    pipeline: &pipeline,
+                };
+                crate::gateway_logs::pipeline_logs(&lister, query).await
+            }
             "pipeline_schedules" => {
                 let repo = self.repo_path.as_deref().ok_or("no repository path")?;
-                let pipeline = schedules_pipeline(path);
+                let pipeline = pipeline_child(path, "pipeline_schedules");
                 if let Some(uuid) = &pipeline
                     && !repo
                         .join("pipelines")
@@ -584,6 +613,27 @@ fn route_names(route: &str) -> &'static [&'static str] {
             "pipeline_run_id",
             "pipeline_uuid",
         ],
+        "logs" => &[
+            "_limit",
+            "_offset",
+            "before_line",
+            "block_run_id",
+            "block_run_id[]",
+            "block_type",
+            "block_type[]",
+            "block_uuid",
+            "block_uuid[]",
+            "end_timestamp",
+            "level[]",
+            "lines",
+            "log_path",
+            "pipeline_run_id",
+            "pipeline_run_id[]",
+            "pipeline_schedule_id",
+            "pipeline_schedule_id[]",
+            "start_timestamp",
+            "text",
+        ],
         "pipeline_run" => &["_format"],
         "pipeline_schedules" => &[
             "_limit",
@@ -617,12 +667,13 @@ fn route_names(route: &str) -> &'static [&'static str] {
     }
 }
 
-/// The pipeline of /api/pipelines/<uuid>/pipeline_schedules.
-fn schedules_pipeline(path: &str) -> Option<String> {
+/// The pipeline of /api/pipelines/<uuid>/<child>.
+fn pipeline_child(path: &str, child: &str) -> Option<String> {
     let uuid = path
         .trim_end_matches('/')
         .strip_prefix("/api/pipelines/")?
-        .strip_suffix("/pipeline_schedules")?;
+        .strip_suffix(child)?
+        .strip_suffix('/')?;
     (!uuid.is_empty() && !uuid.contains('/')).then(|| percent_decode(uuid))
 }
 
@@ -642,7 +693,7 @@ pub(crate) fn unsupported(
     }
     match route {
         "pipeline_runs" => pipeline_runs_unsupported(query, repo_path),
-        "pipeline_schedules" if repo_path.is_none() => {
+        "logs" | "pipeline_schedules" if repo_path.is_none() => {
             Some("no repository path (or the project platform)")
         }
         "pipeline_run" => match parsed.get("_format") {
@@ -1693,17 +1744,22 @@ fn pipeline_names(repo_path: &std::path::Path) -> Vec<Value> {
 
 /// What the runs list reads of a pipeline's metadata.yaml.
 #[derive(Clone)]
-struct PipelineConfig {
+pub(crate) struct PipelineConfig {
     /// PipelineRun.pipeline_tags: the tags, or null without them.
     tags: Value,
     /// PipelineRun.pipeline_type: the type, python when the file names none.
     kind: Value,
+    /// The uuids of `blocks`, in order (Pipeline.blocks_by_uuid); None when the file does
+    /// not read as YAML, which Pipeline.get fails on.
+    pub(crate) blocks: Option<Vec<String>>,
+    /// An execution framework, which builds the blocks itself.
+    pub(crate) execution_framework: bool,
 }
 
 /// The pipeline's config, None when its folder is gone (Pipeline.get with check_if_exists,
 /// then null tags and type). Read again only when the file changed: a runs page lists
 /// thirty runs a few times a minute, mostly of the same pipelines.
-fn pipeline_config(repo_path: &std::path::Path, uuid: &str) -> Option<PipelineConfig> {
+pub(crate) fn pipeline_config(repo_path: &std::path::Path, uuid: &str) -> Option<PipelineConfig> {
     type Cache = BTreeMap<PathBuf, (std::time::SystemTime, PipelineConfig)>;
     static CONFIGS: std::sync::LazyLock<Mutex<Cache>> =
         std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
@@ -1726,6 +1782,8 @@ fn read_pipeline_config(path: &std::path::Path) -> PipelineConfig {
     let unread = PipelineConfig {
         tags: Value::Null,
         kind: Value::String("python".into()),
+        blocks: None,
+        execution_framework: false,
     };
     let Ok(text) = std::fs::read_to_string(path) else {
         return unread;
@@ -1745,7 +1803,24 @@ fn read_pipeline_config(path: &std::path::Path) -> PipelineConfig {
         yaml_rust2::Yaml::String(kind) if !kind.is_empty() => Value::String(kind.clone()),
         _ => Value::String("python".into()),
     };
-    PipelineConfig { tags, kind }
+    let blocks = match &doc["blocks"] {
+        yaml_rust2::Yaml::Array(items) => items
+            .iter()
+            .map(|b| b["uuid"].as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>(),
+        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null => Some(Vec::new()),
+        _ => None,
+    };
+    let execution_framework = !matches!(
+        &doc["execution_framework"],
+        yaml_rust2::Yaml::BadValue | yaml_rust2::Yaml::Null
+    );
+    PipelineConfig {
+        tags,
+        kind,
+        blocks,
+        execution_framework,
+    }
 }
 
 /// The tags alone, as the tests read them.

@@ -16,7 +16,7 @@ from mage_ai.pipeline_services.engine import engine_path
 READY_SECONDS = 15
 # The routes the gateway answers too, from the metadata database, and compares with the
 # server's answers (gateway_shadow.rs); MAGE_GATEWAY_SHADOW=off turns them off.
-SHADOW_ROUTES = 'block_runs,pipeline_run,pipeline_runs,pipeline_schedules'
+SHADOW_ROUTES = 'block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules'
 
 
 def enabled() -> bool:
@@ -75,8 +75,26 @@ def shadow_settings() -> tuple:
         MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN='1' if HIDE_API_TRIGGER_TOKEN else '0',
         # The pipelines' names and tags; none on the project platform, whose runs the
         # gateway leaves to the server.
-        **({} if project_platform_activated() else dict(MAGE_GATEWAY_REPO_PATH=get_repo_path())),
+        **({} if project_platform_activated() else dict(
+            MAGE_GATEWAY_REPO_PATH=get_repo_path(),
+            MAGE_GATEWAY_LOGS_DIR=local_logs_dir() or '',
+        )),
     )
+
+
+def local_logs_dir() -> Optional[str]:
+    """
+    Where LoggerManager keeps run logs (LOGS_DIR_PATH, or the project's variables_dir), for
+    the gateway's logs route; None when they go to S3 or GCS, which it leaves to the server.
+    """
+    from mage_ai.data_preparation.logging import LoggerType
+    from mage_ai.data_preparation.repo_manager import get_repo_config
+    from mage_ai.settings.server import LOGS_DIR_PATH
+
+    repo_config = get_repo_config()
+    if (repo_config.logging_config or {}).get('type') in (LoggerType.S3, LoggerType.GCS):
+        return None
+    return LOGS_DIR_PATH or repo_config.variables_dir
 
 
 def start(host: Optional[str], port: int, upstream_port: int) -> subprocess.Popen:

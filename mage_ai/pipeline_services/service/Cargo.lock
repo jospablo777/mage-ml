@@ -3476,6 +3476,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mage-log-window"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "serde",
+ "tempfile",
+]
+
+[[package]]
 name = "mage-pg"
 version = "0.1.0"
 dependencies = [
@@ -3524,6 +3533,7 @@ dependencies = [
  "mage-connector-sqs",
  "mage-ledger",
  "mage-log",
+ "mage-log-window",
  "mage-pg",
  "mage-service-core",
  "mage-stream-core",

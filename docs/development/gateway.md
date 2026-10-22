@@ -28,7 +28,7 @@ process exits.
 ## Shadow reads
 
 For the routes in `MAGE_GATEWAY_SHADOW` (default
-`block_runs,pipeline_run,pipeline_runs,pipeline_schedules`;
+`block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules`;
 `off` turns them off), the
 gateway still serves the server's answer, then computes its own from the metadata
 database (SQLite, or PostgreSQL in UTC) and compares the two as JSON. The server's answer
@@ -45,6 +45,7 @@ differ; each difference is also logged. The database URL reaches the gateway in 
 | `GET /api/block_runs` | One query over block runs, runs and triggers, with `pipeline_run_id`, `pipeline_uuid`, `order_by`, `_limit`, `_offset` | The default order (started, created, completed, newest first), `metadata.count` and `next`, ISO times without a zero fraction, statuses stored by name and shown by value |
 | `GET /api/pipeline_runs/<id>` | The run's presenter attributes and every column of its block runs, with the trigger's id and name; with `_format=with_basic_details` (the run page's poll), its id, status and execution date | `str(datetime)` times (a space, `+00:00` on PostgreSQL), JSON columns, the block runs sorted by creation, the `metadata: null` envelope |
 | `GET /api/pipeline_runs` | The runs pages' queries: filters by pipeline, status, backfill and the project's triggers, an order, pages, time ranges, the pipelines' tags and types (from each `metadata.yaml`, kept until the file changes) and names. Retries grouping, tag and type filters and `last_run_failed` are counted as `unsupported` and left to the server | Every LIST item's keys, `pipeline_tags` and `pipeline_type` null unless asked for, the block runs and their counts, the trigger's name, token and type, `metadata.pipeline_uuids` in directory order |
+| `GET /api/pipelines/<uuid>/logs` | The logs page's reads of logs on the server's disk: the logs of the pipeline's runs and block runs, its blocks' editor logs, the filters by trigger, run, block run, block and time, a text search, and the lines before a window (`log_path`). Each log is read over its rotated segments with the reader column_atlas_native uses (the `mage-log-window` crate). Logs in S3 or GCS, and paths it would have to resolve against the server's working directory, are counted as `unsupported` | `posixpath.join` paths, `clean_name` of block uuids, `execution_partition`, the first 20 logs (200 with a search), the editor logs in directory order |
 | `GET /api/pipeline_schedules`, `GET /api/pipelines/<uuid>/pipeline_schedules` | The triggers pages' queries: search, type, interval, status and tag filters, the orders, pages; each trigger's run counts, last run status, tags and event matchers, and its next run date. Cron expressions other than five fields of digits, `*`, `/`, `-` and `,` (with a day of the month or of the week, not both) are counted as `unsupported` | `next_execution_date` as croniter computes it (croner gives the same dates for those expressions), landing times and start times ahead, `HIDE_API_TRIGGER_TOKEN` |
 
 The gateway also decides, for each shadowed read, whether it would serve it, and compares
@@ -68,7 +69,7 @@ change the answer. Tornado drops names with a blank value, and the gateway does 
 
 ## Serving
 
-`MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs,pipeline_schedules` (off by
+`MAGE_GATEWAY_SERVE=block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules` (off by
 default) has the gateway answer those
 routes itself when its own decision allows the read: from the metadata database, with the
 server's CORS headers and an ETag (304 when it matches). A read it would refuse, or one it
@@ -90,8 +91,9 @@ with the gateway and checks:
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
 | `GET /api/block_runs` for ten combinations of filters, order and pages over eight block runs | All ten shadow reads equal; a status written as stored instead of shown makes the test fail |
 | `GET /api/pipeline_runs/<id>` for four runs while the scheduler runs them | All equal, some after a reread |
-| `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs`: the routes through the gateway and from the server | The same answers; a caller without a session refused by the server. p95 on a debug build of the engine: the block runs list 7 to 13 ms from the server, 1 to 1.5 ms from the gateway; the runs page's list 7 to 8 ms from the server, 1.6 to 2 ms from the gateway. On a release build: 6.6 and 0.7 ms for the block runs list, 5.8 and 0.8 ms for the runs page's list. The triggers page's list, debug build: 6.2 ms from the server, 1.7 ms from the gateway |
+| `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs`: the routes through the gateway and from the server | The same answers; a caller without a session refused by the server. p95 on a debug build of the engine: the block runs list 7 to 13 ms from the server, 1 to 1.5 ms from the gateway; the runs page's list 7 to 8 ms from the server, 1.6 to 2 ms from the gateway. On a release build: 6.6 and 0.7 ms for the block runs list, 5.8 and 0.8 ms for the runs page's list. The triggers page's list, debug build: 6.2 ms from the server, 1.3 to 1.7 ms from the gateway; a pipeline's logs, 10 ms and 2 ms |
 | The runs list shadowed for eight query shapes, one pipeline tagged | All equal; a type filter counted as unsupported |
+| The logs shadowed for ten queries of the logs page over two runs and an editor log: the default day, a limit, filters by run, trigger and block, a search with and without matches, the lines before a window | All equal; `_format` counted as unsupported |
 | The triggers list shadowed for twelve query shapes over a landing-time trigger, a cron trigger starting in three days, a weekly and an API trigger | All equal; `_format=with_runtime_average` counted as unsupported |
 | Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |

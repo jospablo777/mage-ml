@@ -10,6 +10,7 @@ publish.workspace = true
 mage-service-core = { path = "../core" }
 mage-log = { path = "../log" }
 mage-ledger = { path = "../ledger" }
+mage-log-window = { path = "../log-window" }
 mage-pg = { path = "../pg" }
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }

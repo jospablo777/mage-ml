@@ -1,6 +1,6 @@
 """
-MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail, the runs list
-and the triggers list itself when
+MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail, the runs list,
+the triggers list and the logs itself when
 its own decision allows the read, with what the server answers, and leaves refusals to the
 server, which answers them as before.
 """
@@ -12,7 +12,7 @@ import requests
 
 from integration_tests.gateway.test_gateway import LOAD, run_server
 
-ROUTES = 'block_runs,pipeline_run,pipeline_runs,pipeline_schedules'
+ROUTES = 'block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules'
 
 
 @pytest.fixture(scope='module')
@@ -69,7 +69,8 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
                  'pipeline_runs?disable_retries_grouping=true&include_pipeline_tags=true'
                  '&include_pipeline_uuids=true&_limit=30',
                  'pipeline_schedules?_limit=30&_offset=0&order_by=created_at',
-                 f'pipelines/{uuid}/pipeline_schedules?_limit=40&_offset=0'):
+                 f'pipelines/{uuid}/pipeline_schedules?_limit=40&_offset=0',
+                 f'pipelines/{uuid}/logs?start_timestamp={int(time.time()) - 86400}'):
         through = owner.get(f'{api}/{path}', timeout=60)
         direct = owner.get(f'http://127.0.0.1:{server}/api/{path}', timeout=60)
         assert through.status_code == direct.status_code == 200
@@ -123,6 +124,11 @@ def test_served_reads_are_quicker_than_the_servers(served):
     triggers = 'pipeline_schedules?_limit=30&_offset=0&order_by=created_at'
     direct, through = p95(server, triggers), p95(gateway, triggers)
     print(f'triggers page list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
+    assert through < direct, (through, direct)
+    # The pipeline the first test made, with its run's logs.
+    logs = 'pipelines/served/logs'
+    direct, through = p95(server, logs), p95(gateway, logs)
+    print(f'logs page p95: server {direct:.1f} ms, gateway {through:.1f} ms')
     assert through < direct, (through, direct)
 
 

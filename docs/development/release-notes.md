@@ -53,10 +53,16 @@
   answered by the gateway from the metadata database and compared with the server's answer
   (shadow reads); the counts and differences are at `/__gateway/shadow` from the same
   machine.
-- `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs,pipeline_schedules` has the
-  gateway answer those reads itself when its own decision allows them: the runs page's list
-  in about a quarter of the server's time, the triggers list included. The server answers the rest, refusals and the queries the gateway
+- `MAGE_GATEWAY_SERVE=block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules` has
+  the gateway answer those reads itself when its own decision allows them: the runs page's
+  list in about a quarter of the server's time, the triggers list and the logs page
+  included. The server answers the rest, refusals and the queries the gateway
   does not read yet included.
+- Reading a run's logs no longer creates empty log files, and users who are not owners can
+  search logs and load earlier lines, which were refused. Logs of runs created together
+  keep their order between polls.
+- Exported weekly triggers run on Monday, as in MageML; they ran on Sunday. The export
+  report names triggers whose landing time the service does not keep.
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead
   today is the next one, a monthly landing time keeps its day, and a start time ahead is
   respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets
