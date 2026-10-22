@@ -4,7 +4,8 @@ Masked samples of production tables for local development (`mage data sample <na
 A sample is defined in data_samples/<name>.yaml in the project:
 
     source:
-      profile: default          # the io_config.yaml profile it reads with (PostgreSQL)
+      profile: default          # the io_config.yaml profile it reads with
+      kind: postgres            # postgres (the default), mysql or duckdb
     key_env: MAGE_SAMPLE_KEY    # the variable holding the masking key, at least 16 characters
     tables:
       - table: public.customers
@@ -117,6 +118,8 @@ def check(value: Dict) -> List[str]:
     source = value.get('source') or {}
     if not isinstance(source, dict) or not source.get('profile'):
         problems.append('source needs the io_config.yaml profile it reads with.')
+    elif source.get('kind', 'postgres') not in SOURCE_KINDS:
+        problems.append(f"source kind is one of {', '.join(SOURCE_KINDS)}.")
     tables = value.get('tables') or []
     if not isinstance(tables, list) or not tables:
         problems.append('tables lists at least one table.')
@@ -162,34 +165,60 @@ def check(value: Dict) -> List[str]:
     return problems
 
 
-def _hash_bucket(column: str) -> str:
-    return f'abs(hashtextextended(CAST({column} AS text), 0))'
+# Per source: a stable hash of a key as a non-negative integer, and the placeholder of a
+# query parameter. The same key gives the same bucket in every table of one source, so the
+# samples of tables drawn by the same key hold the same entities.
+DIALECTS = {
+    'postgres': dict(bucket='abs(hashtextextended(CAST({column} AS text), 0))', parameter='%s'),
+    'mysql': dict(
+        bucket='CAST(CONV(SUBSTRING(SHA2(CAST({column} AS CHAR), 256), 1, 15), 16, 10) '
+               'AS UNSIGNED)',
+        parameter='%s',
+    ),
+    'duckdb': dict(bucket='abs(hash(CAST({column} AS VARCHAR)))', parameter='?'),
+}
+SOURCE_KINDS = tuple(DIALECTS)
 
 
-def query(table: Dict, followed: Optional[List] = None) -> tuple:
+def _hash_bucket(column: str, dialect: str = 'postgres') -> str:
+    return DIALECTS[dialect]['bucket'].format(column=column)
+
+
+def query(table: Dict, followed: Optional[List] = None, dialect: str = 'postgres') -> tuple:
     """The SQL that draws the table's sample, and its parameters."""
     where = table.get('where')
     conditions = [f'({where})'] if where else []
     params = []
     follow = table.get('follow')
     if follow:
-        conditions.append(f"{follow['column']} = ANY(%s)")
-        params.append(list(followed or []))
+        keys = list(followed or [])
+        if dialect == 'postgres':
+            conditions.append(f"{follow['column']} = ANY(%s)")
+            params.append(keys)
+        elif keys:
+            marks = ', '.join([DIALECTS[dialect]['parameter']] * len(keys))
+            conditions.append(f"{follow['column']} IN ({marks})")
+            params.extend(keys)
+        else:
+            # No key was sampled: no row follows.
+            conditions.append('1 = 0')
         return (f"SELECT * FROM {table['table']}"
                 + (' WHERE ' + ' AND '.join(conditions) if conditions else ''), params)
     sample = table['sample']
     key = table['key']
     if sample.get('fraction') is not None:
-        conditions.append(f'{_hash_bucket(key)} % 1000000 < {int(sample["fraction"] * 1000000)}')
+        conditions.append(
+            f'{_hash_bucket(key, dialect)} % 1000000 < {int(sample["fraction"] * 1000000)}',
+        )
         return (f"SELECT * FROM {table['table']} WHERE " + ' AND '.join(conditions), params)
     filtered = f"SELECT * FROM {table['table']}" + (
         ' WHERE ' + ' AND '.join(conditions) if conditions else '')
     if sample.get('stratify'):
         return (
             f"SELECT * FROM (SELECT t.*, row_number() OVER (PARTITION BY {sample['stratify']} "
-            f'ORDER BY {_hash_bucket(key)}) AS mage_sample_rank FROM ({filtered}) t) s '
+            f'ORDER BY {_hash_bucket(key, dialect)}) AS mage_sample_rank FROM ({filtered}) t) s '
             f"WHERE mage_sample_rank <= {int(sample['rows'])}", params)
-    return f"{filtered} ORDER BY {_hash_bucket(key)} LIMIT {int(sample['rows'])}", params
+    return f"{filtered} ORDER BY {_hash_bucket(key, dialect)} LIMIT {int(sample['rows'])}", params
 
 
 def personal_without_rule(table: Dict, columns: List[str]) -> List[str]:
@@ -214,7 +243,8 @@ def run(repo_path: str, name: str, reader=None, out_dir: Optional[str] = None) -
             f'{key_env} must hold the masking key, at least {MIN_KEY_LENGTH} characters: the '
             'same key gives the same hashes, and without it they cannot be checked. Keep it '
             'out of the project, as a secret.'])
-    reader = reader or _postgres_reader(repo_path, value['source']['profile'])
+    kind = value['source'].get('kind', 'postgres')
+    reader = reader or _reader(repo_path, value['source']['profile'], kind)
     out = Path(out_dir) if out_dir else Path(repo_path) / OUTPUT_DIR / name
     # Masked or not, a copy of production data stays out of Git.
     from mage_ai.pipeline_services import definitions
@@ -226,7 +256,9 @@ def run(repo_path: str, name: str, reader=None, out_dir: Optional[str] = None) -
     try:
         for table in value['tables']:
             follow = table.get('follow')
-            sql, params = query(table, sampled_keys.get(follow['table']) if follow else None)
+            sql, params = query(
+                table, sampled_keys.get(follow['table']) if follow else None, kind,
+            )
             frame = reader(sql, params)
             frame = frame.drop(columns=['mage_sample_rank'], errors='ignore')
             missing = personal_without_rule(table, list(frame.columns))
@@ -258,7 +290,7 @@ def run(repo_path: str, name: str, reader=None, out_dir: Optional[str] = None) -
         _duckdb(out, [t['table'] for t in record_tables])
         record = dict(
             sample=name, at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
-            by=getpass.getuser(), source=dict(profile=value['source']['profile']),
+            by=getpass.getuser(), source=dict(profile=value['source']['profile'], kind=kind),
             key_env=key_env, tables=record_tables,
         )
         (out / 'record.json').write_text(json.dumps(record, indent=2, default=str) + '\n')
@@ -287,20 +319,44 @@ def _duckdb(out: Path, tables: List[str]) -> None:
         connection.close()
 
 
-def _postgres_reader(repo_path: str, profile: str):
-    from mage_ai.io.config import ConfigFileLoader
-    from mage_ai.io.postgres import Postgres
+def _reader(repo_path: str, profile: str, kind: str = 'postgres'):
+    """reader(sql, params) for the profile's database: a pandas DataFrame of the rows."""
+    from mage_ai.io.config import ConfigFileLoader, ConfigKey
 
     config = ConfigFileLoader(os.path.join(repo_path, 'io_config.yaml'), profile)
 
-    def read(sql: str, params: List):
+    def frame(cursor):
         import pandas as pd
 
+        columns = [d[0] for d in cursor.description]
+        return pd.DataFrame(cursor.fetchall(), columns=columns)
+
+    if kind == 'duckdb':
+        def read_duckdb(sql: str, params: List):
+            import duckdb
+
+            path = config[ConfigKey.DUCKDB_DATABASE]
+            with duckdb.connect(path, read_only=True) as connection:
+                return frame(connection.execute(sql, params or []))
+
+        return read_duckdb
+    if kind == 'mysql':
+        from mage_ai.io.mysql import MySQL
+
+        def read_mysql(sql: str, params: List):
+            with MySQL.with_config(config) as loader:
+                with loader.conn.cursor() as cursor:
+                    cursor.execute(sql, params or None)
+                    return frame(cursor)
+
+        return read_mysql
+
+    from mage_ai.io.postgres import Postgres
+
+    def read_postgres(sql: str, params: List):
         with Postgres.with_config(config) as loader:
             with loader.conn.cursor() as cursor:
                 cursor.execute(sql, params or None)
-                columns = [d[0] for d in cursor.description]
-                rows = cursor.fetchall()
-        return pd.DataFrame(rows, columns=columns)
+                return frame(cursor)
 
-    return read
+    return read_postgres

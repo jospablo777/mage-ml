@@ -47,3 +47,65 @@ class DataSampleDefinitionTest(unittest.TestCase):
                 patch.dict(os.environ, {'MAGE_SAMPLE_KEY': 'short'}):
             with self.assertRaisesRegex(data_samples.SampleError, 'at least 16 characters'):
                 data_samples.run('.', 'dev')
+
+
+class OtherSourcesTest(unittest.TestCase):
+    """Samples were drawn from PostgreSQL only; MySQL and DuckDB sources have their SQL."""
+
+    def test_each_source_has_its_hash_and_parameters(self):
+        table = dict(table='c', key='id', sample=dict(fraction=0.05))
+        self.assertIn('SHA2(CAST(id AS CHAR), 256)', data_samples.query(table, None, 'mysql')[0])
+        self.assertIn('hash(CAST(id AS VARCHAR))', data_samples.query(table, None, 'duckdb')[0])
+        follow = dict(table='o', follow=dict(table='c', column='c_id'))
+        self.assertEqual(data_samples.query(follow, [1, 2], 'mysql'),
+                         ('SELECT * FROM o WHERE c_id IN (%s, %s)', [1, 2]))
+        self.assertEqual(data_samples.query(follow, [1], 'duckdb'),
+                         ('SELECT * FROM o WHERE c_id IN (?)', [1]))
+        # No key sampled, no row follows.
+        self.assertEqual(data_samples.query(follow, [], 'duckdb')[0],
+                         'SELECT * FROM o WHERE 1 = 0')
+        self.assertIn('source kind is one of', '\n'.join(data_samples.check(dict(
+            source=dict(profile='p', kind='oracle'), tables=[table]))))
+
+    def test_a_duckdb_sample_is_drawn_followed_and_masked(self):
+        import tempfile
+
+        import duckdb
+        import pandas as pd
+
+        repo = tempfile.mkdtemp()
+        database = os.path.join(repo, 'prod.duckdb')
+        with duckdb.connect(database) as connection:
+            connection.execute(
+                'CREATE TABLE customers AS SELECT i AS id, '
+                "'person' || i || '@example.com' AS email FROM range(200) t(i)")
+            connection.execute(
+                'CREATE TABLE orders AS SELECT i AS id, i % 200 AS customer_id '
+                'FROM range(1000) t(i)')
+        with open(os.path.join(repo, 'io_config.yaml'), 'w') as file:
+            file.write(f'version: 0.1.1\nprod:\n  DUCKDB_DATABASE: {database}\n')
+        os.makedirs(os.path.join(repo, data_samples.SAMPLES_DIR))
+        with open(os.path.join(repo, data_samples.SAMPLES_DIR, 'dev.yaml'), 'w') as file:
+            file.write(
+                'source: {profile: prod, kind: duckdb}\n'
+                'tables:\n'
+                '  - table: customers\n'
+                '    key: id\n'
+                '    sample: {rows: 20}\n'
+                '    columns: {id: hash, email: {fake: email}}\n'
+                '  - table: orders\n'
+                '    follow: {table: customers, column: customer_id}\n'
+                '    columns: {id: hash, customer_id: hash}\n'
+            )
+        out = os.path.join(repo, 'out')
+        with patch.dict(os.environ, {'MAGE_SAMPLE_KEY': 'a key of sixteen chars'}), \
+                patch('mage_ai.pipeline_services.definitions.ensure_gitignore'):
+            record = data_samples.run(repo, 'dev', out_dir=out)
+
+        self.assertEqual(record['source'], dict(profile='prod', kind='duckdb'))
+        self.assertEqual([t['rows'] for t in record['tables']], [20, 100])
+        customers = pd.read_parquet(os.path.join(out, 'customers.parquet'))
+        orders = pd.read_parquet(os.path.join(out, 'orders.parquet'))
+        self.assertFalse(customers['email'].str.contains('person').any())
+        # Hashed keys still join: every order belongs to a sampled customer.
+        self.assertTrue(set(orders['customer_id']) <= set(customers['id']))
