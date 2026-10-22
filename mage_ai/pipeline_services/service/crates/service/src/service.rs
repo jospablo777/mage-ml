@@ -13,6 +13,7 @@ use mage_service_core::protocol::{
     API_VERSION, ModelSnapshot, MonitorSnapshot, PipelineSnapshot, RunStatus, RunSummary, Snapshot,
     StreamSnapshot, TriggerSnapshot,
 };
+use mage_service_core::run_rules::{self, Admission};
 use serde_json::{Map, Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -459,6 +460,14 @@ impl Service {
     }
 
     fn start_queued(self: &Arc<Self>) {
+        let running_for = |pipeline: &str| {
+            self.running
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .values()
+                .filter(|(p, _)| p == pipeline)
+                .count() as u32
+        };
         for pipeline in &self.manifest.pipelines {
             let settings = match self
                 .ledger
@@ -470,20 +479,16 @@ impl Service {
                     continue;
                 }
             };
-            if settings.paused {
-                continue;
-            }
             loop {
-                let running_here = self
-                    .running
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .values()
-                    .filter(|(p, _)| p == &pipeline.uuid)
-                    .count() as u32;
-                if running_here >= settings.max_concurrent_runs
-                    || self.running_runs() >= self.max_total_runs
-                {
+                let hold = run_rules::admit(Admission {
+                    shutting_down: self.shutting_down(),
+                    paused: settings.paused,
+                    pipeline_running: running_for(&pipeline.uuid),
+                    pipeline_max: settings.max_concurrent_runs,
+                    service_running: u32::try_from(self.running_runs()).unwrap_or(u32::MAX),
+                    service_max: u32::try_from(self.max_total_runs).unwrap_or(u32::MAX),
+                });
+                if hold.is_some() {
                     break;
                 }
                 let run_id = match self

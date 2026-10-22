@@ -33,6 +33,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use mage_service_core::protocol::{BlockRunSummary, BlockStatus, RunDetail, RunStatus, RunSummary};
+use mage_service_core::run_rules;
 use rusqlite::Connection;
 use serde_json::{Map, Value};
 
@@ -664,7 +665,7 @@ impl Ledger {
                 .map(|row| row.int(0))
                 .transpose()?
                 .unwrap_or(0);
-            if running >= i64::from(max) {
+            if !run_rules::may_claim(u32::try_from(running).unwrap_or(u32::MAX), max) {
                 return Ok(None);
             }
             let claimed = db.query_one(
@@ -1227,7 +1228,7 @@ fn create_run_in(db: &mut dyn Db, new: &OwnedRun) -> Result<(String, bool)> {
         )?;
         if let Some(row) = existing {
             let (id, status) = (row.text(0)?, row.text(1)?);
-            if status == "failed" || status == "cancelled" {
+            if RunStatus::parse(&status).is_some_and(run_rules::key_passes_on) {
                 db.execute(
                     "UPDATE runs SET idempotency_key = NULL WHERE id = ?1",
                     cells![id.as_str()],
@@ -1918,6 +1919,15 @@ mod postgres_tests {
         ledger.sql(&format!("DROP SCHEMA {schema} CASCADE"), &[]);
     }
 
+    #[test]
+    fn the_postgres_ledger_applies_the_run_rules() {
+        let Some(url) = url() else { return };
+        let schema = schema();
+        let (me, other) = (open(&url, &schema, "first"), open(&url, &schema, "second"));
+        super::rule_conformance::conform(&me, &other);
+        drop_schema(&me, &schema);
+    }
+
     fn run<'a>(
         variables: &'a Map<String, Value>,
         key: Option<&'a str>,
@@ -2305,5 +2315,135 @@ mod postgres_tests {
             .unwrap();
         assert!(!created);
         drop_schema(&ledger, &schema);
+    }
+}
+
+/// Runs every run state, and every block state under recovery, through the ledger's SQL
+/// and compares the outcome with `run_rules`, the rules it applies.
+#[cfg(test)]
+pub(crate) mod rule_conformance {
+    use mage_service_core::run_rules::{
+        self, BLOCK_STATUSES, Holder, RUN_STATUSES, may_finish, may_record_block,
+        may_request_cancel, recovered_block, recovered_run,
+    };
+
+    use super::*;
+
+    const GONE: &str = "gone-instance";
+
+    fn owner(me: &Ledger, other: &Ledger, holder: Holder) -> Option<String> {
+        match holder {
+            Holder::Me => Some(me.instance().to_string()),
+            Holder::Other => Some(other.instance().to_string()),
+            Holder::Gone => Some(GONE.to_string()),
+            Holder::Nobody => None,
+        }
+    }
+
+    fn run_in(me: &Ledger, other: &Ledger, status: RunStatus, holder: Holder) -> String {
+        let (variables, blocks) = (Map::new(), vec!["a".to_string(), "b".to_string()]);
+        let (id, _) = me
+            .create_run(NewRun {
+                pipeline: "rules",
+                source: "api",
+                variables: &variables,
+                idempotency_key: None,
+                blocks: &blocks,
+            })
+            .unwrap();
+        me.sql(
+            "UPDATE runs SET status = ?2, owner = ?3 WHERE id = ?1",
+            cells![id.as_str(), status.as_str(), owner(me, other, holder)],
+        );
+        id
+    }
+
+    fn run_status(ledger: &Ledger, id: &str) -> RunStatus {
+        ledger.run(id).unwrap().unwrap().run.status
+    }
+
+    fn block_status(ledger: &Ledger, id: &str, block: &str) -> BlockStatus {
+        let detail = ledger.run(id).unwrap().unwrap();
+        detail
+            .blocks
+            .iter()
+            .find(|b| b.block == block)
+            .unwrap()
+            .status
+    }
+
+    pub(crate) fn conform(me: &Ledger, other: &Ledger) {
+        me.sql(
+            "INSERT INTO instances (id, host, pid, started_at, expires_at) \
+             VALUES (?1, 'gone-host', 1, '2000-01-01T00:00:00.000Z', \
+             '2000-01-01T00:00:00.000Z')",
+            cells![GONE],
+        );
+        for status in RUN_STATUSES {
+            for holder in Holder::ALL {
+                let case = format!("{status:?} held by {holder:?}");
+
+                let id = run_in(me, other, status, holder);
+                let finished = me.finish_run(&id, RunStatus::Completed, None).unwrap();
+                assert_eq!(finished, may_finish(status, holder), "finish: {case}");
+                let after = if finished {
+                    RunStatus::Completed
+                } else {
+                    status
+                };
+                assert_eq!(run_status(me, &id), after, "finish: {case}");
+
+                let id = run_in(me, other, status, holder);
+                let asked = me.request_cancel(&id).unwrap();
+                assert_eq!(asked, may_request_cancel(status), "cancel: {case}");
+
+                let id = run_in(me, other, status, holder);
+                me.start_block(&id, "a", 1).unwrap();
+                me.finish_block(&id, "b", BlockStatus::Completed, None, &[])
+                    .unwrap();
+                let recorded = may_record_block(status, holder);
+                let (a, b) = (block_status(me, &id, "a"), block_status(me, &id, "b"));
+                assert_eq!(a == BlockStatus::Running, recorded, "start block: {case}");
+                assert_eq!(
+                    b == BlockStatus::Completed,
+                    recorded,
+                    "finish block: {case}"
+                );
+
+                let id = run_in(me, other, status, holder);
+                let recovered = me.recover_interrupted().unwrap().contains(&id);
+                let expected = recovered_run(status, holder);
+                assert_eq!(recovered, expected.is_some(), "recover: {case}");
+                assert_eq!(
+                    run_status(me, &id),
+                    expected.unwrap_or(status),
+                    "recover: {case}"
+                );
+            }
+        }
+        for status in BLOCK_STATUSES {
+            let id = run_in(me, other, RunStatus::Running, Holder::Gone);
+            me.sql(
+                "UPDATE block_runs SET status = ?2 WHERE run_id = ?1 AND block = 'a'",
+                cells![id.as_str(), status.as_str()],
+            );
+            assert!(me.recover_interrupted().unwrap().contains(&id));
+            let after = recovered_block(status).unwrap_or(status);
+            assert_eq!(
+                block_status(me, &id, "a"),
+                after,
+                "recover block {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sqlite_ledger_applies_the_run_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runs.db");
+        let me = Ledger::open_on(&path, "first").unwrap();
+        let other = Ledger::open_on(&path, "second").unwrap();
+        conform(&me, &other);
+        assert!(run_rules::may_claim(0, 1));
     }
 }
