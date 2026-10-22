@@ -140,7 +140,8 @@ blocks:
   that environment's packages; each other worker becomes a virtual environment of its own
   in the image, built from its `uv.lock`, and its blocks run there. Each worker needs a
   `uv.lock` and the image's Python version. A chain of Python blocks splits where the
-  worker changes. Stream pipelines still need one worker for all their Python blocks.
+  worker changes; in a stream, the blocks then run as one chain, each reading the block
+  before it, as in a stream that mixes languages.
 
 ## Pipeline services
 

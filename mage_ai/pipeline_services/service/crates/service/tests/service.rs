@@ -2128,3 +2128,91 @@ fn a_block_runs_in_the_python_worker_it_selects() {
         "{text}"
     );
 }
+
+const STREAM_FIRST: &str = "import os\n\n@transformer\ndef first(messages, *args, **kwargs):\n    return [dict(m, first=os.environ.get('MAGE_TEST_WORKER', 'image')) for m in messages]\n";
+const STREAM_SECOND: &str = "import os\n\n@transformer\ndef second(messages, *args, **kwargs):\n    return [dict(m, second=os.environ.get('MAGE_TEST_WORKER', 'image')) for m in messages]\n";
+
+/// A stream whose second block selects another Python worker: its blocks run as two
+/// sessions, each in its own interpreter.
+#[test]
+fn a_stream_runs_each_block_in_its_python_worker() {
+    let manifest = json!({
+        "schema_version": 2,
+        "service": {"name": "worker-stream", "project": "proj",
+                    "exported_at": "2026-10-21T00:00:00Z", "mage_version": "test",
+                    "source_sha256": "abc"},
+        "python_workers": {"other": "workers/other/python"},
+        "pipelines": [{
+            "uuid": "hooks", "name": "hooks", "max_concurrent_runs": 1, "variables": {},
+            "blocks": [
+                {"uuid": "first", "type": "transformer", "language": "python",
+                 "file": "transformers/first.py", "sha256": "0", "upstream": []},
+                {"uuid": "second", "type": "transformer", "language": "python",
+                 "file": "transformers/second.py", "sha256": "0", "upstream": ["first"],
+                 "python_worker": "other"}
+            ],
+            "triggers": [],
+            "stream": {
+                "source": {"name": "hook", "kind": "http", "config": {}},
+                "sinks": [{"name": "out", "kind": "stdout", "after": "second"}],
+                "batch": {"max_records": 100, "max_wait_ms": 50, "max_bytes": 1 << 20}
+            }
+        }]
+    });
+    let mut service = Service::with_manifest(
+        &manifest,
+        &[
+            ("transformers/first.py", STREAM_FIRST),
+            ("transformers/second.py", STREAM_SECOND),
+        ],
+    );
+    let interpreter = service.dir.path().join("workers/other/python");
+    std::fs::create_dir_all(interpreter.parent().unwrap()).unwrap();
+    std::fs::write(
+        &interpreter,
+        format!(
+            "#!/bin/sh\nMAGE_TEST_WORKER=other exec \"{}\" \"$@\"\n",
+            python()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        &interpreter,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    service.start(&[("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret")]);
+    wait_for_stream(&service, "hooks");
+    let (status, reply) = service
+        .request_with(
+            "POST",
+            "/v1/streams/hooks/messages",
+            Some("ingest-secret"),
+            r#"[{"n": 1}, {"n": 2}]"#,
+            &[("Idempotency-Key", "1")],
+        )
+        .unwrap();
+    assert_eq!(status, 200, "{reply}");
+    let written = |service: &Service| -> Vec<Value> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("\"second\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .map(|v| v.get("value").cloned().unwrap_or(v))
+            .collect()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while written(&service).len() < 2 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let messages = written(&service);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    for message in messages {
+        assert_eq!(
+            (message["first"].as_str(), message["second"].as_str()),
+            (Some("image"), Some("other")),
+            "{message}"
+        );
+    }
+}

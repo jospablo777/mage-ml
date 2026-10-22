@@ -414,17 +414,7 @@ def _pipeline_environment(pipeline, problems: List[str], capture_: Capture = Non
         if len(set(selections.values())) == 1:
             [alias] = workers
             return named[alias]
-        streaming = str(getattr(pipeline.type, 'value', pipeline.type)) == 'streaming'
-        if streaming or capture_ is None:
-            described = ', '.join(
-                f'{uuid} ({selected if selected not in (None, "mage") else "MageML"})'
-                for uuid, selected in selections.items()
-            )
-            problems.append(
-                f'The Python blocks of stream {pipeline.uuid} run in different Python '
-                f'workers and a stream runs in one: {described}. Select one worker for all '
-                'of them.'
-            )
+        if capture_ is None:
             return None
         defaults = [uuid for uuid, selected in selections.items() if selected in (None, 'mage')]
         if defaults:

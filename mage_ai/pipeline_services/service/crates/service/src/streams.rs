@@ -603,9 +603,12 @@ fn transform_session(
     let mut regions: Vec<Vec<Block>> = Vec::new();
     for block in order.iter().cloned() {
         match regions.last_mut() {
-            // Each window block is a session of its own.
+            // Each window block is a session of its own, and Python blocks split where their
+            // Python worker changes (each worker is a pool of its own interpreter).
             Some(region)
-                if region[0].language == block.language && block.language != Language::Window =>
+                if region[0].language == block.language
+                    && block.language != Language::Window
+                    && region[0].python_worker == block.python_worker =>
             {
                 region.push(block)
             }
@@ -630,7 +633,7 @@ fn transform_session(
     if regions.len() == 1 {
         return session(&order, wanted.into_iter().collect(), true, log).map(Some);
     }
-    // Mixed languages: one chain, each block reading the one before.
+    // Mixed languages or workers: one chain, each block reading the one before.
     for (position, block) in order.iter().enumerate() {
         let expected: Vec<&str> = order[..position]
             .last()
@@ -645,7 +648,7 @@ fn transform_session(
         {
             return Err(format!(
                 "stream block {} does not read the block before it; a stream that mixes \
-                 languages runs its blocks as one chain",
+                 languages or Python workers runs its blocks as one chain",
                 block.uuid
             ));
         }
@@ -768,10 +771,14 @@ fn region_session(
         register(session.state_views());
         return Ok(Box::new(session));
     }
-    let pool = service
-        .python
-        .clone()
-        .ok_or("the stream has Python blocks but the service has no Python worker")?;
+    let pool =
+        service
+            .python_for(&blocks[0])
+            .cloned()
+            .ok_or_else(|| match &blocks[0].python_worker {
+                Some(alias) => format!("the service has no Python worker {alias}"),
+                None => "the stream has Python blocks but the service has no Python worker".into(),
+            })?;
     let session = PythonStreamSession::new(
         pool,
         &service.project_dir(),
