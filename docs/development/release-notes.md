@@ -70,9 +70,10 @@
   Snowflake and BigQuery as well as PostgreSQL (`source.kind`).
 - The Services page promotes a model version: the version a moved alias names, or a
   challenger's, with a reason, recorded in `promotions.yaml` with the signed-in user.
-- Exported services copy their audit records to an object store (`MAGE_SERVICE_AUDIT_URL`)
-  every 30 seconds and when they stop: the records were only on the instance's disk, lost
-  when a container restarts. The copies join back into the hash-chained files.
+- Exported services copy their audit records to an object store or a PostgreSQL table
+  (`MAGE_SERVICE_AUDIT_URL`) every 30 seconds and when they stop: the records were only on
+  the instance's disk, lost when a container restarts. The copies keep the hash chain, and
+  in PostgreSQL each record is a row queryable by model and input key.
 - Exported services send alerts by email too: a channel `kind: email` whose variable holds
   the SMTP server's URL.
 - R blocks read and write Amazon Redshift (`database = "redshift"` in `read_sql`,

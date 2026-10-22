@@ -1,6 +1,7 @@
 //! Copies the audit records (audit.rs) to an object store, MAGE_SERVICE_AUDIT_URL
-//! (`s3://bucket/prefix`, `gs://`, `az://`, `file:///path`). The files are on the instance's
-//! disk, which a container loses when it restarts or moves.
+//! (`s3://bucket/prefix`, `gs://`, `az://`, `file:///path`), or to a PostgreSQL table
+//! (`postgres://`, audit_pg.rs). The files are on the instance's disk, which a container
+//! loses when it restarts or moves.
 //!
 //! Every MAGE_SERVICE_AUDIT_SHIP_SECONDS (30) and when the service stops, the complete lines
 //! added to each file since the last copy go up as one object,
@@ -59,6 +60,20 @@ pub fn open(audit_dir: PathBuf, service: &str, instance: &str) -> Result<Option<
     else {
         return Ok(None);
     };
+    let url = url.trim().to_string();
+    if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+        let table = std::env::var("MAGE_SERVICE_AUDIT_TABLE")
+            .ok()
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| "mage_audit_records".into());
+        let store = crate::audit_pg::PgStore::connect(&url, table.trim())?;
+        return Ok(Some(Shipper::new(
+            Arc::new(store),
+            audit_dir,
+            service,
+            instance,
+        )));
+    }
     #[cfg(feature = "object-store")]
     {
         let endpoint = std::env::var("AWS_ENDPOINT_URL").ok();

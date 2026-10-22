@@ -540,6 +540,23 @@ a file until it is copied. Credentials come from the provider's usual variables
 (`AWS_ACCESS_KEY_ID`, `GOOGLE_APPLICATION_CREDENTIALS`, `AZURE_STORAGE_ACCOUNT_NAME`), and
 `AWS_ENDPOINT_URL` names an S3-compatible store such as MinIO or IBM Cloud Object Storage.
 A service whose models keep audit records is built with object storage support.
+
+With a PostgreSQL URL (`postgres://user:password@host/db?sslmode=require`), each record is
+a row of `MAGE_SERVICE_AUDIT_TABLE` (`mage_audit_records`, created when missing):
+
+| Column | |
+| --- | --- |
+| `service`, `instance`, `model`, `file`, `line` | Where the record was written; the primary key, so a repeated copy adds nothing |
+| `key` | The input key, as text, indexed with `model` |
+| `record` | The line as written: the chain checks on a file's rows in `line` order, and `record::jsonb` reads its fields |
+| `copied_at` | When the row was added |
+
+```sql
+SELECT record::jsonb -> 'output' AS output, record::jsonb ->> 'version' AS version
+FROM mage_audit_records
+WHERE model = 'churn' AND key = '4'
+ORDER BY copied_at DESC;
+```
 - With `MAGE_SERVICE_AUDIT_KEY` set, hashed columns use HMAC-SHA-256 with it, so a guessed
   value cannot be checked against a record without the key.
 
@@ -710,7 +727,8 @@ to it.
 | `MAGE_SERVICE_PUBLIC_URL` | none | The service's address, for links in alerts |
 | `MAGE_SERVICE_AUDIT_RETENTION_DAYS` | `365` | Days audit records are kept; 0 keeps them |
 | `MAGE_SERVICE_AUDIT_KEY` | none | The key of hashed audit columns (HMAC-SHA-256) |
-| `MAGE_SERVICE_AUDIT_URL` | none | An object store (`s3://`, `gs://`, `az://`, `file://`) audit records are copied to |
+| `MAGE_SERVICE_AUDIT_URL` | none | An object store (`s3://`, `gs://`, `az://`, `file://`) or PostgreSQL database (`postgres://`) audit records are copied to |
+| `MAGE_SERVICE_AUDIT_TABLE` | `mage_audit_records` | The table of audit records with a PostgreSQL `MAGE_SERVICE_AUDIT_URL` (`schema.table` works) |
 | `MAGE_SERVICE_AUDIT_SHIP_SECONDS` | `30` | How often audit records are copied to `MAGE_SERVICE_AUDIT_URL` |
 | `MAGE_SERVICE_R_RESIDENT` | `on` | `off` starts Rscript for each R block run instead of keeping an R session in each Python worker |
 | `MAGE_SERVICE_KEEP_OUTPUTS` | `off` | `on` writes every block's output, not only the ones read |

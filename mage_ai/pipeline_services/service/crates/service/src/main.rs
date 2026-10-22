@@ -6,6 +6,7 @@ use mage_log as log;
 mod alerts;
 mod api;
 mod audit;
+mod audit_pg;
 mod audit_ship;
 mod aws;
 mod azure;
