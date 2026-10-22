@@ -69,6 +69,24 @@ class FingerprintTest(TestCase):
         self.assertEqual(golden.fingerprint(frame)['columns'],
                          [['k', 'string'], ['v', 'integer']])
 
+    def test_geo_frames_are_tables_with_their_geometries_as_text(self):
+        import geopandas as gpd
+        from shapely.geometry import Point
+
+        stores = gpd.GeoDataFrame(
+            {'id': [1, 2]}, geometry=[Point(-84.0912345678901, 9.93), Point(-84.1, 9.94)],
+            crs=4326,
+        )
+        found = golden.fingerprint(stores)
+        # A file's bytes differ by platform; the table does not.
+        self.assertEqual(found['kind'], 'table')
+        self.assertEqual(found['columns'], [['id', 'integer'], ['geometry', 'string']])
+        moved = stores.set_geometry(stores.geometry.translate(1e-12, 0))
+        self.assertEqual(golden.fingerprint(moved)['content'], found['content'])
+        apart = stores.set_geometry(stores.geometry.translate(1e-6, 0))
+        self.assertNotEqual(golden.fingerprint(apart)['content'], found['content'])
+        self.assertEqual(golden.fingerprint(stores.geometry)['kind'], 'table')
+
     def test_json_outputs(self):
         self.assertEqual(golden.fingerprint(dict(b=1, a=[1, 2]))['rows'], 2)
         self.assertEqual(

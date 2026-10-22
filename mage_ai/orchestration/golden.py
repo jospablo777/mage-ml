@@ -174,6 +174,14 @@ def _arrow(data: Any):
         if type(data).__name__ == 'LazyFrame':
             data = data.collect()
         return data.to_arrow()
+    if module == 'geopandas' and type(data).__name__ in ('GeoDataFrame', 'GeoSeries'):
+        import pandas as pd
+
+        # Geometries as WKT with nine decimals (0.1 mm in degrees): their stored GeoParquet
+        # files differ in bytes from one platform to another.
+        wkt = data.to_wkt(rounding_precision=9)
+        return _arrow(pd.DataFrame(wkt) if type(data).__name__ == 'GeoDataFrame' else
+                      pd.Series(wkt, name=str(data.name or 'geometry')))
     if module == 'pandas' and type(data).__name__ == 'DataFrame':
         import pandas as pd
 

@@ -43,6 +43,19 @@ FAKER_ROW_COUNT = int(os.getenv('MAGE_TEST_FAKER_ROWS', '2500'))
 LOCK_TIMEOUT = '-c lock_timeout=15s'
 
 
+@pytest.fixture(autouse=True)
+def repo_path_of_the_session_project(request):
+    """
+    A test that uses mage_project runs in it, whatever repository path a fixture of an
+    earlier test on the worker left behind: a test that set its own and removed it made
+    the next test's pipelines "not exist".
+    """
+    if 'mage_project' in request.fixturenames:
+        from mage_ai.settings.repo import set_repo_path
+
+        set_repo_path(request.getfixturevalue('mage_project'))
+
+
 @pytest.fixture(scope='session')
 def postgres_settings():
     settings = {key: os.getenv(variable) for key, variable in POSTGRES_ENV.items()}

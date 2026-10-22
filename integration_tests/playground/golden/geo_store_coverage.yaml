@@ -1,20 +1,81 @@
 version: 1
 pipeline: geo_store_coverage
-recorded_from_run: 2
+recorded_from_run: 1
 blocks:
   geo_export_coverage: {}
   geo_load_customers:
     output_0:
-      kind: file
-      sha256: 2c8d97a3f365f74db52756b8bf8fc2cc8bcf632f932ca12e5f15bb72224c0ff5
+      kind: table
+      rows: 524
+      columns:
+      - - customer_id
+        - integer
+      - - city
+        - string
+      - - segment
+        - string
+      - - lifetime_value
+        - decimal
+      - - latitude
+        - float
+      - - longitude
+        - float
+      - - geometry
+        - string
+      content: 0b1b4ab27bc53eec29d32e3eafc7b03544085e858a96ef887d863f3e8a00bdf4
+      order: ccbff5b9cf3419ec734c0ce6e0393274ba158032f0d2c8b1b7877d0c99cb393d
   geo_load_stores:
     output_0:
-      kind: file
-      sha256: e75414c1eadaf07bc07ccc4515a2cba87cd954164d975b83f16721d7aadd9b2c
+      kind: table
+      rows: 120
+      columns:
+      - - store_id
+        - integer
+      - - name
+        - string
+      - - city
+        - string
+      - - country
+        - string
+      - - latitude
+        - float
+      - - longitude
+        - float
+      - - opened_on
+        - date
+      - - square_meters
+        - integer
+      - - geometry
+        - string
+      content: 1e9757329b1e0fa1a09a9d913db1616523d28e6907877033eccee77241568317
+      order: 375d2f7afbda10f5b0c8f85058aa1fd0eb8a75c17735f542620eff54beacb290
   geo_nearest_store:
     output_0:
-      kind: file
-      sha256: f13272454b53017826499ac8f87a0a912cc13e423ce1f72a9b187667fdca9bd4
+      kind: table
+      rows: 524
+      columns:
+      - - customer_id
+        - integer
+      - - city
+        - string
+      - - segment
+        - string
+      - - lifetime_value
+        - decimal
+      - - latitude
+        - float
+      - - longitude
+        - float
+      - - geometry
+        - string
+      - - store_id
+        - integer
+      - - store_name
+        - string
+      - - distance_km
+        - float
+      content: 4d26f822df899d77d64ed7b54a653b0a510e23f56f3d3e31e15aa67e65c03f54
+      order: 9c01ffb7aabb9edfc07cda15b491e6c3b6c9b3bba4caefe43c2f09323c3c736e
 effects:
   geo_customer_coverage:
     data_provider: postgres

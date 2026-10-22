@@ -42,8 +42,10 @@ def transform(data, *args, **kwargs):
 def project(tmp_path):
     from mage_ai.data_preparation.models.block import Block
     from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.settings.repo import get_repo_path, set_repo_path
     from mage_ai.tests.base_test import remove_test_directory, set_up_test_repo
 
+    previous = get_repo_path()
     holder = types.SimpleNamespace()
     set_up_test_repo(holder)
     repo = Path(holder.repo_path)
@@ -67,6 +69,8 @@ def project(tmp_path):
     Path(transform.file_path).write_text(TRANSFORM)
     pipeline.add_block(transform, upstream_block_uuids=[load.uuid])
     yield str(repo)
+    # The tests after it on this worker read pipelines from the repository path.
+    set_repo_path(previous)
     remove_test_directory(holder._test_directory)
 
 
