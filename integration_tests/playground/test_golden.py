@@ -12,6 +12,7 @@ environment (MAGE_TEST_R_PROJECT_DIR, `make -C integration_tests r-env`), and sk
 """
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -68,12 +69,24 @@ def playground_db(postgres_settings):
         SEED_SCALE=SCALE,
     )
     subprocess.run([sys.executable, str(SEED)], check=True, env=env)
+    # The seed keeps a seeded schema as it is; one from another seed version or scale (a
+    # database a local run left) is replaced, or the golden runs compare other rows.
+    version = int(re.search(r'^SEED_VERSION = (\d+)', SEED.read_text(), re.M).group(1))
+    if seeded(postgres_settings) != (version, float(SCALE)):
+        subprocess.run([sys.executable, str(SEED), '--force'], check=True, env=env)
+    assert seeded(postgres_settings) == (version, float(SCALE))
     with psycopg2.connect(**dict(postgres_settings, dbname=DATABASE)) as connection, \
             connection.cursor() as cursor:
-        cursor.execute('SELECT scale FROM shop.seed_info')
-        assert float(cursor.fetchone()[0]) == float(SCALE), 'seeded at another scale'
         cursor.execute('CREATE SCHEMA IF NOT EXISTS analytics')
     return env
+
+
+def seeded(postgres_settings):
+    with psycopg2.connect(**dict(postgres_settings, dbname=DATABASE)) as connection, \
+            connection.cursor() as cursor:
+        cursor.execute('SELECT version, scale FROM shop.seed_info')
+        version, scale = cursor.fetchone()
+    return version, float(scale)
 
 
 @pytest.fixture(scope='module')

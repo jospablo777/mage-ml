@@ -1,6 +1,6 @@
 version: 1
 pipeline: shape_merge_customer_signals
-recorded_from_run: 5
+recorded_from_run: 7
 blocks:
   merge_customer_signals:
     output_0:
@@ -26,7 +26,7 @@ blocks:
       - - engagement
         - float
       content: d0c526ec6cc9efbe667d5daa8df290a76f79a32e45bc03b3cdcf4dc5c9c22da6
-      order: 9415a4f84d1487552616186edc2354581a278a1641bdf7c82428d1b42c3f69d5
+      order: c49d00c0e9ca09e3d69aa2db88a0325874b3192a485c4f2a522f5356d9357d9c
   merge_customers:
     output_0:
       kind: table

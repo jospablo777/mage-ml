@@ -1,6 +1,6 @@
 version: 1
 pipeline: rust_session_scores
-recorded_from_run: 4
+recorded_from_run: 6
 blocks:
   rust_engagement_score:
     output_0:

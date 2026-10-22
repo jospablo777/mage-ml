@@ -9,6 +9,7 @@ SEED_SCALE multiplies the row counts (1 by default: 400,000 orders, 1,000,000 ev
 The connection comes from the PG* variables (PGHOST, PGUSER, PGPASSWORD, PGDATABASE).
 """
 import argparse
+import datetime
 import io
 import json
 import os
@@ -20,7 +21,9 @@ import numpy as np
 import psycopg2
 from faker import Faker
 
-SEED_VERSION = 2
+# 3: store openings and product dates drawn before the data window's end, not before the
+# day the seed ran, so two machines or two days seed the same rows.
+SEED_VERSION = 3
 SCALE = float(os.getenv('SEED_SCALE', '1'))
 COUNTS = dict(
     customers=int(50_000 * SCALE),
@@ -152,6 +155,9 @@ PAGES = ['/', '/search', '/cart', '/checkout', '/account', '/product', '/offers'
 DEVICES = ['desktop', 'iphone', 'android', 'tablet']
 
 START = np.datetime64('2023-01-01T00:00:00')
+# The last day of the data window; dates without a time of their own are drawn before it.
+WINDOW_END = datetime.date(2025, 6, 30)
+YEARS = datetime.timedelta(365)
 SPAN_SECONDS = int((np.datetime64('2025-06-30T00:00:00') - START) / np.timedelta64(1, 's'))
 
 
@@ -220,7 +226,7 @@ def seed(cursor) -> None:
             country,
             round(lat + rng.normal(0, 0.05), 6),
             round(lon + rng.normal(0, 0.05), 6),
-            fake.date_between('-12y', '-1y'),
+            fake.date_between(WINDOW_END - YEARS * 12, WINDOW_END - YEARS),
             None if store_id % 17 == 0 else int(rng.integers(80, 2500)),
         ))
     copy(cursor, 'shop.stores', [
@@ -296,7 +302,7 @@ def seed(cursor) -> None:
                 f'{prices[i]:.2f}',
                 f'{prices[i] * rng.uniform(0.35, 0.8):.2f}',
                 None if i % 13 == 0 else round(float(rng.uniform(0.05, 25)), 3),
-                fake.date_between('-6y', '-30d'),
+                fake.date_between(WINDOW_END - YEARS * 6, WINDOW_END - datetime.timedelta(30)),
                 '{' + ','.join(tags) + '}',
                 json.dumps(attributes, ensure_ascii=False),
             )

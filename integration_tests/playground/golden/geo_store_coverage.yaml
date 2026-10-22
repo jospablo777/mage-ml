@@ -1,6 +1,6 @@
 version: 1
 pipeline: geo_store_coverage
-recorded_from_run: 1
+recorded_from_run: 2
 blocks:
   geo_export_coverage: {}
   geo_load_customers:
@@ -47,8 +47,8 @@ blocks:
         - integer
       - - geometry
         - string
-      content: 1e9757329b1e0fa1a09a9d913db1616523d28e6907877033eccee77241568317
-      order: 375d2f7afbda10f5b0c8f85058aa1fd0eb8a75c17735f542620eff54beacb290
+      content: 6153dfedd7b85595c2124371cbd50b83625bf81c607a8b168e3a50bf63dc2a2d
+      order: bdc2b688381aff8ba57774b328182f6cbe058b6a59adcf0b1b63a1fa7caab7ec
   geo_nearest_store:
     output_0:
       kind: table

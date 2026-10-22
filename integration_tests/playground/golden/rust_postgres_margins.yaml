@@ -1,6 +1,6 @@
 version: 1
 pipeline: rust_postgres_margins
-recorded_from_run: 3
+recorded_from_run: 5
 blocks:
   rust_category_margin:
     output_0:

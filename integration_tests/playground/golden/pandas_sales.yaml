@@ -1,6 +1,6 @@
 version: 1
 pipeline: pandas_sales
-recorded_from_run: 1
+recorded_from_run: 3
 blocks:
   pandas_category_margin:
     output_0:
