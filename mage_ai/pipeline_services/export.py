@@ -518,7 +518,7 @@ SERVICE_DIR = '/srv/mage-service'
 
 SQL_PROVIDERS = (
     'postgres', 'mysql', 'duckdb', 'clickhouse', 'trino', 'bigquery', 'snowflake', 'redshift',
-    'db2',
+    'db2', 'druid',
 )
 
 
@@ -535,6 +535,7 @@ SQL_CLIENTS = {
     'snowflake': ('snowflake.connector', 'snowflake'),
     'redshift': ('redshift_connector', 'redshift'),
     'db2': ('ibm_db', 'db2'),
+    'druid': ('pydruid', 'druid'),
 }
 
 
@@ -560,8 +561,12 @@ def _sql_unsupported(block) -> Optional[str]:
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
-            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift and Db2.'
+            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift, Db2 '
+            'and Druid.'
         )
+    if provider == 'druid' and not configuration.get('use_raw_sql'):
+        return ('a Druid SQL block that writes its table; Druid takes queries only, so its '
+                'blocks run with raw SQL on.')
     if not configuration.get('data_provider_profile'):
         return 'a SQL block without a data provider profile (io_config.yaml).'
     if 'block_output' in (block.content or ''):
@@ -2943,6 +2948,8 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             candidates += ['redshift_connector', 'mage_ai.io.redshift']
         if 'db2' in providers:
             candidates += ['ibm_db', 'ibm_db_dbi', 'mage_ai.io.db2']
+        if 'druid' in providers:
+            candidates += ['pydruid', 'pydruid.db.api', 'mage_ai.io.druid']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [

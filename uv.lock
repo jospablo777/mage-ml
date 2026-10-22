@@ -3712,6 +3712,9 @@ dbt = [
     { name = "google-cloud-aiplatform" },
     { name = "trino" },
 ]
+druid = [
+    { name = "pydruid" },
+]
 duckdb = [
     { name = "duckdb" },
 ]
@@ -3940,6 +3943,7 @@ requires-dist = [
     { name = "pyairtable", marker = "extra == 'airtable'", specifier = ">=2.3.3" },
     { name = "pyarrow", specifier = ">=26.0.0" },
     { name = "pydruid", marker = "extra == 'all'", specifier = ">=0.6.9" },
+    { name = "pydruid", marker = "extra == 'druid'", specifier = ">=0.6.9" },
     { name = "pygithub", specifier = ">=2.10,<3" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.6.3,<5" },
@@ -3982,7 +3986,7 @@ requires-dist = [
     { name = "werkzeug", specifier = ">=3.1.6" },
     { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "druid", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
 
 [package.metadata.requires-dev]
 dev = [

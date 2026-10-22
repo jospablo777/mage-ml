@@ -180,6 +180,9 @@ postgres = [
 db2 = [
   "ibm-db>=3.2.7,<4",
 ]
+druid = [
+  "pydruid>=0.6.9",
+]
 # IBM MQ in streaming pipelines run by MageML; needs the IBM MQ client installed. Exported
 # services use the engine's own connector instead.
 ibm-mq = [

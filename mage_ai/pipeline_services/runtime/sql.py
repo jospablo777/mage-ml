@@ -85,7 +85,17 @@ PROVIDERS = {
         no_schema=False,
         full_names=True,
     ),
+    # Druid takes queries, not writes (Mage's Druid client raises on export): its blocks run
+    # raw SQL, and {{ df_N }} is a datasource's name.
+    'druid': dict(
+        profile_keys=('DRUID_HOST', 'DRUID_PASSWORD', 'DRUID_PATH', 'DRUID_PORT', 'DRUID_SCHEME',
+                      'DRUID_USER'),
+        no_schema=True,
+        full_names=False,
+    ),
 }
+# Mage's Druid client's error for a write (mage_ai/io/druid.py).
+DRUID_WRITE_ERROR = 'write operations are not supported.'
 # Tries of the read after BigQuery's CREATE TABLE AS: the new table can answer 404 for a
 # moment, as Mage's branch waits for.
 BIGQUERY_READ_TRIES = 5
@@ -496,6 +506,10 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.db2 import Db2
 
         return Db2.with_config(config_loader)
+    if provider == 'druid':
+        from mage_ai.io.druid import Druid
+
+        return Druid.with_config(config_loader)
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -566,6 +580,17 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             return _run_on_trino(loader, provider, configuration, upstreams, inputs, query,
                                  io_config, variables, schema, table, limit, options)
     with loader:
+        if name == 'druid':
+            # Mage's Druid branch: upstream outputs would be written (and fail as writes do),
+            # the query runs as raw SQL, and a block that writes its table fails.
+            upload_upstream_tables(
+                loader, configuration, upstreams, inputs, query, io_config, provider,
+            )
+            query = interpolate_input(loader, configuration, upstreams, query, full_names=False)
+            query = render(query, variables)
+            if configuration.get('use_raw_sql'):
+                return execute_raw_sql(loader, query, configuration, limit)
+            raise SqlBlockError(DRUID_WRITE_ERROR)
         if name == 'db2':
             # Upstream tables in the current schema, named alone; an upstream Db2 SQL
             # block's table with the schema it set; the block's table in its schema (I-269).

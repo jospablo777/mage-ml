@@ -42,6 +42,9 @@
 
 ### Pipelines
 
+- Exported services run Druid SQL blocks (raw SQL, as Mage runs them), with `pydruid` in
+  the image; `mage-ml[druid]` installs the client. Opening a Druid connection no longer
+  prints its settings, password included, into the block's log.
 - Python transformer templates in Polars, as R and Rust had: Clean data, Deduplicate, Data
   quality checks, Aggregate, Join, Reshape, Date features, One-hot encoding and Train a
   model (a scikit-learn random forest that Model inference reads). Each takes a Polars or

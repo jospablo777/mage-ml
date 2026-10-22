@@ -87,7 +87,7 @@ class Druid(BaseSQL):
                 path=self.settings['path'],
                 scheme=self.settings['scheme'],
             )
-            print(connect_kwargs)
+            # The settings hold the password; they were printed into the block's log.
             self._ctx = ConnectionWrapper(**connect_kwargs)
 
     def table_exists(self, schema_name: str, table_name: str) -> bool:
