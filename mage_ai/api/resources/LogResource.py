@@ -133,7 +133,8 @@ class LogResource(GenericResource):
                 select(*columns).
                 join(b, a.pipeline_schedule_id == b.id).
                 filter(b.pipeline_uuid == pipeline_uuid).
-                order_by(a.created_at.desc())
+                # Ties by id: the page shows the first MAX_LOG_FILES logs.
+                order_by(a.created_at.desc(), a.id.desc())
             )
 
             if len(pipeline_schedule_ids):
@@ -202,7 +203,7 @@ class LogResource(GenericResource):
                 join(a, a.id == c.pipeline_run_id).
                 join(b, a.pipeline_schedule_id == b.id).
                 filter(b.pipeline_uuid == pipeline_uuid).
-                order_by(c.started_at.desc())
+                order_by(c.started_at.desc(), c.id.desc())
             )
 
             if len(block_uuids):

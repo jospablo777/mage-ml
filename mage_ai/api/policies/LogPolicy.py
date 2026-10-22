@@ -35,6 +35,19 @@ LogPolicy.allow_read(LogPresenter.default_attributes + [
 ], condition=lambda policy: policy.has_at_least_viewer_role())
 
 LogPolicy.allow_query([
+    # The lines of a log before those shown (log_windows.py).
+    'before_line',
+    'lines',
+    'log_path',
+    # The logs page's text search (upstream #6105).
+    'text',
+], scopes=[
+    OauthScope.CLIENT_PRIVATE,
+], on_action=[
+    constants.LIST,
+], condition=lambda policy: policy.has_at_least_viewer_role())
+
+LogPolicy.allow_query([
     'block_run_id',
     'block_run_id[]',
     'block_type',
