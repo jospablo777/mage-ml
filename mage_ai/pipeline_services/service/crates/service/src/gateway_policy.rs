@@ -37,11 +37,11 @@ pub struct Matrix {
     writes: BTreeMap<Key, Vec<NameRule>>,
 }
 
+/// The engine's copy of contracts/policy_matrix.json, written with it by
+/// scripts/contracts/record.py: exported services build the engine without the repository's
+/// contracts folder.
 static MATRIX: LazyLock<Matrix> = LazyLock::new(|| {
-    Matrix::parse(include_str!(
-        "../../../../../../contracts/policy_matrix.json"
-    ))
-    .expect("contracts/policy_matrix.json reads")
+    Matrix::parse(include_str!("../policy_matrix.json")).expect("policy_matrix.json reads")
 });
 
 pub fn matrix() -> &'static Matrix {

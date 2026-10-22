@@ -24,6 +24,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / 'contracts'
+ENGINE_MATRIX = (ROOT / 'mage_ai' / 'pipeline_services' / 'service' / 'crates' / 'service'
+                 / 'policy_matrix.json')
 
 
 def main() -> int:
@@ -54,6 +56,9 @@ def main() -> int:
     matrix = policy_matrix.build(policy_matrix.make_users())
     CONTRACTS.mkdir(exist_ok=True)
     (CONTRACTS / 'policy_matrix.json').write_text(policy_matrix.dumps(matrix))
+    # The gateway's copy (gateway_policy.rs): exported services build the engine without
+    # this folder.
+    ENGINE_MATRIX.write_text(policy_matrix.dumps(matrix))
     # The docs page of who may do what, from the same matrix.
     subprocess.run(
         [sys.executable, str(ROOT / 'scripts' / 'docs' / 'role_access.py')], check=True,

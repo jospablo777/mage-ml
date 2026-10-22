@@ -6,6 +6,8 @@ from mage_ai.api.policies.BasePolicy import BasePolicy
 from mage_ai.tests.base_test import DBTestCase
 
 MATRIX = Path(__file__).resolve().parents[4] / 'contracts' / 'policy_matrix.json'
+ENGINE_MATRIX = (Path(__file__).resolve().parents[3] / 'pipeline_services' / 'service' /
+                 'crates' / 'service' / 'policy_matrix.json')
 
 
 class PolicyMatrixTest(DBTestCase):
@@ -19,6 +21,15 @@ class PolicyMatrixTest(DBTestCase):
             MATRIX.read_text() == policy_matrix.dumps(self.matrix),
             'contracts/policy_matrix.json differs from the policies: run '
             'scripts/contracts/record.py and commit the file.',
+        )
+
+    def test_the_gateways_copy_is_the_checked_in_matrix(self):
+        """The engine embeds its own copy (gateway_policy.rs): exported services build it
+        without the contracts folder, and the build failed reading it from there."""
+        self.assertTrue(
+            ENGINE_MATRIX.read_text() == MATRIX.read_text(),
+            'the engine\'s policy_matrix.json differs from contracts/policy_matrix.json: run '
+            'scripts/contracts/record.py and commit both.',
         )
 
     def test_the_docs_page_shows_the_checked_in_matrix(self):
