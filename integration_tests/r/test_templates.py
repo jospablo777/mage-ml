@@ -142,6 +142,28 @@ def test_postgres_templates(mage_project, pg, schema, profile_schema):
     assert loaded['name'].tolist()[:2] == ['ñ "quoted"', "it's"]
 
 
+def test_redshift_loader_template(mage_project, pg, schema, profile_schema):
+    """
+    The Redshift loader on the PostgreSQL test schema through Redshift settings. The
+    exporter writes Redshift's SQL (varchar(max)), which PostgreSQL refuses; no Redshift
+    cluster runs in the tests.
+    """
+    with pg.cursor() as cursor:
+        cursor.execute(f'CREATE TABLE {schema}.your_table (id int, name text, updated_at date)')
+        cursor.execute(
+            f'INSERT INTO {schema}.your_table VALUES '
+            "(1, 'first', '2024-06-01'), (2, 'second', '2024-06-01'), (3, 'old', '2000-01-01')",
+        )
+    pg.commit()
+
+    loaded = run(mage_project, LOADER, template(LOADER, 'Amazon Redshift', **{
+        'profile = "default"': 'profile = "redshift_on_postgres"',
+        'as.Date(variable("execution_date"))': 'as.Date("2024-01-01")',
+    }))
+
+    assert sorted(loaded['id'].tolist()) == [1, 2]
+
+
 def test_mysql_templates(mage_project, my, mysql_database, monkeypatch):
     monkeypatch.setenv('MAGE_TEST_MYSQL_DATABASE', mysql_database)
     run(mage_project, EXPORTER, template(

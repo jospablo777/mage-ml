@@ -55,6 +55,15 @@ test_schema:
   POSTGRES_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
   POSTGRES_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
   POSTGRES_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
+# The PostgreSQL test schema read through Redshift settings: RPostgres's Redshift driver
+# speaks the PostgreSQL protocol, and no Redshift cluster runs in the tests.
+redshift_on_postgres:
+  REDSHIFT_DBNAME: "{{ env_var('MAGE_TEST_POSTGRES_DBNAME') }}"
+  REDSHIFT_SCHEMA: "{{ env_var('MAGE_TEST_SCHEMA') }}"
+  REDSHIFT_TEMP_CRED_USER: "{{ env_var('MAGE_TEST_POSTGRES_USER') }}"
+  REDSHIFT_TEMP_CRED_PASSWORD: "{{ env_var('MAGE_TEST_POSTGRES_PASSWORD') }}"
+  REDSHIFT_HOST: "{{ env_var('MAGE_TEST_POSTGRES_HOST') }}"
+  REDSHIFT_PORT: "{{ env_var('MAGE_TEST_POSTGRES_PORT') }}"
 # The ClickHouse database of one test, from MAGE_TEST_CLICKHOUSE_DATABASE.
 clickhouse:
   CLICKHOUSE_DATABASE: "{{ env_var('MAGE_TEST_CLICKHOUSE_DATABASE') }}"

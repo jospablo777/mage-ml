@@ -359,7 +359,7 @@ def read_output(job_dir: str) -> Tuple[bool, Any]:
 
 
 # The io_config.yaml settings that mageml's db_connect() and S3 functions use.
-DATABASE_CONFIG_PREFIXES = ('POSTGRES_', 'MYSQL_', 'DUCKDB_', 'AWS_')
+DATABASE_CONFIG_PREFIXES = ('POSTGRES_', 'MYSQL_', 'DUCKDB_', 'REDSHIFT_', 'AWS_')
 IO_CONFIG_FUNCTIONS = re.compile(
     r'\b(db_connect|io_config|read_sql|write_table|s3_filesystem|read_s3|write_s3)\s*\(',
 )

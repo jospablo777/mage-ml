@@ -67,4 +67,5 @@ class RTemplateTest(TestCase):
         loaders = {t['name'] for t in R_TEMPLATES if t['block_type'] == 'data_loader'}
         self.assertEqual(loaders, {
             'Local file', 'Amazon S3', 'API', 'PostgreSQL', 'MySQL', 'DuckDB', 'SQLite',
+            'Amazon Redshift',
         })

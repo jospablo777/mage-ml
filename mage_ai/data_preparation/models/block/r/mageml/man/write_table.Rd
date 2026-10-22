@@ -7,7 +7,7 @@
 write_table(
   df,
   table,
-  database = c("postgres", "mysql", "duckdb"),
+  database = c("postgres", "mysql", "duckdb", "redshift"),
   profile = "default",
   schema = NULL,
   if_exists = c("replace", "append", "fail")
@@ -18,13 +18,13 @@ write_table(
 
 \item{table}{The name of the table.}
 
-\item{database}{\code{"postgres"}, \code{"mysql"} or \code{"duckdb"}.}
+\item{database}{\code{"postgres"}, \code{"mysql"}, \code{"duckdb"} or \code{"redshift"}.}
 
 \item{profile}{The name of the profile in \code{io_config.yaml}. Write it as
 text in the block, so that Mage passes its settings.}
 
 \item{schema}{The schema of the table. Defaults to the connection's: the
-profile's \code{POSTGRES_SCHEMA} or \code{DUCKDB_SCHEMA}.}
+profile's \code{POSTGRES_SCHEMA}, \code{REDSHIFT_SCHEMA} or \code{DUCKDB_SCHEMA}.}
 
 \item{if_exists}{What to do when the table exists: \code{"replace"} it,
 \code{"append"} to it or \code{"fail"}.}

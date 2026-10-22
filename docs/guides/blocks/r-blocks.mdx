@@ -245,8 +245,12 @@ help pages are in R, such as `?mageml::write_table`.
 | `read_s3(uri, profile, format)`, `write_s3(df, uri, profile, format)` | The same on S3, such as `s3://bucket/orders.parquet` |
 | `s3_filesystem(profile)` | An arrow S3 file system with a profile's AWS settings |
 
-`database` is `"postgres"` (needs RPostgres), `"mysql"` (RMariaDB) or `"duckdb"` (duckdb).
-Only direct connections are supported. Relative file paths start at the MageML project, which
+`database` is `"postgres"` (needs RPostgres), `"mysql"` (RMariaDB), `"duckdb"` (duckdb) or
+`"redshift"` (RPostgres). Redshift connects with the profile's temporary credentials
+(`REDSHIFT_TEMP_CRED_USER`, `REDSHIFT_TEMP_CRED_PASSWORD`) and uses `REDSHIFT_SCHEMA` as its
+search path; IAM credentials (`REDSHIFT_CLUSTER_ID`) work in Python blocks only. Writing to
+Redshift inserts rows in batches: for millions of rows, write a file to S3 and load it with
+Redshift's `COPY`. Only direct connections are supported. Relative file paths start at the MageML project, which
 is the working directory of R blocks.
 
 ```r

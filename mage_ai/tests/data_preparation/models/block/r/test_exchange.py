@@ -319,3 +319,30 @@ class SecretValuesTest(DBTestCase):
         self.assertEqual(secret_values(code), {'api_token': 's3cr3t'})
         self.assertEqual(secret_values("get_secret_value(name = 'missing')"), {})
         self.assertEqual(secret_values('transformer(function(...) 1)'), {})
+
+
+class DatabaseSettingsTest(TestCase):
+    def test_a_profile_s_settings_reach_r_for_each_database(self):
+        """The settings mageml's db_connect() reads, Redshift's among them, and no others."""
+        repo = tempfile.mkdtemp()
+        with open(os.path.join(repo, 'io_config.yaml'), 'w') as file:
+            file.write(
+                'version: 0.1.1\n'
+                'warehouse:\n'
+                '  REDSHIFT_HOST: cluster.example.com\n'
+                '  REDSHIFT_DBNAME: dev\n'
+                '  REDSHIFT_TEMP_CRED_USER: analyst\n'
+                '  POSTGRES_HOST: db\n'
+                '  SNOWFLAKE_USER: elsewhere\n'
+            )
+        code = 'load <- function() read_sql("SELECT 1", database = "redshift", ' \
+            'profile = "warehouse")'
+
+        settings = exchange.database_settings(code, repo)
+
+        self.assertEqual(settings['warehouse'], dict(
+            POSTGRES_HOST='db',
+            REDSHIFT_DBNAME='dev',
+            REDSHIFT_HOST='cluster.example.com',
+            REDSHIFT_TEMP_CRED_USER='analyst',
+        ))

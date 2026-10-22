@@ -24,7 +24,7 @@ there.
 | --- | --- | --- | --- | --- |
 | APIs | Airtable, Amplitude, API | API | API | none yet |
 | Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage | none yet |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse | none yet |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | Amazon Redshift | ClickHouse | none yet |
 | Databases | Druid, DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, Pinot, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL | Incremental load |
 | Databases (NoSQL) | MongoDB | none yet | MongoDB | none yet |
 | Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet | none yet |
@@ -57,7 +57,7 @@ there.
 | --- | --- | --- | --- | --- |
 | APIs | Amplitude | API | API | none yet |
 | Cloud storage | Amazon S3, Azure Blob Storage, Google Cloud Storage, IBM Cloud Object Storage | Amazon S3 | Cloud storage | none yet |
-| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | ClickHouse | none yet |
+| Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | Amazon Redshift | ClickHouse | none yet |
 | Databases | DuckDB, IBM Db2, MSSQL, MySQL, OracleDB, PostgreSQL | DuckDB, MySQL, PostgreSQL, SQLite | DuckDB, MySQL, PostgreSQL | none yet |
 | Databases (NoSQL) | MongoDB | none yet | MongoDB | none yet |
 | Delta Lake | Amazon S3, Azure Blob Storage, Google Cloud Storage | none yet | none yet | none yet |

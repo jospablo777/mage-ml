@@ -6,7 +6,7 @@
 \usage{
 read_sql(
   query,
-  database = c("postgres", "mysql", "duckdb"),
+  database = c("postgres", "mysql", "duckdb", "redshift"),
   profile = "default",
   params = NULL
 )
@@ -14,7 +14,7 @@ read_sql(
 \arguments{
 \item{query}{The SQL query.}
 
-\item{database}{\code{"postgres"}, \code{"mysql"} or \code{"duckdb"}.}
+\item{database}{\code{"postgres"}, \code{"mysql"}, \code{"duckdb"} or \code{"redshift"}.}
 
 \item{profile}{The name of the profile in \code{io_config.yaml}. Write it as
 text in the block, so that Mage passes its settings.}

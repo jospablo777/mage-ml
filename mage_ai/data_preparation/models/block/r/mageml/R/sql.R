@@ -18,7 +18,7 @@
 #' })
 #' }
 read_sql <- function(query,
-                     database = c("postgres", "mysql", "duckdb"),
+                     database = c("postgres", "mysql", "duckdb", "redshift"),
                      profile = "default",
                      params = NULL) {
   database <- match.arg(database)
@@ -88,14 +88,15 @@ sql_datetime <- function(x, zone) {
 #' blobs.
 #'
 #' @param df A data frame.
-#' @param database `"postgres"`, `"mysql"` or `"duckdb"`.
+#' @param database `"postgres"`, `"mysql"`, `"duckdb"` or `"redshift"`.
 #' @return A list with the data frame and its `field_types`.
 #' @noRd
 sql_values <- function(df, database) {
   types <- list(
     postgres = c(date = "date", naive = "timestamp", zoned = "timestamptz"),
     mysql = c(date = "DATE", naive = "DATETIME(6)", zoned = "DATETIME(6)"),
-    duckdb = c(date = "DATE", naive = "TIMESTAMP", zoned = "TIMESTAMPTZ")
+    duckdb = c(date = "DATE", naive = "TIMESTAMP", zoned = "TIMESTAMPTZ"),
+    redshift = c(date = "date", naive = "timestamp", zoned = "timestamptz")
   )[[database]]
   df <- as.data.frame(df, stringsAsFactors = FALSE, optional = TRUE)
   field_types <- character(0)
@@ -133,7 +134,7 @@ sql_values <- function(df, database) {
 #' @param df A data frame.
 #' @param table The name of the table.
 #' @param schema The schema of the table. Defaults to the connection's: the
-#'   profile's `POSTGRES_SCHEMA` or `DUCKDB_SCHEMA`.
+#'   profile's `POSTGRES_SCHEMA`, `REDSHIFT_SCHEMA` or `DUCKDB_SCHEMA`.
 #' @param if_exists What to do when the table exists: `"replace"` it,
 #'   `"append"` to it or `"fail"`.
 #' @return The number of rows written, invisibly.
@@ -147,7 +148,7 @@ sql_values <- function(df, database) {
 #' }
 write_table <- function(df,
                         table,
-                        database = c("postgres", "mysql", "duckdb"),
+                        database = c("postgres", "mysql", "duckdb", "redshift"),
                         profile = "default",
                         schema = NULL,
                         if_exists = c("replace", "append", "fail")) {

@@ -77,7 +77,26 @@ db_arguments <- function(database, config) {
         password = setting("MYSQL_PASSWORD")
       )
     },
-    duckdb = list(dbdir = setting("DUCKDB_DATABASE"))
+    duckdb = list(dbdir = setting("DUCKDB_DATABASE")),
+    redshift = {
+      user <- setting("REDSHIFT_TEMP_CRED_USER")
+      if (is.null(user) && !is.null(setting("REDSHIFT_CLUSTER_ID"))) {
+        stop(
+          "R connects to Redshift with REDSHIFT_TEMP_CRED_USER and ",
+          "REDSHIFT_TEMP_CRED_PASSWORD; IAM credentials (REDSHIFT_CLUSTER_ID) ",
+          "are read by Python blocks only.",
+          call. = FALSE
+        )
+      }
+      port <- setting("REDSHIFT_PORT")
+      list(
+        dbname = setting("REDSHIFT_DBNAME"),
+        host = setting("REDSHIFT_HOST"),
+        port = if (!is.null(port)) as.integer(port),
+        user = user,
+        password = setting("REDSHIFT_TEMP_CRED_PASSWORD")
+      )
+    }
   )
   arguments[!vapply(arguments, is.null, logical(1))]
 }
@@ -85,14 +104,17 @@ db_arguments <- function(database, config) {
 #' Connect to a database of io_config.yaml
 #'
 #' Opens a DBI connection with the settings of a profile in the Mage
-#' project's `io_config.yaml`. Postgres needs the RPostgres package, MySQL
-#' RMariaDB and DuckDB duckdb; add them to the project's R environment with
-#' `rv add`. Close the connection with [DBI::dbDisconnect()].
+#' project's `io_config.yaml`. Postgres and Redshift need the RPostgres
+#' package, MySQL RMariaDB and DuckDB duckdb; add them to the project's R
+#' environment with `rv add`. Close the connection with [DBI::dbDisconnect()].
 #'
-#' A Postgres connection uses `POSTGRES_SCHEMA` as its search path, and a
-#' DuckDB connection `DUCKDB_SCHEMA` as its schema.
+#' A Postgres connection uses `POSTGRES_SCHEMA` as its search path, a
+#' Redshift connection `REDSHIFT_SCHEMA`, and a DuckDB connection
+#' `DUCKDB_SCHEMA` as its schema. Redshift connects with the profile's
+#' temporary credentials (`REDSHIFT_TEMP_CRED_USER`,
+#' `REDSHIFT_TEMP_CRED_PASSWORD`).
 #'
-#' @param database `"postgres"`, `"mysql"` or `"duckdb"`.
+#' @param database `"postgres"`, `"mysql"`, `"duckdb"` or `"redshift"`.
 #' @param profile The name of the profile in `io_config.yaml`. Write it as
 #'   text in the block, so that Mage passes its settings.
 #' @param ... Other arguments of [DBI::dbConnect()].
@@ -106,17 +128,23 @@ db_arguments <- function(database, config) {
 #'   DBI::dbGetQuery(connection, "SELECT * FROM users")
 #' }
 #' }
-db_connect <- function(database = c("postgres", "mysql", "duckdb"),
+db_connect <- function(database = c("postgres", "mysql", "duckdb", "redshift"),
                        profile = "default",
                        ...) {
   database <- match.arg(database)
-  drivers <- c(postgres = "RPostgres", mysql = "RMariaDB", duckdb = "duckdb")
+  drivers <- c(
+    postgres = "RPostgres",
+    mysql = "RMariaDB",
+    duckdb = "duckdb",
+    redshift = "RPostgres"
+  )
   require_packages(c("DBI", drivers[[database]]))
   arguments <- db_arguments(database, io_config(profile))
   driver <- switch(database,
     postgres = RPostgres::Postgres(),
     mysql = RMariaDB::MariaDB(),
-    duckdb = duckdb::duckdb()
+    duckdb = duckdb::duckdb(),
+    redshift = RPostgres::Redshift()
   )
   connection <- do.call(
     DBI::dbConnect,
@@ -126,6 +154,12 @@ db_connect <- function(database = c("postgres", "mysql", "duckdb"),
   if (database == "duckdb" && !is.null(schema) && nzchar(schema)) {
     quoted <- DBI::dbQuoteString(connection, schema)
     DBI::dbExecute(connection, paste("SET schema =", quoted))
+  }
+  # Redshift takes no search path at connection time.
+  schema <- io_config(profile)$REDSHIFT_SCHEMA
+  if (database == "redshift" && !is.null(schema) && nzchar(schema)) {
+    quoted <- DBI::dbQuoteIdentifier(connection, schema)
+    DBI::dbExecute(connection, paste("SET search_path TO", quoted))
   }
   connection
 }

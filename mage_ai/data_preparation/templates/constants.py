@@ -869,6 +869,10 @@ R_TEMPLATES = [
         [GROUP_DATABASES],
     ),
     _r_template(
+        BlockType.DATA_LOADER, 'Amazon Redshift', 'redshift.r',
+        'Query Redshift with DBI and RPostgres.', [GROUP_DATA_WAREHOUSES],
+    ),
+    _r_template(
         BlockType.DATA_LOADER, 'SQLite', 'sqlite.r',
         'Query a SQLite database file with DBI and RSQLite.', [GROUP_DATABASES],
     ),
@@ -912,6 +916,10 @@ R_TEMPLATES = [
     _r_template(
         BlockType.DATA_EXPORTER, 'DuckDB', 'duckdb.r',
         'Write a table to DuckDB with DBI and duckdb.', [GROUP_DATABASES],
+    ),
+    _r_template(
+        BlockType.DATA_EXPORTER, 'Amazon Redshift', 'redshift.r',
+        'Write a table to Redshift with DBI and RPostgres.', [GROUP_DATA_WAREHOUSES],
     ),
     _r_template(
         BlockType.DATA_EXPORTER, 'SQLite', 'sqlite.r',

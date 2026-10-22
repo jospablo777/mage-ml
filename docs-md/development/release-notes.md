@@ -66,6 +66,9 @@
 - Paging through a trigger's runs shows every run once: a date's retries were cut at the
   end of a page and the rest of them left out of the next, and a page past the last run
   failed.
+- R blocks read and write Amazon Redshift (`database = "redshift"` in `read_sql`,
+  `write_table` and `db_connect`, with RPostgres), and the R block menus have Redshift
+  loader and exporter templates.
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead
   today is the next one, a monthly landing time keeps its day, and a start time ahead is
   respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets

@@ -5,13 +5,13 @@
 \title{Connect to a database of io_config.yaml}
 \usage{
 db_connect(
-  database = c("postgres", "mysql", "duckdb"),
+  database = c("postgres", "mysql", "duckdb", "redshift"),
   profile = "default",
   ...
 )
 }
 \arguments{
-\item{database}{\code{"postgres"}, \code{"mysql"} or \code{"duckdb"}.}
+\item{database}{\code{"postgres"}, \code{"mysql"}, \code{"duckdb"} or \code{"redshift"}.}
 
 \item{profile}{The name of the profile in \code{io_config.yaml}. Write it as
 text in the block, so that Mage passes its settings.}
@@ -23,13 +23,16 @@ A DBI connection.
 }
 \description{
 Opens a DBI connection with the settings of a profile in the Mage
-project's \code{io_config.yaml}. Postgres needs the RPostgres package, MySQL
-RMariaDB and DuckDB duckdb; add them to the project's R environment with
-\verb{rv add}. Close the connection with \code{\link[DBI:dbDisconnect]{DBI::dbDisconnect()}}.
+project's \code{io_config.yaml}. Postgres and Redshift need the RPostgres
+package, MySQL RMariaDB and DuckDB duckdb; add them to the project's R
+environment with \verb{rv add}. Close the connection with \code{\link[DBI:dbDisconnect]{DBI::dbDisconnect()}}.
 }
 \details{
-A Postgres connection uses \code{POSTGRES_SCHEMA} as its search path, and a
-DuckDB connection \code{DUCKDB_SCHEMA} as its schema.
+A Postgres connection uses \code{POSTGRES_SCHEMA} as its search path, a
+Redshift connection \code{REDSHIFT_SCHEMA}, and a DuckDB connection
+\code{DUCKDB_SCHEMA} as its schema. Redshift connects with the profile's
+temporary credentials (\code{REDSHIFT_TEMP_CRED_USER},
+\code{REDSHIFT_TEMP_CRED_PASSWORD}).
 }
 \examples{
 \dontrun{

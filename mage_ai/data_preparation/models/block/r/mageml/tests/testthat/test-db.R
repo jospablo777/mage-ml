@@ -41,6 +41,31 @@ test_that("MySQL and DuckDB settings become driver arguments", {
   expect_equal(db_arguments("duckdb", duckdb), list(dbdir = "file.duckdb"))
 })
 
+test_that("Redshift settings become RPostgres arguments", {
+  config <- list(
+    REDSHIFT_DBNAME = "dev",
+    REDSHIFT_HOST = "cluster.example.com",
+    REDSHIFT_PORT = "5439",
+    REDSHIFT_TEMP_CRED_USER = "analyst",
+    REDSHIFT_TEMP_CRED_PASSWORD = "secret",
+    REDSHIFT_SCHEMA = "analytics"
+  )
+
+  expect_equal(db_arguments("redshift", config), list(
+    dbname = "dev",
+    host = "cluster.example.com",
+    port = 5439L,
+    user = "analyst",
+    password = "secret"
+  ))
+})
+
+test_that("Redshift IAM credentials are named as Python only", {
+  config <- list(REDSHIFT_HOST = "h", REDSHIFT_CLUSTER_ID = "cluster")
+
+  expect_error(db_arguments("redshift", config), "Python blocks only")
+})
+
 test_that("SSH tunnels are refused", {
   config <- list(POSTGRES_CONNECTION_METHOD = "ssh_tunnel")
 
