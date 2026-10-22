@@ -660,7 +660,8 @@ pub fn cron_expression(schedule: &str) -> Option<String> {
         "@once" => return None,
         "@hourly" => "0 * * * *",
         "@daily" => "0 0 * * *",
-        "@weekly" => "0 0 * * 0",
+        // MageML's week starts on Monday (PipelineSchedule.current_execution_date).
+        "@weekly" => "0 0 * * 1",
         "@monthly" => "0 0 1 * *",
         other => other,
     };
@@ -1334,6 +1335,7 @@ mod tests {
     #[test]
     fn named_intervals_become_cron_expressions() {
         assert_eq!(cron_expression("@daily").as_deref(), Some("0 0 * * *"));
+        assert_eq!(cron_expression("@weekly").as_deref(), Some("0 0 * * 1"));
         assert_eq!(
             cron_expression("*/5 * * * *").as_deref(),
             Some("*/5 * * * *")

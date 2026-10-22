@@ -2375,6 +2375,11 @@ def _triggers(pipeline, notes: List[str], problems: List[str]) -> List[Dict]:
                 'exported.'
             )
             continue
+        if kind == 'time' and trigger['settings'].get('landing_time_enabled'):
+            notes.append(
+                f'Pipeline {pipeline.uuid}, trigger {trigger_name}: its landing time is not '
+                'exported; the service starts runs at each interval instead.'
+            )
         start = trigger['start_time']
         if isinstance(start, datetime):
             if start.tzinfo is None:

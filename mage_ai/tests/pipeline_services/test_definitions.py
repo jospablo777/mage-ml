@@ -264,6 +264,35 @@ class DefinitionsTest(ExportTestCase):
         self.addCleanup(schedule.delete)
         return schedule
 
+    def test_a_landing_time_is_named_in_the_notes(self):
+        """The service starts a time trigger's runs at each interval: no landing time."""
+        from mage_ai.data_preparation.models.triggers import (
+            ScheduleStatus,
+            ScheduleType,
+        )
+        from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+        self.chain()
+        for name, landing in [('landing', True), ('plain', False)]:
+            schedule = PipelineSchedule.create(
+                name=name,
+                pipeline_uuid=self.pipeline.uuid,
+                repo_path=self.repo_path,
+                schedule_interval='@weekly',
+                schedule_type=ScheduleType.TIME,
+                settings=dict(landing_time_enabled=landing),
+                status=ScheduleStatus.ACTIVE,
+            )
+            self.addCleanup(schedule.delete)
+
+        captured = export.capture(self.repo_path, [self.pipeline.uuid])
+
+        triggers = captured.manifest['pipelines'][0]['triggers']
+        self.assertEqual([t['schedule'] for t in triggers], ['@weekly', '@weekly'])
+        notes = '\n'.join(captured.notes)
+        self.assertIn('trigger landing: its landing time is not exported', notes)
+        self.assertNotIn('trigger plain', notes)
+
     def test_after_run_triggers_go_into_the_service_with_the_pipeline_they_follow(self):
         self.chain()
         first = self.pipeline.uuid
