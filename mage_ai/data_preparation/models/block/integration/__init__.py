@@ -112,7 +112,14 @@ class IntegrationBlock(Block):
                 pipeline=self.pipeline,
             ) or dict()
 
-            if stream_catalog.get('replication_method') in ['INCREMENTAL', 'LOG_BASED']:
+            replication_method = stream_catalog.get('replication_method')
+            # An INCREMENTAL stream's batches of one run all read from the bookmark the
+            # previous run ended with, each its own slice (_offset below). Moved after each
+            # batch, the bookmark (compared with >=) made the next batch read the last row
+            # of the one before again.
+            if replication_method == 'LOG_BASED' or (
+                replication_method == 'INCREMENTAL' and not index
+            ):
                 from mage_integrations.sources.utils import (
                     update_source_state_from_destination_state,
                 )
@@ -132,7 +139,7 @@ class IntegrationBlock(Block):
                 )
                 batch_fetch_limit = get_batch_fetch_limit(config)
 
-                if stream_catalog.get('replication_method') == 'FULL_TABLE' or (
+                if stream_catalog.get('replication_method') in ('FULL_TABLE', 'INCREMENTAL') or (
                     stream_catalog.get('replication_method') == 'LOG_BASED' and
                     not stream_catalog.get('bookmark_properties')
                 ):

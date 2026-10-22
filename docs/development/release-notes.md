@@ -148,6 +148,10 @@
   whose container failed counted as a success.
 - Block timeouts apply to data integration pipelines: a stream's block that runs past its
   timeout fails and its stream stops. Integration streams ignored them (upstream #5133).
+- `INCREMENTAL` streams of data integration pipelines read in more than one batch wrote
+  the last row of each batch twice: the bookmark moved after each batch and is compared
+  with `>=`. A run's batches now all start at the bookmark the previous run ended with,
+  each reading its own slice.
 - `INCREMENTAL` streams of data integration blocks in batch pipelines read in more than one
   batch lost rows and read others twice: every batch started at the same bookmark with no
   offset, and each took the bookmark its own batch number wrote in the previous run. All

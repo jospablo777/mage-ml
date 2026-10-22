@@ -106,7 +106,10 @@ Here are the steps you can optionally go through:
      added to the destination table; to replace its contents, see
      [Replace the table on a full table sync](#replace-the-table-on-a-full-table-sync).
    - `INCREMENTAL`: synchronize the records starting after the most recent
-     bookmarked record from the previous synchronization run.
+     bookmarked record from the previous synchronization run. A bookmark column that is
+     not unique is compared with `>=`, so rows that share the last value are not left out:
+     the last row of the previous run is read again. Unique columns (step 3) make that
+     copy an update or skip it; a bookmark that is itself unique compares with `>`.
 6. Unique conflict method: choose how to handle duplicate records
    - `IGNORE`: skip the new record if it’s a duplicate of an existing record.
    - `UPDATE`: update the existing record with the new record’s properties.
