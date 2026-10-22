@@ -106,6 +106,9 @@ pub enum ChannelKind {
     Discord,
     /// The alert as JSON, for anything else.
     Webhook,
+    /// An email over SMTP: the variable holds smtps://user:password@host:port (or smtp://
+    /// with tls=required) with from= and to= (addresses separated by commas) in its query.
+    Email,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

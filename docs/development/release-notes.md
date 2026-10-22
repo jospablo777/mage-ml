@@ -66,6 +66,8 @@
 - Paging through a trigger's runs shows every run once: a date's retries were cut at the
   end of a page and the rest of them left out of the next, and a page past the last run
   failed.
+- Exported services send alerts by email too: a channel `kind: email` whose variable holds
+  the SMTP server's URL.
 - R blocks read and write Amazon Redshift (`database = "redshift"` in `read_sql`,
   `write_table` and `db_connect`, with RPostgres), and the R block menus have Redshift
   loader and exporter templates.

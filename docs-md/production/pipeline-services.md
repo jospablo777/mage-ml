@@ -542,7 +542,8 @@ of each model.
 
 ## Alerts
 
-A service sends alerts to Slack, Microsoft Teams, Google Chat, Discord or any webhook:
+A service sends alerts to Slack, Microsoft Teams, Google Chat, Discord, any webhook, or by
+email:
 
 ```yaml
     alerts:
@@ -552,6 +553,8 @@ A service sends alerts to Slack, Microsoft Teams, Google Chat, Discord or any we
           url_env: SLACK_WEBHOOK_URL
         - kind: webhook             # the alert as JSON, for an incident tool
           url_env: ONCALL_WEBHOOK_URL
+        - kind: email
+          url_env: ALERT_SMTP_URL   # smtps://user:password@host:465?from=...&to=a@x,b@y
       cooldown_minutes: 10
       run_minutes: 60
       stream_lag: 100000
@@ -568,6 +571,10 @@ A service sends alerts to Slack, Microsoft Teams, Google Chat, Discord or any we
 - Each channel names the environment variable that holds its URL. A webhook URL is a
   credential: the export refuses a URL written in `service.yaml`, and the service reads the
   variable when it sends.
+- An email channel's variable holds the SMTP server as a URL: `smtps://` for TLS from the
+  start (port 465), or `smtp://...?tls=required` for STARTTLS (port 587), with the user and
+  password in the URL (percent-encode `@` as `%40`), the sender in `from=` and the
+  recipients, separated by commas, in `to=`. The subject is the alert's title.
 - Each message says what happened, where (pipeline, block, run), the error's first lines,
   and what to do. With `MAGE_SERVICE_PUBLIC_URL` set, it links the run and its log.
 - The same alert (kind and pipeline) again within `cooldown_minutes` is held; the next one

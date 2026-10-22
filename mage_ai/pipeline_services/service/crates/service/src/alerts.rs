@@ -95,6 +95,11 @@ impl Alerter {
         };
         let message = self.message(&event, held);
         for channel in self.config.channels.clone() {
+            if channel.kind == ChannelKind::Email {
+                let message = message.clone();
+                std::thread::spawn(move || deliver_email(&channel, &message));
+                continue;
+            }
             let payload = payload(channel.kind, &message);
             std::thread::spawn(move || deliver(&channel, &payload));
         }
@@ -345,7 +350,7 @@ fn payload(kind: ChannelKind, message: &Message) -> Value {
         }),
         ChannelKind::GoogleChat => json!({"text": truncate(&text, 4000)}),
         ChannelKind::Discord => json!({"content": truncate(&text, 1990)}),
-        ChannelKind::Webhook => json!({
+        ChannelKind::Webhook | ChannelKind::Email => json!({
             "kind": message.kind,
             "service": message.service,
             "pipeline": message.pipeline,
@@ -395,6 +400,142 @@ fn deliver(channel: &AlertChannel, payload: &Value) {
     }
     crate::log::warn(&format!(
         "An alert to the channel in {} was not delivered after {ATTEMPTS} attempts: {last}",
+        channel.url_env
+    ));
+}
+
+/// An SMTP URL with its sender and recipients: smtps:// (TLS from the start), or smtp://
+/// with tls=required (STARTTLS) or tls=opportunistic (plain without either); user and
+/// password in the URL, from= and to= in its query.
+#[derive(Debug, PartialEq)]
+struct Mailbox {
+    /// The URL without from and to, as lettre reads it.
+    transport: String,
+    from: String,
+    to: Vec<String>,
+}
+
+fn mailbox(url: &str) -> Result<Mailbox, String> {
+    if !(url.starts_with("smtp://") || url.starts_with("smtps://")) {
+        return Err("the URL starts with smtp:// or smtps://".into());
+    }
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let (mut from, mut to, mut kept) = (None, Vec::new(), Vec::new());
+    for pair in query.split('&').filter(|p| !p.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = percent_decode(value);
+        match key {
+            "from" => from = Some(value),
+            "to" => to.extend(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty())
+                    .map(str::to_string),
+            ),
+            _ => kept.push(pair.to_string()),
+        }
+    }
+    let from = from.ok_or("the URL names no sender (from=)")?;
+    if to.is_empty() {
+        return Err("the URL names no recipients (to=)".into());
+    }
+    let transport = if kept.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", kept.join("&"))
+    };
+    Ok(Mailbox {
+        transport,
+        from,
+        to,
+    })
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+        {
+            out.push(byte);
+            i += 3;
+            continue;
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn email(mailbox: &Mailbox, message: &Message) -> Result<lettre::Message, String> {
+    let mut builder = lettre::Message::builder()
+        .from(mailbox.from.parse().map_err(|e| format!("from: {e}"))?)
+        .subject(truncate(&message.title, 200));
+    for to in &mailbox.to {
+        builder = builder.to(to.parse().map_err(|e| format!("to {to}: {e}"))?);
+    }
+    let mut body = message.body.clone();
+    if let Some(link) = &message.link {
+        body.push_str(&format!("\n\n{link}"));
+    }
+    body.push_str(&format!(
+        "\n\nService {}, pipeline {}.",
+        message.service, message.pipeline
+    ));
+    builder
+        .header(lettre::message::header::ContentType::TEXT_PLAIN)
+        .body(body)
+        .map_err(|e| e.to_string())
+}
+
+/// Sends the alert by email, three times at most; the URL and its password never reach
+/// the log.
+fn deliver_email(channel: &AlertChannel, message: &Message) {
+    use lettre::Transport;
+
+    let Ok(url) = std::env::var(&channel.url_env) else {
+        crate::log::warn(&format!(
+            "An alert was not sent: {} is not set.",
+            channel.url_env
+        ));
+        return;
+    };
+    let prepared = mailbox(&url).and_then(|mailbox| {
+        let transport = lettre::SmtpTransport::from_url(&mailbox.transport)
+            .map_err(|e| e.to_string())?
+            .timeout(Some(Duration::from_secs(10)))
+            .build();
+        Ok((transport, email(&mailbox, message)?))
+    });
+    let (transport, email) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            crate::log::warn(&format!(
+                "An alert was not sent: the address in {} is not usable: {}",
+                channel.url_env,
+                crate::log::redact(&error).replace(&url, "<url>")
+            ));
+            return;
+        }
+    };
+    let mut last = String::new();
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_secs(2u64.pow(attempt)));
+        }
+        match transport.send(&email) {
+            Ok(_) => return,
+            Err(error) => last = crate::log::redact(&error.to_string()).replace(&url, "<url>"),
+        }
+    }
+    crate::log::warn(&format!(
+        "An alert by email to the server in {} was not delivered after {ATTEMPTS} attempts: \
+         {last}",
         channel.url_env
     ));
 }
@@ -488,5 +629,109 @@ mod tests {
                 .len()
                 < 2000
         );
+    }
+
+    #[test]
+    fn an_smtp_url_names_its_sender_and_recipients() {
+        let found = mailbox(
+            "smtps://ops%40example.com:p%40ss@mail.example.com:465\
+             ?from=alerts%40example.com&to=a@example.com,%20b@example.com&tls=required",
+        )
+        .unwrap();
+        assert_eq!(
+            found,
+            Mailbox {
+                transport: "smtps://ops%40example.com:p%40ss@mail.example.com:465?tls=required"
+                    .into(),
+                from: "alerts@example.com".into(),
+                to: vec!["a@example.com".into(), "b@example.com".into()],
+            }
+        );
+        assert!(mailbox("https://example.com?from=a@b.c&to=d@e.f").is_err());
+        assert!(mailbox("smtp://host?to=d@e.f").is_err());
+        assert!(mailbox("smtp://host?from=a@b.c").is_err());
+    }
+
+    /// A server that speaks just enough SMTP, and keeps the message it was given.
+    fn fake_smtp() -> (u16, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (sender, received) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut writer = stream;
+            writer.write_all(b"220 fake ESMTP\r\n").unwrap();
+            let mut data = String::new();
+            let mut in_data = false;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                if in_data {
+                    if line == ".\r\n" {
+                        in_data = false;
+                        writer.write_all(b"250 queued\r\n").unwrap();
+                    } else {
+                        data.push_str(&line);
+                    }
+                    continue;
+                }
+                let command = line.to_uppercase();
+                let reply: &[u8] = if command.starts_with("EHLO") {
+                    b"250 fake\r\n"
+                } else if command.starts_with("DATA") {
+                    in_data = true;
+                    b"354 go on\r\n"
+                } else if command.starts_with("QUIT") {
+                    writer.write_all(b"221 bye\r\n").unwrap();
+                    break;
+                } else {
+                    b"250 ok\r\n"
+                };
+                writer.write_all(reply).unwrap();
+            }
+            let _ = sender.send(data);
+        });
+        (port, received)
+    }
+
+    #[test]
+    fn an_alert_goes_out_by_email() {
+        let (port, received) = fake_smtp();
+        let variable = "MAGE_TEST_ALERT_SMTP_URL";
+        // SAFETY: the variable is this test's own.
+        unsafe {
+            std::env::set_var(
+                variable,
+                format!("smtp://127.0.0.1:{port}?from=alerts@example.com&to=ops@example.com"),
+            );
+        }
+        let channel = AlertChannel {
+            kind: ChannelKind::Email,
+            url_env: variable.into(),
+        };
+        let message = alerter(10).message(
+            &Event {
+                kind: Some(AlertKind::RunFailed),
+                pipeline: "orders".into(),
+                run_id: Some("run-1".into()),
+                block: Some("load".into()),
+                title: "Run failed".into(),
+                error: Some("connection refused".into()),
+                hint: "Check the database.".into(),
+            },
+            0,
+        );
+        deliver_email(&channel, &message);
+        let data = received
+            .recv_timeout(Duration::from_secs(10))
+            .expect("no email arrived");
+        assert!(data.contains("To: ops@example.com"), "{data}");
+        assert!(data.contains("Subject:"), "{data}");
+        assert!(data.contains("connection refused"), "{data}");
+        assert!(data.contains("pipeline orders"), "{data}");
     }
 }

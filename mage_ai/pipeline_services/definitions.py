@@ -31,7 +31,7 @@ service.yaml:
     alerts:                  # optional: where the service sends alerts
       on: [run_failed, run_late, stream_stopped, stream_lag, monitor_failed]
       channels:
-        - kind: slack        # slack, teams, google_chat, discord or webhook
+        - kind: slack        # slack, teams, google_chat, discord, webhook or email
           url_env: SLACK_WEBHOOK_URL   # the variable holding the URL, never the URL
       cooldown_minutes: 10
       run_minutes: 60        # a run still running after this is late
@@ -251,7 +251,7 @@ def _challenger_problem(model: Dict) -> Optional[str]:
 # builds for these.
 SUPPORTED_PLATFORMS = ('linux/amd64', 'linux/arm64')
 ALERT_KINDS = ('run_failed', 'run_late', 'stream_stopped', 'stream_lag', 'monitor_failed')
-CHANNEL_KINDS = ('slack', 'teams', 'google_chat', 'discord', 'webhook')
+CHANNEL_KINDS = ('slack', 'teams', 'google_chat', 'discord', 'webhook', 'email')
 _ENV_NAME = re.compile(r'^[A-Z][A-Z0-9_]*$')
 
 

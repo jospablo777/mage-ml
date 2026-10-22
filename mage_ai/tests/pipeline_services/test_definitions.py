@@ -180,6 +180,13 @@ class DefinitionsTest(ExportTestCase):
         self.assertEqual(alerts['run_minutes'], 30)
         self.assertEqual(self.service_yaml('scoring')['alerts'], alerts)
 
+    def test_alerts_go_by_email_through_a_variable_holding_the_smtp_url(self):
+        definitions.save_definition(self.repo_path, 'mailed', dict(pipelines=['a'], alerts=dict(
+            channels=[dict(kind='email', url_env='ALERT_SMTP_URL')],
+        )))
+        alerts = definitions.load_definition(self.repo_path, 'mailed')['alerts']
+        self.assertEqual(alerts['channels'], [dict(kind='email', url_env='ALERT_SMTP_URL')])
+
     def test_a_page_save_keeps_the_settings_the_page_does_not_edit(self):
         """The Services page sends models as name and uri; challengers and audit stayed out."""
         from mage_ai.api.resources.PipelineServiceResource import (
