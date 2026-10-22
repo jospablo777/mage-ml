@@ -113,10 +113,11 @@ class User(BaseModel):
         roles = self.fetch_roles([self.id])
         permissions = Role.fetch_permissions([r.id for r in roles])
         permissions_role = Role.fetch_role_permissions([r.id for r in roles])
-        permissions_mapping = merge_dict(
-            group_by(lambda x: x.role_id, permissions),
-            group_by(lambda x: x.role_id, permissions_role),
-        )
+        # A role's own permissions and those linked to it both count. A dict merge kept one
+        # list per role, so linking a permission to a role dropped the role's own.
+        permissions_mapping = group_by(lambda x: x.role_id, permissions)
+        for role_id, linked in group_by(lambda x: x.role_id, permissions_role).items():
+            permissions_mapping[role_id] = (permissions_mapping.get(role_id) or []) + linked
 
         for role in roles:
             permissions_for_role = permissions_mapping.get(role.id) or []
@@ -262,6 +263,35 @@ class User(BaseModel):
         query = db_connection.session.query(subquery).filter(subquery.c.row_number == 1)
         query.cache = True
         rows = query.all()
+
+        # The roles' own permissions (Permission.role_id, as default roles are made) too:
+        # the query above reads only the permissions linked to roles.
+        seen = {(row.id, row.user_id) for row in rows}
+        own = (
+            Permission.
+            select(
+                Permission.access,
+                Permission.created_at,
+                Permission.entity,
+                Permission.entity_id,
+                Permission.entity_name,
+                Permission.entity_type,
+                Permission.id,
+                Permission.options,
+                Permission.role_id,
+                Permission.updated_at,
+                UserRole.user_id,
+            ).
+            join(
+                UserRole,
+                and_(
+                    UserRole.role_id == Permission.role_id,
+                    UserRole.user_id.in_(user_ids),
+                ),
+            )
+        )
+        own.cache = True
+        rows = list(rows) + [row for row in own.all() if (row.id, row.user_id) not in seen]
 
         arr = []
 

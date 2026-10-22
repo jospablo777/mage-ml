@@ -26,6 +26,8 @@
 
 ### Server
 
+- A role keeps its own permissions when others are linked to it on the roles page: the
+  linked ones replaced them, so an editor role lost its project access.
 - `MAGE_GATEWAY=on` serves MageML's web server through a Rust gateway, the first step of
   moving the API to Rust: every request, stream and WebSocket passes through unchanged, in
   under 1 ms at p95. Off by default. See [Rust gateway](gateway.md).
