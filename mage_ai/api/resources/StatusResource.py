@@ -21,6 +21,10 @@ from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.hash import merge_dict
 
 
+# What a caller who has not signed in reads, when authentication is on.
+PUBLIC_KEYS = ('require_user_authentication', 'require_user_permissions')
+
+
 class StatusResource(GenericResource):
     @classmethod
     @safe_db_query
@@ -108,5 +112,12 @@ class StatusResource(GenericResource):
             }
 
             status = merge_dict(status, activity_details)
+
+        if REQUIRE_USER_AUTHENTICATION and user is None:
+            # Before sign-in the app reads whether to sign in; the server's paths, process
+            # ids, scheduler and activity went to anyone who could reach it.
+            status = {
+                key: status.get(key) for key in PUBLIC_KEYS
+            }
 
         return self.build_result_set([status], user, **kwargs)
