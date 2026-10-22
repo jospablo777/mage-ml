@@ -59,3 +59,20 @@ test('SQL templates are listed under SQL and make their blocks', async ({ page }
   await page.getByRole('button', { name: 'Save and add' }).click();
   await expect(page.getByText('SELECT DISTINCT ON (id) *').first()).toBeVisible();
 });
+
+test('Python transformer templates are listed by family and make Polars blocks', async ({ page }) => {
+  await page.waitForResponse(response => response.url().includes('/api/block_templates'));
+  await page.getByText('All blocks').first().click();
+  await visible(page, 'Transformer').hover();
+  for (const family of ['Data cleaning', 'Feature extraction', 'Machine learning']) {
+    await expect(visible(page, family)).toBeVisible();
+  }
+  await visible(page, 'Machine learning').hover();
+  for (const name of ['Model inference', 'Train a model']) {
+    await expect(visible(page, name)).toBeVisible();
+  }
+  await visible(page, 'Data cleaning').hover();
+  await visible(page, 'Clean data').click();
+  await page.getByRole('button', { name: 'Save and add' }).click();
+  await expect(page.getByText('import polars as pl').first()).toBeVisible();
+});

@@ -323,13 +323,6 @@ TEMPLATES_ONLY_FOR_V2 = [
         name='Base template (generic)',
         path='transformers/default.jinja',
     ),
-    dict(
-        block_type=BlockType.TRANSFORMER,
-        description='Score rows with a model file: skops, CatBoost, XGBoost, ONNX, torch.export.',
-        language=BlockLanguage.PYTHON,
-        name='Model inference',
-        path='transformers/model_inference.jinja',
-    ),
     #   Data warehouses
     dict(
         block_type=BlockType.TRANSFORMER,
@@ -766,6 +759,70 @@ TEMPLATES_ONLY_FOR_V2 = [
         path='sensors/postgres.py',
     ),
 ]
+
+
+def _python_transformer(name, file_name, description, groups):
+    return dict(
+        block_type=BlockType.TRANSFORMER,
+        description=description,
+        groups=groups,
+        language=BlockLanguage.PYTHON,
+        name=name,
+        path=f'transformers/python/{file_name}',
+    )
+
+
+# Python transformers in Polars; each takes a Polars or pandas frame.
+PYTHON_TRANSFORMER_TEMPLATES = [
+    _python_transformer(
+        'Clean data', 'clean.py',
+        'snake_case column names, trimmed text, no empty or duplicate rows.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _python_transformer(
+        'Deduplicate', 'deduplicate.py', 'Keep the latest row of each key.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _python_transformer(
+        'Data quality checks', 'quality.py',
+        'Fail with every problem found: missing values, repeated keys, negative amounts.',
+        [GROUP_DATA_CLEANING],
+    ),
+    _python_transformer(
+        'Aggregate', 'aggregate.py', 'Group rows and sum the numeric columns of each group.',
+        [GROUP_AGGREGATE],
+    ),
+    _python_transformer(
+        'Join', 'join.py', 'Join the outputs of two upstream blocks.', [GROUP_COMBINE],
+    ),
+    _python_transformer(
+        'Reshape', 'reshape.py', 'Turn columns into rows with unpivot.', [GROUP_RESHAPE],
+    ),
+    _python_transformer(
+        'Date features', 'dates.py',
+        'Day, ISO week day, month, hour and weekend of a date column.',
+        [GROUP_FEATURE_EXTRACTION],
+    ),
+    _python_transformer(
+        'One-hot encoding', 'encode.py', 'A 0 or 1 column per value of a column.',
+        [GROUP_FEATURE_EXTRACTION],
+    ),
+    dict(
+        block_type=BlockType.TRANSFORMER,
+        description='Score rows with a model file: skops, CatBoost, XGBoost, ONNX, torch.export.',
+        groups=[GROUP_MACHINE_LEARNING],
+        language=BlockLanguage.PYTHON,
+        name='Model inference',
+        # In TEMPLATES_ONLY_FOR_V2 before, so the default block menu never listed it.
+        path='transformers/model_inference.jinja',
+    ),
+    _python_transformer(
+        'Train a model', 'train.py',
+        'A scikit-learn random forest saved for Model inference, with its test metrics.',
+        [GROUP_MACHINE_LEARNING],
+    ),
+]
+TEMPLATES += PYTHON_TRANSFORMER_TEMPLATES
 
 
 def _r_template(block_type, name, file_name, description, groups=None):

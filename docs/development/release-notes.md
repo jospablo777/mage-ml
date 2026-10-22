@@ -26,6 +26,11 @@
 
 ### Pipelines
 
+- Python transformer templates in Polars, as R and Rust had: Clean data, Deduplicate, Data
+  quality checks, Aggregate, Join, Reshape, Date features, One-hot encoding and Train a
+  model (a scikit-learn random forest that Model inference reads). Each takes a Polars or
+  pandas frame. The Python Model inference template is now in the default block menu; it
+  was listed only in the menu behind the add_new_block_v2 feature flag.
 - Compiled DuckDB SQL chains: in a production run, consecutive DuckDB SQL blocks that
   replace their tables become views, and the block that needs the rows writes its table
   from one query DuckDB plans across them. A four-block chain over 30 million rows ran in

@@ -39,16 +39,16 @@ there.
 
 | Family | Python | R | Rust | SQL |
 | --- | --- | --- | --- | --- |
-| Aggregate | none yet | Aggregate | Aggregate | Date spine |
-| Combine | none yet | Join | Join | none yet |
+| Aggregate | Aggregate | Aggregate | Aggregate | Date spine |
+| Combine | Join | Join | Join | none yet |
 | Compute | none yet | none yet | Parallel computation | none yet |
-| Data cleaning | none yet | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate | Data quality report, Deduplicate |
+| Data cleaning | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate | Clean data, Data quality checks, Deduplicate | Data quality report, Deduplicate |
 | Data warehouses | Amazon Redshift, Google BigQuery, Snowflake | none yet | none yet | none yet |
 | Databases | PostgreSQL | none yet | none yet | none yet |
-| Feature extraction | none yet | Date features, One-hot encoding | Model features | Running total |
+| Feature extraction | Date features, One-hot encoding | Date features, One-hot encoding | Model features | Running total |
 | Formatting | none yet | none yet | Cast types | none yet |
-| Machine learning | none yet | Model inference, Train a model | ONNX model inference | none yet |
-| Reshape | none yet | Reshape | Unpivot | none yet |
+| Machine learning | Model inference, Train a model | Model inference, Train a model | ONNX model inference | none yet |
+| Reshape | Reshape | Reshape | Unpivot | none yet |
 | Other | Base template (generic) | none yet | none yet | none yet |
 
 ### Data exporters
