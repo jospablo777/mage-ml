@@ -7,6 +7,10 @@ from mage_ai.server.api.base import BaseHandler
 
 
 class FailingHandler(BaseHandler):
+    def prepare(self):
+        # Signed in: the traceback goes to signed-in users only (test_middleware.py).
+        self.request.current_user = object()
+
     async def get(self, **kwargs):
         error = ValueError('the resource failed')
         error.add_note('Block load (data_loaders/load.py) failed.')

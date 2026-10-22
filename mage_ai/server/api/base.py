@@ -10,8 +10,12 @@ import tornado.web
 from mage_ai.api.errors import ApiError
 from mage_ai.api.middleware import OAuthMiddleware
 from mage_ai.server.api.constants import PATH_TRAVERSAL_PATTERN
+from mage_ai.server.logger import Logger
+from mage_ai.settings import REQUIRE_USER_AUTHENTICATION
 from mage_ai.shared.parsers import encode_complex
 from mage_ai.shared.strings import camel_to_snake_case
+
+logger = Logger().new_server_logger(__name__)
 
 META_KEY_LIMIT = '_limit'
 META_KEY_OFFSET = '_offset'
@@ -71,6 +75,12 @@ class BaseHandler(tornado.web.RequestHandler):
             # The exception's traceback, with its notes. format_stack() here gave the stack
             # of this error handler, which said nothing about the failure.
             message = ''.join(traceback.format_exception(exception))
+            if REQUIRE_USER_AUTHENTICATION and not getattr(self.request, 'current_user', None):
+                # Not signed in (an API trigger's token, or no sign-in yet): the exception's
+                # own message, and the traceback in the log. The traceback went to the client,
+                # every frame's path and code included.
+                logger.error(f'{self.request.method} {self.request.path}:\n{message}')
+                message = 'The server could not answer this request; its log has the details.'
 
             self.write(
                 dict(
