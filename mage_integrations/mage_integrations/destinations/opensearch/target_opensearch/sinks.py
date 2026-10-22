@@ -200,7 +200,9 @@ class OpenSink(BatchSink):
             self.logger.info(f'Success: {success}')
             self.logger.info(f'Fail: {fail}')
         except opensearchpy.helpers.BulkIndexError as e:
-            self.logger.error(e.errors)
+            # Logged and dropped, a sync whose documents failed to index completed.
+            self.logger.error('OpenSearch bulk index failed: %s', e.errors)
+            raise
 
     def process_batch(self, context: Dict[str, Any]) -> None:
         """

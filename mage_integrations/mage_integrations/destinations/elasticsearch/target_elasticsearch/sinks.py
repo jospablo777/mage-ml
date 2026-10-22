@@ -237,9 +237,13 @@ class ElasticSink(BatchSink):
                 )
             self.logger.info(f'Bulk success: {success}/{len(records)}')
             if fail:
-                self.logger.info(f'Bulk fail: {fail}')
+                self.logger.warning(f'Bulk fail: {fail}')
         except elasticsearch.helpers.BulkIndexError as e:
-            self.logger.error('ES bulk index failed with errors:', e.errors)
+            # The error was logged and dropped, so a sync whose documents failed to index
+            # completed, and the format string had no placeholder for the errors.
+            # raise_on_error: false in bulk_kwargs keeps going and logs the failures.
+            self.logger.error('Elasticsearch bulk index failed: %s', e.errors)
+            raise
 
     def process_batch(self, context: Dict[str, Any]) -> None:
         """
