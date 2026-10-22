@@ -695,10 +695,13 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
     for trigger in [
         dict(name='every minute', schedule_type='time', schedule_interval='* * * * *',
              start_time='2024-01-01T00:00:00', status='active'),
-        # Not evaluated: its runs start ahead of the landing time.
+        # Evaluated: its run exists by the landing time.
         dict(name='landing daily', schedule_type='time', schedule_interval='@daily',
              start_time='2024-01-01T22:00:00', status='active',
              settings=dict(landing_time_enabled=True)),
+        # Not evaluated: a day of the month and of the week, which croniter joins with OR.
+        dict(name='both days', schedule_type='time', schedule_interval='0 12 1 * 1',
+             start_time='2024-01-01T00:00:00', status='active'),
     ]:
         response = signed_in.post(f'{base}/pipelines/{uuid}/pipeline_schedules', json=dict(
             pipeline_schedule=trigger,

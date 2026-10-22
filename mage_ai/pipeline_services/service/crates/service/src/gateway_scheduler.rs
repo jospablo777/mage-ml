@@ -2,7 +2,8 @@
 //! the gateway works out, for each active trigger of the project, the execution date the
 //! scheduler should have a run for (PipelineSchedule.should_schedule's clock rules), and
 //! checks that the run appears. A run that has not appeared after the grace period counts as
-//! missing. The scheduler keeps its authority; this only counts and reports, at
+//! missing; a trigger with a landing time has until the landing time, before which the
+//! scheduler starts its run. The scheduler keeps its authority; this only counts and reports, at
 //! /__gateway/shadow under `scheduler`.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -12,7 +13,7 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
-use crate::gateway_schedules::{UNSUPPORTED, clock_execution_date, truthy};
+use crate::gateway_schedules::{clock_execution_date, landing_execution_date, truthy};
 use crate::gateway_shadow::{Metadata, Raw, read_rows};
 
 const RECENT: usize = 20;
@@ -33,7 +34,9 @@ struct Pending {
     schedule: i64,
     pipeline: String,
     execution: DateTime<Utc>,
-    seen: DateTime<Utc>,
+    /// When the run must exist, before the grace period: when the execution date was seen,
+    /// or a landing time, before which the scheduler starts its run.
+    due: DateTime<Utc>,
 }
 
 #[derive(Default)]
@@ -67,35 +70,47 @@ pub(crate) struct Trigger {
     pub last_enabled_at: Option<DateTime<Utc>>,
 }
 
-/// The execution date the scheduler should have a run for at `now`, None when it starts
-/// none (should_schedule without the pipeline's state); an error for a trigger the gateway
-/// does not evaluate.
-pub(crate) fn due(trigger: &Trigger, now: DateTime<Utc>) -> Result<Option<DateTime<Utc>>, String> {
+/// An execution date and when its run must exist by.
+pub(crate) type Due = (DateTime<Utc>, DateTime<Utc>);
+
+/// The execution date the scheduler should have a run for at `now` and when the run must
+/// exist by, None when it starts none (should_schedule without the pipeline's state); an
+/// error for a trigger the gateway does not evaluate.
+pub(crate) fn due(trigger: &Trigger, now: DateTime<Utc>) -> Result<Option<Due>, String> {
     // After-run triggers start runs when another pipeline's run ends.
     if trigger.schedule_type == "AFTER_RUN" {
         return Ok(None);
     }
     let interval = trigger.interval.as_deref().unwrap_or_default();
     let presets = ["@hourly", "@daily", "@weekly", "@monthly"];
-    if trigger.schedule_type == "TIME"
+    let landing = trigger.schedule_type == "TIME"
         && presets.contains(&interval)
         && truthy(
             trigger
                 .settings
                 .get("landing_time_enabled")
                 .unwrap_or(&Value::Null),
-        )
-    {
-        // Runs start ahead of the landing time by the runs' average duration.
-        return Err(format!("{UNSUPPORTED}a landing time"));
-    }
-    if let Some(start) = trigger.start_time
-        && now < start
-    {
-        return Ok(None);
-    }
-    let Some(execution) = clock_execution_date(trigger.interval.as_deref(), now)? else {
-        return Ok(None);
+        );
+    // A landing time is the time the run must finish by: the scheduler starts it ahead by
+    // the runs' average duration (or at once without one), so it exists by the landing time.
+    let (execution, deadline) = match (landing, trigger.start_time) {
+        (true, Some(start)) => {
+            let Some(execution) = landing_execution_date(interval, start, now)? else {
+                return Ok(None);
+            };
+            (execution, Some(execution))
+        }
+        _ => {
+            if let Some(start) = trigger.start_time
+                && now < start
+            {
+                return Ok(None);
+            }
+            let Some(execution) = clock_execution_date(trigger.interval.as_deref(), now)? else {
+                return Ok(None);
+            };
+            (execution, None)
+        }
     };
     if let Some(start) = trigger.start_time
         && execution < start
@@ -116,7 +131,7 @@ pub(crate) fn due(trigger: &Trigger, now: DateTime<Utc>) -> Result<Option<DateTi
     {
         return Ok(None);
     }
-    Ok(Some(execution))
+    Ok(Some((execution, deadline.map_or(now, |d| d.max(now)))))
 }
 
 fn time(raw: &Raw) -> Option<DateTime<Utc>> {
@@ -221,7 +236,7 @@ impl SchedulerShadow {
                         state.unsupported.insert(trigger.id);
                     }
                     Ok(None) => {}
-                    Ok(Some(execution)) => {
+                    Ok(Some((execution, due))) => {
                         state.unsupported.remove(&trigger.id);
                         if state.last.get(&trigger.id) != Some(&execution) {
                             state.last.insert(trigger.id, execution);
@@ -229,7 +244,7 @@ impl SchedulerShadow {
                                 schedule: trigger.id,
                                 pipeline: trigger.pipeline_uuid.clone(),
                                 execution,
-                                seen: now,
+                                due,
                             });
                         }
                     }
@@ -278,7 +293,7 @@ impl SchedulerShadow {
             if found.contains(&(p.schedule, p.execution)) {
                 on_time += 1;
                 false
-            } else if now - p.seen > grace {
+            } else if now - p.due > grace {
                 missing.push(json!({
                     "pipeline_schedule_id": p.schedule,
                     "pipeline_uuid": p.pipeline,
@@ -357,11 +372,11 @@ mod tests {
         let now = utc("2026-10-22T06:10:15Z");
         assert_eq!(
             due(&trigger("@hourly"), now),
-            Ok(Some(utc("2026-10-22T06:00:00Z")))
+            Ok(Some((utc("2026-10-22T06:00:00Z"), now)))
         );
         assert_eq!(
             due(&trigger("*/15 * * * *"), now),
-            Ok(Some(utc("2026-10-22T06:00:00Z")))
+            Ok(Some((utc("2026-10-22T06:00:00Z"), now)))
         );
         assert_eq!(due(&trigger("@once"), now), Ok(None));
         assert_eq!(due(&trigger(""), now), Ok(None));
@@ -370,7 +385,7 @@ mod tests {
             schedule_type: "API".into(),
             ..trigger("@daily")
         };
-        assert_eq!(due(&api, now), Ok(Some(utc("2026-10-22T00:00:00Z"))));
+        assert_eq!(due(&api, now), Ok(Some((utc("2026-10-22T00:00:00Z"), now))));
         let after = Trigger {
             schedule_type: "AFTER_RUN".into(),
             ..trigger("@daily")
@@ -397,13 +412,30 @@ mod tests {
             settings: json!({"create_initial_pipeline_run": true}),
             ..enabled
         };
-        assert_eq!(due(&initial, now), Ok(Some(utc("2026-10-22T06:00:00Z"))));
-        // Landing times and cron forms the gateway does not read.
+        assert_eq!(
+            due(&initial, now),
+            Ok(Some((utc("2026-10-22T06:00:00Z"), now)))
+        );
+        // A landing time: today's, which the run must exist by; one passed, by now.
         let landing = Trigger {
             settings: json!({"landing_time_enabled": true}),
+            start_time: Some(utc("2026-01-01T22:25:00Z")),
             ..trigger("@daily")
         };
-        assert!(due(&landing, now).is_err());
+        let at = utc("2026-10-22T22:25:00Z");
+        assert_eq!(due(&landing, now), Ok(Some((at, at))));
+        let later = utc("2026-10-22T23:00:00Z");
+        assert_eq!(due(&landing, later), Ok(Some((at, later))));
+        // Without a start time a landing time changes nothing.
+        let unanchored = Trigger {
+            start_time: None,
+            ..landing
+        };
+        assert_eq!(
+            due(&unanchored, now),
+            Ok(Some((utc("2026-10-22T00:00:00Z"), now)))
+        );
+        // Cron forms the gateway does not read.
         assert!(due(&trigger("0 0 L * *"), now).is_err());
     }
 

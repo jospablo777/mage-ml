@@ -563,6 +563,23 @@ pub(crate) fn clock_execution_date(
     schedule.current(now).map(Some)
 }
 
+/// PipelineSchedule.current_execution_date at `now` for a trigger with a landing time:
+/// the execution date takes the start time's clock (and day of the week or month).
+pub(crate) fn landing_execution_date(
+    interval: &str,
+    start: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, String> {
+    let Some(interval) = Interval::parse(interval)? else {
+        return Ok(None);
+    };
+    let schedule = Schedule {
+        interval: &interval,
+        landing: Some(start),
+    };
+    schedule.current(now).map(Some)
+}
+
 /// PipelineSchedule.next_execution_date at `now`.
 fn next_execution_date(
     interval: Option<&str>,
