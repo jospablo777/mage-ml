@@ -34,6 +34,7 @@ with the gateway and checks:
 | Each GET of `contracts/openapi.json` without path parameters (74), plus `/`, `/pipelines`, signed in | The same status and body through the gateway as from the server |
 | A terminal WebSocket, signed in | The shell answers a command through the gateway |
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
+| The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 
 ## Next
 
