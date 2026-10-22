@@ -12,6 +12,7 @@ mod contract;
 mod environment;
 mod executor;
 mod gateway;
+mod gateway_auth;
 mod gateway_shadow;
 mod gcp;
 mod ibm;
@@ -324,10 +325,15 @@ fn main() -> ExitCode {
                 }
                 let shadow = match (shadow.is_empty(), metadata_db) {
                     (true, _) => None,
-                    (false, Some(url)) => Some(
-                        gateway_shadow::Metadata::parse(&url)
-                            .and_then(|db| gateway_shadow::Shadow::new(db, shadow))?,
-                    ),
+                    (false, Some(url)) => {
+                        Some(gateway_shadow::Metadata::parse(&url).and_then(|db| {
+                            gateway_shadow::Shadow::new(
+                                db,
+                                shadow,
+                                gateway_auth::AuthSettings::from_env(),
+                            )
+                        })?)
+                    }
                     (false, None) => return Err("--shadow needs --metadata-db.".to_string()),
                 };
                 gateway::run(listen, upstream, shadow)

@@ -96,6 +96,12 @@ struct Counts {
     equal_after_reread: u64,
     different: u64,
     failed: u64,
+    /// Answers the server refused (401 or 403): their data is not compared.
+    refused: u64,
+    /// The gateway's own allow or refuse against the server's (gateway_auth.rs).
+    decisions_agree: u64,
+    decisions_disagree: u64,
+    decisions_failed: u64,
 }
 
 /// The server's answer read again, for the same request; None when it did not answer 200.
@@ -110,12 +116,17 @@ const REREAD_AFTER: std::time::Duration = std::time::Duration::from_millis(100);
 pub struct Shadow {
     metadata: Metadata,
     routes: Vec<String>,
+    auth: Option<crate::gateway_auth::AuthSettings>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
 
 impl Shadow {
-    pub fn new(metadata: Metadata, routes: Vec<String>) -> Result<Shadow, String> {
+    pub fn new(
+        metadata: Metadata,
+        routes: Vec<String>,
+        auth: Option<crate::gateway_auth::AuthSettings>,
+    ) -> Result<Shadow, String> {
         for route in &routes {
             if !ROUTES.contains(&route.as_str()) {
                 return Err(format!(
@@ -127,6 +138,7 @@ impl Shadow {
         Ok(Shadow {
             metadata,
             routes,
+            auth,
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -157,8 +169,52 @@ impl Shadow {
         path: &str,
         query: &str,
         served: &[u8],
+        headers: &hyper::HeaderMap,
         reread: Reread,
     ) {
+        // MageML answers a refusal with 200 and an error: its code says which.
+        let error_code = serde_json::from_slice::<Value>(served).ok().and_then(|v| {
+            v.get("error")
+                .map(|e| e.get("code").and_then(Value::as_i64).unwrap_or(0))
+        });
+        let refused = matches!(error_code, Some(401 | 403));
+        if let Some(settings) = &self.auth
+            && (error_code.is_none() || refused)
+        {
+            let decided = self.decide(settings, route, path, query, headers).await;
+            let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+            let entry = counts.entry(route.to_string()).or_default();
+            match decided {
+                Ok(Some(allowed)) if allowed != refused => entry.decisions_agree += 1,
+                Ok(Some(allowed)) => {
+                    entry.decisions_disagree += 1;
+                    drop(counts);
+                    self.note(
+                        route,
+                        json!({"route": route, "query": query, "decision": {
+                            "server": if refused { "refused" } else { "allowed" },
+                            "gateway": if allowed { "allowed" } else { "refused" },
+                        }}),
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    entry.decisions_failed += 1;
+                    drop(counts);
+                    self.note(
+                        route,
+                        json!({"route": route, "query": query, "decision_failed": error}),
+                    );
+                }
+            }
+        }
+        if error_code.is_some() {
+            if refused {
+                let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+                counts.entry(route.to_string()).or_default().refused += 1;
+            }
+            return;
+        }
         let mut served = served.to_vec();
         let mut attempt = 0;
         let outcome = loop {
@@ -200,6 +256,59 @@ impl Shadow {
                 self.note(route, json!({"route": route, "query": query, "difference": first_difference(&served, &own)}));
             }
         }
+    }
+
+    /// Whether the gateway would serve the request: the caller as the middleware finds it,
+    /// then has_at_least_viewer_role on the pipeline the route reads, or the project. None
+    /// when there is nothing to decide (a run that does not exist).
+    async fn decide(
+        &self,
+        settings: &crate::gateway_auth::AuthSettings,
+        route: &str,
+        path: &str,
+        query: &str,
+        headers: &hyper::HeaderMap,
+    ) -> Result<Option<bool>, String> {
+        use crate::gateway_auth::{Caller, Entity, caller, may_view};
+        let query = Query::parse(query);
+        let user = match caller(&self.metadata, settings, headers, &query.0).await? {
+            Caller::Open => return Ok(Some(true)),
+            // Both routes take the private scope only.
+            Caller::Public | Caller::Refused(_) => return Ok(Some(false)),
+            Caller::User(user) => user,
+        };
+        let pipeline = match route {
+            "block_runs" => query.get("pipeline_uuid").map(str::to_string),
+            "pipeline_run" => {
+                let id = path
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default();
+                let id = id
+                    .parse::<i64>()
+                    .map_err(|_| format!("{path} names no run"))?;
+                let rows = read_rows(
+                    &self.metadata,
+                    "SELECT pipeline_uuid FROM pipeline_run WHERE id = {1}",
+                    &[Raw::Int(id)],
+                )
+                .await?;
+                match rows.first().and_then(|r| r.first()) {
+                    Some(Raw::Text(uuid)) => Some(uuid.clone()),
+                    Some(_) => None,
+                    None => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
+        };
+        let entity = match &pipeline {
+            Some(uuid) => Entity::Pipeline(uuid),
+            None => Entity::Project,
+        };
+        may_view(&self.metadata, settings, user, entity)
+            .await
+            .map(Some)
     }
 
     fn note(&self, route: &str, difference: Value) {
@@ -683,7 +792,8 @@ fn select_list(metadata: &Metadata, fields: &[(&str, Kind)]) -> String {
 }
 
 /// A value read from either database, before it takes its field's kind.
-enum Raw {
+#[derive(Debug, Clone)]
+pub(crate) enum Raw {
     Null,
     Int(i64),
     Text(String),
@@ -912,6 +1022,108 @@ async fn postgres_run(
     Ok((run, blocks, schedule))
 }
 
+/// Rows of a query whose parameters are written `{1}`, `{2}`: `?1` on SQLite, `$1` on
+/// PostgreSQL. Values read by their column's type (gateway_auth.rs).
+pub(crate) async fn read_rows(
+    metadata: &Metadata,
+    template: &str,
+    params: &[Raw],
+) -> Result<Vec<Vec<Raw>>, String> {
+    let mut sql = template.to_string();
+    for n in (1..=params.len()).rev() {
+        sql = sql.replace(&format!("{{{n}}}"), &placeholder(metadata, n));
+    }
+    match metadata {
+        Metadata::Sqlite(path) => {
+            let (path, params) = (path.clone(), params.to_vec());
+            tokio::task::spawn_blocking(move || -> Result<Vec<Vec<Raw>>, String> {
+                use rusqlite::{OpenFlags, ToSql, types::ToSqlOutput};
+                let connection = rusqlite::Connection::open_with_flags(
+                    &path,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+                let values: Vec<ToSqlOutput> = params
+                    .iter()
+                    .map(|p| match p {
+                        Raw::Int(v) => ToSqlOutput::from(*v),
+                        Raw::Text(v) => ToSqlOutput::from(v.clone()),
+                        Raw::Bool(v) => ToSqlOutput::from(*v),
+                        _ => ToSqlOutput::from(rusqlite::types::Null),
+                    })
+                    .collect();
+                let refs: Vec<&dyn ToSql> = values.iter().map(|v| v as &dyn ToSql).collect();
+                let mut statement = connection.prepare(&sql).map_err(|e| e.to_string())?;
+                let width = statement.column_count();
+                statement
+                    .query_map(refs.as_slice(), |row| {
+                        (0..width).map(|i| row.get_ref(i).map(sqlite_raw)).collect()
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+        Metadata::Postgres(pg) => {
+            use tokio_postgres::types::{ToSql, Type};
+            let client = pg.client().await?;
+            let owned: Vec<Box<dyn ToSql + Sync + Send>> = params
+                .iter()
+                .map(|p| -> Box<dyn ToSql + Sync + Send> {
+                    match p {
+                        // MageML's ids and integers are int4.
+                        Raw::Int(v) => Box::new(*v as i32),
+                        Raw::Text(v) => Box::new(v.clone()),
+                        Raw::Bool(v) => Box::new(*v),
+                        _ => Box::new(Option::<String>::None),
+                    }
+                })
+                .collect();
+            let refs: Vec<&(dyn ToSql + Sync)> = owned
+                .iter()
+                .map(|b| b.as_ref() as &(dyn ToSql + Sync))
+                .collect();
+            let rows = match client.query(sql.as_str(), &refs).await {
+                Ok(rows) => rows,
+                Err(error) => {
+                    pg.forget().await;
+                    return Err(error.to_string());
+                }
+            };
+            rows.iter()
+                .map(|row| {
+                    row.columns()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, column)| {
+                            let raw = match *column.type_() {
+                                Type::INT2 => {
+                                    pg_get::<Option<i16>>(row, i)?.map(|v| Raw::Int(v.into()))
+                                }
+                                Type::INT4 => {
+                                    pg_get::<Option<i32>>(row, i)?.map(|v| Raw::Int(v.into()))
+                                }
+                                Type::INT8 => pg_get::<Option<i64>>(row, i)?.map(Raw::Int),
+                                Type::BOOL => pg_get::<Option<bool>>(row, i)?.map(Raw::Bool),
+                                Type::TIMESTAMPTZ => {
+                                    pg_get::<Option<chrono::DateTime<chrono::Utc>>>(row, i)?
+                                        .map(Raw::Time)
+                                }
+                                Type::TIMESTAMP => pg_get::<Option<chrono::NaiveDateTime>>(row, i)?
+                                    .map(|at| Raw::Time(at.and_utc())),
+                                _ => pg_get::<Option<String>>(row, i)?.map(Raw::Text),
+                            };
+                            Ok(raw.unwrap_or(Raw::Null))
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,8 +1176,12 @@ mod tests {
 
     #[test]
     fn run_paths_are_digits() {
-        let shadow =
-            Shadow::new(Metadata::Sqlite("/x".into()), vec!["pipeline_run".into()]).unwrap();
+        let shadow = Shadow::new(
+            Metadata::Sqlite("/x".into()),
+            vec!["pipeline_run".into()],
+            None,
+        )
+        .unwrap();
         let get = hyper::Method::GET;
         assert_eq!(
             shadow.route_for(&get, "/api/pipeline_runs/12"),

@@ -218,7 +218,14 @@ async fn forward(
         let reread = reread(upstream, &reread_uri, &reread_headers);
         tokio::spawn(async move {
             shadow
-                .compare(route, &route_path, &query, &compared, reread)
+                .compare(
+                    route,
+                    &route_path,
+                    &query,
+                    &compared,
+                    &reread_headers,
+                    reread,
+                )
                 .await
         });
         return Response::from_parts(

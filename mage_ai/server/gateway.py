@@ -50,7 +50,20 @@ def shadow_settings() -> tuple:
     url = metadata_url()
     if routes.lower() in ('', 'off', '0', 'false') or not url:
         return [], {}
-    return ['--shadow', routes], dict(MAGE_GATEWAY_METADATA_DB=url)
+    from mage_ai.data_preparation.repo_manager import get_project_uuid
+    from mage_ai.settings import (
+        OAUTH2_APPLICATION_CLIENT_ID,
+        REQUIRE_USER_AUTHENTICATION,
+    )
+
+    # What the server's decisions depend on, so the gateway decides as it does
+    # (gateway_auth.rs); JWT_SECRET is in the environment the gateway inherits.
+    return ['--shadow', routes], dict(
+        MAGE_GATEWAY_METADATA_DB=url,
+        MAGE_GATEWAY_REQUIRE_AUTHENTICATION='1' if REQUIRE_USER_AUTHENTICATION else '0',
+        MAGE_GATEWAY_CLIENT_ID=OAUTH2_APPLICATION_CLIENT_ID,
+        MAGE_GATEWAY_PROJECT_UUID=get_project_uuid() or '',
+    )
 
 
 def start(host: Optional[str], port: int, upstream_port: int) -> subprocess.Popen:

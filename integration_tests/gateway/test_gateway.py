@@ -20,6 +20,8 @@ import requests
 
 SPEC = Path(__file__).resolve().parents[2] / 'contracts' / 'openapi.json'
 COUNTS = ('equal', 'equal_after_reread', 'different', 'failed')
+DECISIONS = ('decisions_agree', 'decisions_disagree', 'decisions_failed')
+DATA = None
 # Answers that hold the time or a counter, so two calls in a row differ without a gateway.
 VOLATILE = re.compile(r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?|\b\d{10,}(\.\d+)?\b')
 
@@ -40,6 +42,8 @@ def ports(tmp_path_factory):
     except EngineNotFound as error:
         pytest.skip(str(error))
     folder = tmp_path_factory.mktemp('gateway')
+    global DATA
+    DATA = folder / 'data'
     project = folder / 'project'
     port = free_port()
     env = dict(
@@ -89,6 +93,17 @@ def signed_in(ports):
     # The editor's terminal sends the access token inside the session token.
     session.access_token = decode_token(token)['token']
     return session
+
+
+def settled(read):
+    """The shadow counts once two reads 0.3 s apart agree: comparisons run after answers."""
+    last, _ = read()
+    while True:
+        time.sleep(0.3)
+        now, _ = read()
+        if now == last:
+            return now
+        last = now
 
 
 def normalized(response):
@@ -226,7 +241,8 @@ def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
               for uuid in pipelines):
         assert time.monotonic() < deadline, 'the scheduler made no block runs'
         time.sleep(1)
-    before, _ = counts()
+    # The comparisons of the calls above finish in the background; the baseline waits for them.
+    before = settled(counts)
     for query in queries:
         assert signed_in.get(f'{base}/block_runs?{query}', timeout=60).status_code == 200
     deadline = time.monotonic() + 30
@@ -254,7 +270,7 @@ def test_run_details_read_from_the_database_equal_the_servers(ports, signed_in):
         found = report['routes'].get('pipeline_run', {})
         return {k: found.get(k, 0) for k in COUNTS}, report
 
-    before, _ = counts()
+    before = settled(counts)
     blocks = 0
     for run in runs:
         detail = signed_in.get(f"{base}/pipeline_runs/{run['id']}", timeout=60)
@@ -272,3 +288,84 @@ def test_run_details_read_from_the_database_equal_the_servers(ports, signed_in):
     assert added['equal'] + added['equal_after_reread'] == len(runs), \
         json.dumps(report['recent_differences'], indent=1)
     assert added['different'] == added['failed'] == 0
+
+
+def test_the_gateway_decides_who_reads_as_the_server_does(ports, signed_in):
+    """
+    Each shadowed read's allow or refuse, against the server's: the owner, a caller without
+    a session, and a project viewer whom a permission keeps out of one pipeline.
+    """
+    import sqlite3
+
+    from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
+    from mage_ai.settings.server import OAUTH2_APPLICATION_CLIENT_ID
+
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    kept_out, open_to = (
+        signed_in.post(f'{base}/pipelines', json=dict(pipeline=dict(
+            name=name, type='python',
+        )), timeout=60).json()['pipeline']['uuid']
+        for name in ('decide_kept_out', 'decide_open_to')
+    )
+
+    # The server's metadata database: test.db in its folder, as ENV=test_mage reaches it.
+    [database] = list(DATA.parent.glob('*.db')) or list(DATA.rglob('mage-ai.db'))
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            'INSERT INTO "user" (email, username, password_hash, password_salt, owner) '
+            "VALUES ('viewer@example.com', 'viewer', ?, '', 0)",
+            (create_bcrypt_hash('viewer password', generate_salt()),),
+        )
+        user = connection.execute(
+            "SELECT id FROM \"user\" WHERE username = 'viewer'",
+        ).fetchone()[0]
+        connection.execute("INSERT INTO role (name) VALUES ('pipeline viewers')")
+        role = connection.execute(
+            "SELECT id FROM role WHERE name = 'pipeline viewers'",
+        ).fetchone()[0]
+        connection.execute('INSERT INTO user_role (user_id, role_id) VALUES (?, ?)', (user, role))
+        # Viewer everywhere, by a global permission, and nothing on one pipeline.
+        connection.execute(
+            'INSERT INTO permission (entity, entity_id, access, role_id) '
+            "VALUES ('GLOBAL', NULL, 8, ?)",
+            (role,),
+        )
+        connection.execute(
+            "INSERT INTO permission (entity, entity_id, access, role_id) "
+            "VALUES ('PIPELINE', ?, 0, ?)",
+            (kept_out, role),
+        )
+    viewer = requests.Session()
+    viewer.headers['X-API-KEY'] = OAUTH2_APPLICATION_CLIENT_ID
+    token = viewer.post(f'{base}/sessions', json=dict(session=dict(
+        email='viewer@example.com', password='viewer password',
+    )), timeout=60).json()['session']['token']
+    viewer.cookies.set('oauth_token', token)
+    stranger = requests.Session()
+    stranger.headers['X-API-KEY'] = OAUTH2_APPLICATION_CLIENT_ID
+
+    def decisions():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('block_runs', {})
+        return {k: found.get(k, 0) for k in DECISIONS}, report
+
+    before = settled(decisions)
+    asked = [
+        (signed_in, f'pipeline_uuid={kept_out}', True),
+        (stranger, '', False),
+        (viewer, f'pipeline_uuid={open_to}', True),
+        (viewer, f'pipeline_uuid={kept_out}', False),
+    ]
+    for session, query, allowed in asked:
+        body = session.get(f'{base}/block_runs?{query}', timeout=60).json()
+        assert ('error' not in body) == allowed, (query, body)
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = decisions()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(asked) or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added == dict(decisions_agree=len(asked), decisions_disagree=0, decisions_failed=0), \
+        json.dumps(report['recent_differences'], indent=1)

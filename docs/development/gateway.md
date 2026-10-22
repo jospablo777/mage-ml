@@ -44,8 +44,20 @@ differ; each difference is also logged. The database URL reaches the gateway in 
 | `GET /api/block_runs` | One query over block runs, runs and triggers, with `pipeline_run_id`, `pipeline_uuid`, `order_by`, `_limit`, `_offset` | The default order (started, created, completed, newest first), `metadata.count` and `next`, ISO times without a zero fraction, statuses stored by name and shown by value |
 | `GET /api/pipeline_runs/<id>` | The run's presenter attributes and every column of its block runs, with the trigger's id and name | `str(datetime)` times (a space, `+00:00` on PostgreSQL), JSON columns, the block runs sorted by creation, the `metadata: null` envelope |
 
-A route starts being served by the gateway only after its shadow reads stay equal; its
-authorization moves with it, with the policy matrix (`contracts/`) as the check.
+The gateway also decides, for each shadowed read, whether it would serve it, and compares
+that with the server's answer (a refusal is a 200 with an error whose code is 401 or 403;
+its data is not compared). The caller is found as OAuthMiddleware finds it: the API key
+(only MageML's own), then a bearer token or the session cookie, a JWT checked against
+`JWT_SECRET`, and the access token's row and expiry. The read is allowed as
+`has_at_least_viewer_role` allows it on the route's pipeline, or the project: the owner
+flag, an owner role on the project, the older role bits, or any access through the user's
+roles, whose permissions on a pipeline fall back to the project's and then the global ones.
+MageML passes what this depends on (`MAGE_GATEWAY_REQUIRE_AUTHENTICATION`,
+`MAGE_GATEWAY_CLIENT_ID`, `MAGE_GATEWAY_PROJECT_UUID`) in the gateway's environment. The
+counts are `decisions_agree`, `decisions_disagree` and `decisions_failed`.
+
+A route starts being served by the gateway only after its shadow reads and decisions stay
+equal, with the policy matrix (`contracts/`) as a further check.
 
 ## Measured
 
@@ -59,6 +71,7 @@ with the gateway and checks:
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
 | `GET /api/block_runs` for ten combinations of filters, order and pages over eight block runs | All ten shadow reads equal; a status written as stored instead of shown makes the test fail |
 | `GET /api/pipeline_runs/<id>` for four runs while the scheduler runs them | All equal, some after a reread |
+| Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 
 ## Next
