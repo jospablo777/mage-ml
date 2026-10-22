@@ -1,6 +1,7 @@
 # Rust gateway in front of the web server
 
-Status: step 1 done (2026-10-21), off by default; `MAGE_GATEWAY=on` turns it on.
+Status: step 1 and shadow reads for block runs done (2026-10-21), off by default;
+`MAGE_GATEWAY=on` turns it on.
 
 The API moves to Rust one route family at a time behind a gateway (ADR-0007, ROADMAP P2).
 Step 1 is the gateway alone: it answers nothing itself and passes every request to the
@@ -24,6 +25,24 @@ process exits.
   both ways, so kernels and terminals work without the gateway reading their frames.
 - When the server does not answer, the gateway answers 502 with a short message.
 
+## Shadow reads
+
+For the routes in `MAGE_GATEWAY_SHADOW` (default `block_runs`; `off` turns them off), the
+gateway still serves the server's answer, then computes its own from the metadata
+database (SQLite, or PostgreSQL in UTC) and compares the two as JSON. The server's answer
+for these routes is read whole before it is sent, and asked for uncompressed.
+`/__gateway/shadow`, from loopback only, gives the counts per route (equal, different,
+failed) and the last 20 differences with the first path where they differ; each
+difference is also logged. The database URL reaches the gateway in its environment
+(`MAGE_GATEWAY_METADATA_DB`), so `ps` does not show its password.
+
+| Route | Gateway answer | Reproduces |
+| --- | --- | --- |
+| `GET /api/block_runs` | One query over block runs, runs and triggers, with `pipeline_run_id`, `pipeline_uuid`, `order_by`, `_limit`, `_offset` | The default order (started, created, completed, newest first), `metadata.count` and `next`, ISO times without a zero fraction, statuses stored by name and shown by value |
+
+A route starts being served by the gateway only after its shadow reads stay equal; its
+authorization moves with it, with the policy matrix (`contracts/`) as the check.
+
 ## Measured
 
 `integration_tests/gateway` (`make -C integration_tests test-gateway`) runs `mage start`
@@ -34,6 +53,7 @@ with the gateway and checks:
 | Each GET of `contracts/openapi.json` without path parameters (74), plus `/`, `/pipelines`, signed in | The same status and body through the gateway as from the server |
 | A terminal WebSocket, signed in | The shell answers a command through the gateway |
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
+| `GET /api/block_runs` for ten combinations of filters, order and pages over eight block runs | All ten shadow reads equal; a status written as stored instead of shown makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 
 ## Next

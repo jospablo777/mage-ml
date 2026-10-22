@@ -169,3 +169,66 @@ def test_the_gateway_adds_under_two_milliseconds_at_p95(ports, signed_in):
     median = statistics.median(through) - statistics.median(direct)
     print(f'gateway adds {median:.2f} ms at the median, {p95:.2f} ms at p95')
     assert p95 < 2.0, (median, p95)
+
+
+LOAD = """
+@data_loader
+def load(*args, **kwargs):
+    return {'n': 1}
+"""
+
+
+def test_block_runs_read_from_the_database_equal_the_servers(ports, signed_in):
+    """The shadow read of GET /api/block_runs, for each filter, order and page."""
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+
+    def call(method, path, **body):
+        response = signed_in.request(method, f'{base}/{path}', json=body or None, timeout=60)
+        response.raise_for_status()
+        return response.json()
+
+    pipelines = []
+    for name in ('shadow_one', 'shadow_two'):
+        made = call('POST', 'pipelines', pipeline=dict(name=name, type='python'))
+        uuid = made['pipeline']['uuid']
+        for block in ('first', 'second'):
+            call('POST', f'pipelines/{uuid}/blocks', block=dict(
+                name=f'{name}_{block}', type='data_loader', language='python', content=LOAD,
+            ))
+        schedule = call('POST', f'pipelines/{uuid}/pipeline_schedules', pipeline_schedule=dict(
+            name=f'{name} trigger', schedule_type='api', status='active',
+        ))['pipeline_schedule']
+        for _ in range(2):
+            call('POST', f"pipeline_schedules/{schedule['id']}/pipeline_runs",
+                 pipeline_run=dict(variables={}))
+        pipelines.append(uuid)
+    run_id = call('GET', f'pipeline_runs?pipeline_uuid={pipelines[0]}')['pipeline_runs'][0]['id']
+
+    queries = [
+        '', '_limit=3', '_limit=3&_offset=3', '_limit=100',
+        f'pipeline_uuid={pipelines[0]}', f'pipeline_run_id={run_id}',
+        f'pipeline_uuid={pipelines[1]}&order_by=id%20asc', 'order_by=block_uuid+desc',
+        'order_by=created_at', 'pipeline_uuid=nothing_here',
+    ]
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('block_runs', {})
+        return {k: found.get(k, 0) for k in ('equal', 'different', 'failed')}, report
+
+    # The scheduler makes a run's block runs when it starts it.
+    deadline = time.monotonic() + 120
+    while call('GET', 'block_runs')['metadata']['count'] < 8:
+        assert time.monotonic() < deadline, 'the scheduler made no block runs'
+        time.sleep(1)
+    before, _ = counts()
+    for query in queries:
+        assert signed_in.get(f'{base}/block_runs?{query}', timeout=60).status_code == 200
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added == dict(equal=len(queries), different=0, failed=0), report

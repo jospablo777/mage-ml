@@ -12,6 +12,7 @@ mod contract;
 mod environment;
 mod executor;
 mod gateway;
+mod gateway_shadow;
 mod gcp;
 mod ibm;
 mod jobs;
@@ -89,6 +90,14 @@ enum Command {
         /// Exit when the process that started the gateway is gone.
         #[arg(long)]
         exit_with_parent: bool,
+        /// MageML's metadata database (sqlite:///path or postgresql://...), for --shadow;
+        /// MageML passes it in the environment, where ps does not show its password.
+        #[arg(long, env = "MAGE_GATEWAY_METADATA_DB", hide_env_values = true)]
+        metadata_db: Option<String>,
+        /// Routes the gateway also answers from the metadata database and compares with the
+        /// server's answers, comma-separated: block_runs.
+        #[arg(long, value_delimiter = ',')]
+        shadow: Vec<String>,
     },
     /// Check that each stream's source and sinks answer, read-only, then exit: 0 when none
     /// failed.
@@ -307,11 +316,21 @@ fn main() -> ExitCode {
                 listen,
                 upstream,
                 exit_with_parent,
+                metadata_db,
+                shadow,
             } => {
                 if exit_with_parent {
                     gateway::exit_with_parent();
                 }
-                gateway::run(listen, upstream)
+                let shadow = match (shadow.is_empty(), metadata_db) {
+                    (true, _) => None,
+                    (false, Some(url)) => Some(
+                        gateway_shadow::Metadata::parse(&url)
+                            .and_then(|db| gateway_shadow::Shadow::new(db, shadow))?,
+                    ),
+                    (false, None) => return Err("--shadow needs --metadata-db.".to_string()),
+                };
+                gateway::run(listen, upstream, shadow)
                     .await
                     .map(|_| ExitCode::SUCCESS)
             }

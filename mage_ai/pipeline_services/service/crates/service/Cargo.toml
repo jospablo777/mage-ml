@@ -10,6 +10,7 @@ publish.workspace = true
 mage-service-core = { path = "../core" }
 mage-log = { path = "../log" }
 mage-ledger = { path = "../ledger" }
+mage-pg = { path = "../pg" }
 mage-stream-core = { path = "../stream-core" }
 mage-stream-ports = { path = "../stream-ports" }
 mage-connector-local = { path = "../connector-local" }
@@ -24,7 +25,7 @@ mage-connector-ibmmq = { path = "../connector-ibmmq", optional = true }
 mage-connector-objectstore = { path = "../connector-objectstore", optional = true }
 # Always built: the run history can be PostgreSQL in any image (MAGE_SERVICE_LEDGER_URL).
 mage-connector-postgres = { path = "../connector-postgres" }
-tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime", "with-chrono-0_4"] }
 bytes = "1"
 mage-connector-clickhouse = { path = "../connector-clickhouse", optional = true }
 mage-connector-sqs = { path = "../connector-sqs", optional = true }

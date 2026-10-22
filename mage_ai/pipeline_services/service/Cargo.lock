@@ -3500,6 +3500,7 @@ dependencies = [
  "mage-connector-sqs",
  "mage-ledger",
  "mage-log",
+ "mage-pg",
  "mage-service-core",
  "mage-stream-core",
  "mage-stream-ports",
@@ -5172,6 +5173,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "851ca9db4932932d69f3ea811b1abe63087a0f740a47692619dd40d4899b68be"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
 ]

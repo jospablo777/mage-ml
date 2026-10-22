@@ -3,10 +3,12 @@
 //! came, Host included: bodies stream both ways without buffering, and a WebSocket upgrade
 //! becomes a byte tunnel once the server agrees, so kernels and terminals work unchanged.
 //! Route families move here one at a time later; until then the gateway answers nothing
-//! itself, except 502 when the server does not answer.
+//! itself, except 502 when the server does not answer, and compares its own answers for
+//! the routes given with --shadow (gateway_shadow.rs).
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -17,6 +19,8 @@ use hyper::{Request, Response, StatusCode, Uri};
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpListener;
+
+use crate::gateway_shadow::Shadow;
 
 type Body = BoxBody<Bytes, hyper::Error>;
 
@@ -37,7 +41,11 @@ const HOP_BY_HOP: &[&str] = &[
 struct Upstream {
     authority: String,
     client: Client<HttpConnector, Incoming>,
+    shadow: Option<Arc<Shadow>>,
 }
+
+/// The gateway's own page: its shadow reads, from loopback only.
+const SHADOW_REPORT: &str = "/__gateway/shadow";
 
 /// Exits once the process that started the gateway is gone: a stopped or killed MageML
 /// server leaves no gateway holding its port.
@@ -57,14 +65,22 @@ pub fn exit_with_parent() {
     }
 }
 
-pub async fn run(listen: SocketAddr, upstream: String) -> Result<(), String> {
+pub async fn run(
+    listen: SocketAddr,
+    upstream: String,
+    shadow: Option<Shadow>,
+) -> Result<(), String> {
     let listener = TcpListener::bind(listen)
         .await
         .map_err(|e| format!("Could not listen on {listen}: {e}"))?;
-    serve(listener, upstream).await
+    serve(listener, upstream, shadow).await
 }
 
-pub async fn serve(listener: TcpListener, upstream: String) -> Result<(), String> {
+pub async fn serve(
+    listener: TcpListener,
+    upstream: String,
+    shadow: Option<Shadow>,
+) -> Result<(), String> {
     let mut connector = HttpConnector::new();
     connector.set_nodelay(true);
     connector.set_keepalive(Some(Duration::from_secs(60)));
@@ -73,6 +89,7 @@ pub async fn serve(listener: TcpListener, upstream: String) -> Result<(), String
         client: Client::builder(TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
             .build(connector),
+        shadow: shadow.map(Arc::new),
     };
     crate::log::info(&format!(
         "Gateway on {} for the MageML server at {}",
@@ -108,9 +125,24 @@ async fn forward(
     peer: SocketAddr,
     mut request: Request<Incoming>,
 ) -> Response<Body> {
+    if request.uri().path() == SHADOW_REPORT {
+        return match &upstream.shadow {
+            Some(shadow) if peer.ip().is_loopback() => json_answer(&shadow.report()),
+            _ => answer(StatusCode::NOT_FOUND, "Not found."),
+        };
+    }
+    let shadowed = upstream
+        .shadow
+        .as_ref()
+        .and_then(|shadow| shadow.route_for(request.method(), request.uri().path()));
+    let query = request.uri().query().unwrap_or_default().to_string();
     let upgrade = wants_upgrade(request.headers());
     let client_side = upgrade.then(|| hyper::upgrade::on(&mut request));
     let (mut parts, body) = request.into_parts();
+    if shadowed.is_some() {
+        // Compared as JSON, so the server sends it uncompressed.
+        parts.headers.remove(header::ACCEPT_ENCODING);
+    }
     let path = parts
         .uri
         .path_and_query()
@@ -154,7 +186,39 @@ async fn forward(
     }
     let (mut parts, body) = response.into_parts();
     strip_hop_by_hop(&mut parts.headers, false);
+    if let (Some(route), Some(shadow)) = (shadowed, &upstream.shadow)
+        && parts.status == StatusCode::OK
+    {
+        let served = match body.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(error) => {
+                crate::log::warn(&format!("Gateway: reading the server's answer: {error}"));
+                return answer(
+                    StatusCode::BAD_GATEWAY,
+                    "The MageML server's answer broke off.",
+                );
+            }
+        };
+        let (shadow, compared) = (shadow.clone(), served.clone());
+        tokio::spawn(async move { shadow.compare(route, &query, &compared).await });
+        return Response::from_parts(
+            parts,
+            Full::new(served).map_err(|never| match never {}).boxed(),
+        );
+    }
     Response::from_parts(parts, body.boxed())
+}
+
+fn json_answer(value: &serde_json::Value) -> Response<Body> {
+    let mut response = answer(StatusCode::OK, "");
+    *response.body_mut() = Full::new(Bytes::from(value.to_string()))
+        .map_err(|never| match never {})
+        .boxed();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
 }
 
 fn wants_upgrade(headers: &HeaderMap) -> bool {
@@ -352,7 +416,7 @@ mod tests {
     async fn gateway(upstream: SocketAddr) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        tokio::spawn(serve(listener, upstream.to_string()));
+        tokio::spawn(serve(listener, upstream.to_string(), None));
         address
     }
 
