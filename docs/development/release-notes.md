@@ -72,6 +72,8 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- An API trigger call sets only the run's `variables` and `execution_date`; other keys of
+  `pipeline_run` were written to the run (its id, status, backfill).
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead
   today is the next one, a monthly landing time keeps its day, and a start time ahead is
   respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets

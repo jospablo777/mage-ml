@@ -15,6 +15,10 @@ from mage_ai.server.api.errors import UnauthenticatedRequestException
 from mage_ai.shared.requests import get_bearer_auth_token_from_headers
 
 
+# What an API trigger's caller may set on the run it starts.
+RUN_KEYS = ('variables', 'execution_date')
+
+
 class ApiTriggerPipelineHandler(BaseHandler):
     model_class = PipelineRun
 
@@ -51,7 +55,15 @@ class ApiTriggerPipelineHandler(BaseHandler):
                     message=f'The request body is not JSON: {error}.',
                 ))
             if isinstance(body, dict):
-                payload = body.get('pipeline_run') or {}
+                run = body.get('pipeline_run') or {}
+                if not isinstance(run, dict) or not isinstance(run.get('variables', {}), dict):
+                    raise ApiError(dict(
+                        ApiError.RESOURCE_INVALID,
+                        message='pipeline_run must be an object, and its variables too.',
+                    ))
+                # Only what a caller may set: every other key reached PipelineRun.create, so
+                # a caller with the token chose the run's id, status, backfill or metrics.
+                payload = {k: v for k, v in run.items() if k in RUN_KEYS}
                 payload['event_variables'] = {
                     k: v for k, v in body.items() if k != 'pipeline_run'
                 }

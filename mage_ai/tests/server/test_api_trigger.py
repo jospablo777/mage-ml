@@ -69,6 +69,26 @@ class ApiTriggerBodyTest(AsyncHTTPTestCase):
         self.assertEqual(payload['variables'], {'target': 'staging'})
         self.assertEqual(payload['event_variables'], {'source': 'crm'})
 
+    def test_a_caller_sets_variables_and_the_execution_date_only(self):
+        """Every key of pipeline_run reached PipelineRun.create: id, status, backfill."""
+        _, _, payload = self.trigger(json.dumps({'pipeline_run': {
+            'variables': {'target': 'staging'},
+            'execution_date': '2026-01-01T00:00:00',
+            'id': 7, 'status': 'completed', 'backfill_id': 3, 'metrics': {'x': 1},
+        }}))
+
+        self.assertEqual(
+            {k: v for k, v in payload.items() if k != 'event_variables'},
+            {'variables': {'target': 'staging'}, 'execution_date': '2026-01-01T00:00:00'},
+        )
+
+    def test_a_pipeline_run_that_is_not_an_object_is_refused(self):
+        for body in ({'pipeline_run': [1]}, {'pipeline_run': {'variables': [1]}}):
+            with self.subTest(body=body):
+                _, answer, payload = self.trigger(json.dumps(body))
+                self.assertIsNone(payload)
+                self.assertEqual(answer['error']['code'], 400)
+
     def test_a_body_that_is_not_json_is_refused_with_the_reason(self):
         _, answer, payload = self.trigger('{not json')
 
