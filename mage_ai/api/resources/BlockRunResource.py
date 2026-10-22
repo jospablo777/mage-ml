@@ -140,7 +140,12 @@ class BlockRunResource(DatabaseResource):
             asc_desc = asc_desc.lower()
             try:
                 br_col = getattr(a, col)
-                initial_results = query.order_by(getattr(br_col, asc_desc)())
+                # The id breaks ties: block runs a run creates share their times, and pages
+                # cut through equal values repeated or skipped rows from one page to the next.
+                initial_results = query.order_by(
+                    getattr(br_col, asc_desc)(),
+                    getattr(a.id, asc_desc)(),
+                )
             except AttributeError:
                 raise Exception(
                     'Block run sort column/query is invalid. The sort column '
@@ -152,6 +157,7 @@ class BlockRunResource(DatabaseResource):
                 a.started_at.desc(),
                 a.created_at.desc(),
                 a.completed_at.desc(),
+                a.id.desc(),
             )
 
         return initial_results
