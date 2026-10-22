@@ -50,17 +50,22 @@ class DataSampleDefinitionTest(unittest.TestCase):
 
 
 class OtherSourcesTest(unittest.TestCase):
-    """Samples were drawn from PostgreSQL only; MySQL and DuckDB sources have their SQL."""
+    """Samples were drawn from PostgreSQL only; MySQL, DuckDB and ClickHouse sources have
+    their SQL."""
 
     def test_each_source_has_its_hash_and_parameters(self):
         table = dict(table='c', key='id', sample=dict(fraction=0.05))
         self.assertIn('SHA2(CAST(id AS CHAR), 256)', data_samples.query(table, None, 'mysql')[0])
         self.assertIn('hash(CAST(id AS VARCHAR))', data_samples.query(table, None, 'duckdb')[0])
+        self.assertIn('cityHash64(toString(id)) % 1000000 < 50000',
+                      data_samples.query(table, None, 'clickhouse')[0])
         follow = dict(table='o', follow=dict(table='c', column='c_id'))
         self.assertEqual(data_samples.query(follow, [1, 2], 'mysql'),
                          ('SELECT * FROM o WHERE c_id IN (%s, %s)', [1, 2]))
         self.assertEqual(data_samples.query(follow, [1], 'duckdb'),
                          ('SELECT * FROM o WHERE c_id IN (?)', [1]))
+        self.assertEqual(data_samples.query(follow, [3], 'clickhouse'),
+                         ('SELECT * FROM o WHERE c_id IN (%s)', [3]))
         # No key sampled, no row follows.
         self.assertEqual(data_samples.query(follow, [], 'duckdb')[0],
                          'SELECT * FROM o WHERE 1 = 0')

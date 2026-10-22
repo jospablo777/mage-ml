@@ -176,6 +176,7 @@ DIALECTS = {
         parameter='%s',
     ),
     'duckdb': dict(bucket='abs(hash(CAST({column} AS VARCHAR)))', parameter='?'),
+    'clickhouse': dict(bucket='cityHash64(toString({column}))', parameter='%s'),
 }
 SOURCE_KINDS = tuple(DIALECTS)
 
@@ -350,6 +351,17 @@ def _reader(repo_path: str, profile: str, kind: str = 'postgres'):
                     return frame(cursor)
 
         return read_mysql
+    if kind == 'clickhouse':
+        from mage_ai.io.clickhouse import ClickHouse
+
+        def read_clickhouse(sql: str, params: List):
+            loader = ClickHouse.with_config(config)
+            try:
+                return loader.client.query_df(sql, parameters=params or None)
+            finally:
+                loader.client.close()
+
+        return read_clickhouse
 
     from mage_ai.io.postgres import Postgres
 
