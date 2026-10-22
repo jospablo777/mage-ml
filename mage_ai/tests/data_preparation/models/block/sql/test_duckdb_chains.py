@@ -141,4 +141,4 @@ class DuckDBChainTest(DBTestCase):
         configured(total, 'postgres', 'another')
         self.assertFalse(plans.chains_with(double, total))
         configured(total, 'mysql')
-        self.assertIn('supports DuckDB and PostgreSQL', plans.sql_view_problem(total))
+        self.assertIn('supports ClickHouse, DuckDB and PostgreSQL', plans.sql_view_problem(total))

@@ -35,6 +35,8 @@
   3 s instead of 17 s and stored 16 kB instead of 613 MB. Chain views carry a comment that
   marks them, so a block that replaces a table read by chain views drops them first (the
   run creates them again), and a view of the user's is never dropped.
+- ClickHouse SQL chains compile too: the same chain ran in 1.3 s instead of 2.7 s and
+  stored under 1 kB instead of 48 MB.
 
 ### Airflow
 

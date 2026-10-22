@@ -28,7 +28,7 @@ export type CompilationSummaryType = {
   fusion: boolean;
   language_switches: number;
   languages: string[];
-  // SQL chains (DuckDB, PostgreSQL): the blocks that become views, read by the last one in one query.
+  // SQL chains (ClickHouse, DuckDB, PostgreSQL): the blocks that become views, read by the last one in one query.
   sql_chains?: { blocks: string[]; views: string[] }[];
   // SQL blocks followed by another that stay out of a chain, with the reason.
   sql_left_out?: { block: string; reason: string }[];

@@ -1,4 +1,4 @@
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import clickhouse_connect
 from pandas import DataFrame, Series
@@ -16,6 +16,8 @@ from mage_ai.io.export_utils import to_pandas_frame
 
 # Tables keep their data on disk. Memory, used before, lost it when ClickHouse restarted.
 TABLE_ENGINE = 'MergeTree ORDER BY tuple()'
+# The comment on a view a compiled chain made (block/plans.py); other views are the user's.
+CHAIN_VIEW_COMMENT = 'MageML compiled chain view'
 
 
 class ClickHouse(BaseSQLDatabase):
@@ -200,6 +202,42 @@ class ClickHouse(BaseSQLDatabase):
 
     def _full_name(self, database: str, table_name: str) -> str:
         return f'{clickhouse_types.quote(database)}.{clickhouse_types.quote(table_name)}'
+
+    def _engine_and_comment(self, database: str, name: str):
+        rows = self.client.query(
+            'SELECT engine, comment FROM system.tables WHERE database = {database:String} '
+            'AND name = {name:String}',
+            parameters=dict(database=database, name=name),
+        ).result_rows
+        return tuple(rows[0]) if rows else (None, None)
+
+    def create_view(self, database: Optional[str], name: str, query_string: str) -> None:
+        """
+        Makes the name a view of the query, in place of a table of the name: a compiled
+        chain's intermediate block (block/plans.py), which ClickHouse plans with the block
+        that reads it.
+        """
+        database = database or self.default_database()
+        full_name = self._full_name(database, name)
+        query = query_string.strip().rstrip(';').rstrip()
+        engine, _ = self._engine_and_comment(database, name)
+        self.client.command(f'CREATE DATABASE IF NOT EXISTS {clickhouse_types.quote(database)}')
+        if engine is not None and engine != 'View':
+            self.client.command(f'DROP TABLE {full_name}')
+        # In parentheses: after a bare query, COMMENT reads as a table alias.
+        self.client.command(
+            f'CREATE OR REPLACE VIEW {full_name} AS (\n{query}\n) '
+            f"COMMENT '{CHAIN_VIEW_COMMENT}'",
+        )
+
+    def drop_view(self, database: Optional[str], name: str) -> None:
+        """
+        Drops the compiled chain view of the name, so a block that ran as a view writes its
+        table again. A view the user made is left alone.
+        """
+        database = database or self.default_database()
+        if self._engine_and_comment(database, name) == ('View', CHAIN_VIEW_COMMENT):
+            self.client.command(f'DROP VIEW {self._full_name(database, name)}')
 
     def _column_types(self, database: str, table_name: str) -> Dict[str, str]:
         rows = self.client.query(

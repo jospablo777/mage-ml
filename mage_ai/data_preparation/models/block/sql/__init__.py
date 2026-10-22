@@ -244,7 +244,17 @@ def execute_sql_code(
                 should_query=should_query,
                 limit=limit,
             )
+        elif not from_notebook and plans.sql_view_problem(block) is None and \
+                plans.may_plan(block, {}):
+            # In a compiled chain, the next block reads the query as a view and ClickHouse
+            # plans both as one (plans.py).
+            loader.create_view(database, table_name, query_string)
+            print(f'Compiled into the view {database}.{table_name}; the block that needs '
+                  'its rows reads them with the whole chain.')
+            return [plans.view_output(block, database, table_name)]
         else:
+            # A block that ran as a view in a compiled chain writes its table again.
+            loader.drop_view(database, table_name)
             loader.export(
                 None,
                 table_name=table_name,

@@ -12,7 +12,7 @@ chain, an exporter, or has tests, monitors or a data contract, or when the pipel
 every block's output (keep_block_outputs). A planned block keeps its block run, logs and
 status; its stored output is the plan, as JSON, which any later reader can run.
 
-DuckDB and PostgreSQL SQL blocks chain too: a planned block whose table is replaced on
+ClickHouse, DuckDB and PostgreSQL SQL blocks chain too: a planned block whose table is replaced on
 each run (export_write_policy replace) becomes a view of its query instead of a table, and
 the block that needs its output writes its table from a query the database plans across
 the views, as one statement. PostgreSQL views carry a comment that marks them, so a block
@@ -95,8 +95,8 @@ VIEW_KEY = '__mage_view__'
 def chains_with(block, following) -> bool:
     """
     Whether the block may plan for the next block of its stage: both Rust, both R, or a
-    DuckDB or PostgreSQL SQL block that replaces its table followed by a SQL block of the
-    same database and profile.
+    ClickHouse, DuckDB or PostgreSQL SQL block that replaces its table followed by a SQL
+    block of the same database and profile.
     """
     from mage_ai.data_preparation.models.constants import BlockLanguage
 
@@ -112,7 +112,7 @@ def chains_with(block, following) -> bool:
     return False
 
 
-VIEW_PROVIDERS = ('duckdb', 'postgres')
+VIEW_PROVIDERS = ('clickhouse', 'duckdb', 'postgres')
 
 
 def _provider(block) -> Optional[str]:
@@ -129,7 +129,7 @@ def sql_view_problem(block) -> Optional[str]:
 
     configuration = block.configuration or {}
     if _provider(block) not in VIEW_PROVIDERS:
-        return 'For now, compiling SQL block chains supports DuckDB and PostgreSQL.'
+        return 'For now, compiling SQL block chains supports ClickHouse, DuckDB and PostgreSQL.'
     if configuration.get('use_raw_sql'):
         return 'It runs raw SQL, which can hold several statements.'
     if str(configuration.get('export_write_policy') or 'append') != 'replace':
