@@ -15,7 +15,7 @@ from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 
 MAX_RUNS_ENV = 'MAGE_BACKFILL_MAX_RUNS'
-DEFAULT_MAX_RUNS = 10000
+DEFAULT_MAX_RUNS = 100000
 
 
 class BackfillError(ValueError):

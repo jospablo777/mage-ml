@@ -16,5 +16,5 @@
 1. Click the button labeled <b>Save changes</b>.
 1. Once the backfill is saved, click the button labeled <b>Start backfill</b>.
 
-A backfill makes at most 10,000 runs; `MAGE_BACKFILL_MAX_RUNS` changes the limit. See the
+A backfill makes at most 100,000 runs; `MAGE_BACKFILL_MAX_RUNS` changes the limit. See the
 [backfill overview](overview.md) for how the pipeline runs are built.
