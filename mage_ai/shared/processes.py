@@ -75,7 +75,8 @@ def _parent_identity():
     parent = os.getppid()
     try:
         return parent, psutil.Process(parent).create_time()
-    except psutil.Error:
+    except (psutil.Error, OSError, RuntimeError):
+        # psutil raises RuntimeError when /proc/stat has no boot time (some containers).
         return parent, None
 
 
@@ -85,9 +86,20 @@ def _parent_alive(parent: int, created) -> bool:
     if os.getppid() != parent:
         return False
     try:
-        return psutil.Process(parent).create_time() == created
-    except psutil.Error:
+        process = psutil.Process(parent)
+    except psutil.NoSuchProcess:
         return False
+    except (psutil.Error, OSError, RuntimeError):
+        return True
+    if created is None:
+        return True
+    try:
+        return process.create_time() == created
+    except psutil.NoSuchProcess:
+        return False
+    except (psutil.Error, OSError, RuntimeError):
+        # Unreadable is not gone: the parent id still matches.
+        return True
 
 
 def exit_with_parent(

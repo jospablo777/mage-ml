@@ -270,3 +270,24 @@ class FreezeImportsTest(unittest.TestCase):
         del inputs, cycle
         gc.collect()
         self.assertIsNone(alive())
+
+
+class ParentCheckTest(unittest.TestCase):
+    def test_an_unreadable_creation_time_does_not_count_as_a_gone_parent(self):
+        from unittest import mock
+
+        from mage_ai.shared import processes
+
+        no_boot_time = RuntimeError("line 'btime' not found in /proc/stat")
+        with mock.patch.object(psutil.Process, 'create_time', side_effect=no_boot_time):
+            parent, created = processes._parent_identity()
+            self.assertEqual((parent, created), (os.getppid(), None))
+            self.assertTrue(processes._parent_alive(parent, None))
+            self.assertTrue(processes._parent_alive(parent, 123.0))
+
+        parent, created = processes._parent_identity()
+        self.assertTrue(processes._parent_alive(parent, created))
+        self.assertFalse(processes._parent_alive(parent, created + 1))
+        self.assertFalse(processes._parent_alive(parent + 1, created))
+        with mock.patch.object(psutil, 'Process', side_effect=psutil.NoSuchProcess(parent)):
+            self.assertFalse(processes._parent_alive(parent, created))
