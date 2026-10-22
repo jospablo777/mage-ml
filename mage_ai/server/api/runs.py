@@ -37,7 +37,9 @@ class ApiRunHandler(BaseHandler):
         pipeline_schedule = PipelineSchedule.query.filter(
             PipelineSchedule.schedule_type == ScheduleType.API,
             PipelineSchedule.token == token,
-        ).options(load_only(PipelineSchedule.id)).first()
+        ).options(load_only(
+            PipelineSchedule.id, PipelineSchedule.pipeline_uuid, PipelineSchedule.repo_path,
+        )).first()
         if not pipeline_schedule:
             raise ApiError(dict(
                 ApiError.RESOURCE_NOT_FOUND,
@@ -46,10 +48,25 @@ class ApiRunHandler(BaseHandler):
             ))
 
         payload = self.get_payload().get('run', {})
-        pipeline_uuid = payload.get('pipeline_uuid')
+        # A trigger's token runs blocks of its own pipeline, in its own project: any token
+        # ran any block of any pipeline the body named.
+        pipeline_uuid = payload.get('pipeline_uuid') or pipeline_schedule.pipeline_uuid
         block_uuid = payload.get('block_uuid')
         project = payload.get('project')
         variables = payload.get('variables', {})
+        repo_path = (
+            os.path.join(base_repo_dirname(), project) if project
+            else pipeline_schedule.repo_path
+        )
+        if pipeline_uuid != pipeline_schedule.pipeline_uuid or (
+            project and pipeline_schedule.repo_path and
+            os.path.realpath(repo_path) != os.path.realpath(pipeline_schedule.repo_path)
+        ):
+            raise ApiError(dict(
+                ApiError.UNAUTHORIZED_ACCESS,
+                message=f'This trigger\'s token runs blocks of pipeline '
+                        f'{pipeline_schedule.pipeline_uuid} only.',
+            ))
 
         record = payload.get('record', True)
         store_variables = payload.get('store_variables', True)

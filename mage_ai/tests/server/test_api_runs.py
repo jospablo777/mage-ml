@@ -47,8 +47,29 @@ class ApiRunTokenTest(AsyncHTTPTestCase, DBTestCase):
         )
 
         response = self.fetch('/api/runs/0123456789abcdef', method='POST', body=json.dumps(
-            {'run': {'pipeline_uuid': 'no_such_pipeline', 'block_uuid': 'load'}}))
+            {'run': {'pipeline_uuid': 'orders', 'block_uuid': 'load'}}))
 
         # The token was found; before, every call failed on a loader option.
         error = json.loads(response.body)['error']
-        self.assertIn('Pipeline no_such_pipeline does not exist', error['exception'])
+        self.assertIn('Pipeline orders does not exist', error['exception'])
+
+    def test_a_token_runs_blocks_of_its_own_pipeline_only(self):
+        """Any trigger's token ran any block of any pipeline the body named."""
+        from mage_ai.data_preparation.models.triggers import (
+            ScheduleStatus,
+            ScheduleType,
+        )
+        from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+        PipelineSchedule.create(
+            name='api', pipeline_uuid='orders', schedule_type=ScheduleType.API,
+            status=ScheduleStatus.ACTIVE, token='fedcba9876543210', repo_path=self.repo_path,
+        )
+        for run in ({'pipeline_uuid': 'payroll', 'block_uuid': 'load'},
+                    {'pipeline_uuid': 'orders', 'block_uuid': 'load', 'project': '../other'}):
+            with self.subTest(run=run):
+                response = self.fetch('/api/runs/fedcba9876543210', method='POST',
+                                      body=json.dumps({'run': run}))
+                error = json.loads(response.body)['error']
+                self.assertEqual(error['code'], 403, error)
+                self.assertIn('pipeline orders only', error['message'])

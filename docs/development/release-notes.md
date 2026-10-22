@@ -72,6 +72,8 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- `POST /api/runs/<token>` runs blocks of the token's trigger's pipeline only; any trigger's
+  token ran any pipeline's blocks.
 - Event triggers (`POST /api/events`) and event matcher changes need an editor; viewers could
   make them.
 - Sign-in is refused for an account after 10 failed attempts within 15 minutes, until the
