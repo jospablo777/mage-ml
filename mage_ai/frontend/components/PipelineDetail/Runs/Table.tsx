@@ -229,6 +229,11 @@ function RetryButton({
                 Run {status}
               </Text>
               <Spacing mb={1} />
+              {RunStatus.CANCELLED === status && pipelineRun?.metrics?.cancelled_reason && (
+                <Spacing mb={1}>
+                  <Text>{pipelineRun.metrics.cancelled_reason}</Text>
+                </Spacing>
+              )}
               <Text>
                 Retry the run with changes you have made to the pipeline.
                 {isNotFirstPage ? (

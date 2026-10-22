@@ -88,6 +88,9 @@ interface PipelineRunErrorType {
 }
 
 interface PipelineRunMetricsType {
+  // Why the scheduler cancelled the run, such as a trigger that skips runs while the
+  // previous one runs.
+  cancelled_reason?: string;
   blocks: {
     [stream: string]: {
       sources: PipelineRunErrorType & {

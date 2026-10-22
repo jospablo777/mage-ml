@@ -8,6 +8,7 @@ from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.models.schedules import PipelineRun, PipelineSchedule
 from mage_ai.orchestration.pipeline_scheduler import configure_pipeline_run_payload
 from mage_ai.orchestration.triggers.constants import DEFAULT_POLL_INTERVAL
+from mage_ai.shared.hash import merge_dict
 
 
 def check_pipeline_run_status(
@@ -75,10 +76,14 @@ def create_and_cancel_pipeline_run(
     )
     configured_payload['create_block_runs'] = False
     pipeline_run = PipelineRun.create(**configured_payload)
+    update = dict(status=PipelineRun.PipelineRunStatus.CANCELLED)
     if message:
         pipeline_scheduler = PipelineScheduler(pipeline_run)
         pipeline_scheduler.logger.warning(message, **pipeline_scheduler.build_tags())
-    pipeline_run.update(status=PipelineRun.PipelineRunStatus.CANCELLED)
+        # On the run too: it showed as cancelled like a run someone stopped, and only its
+        # log said why.
+        update['metrics'] = merge_dict(pipeline_run.metrics or {}, dict(cancelled_reason=message))
+    pipeline_run.update(**update)
     return pipeline_run
 
 

@@ -1,7 +1,7 @@
 """
 A time trigger with skip_if_previous_running, as schedule_all runs it: while the run of the
-previous hour still runs, this hour's run is created cancelled (the run's log says why),
-and the running one is left alone.
+previous hour still runs, this hour's run is created cancelled, saying why, and the
+running one is left alone.
 """
 import uuid
 from datetime import timedelta
@@ -56,5 +56,6 @@ def test_a_run_is_skipped_while_the_previous_one_runs(mage_project):
     assert len(skipped) == 1, [(r.id, r.status, r.execution_date) for r in runs]
     assert skipped[0].status == PipelineRun.PipelineRunStatus.CANCELLED
     assert skipped[0].execution_date.replace(tzinfo=None) == this_hour.replace(tzinfo=None)
+    assert 'still running' in skipped[0].metrics['cancelled_reason']
     running.refresh()
     assert running.status == PipelineRun.PipelineRunStatus.RUNNING

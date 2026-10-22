@@ -123,6 +123,8 @@
 
 ### Pipelines
 
+- A run the scheduler cancels, such as one a trigger skips while the previous run still
+  runs, says why on the runs page; it looked like a run someone stopped.
 - Backfills: interval units of 0 or below are refused; they never reached the end date, and
   viewing such a backfill hung the server. A backfill of more than 10,000 runs is refused
   (`MAGE_BACKFILL_MAX_RUNS`). Monthly and yearly backfills count from the start date: one

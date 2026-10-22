@@ -10,6 +10,7 @@ from mage_ai.orchestration.triggers.global_data_product import (
 )
 from mage_ai.orchestration.triggers.utils import (
     check_pipeline_run_status,
+    create_and_cancel_pipeline_run,
     create_and_start_pipeline_run,
 )
 from mage_ai.tests.base_test import DBTestCase
@@ -116,3 +117,16 @@ class TriggerUtilsTest(DBTestCase):
 
         self.assertEqual(pipeline_run.pipeline_schedule, self.pipeline_schedule)
         self.assertEqual(pipeline_run.variables['mage'], 3)
+
+    def test_a_run_cancelled_by_the_scheduler_says_why(self):
+        """It showed as cancelled like a run someone stopped; only its log said why."""
+        pipeline_schedule = fetch_or_create_pipeline_schedule(self.global_data_product)
+
+        run = create_and_cancel_pipeline_run(
+            self.pipeline, pipeline_schedule, dict(variables={}),
+            message='Previous pipeline run is still running... skipping this run',
+        )
+
+        run.refresh()
+        self.assertEqual(run.status, PipelineRun.PipelineRunStatus.CANCELLED)
+        self.assertIn('still running', run.metrics['cancelled_reason'])
