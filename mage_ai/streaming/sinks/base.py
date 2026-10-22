@@ -1,6 +1,5 @@
 import json
 import os
-import traceback
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -76,13 +75,17 @@ class BaseSink(ABC):
         buffer = []
         if not self.buffer_path or not os.path.exists(self.buffer_path):
             return buffer
-        try:
-            with open(self.buffer_path) as fp:
-                for line in fp:
+        # A line that does not read (one cut short when the process stopped) is skipped:
+        # reading stopped at it, and every message buffered after it was lost.
+        with open(self.buffer_path) as fp:
+            for number, line in enumerate(fp, start=1):
+                if not line.strip():
+                    continue
+                try:
                     buffer.append(json.loads(line))
-        except Exception:
-            traceback.print_exc()
-            pass
+                except ValueError:
+                    print(f'[WARNING] Skipped line {number} of {self.buffer_path}: '
+                          'it is not JSON.')
         return buffer
 
     def test_connection(self):

@@ -87,9 +87,11 @@ class Algolia(BaseIO):
         index = self.client.init_index(index_name)
 
         data_objs = missing_as_none(df).to_dict('records')
+        # An error was logged and dropped, so the block succeeded with nothing exported.
         try:
             index.save_objects(data_objs, {
                 'autoGenerateObjectIDIfNotExist': True
             })
         except Exception as e:
             LOGGER.error(f'Error when exporting data to algolia: {e}')
+            raise

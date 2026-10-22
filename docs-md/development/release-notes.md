@@ -125,6 +125,9 @@
 
 - A run the scheduler cancels, such as one a trigger skips while the previous run still
   runs, says why on the runs page; it looked like a run someone stopped.
+- The Algolia exporter fails the block when the export fails; it logged the error and the
+  block succeeded with nothing exported. A streaming sink's buffer keeps the messages
+  after a line cut short by a stop; reading stopped at that line.
 - Elasticsearch and OpenSearch destinations fail the sync when documents fail to index;
   they logged the error and went on, so the sync completed with those documents missing.
 - Backfills: interval units of 0 or below are refused; they never reached the end date, and
