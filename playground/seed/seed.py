@@ -434,6 +434,8 @@ def seed(cursor) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--force', action='store_true')
+    # Replaces a schema of another seed version or scale, keeps one of this seed.
+    parser.add_argument('--if-different', action='store_true')
     args = parser.parse_args()
 
     for _ in range(60):
@@ -447,21 +449,35 @@ def main() -> int:
         return 1
 
     with connection, connection.cursor() as cursor:
+        # One seed at a time: test workers seed the same database at once, and two
+        # CREATE SCHEMA shop collided. The lock ends with the transaction, which holds the
+        # whole seed, so the next one finds it done.
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext('mageml playground seed'))")
         cursor.execute("SELECT to_regclass('shop.seed_info') IS NOT NULL")
         if cursor.fetchone()[0] and not args.force:
             cursor.execute('SELECT version, scale, seeded_at FROM shop.seed_info')
             version, scale, seeded_at = cursor.fetchone()
+            different = (version, float(scale)) != (SEED_VERSION, SCALE)
+            if args.if_different and different:
+                print(f'The shop schema is seed version {version} at scale {scale}; '
+                      f'replacing it with version {SEED_VERSION} at scale {SCALE}.')
+                reseed(cursor)
+                return 0
             print(f'The shop schema is seeded: version {version}, scale {scale}, at {seeded_at}.')
             if version != SEED_VERSION:
                 print(f'This seed writes version {SEED_VERSION}; make playground-reseed '
                       'replaces the shop schema with it.')
             return 0
-        cursor.execute('DROP SCHEMA IF EXISTS shop CASCADE')
-        started = time.monotonic()
-        seed(cursor)
+        reseed(cursor)
     connection.close()
-    print(f'Seeded in {time.monotonic() - started:.0f} s.')
     return 0
+
+
+def reseed(cursor) -> None:
+    cursor.execute('DROP SCHEMA IF EXISTS shop CASCADE')
+    started = time.monotonic()
+    seed(cursor)
+    print(f'Seeded in {time.monotonic() - started:.0f} s.')
 
 
 if __name__ == '__main__':

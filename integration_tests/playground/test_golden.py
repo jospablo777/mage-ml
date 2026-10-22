@@ -20,6 +20,7 @@ import types
 from pathlib import Path
 
 import psycopg2
+import psycopg2.errors
 import pytest
 import yaml
 
@@ -57,7 +58,11 @@ def playground_db(postgres_settings):
     with admin.cursor() as cursor:
         cursor.execute('SELECT 1 FROM pg_database WHERE datname = %s', (DATABASE,))
         if cursor.fetchone() is None:
-            cursor.execute(f'CREATE DATABASE {DATABASE}')
+            try:
+                cursor.execute(f'CREATE DATABASE {DATABASE}')
+            except psycopg2.errors.DuplicateDatabase:
+                # Another test worker made it first.
+                pass
     admin.close()
     env = dict(
         os.environ,
@@ -68,12 +73,10 @@ def playground_db(postgres_settings):
         PGUSER=postgres_settings['user'],
         SEED_SCALE=SCALE,
     )
-    subprocess.run([sys.executable, str(SEED)], check=True, env=env)
-    # The seed keeps a seeded schema as it is; one from another seed version or scale (a
-    # database a local run left) is replaced, or the golden runs compare other rows.
+    # A schema from another seed version or scale (a database a local run left) is
+    # replaced, or the golden runs compare other rows. Workers seed one at a time.
+    subprocess.run([sys.executable, str(SEED), '--if-different'], check=True, env=env)
     version = int(re.search(r'^SEED_VERSION = (\d+)', SEED.read_text(), re.M).group(1))
-    if seeded(postgres_settings) != (version, float(SCALE)):
-        subprocess.run([sys.executable, str(SEED), '--force'], check=True, env=env)
     assert seeded(postgres_settings) == (version, float(SCALE))
     with psycopg2.connect(**dict(postgres_settings, dbname=DATABASE)) as connection, \
             connection.cursor() as cursor:
