@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
-from unittest import TestCase
 
 from mage_ai.api.contracts import openapi
+from mage_ai.tests.base_test import TestCase
 
 SPEC = Path(__file__).resolve().parents[4] / 'contracts' / 'openapi.json'
 OUTDATED = 'contracts/openapi.json differs from the code: run scripts/contracts/record.py ' \
@@ -12,6 +12,8 @@ OUTDATED = 'contracts/openapi.json differs from the code: run scripts/contracts/
 class OpenApiTest(TestCase):
     @classmethod
     def setUpClass(cls):
+        # In a scratch project: make_app writes .ssh_tunnel/ into the project.
+        super().setUpClass()
         cls.recorded = json.loads(SPEC.read_text())
         cls.static = openapi.static_spec()
 
