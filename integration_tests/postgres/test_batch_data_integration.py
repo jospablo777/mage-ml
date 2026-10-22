@@ -209,3 +209,45 @@ def test_a_python_blocks_output_exported_by_a_destination_block(
     assert query(pg, f'SELECT id, name, amount FROM {schema}.{tables[0]} ORDER BY id') == [
         (1, 'a', 1.5), (2, "it's", -2.0), (3, None, 1e10),
     ]
+
+
+def test_a_python_block_between_a_source_and_a_destination(
+    mage_project, pg, postgres_settings, schema, tmp_path, batch_integration,
+):
+    """The source's rows, read in several batches, reach a Python transformer as one
+    dictionary of columns and rows; its frame goes to the destination."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    create_table(pg, schema, 'people', 7)
+    pipeline_uuid = build(mage_project, postgres_settings, schema, tmp_path, dict(people={}))
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=mage_project)
+    source = next(b for b in pipeline.blocks_by_uuid.values() if b.type == 'data_loader')
+    destination = next(b for b in pipeline.blocks_by_uuid.values() if b.type == 'data_exporter')
+    transform = Block.create(
+        f'{pipeline_uuid}_shout', 'transformer', mage_project, language='python',
+        pipeline=pipeline, upstream_block_uuids=[source.uuid],
+    )
+    with open(transform.file_path, 'w') as file:
+        file.write(textwrap.dedent('''\
+            import pandas as pd
+
+
+            @transformer
+            def shout(data, *args, **kwargs):
+                frame = pd.DataFrame(data['rows'], columns=data['columns'])
+                frame['name'] = frame['name'].str.upper()
+                return frame
+        '''))
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=mage_project)
+    pipeline.get_block(destination.uuid).update(dict(upstream_blocks=[transform.uuid]))
+
+    run_scheduled_pipeline(pipeline_uuid)
+
+    tables = [t for (t,) in query(
+        pg, 'SELECT table_name FROM information_schema.tables WHERE table_schema = %s '
+        "AND table_name NOT IN ('people')", (schema,),
+    )]
+    assert len(tables) == 1, tables
+    assert query(pg, f'SELECT count(*), min(name), max(name) FROM {schema}.{tables[0]}') == [
+        (7, 'ROW 1', 'ROW 7')]
