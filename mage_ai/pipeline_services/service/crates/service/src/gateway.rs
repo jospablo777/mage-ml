@@ -182,7 +182,9 @@ async fn forward(
             .serve(route, &route_path, &query, request.headers())
             .await
     {
-        if shadow.check_served(route) {
+        if shadow.check_served(route)
+            && let Some(permit) = shadow.comparison_permit(route)
+        {
             // The server's answer for the same request, compared in the background.
             let mut headers = request.headers().clone();
             strip_hop_by_hop(&mut headers, false);
@@ -195,6 +197,7 @@ async fn forward(
                         .compare(route, &path, &query, &answer, &headers, reread)
                         .await;
                 }
+                drop(permit);
             });
         }
         return served_json(&own, request.headers());
@@ -263,20 +266,23 @@ async fn forward(
                 );
             }
         };
-        let (shadow, compared) = (shadow.clone(), served.clone());
-        let reread = reread(upstream, &reread_uri, &reread_headers);
-        tokio::spawn(async move {
-            shadow
-                .compare(
-                    route,
-                    &route_path,
-                    &query,
-                    &compared,
-                    &reread_headers,
-                    reread,
-                )
-                .await
-        });
+        if let Some(permit) = shadow.comparison_permit(route) {
+            let (shadow, compared) = (shadow.clone(), served.clone());
+            let reread = reread(upstream, &reread_uri, &reread_headers);
+            tokio::spawn(async move {
+                shadow
+                    .compare(
+                        route,
+                        &route_path,
+                        &query,
+                        &compared,
+                        &reread_headers,
+                        reread,
+                    )
+                    .await;
+                drop(permit);
+            });
+        }
         return Response::from_parts(
             parts,
             Full::new(served).map_err(|never| match never {}).boxed(),

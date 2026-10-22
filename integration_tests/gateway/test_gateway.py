@@ -50,7 +50,9 @@ def run_server(tmp_path_factory, **extra_env):
     port = free_port()
     env = dict(
         os.environ, MAGE_GATEWAY='on', MAGE_ENGINE_PATH=str(engine),
-        DISABLE_AUTO_BROWSER_OPEN='true', MAGE_DATA_DIR=str(folder / 'data'), **extra_env,
+        DISABLE_AUTO_BROWSER_OPEN='true', MAGE_DATA_DIR=str(folder / 'data'),
+        # The tests count every comparison; none may be skipped on a slow runner.
+        MAGE_GATEWAY_SHADOW_CONCURRENCY='64', **extra_env,
     )
     process = subprocess.Popen(
         [sys.executable, '-c', 'from mage_ai.cli.main import app; app()', 'start',

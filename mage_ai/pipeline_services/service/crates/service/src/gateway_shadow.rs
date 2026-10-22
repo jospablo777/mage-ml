@@ -115,6 +115,9 @@ struct Counts {
     served: u64,
     /// Queries the gateway does not answer yet (unsupported).
     unsupported: u64,
+    /// Comparisons left out because as many were already running
+    /// (MAGE_GATEWAY_SHADOW_CONCURRENCY): shadow reads never pile up under load.
+    skipped: u64,
 }
 
 /// The server's answer read again, for the same request; None when it did not answer 200.
@@ -124,6 +127,8 @@ pub type Reread = Box<
         + Sync,
 >;
 const REREADS: u32 = 2;
+/// Comparisons running at once by default.
+const COMPARISONS: usize = 4;
 const REREAD_AFTER: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub struct Shadow {
@@ -141,6 +146,8 @@ pub struct Shadow {
     logs_dir: Option<String>,
     /// The scheduler's decisions in shadow (MAGE_GATEWAY_SCHEDULER_SHADOW=1).
     scheduler: Option<crate::gateway_scheduler::SchedulerShadow>,
+    /// Comparisons running at once.
+    comparisons: std::sync::Arc<tokio::sync::Semaphore>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
@@ -191,6 +198,13 @@ impl Shadow {
             logs_dir: std::env::var("MAGE_GATEWAY_LOGS_DIR")
                 .ok()
                 .filter(|d| !d.is_empty()),
+            comparisons: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                std::env::var("MAGE_GATEWAY_SHADOW_CONCURRENCY")
+                    .ok()
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .filter(|n| *n > 0)
+                    .unwrap_or(COMPARISONS),
+            )),
             scheduler: (std::env::var("MAGE_GATEWAY_SCHEDULER_SHADOW").as_deref() == Ok("1")
                 && std::env::var("MAGE_GATEWAY_REPO_PATH").is_ok())
             .then(|| {
@@ -489,6 +503,17 @@ impl Shadow {
             report["scheduler"] = scheduler.report();
         }
         report
+    }
+
+    /// A place for one more comparison, or None, counted as skipped, when as many as
+    /// allowed are running.
+    pub fn comparison_permit(&self, route: &str) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let permit = self.comparisons.clone().try_acquire_owned().ok();
+        if permit.is_none() {
+            let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+            counts.entry(route.to_string()).or_default().skipped += 1;
+        }
+        permit
     }
 
     /// Whether the scheduler's decisions are shadowed.
@@ -2123,6 +2148,23 @@ mod tests {
             Query::parse("include_pipeline_tags=false").get("include_pipeline_tags"),
             None
         );
+    }
+
+    #[test]
+    fn comparisons_past_the_limit_are_skipped_and_counted() {
+        let shadow = Shadow::new(
+            Metadata::Sqlite("/x".into()),
+            vec!["block_runs".into()],
+            None,
+        )
+        .unwrap();
+        let held: Vec<_> = (0..COMPARISONS)
+            .map(|_| shadow.comparison_permit("block_runs").unwrap())
+            .collect();
+        assert!(shadow.comparison_permit("block_runs").is_none());
+        assert_eq!(shadow.report()["routes"]["block_runs"]["skipped"], 1);
+        drop(held);
+        assert!(shadow.comparison_permit("block_runs").is_some());
     }
 
     #[test]
