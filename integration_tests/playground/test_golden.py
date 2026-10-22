@@ -7,8 +7,8 @@ the rows of the tables it exports.
 
     MAGE_GOLDEN_RECORD=1 pytest integration_tests/playground   # writes the golden files
 
-The live pipelines read now() and are left out; the R and geo pipelines need their own
-environments and are not here yet.
+The live pipelines read now() and are left out. Pipelines with R blocks run in the R test
+environment (MAGE_TEST_R_PROJECT_DIR, `make -C integration_tests r-env`), and skip without it.
 """
 import logging
 import os
@@ -31,12 +31,21 @@ SCALE = '0.02'
 RECORD = os.getenv('MAGE_GOLDEN_RECORD') == '1'
 # Each pipeline, and the tables it exports: their rows are its effect counts.
 PIPELINES = {
+    'explore_web_events': [],
+    'geo_store_coverage': ['geo_customer_coverage'],
     'pandas_sales': ['pandas_daily_revenue', 'pandas_category_margin'],
     'polars_customer_360': ['polars_customer_360'],
+    'polyglot_churn': ['polyglot_churn_scores', 'polyglot_churn_summary'],
+    'r_dplyr_cohorts': ['r_cohort_retention'],
     'rust_postgres_margins': ['rust_category_margin', 'rust_customer_value'],
     'rust_session_scores': ['rust_session_scores'],
+    'shape_broadcast_web_events': [],
+    'shape_diamond_store_scorecard': ['store_scorecard'],
     'shape_merge_customer_signals': ['customer_signals'],
 }
+# Pipelines with R blocks: they run in the R test environment (integration_tests/r_env).
+WITH_R = {'polyglot_churn', 'r_dplyr_cohorts', 'shape_broadcast_web_events',
+          'shape_diamond_store_scorecard'}
 
 
 @pytest.fixture(scope='module')
@@ -84,6 +93,10 @@ def project(playground_db, monkeypatch_module):
 
     for key in ('PGDATABASE', 'PGHOST', 'PGPASSWORD', 'PGPORT', 'PGUSER'):
         monkeypatch_module.setenv(key, playground_db[key])
+    r_project = os.getenv('MAGE_TEST_R_PROJECT_DIR')
+    if r_project and shutil.which('Rscript') and shutil.which('rv'):
+        monkeypatch_module.setenv('MAGE_R_PROJECT_DIR', str(Path(r_project).resolve()))
+        monkeypatch_module.setenv('MAGE_R_SYNC', 'check')
     previous = get_repo_path()
     own_database = db_connection.session is None
     project = types.SimpleNamespace()
@@ -132,6 +145,8 @@ def test_the_pipeline_matches_its_golden_run(project, pipeline_uuid):
     from mage_ai.data_preparation.models.pipeline import Pipeline
     from mage_ai.orchestration import golden
 
+    if pipeline_uuid in WITH_R and not os.getenv('MAGE_R_PROJECT_DIR'):
+        pytest.skip('R is not configured: MAGE_TEST_R_PROJECT_DIR, Rscript and rv')
     pipeline = Pipeline.get(pipeline_uuid, repo_path=project)
     PipelineExecutor(pipeline).execute(record_run=True, update_status=False)
     run = golden.latest_completed_run(pipeline)

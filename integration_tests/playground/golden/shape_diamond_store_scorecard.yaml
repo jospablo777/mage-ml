@@ -1,0 +1,75 @@
+version: 1
+pipeline: shape_diamond_store_scorecard
+recorded_from_run: 10
+blocks:
+  diamond_export_store_scorecard: {}
+  diamond_order_lines:
+    output_0:
+      kind: table
+      rows: 3404
+      columns:
+      - - order_id
+        - integer
+      - - store_id
+        - integer
+      - - channel
+        - string
+      - - quantity
+        - integer
+      - - unit_price
+        - float
+      - - cost
+        - float
+      content: 724d6367f9c9f39959fdc3552c2b16b706272847ed04c8e5a43ecdaf4b4f3bcc
+      order: e876e60f88ce6921eab5a8ac6f5bea45e2875b383cc0364107e3307d3ccbf207
+  diamond_store_margin:
+    output_0:
+      kind: table
+      rows: 120
+      columns:
+      - - store_id
+        - integer
+      - - cost
+        - float
+      - - margin
+        - float
+      content: 6a51439dad4a87f8c666c8855e09a9611fa07b6c3a7480e98121cd634613f51a
+      order: 382f2ae2334cbaf318001173de1aef73e1bec389db1d922639e5254921def031
+  diamond_store_revenue:
+    output_0:
+      kind: table
+      rows: 120
+      columns:
+      - - store_id
+        - integer
+      - - orders
+        - integer
+      - - revenue
+        - float
+      content: 3d3151ca75fb22b62065d3469b3a41adaeb753fb9ff6c3d240a3e7d578e3079a
+      order: 8daf686b8c7dbcf4d3434d77442bac3651319311117d7c8d40d3c1101207c191
+  diamond_store_scorecard:
+    output_0:
+      kind: table
+      rows: 120
+      columns:
+      - - store_id
+        - integer
+      - - orders
+        - integer
+      - - revenue
+        - float
+      - - cost
+        - float
+      - - margin
+        - float
+      - - margin_rate
+        - float
+      content: e5332cad77cf097f07017f9f279468848af93c378e7d62710abd08eb33037c42
+      order: 7bdd43f5b447ca0792b1800711afa795cc8bfb8739a4b9f14647e695819d8847
+effects:
+  store_scorecard:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.store_scorecard
+    count: 120

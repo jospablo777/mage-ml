@@ -1,0 +1,129 @@
+version: 1
+pipeline: explore_web_events
+recorded_from_run: 1
+blocks:
+  explore_daily_pivot:
+    output_0:
+      kind: table
+      rows: 885
+      columns:
+      - - event_date
+        - date
+      - - "/ \xB7 android"
+        - integer
+      - - "/ \xB7 desktop"
+        - integer
+      - - "/ \xB7 iphone"
+        - integer
+      - - "/ \xB7 tablet"
+        - integer
+      - - "/account \xB7 android"
+        - integer
+      - - "/account \xB7 desktop"
+        - integer
+      - - "/account \xB7 iphone"
+        - integer
+      - - "/account \xB7 tablet"
+        - integer
+      - - "/add_to_cart \xB7 android"
+        - integer
+      - - "/add_to_cart \xB7 desktop"
+        - integer
+      - - "/add_to_cart \xB7 iphone"
+        - integer
+      - - "/add_to_cart \xB7 tablet"
+        - integer
+      - - "/cart \xB7 android"
+        - integer
+      - - "/cart \xB7 desktop"
+        - integer
+      - - "/cart \xB7 iphone"
+        - integer
+      - - "/cart \xB7 tablet"
+        - integer
+      - - "/checkout \xB7 android"
+        - integer
+      - - "/checkout \xB7 desktop"
+        - integer
+      - - "/checkout \xB7 iphone"
+        - integer
+      - - "/checkout \xB7 tablet"
+        - integer
+      - - "/help \xB7 android"
+        - integer
+      - - "/help \xB7 desktop"
+        - integer
+      - - "/help \xB7 iphone"
+        - integer
+      - - "/help \xB7 tablet"
+        - integer
+      - - "/offers \xB7 android"
+        - integer
+      - - "/offers \xB7 desktop"
+        - integer
+      - - "/offers \xB7 iphone"
+        - integer
+      - - "/offers \xB7 tablet"
+        - integer
+      - - "/product \xB7 android"
+        - integer
+      - - "/product \xB7 desktop"
+        - integer
+      - - "/product \xB7 iphone"
+        - integer
+      - - "/product \xB7 tablet"
+        - integer
+      - - "/purchase \xB7 android"
+        - integer
+      - - "/purchase \xB7 desktop"
+        - integer
+      - - "/purchase \xB7 iphone"
+        - integer
+      - - "/purchase \xB7 tablet"
+        - integer
+      - - "/review \xB7 android"
+        - integer
+      - - "/review \xB7 desktop"
+        - integer
+      - - "/review \xB7 iphone"
+        - integer
+      - - "/review \xB7 tablet"
+        - integer
+      - - "/search \xB7 android"
+        - integer
+      - - "/search \xB7 desktop"
+        - integer
+      - - "/search \xB7 iphone"
+        - integer
+      - - "/search \xB7 tablet"
+        - integer
+      content: 171fe31a7bbb5e30913e1ff77eecbeb4148d45e1bf1e8d3e4c5e4183a6d36619
+      order: 63ad954fa1ee0d1b7250fa16de64a5d3acde8861e783f0db29f6eed78ea5d9f0
+  explore_load_events:
+    output_0:
+      kind: table
+      rows: 20000
+      columns:
+      - - event_id
+        - integer
+      - - session_id
+        - string
+      - - customer_id
+        - integer
+      - - occurred_at
+        - datetime_tz
+      - - event_type
+        - string
+      - - page
+        - string
+      - - device
+        - string
+      - - duration_ms
+        - integer
+      - - scroll_depth
+        - float
+      - - properties
+        - string
+      content: bc0f6521316003c98b1c185b59eec51ffe354ba80beabab3ab9053fefe6d80e4
+      order: 382cbbddfb45eb8e5a47eec47cad62d52db70b8a72a492a7a4085bf807b02905
+effects: {}

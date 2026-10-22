@@ -1,0 +1,23 @@
+version: 1
+pipeline: geo_store_coverage
+recorded_from_run: 2
+blocks:
+  geo_export_coverage: {}
+  geo_load_customers:
+    output_0:
+      kind: file
+      sha256: 2c8d97a3f365f74db52756b8bf8fc2cc8bcf632f932ca12e5f15bb72224c0ff5
+  geo_load_stores:
+    output_0:
+      kind: file
+      sha256: e75414c1eadaf07bc07ccc4515a2cba87cd954164d975b83f16721d7aadd9b2c
+  geo_nearest_store:
+    output_0:
+      kind: file
+      sha256: f13272454b53017826499ac8f87a0a912cc13e423ce1f72a9b187667fdca9bd4
+effects:
+  geo_customer_coverage:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.geo_customer_coverage
+    count: 524

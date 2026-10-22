@@ -1,0 +1,63 @@
+version: 1
+pipeline: shape_broadcast_web_events
+recorded_from_run: 9
+blocks:
+  broadcast_device_mix:
+    output_0:
+      kind: table
+      rows: 24
+      columns:
+      - - device
+        - string
+      - - event_type
+        - string
+      - - events
+        - integer
+      - - share
+        - float
+      content: 3ef6e185afb66aa7f069da7410a3ec998f8eee060292cf5255b339dae65adc7a
+      order: b8dea47f89ac21f8864bf1f42a8fe612dd7abb4f2443e762e6d2b2400bc7a284
+  broadcast_hourly_load:
+    output_0:
+      kind: table
+      rows: 24
+      columns:
+      - - hour
+        - integer
+      - - events
+        - integer
+      content: 868c3e997fc1ddedde16fdb7e87623b71044351e2f425ba3348d1c71c8c33c50
+      order: b50324a974eb4085e4753f935a857fa3359503911c875f1c356de2d37c3814e1
+  broadcast_page_dwell:
+    output_0:
+      kind: table
+      rows: 11
+      columns:
+      - - page
+        - string
+      - - views
+        - integer
+      - - median_ms
+        - float
+      - - p90_ms
+        - float
+      content: 041e44b3a6a86600b52c2af620bf5f1cca3119af9a98bf37763ca0715f198ab5
+      order: 7c04b4bb628b316f5e2606c64036d6d2b2d0f6040312f5a119a7087ffa61ef9d
+  broadcast_web_events:
+    output_0:
+      kind: table
+      rows: 20000
+      columns:
+      - - occurred_at
+        - datetime_tz
+      - - event_type
+        - string
+      - - page
+        - string
+      - - device
+        - string
+      - - duration_ms
+        - float
+      content: 1a0de30dcff9d824a84ae5b05b7c3cb939dd46d90c91b134ff2cb784dbf7edec
+      order: 3d8ee7b8fe6677b6d7d279f4b1269451d550d3466c1fef6413bdb93efe06f1c8
+effects: {}

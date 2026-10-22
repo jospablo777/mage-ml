@@ -1,0 +1,88 @@
+version: 1
+pipeline: polyglot_churn
+recorded_from_run: 5
+blocks:
+  polars_churn_summary:
+    output_0:
+      kind: table
+      rows: 16
+      columns:
+      - - segment
+        - string
+      - - churn_risk
+        - string
+      - - customers
+        - integer
+      - - spend
+        - float
+      - - median_days_since_last_order
+        - float
+      - - share_of_segment
+        - float
+      content: e8f174e82c87056f2820c7bf5871ccbca2f08b840e1029316ecd7fd573d42eea
+      order: 0d491c2721195b53134c1f38eeef3d9d67d451b36db14bd34efc705e84c145e0
+  py_export_churn_scores: {}
+  py_export_churn_summary: {}
+  py_load_customer_activity:
+    output_0:
+      kind: table
+      rows: 770
+      columns:
+      - - customer_id
+        - integer
+      - - segment
+        - string
+      - - country
+        - string
+      - - days_since_last_order
+        - integer
+      - - orders
+        - integer
+      - - spend
+        - float
+      - - mean_rating
+        - float
+      content: 02808dbcfc575c3f16fddef166e63fdcc26a9665fefedad5c6ecc850248e0d06
+      order: bb1735701b28733c90559bc0267c1170d8093061874946e2bae33700af6a7681
+  r_churn_scores:
+    output_0:
+      kind: table
+      rows: 770
+      columns:
+      - - customer_id
+        - integer
+      - - segment
+        - string
+      - - country
+        - string
+      - - days_since_last_order
+        - integer
+      - - orders
+        - integer
+      - - spend
+        - float
+      - - mean_rating
+        - float
+      - - recency_score
+        - integer
+      - - frequency_score
+        - integer
+      - - spend_score
+        - integer
+      - - rfm
+        - integer
+      - - churn_risk
+        - string
+      content: c7368bbda8d58979e15ee3cfd68179635c62f22ecc5e78a1830cc2300d64f695
+      order: 40f70d2bc0ccdbe7f057a7db6047f31cb2bb1bbd94774dec39d478baebbf62f2
+effects:
+  polyglot_churn_scores:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.polyglot_churn_scores
+    count: 770
+  polyglot_churn_summary:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.polyglot_churn_summary
+    count: 16

@@ -1,0 +1,64 @@
+version: 1
+pipeline: r_dplyr_cohorts
+recorded_from_run: 6
+blocks:
+  r_channel_mix:
+    output_0:
+      kind: table
+      rows: 4
+      columns:
+      - - segment
+        - string
+      - - mobile
+        - float
+      - - phone
+        - float
+      - - store
+        - float
+      - - web
+        - float
+      content: 5aaeb26ca4a831495072eee00f35e6ccb0d0f7dd2f151f1b2a42274a5225076a
+      order: 0586e3143e1efd08b9463c49403b7f4c34870f83b7108cebff8651d8c62d9c86
+  r_cohort_retention:
+    output_0:
+      kind: table
+      rows: 335
+      columns:
+      - - cohort
+        - date
+      - - months_since_signup
+        - integer
+      - - active_customers
+        - integer
+      - - customers
+        - integer
+      - - retention
+        - float
+      content: 7256a845feb73b7d7664a3e3b4bc0c7eb6168a9d559b0f47f8245ba343e542a6
+      order: 0f712ce85e7fc042f763b463d729e806d56133cc81549c89c10f1d249bed88f9
+  r_export_cohorts: {}
+  r_load_orders:
+    output_0:
+      kind: table
+      rows: 7443
+      columns:
+      - - order_id
+        - integer
+      - - customer_id
+        - integer
+      - - ordered_at
+        - datetime_tz
+      - - channel
+        - string
+      - - signed_up_at
+        - datetime_tz
+      - - segment
+        - string
+      content: 45f6cbda9f230c2023e0f8bb2cc02f096146301e733d594ea8de3c3a7dd81e9d
+      order: 745fcda6a6cd4a6c83d60d7120ad61d63e203cf2271d73847da7a6ce0194a4cb
+effects:
+  r_cohort_retention:
+    data_provider: postgres
+    profile: default
+    sql: SELECT count(*) FROM analytics.r_cohort_retention
+    count: 335

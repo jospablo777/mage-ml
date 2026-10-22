@@ -274,7 +274,7 @@ jobs:
           - id: sql
             name: "Integration: SQL databases"
             services: postgres mysql clickhouse trino db2
-            tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb integration_tests/db2 integration_tests/playground
+            tests: integration_tests/postgres integration_tests/mysql integration_tests/clickhouse integration_tests/trino integration_tests/duckdb integration_tests/db2
             r: false
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/clickhouse/test_rust_clickhouse.py::test_a_failing_query_says_why' 'integration_tests/mysql/test_rust_mysql.py::test_exact_decimals_and_a_failure_that_says_why' 'integration_tests/duckdb/test_rust_duckdb.py::test_a_frame_round_trips_through_rust_blocks'"
           - id: documents
@@ -303,7 +303,7 @@ jobs:
           - id: pipelines
             name: "MageML: compiled and polyglot pipelines"
             services: postgres mysql minio api
-            tests: integration_tests/chains integration_tests/checks integration_tests/workers integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/benchmark/test_resident_rust_latency.py integration_tests/r
+            tests: integration_tests/chains integration_tests/checks integration_tests/workers integration_tests/playground integration_tests/tutorials integration_tests/benchmark/test_fusion_benchmark.py integration_tests/benchmark/test_rust_pipeline_benchmark.py integration_tests/benchmark/test_resident_rust_latency.py integration_tests/r
             r: true
             # This group saves the shared Rust blocks cache: DuckDB (18 minutes of C++) is
             # warmed here so the SQL group finds it built.
@@ -348,7 +348,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
-        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra integrations
+        run: uv sync --locked --group dev --extra postgres --extra mlflow --extra duckdb --extra s3 --extra mysql --extra mongodb --extra pinot --extra clickhouse --extra trino --extra pointblank --extra streaming --extra ibm-mq --extra db2 --extra geo --extra integrations
       # R 4.6 and rv for the groups with R blocks, which run with the rv environment in
       # integration_tests/r_env. make installs its packages from rv.lock.
       - name: Set up R
