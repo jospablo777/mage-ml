@@ -117,8 +117,8 @@ test('a moved model version is promoted from the service page', async ({ page })
   // The field shows its label as its placeholder until it has focus.
   await page.getByPlaceholder('Why (kept in promotions.yaml)').fill('better recall');
   await page.getByRole('button', { name: 'Promote version 5' }).click();
-  await expect(page.getByText('Build and ship the image to put it in the service.', { exact: false }))
-    .toBeVisible();
+  // The section's subtitle says to build and ship too, so the result line is matched.
+  await expect(page.getByText('churn: version 5 promoted', { exact: false })).toBeVisible();
   expect(promoted).toMatchObject({ model: 'churn', name, reason: 'better recall' });
   await api.call('DELETE', `pipeline_services/${name}`).catch(() => null);
 });

@@ -1437,7 +1437,7 @@ function Workbench({
       {!isNew && (saved.models || []).some(model => model.uri.startsWith('models:/')) && (
         <Spacing mt={2}>
           <Section
-            subtitle="Promote the version the registry's alias names now, or a challenger that did better. The promotion is saved in service.yaml with who did it and why; build and ship the image to put it in the service."
+            subtitle="Promote the version the registry's alias names now, or a challenger that did better. service.yaml pins the version and promotions.yaml records who promoted it and why; build and ship the image to put it in the service."
             title="Promote a model version"
           >
             <ModelPromotions serviceName={saved.name} />
