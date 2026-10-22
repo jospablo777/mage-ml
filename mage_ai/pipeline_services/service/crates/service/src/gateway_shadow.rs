@@ -139,6 +139,8 @@ pub struct Shadow {
     /// Where the server keeps run logs (MAGE_GATEWAY_LOGS_DIR); None when they are kept
     /// elsewhere (S3, GCS), which the gateway leaves to the server.
     logs_dir: Option<String>,
+    /// The scheduler's decisions in shadow (MAGE_GATEWAY_SCHEDULER_SHADOW=1).
+    scheduler: Option<crate::gateway_scheduler::SchedulerShadow>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
@@ -189,6 +191,15 @@ impl Shadow {
             logs_dir: std::env::var("MAGE_GATEWAY_LOGS_DIR")
                 .ok()
                 .filter(|d| !d.is_empty()),
+            scheduler: (std::env::var("MAGE_GATEWAY_SCHEDULER_SHADOW").as_deref() == Ok("1")
+                && std::env::var("MAGE_GATEWAY_REPO_PATH").is_ok())
+            .then(|| {
+                let grace = std::env::var("MAGE_GATEWAY_SCHEDULER_GRACE_SECONDS")
+                    .ok()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(120);
+                crate::gateway_scheduler::SchedulerShadow::new(chrono::Duration::seconds(grace))
+            }),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -473,7 +484,30 @@ impl Shadow {
             .iter()
             .cloned()
             .collect();
-        json!({"routes": counts, "recent_differences": recent})
+        let mut report = json!({"routes": counts, "recent_differences": recent});
+        if let Some(scheduler) = &self.scheduler {
+            report["scheduler"] = scheduler.report();
+        }
+        report
+    }
+
+    /// Whether the scheduler's decisions are shadowed.
+    pub fn shadows_scheduler(&self) -> bool {
+        self.scheduler.is_some()
+    }
+
+    /// One look at the triggers and their runs (gateway_scheduler.rs).
+    pub async fn scheduler_tick(&self) {
+        let (Some(scheduler), Some(repo)) = (&self.scheduler, &self.repo_path) else {
+            return;
+        };
+        if let Err(error) = scheduler
+            .tick(&self.metadata, repo, chrono::Utc::now())
+            .await
+        {
+            crate::log::warn(&format!("Gateway scheduler shadow failed: {error}"));
+            scheduler.failed();
+        }
     }
 
     async fn answer(&self, route: &str, path: &str, query: &str) -> Result<Value, String> {

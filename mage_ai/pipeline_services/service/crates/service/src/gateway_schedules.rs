@@ -471,7 +471,7 @@ fn with_clock(at: DateTime<Utc>, hour: u32, minute: u32, second: u32) -> DateTim
 }
 
 /// Python's truth of a JSON value.
-fn truthy(value: &Value) -> bool {
+pub(crate) fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -540,6 +540,27 @@ impl Schedule<'_> {
             Interval::Once | Interval::AlwaysOn => at,
         })
     }
+}
+
+/// What the scheduler does with a trigger's interval: None when it starts no runs on a
+/// clock (no interval, @once, @always_on), else the current execution date at `now`
+/// (PipelineSchedule.current_execution_date without a landing time). Errors are the
+/// intervals the gateway does not read.
+pub(crate) fn clock_execution_date(
+    interval: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, String> {
+    let Some(interval) = Interval::parse(interval.unwrap_or_default())? else {
+        return Ok(None);
+    };
+    if matches!(interval, Interval::Once | Interval::AlwaysOn) {
+        return Ok(None);
+    }
+    let schedule = Schedule {
+        interval: &interval,
+        landing: None,
+    };
+    schedule.current(now).map(Some)
 }
 
 /// PipelineSchedule.next_execution_date at `now`.

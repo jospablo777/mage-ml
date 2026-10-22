@@ -68,6 +68,20 @@ A query with a name a route does not read goes to the server: for a caller who i
 owner the server refuses names its policy does not list, and meta names such as `_format`
 change the answer. Tornado drops names with a blank value, and the gateway does too.
 
+## The scheduler in shadow
+
+The first step of moving the scheduler to Rust (ROADMAP P3) is to check its decisions. Every
+15 s the gateway reads the project's active triggers and works out, as `should_schedule`
+does, the execution date each should have a run for: not before its start time, not for an
+execution date before the trigger was enabled unless `create_initial_pipeline_run` is set,
+and none for after-run triggers, `@once` or `@always_on`. When the run with that execution
+date appears it counts as `on_time`; when it has not appeared after the grace period
+(`MAGE_GATEWAY_SCHEDULER_GRACE_SECONDS`, 120 s) it counts as `missing`, and the trigger and
+date are logged and listed. Triggers with a landing time (their runs start ahead by the runs'
+average duration), with a backfill, or with a cron form the gateway does not read are left
+out and counted as `unsupported_triggers`. The scheduler keeps its authority. The counts are
+under `scheduler` in `/__gateway/shadow`; `MAGE_GATEWAY_SCHEDULER_SHADOW=off` turns it off.
+
 ## Serving
 
 `MAGE_GATEWAY_SERVE=block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules` (off by
@@ -96,6 +110,7 @@ with the gateway and checks:
 | The runs list shadowed for eight query shapes, one pipeline tagged | All equal; a type filter counted as unsupported |
 | The logs shadowed for ten queries of the logs page over two runs and an editor log: the default day, a limit, filters by run, trigger and block, a search with and without matches, the lines before a window | All equal; `_format` counted as unsupported |
 | A trigger's runs and a pipeline's runs grouped with their retries, eight pages over four dates with retries, one past the last run | All equal; paging shows every run once |
+| The scheduler in shadow, a trigger every minute | Its run found within a minute; none missing over the gateway suite |
 | The triggers list shadowed for twelve query shapes over a landing-time trigger, a cron trigger starting in three days, a weekly and an API trigger | All equal; `_format=with_runtime_average` counted as unsupported |
 | Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |

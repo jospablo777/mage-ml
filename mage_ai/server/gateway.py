@@ -73,6 +73,12 @@ def shadow_settings() -> tuple:
         MAGE_GATEWAY_CLIENT_ID=OAUTH2_APPLICATION_CLIENT_ID,
         MAGE_GATEWAY_PROJECT_UUID=get_project_uuid() or '',
         MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN='1' if HIDE_API_TRIGGER_TOKEN else '0',
+        # The scheduler's decisions in shadow (gateway_scheduler.rs): which runs it should
+        # have started, against the runs it did; MAGE_GATEWAY_SCHEDULER_SHADOW=off turns it
+        # off.
+        MAGE_GATEWAY_SCHEDULER_SHADOW='0' if os.getenv(
+            'MAGE_GATEWAY_SCHEDULER_SHADOW', '',
+        ).strip().lower() in ('off', '0', 'false') else '1',
         # The pipelines' names and tags; none on the project platform, whose runs the
         # gateway leaves to the server.
         **({} if project_platform_activated() else dict(

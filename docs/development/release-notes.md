@@ -69,6 +69,9 @@
 - R blocks read and write Amazon Redshift (`database = "redshift"` in `read_sql`,
   `write_table` and `db_connect`, with RPostgres), and the R block menus have Redshift
   loader and exporter templates.
+- With the gateway on, it checks the scheduler: for each active trigger, the run the
+  scheduler should start for the current execution date, counted as on time or missing at
+  `/__gateway/shadow`.
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead
   today is the next one, a monthly landing time keeps its day, and a start time ahead is
   respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets

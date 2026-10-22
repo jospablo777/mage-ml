@@ -46,6 +46,8 @@ struct Upstream {
     shadow: Option<Arc<Shadow>>,
 }
 
+const SCHEDULER_SHADOW_EVERY: Duration = Duration::from_secs(15);
+
 /// The gateway's own page: its shadow reads, from loopback only.
 const SHADOW_REPORT: &str = "/__gateway/shadow";
 
@@ -101,6 +103,16 @@ pub async fn serve(
         rereads: Client::builder(TokioExecutor::new()).build(connector),
         shadow: shadow.map(Arc::new),
     };
+    if let Some(shadow) = upstream.shadow.clone().filter(|s| s.shadows_scheduler()) {
+        tokio::spawn(async move {
+            // The scheduler looks every 10 s; every 15 s is enough to see its runs.
+            let mut every = tokio::time::interval(SCHEDULER_SHADOW_EVERY);
+            loop {
+                every.tick().await;
+                shadow.scheduler_tick().await;
+            }
+        });
+    }
     crate::log::info(&format!(
         "Gateway on {} for the MageML server at {}",
         listener.local_addr().map_err(|e| e.to_string())?,
