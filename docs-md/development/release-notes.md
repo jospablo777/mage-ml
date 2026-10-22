@@ -69,6 +69,7 @@
 - Paging through a trigger's runs shows every run once: a date's retries were cut at the
   end of a page and the rest of them left out of the next, and a page past the last run
   failed.
+- `mage-ml[ibm]` installs IBM Cloud's native drivers, Db2 and IBM MQ, in one extra.
 - `mage data sample` draws masked development samples from MySQL, DuckDB, ClickHouse,
   Snowflake and BigQuery as well as PostgreSQL (`source.kind`).
 - The Services page promotes a model version: the version a moved alias names, or a

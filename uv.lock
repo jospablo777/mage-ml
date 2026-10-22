@@ -3731,6 +3731,10 @@ great-expectations = [
 hdf5 = [
     { name = "tables" },
 ]
+ibm = [
+    { name = "ibm-db" },
+    { name = "ibmmq" },
+]
 ibm-mq = [
     { name = "ibmmq" },
 ]
@@ -3897,10 +3901,12 @@ requires-dist = [
     { name = "mage-ml", extras = ["azure"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["bigquery"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["clickhouse"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["db2"], marker = "extra == 'ibm'" },
     { name = "mage-ml", extras = ["dbt"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["duckdb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["geo"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["google-cloud-storage"], marker = "extra == 'all'" },
+    { name = "mage-ml", extras = ["ibm-mq"], marker = "extra == 'ibm'" },
     { name = "mage-ml", extras = ["mlflow"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "mage-ml", extras = ["oracle"], marker = "extra == 'all'" },
@@ -3986,7 +3992,7 @@ requires-dist = [
     { name = "werkzeug", specifier = ">=3.1.6" },
     { name = "zstandard", marker = "extra == 'streaming'", specifier = ">=0.23" },
 ]
-provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "druid", "ibm-mq", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
+provides-extras = ["airtable", "azure", "bigquery", "chroma", "clickhouse", "dbt", "duckdb", "geo", "great-expectations", "google-cloud-storage", "hdf5", "mongodb", "pinot", "mysql", "oracle", "pointblank", "postgres", "db2", "druid", "ibm-mq", "ibm", "mlflow", "qdrant", "redshift", "s3", "snowflake", "spark", "streaming", "r", "rust", "trino", "integrations", "services", "all"]
 
 [package.metadata.requires-dev]
 dev = [

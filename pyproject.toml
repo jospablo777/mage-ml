@@ -188,6 +188,12 @@ druid = [
 ibm-mq = [
   "ibmmq>=2.1,<3",
 ]
+# IBM Cloud's native drivers: Db2 and IBM MQ. Object Storage, Event Streams, Cloud Databases
+# and Secrets Manager work with the core install.
+ibm = [
+  "mage-ml[db2]",
+  "mage-ml[ibm-mq]",
+]
 mlflow = [
   "mlflow-skinny>=3.17,<4",
   # MLflow 3 saves scikit-learn models with skops by default.

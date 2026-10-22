@@ -18,6 +18,10 @@ IBM Cloud Databases.
 | [Secrets Manager](#secrets-manager) | | `ibm:` secret references |
 | [Code Engine, Container Registry, IKS, OpenShift](#run-services-on-ibm-cloud) | | Deploy scripts, Tekton pipeline, manifests |
 
+Only Db2 and IBM MQ need drivers of their own; `uv pip install "mage-ml[ibm]"` installs
+both (`mage-ml[db2]` and `mage-ml[ibm-mq]` one at a time). Everything else works with the
+core install.
+
 ## Credentials
 
 Every IBM Cloud API takes an IAM access token. MageML gets one from either of:
