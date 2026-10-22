@@ -1923,7 +1923,7 @@ pub(crate) struct PipelineConfig {
     /// PipelineRun.pipeline_tags: the tags, or null without them.
     tags: Value,
     /// PipelineRun.pipeline_type: the type, python when the file names none.
-    kind: Value,
+    pub(crate) kind: Value,
     /// The uuids of `blocks`, in order (Pipeline.blocks_by_uuid); None when the file does
     /// not read as YAML, which Pipeline.get fails on.
     pub(crate) blocks: Option<Vec<String>>,

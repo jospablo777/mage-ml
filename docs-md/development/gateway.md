@@ -76,7 +76,9 @@ The first step of moving the scheduler to Rust (ROADMAP P3) is to check its deci
 15 s the gateway reads the project's active triggers and works out, as `should_schedule`
 does, the execution date each should have a run for: not before its start time, not for an
 execution date before the trigger was enabled unless `create_initial_pipeline_run` is set,
-and none for after-run triggers, `@once` or `@always_on`. When the run with that execution
+and none for after-run triggers or `@always_on`. An `@once` trigger with no run gets one:
+any run of it counts, as its execution date is the time the scheduler started it (streaming
+pipelines, which start one run per executor, are left out). When the run with that execution
 date appears it counts as `on_time`; when it has not appeared after the grace period
 (`MAGE_GATEWAY_SCHEDULER_GRACE_SECONDS`, 120 s) it counts as `missing`, and the trigger and
 date are logged and listed; an execution date with more than one run counts as a

@@ -699,6 +699,9 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
         dict(name='landing daily', schedule_type='time', schedule_interval='@daily',
              start_time='2024-01-01T22:00:00', status='active',
              settings=dict(landing_time_enabled=True)),
+        # One run, started at once.
+        dict(name='once', schedule_type='time', schedule_interval='@once',
+             start_time='2024-01-01T00:00:00', status='active'),
         # Not evaluated: a day of the month and of the week, which croniter joins with OR.
         dict(name='both days', schedule_type='time', schedule_interval='0 12 1 * 1',
              start_time='2024-01-01T00:00:00', status='active'),
@@ -713,10 +716,10 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
         return report['scheduler']
 
     before = scheduler()['counts']
-    # The first minute after the trigger was enabled, a tick of the scheduler (10 s) and one
-    # of the shadow (15 s).
-    deadline = time.monotonic() + 120
-    while scheduler()['counts']['on_time'] == before['on_time']:
+    # The every-minute, landing-time and once triggers' runs: the first minute after the
+    # trigger was enabled, a tick of the scheduler (10 s) and one of the shadow (15 s).
+    deadline = time.monotonic() + 150
+    while scheduler()['counts']['on_time'] < before['on_time'] + 3:
         assert time.monotonic() < deadline, scheduler()
         time.sleep(2)
     after = scheduler()

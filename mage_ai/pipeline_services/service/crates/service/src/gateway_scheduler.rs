@@ -37,6 +37,9 @@ struct Pending {
     /// When the run must exist, before the grace period: when the execution date was seen,
     /// or a landing time, before which the scheduler starts its run.
     due: DateTime<Utc>,
+    /// An @once trigger: any run of it counts, whatever its execution date (the time the
+    /// scheduler started it).
+    once: bool,
 }
 
 #[derive(Default)]
@@ -134,6 +137,45 @@ pub(crate) fn due(trigger: &Trigger, now: DateTime<Utc>) -> Result<Option<Due>, 
     Ok(Some((execution, deadline.map_or(now, |d| d.max(now)))))
 }
 
+/// Whether the scheduler should start the one run of an @once trigger now
+/// (should_schedule's ONCE branch without its run count).
+pub(crate) fn once_due(trigger: &Trigger, now: DateTime<Utc>) -> bool {
+    trigger.interval.as_deref() == Some("@once")
+        && trigger.schedule_type != "AFTER_RUN"
+        && trigger.start_time.is_none_or(|start| start <= now)
+}
+
+/// The runs of a trigger, of one execution date or all.
+async fn run_count(
+    metadata: &Metadata,
+    schedule: i64,
+    execution: Option<DateTime<Utc>>,
+) -> Result<i64, String> {
+    let rows = match execution {
+        Some(at) => {
+            read_rows(
+                metadata,
+                "SELECT count(*) FROM pipeline_run WHERE pipeline_schedule_id = {1} \
+                 AND execution_date = {2}",
+                &[Raw::Int(schedule), execution_param(metadata, at)],
+            )
+            .await?
+        }
+        None => {
+            read_rows(
+                metadata,
+                "SELECT count(*) FROM pipeline_run WHERE pipeline_schedule_id = {1}",
+                &[Raw::Int(schedule)],
+            )
+            .await?
+        }
+    };
+    Ok(match rows.first().and_then(|r| r.first()) {
+        Some(Raw::Int(n)) => *n,
+        _ => 0,
+    })
+}
+
 fn time(raw: &Raw) -> Option<DateTime<Utc>> {
     match raw {
         Raw::Time(at) => Some(*at),
@@ -219,6 +261,8 @@ impl SchedulerShadow {
             })
             .collect();
 
+        // @once triggers not yet taken in: each is checked once, from a time it had no run.
+        let mut once = Vec::new();
         {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             for trigger in &triggers {
@@ -229,6 +273,10 @@ impl SchedulerShadow {
                     .join("metadata.yaml")
                     .is_file();
                 if !defined || backfilled.contains(&trigger.id) {
+                    continue;
+                }
+                if once_due(trigger, now) {
+                    once.push(trigger.clone());
                     continue;
                 }
                 match due(trigger, now) {
@@ -245,6 +293,7 @@ impl SchedulerShadow {
                                 pipeline: trigger.pipeline_uuid.clone(),
                                 execution,
                                 due,
+                                once: false,
                             });
                         }
                     }
@@ -252,32 +301,50 @@ impl SchedulerShadow {
             }
         }
 
-        let pending: Vec<(i64, DateTime<Utc>)> = {
+        for trigger in once {
+            if self
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .last
+                .contains_key(&trigger.id)
+            {
+                continue;
+            }
+            // A streaming pipeline starts one run per executor.
+            let streaming =
+                crate::gateway_shadow::pipeline_config(repo_path, &trigger.pipeline_uuid)
+                    .is_some_and(|c| c.kind == "streaming");
+            let runs = run_count(metadata, trigger.id, None).await?;
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.last.insert(trigger.id, DateTime::<Utc>::UNIX_EPOCH);
+            if runs == 0 && !streaming {
+                state.pending.push(Pending {
+                    schedule: trigger.id,
+                    pipeline: trigger.pipeline_uuid.clone(),
+                    execution: DateTime::<Utc>::UNIX_EPOCH,
+                    due: now,
+                    once: true,
+                });
+            }
+        }
+
+        let pending: Vec<(i64, DateTime<Utc>, bool)> = {
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state
                 .pending
                 .iter()
-                .map(|p| (p.schedule, p.execution))
+                .map(|p| (p.schedule, p.execution, p.once))
                 .collect()
         };
         let mut found = BTreeSet::new();
         let mut doubled = Vec::new();
-        for (schedule, execution) in pending {
-            let rows = read_rows(
-                metadata,
-                "SELECT count(*) FROM pipeline_run WHERE pipeline_schedule_id = {1} \
-                 AND execution_date = {2}",
-                &[Raw::Int(schedule), execution_param(metadata, execution)],
-            )
-            .await?;
-            let runs = match rows.first().and_then(|r| r.first()) {
-                Some(Raw::Int(n)) => *n,
-                _ => 0,
-            };
+        for (schedule, execution, once) in pending {
+            let runs = run_count(metadata, schedule, (!once).then_some(execution)).await?;
             if runs >= 1 {
                 found.insert((schedule, execution));
             }
-            if runs > 1 {
+            if runs > 1 && !once {
                 doubled.push(json!({
                     "pipeline_schedule_id": schedule,
                     "execution_date": execution.to_rfc3339(),
@@ -297,7 +364,8 @@ impl SchedulerShadow {
                 missing.push(json!({
                     "pipeline_schedule_id": p.schedule,
                     "pipeline_uuid": p.pipeline,
-                    "execution_date": p.execution.to_rfc3339(),
+                    "execution_date": (!p.once).then(|| p.execution.to_rfc3339()),
+                    "once": p.once,
                 }));
                 false
             } else {
@@ -437,6 +505,56 @@ mod tests {
         );
         // Cron forms the gateway does not read.
         assert!(due(&trigger("0 0 L * *"), now).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_once_trigger_without_runs_gets_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("mage.db");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join("pipelines/p")).unwrap();
+        std::fs::write(repo.join("pipelines/p/metadata.yaml"), "blocks: []\n").unwrap();
+        let connection = rusqlite::Connection::open(&db).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE pipeline_schedule (id INTEGER, pipeline_uuid TEXT, schedule_type TEXT, \
+                 schedule_interval TEXT, start_time TEXT, settings TEXT, last_enabled_at TEXT, \
+                 status TEXT, repo_path TEXT);
+                 CREATE TABLE backfill (pipeline_schedule_id INTEGER);
+                 CREATE TABLE pipeline_run (id INTEGER, pipeline_schedule_id INTEGER, execution_date TEXT);
+                 INSERT INTO pipeline_schedule VALUES (1, 'p', 'TIME', '@once', NULL, '{}', NULL, 'ACTIVE', NULL);
+                 INSERT INTO pipeline_schedule VALUES (2, 'p', 'TIME', '@once', NULL, '{}', NULL, 'ACTIVE', NULL);
+                 INSERT INTO pipeline_schedule VALUES (3, 'p', 'TIME', '@once', NULL, '{}', NULL, 'ACTIVE', NULL);
+                 INSERT INTO pipeline_run VALUES (1, 3, '2026-01-01 00:00:00.000000');",
+            )
+            .unwrap();
+        let metadata = Metadata::Sqlite(db.clone());
+        let shadow = SchedulerShadow::new(chrono::Duration::seconds(120));
+        let now = utc("2026-10-22T06:10:15Z");
+        shadow.tick(&metadata, &repo, now).await.unwrap();
+        // Triggers 1 and 2 have no run; 3 ran before and is not checked.
+        assert_eq!(shadow.report()["pending"], 2);
+        connection
+            .execute(
+                "INSERT INTO pipeline_run VALUES (2, 1, '2026-10-22 06:10:20.000000')",
+                [],
+            )
+            .unwrap();
+        shadow
+            .tick(&metadata, &repo, now + chrono::Duration::seconds(150))
+            .await
+            .unwrap();
+        let report = shadow.report();
+        assert_eq!(report["counts"]["on_time"], 1);
+        assert_eq!(report["counts"]["missing"], 1);
+        assert_eq!(report["recent_missing"][0]["pipeline_schedule_id"], 2);
+        assert_eq!(report["recent_missing"][0]["once"], true);
+        // Each is checked once.
+        shadow
+            .tick(&metadata, &repo, now + chrono::Duration::seconds(300))
+            .await
+            .unwrap();
+        assert_eq!(shadow.report()["pending"], 0);
     }
 
     #[tokio::test]
