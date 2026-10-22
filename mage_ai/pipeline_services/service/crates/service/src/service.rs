@@ -31,6 +31,9 @@ pub struct Config {
     pub retention_days: u32,
     pub environment: String,
     pub extra_env: Vec<(String, String)>,
+    /// Where streams save their state when it is not the data directory
+    /// (MAGE_SERVICE_STATE_URL).
+    pub state_store: Option<Arc<crate::state_files::StoreHandle>>,
 }
 
 pub struct Service {
@@ -63,6 +66,9 @@ pub struct Service {
     pub residents: Option<crate::resident::Residents>,
     /// Where alerts go, when the manifest has some.
     pub alerts: Option<crate::alerts::Alerter>,
+    /// The object store streams save their state in (MAGE_SERVICE_STATE_URL); None keeps it
+    /// in the data directory.
+    pub state_store: Option<Arc<crate::state_files::StoreHandle>>,
     /// Run logs kept in a shared (PostgreSQL) run history too; None with SQLite.
     pub shared_logs: Option<Arc<crate::run_logs::SharedLogs>>,
     max_total_runs: usize,
@@ -205,6 +211,7 @@ impl Service {
             stream_stop: CancellationToken::new(),
             residents: crate::resident::Residents::from_env(config.max_total_runs.max(1)),
             alerts,
+            state_store: config.state_store,
             shared_logs,
             max_total_runs: config.max_total_runs.max(1),
             wake: Notify::new(),
@@ -269,6 +276,18 @@ impl Service {
             Some(alias) => self.python_workers.get(alias),
             None => self.python.as_ref(),
         }
+    }
+
+    /// Where a stream pipeline's state is saved.
+    pub fn state_files(&self, pipeline: &str) -> crate::state_files::StateFiles {
+        crate::state_files::StateFiles::for_pipeline(
+            self.state_store.as_ref(),
+            self.data_dir
+                .join("state")
+                .join(crate::executor::sanitize(pipeline)),
+            &self.manifest.service.name,
+            pipeline,
+        )
     }
 
     pub fn shutting_down(&self) -> bool {

@@ -18,6 +18,8 @@
 //! date, such as `%Y/%m/%d`), and for S3-compatible stores `endpoint_url`, `region`.
 //! Credentials come from the environment, as each cloud's tools read them.
 
+pub mod blocking;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -121,7 +123,10 @@ impl ObjectSink {
     }
 }
 
-fn open(url: &url::Url, config: &Value) -> Result<(Arc<dyn ObjectStore>, Path), ConnectorError> {
+pub(crate) fn open(
+    url: &url::Url,
+    config: &Value,
+) -> Result<(Arc<dyn ObjectStore>, Path), ConnectorError> {
     let (scheme, path) = ObjectStoreScheme::parse(url)
         .map_err(|e| ConnectorError::fatal(format!("Object storage url {url}: {e}")))?;
     let fail = |e: object_store::Error| ConnectorError::fatal(format!("Object storage {url}: {e}"));

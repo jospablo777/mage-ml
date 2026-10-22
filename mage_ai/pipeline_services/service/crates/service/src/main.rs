@@ -23,6 +23,7 @@ mod scheduler;
 mod secrets;
 mod service;
 mod shadow;
+mod state_files;
 mod stream;
 mod stream_chain;
 mod stream_python;
@@ -803,6 +804,7 @@ async fn start_service(
     let service = Service::new(
         manifest,
         Config {
+            state_store: crate::state_files::open_store()?,
             service_dir: common.dir.clone(),
             data_dir: data,
             schedules_enabled,

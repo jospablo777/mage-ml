@@ -2056,6 +2056,73 @@ fn a_timer_fires_on_an_idle_stream_once_and_not_again_after_a_restart() {
     assert!(alerts(&service).is_empty(), "fired before the restart");
 }
 
+/// With MAGE_SERVICE_STATE_URL, keyed state lives in the object store, not the data
+/// directory: another instance (here a second service with its own data directory) picks a
+/// key up where the first left it, as after a rebalance.
+#[cfg(feature = "object-store")]
+#[test]
+fn keyed_state_in_an_object_store_follows_the_stream_to_another_instance() {
+    let shared = tempfile::tempdir().unwrap();
+    let url = format!("file://{}/state", shared.path().display());
+    let mut manifest = webhook_manifest(json!({}), 1 << 20);
+    manifest["pipelines"][0]["blocks"][0]["configuration"] = json!({"state_key": "card"});
+    let env = [
+        ("MAGE_SERVICE_INGEST_TOKEN", "ingest-secret"),
+        ("MAGE_SERVICE_STATE_URL", url.as_str()),
+    ];
+    let send = |service: &Service, key: &str, body: &str| {
+        let (status, reply) = service
+            .request_with(
+                "POST",
+                "/v1/streams/hooks/messages",
+                Some("ingest-secret"),
+                body,
+                &[("Idempotency-Key", key)],
+            )
+            .unwrap();
+        assert_eq!(status, 200, "{reply}");
+    };
+    let seen = |service: &Service| -> Vec<u64> {
+        std::fs::read_to_string(service.dir.path().join("service.log"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("\"seen\""))
+            .filter_map(|l| serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).ok())
+            .map(|r| {
+                r.get("value").cloned().unwrap_or(r)["seen"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect()
+    };
+
+    let mut first = Service::with_manifest(&manifest, &[("transformers/tag.py", COUNT_BLOCK)]);
+    first.start(&env);
+    wait_for_stream(&first, "hooks");
+    send(&first, "1", r#"[{"card": "a"}, {"card": "a"}]"#);
+    assert_eq!(seen(&first), [1, 2]);
+    // <service>/<pipeline>/<block>/partition-<n>.json in the store.
+    let saved = shared.path().join("state/hooks/hooks/tag/partition-0.json");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !saved.is_file() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        saved.is_file(),
+        "no state in the store at {}",
+        saved.display()
+    );
+    first.signal("-TERM");
+    // Nothing in the first instance's data directory.
+    assert!(!first.dir.path().join("data/state").exists());
+
+    let mut second = Service::with_manifest(&manifest, &[("transformers/tag.py", COUNT_BLOCK)]);
+    second.start(&env);
+    wait_for_stream(&second, "hooks");
+    send(&second, "2", r#"[{"card": "a"}]"#);
+    assert_eq!(seen(&second), [3]);
+}
+
 /// Resident set of a process in KiB, from ps (Linux and macOS).
 fn rss_kib(pid: u32) -> u64 {
     let output = Command::new("ps")

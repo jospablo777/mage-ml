@@ -326,6 +326,10 @@
 
 ### Stream services
 
+- `MAGE_SERVICE_STATE_URL` keeps streams' keyed state and windows in an object store (S3
+  and compatible, GCS, Azure, a shared folder), so a partition's state follows it when a
+  rebalance moves it to another instance; it started empty there.
+
 - Timers of keyed state fire on an idle stream: without `time`, a due timer fires within
   about a second while its partition receives nothing (each idle partition gets a timer
   batch, which the engine never acknowledges), so a device that goes silent is reported

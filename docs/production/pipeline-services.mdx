@@ -690,6 +690,7 @@ to it.
 | `MAGE_SERVICE_STREAM_LOG_FILES` | 4 | Rotated stream logs kept |
 | `MAGE_SERVICE_INGEST_TOKEN` | none | A token that can only send messages to webhook streams, for webhook senders |
 | `MAGE_SERVICE_LEDGER_URL` | none | A PostgreSQL run history, shared by instances on several machines; see [Several instances](#several-instances) |
+| `MAGE_SERVICE_STATE_URL` | none | An object store (`s3://`, `gs://`, `az://`, `file://`) for streams' keyed state and windows, so a partition's state follows it to another instance; without it, state is in the data directory |
 | `MAGE_SERVICE_SHARED_OUTPUT_MB` | `16` | With a PostgreSQL run history, the largest block output it keeps a copy of, so every instance serves it |
 | `MAGE_SERVICE_LEDGER_SCHEMA` | `mage_service` | Its schema; one service per schema |
 | `MAGE_SERVICE_LEDGER_MIGRATE` | `on` | `off` refuses an older run history instead of migrating it at start |

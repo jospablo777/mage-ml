@@ -11,11 +11,11 @@
 //! Saved with the positions it reflects, as windows are (stream_window.rs): each batch's
 //! changes are kept with the batch's last position, and before the source commits a position
 //! the changes through it are applied to the saved state, written to
-//! `<data>/state/<pipeline>/<block>/partition-<n>.json`. A restart loads it and, with offsets,
-//! skips the messages it already holds.
+//! `<data>/state/<pipeline>/<block>/partition-<n>.json`, or in the object store of
+//! MAGE_SERVICE_STATE_URL (state_files.rs). A restart loads it and, with offsets, skips the
+//! messages it already holds.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use mage_service_core::manifest::EventTime;
@@ -59,7 +59,7 @@ pub struct Partition {
 }
 
 pub struct KeyedState {
-    dir: PathBuf,
+    files: crate::state_files::StateFiles,
     /// Shared with the service API, which reads keys (`view`).
     partitions: StateView,
 }
@@ -125,9 +125,9 @@ fn merge<T>(
 }
 
 impl KeyedState {
-    pub fn new(dir: PathBuf) -> KeyedState {
+    pub fn new(files: impl Into<crate::state_files::StateFiles>) -> KeyedState {
         KeyedState {
-            dir,
+            files: files.into(),
             partitions: StateView::default(),
         }
     }
@@ -136,23 +136,25 @@ impl KeyedState {
         self.partitions.clone()
     }
 
-    fn file(&self, partition: u32) -> PathBuf {
-        self.dir.join(format!("partition-{partition}.json"))
+    fn file(partition: u32) -> String {
+        format!("partition-{partition}.json")
     }
 
     /// Runs `f` on the partition's state, loaded from its file the first time.
     fn with<T>(&self, partition: u32, f: impl FnOnce(&mut Partition) -> T) -> Result<T, String> {
-        let file = self.file(partition);
+        let file = Self::file(partition);
         let mut partitions = self.partitions.write().unwrap_or_else(|p| p.into_inner());
         let state = match partitions.entry(partition) {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::btree_map::Entry::Vacant(entry) => {
-                let saved: Saved = match std::fs::read(&file) {
-                    Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
-                        format!("the saved state in {} is unreadable: {e}", file.display())
+                let saved: Saved = match self.files.read(&file)? {
+                    Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+                        format!(
+                            "the saved state in {} is unreadable: {e}",
+                            self.files.describe(&file)
+                        )
                     })?,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Saved::default(),
-                    Err(error) => return Err(format!("reading {}: {error}", file.display())),
+                    None => Saved::default(),
                 };
                 entry.insert(Partition {
                     current: saved.values.clone(),
@@ -226,7 +228,6 @@ impl KeyedState {
     pub fn save(&mut self, commits: &[Commit]) -> Result<(), String> {
         for commit in commits {
             let partition = commit.partition.0;
-            let file = self.file(partition);
             // The file is written outside the lock; the API keeps reading meanwhile.
             let saved = {
                 let mut partitions = self.partitions.write().unwrap_or_else(|p| p.into_inner());
@@ -255,18 +256,7 @@ impl KeyedState {
                 }
                 serde_json::to_vec(&state.saved).map_err(|e| e.to_string())?
             };
-            std::fs::create_dir_all(&self.dir)
-                .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
-            let temporary = file.with_extension("json.tmp");
-            {
-                use std::io::Write;
-                let mut handle = std::fs::File::create(&temporary)
-                    .map_err(|e| format!("writing {}: {e}", temporary.display()))?;
-                handle.write_all(&saved).map_err(|e| e.to_string())?;
-                handle.sync_all().map_err(|e| e.to_string())?;
-            }
-            std::fs::rename(&temporary, &file)
-                .map_err(|e| format!("saving {}: {e}", file.display()))?;
+            self.files.write(&Self::file(partition), &saved)?;
         }
         Ok(())
     }
@@ -329,10 +319,10 @@ fn now_ms() -> i64 {
 }
 
 impl BlockStates {
-    /// The blocks with `state_key` in their configuration, keeping state under `state_dir`.
+    /// The blocks with `state_key` in their configuration, keeping state in `state`.
     pub fn new(
         order: &[mage_service_core::manifest::Block],
-        state_dir: &std::path::Path,
+        state: &crate::state_files::StateFiles,
         stable: bool,
         time: Option<EventTime>,
     ) -> BlockStates {
@@ -343,7 +333,7 @@ impl BlockStates {
                 Some((
                     block.uuid.clone(),
                     key,
-                    KeyedState::new(state_dir.join(crate::executor::sanitize(&block.uuid))),
+                    KeyedState::new(state.child(&crate::executor::sanitize(&block.uuid))),
                 ))
             })
             .collect();

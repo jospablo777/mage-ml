@@ -708,10 +708,7 @@ fn region_session(
     let cancel = service.stream_stop.child_token();
     // Where blocks with keyed state keep it, and whether positions stay the same across
     // restarts (offsets and log positions do; queue tags do not).
-    let state_dir = service
-        .data_dir
-        .join("state")
-        .join(crate::executor::sanitize(&pipeline.uuid));
+    let state_dir = service.state_files(&pipeline.uuid);
     let stable_positions = matches!(
         pipeline.stream.as_ref().map(|s| s.source.kind),
         Some(ConnectorKind::Kafka | ConnectorKind::Postgres)
@@ -727,11 +724,7 @@ fn region_session(
             stream.source.kind,
             ConnectorKind::Kafka | ConnectorKind::Postgres
         );
-        let dir = service
-            .data_dir
-            .join("state")
-            .join(crate::executor::sanitize(&pipeline.uuid))
-            .join(crate::executor::sanitize(&block.uuid));
+        let dir = state_dir.child(&crate::executor::sanitize(&block.uuid));
         return Ok(Box::new(
             crate::stream_window::WindowSession::new(
                 &block.uuid,

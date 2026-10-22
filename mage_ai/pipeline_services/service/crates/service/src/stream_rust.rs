@@ -110,7 +110,7 @@ pub struct RustSessionOptions {
     /// For R blocks: the Python worker that says how to start R.
     pub pool: Option<Arc<PythonPool>>,
     /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
-    pub state_dir: PathBuf,
+    pub state_dir: crate::state_files::StateFiles,
     pub stable_positions: bool,
     /// The stream's event time, which timers of keyed state follow.
     pub time: Option<mage_service_core::manifest::EventTime>,

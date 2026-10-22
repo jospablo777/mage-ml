@@ -244,9 +244,13 @@ The windows are saved with the positions they hold: before the source commits a 
 each partition's open windows as of it are written to
 `<data>/state/<pipeline>/<block>/`. A restarted service resumes them from the same point,
 and with Kafka or PostgreSQL changes it skips the messages its saved windows already hold.
-The files are on the instance's data volume: a partition that moves to another instance
-starts its windows empty there. Windows run on the engine, in exported services and in
-the Run tab, not in MageML's own streaming.
+The files are on the instance's data volume, so a partition that moves to another instance
+starts its windows empty there, unless the service keeps state in an object store:
+`MAGE_SERVICE_STATE_URL` (`s3://bucket/prefix`, `gs://`, `az://`, `file:///path`) puts
+windows and keyed state there, `<prefix>/<service>/<pipeline>/<block>/`, and the instance
+that gets a partition reads its state. Credentials come from the environment as for the
+object storage sink (`AWS_ENDPOINT_URL` for MinIO and other S3-compatible stores). Windows
+run on the engine, in exported services and in the Run tab, not in MageML's own streaming.
 
 ## Keyed state
 

@@ -13,7 +13,6 @@
 //! files are on this instance's volume.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use mage_service_core::manifest::EventTime;
 use mage_stream_core::window::{WindowSpec, Windows, key_of};
@@ -37,7 +36,7 @@ pub struct WindowSession {
     block: String,
     spec: WindowSpec,
     time: EventTime,
-    dir: PathBuf,
+    files: crate::state_files::StateFiles,
     /// Whether positions stay the same across restarts (offsets), so seen ones can be skipped.
     stable_positions: bool,
     partitions: BTreeMap<u32, PartitionState>,
@@ -68,7 +67,7 @@ impl WindowSession {
         block: &str,
         spec: WindowSpec,
         time: Option<EventTime>,
-        dir: PathBuf,
+        files: impl Into<crate::state_files::StateFiles>,
         stable_positions: bool,
     ) -> Result<WindowSession, String> {
         spec.check()?;
@@ -81,7 +80,7 @@ impl WindowSession {
                 lateness_ms: 0,
                 on_late: mage_service_core::manifest::LatePolicy::Pass,
             }),
-            dir,
+            files: files.into(),
             stable_positions,
             partitions: BTreeMap::new(),
             pending: BTreeMap::new(),
@@ -90,25 +89,22 @@ impl WindowSession {
         })
     }
 
-    fn file(&self, partition: u32) -> PathBuf {
-        self.dir.join(format!("partition-{partition}.json"))
+    fn file(partition: u32) -> String {
+        format!("partition-{partition}.json")
     }
 
     /// The partition's state: in memory, else as saved, else empty.
     fn state(&mut self, partition: u32) -> Result<&mut PartitionState, String> {
         if !self.partitions.contains_key(&partition) {
-            let file = self.file(partition);
-            let state = match std::fs::read(&file) {
-                Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+            let file = Self::file(partition);
+            let state = match self.files.read(&file)? {
+                Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
                     format!(
                         "the saved windows in {} are unreadable: {e}",
-                        file.display()
+                        self.files.describe(&file)
                     )
                 })?,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    PartitionState::default()
-                }
-                Err(error) => return Err(format!("reading {}: {error}", file.display())),
+                None => PartitionState::default(),
             };
             self.partitions.insert(partition, state);
         }
@@ -203,20 +199,8 @@ impl WindowSession {
             let Some(index) = chosen else { continue };
             let (_, snapshot) = pending[index].clone();
             pending.drain(..=index);
-            std::fs::create_dir_all(&self.dir)
-                .map_err(|e| format!("creating {}: {e}", self.dir.display()))?;
-            let file = self.file(partition);
-            let temporary = file.with_extension("json.tmp");
             let bytes = serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?;
-            {
-                use std::io::Write;
-                let mut handle = std::fs::File::create(&temporary)
-                    .map_err(|e| format!("writing {}: {e}", temporary.display()))?;
-                handle.write_all(&bytes).map_err(|e| e.to_string())?;
-                handle.sync_all().map_err(|e| e.to_string())?;
-            }
-            std::fs::rename(&temporary, &file)
-                .map_err(|e| format!("saving {}: {e}", file.display()))?;
+            self.files.write(&Self::file(partition), &bytes)?;
         }
         Ok(())
     }

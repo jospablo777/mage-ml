@@ -58,7 +58,7 @@ pub struct SessionOptions {
     /// `Payload(method, properties, body)`, so its blocks run unchanged.
     pub shape: MessageShape,
     /// Where blocks with keyed state keep it (`<data>/state/<pipeline>`).
-    pub state_dir: std::path::PathBuf,
+    pub state_dir: crate::state_files::StateFiles,
     pub stable_positions: bool,
     /// The stream's event time, which timers of keyed state follow.
     pub time: Option<mage_service_core::manifest::EventTime>,
