@@ -58,7 +58,13 @@ def shadow_settings() -> tuple:
 
     # What the server's decisions depend on, so the gateway decides as it does
     # (gateway_auth.rs); JWT_SECRET is in the environment the gateway inherits.
-    return ['--shadow', routes], dict(
+    serve = os.getenv('MAGE_GATEWAY_SERVE', '').strip()
+    arguments = ['--shadow', routes]
+    if serve and serve.lower() not in ('off', '0', 'false'):
+        # Routes the gateway answers itself when its decision allows the read; off by
+        # default until their shadow reads have stayed equal where they run.
+        arguments += ['--serve', serve]
+    return arguments, dict(
         MAGE_GATEWAY_METADATA_DB=url,
         MAGE_GATEWAY_REQUIRE_AUTHENTICATION='1' if REQUIRE_USER_AUTHENTICATION else '0',
         MAGE_GATEWAY_CLIENT_ID=OAUTH2_APPLICATION_CLIENT_ID,

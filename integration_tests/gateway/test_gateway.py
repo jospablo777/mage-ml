@@ -32,9 +32,12 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
-@pytest.fixture(scope='module')
-def ports(tmp_path_factory):
-    """The gateway's port and the server's, for a `mage start` with MAGE_GATEWAY=on."""
+def run_server(tmp_path_factory, **extra_env):
+    """
+    `mage start` with MAGE_GATEWAY=on in a scratch folder: yields the gateway's port, the
+    server's, and the folder. From the checkout, MageML would use the development database
+    in mage_ai/orchestration/db and find the runs of earlier test sessions there.
+    """
     from mage_ai.pipeline_services.engine import EngineNotFound, engine_path
 
     try:
@@ -42,16 +45,12 @@ def ports(tmp_path_factory):
     except EngineNotFound as error:
         pytest.skip(str(error))
     folder = tmp_path_factory.mktemp('gateway')
-    global DATA
-    DATA = folder / 'data'
     project = folder / 'project'
     port = free_port()
     env = dict(
         os.environ, MAGE_GATEWAY='on', MAGE_ENGINE_PATH=str(engine),
-        DISABLE_AUTO_BROWSER_OPEN='true', MAGE_DATA_DIR=str(folder / 'data'),
+        DISABLE_AUTO_BROWSER_OPEN='true', MAGE_DATA_DIR=str(folder / 'data'), **extra_env,
     )
-    # From the checkout, MageML would use the development database in
-    # mage_ai/orchestration/db and find the runs of earlier test sessions there.
     process = subprocess.Popen(
         [sys.executable, '-c', 'from mage_ai.cli.main import app; app()', 'start',
          str(project), '--port', str(port)],
@@ -68,9 +67,18 @@ def ports(tmp_path_factory):
         found = [pattern.search(line) for line in list(lines)]
         upstream = next((int(m.group(1)) for m in found if m), None)
         time.sleep(0.2)
-    yield port, upstream
+    yield port, upstream, folder
     process.terminate()
     process.wait(timeout=30)
+
+
+@pytest.fixture(scope='module')
+def ports(tmp_path_factory):
+    """The gateway's port and the server's, for a `mage start` with MAGE_GATEWAY=on."""
+    global DATA
+    for port, upstream, folder in run_server(tmp_path_factory):
+        DATA = folder / 'data'
+        yield port, upstream
 
 
 @pytest.fixture

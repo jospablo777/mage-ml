@@ -96,9 +96,13 @@ enum Command {
         #[arg(long, env = "MAGE_GATEWAY_METADATA_DB", hide_env_values = true)]
         metadata_db: Option<String>,
         /// Routes the gateway also answers from the metadata database and compares with the
-        /// server's answers, comma-separated: block_runs.
+        /// server's answers, comma-separated: block_runs, pipeline_run.
         #[arg(long, value_delimiter = ',')]
         shadow: Vec<String>,
+        /// Shadowed routes the gateway answers itself when its decision allows the read; the
+        /// server answers the rest.
+        #[arg(long, value_delimiter = ',')]
+        serve: Vec<String>,
     },
     /// Check that each stream's source and sinks answer, read-only, then exit: 0 when none
     /// failed.
@@ -319,6 +323,7 @@ fn main() -> ExitCode {
                 exit_with_parent,
                 metadata_db,
                 shadow,
+                serve,
             } => {
                 if exit_with_parent {
                     gateway::exit_with_parent();
@@ -327,10 +332,11 @@ fn main() -> ExitCode {
                     (true, _) => None,
                     (false, Some(url)) => {
                         Some(gateway_shadow::Metadata::parse(&url).and_then(|db| {
-                            gateway_shadow::Shadow::new(
+                            gateway_shadow::Shadow::serving(
                                 db,
                                 shadow,
                                 gateway_auth::AuthSettings::from_env(),
+                                serve,
                             )
                         })?)
                     }

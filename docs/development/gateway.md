@@ -1,7 +1,7 @@
 # Rust gateway in front of the web server
 
-Status: step 1 and shadow reads for block runs done (2026-10-21), off by default;
-`MAGE_GATEWAY=on` turns it on.
+Status: pass-through, shadow reads and decisions for two routes, and serving them behind
+a flag, done (2026-10-22); off by default, `MAGE_GATEWAY=on` turns it on.
 
 The API moves to Rust one route family at a time behind a gateway (ADR-0007, ROADMAP P2).
 Step 1 is the gateway alone: it answers nothing itself and passes every request to the
@@ -56,8 +56,15 @@ MageML passes what this depends on (`MAGE_GATEWAY_REQUIRE_AUTHENTICATION`,
 `MAGE_GATEWAY_CLIENT_ID`, `MAGE_GATEWAY_PROJECT_UUID`) in the gateway's environment. The
 counts are `decisions_agree`, `decisions_disagree` and `decisions_failed`.
 
-A route starts being served by the gateway only after its shadow reads and decisions stay
-equal, with the policy matrix (`contracts/`) as a further check.
+## Serving
+
+`MAGE_GATEWAY_SERVE=block_runs,pipeline_run` (off by default) has the gateway answer those
+routes itself when its own decision allows the read: from the metadata database, with the
+server's CORS headers and an ETag (304 when it matches). A read it would refuse, or one it
+cannot answer (the database busy, a run that does not exist), goes to the server, which
+answers as it always has, refusals included. `/__gateway/shadow` counts the answers it gave
+as `served`. Turn a route on where its shadow reads and decisions have stayed equal; the
+policy matrix (`contracts/`) is a further check.
 
 ## Measured
 
@@ -71,6 +78,7 @@ with the gateway and checks:
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
 | `GET /api/block_runs` for ten combinations of filters, order and pages over eight block runs | All ten shadow reads equal; a status written as stored instead of shown makes the test fail |
 | `GET /api/pipeline_runs/<id>` for four runs while the scheduler runs them | All equal, some after a reread |
+| `MAGE_GATEWAY_SERVE=block_runs,pipeline_run`: both routes through the gateway and from the server | The same answers; a caller without a session refused by the server; the block runs list's p95 6.8 ms from the server, 3.3 ms from the gateway (debug build) |
 | Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 

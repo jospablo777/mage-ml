@@ -102,6 +102,8 @@ struct Counts {
     decisions_agree: u64,
     decisions_disagree: u64,
     decisions_failed: u64,
+    /// Answered by the gateway itself (--serve).
+    served: u64,
 }
 
 /// The server's answer read again, for the same request; None when it did not answer 200.
@@ -117,16 +119,38 @@ pub struct Shadow {
     metadata: Metadata,
     routes: Vec<String>,
     auth: Option<crate::gateway_auth::AuthSettings>,
+    /// Routes the gateway answers itself when its decision allows the read (--serve).
+    serve: Vec<String>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
 
 impl Shadow {
+    #[cfg(test)]
     pub fn new(
         metadata: Metadata,
         routes: Vec<String>,
         auth: Option<crate::gateway_auth::AuthSettings>,
     ) -> Result<Shadow, String> {
+        Shadow::serving(metadata, routes, auth, Vec::new())
+    }
+
+    pub fn serving(
+        metadata: Metadata,
+        routes: Vec<String>,
+        auth: Option<crate::gateway_auth::AuthSettings>,
+        serve: Vec<String>,
+    ) -> Result<Shadow, String> {
+        for route in &serve {
+            if !routes.contains(route) {
+                return Err(format!("--serve {route} needs --shadow {route} too."));
+            }
+        }
+        if !serve.is_empty() && auth.is_none() {
+            return Err("--serve needs the server's authentication settings \
+                        (MAGE_GATEWAY_REQUIRE_AUTHENTICATION, MAGE_GATEWAY_CLIENT_ID)."
+                .to_string());
+        }
         for route in &routes {
             if !ROUTES.contains(&route.as_str()) {
                 return Err(format!(
@@ -139,6 +163,7 @@ impl Shadow {
             metadata,
             routes,
             auth,
+            serve,
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -256,6 +281,30 @@ impl Shadow {
                 self.note(route, json!({"route": route, "query": query, "difference": first_difference(&served, &own)}));
             }
         }
+    }
+
+    /// The gateway's own answer for a request it serves: Some when the route is served and
+    /// its decision allows the read; None sends the request to the server, which answers
+    /// refusals and anything the gateway cannot answer as it always has.
+    pub async fn serve(
+        &self,
+        route: &'static str,
+        path: &str,
+        query: &str,
+        headers: &hyper::HeaderMap,
+    ) -> Option<Value> {
+        let settings = self.auth.as_ref()?;
+        if !self.serve.iter().any(|r| r == route) {
+            return None;
+        }
+        match self.decide(settings, route, path, query, headers).await {
+            Ok(Some(true)) => {}
+            _ => return None,
+        }
+        let own = self.answer(route, path, query).await.ok()?;
+        let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+        counts.entry(route.to_string()).or_default().served += 1;
+        Some(own)
     }
 
     /// Whether the gateway would serve the request: the caller as the middleware finds it,

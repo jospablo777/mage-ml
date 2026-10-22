@@ -53,6 +53,9 @@
   answered by the gateway from the metadata database and compared with the server's answer
   (shadow reads); the counts and differences are at `/__gateway/shadow` from the same
   machine.
+- `MAGE_GATEWAY_SERVE=block_runs,pipeline_run` has the gateway answer those two reads itself
+  when its own decision allows them, in about half the server's time; the server answers
+  the rest, refusals included.
 - The block runs list breaks ties by id: block runs created together share their times,
   and pages of the list repeated or skipped rows between requests.
 - Listing integration sources and destinations no longer imports every connector into the

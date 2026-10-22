@@ -150,6 +150,13 @@ async fn forward(
     let query = request.uri().query().unwrap_or_default().to_string();
     let route_path = request.uri().path().to_string();
     let reread_uri = request.uri().clone();
+    if let (Some(route), Some(shadow)) = (shadowed, &upstream.shadow)
+        && let Some(own) = shadow
+            .serve(route, &route_path, &query, request.headers())
+            .await
+    {
+        return served_json(&own, request.headers());
+    }
     let upgrade = wants_upgrade(request.headers());
     let client_side = upgrade.then(|| hyper::upgrade::on(&mut request));
     let (mut parts, body) = request.into_parts();
@@ -264,6 +271,57 @@ fn reread(upstream: &Upstream, uri: &Uri, headers: &HeaderMap) -> crate::gateway
             )
         })
     })
+}
+
+/// An answer of the gateway's own, with the headers MageML's server sends with JSON: its
+/// CORS headers and an ETag (the body's SHA-1, as Tornado makes it), 304 when it matches.
+fn served_json(value: &serde_json::Value, request: &HeaderMap) -> Response<Body> {
+    let body = value.to_string();
+    let digest = ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, body.as_bytes());
+    let etag = format!(
+        "\"{}\"",
+        digest
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    let not_modified = request
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',')
+                .any(|tag| tag.trim().trim_start_matches("W/") == etag)
+        });
+    let mut response = if not_modified {
+        let mut response = Response::new(
+            Full::new(Bytes::new())
+                .map_err(|never| match never {})
+                .boxed(),
+        );
+        *response.status_mut() = StatusCode::NOT_MODIFIED;
+        response
+    } else {
+        json_answer(value)
+    };
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        "access-control-allow-headers",
+        HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        "access-control-allow-methods",
+        HeaderValue::from_static("DELETE, GET, PATCH, POST, PUT, OPTIONS"),
+    );
+    headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    if let Ok(value) = HeaderValue::try_from(etag) {
+        headers.insert(header::ETAG, value);
+    }
+    response
 }
 
 fn json_answer(value: &serde_json::Value) -> Response<Body> {
