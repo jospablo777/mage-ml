@@ -1,5 +1,5 @@
 from mage_ai.authentication.permissions.constants import PermissionAccess
-from mage_ai.orchestration.db.models.oauth import RolePermission
+from mage_ai.orchestration.db.models.oauth import Permission, RolePermission
 from mage_ai.tests.api.endpoints.mixins import (
     BaseAPIEndpointTest,
     build_create_endpoint_tests,
@@ -39,13 +39,11 @@ build_create_endpoint_tests(
     test_uuid='with_permission_ids',
     resource='role_permission',
     authentication_accesses=[PermissionAccess.ADMIN],
+    # Three permissions without access: ids 1 to 3 included the test user's admin one, and
+    # admin and owner access go out by an owner's hand only (role_grants.py).
     build_payload=lambda self: dict(
         role_id=0,
-        permission_ids=[
-            1,
-            2,
-            3,
-        ],
+        permission_ids=[Permission.create(access=0).id for _ in range(3)],
     ),
     assert_before_create_count=lambda self: len(
         RolePermission.query.all(),

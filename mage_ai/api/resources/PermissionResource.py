@@ -1,3 +1,4 @@
+from mage_ai.api import role_grants
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
 from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.models.oauth import Permission, Role, RolePermission
@@ -37,6 +38,7 @@ class PermissionResource(DatabaseResource):
     def create(self, payload, user, **kwargs):
         if 'entity_name' not in payload:
             payload['entity_name'] = ''
+        role_grants.check_access(user, payload.get('access'))
 
         return super().create(merge_dict(payload, dict(
             user_id=user.id if user else None,
@@ -44,6 +46,11 @@ class PermissionResource(DatabaseResource):
 
     @safe_db_query
     def update(self, payload, **kwargs):
+        role_grants.check_permissions(self.current_user, [self.model])
+        role_grants.check_access(self.current_user, payload.get('access'))
+        if 'role_ids' not in payload:
+            # Without role_ids, the links stay: a missing list unlinked every role.
+            return super().update(payload, **kwargs)
         role_ids = [int(i) for i in payload.get('role_ids') or []]
         roles_mapping = index_by(lambda x: x.id, self.roles or [])
 
@@ -78,6 +85,12 @@ class PermissionResource(DatabaseResource):
         return super().update(ignore_keys(payload, [
             'role_ids',
         ]), **kwargs)
+
+
+    @safe_db_query
+    def delete(self, **kwargs):
+        role_grants.check_permissions(self.current_user, [self.model])
+        return super().delete(**kwargs)
 
 
 PermissionResource.register_parent_model('role_id', Role)

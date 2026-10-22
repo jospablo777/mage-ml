@@ -26,6 +26,11 @@
 
 ### Server
 
+- Security: only owners give, change or take away admin or owner access through roles,
+  permissions, role permissions and user roles; an admin could make itself an Owner
+  through any of them.
+- Renaming a role, or changing a permission, without its lists keeps the role's users and
+  permissions; a missing list counted as empty and removed them all.
 - Security: an admin can no longer make itself or anyone an Owner, or another user an
   Admin, through a user's role_ids or roles; only the roles_new field was checked.
 - Security: signing in with an unknown email takes as long to refuse as a wrong password,

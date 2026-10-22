@@ -117,9 +117,11 @@ def _assert_after_update(self, result, model):
 build_update_endpoint_tests(
     PermissionAPIEndpointTest,
     resource='permissions',
-    get_resource_id=lambda self: self.permissions_fetched[0].id,
-    build_payload=lambda self: dict(access=999),
-    get_model_before_update=lambda self: Permission.get_by_id(self.permissions_fetched[0].id),
+    # The role's permission and an editor's access: admin and owner access go out by an
+    # owner's hand only (role_grants.py), and 999 holds both bits.
+    get_resource_id=lambda self: self.permission.id,
+    build_payload=lambda self: dict(access=PermissionAccess.EDITOR),
+    get_model_before_update=lambda self: Permission.get_by_id(self.permission.id),
     assert_after_update=lambda self, result, model: model.access != result['access'],
     authentication_accesses=[PermissionAccess.ADMIN],
     permission_settings=[

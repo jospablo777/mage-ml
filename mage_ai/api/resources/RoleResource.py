@@ -1,8 +1,15 @@
+from mage_ai.api import role_grants
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
 from mage_ai.data_preparation.repo_manager import get_project_uuid
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db import db_connection, safe_db_query
-from mage_ai.orchestration.db.models.oauth import Role, RolePermission, User, UserRole
+from mage_ai.orchestration.db.models.oauth import (
+    Permission,
+    Role,
+    RolePermission,
+    User,
+    UserRole,
+)
 from mage_ai.shared.array import find
 from mage_ai.shared.hash import extract, ignore_keys, index_by, merge_dict
 
@@ -73,6 +80,24 @@ class RoleResource(DatabaseResource):
 
     @safe_db_query
     def update(self, payload, **kwargs):
+        # Only the lists the payload has: a missing one counted as empty, so renaming a
+        # role took every user off it and unlinked all its permissions.
+        if 'permission_ids' in payload:
+            self.__update_permissions(payload)
+        if 'user_ids' in payload:
+            self.__update_users(payload)
+
+        return super().update(ignore_keys(payload, [
+            'permission_ids',
+            'user_ids',
+        ]), **kwargs)
+
+    @safe_db_query
+    def delete(self, **kwargs):
+        role_grants.check_roles(self.current_user, [self.model])
+        return super().delete(**kwargs)
+
+    def __update_permissions(self, payload):
         permission_ids = [int(i) for i in payload.get('permission_ids') or []]
         role_permissions_mapping = index_by(lambda x: x.id, self.role_permissions or [])
 
@@ -86,6 +111,12 @@ class RoleResource(DatabaseResource):
         for permission_id in role_permissions_mapping.keys():
             if permission_id not in permission_ids:
                 permission_ids_delete.append(permission_id)
+
+        changed = permission_ids_create + permission_ids_delete
+        role_grants.check_permissions(
+            self.current_user,
+            Permission.query.filter(Permission.id.in_(changed)).all() if changed else [],
+        )
 
         if permission_ids_create:
             db_connection.session.bulk_save_objects(
@@ -104,6 +135,7 @@ class RoleResource(DatabaseResource):
             )
             db_connection.session.execute(delete_statement)
 
+    def __update_users(self, payload):
         user_ids = [int(i) for i in payload.get('user_ids') or []]
         user_role_mapping = index_by(lambda x: x.id, self.users or [])
 
@@ -117,6 +149,13 @@ class RoleResource(DatabaseResource):
         for permission_id in user_role_mapping.keys():
             if permission_id not in user_ids:
                 user_ids_delete.append(permission_id)
+
+        changed = user_ids_create + user_ids_delete
+        if changed:
+            role_grants.check_roles(self.current_user, [self.model])
+            role_grants.check_users(
+                self.current_user, User.query.filter(User.id.in_(changed)).all(),
+            )
 
         if user_ids_create:
             db_connection.session.bulk_save_objects(
@@ -133,11 +172,6 @@ class RoleResource(DatabaseResource):
                 UserRole.user_id.in_(user_ids_delete),
             )
             db_connection.session.execute(delete_statement)
-
-        return super().update(ignore_keys(payload, [
-            'permission_ids',
-            'user_ids',
-        ]), **kwargs)
 
 
 def __load_permissions(resource):
