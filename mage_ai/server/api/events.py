@@ -3,17 +3,17 @@ import json
 from mage_ai.orchestration.db.models.schedules import EventMatcher, PipelineSchedule
 from mage_ai.orchestration.triggers.event_trigger import EventTrigger
 
-from .base import BaseDetailHandler, BaseHandler, SignedInMixin
+from .base import BaseDetailHandler, BaseHandler, EditorMixin
 
 
-class ApiEventHandler(SignedInMixin, BaseHandler):
+class ApiEventHandler(EditorMixin, BaseHandler):
     def post(self):
         payload = self.get_payload()
         EventTrigger().run(payload)
         self.write(dict(event=payload))
 
 
-class ApiEventMatcherDetailHandler(SignedInMixin, BaseDetailHandler):
+class ApiEventMatcherDetailHandler(EditorMixin, BaseDetailHandler):
     model_class = EventMatcher
 
     def get(self, event_matcher_id):
@@ -24,7 +24,11 @@ class ApiEventMatcherDetailHandler(SignedInMixin, BaseDetailHandler):
 
     def put(self, event_matcher_id):
         event_matcher = self.model_class.get_by_id(int(event_matcher_id))
-        payload = self.get_payload()
+        # A matcher's own fields: the whole payload reached update(), any column too.
+        payload = {
+            k: v for k, v in self.get_payload().items()
+            if k in ('event_type', 'name', 'pattern', 'pipeline_schedule_ids')
+        }
         pipeline_schedule_ids = payload.pop('pipeline_schedule_ids', None)
         if pipeline_schedule_ids is not None:
             pipeline_schedules = PipelineSchedule.query.filter(
@@ -38,7 +42,7 @@ class ApiEventMatcherDetailHandler(SignedInMixin, BaseDetailHandler):
         super().delete(event_matcher_id)
 
 
-class ApiEventMatcherListHandler(SignedInMixin, BaseHandler):
+class ApiEventMatcherListHandler(EditorMixin, BaseHandler):
     model_class = EventMatcher
 
     def get(self):

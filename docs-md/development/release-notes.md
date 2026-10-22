@@ -72,6 +72,8 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- Event triggers (`POST /api/events`) and event matcher changes need an editor; viewers could
+  make them.
 - Sign-in is refused for an account after 10 failed attempts within 15 minutes, until the
   oldest leaves the window (`MAGE_SIGN_IN_MAX_FAILURES`, `MAGE_SIGN_IN_WINDOW_SECONDS`).
   With LDAP, an unknown user and a wrong password give the same message.

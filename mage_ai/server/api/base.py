@@ -190,6 +190,35 @@ class SignedInMixin(OAuthMiddleware):
             self.finish(json.dumps(dict(error=dict(code=401, message='Sign in first.'))))
 
 
+class EditorMixin(SignedInMixin):
+    """
+    SignedInMixin, and changes only by an editor of the project: any signed-in user, a
+    viewer too, could trigger event pipelines through /api/events and create, change or
+    delete event matchers.
+    """
+
+    def prepare(self):
+        from mage_ai import settings
+
+        super().prepare()
+        if self._finished or not settings.REQUIRE_USER_AUTHENTICATION:
+            return
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        from mage_ai.api.utils import has_at_least_editor_role
+        from mage_ai.data_preparation.repo_manager import get_project_uuid
+        from mage_ai.orchestration.constants import Entity
+
+        if not has_at_least_editor_role(
+            self.request.current_user, Entity.PROJECT, get_project_uuid(),
+        ):
+            self.set_status(403)
+            self.set_header('Content-Type', 'application/json')
+            self.finish(json.dumps(dict(error=dict(
+                code=403, message='Only editors make changes here.',
+            ))))
+
+
 class BaseDetailHandler(BaseHandler):
     def get(self, model_id, **kwargs):
         model = self.model_class.get_by_id(int(model_id))

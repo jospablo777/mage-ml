@@ -63,3 +63,41 @@ class LegacyHandlerAuthTest(AsyncHTTPTestCase, DBTestCase):
         with patch('mage_ai.settings.REQUIRE_USER_AUTHENTICATION', False), \
                 patch('mage_ai.api.middleware.REQUIRE_USER_AUTHENTICATION', False):
             self.assertEqual(self.fetch('/api/event_matchers').code, 200)
+
+    def test_viewers_read_and_only_editors_change(self):
+        """A signed-in viewer triggered event pipelines and changed event matchers."""
+        from mage_ai.api.middleware import OAuthMiddleware
+        from mage_ai.orchestration.db.models.oauth import Role
+        from mage_ai.tests.factory import create_user
+
+        Role.create_default_roles()
+        viewer = create_user(roles_new=[Role.get_role('Viewer')])
+        editor = create_user(roles_new=[Role.get_role('Editor')])
+        matcher = EventMatcher.create(name='orders_landed', pattern={'source': ['shop']})
+
+        def as_user(user):
+            def prepare(handler):
+                handler.request.current_user = user
+                handler.request.error = None
+            return patch.object(OAuthMiddleware, 'prepare', prepare)
+
+        with patch('mage_ai.api.utils.REQUIRE_USER_AUTHENTICATION', True), \
+                patch('mage_ai.server.api.events.EventTrigger') as trigger:
+            with as_user(viewer):
+                self.assertEqual(self.fetch('/api/event_matchers').code, 200)
+                event = self.fetch('/api/events', method='POST',
+                                   body=json.dumps({'source': 'shop'}))
+                self.assertEqual(event.code, 403)
+                trigger.assert_not_called()
+                changed = self.fetch(f'/api/event_matchers/{matcher.id}', method='PUT',
+                                     body=json.dumps({'event_matcher': {'name': 'taken'}}))
+                self.assertEqual(changed.code, 403)
+            with as_user(editor):
+                changed = self.fetch(f'/api/event_matchers/{matcher.id}', method='PUT',
+                                     body=json.dumps({'event_matcher': {
+                                         'name': 'renamed', 'id': 999,
+                                     }}))
+                self.assertEqual(changed.code, 200, changed.body)
+        found = EventMatcher.get_by_id(matcher.id)
+        # Its own fields only: the id stays.
+        self.assertEqual(found.name, 'renamed')
