@@ -2117,13 +2117,19 @@ mod tests {
                 .and_then(Value::as_array)
                 .is_some_and(|roles| roles.iter().any(|r| r == "viewer"))
         };
-        for (route, resource, action) in [
+        let checked = [
             ("block_runs", "block_runs", "list"),
             ("logs", "logs", "list"),
+            ("monitor_stats", "monitor_stats", "detail"),
             ("pipeline_run", "pipeline_runs", "detail"),
             ("pipeline_runs", "pipeline_runs", "list"),
             ("pipeline_schedules", "pipeline_schedules", "list"),
-        ] {
+        ];
+        // A new route is checked too: monitor_stats was left out of this list at first.
+        let mut listed: Vec<&str> = checked.iter().map(|(route, _, _)| *route).collect();
+        listed.sort_unstable();
+        assert_eq!(listed, ROUTES, "every shadow route is checked here");
+        for (route, resource, action) in checked {
             assert!(ROUTES.contains(&route), "{route}");
             let action_entry = matrix["actions"]
                 .as_array()
