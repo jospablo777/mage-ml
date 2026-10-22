@@ -1893,6 +1893,67 @@ mod tests {
         );
     }
 
+    /// The routes against the policies as recorded from the server (contracts/): a viewer
+    /// takes each route's action, and every query name a route reads is one the policy
+    /// allows a viewer on it. A policy that drops a name fails here, not in production.
+    #[test]
+    fn routes_conform_to_the_recorded_policies() {
+        let matrix: Value = serde_json::from_str(include_str!(
+            "../../../../../../contracts/policy_matrix.json"
+        ))
+        .unwrap();
+        let viewer_may = |entry: &Value| {
+            entry
+                .as_array()
+                .and_then(|e| e.last())
+                .and_then(Value::as_array)
+                .is_some_and(|roles| roles.iter().any(|r| r == "viewer"))
+        };
+        for (route, resource, action) in [
+            ("block_runs", "block_runs", "list"),
+            ("logs", "logs", "list"),
+            ("pipeline_run", "pipeline_runs", "detail"),
+            ("pipeline_runs", "pipeline_runs", "list"),
+            ("pipeline_schedules", "pipeline_schedules", "list"),
+        ] {
+            assert!(ROUTES.contains(&route), "{route}");
+            let action_entry = matrix["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a[0] == resource && a[1] == action)
+                .unwrap_or_else(|| panic!("no {resource} {action} in the matrix"));
+            assert!(
+                viewer_may(action_entry),
+                "a viewer may not {action} {resource}"
+            );
+            let allowed: Vec<&str> = matrix["attributes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|a| {
+                    a[0] == resource
+                        && a[1] == "query"
+                        && a[2] == action
+                        && a[3].as_array().is_some_and(|m| m.iter().any(|m| m == 0))
+                })
+                .flat_map(|a| a[4].as_object().unwrap().iter())
+                .filter(|(roles, _)| roles.split(' ').any(|r| r == "viewer"))
+                .flat_map(|(_, names)| names.as_array().unwrap().iter())
+                .filter_map(Value::as_str)
+                .collect();
+            for name in route_names(route) {
+                // Meta names (`_limit`) are not authorized as queries.
+                if !name.starts_with('_') {
+                    assert!(
+                        allowed.contains(name),
+                        "{route} reads {name}, which the policy refuses a viewer"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn queries_with_names_the_server_refuses_or_reads_otherwise_go_to_it() {
         let repo = std::path::Path::new("/repo");
