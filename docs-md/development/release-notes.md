@@ -26,6 +26,9 @@
 
 ### Server
 
+- With `MAGE_GATEWAY_AUTHZ_SHADOW=1`, the gateway decides every API read from the recorded
+  policies and counts where it agrees with the server: the measure for moving authorization
+  to Rust. Every recorded read by every role, and the end-to-end suite, agreed.
 - The gateway reads `GET /api/monitor_stats` (the overview's and monitor pages' run counts
   and times) from the metadata database, compares it with the server's answer, and serves
   it with `MAGE_GATEWAY_SERVE=monitor_stats`.

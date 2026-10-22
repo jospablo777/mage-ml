@@ -151,6 +151,20 @@ pub struct Shadow {
     comparisons: std::sync::Arc<tokio::sync::Semaphore>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
+    /// Every API read's authorization decided from the recorded policies and compared with
+    /// the server's (MAGE_GATEWAY_AUTHZ_SHADOW=1, gateway_policy.rs), by resource and action.
+    authorization: bool,
+    authz_counts: Mutex<BTreeMap<String, AuthzCounts>>,
+}
+
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+struct AuthzCounts {
+    agree: u64,
+    disagree: u64,
+    /// The matrix has no rule for the mode, or the decision needs what it does not record
+    /// (user permissions on).
+    uncovered: u64,
+    failed: u64,
 }
 
 impl Shadow {
@@ -217,6 +231,8 @@ impl Shadow {
             }),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
+            authorization: std::env::var("MAGE_GATEWAY_AUTHZ_SHADOW").as_deref() == Ok("1"),
+            authz_counts: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -483,6 +499,74 @@ impl Shadow {
         recent.push_back(difference);
     }
 
+    /// Whether every API read's authorization is compared with the server's.
+    pub fn shadows_authorization(&self) -> bool {
+        self.authorization && self.auth.is_some()
+    }
+
+    /// The gateway's decision for an API read, from the recorded policies, against the
+    /// server's answer to it.
+    pub async fn compare_authorization(
+        &self,
+        path: &str,
+        query: &str,
+        headers: &hyper::HeaderMap,
+        served: &[u8],
+    ) {
+        use crate::gateway_auth::{Caller, caller, viewer};
+        use crate::gateway_policy::{checked_names, matrix, mode, server_decision};
+
+        let Some(settings) = &self.auth else { return };
+        let Some((resource, action)) = matrix().target(path) else {
+            return;
+        };
+        let Some(server) = server_decision(served) else {
+            return;
+        };
+        let key = format!("{resource} {action}");
+        let count = |field: fn(&mut AuthzCounts) -> &mut u64| {
+            let mut counts = self.authz_counts.lock().unwrap_or_else(|p| p.into_inner());
+            *field(counts.entry(key.clone()).or_default()) += 1;
+        };
+        // Policies with user permissions on read entity grants the matrix does not record.
+        if crate::gateway_policy::user_permissions() {
+            count(|c| &mut c.uncovered);
+            return;
+        }
+        let parsed = Query::parse(query);
+        let role = match caller(&self.metadata, settings, headers, &parsed.0).await {
+            Ok(Caller::Open) => return,
+            Ok(Caller::Public) => "anonymous",
+            // The middleware answers these before any policy.
+            Ok(Caller::Refused(_)) => return,
+            Ok(Caller::User(user)) => match viewer(&self.metadata, settings, user).await {
+                Ok(viewer) => viewer.role(),
+                Err(_) => {
+                    count(|c| &mut c.failed);
+                    return;
+                }
+            },
+            Err(_) => {
+                count(|c| &mut c.failed);
+                return;
+            }
+        };
+        let names = checked_names(&parsed.0);
+        match matrix().decide(&resource, action, mode(), role, &names) {
+            None => count(|c| &mut c.uncovered),
+            Some(gateway) if gateway == server => count(|c| &mut c.agree),
+            Some(gateway) => {
+                count(|c| &mut c.disagree);
+                self.note(
+                    "authorization",
+                    json!({"authorization": key, "role": role, "query": names,
+                           "server": if server { "allowed" } else { "refused" },
+                           "gateway": if gateway { "allowed" } else { "refused" }}),
+                );
+            }
+        }
+    }
+
     /// Whether this served answer is one of those compared with the server's.
     pub fn check_served(&self, route: &str) -> bool {
         let counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
@@ -505,6 +589,14 @@ impl Shadow {
             .cloned()
             .collect();
         let mut report = json!({"routes": counts, "recent_differences": recent});
+        if self.shadows_authorization() {
+            report["authorization"] = json!(
+                self.authz_counts
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone()
+            );
+        }
         if let Some(scheduler) = &self.scheduler {
             report["scheduler"] = scheduler.report();
         }

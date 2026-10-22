@@ -52,8 +52,10 @@ def shadow_settings() -> tuple:
         return [], {}
     from mage_ai.data_preparation.repo_manager import get_project_uuid
     from mage_ai.settings import (
+        DISABLE_NOTEBOOK_EDIT_ACCESS,
         OAUTH2_APPLICATION_CLIENT_ID,
         REQUIRE_USER_AUTHENTICATION,
+        REQUIRE_USER_PERMISSIONS,
     )
     from mage_ai.settings.platform import project_platform_activated
     from mage_ai.settings.repo import get_repo_path
@@ -73,6 +75,10 @@ def shadow_settings() -> tuple:
         MAGE_GATEWAY_CLIENT_ID=OAUTH2_APPLICATION_CLIENT_ID,
         MAGE_GATEWAY_PROJECT_UUID=get_project_uuid() or '',
         MAGE_GATEWAY_HIDE_API_TRIGGER_TOKEN='1' if HIDE_API_TRIGGER_TOKEN else '0',
+        # The policies' modes, for every read's authorization decided from the recorded
+        # policies (gateway_policy.rs, MAGE_GATEWAY_AUTHZ_SHADOW=1).
+        MAGE_GATEWAY_DISABLE_NOTEBOOK_EDIT_ACCESS=str(int(DISABLE_NOTEBOOK_EDIT_ACCESS or 0)),
+        MAGE_GATEWAY_REQUIRE_USER_PERMISSIONS='1' if REQUIRE_USER_PERMISSIONS else '0',
         # The scheduler's decisions in shadow (gateway_scheduler.rs): which runs it should
         # have started, against the runs it did; MAGE_GATEWAY_SCHEDULER_SHADOW=off turns it
         # off.

@@ -204,8 +204,16 @@ async fn forward(
     }
     let upgrade = wants_upgrade(request.headers());
     let client_side = upgrade.then(|| hyper::upgrade::on(&mut request));
+    // Every other API read's authorization, decided from the recorded policies.
+    let authz_read = shadowed.is_none()
+        && request.method() == hyper::Method::GET
+        && route_path.starts_with("/api/")
+        && upstream
+            .shadow
+            .as_ref()
+            .is_some_and(|shadow| shadow.shadows_authorization());
     let (mut parts, body) = request.into_parts();
-    if shadowed.is_some() {
+    if shadowed.is_some() || authz_read {
         // Compared as JSON, so the server sends it uncompressed.
         parts.headers.remove(header::ACCEPT_ENCODING);
     }
@@ -279,6 +287,41 @@ async fn forward(
                         &reread_headers,
                         reread,
                     )
+                    .await;
+                drop(permit);
+            });
+        }
+        return Response::from_parts(
+            parts,
+            Full::new(served).map_err(|never| match never {}).boxed(),
+        );
+    }
+    let json = parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t.starts_with("application/json"));
+    if let Some(shadow) = &upstream.shadow
+        && authz_read
+        && json
+        && parts.status == StatusCode::OK
+        && !parts.headers.contains_key(header::CONTENT_ENCODING)
+    {
+        let served = match body.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(error) => {
+                crate::log::warn(&format!("Gateway: reading the server's answer: {error}"));
+                return answer(
+                    StatusCode::BAD_GATEWAY,
+                    "The MageML server's answer broke off.",
+                );
+            }
+        };
+        if let Some(permit) = shadow.comparison_permit("authorization") {
+            let (shadow, compared) = (shadow.clone(), served.clone());
+            tokio::spawn(async move {
+                shadow
+                    .compare_authorization(&route_path, &query, &reread_headers, &compared)
                     .await;
                 drop(permit);
             });

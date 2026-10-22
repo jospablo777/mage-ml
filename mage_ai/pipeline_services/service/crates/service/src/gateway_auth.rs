@@ -141,12 +141,31 @@ pub struct Viewer {
     grants: BTreeMap<i64, Vec<Grant>>,
     project: i64,
     project_uuid: String,
+    /// The user's owner flag and older role bits (1 admin, 2 editor, 4 viewer).
+    owner_flag: bool,
+    legacy_roles: i64,
 }
 
 impl Viewer {
     /// The owner flag, an older role bit or an owner role on the project: every entity.
     pub fn sees_everything(&self) -> bool {
         self.everything
+    }
+
+    /// The user's role on the project, named as contracts/policy_matrix.json names roles:
+    /// is_owner, then has_at_least_admin_role, editor and viewer, then `none`.
+    pub fn role(&self) -> &'static str {
+        if self.owner_flag || self.project & OWNER != 0 {
+            "owner"
+        } else if self.legacy_roles & 1 != 0 || self.project & ADMIN != 0 {
+            "admin"
+        } else if self.legacy_roles & 2 != 0 || self.project & EDITOR != 0 {
+            "editor"
+        } else if self.legacy_roles & 4 != 0 || self.project & VIEWER != 0 {
+            "viewer"
+        } else {
+            "none"
+        }
     }
 
     pub fn may_view(&self, entity: Entity<'_>) -> bool {
@@ -168,11 +187,13 @@ pub async fn viewer(
     settings: &AuthSettings,
     user: i64,
 ) -> Result<Viewer, String> {
-    let nobody = |everything| Viewer {
+    let nobody = |everything, owner_flag, legacy_roles| Viewer {
         everything,
         grants: BTreeMap::new(),
         project: 0,
         project_uuid: settings.project_uuid.clone(),
+        owner_flag,
+        legacy_roles,
     };
     let users = read_rows(
         metadata,
@@ -181,7 +202,7 @@ pub async fn viewer(
     )
     .await?;
     let Some(row) = users.first() else {
-        return Ok(nobody(false));
+        return Ok(nobody(false, false, 0));
     };
     let owner_flag = matches!(row[0], Raw::Bool(true) | Raw::Int(1));
     let legacy_roles = match row[1] {
@@ -189,7 +210,7 @@ pub async fn viewer(
         _ => 0,
     };
     if owner_flag || legacy_roles & 0b111 != 0 {
-        return Ok(nobody(true));
+        return Ok(nobody(true, owner_flag, legacy_roles));
     }
     let permissions = read_rows(
         metadata,
@@ -221,6 +242,8 @@ pub async fn viewer(
         grants,
         project,
         project_uuid: settings.project_uuid.clone(),
+        owner_flag,
+        legacy_roles,
     })
 }
 

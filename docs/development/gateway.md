@@ -101,6 +101,20 @@ as `served`. One served answer in ten is also asked of the server in the backgro
 compared as a shadow read is, so a served route keeps being checked. Turn a route on where its shadow reads and decisions have stayed equal; the
 policy matrix (`contracts/`) is a further check.
 
+## Authorization in shadow
+
+`MAGE_GATEWAY_AUTHZ_SHADOW=1` has the gateway decide every other `GET /api` read the way
+the policies do, from `contracts/policy_matrix.json` (recorded from them; ROADMAP P3): the
+caller as the middleware finds it, their project role (owner, admin, editor, viewer, none,
+or anonymous without a session), the roles the resource's action allows in the server's
+`DISABLE_NOTEBOOK_EDIT_ACCESS` mode, and the query names the role may send (meta names such
+as `_limit` are not checked; an owner sends any name unless notebook edits are off). It
+reads the server's JSON answer (asked for uncompressed) and counts, per resource and action,
+`agree`, `disagree`, `uncovered` (the matrix has no rule, or user permissions are on: the
+policies then read grants per entity, which the matrix does not record) and `failed`, under
+`authorization` in `/__gateway/shadow`, with each disagreement among the recent differences.
+The server still decides; the counts are what moving authorization to Rust is measured by.
+
 ## Measured
 
 `integration_tests/gateway` (`make -C integration_tests test-gateway`) runs `mage start`
@@ -123,6 +137,9 @@ with the gateway and checks:
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 | The same suite with `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs` | 38 passed, 4 skipped; the gateway answered 50 of the pages' reads (46 runs lists, the overview's included), none unsupported |
 | The same suite with all five routes served | 38 passed, 4 skipped; the gateway answered 68 of the pages' reads (46 runs lists, 14 triggers lists, 4 logs, 3 block runs lists, a run), and the ten it also asked the server for were equal |
+| `GET /api/monitor_stats`: ten queries of the overview and the monitor pages, on SQLite; the same SQL on PostgreSQL in a unit test | All ten equal |
+| `MAGE_GATEWAY_AUTHZ_SHADOW=1`: every recorded `GET /api` read as the owner, an editor, a viewer, a user with no role and a caller without a session | Every decision as the server's |
+| The Playwright suite with `MAGE_GATEWAY_AUTHZ_SHADOW=1` and six routes served | 41 passed, 4 skipped; 619 reads over 45 resources and actions decided, all as the server's |
 
 ## Next
 

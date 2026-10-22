@@ -17,6 +17,7 @@ mod gateway;
 mod gateway_auth;
 mod gateway_logs;
 mod gateway_monitor;
+mod gateway_policy;
 mod gateway_scheduler;
 mod gateway_schedules;
 mod gateway_shadow;
