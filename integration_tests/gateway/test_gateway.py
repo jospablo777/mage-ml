@@ -690,13 +690,18 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
     uuid = signed_in.post(f'{base}/pipelines', json=dict(pipeline=dict(
         name='gateway scheduler', type='python',
     )), timeout=60).json()['pipeline']['uuid']
-    response = signed_in.post(f'{base}/pipelines/{uuid}/pipeline_schedules', json=dict(
-        pipeline_schedule=dict(
-            name='every minute', schedule_type='time', schedule_interval='* * * * *',
-            start_time='2024-01-01T00:00:00', status='active',
-        ),
-    ), timeout=60).json()
-    assert 'error' not in response, response
+    for trigger in [
+        dict(name='every minute', schedule_type='time', schedule_interval='* * * * *',
+             start_time='2024-01-01T00:00:00', status='active'),
+        # Not evaluated: its runs start ahead of the landing time.
+        dict(name='landing daily', schedule_type='time', schedule_interval='@daily',
+             start_time='2024-01-01T22:00:00', status='active',
+             settings=dict(landing_time_enabled=True)),
+    ]:
+        response = signed_in.post(f'{base}/pipelines/{uuid}/pipeline_schedules', json=dict(
+            pipeline_schedule=trigger,
+        ), timeout=60).json()
+        assert 'error' not in response, response
 
     def scheduler():
         report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
@@ -713,5 +718,4 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
     assert after['counts']['missing'] == before['missing'], after
     assert after['counts']['duplicates'] == before['duplicates'], after
     assert after['counts']['failed'] == 0, after
-    # The landing-time trigger of the triggers test is not evaluated.
     assert after['unsupported_triggers'] >= 1, after
