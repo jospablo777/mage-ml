@@ -57,3 +57,9 @@ MageMLPipelineOperator(task_id='orders_report', pipeline='orders_report',
 Runs go under the pipeline's API trigger named Airflow. A retry finds the run its task
 instance started, the blocks' log lines go to the task log when the run ends, a failed run
 names its failed blocks, and killing the task cancels the run.
+
+## Assets
+
+`mageml_asset(pipeline, block=None)` is the Airflow Asset of a pipeline or a block's output.
+In an operator's `outlets`, each successful run records an asset event, and DAGs scheduled
+on the asset (`schedule=[asset]`) run after it.

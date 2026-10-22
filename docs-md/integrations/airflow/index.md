@@ -50,6 +50,31 @@ environment, so their packages cannot clash.
 The provider's tests run it against a real service, and a DAG in Airflow 3.3 through
 `airflow dags test`.
 
+## Schedule DAGs on MageML runs (Assets)
+
+`mageml_asset(pipeline, block=None)` names a pipeline, or one block's output, as an Airflow
+Asset (`mageml://<connection>/<pipeline>[/<block>]`). Put it in an operator's `outlets`:
+each successful run records an asset event, and DAGs scheduled on the asset run after it.
+
+```python
+from airflow.sdk import DAG
+from mageml_airflow.assets import mageml_asset
+from mageml_airflow.operators import MageMLServiceRunOperator
+
+scores = mageml_asset('score_orders', block='summary')
+
+with DAG('nightly_scores', schedule='@daily'):
+    MageMLServiceRunOperator(task_id='score_orders', pipeline='score_orders',
+                             outlets=[scores])
+
+with DAG('scores_report', schedule=[scores]):   # after each score_orders run
+    ...
+```
+
+The other way, a DAG scheduled on any asset (a file landed, a table loaded) runs a MageML
+pipeline with the operator as one of its tasks. Runs a service starts on its own schedule
+record no asset event; start them from Airflow when DAGs depend on them.
+
 ## Run a pipeline on a MageML server
 
 For pipelines that are not exported as a service, `MageMLPipelineOperator` runs them on a

@@ -44,6 +44,8 @@
   exported: it signs in as a user, runs the pipeline under its API trigger named Airflow,
   finds its run again on retry, writes the blocks' log lines to the task log, names failed
   blocks, and cancels on kill. The Services page shows the DAG for a service's pipeline.
+- `mageml_asset(pipeline, block=None)`: a pipeline's Airflow Asset; in an operator's
+  `outlets`, each run records an asset event, so DAGs scheduled on it run after it.
 
 ### Block templates
 
