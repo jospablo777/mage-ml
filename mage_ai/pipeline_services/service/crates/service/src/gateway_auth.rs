@@ -144,6 +144,11 @@ pub struct Viewer {
 }
 
 impl Viewer {
+    /// The owner flag, an older role bit or an owner role on the project: every entity.
+    pub fn sees_everything(&self) -> bool {
+        self.everything
+    }
+
     pub fn may_view(&self, entity: Entity<'_>) -> bool {
         if self.everything {
             return true;

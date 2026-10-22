@@ -378,20 +378,26 @@ impl Shadow {
             Caller::Public | Caller::Refused(_) => return Ok(Some(false)),
             Caller::User(user) => user,
         };
-        if route == "pipeline_schedules" {
-            // The list is the project's; then each trigger's attributes are authorized on
-            // its pipeline, and one the user may not view refuses the whole answer. A user
-            // kept from any pipeline with triggers is left to the server.
+        // Lists whose items the server authorizes each on its own pipeline: the triggers
+        // list, and the runs list without a pipeline_uuid (PipelineRunPolicy.entity). One
+        // item the user may not view refuses the whole answer, so a user kept from any
+        // pipeline with triggers (or runs) is left to the server.
+        let per_item = match route {
+            "pipeline_schedules" => Some("SELECT DISTINCT pipeline_uuid FROM pipeline_schedule"),
+            "pipeline_runs" if query.get("pipeline_uuid").is_none() => {
+                Some("SELECT DISTINCT pipeline_uuid FROM pipeline_run")
+            }
+            _ => None,
+        };
+        if let Some(pipelines_sql) = per_item {
             let viewer = crate::gateway_auth::viewer(&self.metadata, settings, user).await?;
             if !viewer.may_view(Entity::Project) {
                 return Ok(Some(false));
             }
-            let pipelines = read_rows(
-                &self.metadata,
-                "SELECT DISTINCT pipeline_uuid FROM pipeline_schedule",
-                &[],
-            )
-            .await?;
+            if viewer.sees_everything() {
+                return Ok(Some(true));
+            }
+            let pipelines = read_rows(&self.metadata, pipelines_sql, &[]).await?;
             let all = pipelines.iter().all(|row| match row.first() {
                 Some(Raw::Text(uuid)) => viewer.may_view(Entity::Pipeline(uuid)),
                 _ => true,

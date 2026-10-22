@@ -379,6 +379,41 @@ def test_the_gateway_decides_who_reads_as_the_server_does(ports, signed_in):
     assert added == dict(decisions_agree=len(asked), decisions_disagree=0, decisions_failed=0), \
         json.dumps(report['recent_differences'], indent=1)
 
+    # The runs list authorizes each run on its own pipeline: with a run of the pipeline the
+    # viewer is kept out of, the server refuses the whole list, and the gateway, which
+    # served it, leaves it to the server.
+    schedule = signed_in.post(f'{base}/pipelines/{kept_out}/pipeline_schedules', json=dict(
+        pipeline_schedule=dict(name='kept out trigger', schedule_type='api', status='active'),
+    ), timeout=60).json()['pipeline_schedule']
+    signed_in.post(f"{base}/pipeline_schedules/{schedule['id']}/pipeline_runs", json=dict(
+        pipeline_run=dict(variables={}),
+    ), timeout=60).raise_for_status()
+
+    def run_decisions():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('pipeline_runs', {})
+        return {k: found.get(k, 0) for k in DECISIONS}, report
+
+    before = settled(run_decisions)
+    refused = viewer.get(f'{base}/pipeline_runs?disable_retries_grouping=1', timeout=60).json()
+    assert refused['error']['code'] == 403, refused
+    allowed = viewer.get(f'{base}/pipeline_runs?pipeline_uuid={open_to}'
+                         '&disable_retries_grouping=1', timeout=60).json()
+    assert 'error' not in allowed, allowed
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = run_decisions()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= 1 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    time.sleep(1)
+    after, report = run_decisions()
+    added = {k: after[k] - before[k] for k in after}
+    # The refused list is not decided by the gateway; the allowed one agrees.
+    assert added == dict(decisions_agree=1, decisions_disagree=0, decisions_failed=0), \
+        json.dumps(report['recent_differences'], indent=1)
+
 
 def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
     """GET /api/pipeline_runs as the runs pages ask for it, after the runs made above."""

@@ -56,9 +56,10 @@ its data is not compared). The caller is found as OAuthMiddleware finds it: the 
 `has_at_least_viewer_role` allows it on the route's pipeline, or the project: the owner
 flag, an owner role on the project, the older role bits, or any access through the user's
 roles, whose permissions on a pipeline fall back to the project's and then the global ones.
-The triggers list is the project's, and the server then authorizes each trigger on its
-pipeline, refusing the whole list for one the user may not view; the gateway leaves a user
-kept from any pipeline with triggers to the server.
+The triggers list, and the runs list without a `pipeline_uuid`, are the project's, and the
+server then authorizes each item on its own pipeline, refusing the whole list for one the
+user may not view; the gateway leaves a user kept from any pipeline with triggers (or runs)
+to the server.
 MageML passes what this depends on (`MAGE_GATEWAY_REQUIRE_AUTHENTICATION`,
 `MAGE_GATEWAY_CLIENT_ID`, `MAGE_GATEWAY_PROJECT_UUID`) in the gateway's environment. The
 counts are `decisions_agree`, `decisions_disagree` and `decisions_failed`.
