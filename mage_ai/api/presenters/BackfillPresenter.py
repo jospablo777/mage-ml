@@ -1,6 +1,7 @@
+from mage_ai.api.errors import ApiError
 from mage_ai.api.operations.constants import META_KEY_LIMIT, META_KEY_OFFSET
 from mage_ai.api.presenters.BasePresenter import BasePresenter
-from mage_ai.orchestration.backfills.service import preview_run_dates
+from mage_ai.orchestration.backfills.service import BackfillError, preview_run_dates
 
 
 class BackfillPresenter(BasePresenter):
@@ -47,7 +48,10 @@ class BackfillPresenter(BasePresenter):
             self.model.interval_type is not None and
             self.model.interval_units is not None
         ):
-            pipeline_run_dates = preview_run_dates(self.model)
+            try:
+                pipeline_run_dates = preview_run_dates(self.model)
+            except BackfillError as error:
+                raise ApiError(dict(code=400, message=str(error)))
             data['total_run_count'] = len(pipeline_run_dates)
             data['run_status_counts'] = self.model.pipeline_run_status_counts
             if include_preview_runs:

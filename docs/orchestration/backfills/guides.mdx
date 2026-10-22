@@ -12,8 +12,11 @@ description: "How to create a backfill."
 1. Select a start date and time.
 1. Select an end date and time.
 1. Select an interval type; this value will help determine how many pipeline runs to create.
-1. Enter the interval units; this value is multiplied by the interval type to determine how many pipeline runs to create.
+1. Enter the interval units, a positive whole number: a run every that many of the interval
+   type, such as every 2 days. Monthly and yearly runs count from the start date, so a
+   monthly backfill from January 31 runs on February 28, March 31 and April 30.
 1. Click the button labeled <b>Save changes</b>.
 1. Once the backfill is saved, click the button labeled <b>Start backfill</b>.
 
-See the [backfill overview](/orchestration/backfills/overview) for how the pipeline runs are built.
+A backfill makes at most 10,000 runs; `MAGE_BACKFILL_MAX_RUNS` changes the limit. See the
+[backfill overview](/orchestration/backfills/overview) for how the pipeline runs are built.

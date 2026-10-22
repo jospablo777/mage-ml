@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -12,6 +13,20 @@ from mage_ai.orchestration.db.models.schedules import (
 )
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
+
+MAX_RUNS_ENV = 'MAGE_BACKFILL_MAX_RUNS'
+DEFAULT_MAX_RUNS = 10000
+
+
+class BackfillError(ValueError):
+    pass
+
+
+def max_runs() -> int:
+    try:
+        return max(int(os.getenv(MAX_RUNS_ENV) or DEFAULT_MAX_RUNS), 1)
+    except ValueError:
+        return DEFAULT_MAX_RUNS
 
 
 def start_backfill(backfill: Backfill) -> List[PipelineRun]:
@@ -131,32 +146,37 @@ def __build_variables_list(backfill: Backfill) -> List[Dict]:
 
 
 def __build_dates(backfill: Backfill) -> List[datetime]:
+    """
+    The execution dates from start to end, every interval_units of interval_type. Months
+    and years count from the start date: adding a month to the date before drifted, so a
+    backfill from January 31 ran on February 28, then March 28.
+    """
+    units = backfill.interval_units
+    if not isinstance(units, int) or isinstance(units, bool) or units <= 0:
+        # Zero or a negative number never reached the end date: building the dates never
+        # finished, and the backfill's page hung the server.
+        raise BackfillError(
+            f'The interval units must be a positive whole number; they are {units!r}.',
+        )
+    interval_type = backfill.interval_type
+    limit = max_runs()
     dates = []
-
+    step = 0
     current_datetime = backfill.start_datetime
     while current_datetime <= backfill.end_datetime:
+        if len(dates) >= limit:
+            raise BackfillError(
+                f'The backfill would start more than {limit} runs; choose a shorter period '
+                f'or a longer interval, or raise {MAX_RUNS_ENV}.',
+            )
         dates.append(current_datetime)
-
-        interval_type = backfill.interval_type
-        if interval_type not in [
-            Backfill.IntervalType.MONTH,
-            Backfill.IntervalType.YEAR,
-        ]:
-            unit = f'{interval_type.value}s'
-            if Backfill.IntervalType.CUSTOM == interval_type:
-                unit = 'seconds'
-            current_datetime += timedelta(**{unit: backfill.interval_units})
+        step += 1
+        if interval_type in [Backfill.IntervalType.MONTH, Backfill.IntervalType.YEAR]:
+            key = 'months' if Backfill.IntervalType.MONTH == interval_type else 'years'
+            current_datetime = backfill.start_datetime + relativedelta(**{key: step * units})
         else:
-            key = None
-            if Backfill.IntervalType.MONTH == interval_type:
-                key = 'months'
-            elif Backfill.IntervalType.YEAR == interval_type:
-                key = 'years'
-
-            delta = {
-                key: backfill.interval_units,
-            }
-            current_datetime = current_datetime + relativedelta(**delta)
-            current_datetime = current_datetime.replace(tzinfo=current_datetime.tzinfo)
+            unit = 'seconds' if Backfill.IntervalType.CUSTOM == interval_type \
+                else f'{interval_type.value}s'
+            current_datetime = backfill.start_datetime + timedelta(**{unit: step * units})
 
     return dates

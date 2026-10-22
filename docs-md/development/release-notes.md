@@ -123,6 +123,10 @@
 
 ### Pipelines
 
+- Backfills: interval units of 0 or below are refused; they never reached the end date, and
+  viewing such a backfill hung the server. A backfill of more than 10,000 runs is refused
+  (`MAGE_BACKFILL_MAX_RUNS`). Monthly and yearly backfills count from the start date: one
+  from January 31 ran on February 28, then March 28.
 - Data integration destinations can empty their table before a `FULL_TABLE` sync:
   `truncate_before_full_table_sync: true` in the destination config (upstream #4708).
   Rows deleted at the source no longer stay in the destination. The table is emptied once
