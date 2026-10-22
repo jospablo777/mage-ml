@@ -324,6 +324,12 @@
 
 ### Stream services
 
+- Timers of keyed state fire on an idle stream: without `time`, a due timer fires within
+  about a second while its partition receives nothing (each idle partition gets a timer
+  batch, which the engine never acknowledges), so a device that goes silent is reported
+  without another message; its state is saved so a restart does not fire it again. Timers
+  fired only when a message arrived.
+
 - While a source refused acknowledgements (a Kafka broker shutting down slowly), a stream
   read and wrote on, and a lost assignment then repeated everything since the last
   acknowledgement: 5,587 of 20,000 messages in one test. Batches written but not

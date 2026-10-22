@@ -894,6 +894,19 @@ class StreamTimersTest(WorkerTestCase):
         self.assertEqual(result['outputs']['watch'],
                          [dict(device='d3', silent_since=5, at=90_000)])
 
+    def test_a_timer_batch_runs_only_the_fired_timers(self):
+        # An idle partition's timer batch: no messages, the blocks run once, on the fired keys.
+        calls = self.block('''
+            @transformer
+            def f(messages, *args, **kwargs):
+                return [dict(fired=sorted(kwargs['fired']), messages=len(messages))]
+        ''', name='calls')
+        result = worker.run_stream_batch(dict(
+            chain=[calls], messages=[], kwargs={}, state={'calls': {'d3': 5}},
+            timers={'calls': {}}, fired={'calls': {'d3': 90_000}}, watermark=100_000,
+        ))
+        self.assertEqual(result['outputs']['calls'], [dict(fired=['d3'], messages=0)])
+
     def test_a_timer_must_be_a_time(self):
         bad = self.block('''
             @transformer

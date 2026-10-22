@@ -895,6 +895,9 @@ def _stream_batch(request: Dict) -> Dict:
     fired_result = None
     if any((request.get('fired') or {}).values()):
         fired_result = _run_stream_chain(request, [], state, fired=True)
+        if not messages:
+            # A timer batch (an idle partition's due timers): no messages to run.
+            return _with_state_updates(fired_result, original, state)
     if not request.get('isolate'):
         result = _run_stream_chain(request, messages, state)
         return _with_state_updates(_after_fired(fired_result, result), original, state)

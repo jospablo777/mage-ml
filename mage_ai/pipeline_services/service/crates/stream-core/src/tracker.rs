@@ -93,6 +93,10 @@ impl PartitionState {
 pub struct AckTracker {
     config: TrackerConfig,
     partitions: BTreeMap<PartitionId, PartitionState>,
+    /// Timer batches that left the front done, and per partition the position its state is
+    /// saved at for them; taken with [`AckTracker::take_timers_done`].
+    timers_done: Vec<BatchId>,
+    timer_saves: Vec<Commit>,
     /// The highest epoch ever assigned per partition, kept after a revoke: an assignment
     /// must move forward, so a source that reused an epoch could not commit stale work.
     highest_epoch: BTreeMap<PartitionId, AssignmentEpoch>,
@@ -111,6 +115,8 @@ impl AckTracker {
         AckTracker {
             config,
             partitions: BTreeMap::new(),
+            timers_done: Vec::new(),
+            timer_saves: Vec::new(),
             highest_epoch: BTreeMap::new(),
         }
     }
@@ -167,6 +173,33 @@ impl AckTracker {
             .filter(|b| !b.done())
             .map(|b| b.meta.id)
             .collect()
+    }
+
+    /// A timer batch of the partition's current epoch, behind its batches in flight. It has
+    /// no position: it is never committed, and its seq stays out of the source's.
+    pub fn admit_timer(&mut self, meta: BatchMeta) -> Admission {
+        let Some(state) = self.partitions.get_mut(&meta.id.partition) else {
+            return Admission::Stale;
+        };
+        if state.epoch != meta.id.epoch || !meta.id.is_timer() {
+            return Admission::Stale;
+        }
+        let pending = self.config.required_sinks.iter().copied().collect();
+        state.in_flight.push_back(InFlight {
+            meta,
+            pending,
+            dead_lettered: false,
+        });
+        Admission::Admitted { pause: false }
+    }
+
+    /// The timer batches done since the last call, and the positions to save their
+    /// partitions' state at (the last done position, when there is one).
+    pub fn take_timers_done(&mut self) -> (Vec<BatchId>, Vec<Commit>) {
+        (
+            std::mem::take(&mut self.timers_done),
+            std::mem::take(&mut self.timer_saves),
+        )
     }
 
     pub fn admit(&mut self, meta: BatchMeta) -> Admission {
@@ -245,12 +278,29 @@ impl AckTracker {
     pub fn committable(&mut self) -> Vec<Commit> {
         let mut commits = Vec::new();
         for (partition, state) in &mut self.partitions {
+            let mut timer_done = false;
             while state.in_flight.front().is_some_and(InFlight::done) {
                 let batch = state.in_flight.pop_front().expect("checked above");
                 state.bytes -= batch.meta.bytes;
+                if batch.meta.id.is_timer() {
+                    // No position: nothing to acknowledge, only its state to save.
+                    self.timers_done.push(batch.meta.id);
+                    timer_done = true;
+                    continue;
+                }
                 state.awaiting.push_back(batch.meta.last.clone());
                 state.done_through = Some(batch.meta.last);
                 state.unconfirmed = true;
+            }
+            if timer_done
+                && state.in_flight.is_empty()
+                && let Some(position) = &state.done_through
+            {
+                self.timer_saves.push(Commit {
+                    partition: *partition,
+                    epoch: state.epoch,
+                    position: position.clone(),
+                });
             }
             if state.unconfirmed
                 && let Some(position) = &state.done_through
@@ -292,6 +342,14 @@ impl AckTracker {
             state.bytes <= self.config.max_in_flight_bytes / 2
                 && state.unacknowledged() <= self.config.max_in_flight_batches / 2
         })
+    }
+
+    /// The partitions assigned now, with their epochs.
+    pub fn assigned(&self) -> Vec<(PartitionId, AssignmentEpoch)> {
+        self.partitions
+            .iter()
+            .map(|(partition, state)| (*partition, state.epoch))
+            .collect()
     }
 
     pub fn epoch(&self, partition: PartitionId) -> Option<AssignmentEpoch> {

@@ -44,6 +44,17 @@ pub struct BatchId {
     pub seq: u64,
 }
 
+/// The bit of a timer batch's `seq`: the driver makes these batches, which carry no message
+/// and no position, so their ids never meet a source's.
+pub const TIMER_SEQ: u64 = 1 << 63;
+
+impl BatchId {
+    /// A batch the driver made to fire timers on an idle partition.
+    pub fn is_timer(&self) -> bool {
+        self.seq & TIMER_SEQ != 0
+    }
+}
+
 impl fmt::Display for BatchId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

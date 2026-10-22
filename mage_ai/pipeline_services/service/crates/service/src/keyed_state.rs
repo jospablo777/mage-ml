@@ -307,6 +307,13 @@ pub struct BatchKeys {
     pub watermark: Option<i64>,
 }
 
+impl BatchKeys {
+    /// Whether any timer fires with the batch.
+    pub fn fires_any(&self) -> bool {
+        self.fired.iter().any(|fired| !fired.is_empty())
+    }
+}
+
 /// What a batch sends to the blocks with keyed state, per block.
 pub struct Outgoing {
     pub state: Value,

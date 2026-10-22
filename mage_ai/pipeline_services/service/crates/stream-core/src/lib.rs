@@ -18,7 +18,7 @@ mod time;
 mod tracker;
 pub mod window;
 
-pub use ids::{AssignmentEpoch, BatchId, BatchMeta, PartitionId, Position, SinkId};
+pub use ids::{AssignmentEpoch, BatchId, BatchMeta, PartitionId, Position, SinkId, TIMER_SEQ};
 pub use runner::{
     Effect, Event, FailureKind, Operation, PoisonPolicy, RetryPolicy, RunnerConfig, RunnerMachine,
     StopReason,

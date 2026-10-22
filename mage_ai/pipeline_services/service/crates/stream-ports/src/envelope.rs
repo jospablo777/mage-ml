@@ -40,6 +40,30 @@ pub struct Envelope {
     pub timestamp: Option<i64>,
 }
 
+/// The header of the one envelope of a timer batch: no message, only the partition whose
+/// due timers fire (see mage_stream_core::BatchId::is_timer).
+pub const TIMER_TICK_HEADER: &str = "mage-timer-tick";
+
+/// The envelope of a timer batch for a partition.
+pub fn timer_tick(partition: u32) -> Envelope {
+    Envelope {
+        headers: vec![Header {
+            key: TIMER_TICK_HEADER.to_string(),
+            value: Vec::new(),
+        }],
+        partition,
+        ..Envelope::default()
+    }
+}
+
+/// Whether an envelope is a timer batch's, not a message.
+pub fn is_timer_tick(envelope: &Envelope) -> bool {
+    envelope.position.is_none()
+        && envelope.value.is_empty()
+        && envelope.headers.len() == 1
+        && envelope.headers[0].key == TIMER_TICK_HEADER
+}
+
 fn header_fields() -> Fields {
     Fields::from(vec![
         Field::new("key", DataType::Utf8, false),

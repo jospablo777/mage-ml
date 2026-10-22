@@ -34,6 +34,11 @@ impl TransformSession for ChainedSession {
         batch: RecordBatch,
     ) -> BoxFuture<'_, Result<TransformOutput, TransformError>> {
         Box::pin(async move {
+            // A timer batch goes to every run, after the messages of the run before, so each
+            // run's due timers fire.
+            let tick = mage_stream_ports::read_envelope(&batch)
+                .ok()
+                .and_then(|envelopes| envelopes.into_iter().find(mage_stream_ports::is_timer_tick));
             let mut input = batch;
             let mut outputs = BTreeMap::new();
             let mut row_errors = Vec::new();
@@ -65,6 +70,10 @@ impl TransformSession for ChainedSession {
                     if self.wanted.contains(&block) {
                         outputs.insert(block, messages);
                     }
+                }
+                if let Some(tick) = &tick {
+                    input = with_tick(&next, tick).map_err(TransformError::Protocol)?;
+                    continue;
                 }
                 if next.num_rows() == 0 {
                     // Nothing goes on: the later blocks make nothing of this batch.
@@ -109,6 +118,19 @@ impl TransformSession for ChainedSession {
     fn keeps_state(&self) -> bool {
         self.runs.iter().any(|(session, _)| session.keeps_state())
     }
+}
+
+/// The messages with a timer batch's envelope after them.
+fn with_tick(
+    messages: &RecordBatch,
+    tick: &mage_stream_ports::Envelope,
+) -> Result<RecordBatch, String> {
+    let mut builder = mage_stream_ports::EnvelopeBuilder::new();
+    for envelope in mage_stream_ports::read_envelope(messages).map_err(|e| e.to_string())? {
+        builder.push(&envelope);
+    }
+    builder.push(tick);
+    builder.finish().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

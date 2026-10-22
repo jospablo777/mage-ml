@@ -16,7 +16,10 @@ pub mod sql;
 mod sql_reserved;
 
 pub use arrow_array::RecordBatch;
-pub use envelope::{Envelope, EnvelopeBuilder, Header, envelope_schema, read_envelope};
+pub use envelope::{
+    Envelope, EnvelopeBuilder, Header, TIMER_TICK_HEADER, envelope_schema, is_timer_tick,
+    read_envelope, timer_tick,
+};
 pub use mage_stream_core::{AssignmentEpoch, BatchMeta, Commit, PartitionId, Position};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

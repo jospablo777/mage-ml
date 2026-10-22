@@ -345,10 +345,12 @@ def watch(messages, *args, **kwargs):
 | The time timers follow | `kwargs['watermark']` | `timers.watermark()` | `watermark()` |
 
 A Rust block takes `Timers` after its messages, next to `State`. Timers are saved with the
-state and its positions, so one that was due before a restart fires after it. They fire
-with the batches of their partition: a timer fires when a message of its partition moves
-the time, not while the partition receives nothing. In the editor, **Execute pipeline**
-fires timers with the next batch, by the clock.
+state and its positions, so one that was due before a restart fires after it, and one that
+fired does not fire again. In an exported service, a stream without `time` (timers by the
+clock) fires a due timer within about a second also while its partition receives nothing,
+so a device that goes silent is reported without waiting for another message. With event
+time, a timer fires when messages move the partition's watermark past it. In the editor,
+**Execute pipeline** fires timers with the next batch, by the clock.
 
 ### Read the state over the API
 

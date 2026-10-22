@@ -532,6 +532,8 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
     let (mut last_in, mut last_out) = (0u64, 0u64);
     let started = std::time::Instant::now();
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    // Timer batches made so far: their seq, with BatchId's timer bit.
+    let mut timer_batches: u64 = 0;
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut pause = parts.pause.take();
     let mut user_paused = pause.as_ref().is_some_and(|p| *p.borrow());
@@ -676,6 +678,31 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
             },
             _ = ticker.tick() => {
                 events.push(Event::Tick);
+                // Keyed state's timers fire on idle partitions too: each partition with
+                // nothing in flight gets a timer batch, which the session answers at once
+                // when no timer is due (arrival-time timers; event time waits for events).
+                if keeps_state && reading && !user_paused {
+                    for (partition, epoch) in machine.idle_partitions() {
+                        timer_batches += 1;
+                        let mut builder = EnvelopeBuilder::new();
+                        builder.push(&mage_stream_ports::timer_tick(partition.0));
+                        let Ok(batch) = builder.finish() else { continue };
+                        let tag = timer_batches.to_be_bytes().to_vec();
+                        let meta = BatchMeta {
+                            id: BatchId {
+                                partition,
+                                epoch,
+                                seq: mage_stream_core::TIMER_SEQ | timer_batches,
+                            },
+                            first: mage_stream_core::Position::Opaque(tag.clone()),
+                            last: mage_stream_core::Position::Opaque(tag),
+                            records: 0,
+                            bytes: 0,
+                        };
+                        inputs.insert(meta.id, (batch, meta.clone()));
+                        events.push(Event::TimerBatch(meta));
+                    }
+                }
                 let lag = parts.source.lag();
                 count(&status, |s| {
                     let total_lag: i64 = lag.values().sum();
@@ -818,6 +845,10 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                             // The output of the block the sink follows; a block that made
                             // nothing of this batch writes an empty batch, which confirms it.
                             let batch = match sink_after.get(index).cloned().flatten() {
+                                // A timer batch has no message of its own to pass through.
+                                None if id.is_timer() => {
+                                    RecordBatch::new_empty(mage_stream_ports::envelope_schema())
+                                }
                                 None => on_time.get(&id).map_or(input, |(kept, _, _)| kept).clone(),
                                 Some(block) => outputs
                                     .get(&id)
@@ -924,6 +955,26 @@ pub async fn run(mut parts: StreamParts, status: SharedStatus, shutdown: Cancell
                                     &status,
                                     &parts.name,
                                     &format!("acknowledging failed: {error}"),
+                                );
+                            }
+                        }
+                    }
+                    Effect::TimersDone { ids, saves } => {
+                        for id in &ids {
+                            inputs.remove(id);
+                            outputs.remove(id);
+                            rejected.remove(id);
+                        }
+                        // The state the timers changed is saved at the last acknowledged
+                        // position, so a restart does not fire them again.
+                        if keeps_state && !saves.is_empty() {
+                            let (reply, saved) = tokio::sync::oneshot::channel();
+                            let _ = lane_tx.send(LaneJob::Committed(saves, reply));
+                            if let Ok(Err(error)) = saved.await {
+                                record_error(
+                                    &status,
+                                    &parts.name,
+                                    &format!("saving the state of fired timers failed: {error}"),
                                 );
                             }
                         }

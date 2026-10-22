@@ -676,7 +676,13 @@ impl TransformSession for RustStreamSession {
             // again after a restart) are done; they are not run again.
             let held = self.state.held(partition).map_err(TransformError::Crash)?;
             let mut batch_keys = self.state.batch();
+            // A timer batch's envelope: never a message; its partition's due timers fire
+            // (a chain passes it on with the messages of the run before).
+            let ticks = envelopes.iter().any(mage_stream_ports::is_timer_tick);
             for (row, envelope) in envelopes.into_iter().enumerate() {
+                if mage_stream_ports::is_timer_tick(&envelope) {
+                    continue;
+                }
                 if let (Some(held), Some(position)) = (held, envelope.position)
                     && position <= held
                 {
@@ -691,13 +697,17 @@ impl TransformSession for RustStreamSession {
                     }
                 }
             }
-            if values.is_empty() && !self.state.is_empty() && undecoded.is_empty() {
+            if values.is_empty() && !ticks && !self.state.is_empty() && undecoded.is_empty() {
                 // Every message was held already.
                 return Ok(TransformOutput::default());
             }
             self.state
                 .fire(partition, &mut batch_keys)
                 .map_err(TransformError::Crash)?;
+            if ticks && values.is_empty() && undecoded.is_empty() && !batch_keys.fires_any() {
+                // Nothing due: the program is not asked.
+                return Ok(TransformOutput::default());
+            }
             let state = self
                 .state
                 .outgoing(partition, &batch_keys)

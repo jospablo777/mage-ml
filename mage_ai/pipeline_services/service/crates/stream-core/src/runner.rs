@@ -92,6 +92,9 @@ pub enum Event {
         epoch: AssignmentEpoch,
     },
     BatchRead(BatchMeta),
+    /// The driver made a timer batch (no message, no position; `BatchId::is_timer`) for an
+    /// idle partition, so its due timers fire without waiting for a message.
+    TimerBatch(BatchMeta),
     /// Some messages of the batch failed on their own; the others' output is coming
     /// (`TransformDone` follows). They go to the dead-letter sink, or the stream stops.
     RowsRejected {
@@ -161,6 +164,12 @@ pub enum Effect {
     DeadLetterRows(BatchId),
     /// Acknowledge these positions to the source, then report [`Event::Committed`].
     Commit(Vec<Commit>),
+    /// These timer batches are done: forget them, and save the state of the sessions at
+    /// these positions (each partition's last done one), which the source has already.
+    TimersDone {
+        ids: Vec<BatchId>,
+        saves: Vec<Commit>,
+    },
     Pause(PartitionId),
     Resume(PartitionId),
     /// Work for these batches is stale (their partition was revoked or reassigned): stop it.
@@ -281,6 +290,17 @@ impl RunnerMachine {
                             effects.push(Effect::Pause(id.partition));
                         }
                     }
+                }
+            }
+            Event::TimerBatch(meta) => {
+                let id = meta.id;
+                if self.stopping || self.draining.contains_key(&id.partition) {
+                    effects.push(Effect::Cancel(vec![id]));
+                    return effects;
+                }
+                match self.tracker.admit_timer(meta) {
+                    Admission::Stale => effects.push(Effect::Cancel(vec![id])),
+                    Admission::Admitted { .. } => effects.push(Effect::Transform(id)),
                 }
             }
             Event::RowsRejected { id, count, error } => {
@@ -460,7 +480,29 @@ impl RunnerMachine {
         if !commits.is_empty() {
             effects.push(Effect::Commit(commits));
         }
+        self.timers_done(effects);
         self.resumes(effects);
+    }
+
+    fn timers_done(&mut self, effects: &mut Vec<Effect>) {
+        let (ids, saves) = self.tracker.take_timers_done();
+        if !ids.is_empty() {
+            effects.push(Effect::TimersDone { ids, saves });
+        }
+    }
+
+    /// Partitions read now with nothing in flight, which can take a timer batch.
+    pub fn idle_partitions(&self) -> Vec<(PartitionId, AssignmentEpoch)> {
+        if self.stopping || self.stopped {
+            return Vec::new();
+        }
+        self.tracker
+            .assigned()
+            .into_iter()
+            .filter(|(partition, _)| {
+                !self.draining.contains_key(partition) && !self.tracker.has_unfinished(*partition)
+            })
+            .collect()
     }
 
     fn resumes(&mut self, effects: &mut Vec<Effect>) {
@@ -493,6 +535,7 @@ impl RunnerMachine {
         if !commits.is_empty() {
             effects.push(Effect::Commit(commits));
         }
+        self.timers_done(effects);
         let dropped = self.tracker.revoke(partition, epoch);
         self.paused.remove(&partition);
         self.forget(&dropped);
@@ -568,6 +611,101 @@ mod tests {
             epoch: E,
         });
         m
+    }
+
+    fn timer_meta(n: u64) -> BatchMeta {
+        BatchMeta {
+            id: BatchId {
+                partition: P,
+                epoch: E,
+                seq: crate::ids::TIMER_SEQ | n,
+            },
+            first: Position::Opaque(n.to_be_bytes().to_vec()),
+            last: Position::Opaque(n.to_be_bytes().to_vec()),
+            records: 0,
+            bytes: 0,
+        }
+    }
+
+    fn finish(m: &mut RunnerMachine, id: BatchId) -> Vec<Effect> {
+        let mut effects = m.step(Event::TransformDone(id));
+        effects.extend(m.step(Event::SinkReceipt { id, sink: REQUIRED }));
+        effects
+    }
+
+    #[test]
+    fn a_timer_batch_runs_and_is_never_committed() {
+        let mut m = started(PoisonPolicy::Stop, false);
+        assert_eq!(m.idle_partitions(), [(P, E)]);
+        let timer = timer_meta(1);
+        assert_eq!(
+            m.step(Event::TimerBatch(timer.clone())),
+            [Effect::Transform(timer.id)]
+        );
+        assert!(m.idle_partitions().is_empty());
+        let effects = finish(&mut m, timer.id);
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Commit(_))),
+            "{effects:?}"
+        );
+        // No batch was ever done: nothing to save the state at yet.
+        assert!(
+            effects.contains(&Effect::TimersDone {
+                ids: vec![timer.id],
+                saves: vec![]
+            }),
+            "{effects:?}"
+        );
+        assert_eq!(m.idle_partitions(), [(P, E)]);
+
+        // A source batch after it keeps its own numbering, and commits as usual.
+        assert_eq!(
+            m.step(Event::BatchRead(meta(0))),
+            [Effect::Transform(meta(0).id)]
+        );
+        let effects = finish(&mut m, meta(0).id);
+        let commit = Commit {
+            partition: P,
+            epoch: E,
+            position: Position::Offset(9),
+        };
+        assert!(
+            effects.contains(&Effect::Commit(vec![commit.clone()])),
+            "{effects:?}"
+        );
+        m.step(Event::Committed(commit.clone()));
+
+        // The next timer batch saves the state at the last done position, commits nothing.
+        let effects = {
+            m.step(Event::TimerBatch(timer_meta(2)));
+            finish(&mut m, timer_meta(2).id)
+        };
+        assert!(
+            effects.contains(&Effect::TimersDone {
+                ids: vec![timer_meta(2).id],
+                saves: vec![commit]
+            }),
+            "{effects:?}"
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Commit(_))),
+            "{effects:?}"
+        );
+    }
+
+    #[test]
+    fn a_timer_batch_of_an_old_epoch_or_without_the_timer_bit_is_cancelled() {
+        let mut m = started(PoisonPolicy::Stop, false);
+        let mut old = timer_meta(1);
+        old.id.epoch = AssignmentEpoch(0);
+        assert_eq!(
+            m.step(Event::TimerBatch(old.clone())),
+            [Effect::Cancel(vec![old.id])]
+        );
+        assert_eq!(
+            m.step(Event::TimerBatch(meta(5))),
+            [Effect::Cancel(vec![meta(5).id])]
+        );
     }
 
     #[test]
