@@ -170,6 +170,12 @@ class PipelineScheduleResource(DatabaseResource):
                     query = query.order_by(PipelineSchedule.status.asc())
                 elif order_by == 'schedule_type':
                     query = query.order_by(PipelineSchedule.schedule_type.asc())
+            # Pages are slices of this list: ties, and no order at all, in the same order on
+            # every request.
+            query = query.order_by(
+                PipelineSchedule.id.desc() if order_by == 'created_at'
+                else PipelineSchedule.id.asc(),
+            )
 
         query = query.options(joinedload(PipelineSchedule.event_matchers))
 
@@ -258,7 +264,8 @@ class PipelineScheduleResource(DatabaseResource):
                 run_counts_by_pipeline_schedule.get(s.id, {}),
                 dict(
                     next_pipeline_run_date=s.next_execution_date(),
-                    tags=tags_by_pipeline_schedule.get(s.id, []),
+                    # Sorted, as the detail gives them.
+                    tags=sorted(tags_by_pipeline_schedule.get(s.id, [])),
                 ),
             )
             results.append(

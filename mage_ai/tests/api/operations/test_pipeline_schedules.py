@@ -165,3 +165,37 @@ class PipelineScheduleOperationTests(BaseApiTestCase):
             resource_parent_id=self.pipeline.uuid,
             user=user,
         )
+
+    async def test_list_tags_sorted_and_ties_in_id_order(self):
+        """
+        Pages are slices of the list, so its order holds from one request to the next: ties
+        on the order asked for, and no order at all, go by id. Tags come sorted, as in the
+        detail. And a user who is not an owner may search, which the policy refused.
+        """
+        from mage_ai.api.resources.PipelineScheduleResource import (
+            PipelineScheduleResource,
+        )
+
+        user = create_user(email=self.faker.email(), roles=1)
+        name = f'tie {self.faker.uuid4()}'
+        schedules = [
+            PipelineSchedule.create(
+                name=name,
+                pipeline_uuid=self.pipeline.uuid,
+                repo_path=get_repo_path(),
+                schedule_type=ScheduleType.API,
+            )
+            for _ in range(3)
+        ]
+        PipelineScheduleResource(schedules[0], user).update(dict(tags=['zeta', 'alpha', 'mid']))
+
+        for order_by in [None, 'name', 'status']:
+            with self.subTest(order_by=order_by):
+                query = dict(search=[name])
+                if order_by:
+                    query['order_by'] = [order_by]
+                response = await self.build_list_operation(query=query, user=user).execute()
+                self.assertNotIn('error', response, response)
+                found = response['pipeline_schedules']
+                self.assertEqual([s['id'] for s in found], [s.id for s in schedules])
+                self.assertEqual(found[0]['tags'], ['alpha', 'mid', 'zeta'])

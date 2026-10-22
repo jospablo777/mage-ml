@@ -443,7 +443,7 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
         else:
             self.create(**kwargs)
 
-    def current_execution_date(self) -> datetime:
+    def current_execution_date(self, now: datetime = None) -> datetime:
         """
         Calculate the current execution date and time based on the schedule_interval and start_time.
 
@@ -457,7 +457,8 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
 
             The returned datetime object is in the UTC timezone.
         """
-        now = datetime.now(timezone.utc)
+        if now is None:
+            now = datetime.now(timezone.utc)
         current_execution_date = None
 
         # Also "", saved before empty crons were refused.
@@ -517,30 +518,55 @@ class PipelineSchedule(PipelineScheduleProjectPlatformMixin, BaseModel):
         return current_execution_date
 
     def next_execution_date(self) -> datetime:
-        next_execution_date = None
-        current_execution_date = self.current_execution_date()
+        """
+        When the schedule runs next, as should_schedule decides: never on an execution date
+        before start_time, and a landing time still ahead today (this hour, week or month)
+        is the next one.
+        """
+        now = datetime.now(timezone.utc)
+        current_execution_date = self.current_execution_date(now)
 
-        if current_execution_date is None:
+        if current_execution_date is None or self.schedule_interval in [
+            ScheduleInterval.ONCE,
+            ScheduleInterval.ALWAYS_ON,
+        ]:
             return None
 
-        if (
-            self.schedule_interval == ScheduleInterval.ONCE
-            or self.schedule_interval == ScheduleInterval.ALWAYS_ON
-        ):
-            pass
-        elif self.schedule_interval == ScheduleInterval.DAILY:
-            next_execution_date = current_execution_date + timedelta(days=1)
-        elif self.schedule_interval == ScheduleInterval.HOURLY:
-            next_execution_date = current_execution_date + timedelta(hours=1)
-        elif self.schedule_interval == ScheduleInterval.WEEKLY:
-            next_execution_date = current_execution_date + timedelta(weeks=1)
-        elif self.schedule_interval == ScheduleInterval.MONTHLY:
-            next_execution_date = (current_execution_date + timedelta(days=32)).replace(day=1)
-        else:
-            cron_itr = croniter(self.schedule_interval, current_execution_date)
-            next_execution_date = cron_itr.get_next(datetime)
+        start_time = self.start_time
+        if start_time is not None and start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
 
-        return next_execution_date
+        if self.landing_time_enabled() and start_time:
+            if compare(now, start_time) == -1:
+                # The landing times take start_time's clock, so the first is start_time.
+                return start_time
+            if compare(current_execution_date, now) == 1:
+                return current_execution_date
+            return self.__execution_date_after(current_execution_date)
+
+        if start_time is not None and compare(now, start_time) == -1:
+            first = self.current_execution_date(start_time)
+            if compare(first, start_time) == -1:
+                first = self.__execution_date_after(first)
+            return first
+
+        return self.__execution_date_after(current_execution_date)
+
+    def __execution_date_after(self, execution_date: datetime) -> datetime:
+        if self.schedule_interval == ScheduleInterval.DAILY:
+            return execution_date + timedelta(days=1)
+        elif self.schedule_interval == ScheduleInterval.HOURLY:
+            return execution_date + timedelta(hours=1)
+        elif self.schedule_interval == ScheduleInterval.WEEKLY:
+            return execution_date + timedelta(weeks=1)
+        elif self.schedule_interval == ScheduleInterval.MONTHLY:
+            if self.landing_time_enabled() and self.start_time:
+                # The same day of the next month, as current_execution_date counts it.
+                month = execution_date.replace(day=1) + timedelta(days=32)
+                return self.current_execution_date(month.replace(day=1))
+            return (execution_date + timedelta(days=32)).replace(day=1)
+        cron_itr = croniter(self.schedule_interval, execution_date)
+        return cron_itr.get_next(datetime)
 
     @safe_db_query
     def should_schedule(

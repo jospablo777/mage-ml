@@ -172,6 +172,8 @@ PipelineSchedulePolicy.allow_query([
 PipelineSchedulePolicy.allow_query([
     'schedule_interval[]',
     'schedule_type[]',
+    # The triggers page's search box (upstream #5697).
+    'search',
     'status[]',
     'tag[]',
 ], scopes=[

@@ -1198,6 +1198,46 @@ class PipelineScheduleTests(DBTestCase):
         )
 
     @freeze_time('2023-08-19 20:10:15')
+    def test_next_execution_date_waits_for_start_and_landing_time(self):
+        """
+        should_schedule runs no execution date before start_time, and starts a landing-time
+        run ahead of its landing time: the next date shown is that one.
+        """
+        def utc(*args):
+            return datetime(*args).replace(tzinfo=timezone.utc)
+
+        def next_date(interval, start, landing=False):
+            return PipelineSchedule.create(
+                name=self.faker.name(),
+                pipeline_uuid='test_pipeline2',
+                schedule_interval=interval,
+                schedule_type=ScheduleType.TIME,
+                settings=dict(landing_time_enabled=landing),
+                start_time=start,
+            ).next_execution_date()
+
+        cases = [
+            # Landing time still ahead today, this hour, this month.
+            (ScheduleInterval.DAILY, utc(2023, 8, 1, 22, 25), True, utc(2023, 8, 19, 22, 25)),
+            (ScheduleInterval.HOURLY, utc(2023, 8, 1, 5, 30), True, utc(2023, 8, 19, 20, 30)),
+            (ScheduleInterval.MONTHLY, utc(2023, 7, 25, 6), True, utc(2023, 8, 25, 6)),
+            # Landing time passed: the next period's.
+            (ScheduleInterval.DAILY, utc(2023, 8, 1, 19), True, utc(2023, 8, 20, 19)),
+            (ScheduleInterval.WEEKLY, utc(2023, 8, 4, 9), True, utc(2023, 8, 25, 9)),
+            (ScheduleInterval.MONTHLY, utc(2023, 7, 10, 6), True, utc(2023, 9, 10, 6)),
+            # A start time ahead: the first execution date on or after it.
+            (ScheduleInterval.DAILY, utc(2023, 9, 1, 22, 25), True, utc(2023, 9, 1, 22, 25)),
+            (ScheduleInterval.DAILY, utc(2023, 9, 1, 10), False, utc(2023, 9, 2)),
+            (ScheduleInterval.DAILY, utc(2023, 9, 1), False, utc(2023, 9, 1)),
+            (ScheduleInterval.MONTHLY, utc(2023, 9, 1, 10), False, utc(2023, 10, 1)),
+            ('30 9 * * *', utc(2023, 9, 1, 9, 30), False, utc(2023, 9, 1, 9, 30)),
+            ('30 9 * * *', utc(2023, 9, 1, 9, 31), False, utc(2023, 9, 2, 9, 30)),
+        ]
+        for interval, start, landing, expected in cases:
+            with self.subTest(interval=interval, start=start, landing=landing):
+                self.assertEqual(next_date(interval, start, landing), expected)
+
+    @freeze_time('2023-08-19 20:10:15')
     def test_should_schedule_always_on(self):
         pipeline_schedule = PipelineSchedule.create(
             name=self.faker.name(),
