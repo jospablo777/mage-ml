@@ -46,7 +46,7 @@ const LAYERS: &[Layer] = &[
     },
     Layer {
         name: "support",
-        crates: &["mage-log", "mage-pg"],
+        crates: &["mage-log", "mage-log-window", "mage-pg"],
         may_depend_on: &["domain"],
         isolated: true,
         banned: &[],
