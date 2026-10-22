@@ -301,7 +301,8 @@ jobs:
             warm: "'integration_tests/chains/test_compiled_chains.py::test_a_rust_chain_runs_compiled_with_the_outputs_of_block_by_block' 'integration_tests/postgres/test_rust_pipelines.py::test_the_pipeline_runs_as_an_exported_service' 'integration_tests/s3/test_rust_storage.py::test_a_missing_object_names_the_path'"
           - id: ml
             name: "Integration: ML and HTTP services"
-            services: feast mlflow api
+            # minio: exported services copy audit records to S3 (models/test_audit_store.py).
+            services: feast mlflow api minio
             # The deploy test builds a service image and deploys it to the runner's Docker.
             tests: integration_tests/feast integration_tests/mlflow integration_tests/api integration_tests/deploy integration_tests/models
             r: false

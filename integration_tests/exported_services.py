@@ -48,6 +48,19 @@ def stream_service_binary(release: bool = False) -> Path:
     return STREAM_TARGET / ('release' if release else 'debug') / 'mage-service'
 
 
+# The engine with object storage only (an audit store, state in a bucket), in its own target
+# folder, for jobs that do not build the stream connectors.
+OBJECT_STORE_TARGET = SERVICE / 'target' / 'object-store'
+
+
+def object_store_service_binary() -> Path:
+    subprocess.run(
+        ['cargo', 'build', '-q', '-p', 'mage-service', '--features', 'object-store'],
+        cwd=SERVICE, check=True, env=dict(os.environ, CARGO_TARGET_DIR=str(OBJECT_STORE_TARGET)),
+    )
+    return OBJECT_STORE_TARGET / 'debug' / 'mage-service'
+
+
 # The engine with the data checks (contracts and monitors, on Polars), in its own target
 # folder. CI builds it outside the cached target: Polars' build would grow the shared Rust
 # cache past the repository's 10 GB, which evicts the others.
