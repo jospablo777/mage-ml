@@ -23,6 +23,8 @@ pub(crate) struct Counts {
     pub on_time: u64,
     /// Execution dates whose run had not appeared after the grace period.
     pub missing: u64,
+    /// Execution dates with more than one run: the scheduler started one twice.
+    pub duplicates: u64,
     /// Ticks that could not read the database.
     pub failed: u64,
 }
@@ -44,6 +46,7 @@ struct State {
     /// it does not read).
     unsupported: BTreeSet<i64>,
     recent: VecDeque<Value>,
+    duplicates: VecDeque<Value>,
 }
 
 pub(crate) struct SchedulerShadow {
@@ -243,16 +246,28 @@ impl SchedulerShadow {
                 .collect()
         };
         let mut found = BTreeSet::new();
+        let mut doubled = Vec::new();
         for (schedule, execution) in pending {
             let rows = read_rows(
                 metadata,
-                "SELECT id FROM pipeline_run WHERE pipeline_schedule_id = {1} \
-                 AND execution_date = {2} LIMIT 1",
+                "SELECT count(*) FROM pipeline_run WHERE pipeline_schedule_id = {1} \
+                 AND execution_date = {2}",
                 &[Raw::Int(schedule), execution_param(metadata, execution)],
             )
             .await?;
-            if !rows.is_empty() {
+            let runs = match rows.first().and_then(|r| r.first()) {
+                Some(Raw::Int(n)) => *n,
+                _ => 0,
+            };
+            if runs >= 1 {
                 found.insert((schedule, execution));
+            }
+            if runs > 1 {
+                doubled.push(json!({
+                    "pipeline_schedule_id": schedule,
+                    "execution_date": execution.to_rfc3339(),
+                    "runs": runs,
+                }));
             }
         }
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
@@ -275,6 +290,16 @@ impl SchedulerShadow {
             }
         });
         state.counts.on_time += on_time;
+        state.counts.duplicates += doubled.len() as u64;
+        for difference in doubled {
+            crate::log::warn(&format!(
+                "Gateway scheduler shadow: more than one run for {difference}"
+            ));
+            if state.duplicates.len() == RECENT {
+                state.duplicates.pop_front();
+            }
+            state.duplicates.push_back(difference);
+        }
         state.counts.missing += missing.len() as u64;
         for difference in missing {
             crate::log::warn(&format!(
@@ -302,6 +327,7 @@ impl SchedulerShadow {
             "unsupported_triggers": state.unsupported.len(),
             "grace_seconds": self.grace.num_seconds(),
             "recent_missing": state.recent.iter().cloned().collect::<Vec<_>>(),
+            "recent_duplicates": state.duplicates.iter().cloned().collect::<Vec<_>>(),
         })
     }
 }
@@ -406,7 +432,10 @@ mod tests {
                  INSERT INTO pipeline_schedule VALUES (2, 'forgotten', 'TIME', '@hourly', NULL, '{{}}', NULL, 'ACTIVE', NULL);
                  INSERT INTO pipeline_schedule VALUES (3, 'on_time', 'TIME', '@hourly', NULL, '{{}}', NULL, 'INACTIVE', NULL);
                  INSERT INTO pipeline_schedule VALUES (4, 'gone', 'TIME', '@hourly', NULL, '{{}}', NULL, 'ACTIVE', NULL);
-                 INSERT INTO pipeline_run VALUES (1, 1, '2026-10-22 06:00:00.000000');",
+                 INSERT INTO pipeline_run VALUES (1, 1, '2026-10-22 06:00:00.000000');
+                 INSERT INTO pipeline_schedule VALUES (5, 'on_time', 'API', '@hourly', NULL, '{{}}', NULL, 'ACTIVE', NULL);
+                 INSERT INTO pipeline_run VALUES (2, 5, '2026-10-22 06:00:00.000000');
+                 INSERT INTO pipeline_run VALUES (3, 5, '2026-10-22 06:00:00.000000');",
                 repo = repo.display()
             ))
             .unwrap();
@@ -415,7 +444,9 @@ mod tests {
         let now = utc("2026-10-22T06:10:15Z");
         shadow.tick(&metadata, &repo, now).await.unwrap();
         let report = shadow.report();
-        assert_eq!(report["counts"]["on_time"], 1);
+        assert_eq!(report["counts"]["on_time"], 2);
+        assert_eq!(report["counts"]["duplicates"], 1);
+        assert_eq!(report["recent_duplicates"][0]["pipeline_schedule_id"], 5);
         assert_eq!(report["pending"], 1);
         // Within the grace period nothing is missing; after it, the forgotten trigger is.
         shadow
@@ -435,6 +466,6 @@ mod tests {
             .tick(&metadata, &repo, utc("2026-10-22T07:00:30Z"))
             .await
             .unwrap();
-        assert_eq!(shadow.report()["pending"], 2);
+        assert_eq!(shadow.report()["pending"], 3);
     }
 }

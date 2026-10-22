@@ -711,6 +711,7 @@ def test_the_scheduler_s_runs_are_checked_in_shadow(ports, signed_in):
         time.sleep(2)
     after = scheduler()
     assert after['counts']['missing'] == before['missing'], after
+    assert after['counts']['duplicates'] == before['duplicates'], after
     assert after['counts']['failed'] == 0, after
     # The landing-time trigger of the triggers test is not evaluated.
     assert after['unsupported_triggers'] >= 1, after

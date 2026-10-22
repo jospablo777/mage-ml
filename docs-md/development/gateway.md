@@ -77,7 +77,8 @@ execution date before the trigger was enabled unless `create_initial_pipeline_ru
 and none for after-run triggers, `@once` or `@always_on`. When the run with that execution
 date appears it counts as `on_time`; when it has not appeared after the grace period
 (`MAGE_GATEWAY_SCHEDULER_GRACE_SECONDS`, 120 s) it counts as `missing`, and the trigger and
-date are logged and listed. Triggers with a landing time (their runs start ahead by the runs'
+date are logged and listed; an execution date with more than one run counts as a
+`duplicate`. Triggers with a landing time (their runs start ahead by the runs'
 average duration), with a backfill, or with a cron form the gateway does not read are left
 out and counted as `unsupported_triggers`. The scheduler keeps its authority. The counts are
 under `scheduler` in `/__gateway/shadow`; `MAGE_GATEWAY_SCHEDULER_SHADOW=off` turns it off.
