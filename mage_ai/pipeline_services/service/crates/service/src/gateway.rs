@@ -73,17 +73,24 @@ pub async fn run(
     let listener = TcpListener::bind(listen)
         .await
         .map_err(|e| format!("Could not listen on {listen}: {e}"))?;
-    serve(listener, upstream, shadow).await
+    serve(listener, upstream, shadow, HEADER_TIMEOUT).await
 }
+
+/// How long a client may take to send a request's headers, the next request's on a kept
+/// connection included; a client that trickles them (slowloris) is cut off then.
+const HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn serve(
     listener: TcpListener,
     upstream: String,
     shadow: Option<Shadow>,
+    header_timeout: Duration,
 ) -> Result<(), String> {
     let mut connector = HttpConnector::new();
     connector.set_nodelay(true);
     connector.set_keepalive(Some(Duration::from_secs(60)));
+    connector.set_connect_timeout(Some(CONNECT_TIMEOUT));
     let upstream = Upstream {
         authority: upstream,
         client: Client::builder(TokioExecutor::new())
@@ -113,6 +120,8 @@ pub async fn serve(
             });
             // Errors here are clients that went away; nothing to answer.
             let _ = hyper::server::conn::http1::Builder::new()
+                .timer(hyper_util::rt::TokioTimer::new())
+                .header_read_timeout(header_timeout)
                 .serve_connection(TokioIo::new(stream), service)
                 .with_upgrades()
                 .await;
@@ -416,7 +425,12 @@ mod tests {
     async fn gateway(upstream: SocketAddr) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        tokio::spawn(serve(listener, upstream.to_string(), None));
+        tokio::spawn(serve(
+            listener,
+            upstream.to_string(),
+            None,
+            Duration::from_millis(300),
+        ));
         address
     }
 
@@ -493,6 +507,24 @@ mod tests {
             stream.read_exact(&mut echoed).await.unwrap();
             assert_eq!(echoed, word.to_ascii_uppercase().as_bytes());
         }
+    }
+
+    #[tokio::test]
+    async fn a_client_that_trickles_its_headers_is_cut_off() {
+        let through = gateway(upstream().await).await;
+        let mut stream = TcpStream::connect(through).await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: h\r\n")
+            .await
+            .unwrap();
+        let start = Instant::now();
+        let mut rest = Vec::new();
+        // The gateway answers 408 or closes; either way the read ends.
+        let _ = tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut rest)).await;
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "the connection stayed open"
+        );
     }
 
     #[tokio::test]
