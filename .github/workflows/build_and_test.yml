@@ -32,6 +32,12 @@ on:
       - ".github/workflows/build_and_test.yml"
   workflow_dispatch:
 
+# A push replaces the runs of older commits of its branch: they tested code that is gone,
+# held the runners for an hour and reported failures already fixed.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   ENV: test_mage
   NODE_OPTIONS: --max-old-space-size=4096
