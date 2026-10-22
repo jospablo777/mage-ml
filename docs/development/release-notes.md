@@ -72,6 +72,7 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- Starting or stopping the scheduler needs an editor; a viewer could stop it.
 - Global hooks need an admin, and Git, compute clusters and connections an editor, as their
   policies state: an override meant for the user permissions mode let any signed-in user,
   one with no role too, change them.

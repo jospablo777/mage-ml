@@ -9,11 +9,18 @@ class SchedulerPolicy(BasePolicy):
 
 
 SchedulerPolicy.allow_actions([
-    constants.CREATE,
     constants.LIST,
 ], scopes=[
     OauthScope.CLIENT_PRIVATE,
 ], condition=lambda policy: policy.has_at_least_viewer_role())
+
+# Starting or stopping the scheduler (action_type start or stop) starts or stops every
+# scheduled run: a viewer could stop it.
+SchedulerPolicy.allow_actions([
+    constants.CREATE,
+], scopes=[
+    OauthScope.CLIENT_PRIVATE,
+], condition=lambda policy: policy.has_at_least_editor_role())
 
 SchedulerPolicy.allow_read(SchedulerPresenter.default_attributes, scopes=[
     OauthScope.CLIENT_PRIVATE,
@@ -26,4 +33,4 @@ SchedulerPolicy.allow_write(['action_type'], scopes=[
     OauthScope.CLIENT_PRIVATE,
 ], on_action=[
     constants.CREATE,
-], condition=lambda policy: policy.has_at_least_viewer_role())
+], condition=lambda policy: policy.has_at_least_editor_role())

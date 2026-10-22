@@ -9,6 +9,7 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.operations.constants import OperationType
 from mage_ai.api.policies.ComputeClusterPolicy import ComputeClusterPolicy
 from mage_ai.api.policies.GlobalHookPolicy import GlobalHookPolicy
+from mage_ai.api.policies.SchedulerPolicy import SchedulerPolicy
 from mage_ai.api.policies.VersionControlBranchPolicy import VersionControlBranchPolicy
 from mage_ai.orchestration.db.models.oauth import Role
 from mage_ai.tests.base_test import AsyncDBTestCase
@@ -41,6 +42,10 @@ class PermissionOverrideTest(AsyncDBTestCase):
             await self.allowed(VersionControlBranchPolicy, OperationType.UPDATE, editor),
         )
         self.assertFalse(await self.allowed(GlobalHookPolicy, OperationType.CREATE, editor))
+        # A viewer stopped the scheduler, and with it every scheduled run.
+        self.assertTrue(await self.allowed(SchedulerPolicy, OperationType.LIST, viewer))
+        self.assertFalse(await self.allowed(SchedulerPolicy, OperationType.CREATE, viewer))
+        self.assertTrue(await self.allowed(SchedulerPolicy, OperationType.CREATE, editor))
         self.assertTrue(await self.allowed(GlobalHookPolicy, OperationType.CREATE, admin))
 
     @patch('mage_ai.api.policies.BasePolicy.REQUIRE_USER_PERMISSIONS', True)
