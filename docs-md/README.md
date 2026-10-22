@@ -561,6 +561,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Experiments and the model registry](development/experiment-registry.md)
 - [Pushing and pulling features with Feast](development/feast-integration.md)
 - [Fork audit](development/fork-audit.md)
+- [Rust gateway in front of the web server](development/gateway.md)
 - [Monitoring](development/ml-monitoring.md)
 - [MongoDB with pandas and Polars](development/mongodb-integration.md)
 - [MySQL with pandas and Polars](development/mysql-integration.md)

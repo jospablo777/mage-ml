@@ -202,6 +202,12 @@ test-soak-engine: up
 		integration_tests/soak/test_scheduler.py integration_tests/soak/test_worker_crash.py \
 		-p no:xdist -rs $(PYTEST_ARGS)
 
+# The Rust gateway in front of `mage start` (MAGE_GATEWAY=on): the same answers as the
+# server for the recorded API, a terminal through it, and under 2 ms added at p95.
+test-gateway:
+	cd .. && MAGE_ENGINE_PATH=$(abspath $(ENGINE)) $(PYTHON) -m pytest integration_tests/gateway \
+		-p no:xdist -rs $(PYTEST_ARGS)
+
 # DuckDB runs in process; these tests need no service.
 test-duckdb:
 	cd .. && $(PYTHON) -m pytest integration_tests/duckdb $(PYTEST_ARGS)

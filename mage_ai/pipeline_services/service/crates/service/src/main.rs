@@ -11,6 +11,7 @@ mod azure;
 mod contract;
 mod environment;
 mod executor;
+mod gateway;
 mod gcp;
 mod ibm;
 mod jobs;
@@ -76,6 +77,19 @@ enum Command {
     /// Warm Python workers for the jobs of MageML's scheduler (requests on stdin, events
     /// on stdout); MageML starts it, see docs/development/run-engine.md.
     Jobs(jobs::JobsArgs),
+    /// Serve MageML's web server through a Rust gateway: every request and WebSocket passes
+    /// to the server at --upstream (ADR-0007); MageML starts it with MAGE_GATEWAY=on.
+    Gateway {
+        /// The address the gateway listens on.
+        #[arg(long, default_value = "127.0.0.1:6789")]
+        listen: std::net::SocketAddr,
+        /// The MageML server's address, host:port.
+        #[arg(long)]
+        upstream: String,
+        /// Exit when the process that started the gateway is gone.
+        #[arg(long)]
+        exit_with_parent: bool,
+    },
     /// Check that each stream's source and sinks answer, read-only, then exit: 0 when none
     /// failed.
     CheckConnections {
@@ -288,6 +302,18 @@ fn main() -> ExitCode {
             Command::Jobs(args) => {
                 log::to_stderr();
                 jobs::run(args).await
+            }
+            Command::Gateway {
+                listen,
+                upstream,
+                exit_with_parent,
+            } => {
+                if exit_with_parent {
+                    gateway::exit_with_parent();
+                }
+                gateway::run(listen, upstream)
+                    .await
+                    .map(|_| ExitCode::SUCCESS)
             }
         }
     });

@@ -680,10 +680,19 @@ async def main(
             'port with --port.'
         )
 
-    app.listen(
-        port,
-        address=host if host != 'localhost' else None,
-    )
+    from mage_ai.server import gateway
+
+    if gateway.enabled():
+        # The server takes a loopback port of its own; the gateway takes the user's port.
+        upstream_port = gateway.free_loopback_port()
+        app.listen(upstream_port, address='127.0.0.1')
+        gateway.start(host, port, upstream_port)
+        logger.info(f'The Rust gateway serves port {port} for the server on {upstream_port}.')
+    else:
+        app.listen(
+            port,
+            address=host if host != 'localhost' else None,
+        )
 
     host = host or 'localhost'
     url = f'http://{host}:{port}'

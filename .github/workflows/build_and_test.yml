@@ -545,6 +545,9 @@ jobs:
       - name: Run the scheduler soak test on the run engine
         if: matrix.id == 'soak'
         run: make -C integration_tests test-soak-engine SERVICES="${{ matrix.services }}" PYTEST_ARGS='--junitxml=integration_tests/soak-engine-results.xml'
+      - name: Run the gateway tests
+        if: matrix.id == 'soak'
+        run: make -C integration_tests test-gateway PYTEST_ARGS='--junitxml=integration_tests/soak-gateway-results.xml'
       - name: Failed tests
         if: failure()
         run: python3 scripts/junit_annotations.py integration_tests/results-*.xml integration_tests/soak*-results.xml
