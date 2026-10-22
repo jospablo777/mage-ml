@@ -1119,6 +1119,12 @@ impl std::ops::Deref for Pooled {
     }
 }
 
+impl Pooled {
+    fn discard(&mut self) {
+        self.connection = None;
+    }
+}
+
 impl Drop for Pooled {
     fn drop(&mut self) {
         if let Some(connection) = self.connection.take() {
@@ -1167,7 +1173,7 @@ pub(crate) async fn read_rows(
             let (path, params) = (path.clone(), params.to_vec());
             tokio::task::spawn_blocking(move || -> Result<Vec<Vec<Raw>>, String> {
                 use rusqlite::{ToSql, types::ToSqlOutput};
-                let connection = pooled(&path)?;
+                let mut connection = pooled(&path)?;
                 let values: Vec<ToSqlOutput> = params
                     .iter()
                     .map(|p| match p {
@@ -1178,15 +1184,23 @@ pub(crate) async fn read_rows(
                     })
                     .collect();
                 let refs: Vec<&dyn ToSql> = values.iter().map(|v| v as &dyn ToSql).collect();
-                let mut statement = connection.prepare(&sql).map_err(|e| e.to_string())?;
-                let width = statement.column_count();
-                statement
-                    .query_map(refs.as_slice(), |row| {
-                        (0..width).map(|i| row.get_ref(i).map(sqlite_raw)).collect()
-                    })
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())
+                let rows = (|| -> Result<Vec<Vec<Raw>>, String> {
+                    let mut statement = connection.prepare(&sql).map_err(|e| e.to_string())?;
+                    let width = statement.column_count();
+                    statement
+                        .query_map(refs.as_slice(), |row| {
+                            (0..width).map(|i| row.get_ref(i).map(sqlite_raw)).collect()
+                        })
+                        .map_err(|e| e.to_string())?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())
+                })();
+                if rows.is_err() {
+                    // A connection that failed (a database file replaced, a lock) is not
+                    // handed to the next read.
+                    connection.discard();
+                }
+                rows
             })
             .await
             .map_err(|e| e.to_string())?
@@ -1713,6 +1727,34 @@ mod tests {
         let mut names: Vec<Value> = pipeline_names(folder.path());
         names.sort_by_key(|v| v.as_str().unwrap_or_default().to_string());
         assert_eq!(names, vec![json!("block"), json!("inline"), json!("none")]);
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_failed_leaves_the_pool() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("meta.db");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute_batch("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);")
+            .unwrap();
+        let metadata = Metadata::Sqlite(path.clone());
+        let kept = || {
+            SQLITE_POOL
+                .lock()
+                .unwrap()
+                .get(&path)
+                .map(Vec::len)
+                .unwrap_or(0)
+        };
+        let rows = read_rows(&metadata, "SELECT n FROM t", &[]).await.unwrap();
+        assert!(matches!(rows[0][0], Raw::Int(1)));
+        assert_eq!(kept(), 1);
+        assert!(
+            read_rows(&metadata, "SELECT n FROM missing", &[])
+                .await
+                .is_err()
+        );
+        assert_eq!(kept(), 0);
     }
 
     #[test]
