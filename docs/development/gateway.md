@@ -64,7 +64,8 @@ routes itself when its own decision allows the read: from the metadata database,
 server's CORS headers and an ETag (304 when it matches). A read it would refuse, or one it
 cannot answer (the database busy, a run that does not exist), goes to the server, which
 answers as it always has, refusals included. `/__gateway/shadow` counts the answers it gave
-as `served`. Turn a route on where its shadow reads and decisions have stayed equal; the
+as `served`. One served answer in ten is also asked of the server in the background and
+compared as a shadow read is, so a served route keeps being checked. Turn a route on where its shadow reads and decisions have stayed equal; the
 policy matrix (`contracts/`) is a further check.
 
 ## Measured

@@ -15,6 +15,9 @@ use std::sync::Mutex;
 use serde_json::{Map, Value, json};
 
 const RECENT_DIFFERENCES: usize = 20;
+/// One served answer in this many is also asked of the server and compared, so serving a
+/// route keeps checking it.
+pub const SERVED_CHECK_EVERY: u64 = 10;
 const ROUTES: &[&str] = &["block_runs", "pipeline_run", "pipeline_runs"];
 /// DatabaseResource.DEFAULT_LIMIT.
 const DEFAULT_LIMIT: i64 = 40;
@@ -392,6 +395,14 @@ impl Shadow {
             recent.pop_front();
         }
         recent.push_back(difference);
+    }
+
+    /// Whether this served answer is one of those compared with the server's.
+    pub fn check_served(&self, route: &str) -> bool {
+        let counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+        counts
+            .get(route)
+            .is_some_and(|c| c.served % SERVED_CHECK_EVERY == 1)
     }
 
     pub fn report(&self) -> Value {

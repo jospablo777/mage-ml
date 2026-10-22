@@ -111,3 +111,21 @@ def test_served_reads_are_quicker_than_the_servers(served):
     direct, through = p95(server, page), p95(gateway, page)
     print(f'runs page list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
     assert through < direct, (through, direct)
+
+
+def test_a_sample_of_served_answers_is_compared_with_the_servers(served):
+    """One served answer in ten is asked of the server too, so serving keeps checking."""
+    gateway, _ = served
+    owner = sign_in(gateway)
+    for _ in range(30):
+        owner.get(f'http://127.0.0.1:{gateway}/api/block_runs?_limit=5', timeout=30)
+    deadline = time.monotonic() + 30
+    while True:
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes']['block_runs']
+        checked = found.get('equal', 0) + found.get('equal_after_reread', 0)
+        if checked >= 3 or time.monotonic() > deadline:
+            break
+        time.sleep(0.3)
+    assert checked >= 3, report
+    assert found.get('different', 0) == found.get('failed', 0) == 0, report

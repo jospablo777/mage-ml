@@ -155,6 +155,21 @@ async fn forward(
             .serve(route, &route_path, &query, request.headers())
             .await
     {
+        if shadow.check_served(route) {
+            // The server's answer for the same request, compared in the background.
+            let mut headers = request.headers().clone();
+            strip_hop_by_hop(&mut headers, false);
+            headers.remove(header::ACCEPT_ENCODING);
+            let (shadow, path, query) = (shadow.clone(), route_path.clone(), query.clone());
+            let reread = reread(upstream, &reread_uri, &headers);
+            tokio::spawn(async move {
+                if let Some(answer) = reread().await {
+                    shadow
+                        .compare(route, &path, &query, &answer, &headers, reread)
+                        .await;
+                }
+            });
+        }
         return served_json(&own, request.headers());
     }
     let upgrade = wants_upgrade(request.headers());
