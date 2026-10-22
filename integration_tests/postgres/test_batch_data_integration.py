@@ -155,3 +155,57 @@ def test_an_incremental_stream_continues_from_its_bookmark(
     assert query(
         pg, f'SELECT count(*), count(DISTINCT id), max(id) FROM {schema}.dst_events',
     ) == [(10, 10, 10)]
+
+
+def test_a_python_blocks_output_exported_by_a_destination_block(
+    mage_project, pg, postgres_settings, schema, batch_integration,
+):
+    """A DataFrame from an ordinary block, written by a data integration destination."""
+    from mage_ai.data_preparation.models.block import Block
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+
+    name = f'batch_di_py_{uuid.uuid4().hex[:8]}'
+    pipeline = Pipeline.create(name, repo_path=mage_project)
+    loader = Block.create(
+        f'{name}_rows', 'data_loader', mage_project, language='python', pipeline=pipeline,
+    )
+    with open(loader.file_path, 'w') as file:
+        file.write(textwrap.dedent('''\
+            import pandas as pd
+
+
+            @data_loader
+            def rows(*args, **kwargs):
+                return pd.DataFrame({
+                    'id': [1, 2, 3],
+                    'name': ['a', "it's", None],
+                    'amount': [1.5, -2.0, 1e10],
+                })
+        '''))
+    destination = Block.create(
+        f'{name}_destination', 'data_exporter', mage_project, language='yaml',
+        pipeline=pipeline, upstream_block_uuids=[loader.uuid],
+    )
+    with open(destination.file_path, 'w') as file:
+        file.write(textwrap.dedent(f'''\
+            destination: postgresql
+            config:
+              database: {postgres_settings['dbname']}
+              host: {postgres_settings['host']}
+              port: {postgres_settings['port']}
+              username: {postgres_settings['user']}
+              password: {postgres_settings['password']}
+              schema: {schema}
+              table: rows
+        '''))
+
+    run_scheduled_pipeline(pipeline.uuid)
+
+    tables = [t for (t,) in query(
+        pg, 'SELECT table_name FROM information_schema.tables WHERE table_schema = %s',
+        (schema,),
+    )]
+    assert len(tables) == 1, tables
+    assert query(pg, f'SELECT id, name, amount FROM {schema}.{tables[0]} ORDER BY id') == [
+        (1, 'a', 1.5), (2, "it's", -2.0), (3, None, 1e10),
+    ]
