@@ -127,3 +127,43 @@ class UserOperationTests(BaseApiTestCase):
             await self.base_test_execute_update(user.id, {}, {}, user=create_user())
 
         await self.assertRaisesAsync(Exception, _func)
+
+
+# Its own class: the users it makes changed the counts UserOperationTests compares.
+@patch('mage_ai.api.policies.BasePolicy.REQUIRE_USER_AUTHENTICATION', 1)
+class UserRoleGrantTests(BaseApiTestCase):
+    @classmethod
+    def setUpClass(self):
+        super().setUpClass()
+        Role.create_default_roles()
+
+    async def test_an_admin_raises_no_one_to_admin_or_owner_through_role_ids(self):
+        from mage_ai.api.operations import constants
+
+        admin = create_user(roles_new=[Role.get_role('Admin')])
+        editor = create_user(roles_new=[Role.get_role('Editor')])
+        made = [admin, editor]
+        self.addCleanup(lambda: [User.get_by_id(u.id).delete() for u in made])
+
+        async def update(target, by, **user):
+            return await self.build_operation(
+                action=constants.UPDATE, resource='users', pk=target.id,
+                payload=dict(user=user), user=by,
+            ).execute()
+
+        for target, role in ((admin, 'Owner'), (editor, 'Admin'), (editor, 'Owner')):
+            with self.subTest(target=target.id, role=role):
+                response = await update(target, admin, role_ids=[Role.get_role(role).id])
+                # role_ids had none of the checks roles_new has: an admin made itself Owner.
+                self.assertIn('error', response)
+        self.assertEqual([r.name for r in User.get_by_id(admin.id).roles_new], ['Admin'])
+        self.assertEqual([r.name for r in User.get_by_id(editor.id).roles_new], ['Editor'])
+
+        # Nor through the older roles field, whose first bit is Admin.
+        self.assertIn('error', await update(editor, admin, roles=1))
+
+        owner = create_user(_owner=True)
+        made.append(owner)
+        response = await update(editor, owner, role_ids=[Role.get_role('Admin').id])
+        self.assertNotIn('error', response)
+        self.assertEqual([r.name for r in User.get_by_id(editor.id).roles_new], ['Admin'])

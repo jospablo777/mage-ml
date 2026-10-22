@@ -108,6 +108,24 @@ class UserResource(DatabaseResource):
 
         return resource
 
+    def __check_admin_grants(self, roles, error) -> None:
+        """An admin changes no Owner's or other Admin's roles, and grants neither role."""
+        if not self.current_user.is_admin:
+            return
+        access = get_access_for_roles(roles, Entity.PROJECT, get_project_uuid())
+        if self.owner:
+            error.update({'message': 'Admins cannot update users who are Owners.'})
+            raise ApiError(error)
+        elif self.is_admin and self.current_user.id != self.id:
+            error.update({'message': 'Admins cannot update users who are Admins.'})
+            raise ApiError(error)
+        elif access & Permission.Access.ADMIN != 0 and self.current_user.id != self.id:
+            error.update({'message': 'Admins cannot make other users Admins.'})
+            raise ApiError(error)
+        elif access & Permission.Access.OWNER != 0:
+            error.update({'message': 'Admins cannot make other users Owners.'})
+            raise ApiError(error)
+
     @safe_db_query
     def update(self, payload, **kwargs):
         error = ApiError.RESOURCE_INVALID.copy()
@@ -118,29 +136,19 @@ class UserResource(DatabaseResource):
 
             payload['roles_new'] = roles_new
 
-            access = get_access_for_roles(
-                roles_new,
-                Entity.PROJECT,
-                get_project_uuid(),
-            )
+            self.__check_admin_grants(roles_new, error)
 
-            if self.current_user.is_admin:
-                if self.owner:
-                    error.update(
-                        {'message': 'Admins cannot update users who are Owners.'})
-                    raise ApiError(error)
-                elif self.is_admin and self.current_user.id != self.id:
-                    error.update(
-                        {'message': 'Admins cannot update users who are Admins.'})
-                    raise ApiError(error)
-                elif access & Permission.Access.ADMIN != 0:
-                    error.update(
-                        {'message': 'Admins cannot make other users Admins.'})
-                    raise ApiError(error)
-                elif access & Permission.Access.OWNER != 0:
-                    error.update(
-                        {'message': 'Admins cannot make other users Owners.'})
-                    raise ApiError(error)
+        # The same checks for role_ids, which the user page sends, and the older roles bits:
+        # only roles_new had them, so an admin gave itself the Owner role through role_ids.
+        if 'role_ids' in payload:
+            ids = [int(i) for i in payload.get('role_ids') or []]
+            self.__check_admin_grants(
+                Role.query.filter(Role.id.in_(ids)).all() if ids else [], error,
+            )
+        if payload.get('roles') is not None and self.current_user.is_admin and \
+                int(payload['roles']) & 1 != 0 and self.current_user.id != self.id:
+            error.update({'message': 'Admins cannot make other users Admins.'})
+            raise ApiError(error)
 
         password = payload.get('password')
         if password:

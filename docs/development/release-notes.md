@@ -26,6 +26,8 @@
 
 ### Server
 
+- Security: an admin can no longer make itself or anyone an Owner, or another user an
+  Admin, through a user's role_ids or roles; only the roles_new field was checked.
 - Security: signing in with an unknown email takes as long to refuse as a wrong password,
   so the time no longer tells which emails have accounts; a user without a password (made
   by LDAP or OAuth sign-in) who tries one is refused instead of getting an error.
