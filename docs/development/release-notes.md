@@ -72,6 +72,9 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
+- Sign-in is refused for an account after 10 failed attempts within 15 minutes, until the
+  oldest leaves the window (`MAGE_SIGN_IN_MAX_FAILURES`, `MAGE_SIGN_IN_WINDOW_SECONDS`).
+  With LDAP, an unknown user and a wrong password give the same message.
 - An API trigger call sets only the run's `variables` and `execution_date`; other keys of
   `pipeline_run` were written to the run (its id, status, backfill).
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead

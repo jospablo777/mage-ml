@@ -291,3 +291,51 @@ class SessionOperationTests(BaseApiTestCase):
             user = User.query.filter(User.username == username).first()
             self.assertIsNotNone(user)
             self.assertEqual(user.roles_new[0].name, 'Editor')
+
+
+class SignInLimitTests(BaseApiTestCase):
+    def setUp(self):
+        super().setUp()
+        from mage_ai.authentication import sign_in_limits
+
+        sign_in_limits.reset()
+        self.addCleanup(sign_in_limits.reset)
+
+    async def sign_in(self, email, password):
+        return await self.build_operation(
+            action=constants.CREATE,
+            payload=dict(session=dict(email=email, password=password)),
+            resource='sessions',
+            user=None,
+        ).execute()
+
+    @patch('mage_ai.authentication.sign_in_limits.WINDOW_SECONDS', 60)
+    @patch('mage_ai.authentication.sign_in_limits.MAX_FAILURES', 3)
+    async def test_an_account_with_too_many_failures_waits_for_the_window(self):
+        """A password could be guessed as fast as parallel requests went."""
+        user = create_user(password='password')
+        clock = [1000.0]
+        with patch('mage_ai.authentication.sign_in_limits.time.monotonic', lambda: clock[0]):
+            for _ in range(3):
+                self.assertIn('error', await self.sign_in(user.email, 'guess'))
+            # The right password too, until the window passes; other accounts sign in.
+            refused = await self.sign_in(user.email.upper(), 'password')
+            self.assertEqual(refused['error']['code'], 429, refused)
+            other = create_user(password='password')
+            self.assertNotIn('error', await self.sign_in(other.email, 'password'))
+            clock[0] += 61
+            self.assertNotIn('error', await self.sign_in(user.email, 'password'))
+
+    @patch('mage_ai.api.resources.SessionResource.AUTHENTICATION_MODE', 'ldap')
+    @patch.object(LDAPConnection, 'authorize')
+    @patch.object(LDAPConnection, 'authenticate')
+    async def test_ldap_unknown_users_and_wrong_passwords_read_the_same(
+        self, mock_authenticate, mock_authorize,
+    ):
+        """Two messages told which usernames the directory has."""
+        messages = []
+        for found in ('', 'cn=known'):
+            mock_authenticate.return_value = (False, found, dict())
+            response = await self.sign_in('someone', 'guess')
+            messages.append(response['error']['message'])
+        self.assertEqual(messages[0], messages[1])

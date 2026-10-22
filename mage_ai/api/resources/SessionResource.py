@@ -2,6 +2,7 @@ import asyncio
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BaseResource import BaseResource
+from mage_ai.authentication import sign_in_limits
 from mage_ai.authentication.ldap import new_ldap_connection
 from mage_ai.authentication.oauth2 import encode_token, generate_access_token
 from mage_ai.authentication.passwords import unmatchable_hash, verify_password
@@ -75,6 +76,9 @@ class SessionResource(BaseResource):
                 {'message': 'Email/username and password are required.'})
             raise ApiError(error)
 
+        account = email or username
+        sign_in_limits.check(account)
+
 
         user = None
         if AUTHENTICATION_MODE.lower() == 'ldap':
@@ -82,11 +86,11 @@ class SessionResource(BaseResource):
             conn = new_ldap_connection()
             auth, user_dn, user_attributes = conn.authenticate(email, password)
             if not auth:
-                if not user_dn:
-                    error.update({'message': 'LDAP user not found.'})
-                else:
-                    error.update({'message': 'LDAP password invalid.'})
+                # One message for an unknown user and a wrong password: two told which
+                # usernames the directory has.
+                sign_in_limits.failed(account)
                 raise ApiError(error)
+            sign_in_limits.succeeded(account)
 
             authz = conn.authorize(user_dn)
             if not authz:
@@ -130,13 +134,16 @@ class SessionResource(BaseResource):
             # that no account had it. A user without a password (LDAP, OAuth) failed with
             # an exception on the missing hash.
             await asyncio.to_thread(verify_password, password, unmatchable_hash())
+            sign_in_limits.failed(account)
             raise ApiError(error)
 
         # bcrypt takes most of a second by design; off the event loop, other requests go on.
         if await asyncio.to_thread(verify_password, password, user.password_hash):
+            sign_in_limits.succeeded(account)
             oauth_token = generate_access_token(user, kwargs['oauth_client'])
             return self(oauth_token, user, **kwargs)
         else:
+            sign_in_limits.failed(account)
             raise ApiError(error)
 
     @classmethod
