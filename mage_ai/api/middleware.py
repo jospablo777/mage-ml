@@ -51,6 +51,11 @@ class OAuthMiddleware(RequestHandler):
             return
 
         if self.bypass_oauth_check:
+            # Open to all (the status, also a health check), but a signed-in caller is still
+            # known: the status tells a caller who has not signed in less.
+            self.request.__setattr__(
+                'current_user', user_from_cookie(self.request.headers.get('Cookie', '')),
+            )
             return
 
         api_key = self.request.headers.get(HEADER_API_KEY, None)
