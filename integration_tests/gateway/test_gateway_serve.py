@@ -64,6 +64,8 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
     before = served_count(gateway)
     for path in (f'block_runs?pipeline_uuid={uuid}', 'block_runs?_limit=5',
                  f"pipeline_runs/{run['id']}",
+                 # The run page's poll, a format of three fields.
+                 f"pipeline_runs/{run['id']}?_format=with_basic_details",
                  'pipeline_runs?disable_retries_grouping=true&include_pipeline_tags=true'
                  '&include_pipeline_uuids=true&_limit=30'):
         through = owner.get(f'{api}/{path}', timeout=60)
@@ -80,6 +82,11 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
             'If-None-Match': through.headers['etag'],
         }).status_code in (200, 304)
     assert served_count(gateway) > before
+
+    # A name the gateway does not read goes to the server, which answers it.
+    before = served_count(gateway)
+    owner.get(f'{api}/block_runs?pipeline_uuid={uuid}&_format=detail', timeout=60)
+    assert served_count(gateway) == before
 
     # A caller without a session: the gateway leaves it to the server, which refuses.
     stranger = requests.Session()

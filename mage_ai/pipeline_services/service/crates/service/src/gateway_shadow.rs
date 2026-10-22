@@ -107,7 +107,7 @@ struct Counts {
     decisions_failed: u64,
     /// Answered by the gateway itself (--serve).
     served: u64,
-    /// Queries the gateway does not answer yet (pipeline_runs_unsupported).
+    /// Queries the gateway does not answer yet (unsupported).
     unsupported: u64,
 }
 
@@ -246,10 +246,7 @@ impl Shadow {
                 }
             }
         }
-        if route == "pipeline_runs"
-            && error_code.is_none()
-            && pipeline_runs_unsupported(query, self.repo_path.as_deref()).is_some()
-        {
+        if error_code.is_none() && unsupported(route, query, self.repo_path.as_deref()).is_some() {
             let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
             counts.entry(route.to_string()).or_default().unsupported += 1;
             return;
@@ -318,9 +315,7 @@ impl Shadow {
         if !self.serve.iter().any(|r| r == route) {
             return None;
         }
-        if route == "pipeline_runs"
-            && pipeline_runs_unsupported(query, self.repo_path.as_deref()).is_some()
-        {
+        if unsupported(route, query, self.repo_path.as_deref()).is_some() {
             return None;
         }
         match self.decide(settings, route, path, query, headers).await {
@@ -435,7 +430,17 @@ impl Shadow {
                     .next()
                     .and_then(|id| id.parse::<i64>().ok())
                     .ok_or_else(|| format!("{path} names no run"))?;
-                pipeline_run(&self.metadata, id).await
+                let found = pipeline_run(&self.metadata, id).await?;
+                if Query::parse(query).get("_format") == Some("with_basic_details") {
+                    // The run page's poll: PipelineRunPresenter's with_basic_details.
+                    let run = &found["pipeline_run"];
+                    return Ok(json!({"pipeline_run": {
+                        "execution_date": run["execution_date"],
+                        "id": run["id"],
+                        "status": run["status"],
+                    }, "metadata": null}));
+                }
+                Ok(found)
             }
             _ => Err(format!("No shadow read for {route}.")),
         }
@@ -484,12 +489,79 @@ impl Query {
         Query(values)
     }
 
-    /// A value Mage reads with `query.get(name, [None])[0]` and then tests for truth.
+    /// A value Mage reads with `query.get(name, [None])[0]` and then tests for truth. The
+    /// operation reads `false` as False (BaseOperation.query).
     fn get(&self, name: &str) -> Option<&str> {
         self.0
             .get(name)
             .map(String::as_str)
-            .filter(|v| !v.is_empty())
+            .filter(|v| !v.is_empty() && *v != "false")
+    }
+
+    /// The names Tornado keeps: it drops those with a blank value.
+    fn names(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, _)| k.as_str())
+    }
+}
+
+/// The query names each route reads, besides api_key. The server refuses any other name a
+/// caller who is not an owner sends (BasePolicy.authorize_query), and meta names such as
+/// _format change the answer, so a query with another name is left to the server.
+fn route_names(route: &str) -> &'static [&'static str] {
+    match route {
+        "block_runs" => &[
+            "_limit",
+            "_offset",
+            "order_by",
+            "pipeline_run_id",
+            "pipeline_uuid",
+        ],
+        "pipeline_run" => &["_format"],
+        "pipeline_runs" => &[
+            "_limit",
+            "_offset",
+            "backfill_id",
+            "disable_retries_grouping",
+            "end_timestamp",
+            "include_all_pipeline_schedules",
+            "include_pipeline_tags",
+            "include_pipeline_type",
+            "include_pipeline_uuids",
+            "order_by[]",
+            "pipeline_uuid",
+            "pipeline_uuid[]",
+            "start_timestamp",
+            "status",
+            "status[]",
+        ],
+        _ => &[],
+    }
+}
+
+/// Why the gateway leaves a query of a route to the server; None when it answers it.
+pub(crate) fn unsupported(
+    route: &str,
+    query: &str,
+    repo_path: Option<&std::path::Path>,
+) -> Option<&'static str> {
+    let parsed = Query::parse(query);
+    let names = route_names(route);
+    if parsed
+        .names()
+        .any(|name| name != "api_key" && !names.contains(&name))
+    {
+        return Some("a query name the gateway does not read");
+    }
+    match route {
+        "pipeline_runs" => pipeline_runs_unsupported(query, repo_path),
+        "pipeline_run" => match parsed.get("_format") {
+            None | Some("with_basic_details") => None,
+            Some(_) => Some("a _format the gateway does not answer"),
+        },
+        _ => None,
     }
 }
 
@@ -1652,6 +1724,27 @@ mod tests {
         assert_eq!(
             field_value(Kind::Json, Raw::Text("null".into())).unwrap(),
             Value::Null
+        );
+    }
+
+    #[test]
+    fn queries_with_names_the_server_refuses_or_reads_otherwise_go_to_it() {
+        let repo = std::path::Path::new("/repo");
+        let ok = |route, query| unsupported(route, query, Some(repo)).is_none();
+        assert!(ok("block_runs", "pipeline_uuid=p&_limit=5&api_key=k"));
+        // A non-owner's unknown name: the server refuses it.
+        assert!(!ok("block_runs", "pipeline_uuid=p&foo=1"));
+        // Tornado drops blank values, so the name is not there.
+        assert!(ok("block_runs", "pipeline_uuid=p&foo="));
+        assert!(!ok("block_runs", "_format=detail"));
+        assert!(ok("pipeline_run", ""));
+        assert!(ok("pipeline_run", "_format=with_basic_details"));
+        assert!(!ok("pipeline_run", "_format=integration_source"));
+        assert!(!ok("pipeline_runs", "_format=x"));
+        // false reads as False.
+        assert_eq!(
+            Query::parse("include_pipeline_tags=false").get("include_pipeline_tags"),
+            None
         );
     }
 
