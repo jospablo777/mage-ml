@@ -128,11 +128,13 @@ def test_changes_reach_a_table_exactly_and_a_restart_continues(
     pipeline = make_pipeline(mage_project, postgres_settings, schema, cdc)
     count = f'SELECT count(*) FROM {schema}.changes'
     slot = f"SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{cdc['slot']}'"
+    logs = []
     try:
         directory = export_service(mage_project, pipeline.uuid, tmp_path)
         environment = dict(PG_PASSWORD=postgres_settings['password'])
         service = RunningService(stream_service_binary(), directory, tmp_path / 'data',
                                  **environment)
+        logs.append(service.log)
         service.start()
         try:
             service.wait_running()
@@ -165,6 +167,7 @@ def test_changes_reach_a_table_exactly_and_a_restart_continues(
         execute(pg, f"INSERT INTO {schema}.events (id, name) VALUES (1000, 'while stopped')")
         service = RunningService(stream_service_binary(), directory, tmp_path / 'data2',
                                  **environment)
+        logs.append(service.log)
         service.start()
         try:
             service.wait_running()
@@ -176,7 +179,10 @@ def test_changes_reach_a_table_exactly_and_a_restart_continues(
     finally:
         pipeline.delete()
 
-    assert first and second, query(pg, count)
+    # Both services' logs: a failure here once showed only the count.
+    assert first and second, (query(pg, count), '\n'.join(
+        f'--- {log.name}\n{log.read_text()[-4000:]}' for log in logs if log.exists()
+    ))
     assert followed, (query(pg, slot), log_end)
     assert stream['last_error'] is None, stream
     rows = query(pg, f'''
