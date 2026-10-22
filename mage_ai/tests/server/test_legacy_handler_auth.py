@@ -101,3 +101,20 @@ class LegacyHandlerAuthTest(AsyncHTTPTestCase, DBTestCase):
         found = EventMatcher.get_by_id(matcher.id)
         # Its own fields only: the id stays.
         self.assertEqual(found.name, 'renamed')
+
+    def test_block_statistics_need_access_to_the_pipeline(self):
+        """Signed in was enough: a user with no role read any pipeline's statistics."""
+        from mage_ai.api.middleware import OAuthMiddleware
+        from mage_ai.tests.factory import create_user
+
+        nobody = create_user()
+
+        def prepare(handler):
+            handler.request.current_user = nobody
+            handler.request.error = None
+
+        with patch('mage_ai.api.utils.REQUIRE_USER_AUTHENTICATION', True), \
+                patch.object(OAuthMiddleware, 'prepare', prepare):
+            response = self.fetch('/api/pipelines/orders/blocks/load_orders/analyses')
+        self.assertEqual(response.code, 403)
+        self.assertNotIn(b'analyses', response.body)

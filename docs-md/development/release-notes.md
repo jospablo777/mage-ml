@@ -72,7 +72,8 @@
 - With the gateway on, it checks the scheduler: for each active trigger, the run the
   scheduler should start for the current execution date, counted as on time or missing at
   `/__gateway/shadow`.
-- Downloading a block's output needs read access to its pipeline; any signed-in user could.
+- Downloading a block's output, its statistics and a pipeline's documentation files need
+  read access to the pipeline; any signed-in user could read them.
 - `POST /api/runs/<token>` runs blocks of the token's trigger's pipeline only; any trigger's
   token ran any pipeline's blocks.
 - Event triggers (`POST /api/events`) and event matcher changes need an editor; viewers could

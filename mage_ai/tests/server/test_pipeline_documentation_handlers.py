@@ -82,3 +82,22 @@ class DocumentationImageTest(AsyncHTTPTestCase, DBTestCase):
             response = self.fetch('/api/pipeline_documentations/documented/images/flow.svg')
         self.assertEqual(response.code, 401)
         self.assertNotEqual(response.body, SVG)
+
+    def test_a_user_without_access_to_the_pipeline_gets_nothing(self):
+        """Signed in was enough: a user with no role read any pipeline's documentation."""
+        from mage_ai.api.middleware import OAuthMiddleware
+        from mage_ai.tests.factory import create_user
+
+        nobody = create_user()
+
+        def prepare(handler):
+            handler.request.current_user = nobody
+            handler.request.error = None
+
+        with patch('mage_ai.server.api.pipeline_documentation.REQUIRE_USER_AUTHENTICATION',
+                   True), \
+                patch('mage_ai.api.utils.REQUIRE_USER_AUTHENTICATION', True), \
+                patch.object(OAuthMiddleware, 'prepare', prepare):
+            response = self.fetch('/api/pipeline_documentations/documented/images/flow.svg')
+        self.assertEqual(response.code, 403)
+        self.assertNotEqual(response.body, SVG)

@@ -190,6 +190,20 @@ class SignedInMixin(OAuthMiddleware):
             self.finish(json.dumps(dict(error=dict(code=401, message='Sign in first.'))))
 
 
+def may_view_pipeline(user, pipeline_uuid: str, required: bool) -> bool:
+    """
+    has_at_least_viewer_role on the pipeline, for handlers outside the API resources: being
+    signed in let a user with no role, or kept out of the pipeline, read its outputs.
+    `required` is the caller's REQUIRE_USER_AUTHENTICATION.
+    """
+    if not required:
+        return True
+    from mage_ai.api.utils import has_at_least_viewer_role
+    from mage_ai.orchestration.constants import Entity
+
+    return user is not None and has_at_least_viewer_role(user, Entity.PIPELINE, pipeline_uuid)
+
+
 class EditorMixin(SignedInMixin):
     """
     SignedInMixin, and changes only by an editor of the project: any signed-in user, a

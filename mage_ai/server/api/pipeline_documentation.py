@@ -6,7 +6,7 @@ the API key in the query, as an <img> or <iframe> cannot send headers.
 import os
 
 from mage_ai.data_preparation.models.pipelines import documentation
-from mage_ai.server.api.base import BaseApiHandler
+from mage_ai.server.api.base import BaseApiHandler, may_view_pipeline
 from mage_ai.settings import REQUIRE_USER_AUTHENTICATION
 from mage_ai.settings.repo import get_repo_path, get_variables_dir
 
@@ -26,6 +26,13 @@ class _DocumentationFileHandler(BaseApiHandler):
             getattr(self.request, 'error', None) or not getattr(self.request, 'current_user', None)
         ):
             self.set_status(401)
+            self.finish()
+            return None
+        if not may_view_pipeline(
+            getattr(self.request, 'current_user', None), pipeline_uuid,
+            REQUIRE_USER_AUTHENTICATION,
+        ):
+            self.set_status(403)
             self.finish()
             return None
         repo_path = get_repo_path(user=getattr(self.request, 'current_user', None))
