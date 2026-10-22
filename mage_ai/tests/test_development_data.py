@@ -66,6 +66,16 @@ class OtherSourcesTest(unittest.TestCase):
                          ('SELECT * FROM o WHERE c_id IN (?)', [1]))
         self.assertEqual(data_samples.query(follow, [3], 'clickhouse'),
                          ('SELECT * FROM o WHERE c_id IN (%s)', [3]))
+        self.assertIn('ABS(HASH(CAST(id AS VARCHAR))) % 1000000 < 50000',
+                      data_samples.query(table, None, 'snowflake')[0])
+        # BigQuery: no % operator, named parameters.
+        self.assertIn('ABS(MOD(FARM_FINGERPRINT(CAST(id AS STRING)), 1000000)) < 50000',
+                      data_samples.query(table, None, 'bigquery')[0])
+        self.assertEqual(data_samples.query(follow, [1, 'x'], 'bigquery'),
+                         ('SELECT * FROM o WHERE c_id IN (@k0, @k1)', [1, 'x']))
+        rows = dict(table='c', key='id', sample=dict(rows=10))
+        self.assertTrue(data_samples.query(rows, None, 'bigquery')[0].endswith(
+            'ORDER BY FARM_FINGERPRINT(CAST(id AS STRING)) LIMIT 10'))
         # No key sampled, no row follows.
         self.assertEqual(data_samples.query(follow, [], 'duckdb')[0],
                          'SELECT * FROM o WHERE 1 = 0')
@@ -114,3 +124,21 @@ class OtherSourcesTest(unittest.TestCase):
         self.assertFalse(customers['email'].str.contains('person').any())
         # Hashed keys still join: every order belongs to a sampled customer.
         self.assertTrue(set(orders['customer_id']) <= set(customers['id']))
+
+
+class BigQueryReaderTest(unittest.TestCase):
+    def test_keys_go_as_typed_named_parameters(self):
+        from unittest.mock import MagicMock, patch
+
+        client = MagicMock()
+        with patch('mage_ai.io.bigquery.BigQuery.with_config',
+                   return_value=MagicMock(client=client)), \
+                patch('mage_ai.io.config.ConfigFileLoader'):
+            read = data_samples._reader('/repo', 'warehouse', 'bigquery')
+            read('SELECT * FROM o WHERE c_id IN (@k0, @k1, @k2)', [7, 'x', 1.5])
+
+        job_config = client.query.call_args.kwargs['job_config']
+        self.assertEqual(
+            [(p.name, p.type_, p.value) for p in job_config.query_parameters],
+            [('k0', 'INT64', 7), ('k1', 'STRING', 'x'), ('k2', 'FLOAT64', 1.5)],
+        )

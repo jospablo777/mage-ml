@@ -177,6 +177,13 @@ DIALECTS = {
     ),
     'duckdb': dict(bucket='abs(hash(CAST({column} AS VARCHAR)))', parameter='?'),
     'clickhouse': dict(bucket='cityHash64(toString({column}))', parameter='%s'),
+    'snowflake': dict(bucket='ABS(HASH(CAST({column} AS VARCHAR)))', parameter='%s'),
+    # BigQuery has no % operator and takes named parameters (@k0, @k1, ...).
+    'bigquery': dict(
+        bucket='FARM_FINGERPRINT(CAST({column} AS STRING))',
+        fraction='ABS(MOD({bucket}, 1000000))',
+        parameter='@k{index}',
+    ),
 }
 SOURCE_KINDS = tuple(DIALECTS)
 
@@ -197,7 +204,9 @@ def query(table: Dict, followed: Optional[List] = None, dialect: str = 'postgres
             conditions.append(f"{follow['column']} = ANY(%s)")
             params.append(keys)
         elif keys:
-            marks = ', '.join([DIALECTS[dialect]['parameter']] * len(keys))
+            marks = ', '.join(
+                DIALECTS[dialect]['parameter'].format(index=i) for i in range(len(keys))
+            )
             conditions.append(f"{follow['column']} IN ({marks})")
             params.extend(keys)
         else:
@@ -208,8 +217,10 @@ def query(table: Dict, followed: Optional[List] = None, dialect: str = 'postgres
     sample = table['sample']
     key = table['key']
     if sample.get('fraction') is not None:
+        fraction = DIALECTS[dialect].get('fraction', '{bucket} % 1000000')
         conditions.append(
-            f'{_hash_bucket(key, dialect)} % 1000000 < {int(sample["fraction"] * 1000000)}',
+            f'{fraction.format(bucket=_hash_bucket(key, dialect))} '
+            f'< {int(sample["fraction"] * 1000000)}',
         )
         return (f"SELECT * FROM {table['table']} WHERE " + ' AND '.join(conditions), params)
     filtered = f"SELECT * FROM {table['table']}" + (
@@ -320,6 +331,16 @@ def _duckdb(out: Path, tables: List[str]) -> None:
         connection.close()
 
 
+def _bigquery_type(value) -> str:
+    if isinstance(value, bool):
+        return 'BOOL'
+    if isinstance(value, int):
+        return 'INT64'
+    if isinstance(value, float):
+        return 'FLOAT64'
+    return 'STRING'
+
+
 def _reader(repo_path: str, profile: str, kind: str = 'postgres'):
     """reader(sql, params) for the profile's database: a pandas DataFrame of the rows."""
     from mage_ai.io.config import ConfigFileLoader, ConfigKey
@@ -351,6 +372,30 @@ def _reader(repo_path: str, profile: str, kind: str = 'postgres'):
                     return frame(cursor)
 
         return read_mysql
+    if kind == 'snowflake':
+        from mage_ai.io.snowflake import Snowflake
+
+        def read_snowflake(sql: str, params: List):
+            with Snowflake.with_config(config) as loader:
+                with loader.conn.cursor() as cursor:
+                    cursor.execute(sql, params or None)
+                    return frame(cursor)
+
+        return read_snowflake
+    if kind == 'bigquery':
+        from mage_ai.io.bigquery import BigQuery
+
+        def read_bigquery(sql: str, params: List):
+            from google.cloud import bigquery
+
+            job_config = bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter(f'k{i}', _bigquery_type(value), value)
+                for i, value in enumerate(params or [])
+            ])
+            client = BigQuery.with_config(config).client
+            return client.query(sql, job_config=job_config).to_dataframe()
+
+        return read_bigquery
     if kind == 'clickhouse':
         from mage_ai.io.clickhouse import ClickHouse
 

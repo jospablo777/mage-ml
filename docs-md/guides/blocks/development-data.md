@@ -11,17 +11,18 @@ on every copy, and without the key a masked value cannot be checked against a gu
 
 ## Define a sample
 
-The source is PostgreSQL, MySQL, DuckDB or ClickHouse, read with a profile of
-`io_config.yaml`. Rows are drawn in the source's own SQL by a hash of the key:
+The source is PostgreSQL, MySQL, DuckDB, ClickHouse, Snowflake or BigQuery, read with a
+profile of `io_config.yaml`. Rows are drawn in the source's own SQL by a hash of the key:
 `hashtextextended` in PostgreSQL, SHA-256 in MySQL, `hash` in DuckDB, `cityHash64` in
-ClickHouse. The same key draws the same entities in every table of one source.
+ClickHouse, `HASH` in Snowflake, `FARM_FINGERPRINT` in BigQuery. The same key draws the
+same entities in every table of one source.
 
 `data_samples/<name>.yaml` in the project:
 
 ```yaml
 source:
   profile: production_readonly       # an io_config.yaml profile
-  kind: postgres                     # postgres (the default), mysql, duckdb or clickhouse
+  kind: postgres                     # postgres (default), mysql, duckdb, clickhouse, snowflake, bigquery
 key_env: MAGE_SAMPLE_KEY             # the variable with the masking key, 16 characters or more
 tables:
   - table: public.customers
