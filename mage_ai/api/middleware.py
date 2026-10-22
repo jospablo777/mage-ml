@@ -104,11 +104,16 @@ class OAuthMiddleware(RequestHandler):
                     )
                     should_check = True
                 elif COOKIE_OAUTH_TOKEN in cookies:
-                    token_data = decode_token(cookies[COOKIE_OAUTH_TOKEN])
+                    # A cookie that does not decode (another JWT_SECRET, a cut value) is an
+                    # invalid token, which signs the user in again; it answered 500.
+                    try:
+                        token_data = decode_token(cookies[COOKIE_OAUTH_TOKEN])
+                    except Exception:
+                        token_data = {}
                     if 'token' in token_data:
                         oauth_token, valid = authenticate_client_and_token(
                             oauth_client.id,
-                            decode_token(cookies[COOKIE_OAUTH_TOKEN])['token'],
+                            token_data['token'],
                         )
                     should_check = True
 

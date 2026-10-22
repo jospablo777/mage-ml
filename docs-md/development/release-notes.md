@@ -26,6 +26,8 @@
 
 ### Server
 
+- A session cookie that no longer decodes, as after `JWT_SECRET` changes, signs the user in
+  again; every API request answered 500 until the cookie was cleared by hand.
 - Security: in a list, each resource is checked for its own pipeline. The role checks of a
   response were cached under the check's name, so a pipeline a permission denied was
   shown with the others.
