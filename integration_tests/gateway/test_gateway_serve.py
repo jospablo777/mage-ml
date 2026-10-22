@@ -1,6 +1,6 @@
 """
 MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail, the runs list,
-the triggers list and the logs itself when
+the triggers list, the logs and the monitor stats itself when
 its own decision allows the read, with what the server answers, and leaves refusals to the
 server, which answers them as before.
 """
@@ -12,7 +12,7 @@ import requests
 
 from integration_tests.gateway.test_gateway import LOAD, run_server
 
-ROUTES = 'block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules'
+ROUTES = 'block_runs,logs,monitor_stats,pipeline_run,pipeline_runs,pipeline_schedules'
 
 
 @pytest.fixture(scope='module')
@@ -70,7 +70,10 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
                  '&include_pipeline_uuids=true&_limit=30',
                  'pipeline_schedules?_limit=30&_offset=0&order_by=created_at',
                  f'pipelines/{uuid}/pipeline_schedules?_limit=40&_offset=0',
-                 f'pipelines/{uuid}/logs?start_timestamp={int(time.time()) - 86400}'):
+                 f'pipelines/{uuid}/logs?start_timestamp={int(time.time()) - 86400}',
+                 # The overview's and the monitor page's counts.
+                 'monitor_stats/pipeline_run_count?group_by_pipeline_type=1',
+                 f'monitor_stats/block_run_count?pipeline_uuid={uuid}'):
         through = owner.get(f'{api}/{path}', timeout=60)
         direct = owner.get(f'http://127.0.0.1:{server}/api/{path}', timeout=60)
         assert through.status_code == direct.status_code == 200

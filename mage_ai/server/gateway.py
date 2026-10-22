@@ -16,7 +16,7 @@ from mage_ai.pipeline_services.engine import engine_path
 READY_SECONDS = 15
 # The routes the gateway answers too, from the metadata database, and compares with the
 # server's answers (gateway_shadow.rs); MAGE_GATEWAY_SHADOW=off turns them off.
-SHADOW_ROUTES = 'block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules'
+SHADOW_ROUTES = 'block_runs,logs,monitor_stats,pipeline_run,pipeline_runs,pipeline_schedules'
 
 
 def enabled() -> bool:

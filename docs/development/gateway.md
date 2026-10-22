@@ -28,7 +28,7 @@ process exits.
 ## Shadow reads
 
 For the routes in `MAGE_GATEWAY_SHADOW` (default
-`block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules`;
+`block_runs,logs,monitor_stats,pipeline_run,pipeline_runs,pipeline_schedules`;
 `off` turns them off), the
 gateway still serves the server's answer, then computes its own from the metadata
 database (SQLite, or PostgreSQL in UTC) and compares the two as JSON. The server's answer
@@ -48,6 +48,7 @@ differ; each difference is also logged. The database URL reaches the gateway in 
 | `GET /api/pipeline_runs/<id>` | The run's presenter attributes and every column of its block runs, with the trigger's id and name; with `_format=with_basic_details` (the run page's poll), its id, status and execution date | `str(datetime)` times (a space, `+00:00` on PostgreSQL), JSON columns, the block runs sorted by creation, the `metadata: null` envelope |
 | `GET /api/pipeline_runs` | The runs pages' queries: filters by pipeline, status, backfill and the project's triggers, an order, pages, time ranges, the pipelines' tags and types (from each `metadata.yaml`, kept until the file changes) and names. With `GET /api/pipeline_schedules/<id>/pipeline_runs` (a trigger's page), each date's runs grouped with their retries as the server groups them. Tag and type filters and `last_run_failed` are counted as `unsupported` and left to the server | Every LIST item's keys, `pipeline_tags` and `pipeline_type` null unless asked for, the block runs and their counts, the trigger's name, token and type, `metadata.pipeline_uuids` in directory order |
 | `GET /api/pipelines/<uuid>/logs` | The logs page's reads of logs on the server's disk: the logs of the pipeline's runs and block runs, its blocks' editor logs, the filters by trigger, run, block run, block and time, a text search, and the lines before a window (`log_path`). Each log is read over its rotated segments with the reader column_atlas_native uses (the `mage-log-window` crate). Logs in S3 or GCS, and paths it would have to resolve against the server's working directory, are counted as `unsupported` | `posixpath.join` paths, `clean_name` of block uuids, `execution_partition`, the first 20 logs (200 with a search), the editor logs in directory order |
+| `GET /api/monitor_stats/<type>` | The overview's and monitor pages' stats: `pipeline_run_count` (per trigger and day, by status, or by pipeline type with `group_by_pipeline_type`), `pipeline_run_time`, `block_run_count` and `block_run_time` (means of the finished runs per day), for the project's triggers between `start_time` and `end_time`. Times other than ISO dates and times are counted as `unsupported` | Days as the database formats them (`to_char`, `strftime`), a deleted pipeline's runs counted with their day but no type, 0 for a day without a positive time; means compared within a relative 1e-9, since the database's order of the runs can change between the two reads |
 | `GET /api/pipeline_schedules`, `GET /api/pipelines/<uuid>/pipeline_schedules` | The triggers pages' queries: search, type, interval, status and tag filters, the orders, pages; each trigger's run counts, last run status, tags and event matchers, and its next run date. Cron expressions other than five fields of digits, `*`, `/`, `-` and `,` (with a day of the month or of the week, not both) are counted as `unsupported` | `next_execution_date` as croniter computes it (croner gives the same dates for those expressions), landing times and start times ahead, `HIDE_API_TRIGGER_TOKEN` |
 
 The gateway also decides, for each shadowed read, whether it would serve it, and compares
@@ -90,7 +91,7 @@ under `scheduler` in `/__gateway/shadow`; `MAGE_GATEWAY_SCHEDULER_SHADOW=off` tu
 
 ## Serving
 
-`MAGE_GATEWAY_SERVE=block_runs,logs,pipeline_run,pipeline_runs,pipeline_schedules` (off by
+`MAGE_GATEWAY_SERVE=block_runs,logs,monitor_stats,pipeline_run,pipeline_runs,pipeline_schedules` (off by
 default) has the gateway answer those
 routes itself when its own decision allows the read: from the metadata database, with the
 server's CORS headers and an ETag (304 when it matches). A read it would refuse, or one it

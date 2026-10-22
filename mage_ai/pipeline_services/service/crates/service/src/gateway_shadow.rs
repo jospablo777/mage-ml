@@ -21,6 +21,7 @@ pub const SERVED_CHECK_EVERY: u64 = 10;
 const ROUTES: &[&str] = &[
     "block_runs",
     "logs",
+    "monitor_stats",
     "pipeline_run",
     "pipeline_runs",
     "pipeline_schedules",
@@ -229,6 +230,9 @@ impl Shadow {
         if path == "/api/block_runs" && enabled("block_runs") {
             return Some("block_runs");
         }
+        if enabled("monitor_stats") && crate::gateway_monitor::stats_type(path).is_some() {
+            return Some("monitor_stats");
+        }
         if (path == "/api/pipeline_runs" || schedule_runs(path).is_some())
             && enabled("pipeline_runs")
         {
@@ -321,7 +325,7 @@ impl Shadow {
                 Err(error) => Err(format!("The server's answer is not JSON: {error}")),
             };
             match pair {
-                Ok((served, own)) if served == own => break Ok(attempt),
+                Ok((served, own)) if same_answer(route, &served, &own) => break Ok(attempt),
                 Ok(pair) if attempt == REREADS => break Err(Some(pair)),
                 Ok(_) => {}
                 // Found unsupported only on reading the rows (a trigger's schedule).
@@ -432,6 +436,8 @@ impl Shadow {
             return Ok(all.then_some(true));
         }
         let pipeline = match route {
+            // MonitorStatPolicy: has_at_least_viewer_role on the project.
+            "monitor_stats" => None,
             "logs" => pipeline_child(path, "logs"),
             "block_runs" | "pipeline_runs" => query.get("pipeline_uuid").map(str::to_string),
             "pipeline_run" => {
@@ -580,6 +586,16 @@ impl Shadow {
                 crate::gateway_schedules::pipeline_schedules(&lister, query).await
             }
             "block_runs" => block_runs(&self.metadata, &Query::parse(query)).await,
+            "monitor_stats" => {
+                let repo = self.repo_path.as_deref().ok_or("no repository path")?;
+                crate::gateway_monitor::monitor_stats(
+                    &self.metadata,
+                    repo,
+                    path,
+                    &Query::parse(query),
+                )
+                .await
+            }
             "pipeline_runs" => {
                 let repo = self.repo_path.as_deref().ok_or("no repository path")?;
                 let schedule = schedule_runs(path);
@@ -622,6 +638,15 @@ impl Shadow {
             _ => Err(format!("No shadow read for {route}.")),
         }
     }
+}
+
+/// Whether the server's answer and the gateway's are the same. Monitor stats' means can
+/// differ in the last bits (gateway_monitor::close).
+fn same_answer(route: &str, served: &Value, own: &Value) -> bool {
+    if route == "monitor_stats" {
+        return crate::gateway_monitor::close(served, own);
+    }
+    served == own
 }
 
 /// Where two answers first differ, as a path and the two values.
@@ -718,6 +743,13 @@ fn route_names(route: &str) -> &'static [&'static str] {
             "text",
         ],
         "pipeline_run" => &["_format"],
+        "monitor_stats" => &[
+            "end_time",
+            "group_by_pipeline_type",
+            "pipeline_schedule_id",
+            "pipeline_uuid",
+            "start_time",
+        ],
         "pipeline_schedules" => &[
             "_limit",
             "_offset",
@@ -787,6 +819,7 @@ pub(crate) fn unsupported(
     }
     match route {
         "pipeline_runs" => pipeline_runs_unsupported(query, repo_path),
+        "monitor_stats" => crate::gateway_monitor::unsupported(&parsed, repo_path),
         "logs" | "pipeline_schedules" if repo_path.is_none() => {
             Some("no repository path (or the project platform)")
         }

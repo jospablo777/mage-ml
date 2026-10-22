@@ -466,6 +466,54 @@ def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
     assert page['pipeline_runs'][0]['pipeline_tags'] == ['nightly', 'finance']
 
 
+def test_monitor_stats_read_from_the_database_equal_the_servers(ports, signed_in):
+    """GET /api/monitor_stats as the overview and the monitor pages ask for it."""
+    from datetime import datetime, timedelta, timezone
+
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    runs = signed_in.get(f'{base}/pipeline_runs?_limit=100', timeout=60).json()['pipeline_runs']
+    assert runs
+    pipeline, schedule = runs[0]['pipeline_uuid'], runs[0]['pipeline_schedule_id']
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('monitor_stats', {})
+        return {k: found.get(k, 0) for k in COUNTS + ('unsupported',)}, report
+
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    queries = [
+        # The overview page.
+        f'pipeline_run_count?group_by_pipeline_type=1&start_time={week_ago}',
+        'pipeline_run_count',
+        # The monitor pages.
+        f'pipeline_run_count?pipeline_uuid={pipeline}',
+        f'pipeline_run_time?pipeline_uuid={pipeline}',
+        'pipeline_run_time',
+        f'block_run_count?pipeline_uuid={pipeline}',
+        f'block_run_count?pipeline_uuid={pipeline}&pipeline_schedule_id={schedule}',
+        f'block_run_time?pipeline_uuid={pipeline}',
+        f'block_run_time?pipeline_uuid={pipeline}&pipeline_schedule_id={schedule}',
+        f'block_run_time?start_time={week_ago}&end_time=2100-01-01',
+    ]
+    before = settled(counts)
+    for query in queries + ['block_run_time?start_time=Oct%201%202026']:
+        response = signed_in.get(f'{base}/monitor_stats/{query}', timeout=60)
+        assert response.status_code == 200 and 'error' not in response.json(), response.text
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0
+    # A time the gateway does not read is counted, not compared.
+    assert added['unsupported'] == 1
+
+
 def test_trigger_lists_read_from_the_database_equal_the_servers(ports, signed_in):
     """
     GET /api/pipeline_schedules as the triggers pages ask for it, with next run dates of

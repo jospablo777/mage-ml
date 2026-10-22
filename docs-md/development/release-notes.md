@@ -26,6 +26,9 @@
 
 ### Server
 
+- The gateway reads `GET /api/monitor_stats` (the overview's and monitor pages' run counts
+  and times) from the metadata database, compares it with the server's answer, and serves
+  it with `MAGE_GATEWAY_SERVE=monitor_stats`.
 - Security: only owners give, change or take away admin or owner access through roles,
   permissions, role permissions and user roles; an admin could make itself an Owner
   through any of them.
