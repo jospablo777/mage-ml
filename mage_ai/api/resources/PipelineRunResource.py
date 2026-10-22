@@ -257,7 +257,8 @@ class PipelineRunResource(DatabaseResource):
         query arg and set it to True (e.g. in order to make the number of pipeline runs
         returned consistent across pages).
         """
-        if limit is not None and limit != 0 and total_count >= 1 and \
+        # A page past the last run has no first or last run to group.
+        if limit is not None and limit != 0 and total_count >= 1 and results and \
             not disable_retries_grouping and \
                 (pipeline_uuid is not None or pipeline_schedule_id is not None):
 
