@@ -11,6 +11,29 @@ from mage_ai.tests.base_test import TestCase
 
 
 class LoggerManagerTest(TestCase):
+    def test_reading_a_log_creates_nothing_and_leaves_the_writer_alone(self):
+        """
+        A reader created the log's folder and an empty log file, and when it was collected
+        it took the file handler off the logger a running block wrote with.
+        """
+        import gc
+
+        reader = LoggerManager(pipeline_uuid='read_only', partition='7/20260101T000000')
+        path = reader.get_log_filepath()
+        item = reader.get_logs()
+        self.assertFalse(os.path.exists(os.path.dirname(path)))
+        self.assertEqual((item['content'], item['size']), ('', None))
+        del reader
+
+        writer = LoggerManager(pipeline_uuid='read_only', partition='7/20260101T000001')
+        writer.logger.info('first')
+        reader = LoggerManager(pipeline_uuid='read_only', partition='7/20260101T000001')
+        self.assertIn('first', reader.get_logs()['content'])
+        del reader
+        gc.collect()
+        writer.logger.info('second')
+        self.assertIn('second', open(writer.get_log_filepath()).read())
+
     def test_delete_old_logs_no_retention_period(self):
         # Test the scenario when retention_period is not set,
         # it should return without doing anything

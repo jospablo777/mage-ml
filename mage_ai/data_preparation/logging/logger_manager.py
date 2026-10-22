@@ -77,12 +77,10 @@ class LoggerManager:
             logger_name_parts.append(self.partition)
         if self.block_uuid is not None:
             logger_name_parts.append(self.block_uuid)
-        logger_name = '/'.join(logger_name_parts)
-        self.logger = logging.getLogger(logger_name)
+        self.logger_name = '/'.join(logger_name_parts)
 
         # Set the log level based on the configuration
         self.log_level = logging.getLevelName(self.logging_config.level)
-        self.logger.setLevel(self.log_level)
 
         # Create log formatter
         self.formatter = logging.Formatter(
@@ -90,9 +88,26 @@ class LoggerManager:
             '%Y-%m-%dT%H:%M:%S',
         )
 
-        # Initialize log stream and add appropriate handlers to the logger
         self.stream = None
-        if not self.logger.handlers:
+        # The handler this instance attached, which only it removes.
+        self._handler = None
+        self._logger = None
+
+        self.storage = LocalStorage()
+
+    @property
+    def logger(self) -> logging.Logger:
+        """
+        The logger, with its handler attached on first use. Reading a log never logs: it
+        created the log's folder and an empty log file, and when the reader was collected it
+        took the file handler off the logger a running block wrote with.
+        """
+        if self._logger is not None:
+            return self._logger
+        logger = logging.getLogger(self.logger_name)
+        logger.setLevel(self.log_level)
+
+        if not logger.handlers:
             if self.logging_config.destination_config:
                 # If there is a destination configuration, use a stream handler
                 handler = self.create_stream_handler()
@@ -107,29 +122,33 @@ class LoggerManager:
 
             handler.setLevel(self.log_level)
             handler.setFormatter(self.formatter)
-            self.logger.addHandler(handler)
-        else:
-            if self.logging_config.destination_config:
-                # If a stream handler already exists, get the stream object
-                stream_handler = find(
-                    lambda hr: hr.__class__ == logging.StreamHandler, self.logger.handlers
-                )
-                if stream_handler:
-                    self.stream = stream_handler.stream
+            logger.addHandler(handler)
+            self._handler = handler
+        elif self.logging_config.destination_config:
+            # If a stream handler already exists, get the stream object
+            stream_handler = find(
+                lambda hr: hr.__class__ == logging.StreamHandler, logger.handlers
+            )
+            if stream_handler:
+                self.stream = stream_handler.stream
 
-        self.storage = LocalStorage()
+        self._logger = logger
+        return logger
 
     def __del__(self):
         """
-        Close the log file if the logger uses the file handler.
+        Close the log file if this instance attached a file handler.
         """
-        for handler in list(self.logger.handlers):
-            try:
-                if isinstance(handler, (logging.FileHandler, logging.handlers.RotatingFileHandler)):
-                    self.logger.removeHandler(handler)
-                    handler.close()
-            except Exception:
-                traceback.print_exc()
+        handler = getattr(self, '_handler', None)
+        if handler is None or not isinstance(
+            handler, (logging.FileHandler, logging.handlers.RotatingFileHandler),
+        ):
+            return
+        try:
+            self._logger.removeHandler(handler)
+            handler.close()
+        except Exception:
+            traceback.print_exc()
 
     def create_stream_handler(self):
         """
