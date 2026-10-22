@@ -91,7 +91,9 @@ def measure(runs: int, warmup: int = 2) -> dict:
         times = []
         for index in range(warmup + runs):
             started = time.perf_counter()
-            result = runner.invoke(app, ['run', project, PIPELINE])
+            # Without the blocks' tests, which mage run runs by default since it changed;
+            # typer gives the base side's older --test option a --no-test too.
+            result = runner.invoke(app, ['run', project, PIPELINE, '--no-test'])
             elapsed = (time.perf_counter() - started) * 1000
             if result.exit_code != 0:
                 raise SystemExit(f'mage run failed:\n{result.output}\n{result.exception!r}')
