@@ -82,6 +82,7 @@ a field. A pipeline's own permissions (roles on one pipeline) narrow these furth
 | `pipeline_schedules` | Viewer | Viewer | Editor | Editor | Editor |
 | `pipeline_service_builds` | Editor | Editor | Editor | No one | No one |
 | `pipeline_service_exports` | Editor | Editor | Editor | No one | No one |
+| `pipeline_service_models` | No one | Viewer | Editor | No one | No one |
 | `pipeline_services` | Viewer | Viewer | Editor | Editor | Editor |
 | `pipeline_triggers` | Viewer | No one | Editor | No one | No one |
 | `pipelines` | Viewer | Viewer | Editor * | Editor | Editor * |

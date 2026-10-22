@@ -491,6 +491,7 @@ def promote(
     version: Optional[str] = None,
     move_alias: bool = False,
     reason: Optional[str] = None,
+    by: Optional[str] = None,
 ) -> Dict:
     """
     Makes a model version the one the service embeds, and records who did it, when and
@@ -571,7 +572,7 @@ def promote(
     definitions.save_definition(repo_path, name, dict(saved, models=models))
     record = dict(
         at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
-        by=_who(repo_path),
+        by=by or _who(repo_path),
         model=model,
         registered=registered,
         from_version=None if previous is None else str(previous),

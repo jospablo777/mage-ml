@@ -80,3 +80,45 @@ test('a pipeline becomes a service and its settings show it', async ({ page }) =
   await arm64.click();
   await expect(page.getByText('Choose where the image runs.')).toBeVisible();
 });
+
+test('a moved model version is promoted from the service page', async ({ page }) => {
+  // A service that embeds a registry model; the registry's answers are stubbed.
+  const name = `${serviceName}-models`;
+  await api.call('POST', 'pipeline_services', { pipeline_service: {
+    models: [{ name: 'churn', uri: 'models:/churn@champion' }],
+    name,
+    pipelines: [pipelineUUID],
+  } });
+  const models = [{
+    built: '3', challengers: [], name: 'churn', registry: '5', status: 'moved',
+    uri: 'models:/churn@champion',
+  }];
+  let promoted = null;
+  await page.route('**/api/pipeline_service_models**', async (route) => {
+    if (route.request().method() === 'POST') {
+      promoted = route.request().postDataJSON().pipeline_service_model;
+      await route.fulfill({ json: { pipeline_service_model: {
+        models: [{ ...models[0], built: '3', status: 'moved' }],
+        name,
+        promoted: {
+          at: '2026-10-22T08:00:00+00:00', by: 'admin@admin.com', from_version: '3',
+          how: 'alias followed', model: 'churn', to_version: '5',
+        },
+        promotions: [],
+      } } });
+      return;
+    }
+    await route.fulfill({ json: { pipeline_service_model: { models, name, promotions: [] } } });
+  });
+
+  await page.goto(`/services?service=${name}`);
+  await expect(page.getByText('Promote a model version')).toBeVisible();
+  await expect(page.getByText('Image: version 3.', { exact: false })).toBeVisible();
+  // The field shows its label as its placeholder until it has focus.
+  await page.getByPlaceholder('Why (kept in promotions.yaml)').fill('better recall');
+  await page.getByRole('button', { name: 'Promote version 5' }).click();
+  await expect(page.getByText('Build and ship the image to put it in the service.', { exact: false }))
+    .toBeVisible();
+  expect(promoted).toMatchObject({ model: 'churn', name, reason: 'better recall' });
+  await api.call('DELETE', `pipeline_services/${name}`).catch(() => null);
+});

@@ -3831,7 +3831,7 @@
          "type": "integer"
         },
         "modified_timestamp": {
-         "type": "integer"
+         "type": "null"
         },
         "name": {
          "type": "string"
@@ -3843,7 +3843,7 @@
          "type": "integer"
         },
         "size": {
-         "type": "integer"
+         "type": "null"
         },
         "total_lines": {
          "type": "integer"
@@ -3863,7 +3863,7 @@
          "type": "integer"
         },
         "modified_timestamp": {
-         "type": "integer"
+         "type": "null"
         },
         "name": {
          "type": "string"
@@ -3875,7 +3875,7 @@
          "type": "integer"
         },
         "size": {
-         "type": "integer"
+         "type": "null"
         },
         "total_lines": {
          "type": "integer"
@@ -4134,14 +4134,8 @@
      "keep_block_outputs": {},
      "last_compiled": {
       "properties": {
-       "finished_at": {
-        "type": "number"
-       },
        "state": {
         "type": "string"
-       },
-       "units": {
-        "type": "integer"
        },
        "up_to_date": {
         "type": "boolean"
@@ -4548,6 +4542,15 @@
      "schedules": {},
      "stage": {},
      "state": {}
+    },
+    "type": "object"
+   },
+   "PipelineServiceModel": {
+    "properties": {
+     "models": {},
+     "name": {},
+     "promoted": {},
+     "promotions": {}
     },
     "type": "object"
    },
@@ -12854,6 +12857,82 @@
     }
    ]
   },
+  "/api/pipeline_service_models": {
+   "post": {
+    "operationId": "create_pipeline_service_models",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "pipeline_service_model": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "pipeline_service_model": {
+           "$ref": "#/components/schemas/PipelineServiceModel"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create pipeline_service_models",
+    "tags": [
+     "pipeline_service_models"
+    ]
+   }
+  },
+  "/api/pipeline_service_models/{id}": {
+   "get": {
+    "operationId": "detail_pipeline_service_models",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "pipeline_service_model": {
+           "$ref": "#/components/schemas/PipelineServiceModel"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail pipeline_service_models",
+    "tags": [
+     "pipeline_service_models"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
+  },
   "/api/pipeline_services": {
    "get": {
     "operationId": "list_pipeline_services",
@@ -20598,6 +20677,13 @@
    ],
    "schema": "PipelineServiceExport"
   },
+  "pipeline_service_models": {
+   "operations": [
+    "create",
+    "detail"
+   ],
+   "schema": "PipelineServiceModel"
+  },
   "pipeline_services": {
    "operations": [
     "list",
@@ -20976,6 +21062,7 @@
   "pipeline_execution_frameworks": "get /api/pipeline_execution_frameworks: error 404: Pipeline execution framework was not found.",
   "pipeline_interactions": "no list or detail reached",
   "pipeline_service_exports": "no list or detail reached",
+  "pipeline_service_models": "no list or detail reached",
   "pipeline_services": "no list or detail reached",
   "pipeline_triggers": "get /api/pipeline_triggers: error 400: Pipeline triggers belong to a pipeline: /api/pipelines/<uuid>/pipeline_triggers.",
   "pull_requests": "no list or detail reached",

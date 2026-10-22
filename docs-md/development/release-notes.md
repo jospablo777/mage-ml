@@ -66,6 +66,8 @@
 - Paging through a trigger's runs shows every run once: a date's retries were cut at the
   end of a page and the rest of them left out of the next, and a page past the last run
   failed.
+- The Services page promotes a model version: the version a moved alias names, or a
+  challenger's, with a reason, recorded in `promotions.yaml` with the signed-in user.
 - Exported services send alerts by email too: a channel `kind: email` whose variable holds
   the SMTP server's URL.
 - R blocks read and write Amazon Redshift (`database = "redshift"` in `read_sql`,

@@ -486,6 +486,12 @@ mage service promote scoring --model churn --version 7 --env prod
 - With `--env`, the service is built, tested and deployed as `mage service deploy` does,
   with its health check and rollback; the deployment records the promotion as its reason.
 
+The Services page does the same for a saved service that embeds registry models: under
+**Promote a model version** it shows each model's version in the image and in the registry
+now, with **Promote** for a moved alias and for each challenger, and the last promotions. A
+promotion from the page records the signed-in user. Build and ship the image afterwards to
+put the version in the service.
+
 ### Audit records
 
 With `audit` on a model, every input `predict` scores gets a record, written before
