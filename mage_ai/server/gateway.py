@@ -16,7 +16,7 @@ from mage_ai.pipeline_services.engine import engine_path
 READY_SECONDS = 15
 # The routes the gateway answers too, from the metadata database, and compares with the
 # server's answers (gateway_shadow.rs); MAGE_GATEWAY_SHADOW=off turns them off.
-SHADOW_ROUTES = 'block_runs,pipeline_run'
+SHADOW_ROUTES = 'block_runs,pipeline_run,pipeline_runs'
 
 
 def enabled() -> bool:
@@ -51,6 +51,8 @@ def shadow_settings() -> tuple:
     if routes.lower() in ('', 'off', '0', 'false') or not url:
         return [], {}
     from mage_ai.data_preparation.repo_manager import get_project_uuid
+    from mage_ai.settings.platform import project_platform_activated
+    from mage_ai.settings.repo import get_repo_path
     from mage_ai.settings import (
         OAUTH2_APPLICATION_CLIENT_ID,
         REQUIRE_USER_AUTHENTICATION,
@@ -69,6 +71,9 @@ def shadow_settings() -> tuple:
         MAGE_GATEWAY_REQUIRE_AUTHENTICATION='1' if REQUIRE_USER_AUTHENTICATION else '0',
         MAGE_GATEWAY_CLIENT_ID=OAUTH2_APPLICATION_CLIENT_ID,
         MAGE_GATEWAY_PROJECT_UUID=get_project_uuid() or '',
+        # The pipelines' names and tags; none on the project platform, whose runs the
+        # gateway leaves to the server.
+        **({} if project_platform_activated() else dict(MAGE_GATEWAY_REPO_PATH=get_repo_path())),
     )
 
 

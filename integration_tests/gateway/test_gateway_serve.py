@@ -1,5 +1,6 @@
 """
-MAGE_GATEWAY_SERVE: the gateway answers the block runs list and the run detail itself when
+MAGE_GATEWAY_SERVE: the gateway answers the block runs list, the run detail and the runs
+list itself when
 its own decision allows the read, with what the server answers, and leaves refusals to the
 server, which answers them as before.
 """
@@ -11,7 +12,7 @@ import requests
 
 from integration_tests.gateway.test_gateway import LOAD, run_server
 
-ROUTES = 'block_runs,pipeline_run'
+ROUTES = 'block_runs,pipeline_run,pipeline_runs'
 
 
 @pytest.fixture(scope='module')
@@ -62,7 +63,9 @@ def test_the_gateway_answers_as_the_server_and_leaves_refusals_to_it(served):
 
     before = served_count(gateway)
     for path in (f'block_runs?pipeline_uuid={uuid}', 'block_runs?_limit=5',
-                 f"pipeline_runs/{run['id']}"):
+                 f"pipeline_runs/{run['id']}",
+                 'pipeline_runs?disable_retries_grouping=true&include_pipeline_tags=true'
+                 '&include_pipeline_uuids=true&_limit=30'):
         through = owner.get(f'{api}/{path}', timeout=60)
         direct = owner.get(f'http://127.0.0.1:{server}/api/{path}', timeout=60)
         assert through.status_code == direct.status_code == 200
@@ -89,8 +92,8 @@ def test_served_reads_are_quicker_than_the_servers(served):
     gateway, server = served
     owner = sign_in(gateway)
 
-    def p95(port):
-        url = f'http://127.0.0.1:{port}/api/block_runs?_limit=20'
+    def p95(port, path='block_runs?_limit=20'):
+        url = f'http://127.0.0.1:{port}/api/{path}'
         for _ in range(10):
             owner.get(url, timeout=30)
         times = []
@@ -102,4 +105,9 @@ def test_served_reads_are_quicker_than_the_servers(served):
 
     direct, through = p95(server), p95(gateway)
     print(f'block runs list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
+    assert through < direct, (through, direct)
+    page = 'pipeline_runs?disable_retries_grouping=true&include_pipeline_tags=true' \
+        '&include_pipeline_uuids=true&_limit=30'
+    direct, through = p95(server, page), p95(gateway, page)
+    print(f'runs page list p95: server {direct:.1f} ms, gateway {through:.1f} ms')
     assert through < direct, (through, direct)

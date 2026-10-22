@@ -377,3 +377,47 @@ def test_the_gateway_decides_who_reads_as_the_server_does(ports, signed_in):
         time.sleep(0.2)
     assert added == dict(decisions_agree=len(asked), decisions_disagree=0, decisions_failed=0), \
         json.dumps(report['recent_differences'], indent=1)
+
+
+def test_run_lists_read_from_the_database_equal_the_servers(ports, signed_in):
+    """GET /api/pipeline_runs as the runs pages ask for it, after the runs made above."""
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    runs = signed_in.get(f'{base}/pipeline_runs?_limit=100', timeout=60).json()['pipeline_runs']
+    assert len(runs) >= 4
+    tagged = runs[0]['pipeline_uuid']
+    signed_in.put(f'{base}/pipelines/{tagged}', json=dict(pipeline=dict(
+        tags=['nightly', 'finance'],
+    )), timeout=60).raise_for_status()
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('pipeline_runs', {})
+        return {k: found.get(k, 0) for k in COUNTS + ('unsupported',)}, report
+
+    queries = [
+        '', '_limit=2', '_limit=2&_offset=2',
+        # The runs page.
+        'disable_retries_grouping=true&include_pipeline_tags=true&include_pipeline_uuids=true'
+        '&_limit=30&_offset=0',
+        f'pipeline_uuid={tagged}&disable_retries_grouping=true&include_pipeline_tags=true',
+        'status=completed', 'status[]=completed,failed', 'order_by[]=id%20asc',
+    ]
+    before = settled(counts)
+    for query in queries + ['pipeline_type=python']:
+        assert signed_in.get(f'{base}/pipeline_runs?{query}', timeout=60).status_code == 200
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) + 1 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == 0
+    # A filter the gateway does not read yet is counted, not compared.
+    assert added['unsupported'] == 1
+    page = signed_in.get(f'{base}/pipeline_runs?pipeline_uuid={tagged}'
+                         '&disable_retries_grouping=1&include_pipeline_tags=1', timeout=60).json()
+    assert page['pipeline_runs'][0]['pipeline_tags'] == ['nightly', 'finance']

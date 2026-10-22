@@ -27,8 +27,8 @@ process exits.
 
 ## Shadow reads
 
-For the routes in `MAGE_GATEWAY_SHADOW` (default `block_runs,pipeline_run`; `off` turns
-them off), the
+For the routes in `MAGE_GATEWAY_SHADOW` (default `block_runs,pipeline_run,pipeline_runs`;
+`off` turns them off), the
 gateway still serves the server's answer, then computes its own from the metadata
 database (SQLite, or PostgreSQL in UTC) and compares the two as JSON. The server's answer
 for these routes is read whole before it is sent, and asked for uncompressed.
@@ -43,6 +43,7 @@ differ; each difference is also logged. The database URL reaches the gateway in 
 | --- | --- | --- |
 | `GET /api/block_runs` | One query over block runs, runs and triggers, with `pipeline_run_id`, `pipeline_uuid`, `order_by`, `_limit`, `_offset` | The default order (started, created, completed, newest first), `metadata.count` and `next`, ISO times without a zero fraction, statuses stored by name and shown by value |
 | `GET /api/pipeline_runs/<id>` | The run's presenter attributes and every column of its block runs, with the trigger's id and name | `str(datetime)` times (a space, `+00:00` on PostgreSQL), JSON columns, the block runs sorted by creation, the `metadata: null` envelope |
+| `GET /api/pipeline_runs` | The runs pages' queries: filters by pipeline, status, backfill and the project's triggers, an order, pages, the pipelines' tags (from each `metadata.yaml`, kept until the file changes) and names. Retries grouping, tag and type filters, time ranges and `last_run_failed` are counted as `unsupported` and left to the server | Every LIST item's keys, `pipeline_tags` and `pipeline_type` null unless asked for, the block runs and their counts, the trigger's name, token and type, `metadata.pipeline_uuids` in directory order |
 
 The gateway also decides, for each shadowed read, whether it would serve it, and compares
 that with the server's answer (a refusal is a 200 with an error whose code is 401 or 403;
@@ -78,7 +79,8 @@ with the gateway and checks:
 | `/api/status`, 300 requests on one connection | Under 1 ms added at p95 on a debug build of the engine; the budget is 2 ms |
 | `GET /api/block_runs` for ten combinations of filters, order and pages over eight block runs | All ten shadow reads equal; a status written as stored instead of shown makes the test fail |
 | `GET /api/pipeline_runs/<id>` for four runs while the scheduler runs them | All equal, some after a reread |
-| `MAGE_GATEWAY_SERVE=block_runs,pipeline_run`: both routes through the gateway and from the server | The same answers; a caller without a session refused by the server; the block runs list's p95 6.8 ms from the server, 3.3 ms from the gateway (debug build) |
+| `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs`: the routes through the gateway and from the server | The same answers; a caller without a session refused by the server. p95 on a debug build of the engine: the block runs list 7 to 13 ms from the server, 1 to 1.5 ms from the gateway; the runs page's list 7 to 8 ms from the server, 1.6 to 2 ms from the gateway |
+| The runs list shadowed for eight query shapes, one pipeline tagged | All equal; a type filter counted as unsupported |
 | Who may read `GET /api/block_runs`: the owner, a caller without a session, a project viewer kept out of one pipeline by a permission | Four decisions, all as the server's; ignoring a permission of no access makes the test fail |
 | The Playwright end-to-end suite against `mage start` with the gateway | 38 passed, 4 skipped, as without it: the editor runs blocks through kernel WebSockets, the terminal works, logs and outputs load |
 

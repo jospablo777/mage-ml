@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value, json};
 
 const RECENT_DIFFERENCES: usize = 20;
-const ROUTES: &[&str] = &["block_runs", "pipeline_run"];
+const ROUTES: &[&str] = &["block_runs", "pipeline_run", "pipeline_runs"];
 /// DatabaseResource.DEFAULT_LIMIT.
 const DEFAULT_LIMIT: i64 = 40;
 
@@ -104,6 +104,8 @@ struct Counts {
     decisions_failed: u64,
     /// Answered by the gateway itself (--serve).
     served: u64,
+    /// Queries the gateway does not answer yet (pipeline_runs_unsupported).
+    unsupported: u64,
 }
 
 /// The server's answer read again, for the same request; None when it did not answer 200.
@@ -121,6 +123,8 @@ pub struct Shadow {
     auth: Option<crate::gateway_auth::AuthSettings>,
     /// Routes the gateway answers itself when its decision allows the read (--serve).
     serve: Vec<String>,
+    /// The project's folder (MAGE_GATEWAY_REPO_PATH), for the pipelines' names and tags.
+    repo_path: Option<PathBuf>,
     counts: Mutex<BTreeMap<String, Counts>>,
     differences: Mutex<VecDeque<Value>>,
 }
@@ -164,6 +168,9 @@ impl Shadow {
             routes,
             auth,
             serve,
+            repo_path: std::env::var("MAGE_GATEWAY_REPO_PATH")
+                .ok()
+                .map(PathBuf::from),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
         })
@@ -178,6 +185,9 @@ impl Shadow {
         let path = path.trim_end_matches('/');
         if path == "/api/block_runs" && enabled("block_runs") {
             return Some("block_runs");
+        }
+        if path == "/api/pipeline_runs" && enabled("pipeline_runs") {
+            return Some("pipeline_runs");
         }
         let run = path.strip_prefix("/api/pipeline_runs/")?;
         (enabled("pipeline_run") && !run.is_empty() && run.bytes().all(|b| b.is_ascii_digit()))
@@ -232,6 +242,14 @@ impl Shadow {
                     );
                 }
             }
+        }
+        if route == "pipeline_runs"
+            && error_code.is_none()
+            && pipeline_runs_unsupported(query, self.repo_path.as_deref()).is_some()
+        {
+            let mut counts = self.counts.lock().unwrap_or_else(|p| p.into_inner());
+            counts.entry(route.to_string()).or_default().unsupported += 1;
+            return;
         }
         if error_code.is_some() {
             if refused {
@@ -297,6 +315,11 @@ impl Shadow {
         if !self.serve.iter().any(|r| r == route) {
             return None;
         }
+        if route == "pipeline_runs"
+            && pipeline_runs_unsupported(query, self.repo_path.as_deref()).is_some()
+        {
+            return None;
+        }
         match self.decide(settings, route, path, query, headers).await {
             Ok(Some(true)) => {}
             _ => return None,
@@ -327,7 +350,7 @@ impl Shadow {
             Caller::User(user) => user,
         };
         let pipeline = match route {
-            "block_runs" => query.get("pipeline_uuid").map(str::to_string),
+            "block_runs" | "pipeline_runs" => query.get("pipeline_uuid").map(str::to_string),
             "pipeline_run" => {
                 let id = path
                     .trim_end_matches('/')
@@ -390,6 +413,10 @@ impl Shadow {
     async fn answer(&self, route: &str, path: &str, query: &str) -> Result<Value, String> {
         match route {
             "block_runs" => block_runs(&self.metadata, &Query::parse(query)).await,
+            "pipeline_runs" => {
+                let repo = self.repo_path.as_deref().ok_or("no repository path")?;
+                pipeline_runs(&self.metadata, repo, &Query::parse(query)).await
+            }
             "pipeline_run" => {
                 let id = path
                     .trim_end_matches('/')
@@ -663,12 +690,8 @@ fn sqlite_block_runs(
     rows_sql: &str,
     params: &[Param],
 ) -> Result<(i64, Vec<Value>), String> {
-    use rusqlite::{OpenFlags, ToSql, types::ToSqlOutput};
-    let connection = rusqlite::Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    use rusqlite::{ToSql, types::ToSqlOutput};
+    let connection = pooled(path)?;
     let values: Vec<ToSqlOutput> = params
         .iter()
         .map(|p| match p {
@@ -967,12 +990,7 @@ fn sqlite_run(
     blocks_sql: &str,
     schedule_sql: &str,
 ) -> Result<RunRows, String> {
-    use rusqlite::OpenFlags;
-    let connection = rusqlite::Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    let connection = pooled(path)?;
     let read = |row: &rusqlite::Row<'_>, n: usize| -> rusqlite::Result<Vec<Raw>> {
         (0..n).map(|i| row.get_ref(i).map(sqlite_raw)).collect()
     };
@@ -1071,6 +1089,57 @@ async fn postgres_run(
     Ok((run, blocks, schedule))
 }
 
+/// Read-only SQLite connections kept per database: each read opened one, and a runs list
+/// made seven reads.
+static SQLITE_POOL: std::sync::LazyLock<Mutex<BTreeMap<PathBuf, Vec<rusqlite::Connection>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+const SQLITE_POOL_SIZE: usize = 8;
+
+struct Pooled {
+    path: PathBuf,
+    connection: Option<rusqlite::Connection>,
+}
+
+impl std::ops::Deref for Pooled {
+    type Target = rusqlite::Connection;
+
+    fn deref(&self) -> &rusqlite::Connection {
+        self.connection.as_ref().expect("a pooled connection")
+    }
+}
+
+impl Drop for Pooled {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            let mut pool = SQLITE_POOL.lock().unwrap_or_else(|p| p.into_inner());
+            let kept = pool.entry(self.path.clone()).or_default();
+            if kept.len() < SQLITE_POOL_SIZE {
+                kept.push(connection);
+            }
+        }
+    }
+}
+
+fn pooled(path: &std::path::Path) -> Result<Pooled, String> {
+    let kept = SQLITE_POOL
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(path)
+        .and_then(Vec::pop);
+    let connection = match kept {
+        Some(connection) => connection,
+        None => rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("{}: {e}", path.display()))?,
+    };
+    Ok(Pooled {
+        path: path.to_path_buf(),
+        connection: Some(connection),
+    })
+}
+
 /// Rows of a query whose parameters are written `{1}`, `{2}`: `?1` on SQLite, `$1` on
 /// PostgreSQL. Values read by their column's type (gateway_auth.rs).
 pub(crate) async fn read_rows(
@@ -1086,12 +1155,8 @@ pub(crate) async fn read_rows(
         Metadata::Sqlite(path) => {
             let (path, params) = (path.clone(), params.to_vec());
             tokio::task::spawn_blocking(move || -> Result<Vec<Vec<Raw>>, String> {
-                use rusqlite::{OpenFlags, ToSql, types::ToSqlOutput};
-                let connection = rusqlite::Connection::open_with_flags(
-                    &path,
-                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                )
-                .map_err(|e| format!("{}: {e}", path.display()))?;
+                use rusqlite::{ToSql, types::ToSqlOutput};
+                let connection = pooled(&path)?;
                 let values: Vec<ToSqlOutput> = params
                     .iter()
                     .map(|p| match p {
@@ -1173,6 +1238,309 @@ pub(crate) async fn read_rows(
     }
 }
 
+/// Why the gateway does not answer a GET /api/pipeline_runs query yet; None when it does.
+/// It answers the runs pages' queries: filters by pipeline, status, backfill and trigger
+/// scope, an order, pages, tags and the pipelines' names.
+pub(crate) fn pipeline_runs_unsupported(
+    query: &str,
+    repo_path: Option<&std::path::Path>,
+) -> Option<&'static str> {
+    let query = Query::parse(query);
+    if repo_path.is_none() {
+        return Some("no repository path (or the project platform)");
+    }
+    for key in [
+        "pipeline_tag[]",
+        "pipeline_type",
+        "global_data_product_uuid",
+        "start_timestamp",
+        "end_timestamp",
+        "include_pipeline_type",
+    ] {
+        if query.get(key).is_some() {
+            return Some("a filter the gateway does not read");
+        }
+    }
+    if query.get("status") == Some("last_run_failed") {
+        return Some("last_run_failed");
+    }
+    // PipelineRunResource groups a pipeline's retries unless told not to.
+    if query.get("pipeline_uuid").is_some() && query.get("disable_retries_grouping").is_none() {
+        return Some("grouped retries");
+    }
+    if query.get("_limit") == Some("0") {
+        return Some("_limit=0");
+    }
+    None
+}
+
+/// GET /api/pipeline_runs as PipelineRunResource and its LIST presenter answer it.
+async fn pipeline_runs(
+    metadata: &Metadata,
+    repo_path: &std::path::Path,
+    query: &Query,
+) -> Result<Value, String> {
+    let limit = match query.get("_limit") {
+        Some(text) => text.parse::<i64>().map_err(|_| format!("_limit {text}"))?,
+        None => DEFAULT_LIMIT,
+    };
+    let offset = match query.get("_offset") {
+        Some(text) => text.parse::<i64>().map_err(|_| format!("_offset {text}"))?,
+        None => 0,
+    };
+    let mut filters = vec!["s.global_data_product_uuid IS NULL".to_string()];
+    let mut params: Vec<Raw> = Vec::new();
+    let param = |raw: Raw, params: &mut Vec<Raw>| {
+        params.push(raw);
+        format!("{{{}}}", params.len())
+    };
+    if query.get("include_all_pipeline_schedules").is_none() {
+        let p = param(Raw::Text(repo_path.display().to_string()), &mut params);
+        filters.push(format!("(s.repo_path = {p} OR s.repo_path IS NULL)"));
+    }
+    if let Some(backfill) = query.get("backfill_id") {
+        let id = backfill
+            .parse::<i64>()
+            .map_err(|_| format!("backfill_id {backfill}"))?;
+        let p = param(Raw::Int(id), &mut params);
+        filters.push(format!("r.backfill_id = {p}"));
+    }
+    if let Some(pipeline) = query.get("pipeline_uuid") {
+        let p = param(Raw::Text(pipeline.to_string()), &mut params);
+        filters.push(format!("r.pipeline_uuid = {p}"));
+    }
+    let list = |text: &str| text.split(',').map(str::to_string).collect::<Vec<_>>();
+    if let Some(uuids) = query.get("pipeline_uuid[]") {
+        let ps: Vec<String> = list(uuids)
+            .into_iter()
+            .map(|u| param(Raw::Text(u), &mut params))
+            .collect();
+        filters.push(format!("r.pipeline_uuid IN ({})", ps.join(", ")));
+    }
+    // Statuses are stored by member name.
+    let status_text = match metadata {
+        Metadata::Postgres(_) => "CAST(r.status AS TEXT)",
+        Metadata::Sqlite(_) => "r.status",
+    };
+    if let Some(status) = query.get("status") {
+        let p = param(Raw::Text(status.to_uppercase()), &mut params);
+        filters.push(format!("{status_text} = {p}"));
+    }
+    if let Some(statuses) = query.get("status[]") {
+        let ps: Vec<String> = list(statuses)
+            .into_iter()
+            .map(|s| param(Raw::Text(s.to_uppercase()), &mut params))
+            .collect();
+        filters.push(format!("{status_text} IN ({})", ps.join(", ")));
+    }
+    let order = match query.get("order_by[]") {
+        Some(order_by) => {
+            let mut parts = Vec::new();
+            for term in order_by.split(',') {
+                let mut words = term.trim().split(' ');
+                let column = words.next().unwrap_or_default();
+                let direction = words.next().unwrap_or("asc").to_lowercase();
+                if !RUN_FIELDS.iter().any(|(name, _)| *name == column)
+                    || !matches!(direction.as_str(), "asc" | "desc")
+                {
+                    return Err(format!("order_by[] {order_by}"));
+                }
+                parts.push(format!("r.{column} {}", direction.to_uppercase()));
+            }
+            parts.join(", ")
+        }
+        None => "r.execution_date DESC, r.id DESC".to_string(),
+    };
+    let from = format!(
+        "FROM pipeline_run r JOIN pipeline_schedule s ON r.pipeline_schedule_id = s.id WHERE {}",
+        filters.join(" AND ")
+    );
+    let columns: Vec<String> = RUN_FIELDS
+        .iter()
+        .map(|(name, kind)| match (metadata, kind) {
+            (Metadata::Postgres(_), Kind::Enum | Kind::Json) => format!("CAST(r.{name} AS TEXT)"),
+            _ => format!("r.{name}"),
+        })
+        .collect();
+    let schedule_type = match metadata {
+        Metadata::Postgres(_) => "CAST(s.schedule_type AS TEXT)",
+        Metadata::Sqlite(_) => "s.schedule_type",
+    };
+    let count = read_rows(metadata, &format!("SELECT count(*) {from}"), &params).await?;
+    let count = match count.first().and_then(|r| r.first()) {
+        Some(Raw::Int(n)) => *n,
+        _ => 0,
+    };
+    let rows = read_rows(
+        metadata,
+        &format!(
+            "SELECT {}, s.name, s.token, {schedule_type}, s.repo_path {from} ORDER BY {order} \
+             LIMIT {} OFFSET {}",
+            columns.join(", "),
+            limit + 1,
+            offset
+        ),
+        &params,
+    )
+    .await?;
+    let has_next = rows.len() as i64 > limit;
+    let rows: Vec<Vec<Raw>> = rows.into_iter().take(limit.max(0) as usize).collect();
+
+    let ids: Vec<i64> = rows
+        .iter()
+        .filter_map(|r| match r[6] {
+            Raw::Int(id) => Some(id),
+            _ => None,
+        })
+        .collect();
+    let mut blocks_by_run: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
+    if !ids.is_empty() {
+        let block_columns: Vec<String> = BLOCK_RUN_FIELDS
+            .iter()
+            .map(|(name, kind)| match (metadata, kind) {
+                (Metadata::Postgres(_), Kind::Enum | Kind::Json) => format!("CAST({name} AS TEXT)"),
+                _ => name.to_string(),
+            })
+            .collect();
+        let placeholders: Vec<String> = (1..=ids.len()).map(|n| format!("{{{n}}}")).collect();
+        let blocks = read_rows(
+            metadata,
+            &format!(
+                "SELECT {} FROM block_run WHERE pipeline_run_id IN ({}) ORDER BY id",
+                block_columns.join(", "),
+                placeholders.join(", ")
+            ),
+            &ids.iter().map(|id| Raw::Int(*id)).collect::<Vec<_>>(),
+        )
+        .await?;
+        for raws in blocks {
+            let run = match raws[3] {
+                Raw::Int(run) => run,
+                _ => continue,
+            };
+            blocks_by_run
+                .entry(run)
+                .or_default()
+                .push(Value::Object(object(BLOCK_RUN_FIELDS, raws)?));
+        }
+    }
+
+    let tags = query.get("include_pipeline_tags").is_some();
+    let mut runs = Vec::new();
+    for mut raws in rows {
+        let extra = raws.split_off(RUN_FIELDS.len());
+        let mut run = object(RUN_FIELDS, raws)?;
+        let id = run["id"].as_i64().unwrap_or_default();
+        let blocks = blocks_by_run.remove(&id).unwrap_or_default();
+        let completed = blocks.iter().filter(|b| b["status"] == "completed").count();
+        run.insert("block_runs_count".into(), Value::from(blocks.len()));
+        run.insert("completed_block_runs_count".into(), Value::from(completed));
+        run.insert("block_runs".into(), Value::Array(blocks));
+        let text = |raw: &Raw| match raw {
+            Raw::Text(v) => Value::String(v.clone()),
+            _ => Value::Null,
+        };
+        run.insert("pipeline_schedule_name".into(), text(&extra[0]));
+        run.insert("pipeline_schedule_token".into(), text(&extra[1]));
+        run.insert(
+            "pipeline_schedule_type".into(),
+            match &extra[2] {
+                Raw::Text(v) => Value::String(v.to_lowercase()),
+                _ => Value::Null,
+            },
+        );
+        run.insert("repo_path".into(), text(&extra[3]));
+        // Both keys are in every item of the LIST format; null unless asked for.
+        let tag_value = if tags {
+            let uuid = run["pipeline_uuid"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            pipeline_tags(repo_path, &uuid)
+        } else {
+            Value::Null
+        };
+        run.insert("pipeline_tags".into(), tag_value);
+        run.insert("pipeline_type".into(), Value::Null);
+        runs.push(Value::Object(run));
+    }
+    let mut meta = Map::new();
+    meta.insert("count".into(), Value::from(count));
+    meta.insert("next".into(), Value::Bool(has_next));
+    if query.get("include_pipeline_uuids").is_some() {
+        meta.insert(
+            "pipeline_uuids".into(),
+            Value::Array(pipeline_names(repo_path)),
+        );
+    }
+    Ok(json!({ "pipeline_runs": runs, "metadata": meta }))
+}
+
+/// Pipeline.get_all_pipelines: the folders of pipelines/ that hold a metadata.yaml, in the
+/// order the directory lists them.
+fn pipeline_names(repo_path: &std::path::Path) -> Vec<Value> {
+    std::fs::read_dir(repo_path.join("pipelines"))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|e| e.path().join("metadata.yaml").is_file())
+                .map(|e| Value::String(e.file_name().to_string_lossy().into_owned()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// PipelineRun.pipeline_tags: the tags of the pipeline's metadata.yaml, or null without
+/// them (or without the file).
+fn pipeline_tags(repo_path: &std::path::Path, uuid: &str) -> Value {
+    // Read again only when the file changed: a runs page lists thirty runs a few times a
+    // minute, mostly of the same pipelines.
+    static TAGS: std::sync::LazyLock<Mutex<BTreeMap<PathBuf, (std::time::SystemTime, Value)>>> =
+        std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+    let path = repo_path.join("pipelines").join(uuid).join("metadata.yaml");
+    let Ok(modified) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
+        return Value::Null;
+    };
+    if let Some((at, tags)) = TAGS.lock().unwrap_or_else(|p| p.into_inner()).get(&path)
+        && *at == modified
+    {
+        return tags.clone();
+    }
+    let tags = read_pipeline_tags(&path);
+    TAGS.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(path, (modified, tags.clone()));
+    tags
+}
+
+fn read_pipeline_tags(path: &std::path::Path) -> Value {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Value::Null;
+    };
+    let Ok(documents) = yaml_rust2::YamlLoader::load_from_str(&text) else {
+        return Value::Null;
+    };
+    match documents.first().map(|doc| &doc["tags"]) {
+        Some(yaml_rust2::Yaml::Array(items)) => {
+            Value::Array(items.iter().map(yaml_value).collect())
+        }
+        Some(yaml_rust2::Yaml::BadValue) | None | Some(yaml_rust2::Yaml::Null) => Value::Null,
+        Some(other) => yaml_value(other),
+    }
+}
+
+fn yaml_value(yaml: &yaml_rust2::Yaml) -> Value {
+    use yaml_rust2::Yaml;
+    match yaml {
+        Yaml::String(s) => Value::String(s.clone()),
+        Yaml::Integer(i) => Value::from(*i),
+        Yaml::Real(r) => r.parse::<f64>().map(Value::from).unwrap_or(Value::Null),
+        Yaml::Boolean(b) => Value::Bool(*b),
+        Yaml::Array(items) => Value::Array(items.iter().map(yaml_value).collect()),
+        _ => Value::Null,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1246,6 +1614,49 @@ mod tests {
             shadow.route_for(&hyper::Method::PUT, "/api/pipeline_runs/12"),
             None
         );
+    }
+
+    #[test]
+    fn run_lists_answer_the_runs_pages_queries_only() {
+        let repo = std::path::Path::new("/project");
+        let page = "disable_retries_grouping=true&include_pipeline_tags=true&_limit=30";
+        assert_eq!(pipeline_runs_unsupported(page, Some(repo)), None);
+        assert_eq!(
+            pipeline_runs_unsupported("status=completed", Some(repo)),
+            None
+        );
+        assert!(pipeline_runs_unsupported(page, None).is_some());
+        assert!(pipeline_runs_unsupported("pipeline_tag[]=a", Some(repo)).is_some());
+        assert!(pipeline_runs_unsupported("status=last_run_failed", Some(repo)).is_some());
+        // One pipeline's runs come with their retries grouped unless told not to.
+        assert!(pipeline_runs_unsupported("pipeline_uuid=p", Some(repo)).is_some());
+        assert_eq!(
+            pipeline_runs_unsupported("pipeline_uuid=p&disable_retries_grouping=1", Some(repo)),
+            None
+        );
+    }
+
+    #[test]
+    fn pipeline_tags_come_from_metadata_yaml() {
+        let folder = tempfile::tempdir().unwrap();
+        let write = |uuid: &str, text: &str| {
+            let dir = folder.path().join("pipelines").join(uuid);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("metadata.yaml"), text).unwrap();
+        };
+        write("block", "name: a\ntags:\n- nightly\n- finance\n");
+        write("inline", "tags: [one, 2]\n");
+        write("none", "name: c\n");
+        assert_eq!(
+            pipeline_tags(folder.path(), "block"),
+            json!(["nightly", "finance"])
+        );
+        assert_eq!(pipeline_tags(folder.path(), "inline"), json!(["one", 2]));
+        assert_eq!(pipeline_tags(folder.path(), "none"), Value::Null);
+        assert_eq!(pipeline_tags(folder.path(), "missing"), Value::Null);
+        let mut names: Vec<Value> = pipeline_names(folder.path());
+        names.sort_by_key(|v| v.as_str().unwrap_or_default().to_string());
+        assert_eq!(names, vec![json!("block"), json!("inline"), json!("none")]);
     }
 
     #[test]
