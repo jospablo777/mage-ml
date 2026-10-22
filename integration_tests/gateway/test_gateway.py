@@ -611,3 +611,70 @@ def test_logs_read_from_disk_equal_the_servers(ports, signed_in):
     assert added['unsupported'] == 1
     found = call('GET', f'pipelines/{uuid}/logs?text=gateway-needle')['logs'][0]
     assert any('editor gateway-needle' in i['content'] for i in found['block_run_logs'])
+
+
+def test_runs_grouped_with_their_retries_equal_the_servers(ports, signed_in):
+    """
+    A trigger's runs page (GET /api/pipeline_schedules/<id>/pipeline_runs) and a pipeline's
+    runs without disable_retries_grouping: each date's runs come together, pages that start
+    inside a date leave it to the page before, and one past the last run is empty.
+    """
+    import sqlite3
+
+    gateway, _ = ports
+    base = f'http://127.0.0.1:{gateway}/api'
+    uuid = signed_in.post(f'{base}/pipelines', json=dict(pipeline=dict(
+        name='gateway retries', type='python',
+    )), timeout=60).json()['pipeline']['uuid']
+    schedule = signed_in.post(f'{base}/pipelines/{uuid}/pipeline_schedules', json=dict(
+        pipeline_schedule=dict(name='retries trigger', schedule_type='api', status='inactive'),
+    ), timeout=60).json()['pipeline_schedule']
+    [database] = list(DATA.parent.glob('*.db')) or list(DATA.rglob('mage-ai.db'))
+    with sqlite3.connect(database) as connection:
+        # Four dates: one run, a run and two retries, a run and a retry, one run.
+        for hour, runs in ((1, 1), (2, 3), (3, 2), (4, 1)):
+            for attempt in range(runs):
+                connection.execute(
+                    'INSERT INTO pipeline_run (pipeline_schedule_id, pipeline_uuid, '
+                    "execution_date, status, variables, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, '{}', ?, ?)",
+                    (schedule['id'], uuid, f'2026-01-01 0{hour}:00:00.000000',
+                     'FAILED' if attempt < runs - 1 else 'COMPLETED',
+                     f'2026-01-01 0{hour}:0{attempt}:00.000000',
+                     f'2026-01-01 0{hour}:0{attempt}:00.000000'),
+                )
+
+    def counts():
+        report = requests.get(f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10).json()
+        found = report['routes'].get('pipeline_runs', {})
+        return {k: found.get(k, 0) for k in COUNTS + ('unsupported',)}, report
+
+    trigger = f"pipeline_schedules/{schedule['id']}/pipeline_runs"
+    queries = [
+        f'{trigger}?_limit=30&_offset=0', f'{trigger}?_limit=2&_offset=0',
+        f'{trigger}?_limit=2&_offset=2', f'{trigger}?_limit=2&_offset=4',
+        f'{trigger}?_limit=3&_offset=3', f'{trigger}?_limit=2&_offset=50',
+        f'{trigger}?_limit=30&status=completed',
+        f'pipeline_runs?pipeline_uuid={uuid}&_limit=2&_offset=1',
+    ]
+    before = settled(counts)
+    for query in queries:
+        response = signed_in.get(f'{base}/{query}', timeout=60).json()
+        assert 'error' not in response, (query, response)
+    deadline = time.monotonic() + 30
+    while True:
+        after, report = counts()
+        added = {k: after[k] - before[k] for k in after}
+        if sum(added.values()) >= len(queries) or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert added['equal'] + added['equal_after_reread'] == len(queries), \
+        json.dumps(report['recent_differences'], indent=1)
+    assert added['different'] == added['failed'] == added['unsupported'] == 0
+    # Every run is on one page.
+    shown = []
+    for offset in range(0, 10, 2):
+        shown += signed_in.get(f'{base}/{trigger}?_limit=2&_offset={offset}',
+                               timeout=60).json()['pipeline_runs']
+    assert sorted(r['id'] for r in shown) == sorted(set(r['id'] for r in shown))
+    assert len(shown) == 7, [r['execution_date'] for r in shown]

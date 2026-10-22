@@ -63,6 +63,9 @@
   keep their order between polls.
 - Exported weekly triggers run on Monday, as in MageML; they ran on Sunday. The export
   report names triggers whose landing time the service does not keep.
+- Paging through a trigger's runs shows every run once: a date's retries were cut at the
+  end of a page and the rest of them left out of the next, and a page past the last run
+  failed.
 - A trigger's next run date is the one the scheduler keeps: a landing time still ahead
   today is the next one, a monthly landing time keeps its day, and a start time ahead is
   respected. The triggers list keeps its order across pages, sorts each trigger's tags, lets

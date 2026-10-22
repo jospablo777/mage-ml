@@ -204,7 +204,9 @@ impl Shadow {
         if path == "/api/block_runs" && enabled("block_runs") {
             return Some("block_runs");
         }
-        if path == "/api/pipeline_runs" && enabled("pipeline_runs") {
+        if (path == "/api/pipeline_runs" || schedule_runs(path).is_some())
+            && enabled("pipeline_runs")
+        {
             return Some("pipeline_runs");
         }
         if enabled("logs") && pipeline_child(path, "logs").is_some() {
@@ -521,7 +523,23 @@ impl Shadow {
             "block_runs" => block_runs(&self.metadata, &Query::parse(query)).await,
             "pipeline_runs" => {
                 let repo = self.repo_path.as_deref().ok_or("no repository path")?;
-                pipeline_runs(&self.metadata, repo, &Query::parse(query)).await
+                let schedule = schedule_runs(path);
+                if let Some(id) = schedule {
+                    let found = read_rows(
+                        &self.metadata,
+                        "SELECT id FROM pipeline_schedule WHERE id = {1}",
+                        &[Raw::Int(id)],
+                    )
+                    .await?;
+                    if found.is_empty() {
+                        // The server answers a trigger that does not exist with an error.
+                        return Err(format!(
+                            "{}no trigger {id}",
+                            crate::gateway_schedules::UNSUPPORTED
+                        ));
+                    }
+                }
+                pipeline_runs(&self.metadata, repo, &Query::parse(query), schedule).await
             }
             "pipeline_run" => {
                 let id = path
@@ -671,6 +689,17 @@ fn route_names(route: &str) -> &'static [&'static str] {
         ],
         _ => &[],
     }
+}
+
+/// The trigger of /api/pipeline_schedules/<id>/pipeline_runs, the trigger page's runs.
+fn schedule_runs(path: &str) -> Option<i64> {
+    let id = path
+        .trim_end_matches('/')
+        .strip_prefix("/api/pipeline_schedules/")?
+        .strip_suffix("/pipeline_runs")?;
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| id.parse().ok())
+        .flatten()
 }
 
 /// The pipeline of /api/pipelines/<uuid>/<child>.
@@ -1064,6 +1093,20 @@ const RUN_FIELDS: &[(&str, Kind)] = &[
 ];
 /// Where pipeline_schedule_id is in RUN_FIELDS.
 const RUN_SCHEDULE: usize = 9;
+const RUN_EXECUTION_DATE: usize = 4;
+const RUN_ID: usize = 6;
+
+/// Two values read from the database, equal as Python compares them.
+fn same_raw(a: &Raw, b: &Raw) -> bool {
+    match (a, b) {
+        (Raw::Null, Raw::Null) => true,
+        (Raw::Int(a), Raw::Int(b)) => a == b,
+        (Raw::Text(a), Raw::Text(b)) => a == b,
+        (Raw::Bool(a), Raw::Bool(b)) => a == b,
+        (Raw::Time(a), Raw::Time(b)) => a == b,
+        _ => false,
+    }
+}
 
 /// Every column of block_run, as BaseModel.to_dict gives them.
 const BLOCK_RUN_FIELDS: &[(&str, Kind)] = &[
@@ -1507,9 +1550,9 @@ pub(crate) fn pipeline_runs_unsupported(
     if query.get("status") == Some("last_run_failed") {
         return Some("last_run_failed");
     }
-    // PipelineRunResource groups a pipeline's retries unless told not to.
-    if query.get("pipeline_uuid").is_some() && query.get("disable_retries_grouping").is_none() {
-        return Some("grouped retries");
+    // `false` reads as False, which is not None: the retries are grouped, unfiltered.
+    if query.0.get("pipeline_uuid").is_some_and(|v| v == "false") {
+        return Some("pipeline_uuid=false");
     }
     if query.get("_limit") == Some("0") {
         return Some("_limit=0");
@@ -1522,6 +1565,7 @@ async fn pipeline_runs(
     metadata: &Metadata,
     repo_path: &std::path::Path,
     query: &Query,
+    schedule: Option<i64>,
 ) -> Result<Value, String> {
     let limit = match query.get("_limit") {
         Some(text) => text.parse::<i64>().map_err(|_| format!("_limit {text}"))?,
@@ -1551,6 +1595,11 @@ async fn pipeline_runs(
     if let Some(pipeline) = query.get("pipeline_uuid") {
         let p = param(Raw::Text(pipeline.to_string()), &mut params);
         filters.push(format!("r.pipeline_uuid = {p}"));
+    }
+    // GET /api/pipeline_schedules/<id>/pipeline_runs.
+    if let Some(id) = schedule {
+        let p = param(Raw::Int(id), &mut params);
+        filters.push(format!("r.pipeline_schedule_id = {p}"));
     }
     let list = |text: &str| text.split(',').map(str::to_string).collect::<Vec<_>>();
     if let Some(uuids) = query.get("pipeline_uuid[]") {
@@ -1640,8 +1689,69 @@ async fn pipeline_runs(
         &params,
     )
     .await?;
+    // A run and its retries share an execution date, and a page shows them together
+    // unless told not to: a page that starts inside a date's runs leaves them to the
+    // page that starts them, and the date it ends on comes whole. The row past the page
+    // only says whether there is a next one.
+    let grouped = count >= 1
+        && !rows.is_empty()
+        && query.get("disable_retries_grouping").is_none()
+        && (query.get("pipeline_uuid").is_some() || schedule.is_some());
     let has_next = rows.len() as i64 > limit;
-    let rows: Vec<Vec<Raw>> = rows.into_iter().take(limit.max(0) as usize).collect();
+    let rows: Vec<Vec<Raw>> = if grouped {
+        let page: Vec<Vec<Raw>> = rows.into_iter().take(limit.max(0) as usize).collect();
+        let same_date = |date: &Raw, params: &mut Vec<Raw>| match date {
+            Raw::Null => "r.execution_date IS NULL".to_string(),
+            date => {
+                params.push(date.clone());
+                format!("r.execution_date = {{{}}}", params.len())
+            }
+        };
+        let first = &page[0];
+        let mut first_params = params.clone();
+        let condition = same_date(&first[RUN_EXECUTION_DATE], &mut first_params);
+        let first_of_date = read_rows(
+            metadata,
+            &format!("SELECT r.id {from} AND {condition} ORDER BY {order} LIMIT 1"),
+            &first_params,
+        )
+        .await?;
+        let mut left_out = Vec::new();
+        if !first_of_date
+            .first()
+            .is_some_and(|row| same_raw(&row[0], &first[RUN_ID]))
+        {
+            left_out.push(first[RUN_EXECUTION_DATE].clone());
+        }
+        let last = page[page.len() - 1][RUN_EXECUTION_DATE].clone();
+        let whole = if left_out.iter().any(|d| same_raw(d, &last)) {
+            Vec::new()
+        } else {
+            let mut last_params = params.clone();
+            let condition = same_date(&last, &mut last_params);
+            read_rows(
+                metadata,
+                &format!(
+                    "SELECT {}, s.name, s.token, {schedule_type}, s.repo_path {from} \
+                     AND {condition} ORDER BY {order}",
+                    columns.join(", ")
+                ),
+                &last_params,
+            )
+            .await?
+        };
+        left_out.push(last);
+        page.into_iter()
+            .filter(|row| {
+                !left_out
+                    .iter()
+                    .any(|d| same_raw(d, &row[RUN_EXECUTION_DATE]))
+            })
+            .chain(whole)
+            .collect()
+    } else {
+        rows.into_iter().take(limit.max(0) as usize).collect()
+    };
 
     let ids: Vec<i64> = rows
         .iter()
@@ -2020,8 +2130,20 @@ mod tests {
         let overview = "include_pipeline_type=1&start_timestamp=1&status=failed";
         assert_eq!(pipeline_runs_unsupported(overview, Some(repo)), None);
         assert!(pipeline_runs_unsupported("status=last_run_failed", Some(repo)).is_some());
-        // One pipeline's runs come with their retries grouped unless told not to.
-        assert!(pipeline_runs_unsupported("pipeline_uuid=p", Some(repo)).is_some());
+        // Retries are grouped now; pipeline_uuid=false groups them unfiltered.
+        assert_eq!(
+            pipeline_runs_unsupported("pipeline_uuid=p", Some(repo)),
+            None
+        );
+        assert!(pipeline_runs_unsupported("pipeline_uuid=false", Some(repo)).is_some());
+        assert_eq!(
+            schedule_runs("/api/pipeline_schedules/12/pipeline_runs"),
+            Some(12)
+        );
+        assert_eq!(
+            schedule_runs("/api/pipeline_schedules/x/pipeline_runs"),
+            None
+        );
         assert_eq!(
             pipeline_runs_unsupported("pipeline_uuid=p&disable_retries_grouping=1", Some(repo)),
             None

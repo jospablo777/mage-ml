@@ -261,6 +261,12 @@ class PipelineRunResource(DatabaseResource):
         if limit is not None and limit != 0 and total_count >= 1 and results and \
             not disable_retries_grouping and \
                 (pipeline_uuid is not None or pipeline_schedule_id is not None):
+            # The page's rows, without the one past it that tells whether there is a next
+            # page: grouping took that row in, then dropped the page's last row, so the
+            # last date's runs were cut and the next page, starting inside that date, left
+            # it out: some runs were on no page.
+            has_next = len(results) > limit
+            results = results[:limit]
 
             first_result = results[0]
             first_execution_date = first_result.execution_date
@@ -270,24 +276,26 @@ class PipelineRunResource(DatabaseResource):
             first_additional_results = additional_results.first()
             filter_dates = []
             if first_additional_results.id != first_result.id:
+                # The page before shows this date's runs whole.
                 filter_dates.append(first_execution_date)
 
-            last_result = results[-1]
-            last_execution_date = last_result.execution_date
-            additional_results = total_results.filter(
-                PipelineRun.execution_date == last_execution_date,
-            )
-            filter_dates.append(last_result.execution_date)
+            last_execution_date = results[-1].execution_date
+            last_date_runs = []
+            if last_execution_date not in filter_dates:
+                last_date_runs = total_results.filter(
+                    PipelineRun.execution_date == last_execution_date,
+                ).all()
             results = list(
                 filter(
-                    lambda x: x.execution_date not in filter_dates,
+                    lambda x: x.execution_date not in filter_dates + [last_execution_date],
                     results,
                 ),
-            ) + additional_results.all()
-
-        results_size = len(results)
-        has_next = results_size > limit
-        final_end_idx = results_size - 1 if has_next else results_size
+            ) + last_date_runs
+            final_end_idx = len(results)
+        else:
+            results_size = len(results)
+            has_next = results_size > limit
+            final_end_idx = results_size - 1 if has_next else results_size
 
         # Expire pipeline runs that are in progress so that the latest status is returned
         # the next time they are fetched.
