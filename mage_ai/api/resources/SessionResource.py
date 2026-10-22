@@ -4,7 +4,7 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.BaseResource import BaseResource
 from mage_ai.authentication.ldap import new_ldap_connection
 from mage_ai.authentication.oauth2 import encode_token, generate_access_token
-from mage_ai.authentication.passwords import verify_password
+from mage_ai.authentication.passwords import unmatchable_hash, verify_password
 from mage_ai.authentication.providers.constants import NAME_TO_PROVIDER
 from mage_ai.orchestration.db import safe_db_query, safe_db_query_async
 from mage_ai.orchestration.db.models.oauth import Role, User
@@ -125,7 +125,11 @@ class SessionResource(BaseResource):
             user = User.query.filter(User.email == email).first()
         elif username:
             user = User.query.filter(User.username == username).first()
-        if not user:
+        if not user or not user.password_hash:
+            # The same work as a wrong password: refused at once, an unknown email told
+            # that no account had it. A user without a password (LDAP, OAuth) failed with
+            # an exception on the missing hash.
+            await asyncio.to_thread(verify_password, password, unmatchable_hash())
             raise ApiError(error)
 
         # bcrypt takes most of a second by design; off the event loop, other requests go on.

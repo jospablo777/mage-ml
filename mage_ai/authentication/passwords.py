@@ -1,3 +1,6 @@
+import secrets
+import threading
+
 import bcrypt
 
 # bcrypt hashes the first 72 bytes. bcrypt 4 truncated longer input and bcrypt 5
@@ -25,3 +28,20 @@ def verify_password(password: str, hash_from_database: str) -> bool:
     does_match = bcrypt.checkpw(password_bytes, hash_bytes)
 
     return does_match
+
+
+_unmatchable = None
+_unmatchable_lock = threading.Lock()
+
+
+def unmatchable_hash() -> str:
+    """
+    A hash no password matches, made at the cost of real ones: checked when no user has the
+    email, a refusal takes as long as for a wrong password, so timing does not tell which
+    emails have accounts.
+    """
+    global _unmatchable
+    with _unmatchable_lock:
+        if _unmatchable is None:
+            _unmatchable = create_bcrypt_hash(secrets.token_hex(32), generate_salt())
+        return _unmatchable

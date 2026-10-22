@@ -41,6 +41,38 @@ class SessionOperationTests(BaseApiTestCase):
             encode_token(access_token.token, access_token.expires),
         )
 
+    async def test_an_unknown_email_and_a_user_without_a_password_are_refused_alike(self):
+        from mage_ai.authentication import passwords
+
+        no_password = create_user()
+        no_password.update(password_hash=None)
+        wrong = create_user(password='password')
+        checked = []
+        real = passwords.verify_password
+
+        def counting(password, hashed):
+            checked.append(hashed)
+            return real(password, hashed)
+
+        responses = []
+        with patch('mage_ai.api.resources.SessionResource.verify_password', counting):
+            for email in (wrong.email, 'nobody@example.com', no_password.email):
+                operation = self.build_operation(
+                    action=constants.CREATE,
+                    payload=dict(session=dict(email=email, password='not password')),
+                    resource='sessions',
+                    user=None,
+                )
+                responses.append(await operation.execute())
+
+        # One message for all three, and a bcrypt check for each: an unknown email was
+        # refused at once, and a user without a password raised on the missing hash.
+        messages = {r['error']['message'] for r in responses}
+        self.assertEqual(messages, {'Email/username and/or password invalid.'})
+        self.assertEqual(len(checked), 3)
+        self.assertEqual(checked[1], checked[2])
+        self.assertEqual(checked[1], passwords.unmatchable_hash())
+
     @freeze_time(datetime(3000, 1, 1))
     async def test_execute_create_with_disable_notebook_edits(self):
         password = 'password'

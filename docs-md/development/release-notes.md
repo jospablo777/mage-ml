@@ -26,6 +26,9 @@
 
 ### Server
 
+- Security: signing in with an unknown email takes as long to refuse as a wrong password,
+  so the time no longer tells which emails have accounts; a user without a password (made
+  by LDAP or OAuth sign-in) who tries one is refused instead of getting an error.
 - Security: an API error's traceback goes only to signed-in users (and to everyone on a
   server without authentication); others get the error's message, and the traceback is in
   the server log. It went to anyone, before sign-in too.
