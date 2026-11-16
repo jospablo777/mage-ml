@@ -28,6 +28,8 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`monitor-status`](#monitor-status) | Show a monitor's checks for the latest pipeline runs |
 | [`monitor-silence`](#monitor-silence) | Silence a monitor's notifications for a while |
 | [`verify-fusion`](#verify-fusion) | Run a pipeline block by block and fused, and compare the outputs |
+| [`project-export`](#project-export) | Export pipelines, their blocks and contracts as one zip |
+| [`project-import`](#project-import) | Import such a zip, planned first |
 | [`r setup`, `r init`, `r sync`, `r status`](#r-blocks) | Manage the rv environment that R blocks run in |
 | [`rust init`, `rust build`, `rust status`](#rust-blocks) | Manage the Cargo workspace that Rust blocks build in |
 | [`export service`](#export-service) | Export pipelines as a standalone Docker service |
@@ -387,6 +389,29 @@ mage verify-fusion <project_path> <pipeline_uuid> [OPTIONS]
 - `--yes`, `-y` (optional): Run without asking first
 - `--report` (optional): Also write the result as JSON to this path
 - `--exact` (optional): Count floats that differ only by rounding as a difference
+
+---
+
+## Moving pipelines between projects
+
+#### `project-export`
+
+Export pipelines as one zip: their folders, their blocks' files and the data contracts they
+name, with a manifest. `io_config.yaml` and secrets are not included. See
+[Import and export pipelines](../guides/pipelines/import-export.md).
+
+```bash
+mage project-export <project_path> <output.zip> [--pipelines a,b]
+```
+
+#### `project-import`
+
+Import a zip from `project-export`. It prints what each pipeline and file would become, then
+writes; with `--mode skip` (the default) the project's pipelines stay as they are and the
+
+```bash
+mage project-import <project_path> <archive.zip> [--mode skip|replace] [--dry-run]
+```
 
 ---
 
