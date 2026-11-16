@@ -66,6 +66,9 @@
   pyasn1, pymongo, soupsieve, nbconvert and others in Python; certifi 2026.10.23 (dbt-snowflake
   1.12.5 lifted its bound); zstd, tokio, arrow, ctutils and the bundled SQLite (rusqlite 0.43)
   in the Rust engine and SDK.
+- The dependency audit runs every day, and a daily workflow updates the vulnerable
+  dependencies it can (uv, Cargo and yarn locks) and opens a pull request with what it
+  changed and what still needs a person (`scripts/fix_vulnerabilities.py`).
 
 ### Server
 

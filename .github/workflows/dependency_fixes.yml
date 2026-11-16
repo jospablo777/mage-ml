@@ -1,0 +1,90 @@
+name: Dependency fixes
+
+# Updates the dependencies with known vulnerabilities (scripts/fix_vulnerabilities.py) and
+# opens one pull request, security/dependency-fixes, with what changed; the tests and the
+# audit run on it. Fails when a fixed release exists that the locks cannot reach (held),
+# which needs a person.
+
+on:
+  schedule:
+    - cron: '40 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: dependency-fixes
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv and the audit tooling
+        run: |
+          python -m pip install uv==0.11.29
+          uv sync --locked --only-group dev
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install Yarn
+        run: npm install --global yarn@1.22.22
+
+      - name: Update the vulnerable dependencies
+        id: fix
+        run: |
+          set +e
+          uv run --no-sync python scripts/fix_vulnerabilities.py --summary "$RUNNER_TEMP/fixes.md"
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          [ -f "$RUNNER_TEMP/fixes.md" ] && cat "$RUNNER_TEMP/fixes.md" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Open or update the pull request
+        if: steps.fix.outputs.code != '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: security/dependency-fixes
+        run: |
+          if git diff --quiet; then
+            echo 'No lock changed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B "$BRANCH"
+          git commit --all --quiet --message 'Update dependencies with known vulnerabilities'
+          git push --force origin "$BRANCH"
+
+          {
+            echo 'Made by the Dependency fixes workflow (scripts/fix_vulnerabilities.py).'
+            echo 'Merge after the tests and the dependency audit pass on this branch.'
+            echo
+            cat "$RUNNER_TEMP/fixes.md"
+          } > "$RUNNER_TEMP/body.md"
+          number="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --body-file "$RUNNER_TEMP/body.md"
+          elif ! gh pr create --base master --head "$BRANCH" \
+              --title 'Update dependencies with known vulnerabilities' \
+              --body-file "$RUNNER_TEMP/body.md"; then
+            echo "::warning::The pull request was not opened: allow GitHub Actions to create pull requests (Settings > Actions > General), or open it from $BRANCH."
+          fi
+
+          # A push with this workflow's token starts no workflow: start the checks.
+          gh workflow run build_and_test.yml --ref "$BRANCH"
+          gh workflow run dependency_audit.yml --ref "$BRANCH"
+
+      - name: Fail when a fix needs a person
+        if: steps.fix.outputs.code != '0'
+        run: |
+          echo '::error::Some vulnerabilities have a fixed release the locks cannot reach, or the fixer failed: see the summary.'
+          exit 1

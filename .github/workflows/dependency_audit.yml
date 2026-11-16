@@ -31,7 +31,7 @@ on:
       - scripts/audit_dependencies.sh
       - scripts/yarn_audit.py
   schedule:
-    - cron: '20 6 * * 1'
+    - cron: '20 6 * * *'
   workflow_dispatch:
 
 permissions:

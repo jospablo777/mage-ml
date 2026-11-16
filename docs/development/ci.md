@@ -93,7 +93,8 @@ Tests that run blocks restart the kernel in `beforeEach`.
 | Workflow | When | What it checks |
 | --- | --- | --- |
 | `build_and_test.yml` | Push to `master` and pull requests that change `mage_ai/`, `mage_integrations/`, `vendor/`, `runtimes/`, `rust/`, `integration_tests/`, `pyproject.toml`, `uv.lock` or the workflow; manual | Lint, Rust, packaging, integration tests, unit tests and the browser tests |
-| `dependency_audit.yml` | Dependency changes; Mondays 06:20 UTC; manual | Known vulnerabilities in the Python, Rust and JavaScript dependencies (`scripts/audit_dependencies.sh`) |
+| `dependency_audit.yml` | Dependency changes; daily 06:20 UTC; manual | Known vulnerabilities in the Python, Rust and JavaScript dependencies (`scripts/audit_dependencies.sh`) |
+| `dependency_fixes.yml` | Daily 05:40 UTC; manual | Updates the vulnerable dependencies (`scripts/fix_vulnerabilities.py`) and opens the `security/dependency-fixes` pull request, on which it starts the tests and the audit |
 | `codeql-analysis.yml` | Tuesdays 16:24 UTC; manual | CodeQL code scanning |
 | `trivy.yml` | Tuesdays 01:35 UTC; manual | Trivy scan of the image and the repository |
 | `lint_docker_image.yml` | Pull requests that change the Dockerfile; manual | Dockerfile lint |
@@ -236,10 +237,35 @@ scripts/audit_dependencies.sh            # every check
 scripts/audit_dependencies.sh rust       # or python, runtimes, frontend
 ```
 
-The accepted advisories are listed in the script with the reason for each. To fix one,
-upgrade to the smallest patched release (`uv lock --upgrade-package <name>`,
-`cargo update -p <crate>@<version>` in the lock's folder, or a version or `resolutions`
-entry in `package.json`), then run the unit, Rust and browser suites.
+The accepted advisories are listed in the script with the reason for each.
+
+`scripts/fix_vulnerabilities.py` fixes what it can in the same locks and reports the rest.
+For each vulnerable package it takes the smallest release that fixes all of its advisories,
+then:
+
+| Lock | Update |
+| --- | --- |
+| `uv.lock`, `runtimes/*/uv.lock` | `uv lock --upgrade-package '<name>>=<fixed>'`, all packages at once, one by one when that fails |
+| `Cargo.lock` | `cargo update -p <crate>@<version>`, then `--precise <fixed>` when the newest compatible release is not enough |
+| `yarn.lock` | The package's entries are resolved again from their ranges; when the ranges keep the vulnerable release, a `resolutions` entry (transitive) or a raised range (direct), within the installed line |
+
+```bash
+uv run --no-sync python scripts/fix_vulnerabilities.py --dry-run   # report only
+uv run --no-sync python scripts/fix_vulnerabilities.py --only rust --summary fixes.md
+```
+
+Each lock is audited again after the update. The summary gives each package a status:
+**fixed**, **held** (a fixed release exists, but a declared range excludes it; the note
+names the range), **no fix** or **accepted**. It exits 1 when one is held. A held package
+needs a person: raise the range that holds it, or replace the dependency, or accept the
+advisory in `audit_dependencies.sh` with the reason.
+
+`dependency_fixes.yml` runs it every day. When a lock changes, it pushes the
+`security/dependency-fixes` branch, opens or updates its pull request with the summary,
+and starts `build_and_test.yml` and `dependency_audit.yml` on it (a push with the
+workflow's token starts no workflow by itself). Merge the pull request when they pass. The
+repository has to allow GitHub Actions to create pull requests (Settings > Actions >
+General); without it the workflow still pushes the branch and warns.
 
 ### The whole workflow
 
