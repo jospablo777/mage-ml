@@ -3,6 +3,7 @@ import { REQUIRE_USER_AUTHENTICATION, REQUIRE_USER_PERMISSIONS } from '@utils/se
 import {
   BlocksSeparated,
   DocumentIcon,
+  Insights,
   Locked,
   Settings,
   SettingsWithKnobs,
@@ -16,6 +17,7 @@ export const SECTION_ITEM_UUID_GIT_SETTINGS = 'Git settings';
 export const SECTION_ITEM_UUID_PREFERENCES = 'Preferences';
 export const SECTION_ITEM_UUID_PLATFORM_PREFERENCES = 'Preferences';
 export const SECTION_ITEM_UUID_PLATFORM_SETTINGS = 'Settings';
+export const SECTION_ITEM_UUID_SERVER_HEALTH = 'Server health';
 export const SECTION_ITEM_UUID_USERS = 'Users';
 export const SECTION_UUID_WORKSPACE = 'Workspace';
 
@@ -63,6 +65,17 @@ export const SECTIONS = ({ owner, roles, project_access }: UserType, opts?: {
       uuid: SECTION_ITEM_UUID_GIT_SETTINGS,
     },
   ];
+
+  // The server's processes and paths: owners and admins.
+  if (!REQUIRE_USER_AUTHENTICATION() || hasAdminPrivileges) {
+    workspaceItems.push({
+      Icon: Insights,
+      linkProps: {
+        href: '/settings/workspace/server-health',
+      },
+      uuid: SECTION_ITEM_UUID_SERVER_HEALTH,
+    });
+  }
 
   const arr = [
     {

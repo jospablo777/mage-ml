@@ -1,0 +1,23 @@
+---
+title: "Server health"
+description: "The machine's load, memory and disk, MageML's processes, and what it stores, with six hours of history."
+---
+
+**Settings > Workspace > Server health** shows, for owners and admins (everyone without
+user authentication):
+
+| Part | What it shows |
+| --- | --- |
+| Headline | The memory of MageML's processes, their count, and the load against the CPUs |
+| Load | The machine's load over the last minute, 5 and 15 minutes, against its CPUs |
+| Memory | Memory used of the total; in a container, the container's limit (cgroup) |
+| MageML processes | The server, the scheduler, notebook kernels, block run processes and the service engine, each with its CPU and memory |
+| Disk | Free space on the disk that holds the variables folder |
+| History | The load and MageML's memory over the last six hours, sampled every 30 seconds |
+| Storage | The size of the variables folder (block outputs and logs) and of a SQLite metadata database, measured every 10 minutes in the background |
+
+The history is kept in the server's memory and starts again when the server restarts. The
+project folder is not measured: it can be on network storage, and the variables folder is
+what grows.
+
+The same report is at `GET /api/server_health/current`.

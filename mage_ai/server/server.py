@@ -704,6 +704,11 @@ async def main(
         webbrowser.open_new_tab(url)
     logger.info(f'MageML is running at {url} and serving project {project}')
 
+    # Samples the server's load and memory for the health page (server/health.py).
+    from mage_ai.server import health
+
+    health.start()
+
     db_connection.start_session(force=True)
     latest_user_activity.update_latest_activity()
 

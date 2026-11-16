@@ -60,6 +60,9 @@
 
 ### Server
 
+- Settings > Workspace > Server health shows the machine's load, memory and disk,
+  MageML's processes with their memory, the size of its outputs and logs, and six hours of
+  history (`GET /api/server_health/current`), for owners and admins.
 - An audit log of every create, update and delete through the API, with its user, what it
   wrote (secrets hidden, code as its hash) and its outcome: Settings > User management >
   Audit log, and `GET /api/audit_events` for owners and admins. Kept 365 days

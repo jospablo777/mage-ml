@@ -349,6 +349,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [GitLab deployments](production/ci-cd/local-cloud/gitlab-ci-cd.md)
 - [Buildkite deployments](production/ci-cd/local-cloud/buildkite.md)
 - [Production Configuration](production/configuring-production-settings/overview.md)
+- [Server health](production/server-health.md)
 - [Export pipelines as a service](production/export-a-service.md)
 - [Stream services](production/stream-services.md)
 - [Services in the app](production/services-page.md)
