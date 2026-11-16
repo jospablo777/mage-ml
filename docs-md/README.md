@@ -317,6 +317,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Monitoring block outputs](guides/pipelines/monitoring.md)
 - [Community Examples](guides/community-examples.md)
 - [Pipeline documentation](guides/pipelines/documentation.md)
+- [Pipeline dependencies](guides/pipelines/dependencies.md)
 
 ### dbt
 

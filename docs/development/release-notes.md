@@ -33,6 +33,11 @@
 
 ### Pipelines
 
+- A Dependencies page draws the pipelines that start or feed other pipelines (after-run
+  triggers, global data products, `trigger_pipeline` calls in blocks) with each pipeline's
+  last run, and lists each link.
+- Deleting a pipeline makes its triggers inactive; they stayed active for a pipeline that
+  no longer existed.
 - Exported services run SQL blocks on SQL Server, through pymssql (FreeTDS): the image needs
   no ODBC driver. MageML connects the same way with `MSSQL_DRIVER: pymssql`
   (`mage-ml[mssql]`).

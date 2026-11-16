@@ -2360,6 +2360,22 @@ class Pipeline:
         except Exception as err:
             print(f'Could not delete secrets directory due to {str(err)}')
 
+        # Its triggers stay with their runs' history, inactive: active, they kept being
+        # evaluated for a pipeline that no longer exists (I-447).
+        try:
+            from mage_ai.data_preparation.models.triggers import ScheduleStatus
+            from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+            PipelineSchedule.query.filter(
+                PipelineSchedule.pipeline_uuid == self.uuid,
+                PipelineSchedule.repo_path == self.repo_path,
+                PipelineSchedule.status == ScheduleStatus.ACTIVE,
+            ).update({PipelineSchedule.status: ScheduleStatus.INACTIVE},
+                     synchronize_session=False)
+            PipelineSchedule.query.session.commit()
+        except Exception as err:
+            print(f'Could not deactivate the pipeline\'s triggers due to {str(err)}')
+
     def delete_block(
         self,
         block: Block,

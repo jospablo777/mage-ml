@@ -4215,6 +4215,15 @@
     },
     "type": "object"
    },
+   "PipelineDependency": {
+    "properties": {
+     "edges": {},
+     "id": {},
+     "nodes": {},
+     "pipelines_without_dependencies": {}
+    },
+    "type": "object"
+   },
    "PipelineDocumentation": {
     "properties": {
      "exists": {},
@@ -11310,6 +11319,42 @@
     "summary": "detail pipeline_compilations",
     "tags": [
      "pipeline_compilations"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
+  },
+  "/api/pipeline_dependencies/{id}": {
+   "get": {
+    "operationId": "detail_pipeline_dependencies",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "pipeline_dependency": {
+           "$ref": "#/components/schemas/PipelineDependency"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail pipeline_dependencies",
+    "tags": [
+     "pipeline_dependencies"
     ]
    },
    "parameters": [
@@ -20617,6 +20662,12 @@
    ],
    "schema": "PipelineCompilation"
   },
+  "pipeline_dependencies": {
+   "operations": [
+    "detail"
+   ],
+   "schema": "PipelineDependency"
+  },
   "pipeline_documentations": {
    "operations": [
     "detail",
@@ -21058,6 +21109,7 @@
   "page_block_layouts": "no list or detail reached",
   "permissions": "no list or detail reached",
   "pipeline_compilations": "no list or detail reached",
+  "pipeline_dependencies": "no list or detail reached",
   "pipeline_documentations": "no list or detail reached",
   "pipeline_execution_frameworks": "get /api/pipeline_execution_frameworks: error 404: Pipeline execution framework was not found.",
   "pipeline_interactions": "no list or detail reached",

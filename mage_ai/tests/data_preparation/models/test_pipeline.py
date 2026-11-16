@@ -632,6 +632,28 @@ class PipelineTest(AsyncDBTestCase):
         self.assertFalse(os.access(block4.file_path, os.F_OK))
         self.assertFalse(os.access(block5.file_path, os.F_OK))
 
+    def test_deleting_a_pipeline_deactivates_its_triggers(self):
+        """They stay, with their runs; active, they kept being evaluated (I-447)."""
+        from mage_ai.orchestration.db.models.schedules import PipelineSchedule
+
+        pipeline = Pipeline.create('test pipeline deleted triggers', repo_path=self.repo_path)
+        other = Pipeline.create('test pipeline kept triggers', repo_path=self.repo_path)
+        deleted = PipelineSchedule.create(
+            name='hourly', pipeline_uuid=pipeline.uuid, schedule_type='time',
+            schedule_interval='@hourly', status='active', repo_path=self.repo_path,
+        )
+        kept = PipelineSchedule.create(
+            name='hourly', pipeline_uuid=other.uuid, schedule_type='time',
+            schedule_interval='@hourly', status='active', repo_path=self.repo_path,
+        )
+
+        pipeline.delete()
+
+        deleted.refresh()
+        kept.refresh()
+        self.assertEqual(deleted.status, 'inactive')
+        self.assertEqual(kept.status, 'active')
+
     async def test_duplicate_standard_pipeline(self):
         pipeline = self.__create_pipeline_with_blocks('test_pipeline_7a')
         duplicate_pipeline = await Pipeline.duplicate(pipeline, 'duplicate_pipeline')
