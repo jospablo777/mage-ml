@@ -86,6 +86,7 @@ async def build_case(
             oauth_client=request.oauth_client,
             oauth_token=request.oauth_token,
             pk=child_pk or resource_pk,
+            remote_ip=None,
             resource=child or resource,
             resource_parent=resource if child else None,
             resource_parent_id=resource_pk if child else None,

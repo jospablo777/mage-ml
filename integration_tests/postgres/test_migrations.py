@@ -79,3 +79,22 @@ def test_the_after_run_migration_downgrades_with_runs_of_after_run_triggers(data
         types = connection.execute(text('SELECT unnest(enum_range(NULL::scheduletype))'))
         assert 'AFTER_RUN' in [row[0] for row in types]
     engine.dispose()
+
+
+def test_the_audit_log_table_upgrades_and_downgrades(database):
+    _alembic(database, 'upgrade', 'head')
+    engine = create_engine(database)
+    with engine.begin() as connection:
+        connection.execute(text(
+            'INSERT INTO audit_event (user_name, action, object_type, outcome, changes, count) '
+            "VALUES ('owner@example.com', 'update', 'blocks', 'succeeded', '{\"rows\": 3}', 2)"
+        ))
+        row = connection.execute(text(
+            'SELECT user_name, changes, count, created_at IS NOT NULL FROM audit_event',
+        )).one()
+    assert tuple(row) == ('owner@example.com', {'rows': 3}, 2, True)
+
+    _alembic(database, 'downgrade', AFTER_RUN)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT to_regclass('audit_event')")).scalar() is None
+    _alembic(database, 'upgrade', 'head')

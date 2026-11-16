@@ -64,6 +64,7 @@ class BaseOperation:
         self.payload = kwargs.get('payload') or {}
         self.payload_mutated = None
         self._query = kwargs.get('query', {}) or {}
+        self.remote_ip = kwargs.get('remote_ip')
         self.resource = kwargs.get('resource')
         self.resource_parent = kwargs.get('resource_parent')
         self.resource_parent_id = kwargs.get('resource_parent_id')
@@ -228,7 +229,9 @@ class BaseOperation:
                         'id': self.user.id if self.user else None,
                     },
                 }
+            self.__audit('succeeded')
         except ApiError as err:
+            self.__audit('refused' if err.code == 403 else 'failed', err.message)
             if (
                 getattr(err, 'code', None) == 404
                 and getattr(err, 'message', None) == ApiError.RESOURCE_NOT_FOUND['message']
@@ -261,11 +264,33 @@ class BaseOperation:
 
             if settings.DEBUG:
                 raise err
-
+        except Exception as err:
+            self.__audit('failed', str(err))
+            raise
         finally:
             db_connection.stop_cache()
 
         return response
+
+    def __audit(self, outcome: str, error: str = None) -> None:
+        """Writes go to the audit log (orchestration/audit_log.py)."""
+        from mage_ai.orchestration import audit_log
+
+        if self.action not in audit_log.WRITE_ACTIONS:
+            return
+        forwarded = (self.headers or {}).get('X-Forwarded-For') if self.headers else None
+        audit_log.record(
+            self.action,
+            self.resource,
+            object_id=self.pk,
+            parent=self.resource_parent,
+            parent_id=self.resource_parent_id,
+            user=self.user,
+            payload=self.payload,
+            outcome=outcome,
+            error=error,
+            source_ip=(forwarded.split(',')[0].strip() if forwarded else self.remote_ip),
+        )
 
     @property
     def query(self) -> Dict:

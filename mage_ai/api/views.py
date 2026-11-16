@@ -56,6 +56,7 @@ async def execute_operation(
             payload=__payload(request),
             pk=child_pk or pk,
             query=__query(request),
+            remote_ip=getattr(request, 'remote_ip', None),
             resource=child or resource,
             resource_parent=resource if child else None,
             resource_parent_id=pk if child else None,

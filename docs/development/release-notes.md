@@ -60,6 +60,10 @@
 
 ### Server
 
+- An audit log of every create, update and delete through the API, with its user, what it
+  wrote (secrets hidden, code as its hash) and its outcome: Settings > User management >
+  Audit log, and `GET /api/audit_events` for owners and admins. Kept 365 days
+  (`MAGE_AUDIT_LOG_RETENTION_DAYS`); `MAGE_AUDIT_LOG=off` stops it.
 - With `MAGE_GATEWAY_AUTHZ=enforce`, the gateway refuses the API requests the recorded
   policies refuse, without the server; the others still go to the server, which decides
   them.

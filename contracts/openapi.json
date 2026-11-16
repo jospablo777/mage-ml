@@ -1,6 +1,124 @@
 {
  "components": {
   "schemas": {
+   "AuditEvent": {
+    "properties": {
+     "action": {
+      "type": "string"
+     },
+     "changes": {
+      "properties": {
+       "content": {
+        "type": "string"
+       },
+       "end_datetime": {
+        "type": "string"
+       },
+       "interval_type": {
+        "type": "string"
+       },
+       "interval_units": {
+        "type": "integer"
+       },
+       "language": {
+        "type": "string"
+       },
+       "name": {
+        "type": "string"
+       },
+       "pipeline_uuid": {
+        "type": "string"
+       },
+       "repo_path": {
+        "type": "string"
+       },
+       "schedule_interval": {
+        "type": "string"
+       },
+       "schedule_type": {
+        "type": "string"
+       },
+       "start_datetime": {
+        "type": "string"
+       },
+       "status": {
+        "type": "string"
+       },
+       "tags": {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       "token": {
+        "type": "string"
+       },
+       "type": {
+        "type": "string"
+       },
+       "upstream_blocks": {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       "value": {
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "count": {
+      "type": "integer"
+     },
+     "created_at": {
+      "type": "string"
+     },
+     "error": {
+      "type": "null"
+     },
+     "id": {
+      "type": "integer"
+     },
+     "last_at": {
+      "type": "string"
+     },
+     "object_id": {
+      "type": [
+       "null",
+       "string"
+      ]
+     },
+     "object_type": {
+      "type": "string"
+     },
+     "outcome": {
+      "type": "string"
+     },
+     "parent": {
+      "type": [
+       "null",
+       "string"
+      ]
+     },
+     "parent_id": {
+      "type": [
+       "null",
+       "string"
+      ]
+     },
+     "source_ip": {
+      "type": "string"
+     },
+     "user_id": {
+      "type": "null"
+     },
+     "user_name": {
+      "type": "null"
+     }
+    },
+    "type": "object"
+   },
    "AutocompleteItem": {
     "properties": {
      "classes": {
@@ -5546,6 +5664,174 @@
  },
  "openapi": "3.1.0",
  "paths": {
+  "/api/audit_events": {
+   "get": {
+    "operationId": "list_audit_events",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "audit_events": {
+           "items": {
+            "$ref": "#/components/schemas/AuditEvent"
+           },
+           "type": "array"
+          },
+          "metadata": {
+           "type": "object"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list audit_events",
+    "tags": [
+     "audit_events"
+    ]
+   },
+   "post": {
+    "operationId": "create_audit_events",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "audit_event": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "audit_event": {
+           "$ref": "#/components/schemas/AuditEvent"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create audit_events",
+    "tags": [
+     "audit_events"
+    ]
+   }
+  },
+  "/api/audit_events/{id}": {
+   "delete": {
+    "operationId": "delete_audit_events",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "audit_event": {
+           "$ref": "#/components/schemas/AuditEvent"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "delete audit_events",
+    "tags": [
+     "audit_events"
+    ]
+   },
+   "get": {
+    "operationId": "detail_audit_events",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "audit_event": {
+           "$ref": "#/components/schemas/AuditEvent"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail audit_events",
+    "tags": [
+     "audit_events"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ],
+   "put": {
+    "operationId": "update_audit_events",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "audit_event": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "audit_event": {
+           "$ref": "#/components/schemas/AuditEvent"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "update audit_events",
+    "tags": [
+     "audit_events"
+    ]
+   }
+  },
   "/api/autocomplete_items": {
    "get": {
     "operationId": "list_autocomplete_items",
@@ -20242,6 +20528,16 @@
   }
  },
  "x-mage-resources": {
+  "audit_events": {
+   "operations": [
+    "list",
+    "create",
+    "detail",
+    "update",
+    "delete"
+   ],
+   "schema": "AuditEvent"
+  },
   "autocomplete_items": {
    "operations": [
     "list"

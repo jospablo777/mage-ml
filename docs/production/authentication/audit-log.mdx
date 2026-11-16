@@ -1,0 +1,45 @@
+---
+title: "Audit log"
+description: "Every change made through MageML's API: who made it, what it wrote, and how it ended."
+---
+
+MageML records each create, update and delete made through its API in the metadata
+database: the editor, the settings pages, the triggers and runs pages, scripts calling the
+API. Owners and admins read it in **Settings > User management > Audit log**, filter it by
+user, resource, action and outcome, and download it as JSON Lines.
+
+| Recorded | |
+| --- | --- |
+| When | The time of the change; repeated saves of the same object by the same user within a minute are one row with a count and the time of the last |
+| Who | The signed-in user's email, or the email a sign-in named |
+| What | The action and the object, such as `update pipelines/orders` or `delete pipelines/orders/blocks/load` |
+| Written | The attributes the request set |
+| Outcome | `succeeded`, `refused` (the user's role did not allow it) or `failed`, with the error |
+| From | The client's address (the first `X-Forwarded-For` behind a proxy) |
+
+What is written is kept without secrets: the values of secrets and OAuth tokens, and any
+attribute whose name says password, secret, token, key or credential, are `[hidden]`; a value
+longer than 200 characters, such as a block's code, is kept as its length and SHA-256, which
+shows that it changed and lets you match it with a version in Git. Reads are not recorded.
+
+## Settings
+
+| Variable | Default | |
+| --- | --- | --- |
+| `MAGE_AUDIT_LOG` | `on` | `off` stops recording |
+| `MAGE_AUDIT_LOG_RETENTION_DAYS` | `365` | Older events are deleted, at most once an hour |
+
+Recording never fails a request: an error writing the event is logged as a warning. With the
+gateway refusing requests itself (`MAGE_GATEWAY_AUTHZ=enforce`), those refusals do not reach
+the server and are counted by the gateway instead.
+
+## API
+
+`GET /api/audit_events`, for owners and admins, newest first, with `user_name`,
+`object_type`, `object_id`, `action`, `outcome`, `since` and `until` (ISO times) and the usual
+`_limit` and `_offset`:
+
+```bash
+curl -s "$MAGE_URL/api/audit_events?object_type=pipelines&since=2026-11-01T00:00:00Z" \
+  -H "Authorization: Bearer $TOKEN" -H "X-API-KEY: $API_KEY"
+```

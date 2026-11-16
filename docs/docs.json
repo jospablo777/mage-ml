@@ -638,6 +638,7 @@
             "pages": [
               "production/authentication/overview",
               "production/authentication/access",
+              "production/authentication/audit-log",
               "production/authentication/okta",
               "production/authentication/microsoft",
               "production/authentication/google",

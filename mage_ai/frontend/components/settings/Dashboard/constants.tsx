@@ -2,6 +2,7 @@ import UserType, { RoleValueEnum } from '@interfaces/UserType';
 import { REQUIRE_USER_AUTHENTICATION, REQUIRE_USER_PERMISSIONS } from '@utils/session';
 import {
   BlocksSeparated,
+  DocumentIcon,
   Locked,
   Settings,
   SettingsWithKnobs,
@@ -25,6 +26,7 @@ export enum SectionEnum {
 }
 
 export enum SectionItemEnum {
+  AUDIT_LOG = 'Audit log',
   PERMISSIONS = 'Permissions',
   PREFERENCES = 'Preferences',
   ROLES = 'Roles',
@@ -98,6 +100,14 @@ export const SECTIONS = ({ owner, roles, project_access }: UserType, opts?: {
         },
       ]);
     }
+
+    items.push({
+      Icon: DocumentIcon,
+      linkProps: {
+        href: '/settings/workspace/audit-log',
+      },
+      uuid: SectionItemEnum.AUDIT_LOG,
+    });
 
     arr.push({
       items,
