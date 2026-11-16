@@ -55,6 +55,7 @@ from mage_ai.data_preparation.models.triggers import (
     add_or_update_trigger_for_pipeline_and_persist,
 )
 from mage_ai.data_preparation.variable_manager import get_global_variables
+from mage_ai.orchestration import trigger_rules
 from mage_ai.orchestration.db import db_connection, safe_db_query
 from mage_ai.orchestration.db.errors import ValidationError
 from mage_ai.orchestration.db.models.base import Base, BaseModel, classproperty
@@ -1068,6 +1069,7 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
 
         completed_block_uuids = _build_block_uuids(self.completed_block_runs)
         finished_block_uuids = _build_block_uuids(self.block_runs)
+        status_by_block_uuid = {b.block_uuid: b.status for b in self.block_runs}
 
         block_runs_all = []
 
@@ -1252,14 +1254,24 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
                                 + up_uuids_dynamic_children
                             )
 
-                completed = (
+                if (
                     not incomplete
-                    and block is not None
-                    and block.all_upstream_blocks_completed(
-                        completed_block_uuids,
-                        upstream_block_uuids_override,
+                    and not upstream_block_uuids_override
+                    and trigger_rules.applies(block)
+                ):
+                    completed = trigger_rules.decide(
+                        trigger_rules.block_trigger_rule(block),
+                        [status_by_block_uuid.get(u) for u in block.upstream_block_uuids],
+                    ) == trigger_rules.Decision.RUN
+                else:
+                    completed = (
+                        not incomplete
+                        and block is not None
+                        and block.all_upstream_blocks_completed(
+                            completed_block_uuids,
+                            upstream_block_uuids_override,
+                        )
                     )
-                )
 
             if completed:
                 executable_block_runs.append(block_run)
@@ -1311,12 +1323,34 @@ class PipelineRun(PipelineRunProjectPlatformMixin, BaseModel):
             BlockRun.BlockRunStatus.CONDITION_FAILED: condition_failed_block_uuids,
             BlockRun.BlockRunStatus.UPSTREAM_FAILED: failed_block_uuids,
         }
+        status_by_block_uuid = {b.block_uuid: b.status for b in self.block_runs}
         not_updated_block_runs = []
         for block_run in block_runs:
             updated_status = False
             dynamic_upstream_block_uuids = block_run.metrics and block_run.metrics.get(
                 'dynamic_upstream_block_uuids',
             )
+
+            # A block with a trigger rule is skipped or upstream failed as its rule says.
+            block = pipeline.get_block(block_run.block_uuid)
+            if (
+                not dynamic_upstream_block_uuids
+                and block is not None
+                and block_run.block_uuid == block.uuid
+                and trigger_rules.applies(block)
+            ):
+                decision = trigger_rules.decide(
+                    trigger_rules.block_trigger_rule(block),
+                    [status_by_block_uuid.get(u) for u in block.upstream_block_uuids],
+                )
+                if decision in (
+                    trigger_rules.Decision.UPSTREAM_FAILED,
+                    trigger_rules.Decision.CONDITION_FAILED,
+                ):
+                    block_run.update(status=BlockRun.BlockRunStatus(decision.value))
+                else:
+                    not_updated_block_runs.append(block_run)
+                continue
 
             for status, block_uuids in statuses.items():
                 upstream_block_uuids = []

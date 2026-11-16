@@ -78,8 +78,21 @@ class PipelineExecutor:
                     execution_partition=self.execution_partition,
                     max_parallel=kwargs.get('max_parallel'),
                     record_run=bool(kwargs.get('record_run')),
+                    fuse=fusion.fusion_enabled(self.pipeline),
                 )
             elif pipeline_run_id is None:
+                controlled = [
+                    b.uuid for b in self.pipeline.blocks_by_uuid.values()
+                    if fusion.run_controlled(b)
+                ]
+                if controlled:
+                    print(
+                        '[WARNING] mage run does not apply conditions, disabled blocks or '
+                        'trigger rules to this pipeline: its dynamic, data integration or '
+                        'replicated blocks, or callbacks, do not run in stages. A '
+                        'trigger\'s runs apply them. Blocks with them: '
+                        + ', '.join(controlled),
+                    )
                 await self.pipeline.execute(
                     analyze_outputs=analyze_outputs,
                     global_vars=global_vars,

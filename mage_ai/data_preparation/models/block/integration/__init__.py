@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import subprocess
@@ -22,6 +23,10 @@ from mage_ai.data_integrations.utils.config import (
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.block.data_integration.constants import (
     CONFIG_KEY_CLEAN_UP_INPUT_FILE,
+)
+from mage_ai.data_preparation.models.block.integration.records import (
+    records_frame,
+    records_per_call,
 )
 from mage_ai.data_preparation.models.constants import PYTHON_COMMAND, BlockType
 from mage_ai.data_preparation.shared.stream import StreamToLogger
@@ -220,11 +225,16 @@ class IntegrationBlock(Block):
 
             exec(self.content, results)
 
-            # 1. Recreate each record
-            # 2. Recreate schema
-            schema_original = None
-            schema_updated = None
-            schema_index = None
+            per_call = records_per_call(self.configuration)
+            input_kwargs = merge_dict(
+                global_vars,
+                dict(
+                    index=index,
+                    query=query_data,
+                    stream=stream,
+                ),
+            )
+
             # Support an 'aliases' property for columns, which keeps types mapped correctly
             # in case of transformer code using pandas.rename
             output_col_aliases = {}
@@ -233,12 +243,8 @@ class IntegrationBlock(Block):
                 for alias in col_props.get('aliases', []):
                     output_col_aliases[alias] = col_props
 
-            output_arr = []
-            records_transformed = 0
-            df_sample = None
-
             def __update_col_names(schema_dict: Dict, properties_key: str, new_columns: List[str]):
-                properties_cols = schema_updated.get(properties_key, [])
+                properties_cols = schema_dict.get(properties_key, [])
                 if properties_cols:
                     updated_properties_cols = []
                     for col in properties_cols:
@@ -250,8 +256,97 @@ class IntegrationBlock(Block):
                             updated_properties_cols.append(col)
                     schema_dict[properties_key] = updated_properties_cols
 
-            with open(source_output_file_path, 'r') as f:
-                idx = 0
+            def __schema_of(schema_original: Dict, df: pd.DataFrame) -> Dict:
+                properties_updated = {
+                    k: dict(type=[COLUMN_TYPE_NULL, convert_data_type(v)])
+                    for k, v in infer_dtypes(df).items()
+                }
+                schema_updated = copy.deepcopy(schema_original)
+                properties_original = schema_updated['schema']['properties']
+                schema_updated['schema']['properties'] = {
+                    k: properties_original[k] if k in properties_original else v
+                    for k, v in properties_updated.items()
+                }
+                # Separately, update schema types from alias map
+                for cname in schema_updated['schema']['properties'].keys():
+                    if cname in output_col_aliases:
+                        schema_updated['schema']['properties'][cname] = output_col_aliases[cname]
+
+                # Update column names in unique_constraints and key_properties
+                new_columns = schema_updated['schema']['properties'].keys()
+                __update_col_names(schema_updated, 'unique_constraints', new_columns)
+                __update_col_names(schema_updated, 'key_properties', new_columns)
+                return schema_updated
+
+            records_read = 0
+            records_transformed = 0
+            schema_original = None
+            schema_updated = None
+            # Lines held until the transformer's first rows give the schema they follow.
+            held = []
+            # Record messages read since the last call, in order.
+            messages = []
+
+            transformed_file_path = f'{source_output_file_path}.transformed'
+            with open(source_output_file_path, 'r') as f, \
+                    open(transformed_file_path, 'w') as output:
+
+                def __write(line: str):
+                    if schema_updated is None and schema_original is not None:
+                        held.append(line)
+                    else:
+                        output.write(line + '\n')
+
+                def __transform():
+                    nonlocal records_read, records_transformed, schema_updated
+                    if not messages:
+                        return
+                    records_read += len(messages)
+                    input_vars = [records_frame([m['record'] for m in messages])]
+                    block_function = self._validate_execution(decorated_functions, input_vars)
+                    if block_function is None:
+                        rows = [m['record'] for m in messages]
+                    else:
+                        try:
+                            df = self.execute_block_function(
+                                block_function,
+                                input_vars,
+                                global_vars=input_kwargs,
+                                from_notebook=from_notebook,
+                            )
+                        except Exception as error:
+                            if per_call > 1:
+                                error.add_note(
+                                    f'This transformer receives up to {per_call} records of '
+                                    f'stream {stream} in one DataFrame. If it handles one '
+                                    'record at a time, set "Records per call" to 1 in the '
+                                    "block's settings (configuration.records_per_call).",
+                                )
+                            raise
+                        if schema_updated is None and schema_original is not None and df.shape[0]:
+                            schema_updated = __schema_of(schema_original, df)
+                            for line in held:
+                                if json.loads(line).get('type') == TYPE_SCHEMA:
+                                    line = json.dumps(schema_updated)
+                                output.write(line + '\n')
+                            held.clear()
+                        rows = missing_as_none(df).to_dict('records')
+
+                    # The other keys of a record message (stream, time_extracted) come from
+                    # the first message of the call.
+                    template = {k: v for k, v in messages[0].items() if k != 'record'}
+                    messages.clear()
+                    for row in rows:
+                        __write(json.dumps(merge_dict(template, dict(record=row))))
+                    records_transformed += len(rows)
+
+                    msg = f'{records_read} records read, {records_transformed} records ' \
+                        'written by the transformer...'
+                    if logger:
+                        logger.info(msg, **updated_logging_tags)
+                    else:
+                        print(msg)
+
                 for line in f:
                     line = line.strip() if line else ''
                     if len(line) == 0:
@@ -259,101 +354,36 @@ class IntegrationBlock(Block):
 
                     try:
                         data = json.loads(line)
-                        line_type = data.get('type')
-
-                        if TYPE_SCHEMA == line_type:
-                            schema_index = idx
-                            schema_original = data
-                        elif TYPE_RECORD == line_type:
-                            record = data['record']
-                            input_vars = [pd.DataFrame.from_dict([record])]
-                            input_kwargs = merge_dict(
-                                global_vars,
-                                dict(
-                                    index=index,
-                                    query=query_data,
-                                    stream=stream,
-                                ),
-                            )
-                            block_function = self._validate_execution(
-                                decorated_functions,
-                                input_vars,
-                            )
-
-                            if block_function is not None:
-                                df = self.execute_block_function(
-                                    block_function,
-                                    input_vars,
-                                    global_vars=input_kwargs,
-                                    from_notebook=from_notebook,
-                                )
-                                if df_sample is None:
-                                    df_sample = df
-
-                                if not schema_updated:
-                                    properties_updated = {
-                                        k: dict(type=[COLUMN_TYPE_NULL, convert_data_type(v)])
-                                        for k, v in infer_dtypes(df).items()
-                                    }
-                                    schema_updated = schema_original.copy()
-                                    properties_original = schema_updated['schema']['properties']
-                                    schema_updated['schema']['properties'] = {
-                                        k: properties_original[k]
-                                        if k in properties_original else v
-                                        for k, v in properties_updated.items()
-                                    }
-                                    # Separately, update schema types from alias map
-                                    if len(output_col_aliases.keys()):
-                                        for cname in schema_updated['schema']['properties'].keys():
-                                            if cname in output_col_aliases:
-                                                prop = output_col_aliases[cname]
-                                                schema_updated['schema']['properties'][cname] = prop
-
-                                    # Update column names in unique_constraints and key_properties
-                                    new_columns = schema_updated['schema']['properties'].keys()
-                                    __update_col_names(
-                                        schema_updated,
-                                        'unique_constraints',
-                                        new_columns,
-                                    )
-                                    __update_col_names(
-                                        schema_updated,
-                                        'key_properties',
-                                        new_columns,
-                                    )
-
-                                if df.shape[0] == 0:
-                                    continue
-                                record_transformed = missing_as_none(df).to_dict('records')[0]
-
-                                line = json.dumps(merge_dict(
-                                    data,
-                                    dict(record=record_transformed),
-                                ))
-                                records_transformed += 1
-
-                                if records_transformed % 1000 == 0:
-                                    msg = f'{records_transformed} records have been transformed...'
-                                    if logger:
-                                        logger.info(msg, **updated_logging_tags)
-                                    else:
-                                        print(msg)
                     except json.decoder.JSONDecodeError:
-                        pass
+                        data = None
+                    line_type = data.get('type') if isinstance(data, dict) else None
 
-                    output_arr.append(line)
-                    idx += 1
+                    if TYPE_RECORD == line_type:
+                        messages.append(data)
+                        if len(messages) >= per_call:
+                            __transform()
+                        continue
 
-            output_arr[schema_index] = json.dumps(schema_updated)
+                    # Records before a STATE or SCHEMA message are written before it.
+                    __transform()
+                    if TYPE_SCHEMA == line_type:
+                        if schema_original is None:
+                            schema_original = data
+                        if schema_updated is not None:
+                            line = json.dumps(schema_updated)
+                    __write(line)
 
-            with open(source_output_file_path, 'w') as f:
-                output = '\n'.join(output_arr)
-                f.write(output)
+                __transform()
+                # No rows came out: the stream keeps the schema it had.
+                for line in held:
+                    output.write(line + '\n')
 
-            msg = f'Transformed {records_transformed} total records for stream {stream}.'
+            os.replace(transformed_file_path, source_output_file_path)
+
+            msg = f'Transformed {records_read} total records for stream {stream} into ' \
+                f'{records_transformed} records, {per_call} records per call.'
             file_size = os.path.getsize(source_output_file_path)
-            msg2 = f'Finished writing {file_size} bytes with {len(output_arr)} lines to '\
-                f'output file {source_output_file_path}.'
+            msg2 = f'Finished writing {file_size} bytes to output file {source_output_file_path}.'
             if logger:
                 logger.info(msg, **updated_logging_tags)
                 logger.info(msg2, **updated_logging_tags)

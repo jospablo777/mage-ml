@@ -39,7 +39,8 @@ class Recorder:
         self.partitions = []
 
     def __call__(self, pipeline, stage, global_vars, run_tests, update_status, partition=None,
-                 tracking=None, summary=None):
+                 tracking=None, summary=None, statuses=None):
+        statuses[stage[0]] = 'running'
         with self.lock:
             self.events.append(('start', stage[0]))
             self.running += 1
@@ -50,7 +51,9 @@ class Recorder:
             self.running -= 1
             self.events.append(('end', stage[0]))
         if stage[0] in self.fail:
+            statuses[stage[0]] = 'failed'
             raise ValueError(f'{stage[0]} failed')
+        statuses[stage[0]] = 'completed'
 
 
 def run(pipeline, recorder, **kwargs):

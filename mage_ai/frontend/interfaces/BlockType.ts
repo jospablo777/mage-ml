@@ -295,6 +295,10 @@ export interface TemplateType {
 export interface ConfigurationType extends BaseConfigurationType {
   // The Python worker (python_workers/<name>/) the block runs in; 'mage' is MageML's Python.
   python_worker?: string;
+  // An integration pipeline transformer: records of a stream in each call (10000 when unset).
+  records_per_call?: number | null;
+  // When the block runs, given how its upstream blocks ended (orchestration/trigger_rules.py).
+  trigger_rule?: 'all_success' | 'none_failed_min_one_success' | 'all_done' | null;
   // The data contract the block's output must meet (contracts/<name>.yaml).
   contract?: string | {
     enforcement?: 'fail' | 'warn' | 'off';

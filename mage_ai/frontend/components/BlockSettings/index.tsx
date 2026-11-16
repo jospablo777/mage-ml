@@ -78,16 +78,23 @@ const SHARED_EMPHASIZED_TEXT_PROPS = {
 };
 const BLOCK_COLOR_HEX_CODE_MAPPING = getBlockColorHexCodeMapping();
 
+// Settings in a block's configuration, not its variables: the variables table hides them.
 const RESERVED_BLOCK_CONFIG_KEYS = [
   'contract',
   'data_integration',
   'disable_output_preview',
+  'disabled',
   'dynamic',
+  'exclusive',
   'file_path',
   'file_source',
+  'fusion',
   'global_data_product',
+  'python_worker',
+  'records_per_call',
   'reduce_output',
   'resources',
+  'trigger_rule',
 ];
 
 type BlockSettingsProps = {
@@ -931,6 +938,71 @@ function BlockSettings({
             <Text muted small>
               The block timeout will only be applied when the block is run through a trigger. If a
               block times out, the block run will be set to a failed state.
+            </Text>
+          </Spacing>
+        )}
+
+        {BlockLanguageEnum.PYTHON === language && pipeline?.type === PipelineTypeEnum.PYTHON && [
+          BlockTypeEnum.CUSTOM,
+          BlockTypeEnum.DATA_EXPORTER,
+          BlockTypeEnum.DATA_LOADER,
+          BlockTypeEnum.TRANSFORMER,
+        ].includes(blockType) && !!block?.upstream_blocks?.length && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <Headline level={5}>Trigger rule</Headline>
+            <Spacing mb={1} />
+            <Select
+              monospace
+              onChange={e => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  trigger_rule: e.target.value || null,
+                },
+              }))}
+              primary
+              value={blockAttributes?.configuration?.trigger_rule || ''}
+            >
+              <option value="">All upstream blocks completed (all_success)</option>
+              <option value="none_failed_min_one_success">
+                None failed, at least one completed (none_failed_min_one_success)
+              </option>
+              <option value="all_done">All upstream blocks finished, however they ended (all_done)</option>
+            </Select>
+            <Spacing mb={1} />
+            <Text muted small>
+              An upstream block that was skipped or failed gives this block None as its input.
+              A failed block still fails the run.
+            </Text>
+          </Spacing>
+        )}
+
+        {BlockTypeEnum.TRANSFORMER === blockType && pipeline?.type === PipelineTypeEnum.INTEGRATION && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <Headline level={5}>Records per call</Headline>
+            <Spacing mb={1} />
+            <TextInput
+              label="Records in each DataFrame (10000 when empty)"
+              minValue={1}
+              monospace
+              name="records_per_call"
+              onChange={e => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  records_per_call: e.target.value === '' ? null : Number(e.target.value),
+                },
+              }))}
+              primary
+              setContentOnMount
+              type="number"
+              value={blockAttributes?.configuration?.records_per_call ?? ''}
+            />
+            <Spacing mb={1} />
+            <Text muted small>
+              The transformer gets a stream&apos;s records in DataFrames of up to this many rows.
+              Set 1 only for code written for one record at a time: it runs about 100 times
+              slower.
             </Text>
           </Spacing>
         )}

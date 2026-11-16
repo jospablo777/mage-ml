@@ -24,6 +24,13 @@ from mage_ai.data_preparation.models.constants import (
 )
 from mage_ai.orchestration.db import db_connection
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
+from mage_ai.orchestration.trigger_rules import (
+    Decision,
+    block_trigger_rule,
+    continues_after_failure,
+    decide,
+    has_trigger_rule,
+)
 
 BLOCK_FUSION_CHAINS = 'chains'
 
@@ -100,8 +107,30 @@ def fusion_enabled(pipeline, pipeline_run=None) -> bool:
     )
 
 
+def run_controlled(block) -> bool:
+    """Whether the block runs depending on a condition, on being disabled, or on how its
+    upstream blocks ended (a trigger rule)."""
+    return bool(
+        (block.configuration or {}).get('disabled')
+        or has_trigger_rule(block)
+        or getattr(block, 'conditional_blocks', None)
+    )
+
+
 def block_can_fuse(pipeline, block) -> bool:
     """Whether a block can run in a stage with the blocks before and after it."""
+    if block is None:
+        return False
+    if (block.configuration or {}).get('fusion') is False:
+        return False
+    # Whether it runs is decided on its own, before it starts.
+    if run_controlled(block):
+        return False
+    return block_can_run_in_stage(pipeline, block)
+
+
+def block_can_run_in_stage(pipeline, block) -> bool:
+    """Whether a block can run in a stage of `mage run` in this process."""
     from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
     from mage_ai.data_preparation.models.block.dynamic.utils import (
         is_dynamic_block,
@@ -113,7 +142,7 @@ def block_can_fuse(pipeline, block) -> bool:
     if block is None:
         return False
     configuration = block.configuration or {}
-    if configuration.get('fusion') is False or configuration.get('variables'):
+    if configuration.get('variables'):
         return False
     # A block that declares resources waits for them on its own (resources.py).
     if configuration.get('resources'):
@@ -479,15 +508,39 @@ def cli_tracking(pipeline, execution_partition: Optional[str] = None) -> Optiona
     )
 
 
+def _conditions_pass(block, global_vars: Dict, execution_partition: Optional[str]) -> bool:
+    """Whether a block runs: not disabled, and its conditional blocks return true. A
+    condition that raises counts as false, as in a scheduled run (block_executor.py)."""
+    if (block.configuration or {}).get('disabled'):
+        print(f'Block {block.uuid} is disabled: it and the blocks after it are skipped.')
+        return False
+    for conditional in getattr(block, 'conditional_blocks', None) or []:
+        try:
+            passed = conditional.execute_conditional(
+                block, execution_partition=execution_partition, global_vars=global_vars,
+            )
+        except Exception as error:
+            print(f'Conditional block {conditional.uuid} of {block.uuid} failed: {error}')
+            passed = False
+        if not passed:
+            print(f'Conditional block {conditional.uuid} returned false: block {block.uuid} '
+                  'and the blocks after it are skipped.')
+            return False
+    return True
+
+
 def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tests: bool,
                           update_status: bool, execution_partition: Optional[str] = None,
                           tracking: Optional[Dict] = None,
-                          summary: Optional[List] = None) -> None:
+                          summary: Optional[List] = None,
+                          statuses: Optional[Dict[str, str]] = None) -> None:
     """Runs a stage's blocks in order, each taking the previous block's output in memory;
-    a Rust or R block followed by one of its language may plan (block/plans.py)."""
+    a Rust or R block followed by one of its language may plan (block/plans.py). Each
+    block's status goes in statuses as a block run's would."""
     from mage_ai.data_preparation.models.block import plans
     from mage_ai.orchestration.db import end_transaction
 
+    statuses = statuses if statuses is not None else {}
     previous = None
     for index, uuid in enumerate(stage):
         block = pipeline.get_block(uuid)
@@ -495,6 +548,23 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
         next_block = following.uuid if plans.chains_with(block, following) else None
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
+        if not _conditions_pass(block, variables, execution_partition):
+            for skipped in stage[index:]:
+                statuses[skipped] = BlockRun.BlockRunStatus.CONDITION_FAILED
+                if summary is not None:
+                    summary.append(dict(block=skipped, seconds=None, tests=None, failed=False,
+                                        status=BlockRun.BlockRunStatus.CONDITION_FAILED))
+            return
+        if previous:
+            outputs_cache = {previous[0]: previous[1]}
+        else:
+            # A block with a trigger rule gets None from an upstream block that did not
+            # complete, not that block's output of an earlier run.
+            outputs_cache = {
+                u: [None] for u in block.upstream_block_uuids
+                if has_trigger_rule(block)
+                and statuses.get(u) != BlockRun.BlockRunStatus.COMPLETED
+            } or None
         started = time.monotonic()
         row = dict(block=uuid, seconds=None, tests=None, failed=True,
                    started_at=datetime.now(timezone.utc), completed_at=None)
@@ -502,25 +572,34 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
             summary.append(row)
         block.test_summary = None
         end_transaction()
-        with _block_tracking(tracking, uuid), plans.stage_context(next_block, None):
-            result = block.execute_sync(
-                block_run_outputs_cache={previous[0]: previous[1]} if previous else None,
-                execution_partition=execution_partition,
-                global_vars=variables,
-                run_all_blocks=True,
-                update_status=update_status,
-            )
-            # Without tests the data contract is still checked (contracts_only).
-            try:
-                block.run_tests(
-                    contracts_only=not run_tests, execution_partition=execution_partition,
-                    global_vars=variables, update_tests=False,
+        statuses[uuid] = BlockRun.BlockRunStatus.RUNNING
+        try:
+            with _block_tracking(tracking, uuid), plans.stage_context(next_block, None):
+                result = block.execute_sync(
+                    block_run_outputs_cache=outputs_cache,
+                    execution_partition=execution_partition,
+                    global_vars=variables,
+                    run_all_blocks=True,
+                    update_status=update_status,
                 )
-            finally:
-                row.update(seconds=time.monotonic() - started,
-                           tests=getattr(block, 'test_summary', None),
-                           completed_at=datetime.now(timezone.utc))
+                # Without tests the data contract is still checked (contracts_only).
+                try:
+                    block.run_tests(
+                        contracts_only=not run_tests,
+                        execution_partition=execution_partition,
+                        global_vars=variables, update_tests=False,
+                    )
+                finally:
+                    row.update(seconds=time.monotonic() - started,
+                               tests=getattr(block, 'test_summary', None),
+                               completed_at=datetime.now(timezone.utc))
+        except BaseException:
+            statuses[uuid] = BlockRun.BlockRunStatus.FAILED
+            for later in stage[index + 1:]:
+                statuses[later] = BlockRun.BlockRunStatus.UPSTREAM_FAILED
+            raise
         row['failed'] = False
+        statuses[uuid] = BlockRun.BlockRunStatus.COMPLETED
         output = result.get('output') if isinstance(result, dict) else None
         previous = (uuid, output) if passes_in_memory(output) else None
         release_block(block)
@@ -551,20 +630,18 @@ def executable(block) -> bool:
 
 
 def stages_apply_to_cli(pipeline) -> bool:
-    """Whether `mage run` runs the pipeline in stages: fusion on, and only blocks a stage
-    can hold (no dynamic, integration or replicated blocks, conditionals or callbacks).
-    Markdown, charts and scratchpads are not run, so they do not count."""
-    if not fusion_enabled(pipeline):
+    """Whether `mage run` runs the pipeline in stages: fusion on, or a block whose run is
+    decided (run_controlled), which only the stages decide; and only blocks a stage can
+    hold (no dynamic, integration or replicated blocks, or callbacks). Markdown, charts
+    and scratchpads are not run, so they do not count."""
+    if pipeline is None or pipeline.type != PipelineType.PYTHON:
         return False
-    if getattr(pipeline, 'conditionals', None) or getattr(pipeline, 'callbacks', None):
+    blocks = [b for b in pipeline.blocks_by_uuid.values() if executable(b)]
+    if not fusion_enabled(pipeline) and not any(map(run_controlled, blocks)):
         return False
-    # Disabled blocks are skipped by the block executor, as conditions skip blocks.
-    if any((b.configuration or {}).get('disabled') for b in pipeline.blocks_by_uuid.values()):
+    if getattr(pipeline, 'callbacks', None):
         return False
-    return all(
-        block_can_fuse(pipeline, block)
-        for block in pipeline.blocks_by_uuid.values() if executable(block)
-    )
+    return all(block_can_run_in_stage(pipeline, block) for block in blocks)
 
 
 def print_run_summary(rows: List[Dict], run_tests: bool) -> None:
@@ -589,6 +666,10 @@ def print_run_summary(rows: List[Dict], run_tests: bool) -> None:
         seconds = '' if row.get('seconds') is None else f'{row["seconds"]:.2f}'
         if row.get('failed'):
             text += ' (failed)' if text != '-' else 'failed'
+        elif row.get('status') == BlockRun.BlockRunStatus.CONDITION_FAILED:
+            text = 'skipped'
+        elif row.get('status') == BlockRun.BlockRunStatus.UPSTREAM_FAILED:
+            text = 'not run: upstream failed'
         lines.append(f'{row["block"]:<{width}}  {seconds:>8}  {text}')
     blocks = len(rows)
     if ran:
@@ -630,20 +711,28 @@ async def execute_in_stages(
     execution_partition: Optional[str] = None,
     max_parallel: Optional[int] = None,
     record_run: bool = False,
+    fuse: bool = True,
 ) -> None:
     """
-    `mage run` with block fusion: the pipeline's stages in this process, as a fused run
-    runs them. With record_run, the run is recorded as a pipeline run when it ends
-    (cli_runs.py). A stage starts as soon as its upstream blocks are done, up to the stage
-    limit (stage_limit), and not while the process holds more memory than
-    MAGE_STAGE_MAX_MEMORY_SHARE allows and another stage runs. After a stage fails, no
-    stage starts; the run waits for the stages already running (a thread cannot be
-    stopped) and raises the first failure, with the others noted.
+    `mage run` with block fusion (fuse), or with each block a stage of its own: the
+    pipeline's stages in this process, as a fused run runs them. With record_run, the run is
+    recorded as a pipeline run when it ends (cli_runs.py). A stage starts as soon as its
+    upstream blocks are done, up to the stage limit (stage_limit), and not while the process
+    holds more memory than MAGE_STAGE_MAX_MEMORY_SHARE allows and another stage runs. A
+    disabled block, or one whose condition is false, is skipped with the blocks after it; a
+    stage whose first block has a trigger rule starts as the rule says (trigger_rules.py).
+    After a stage fails, no stage starts, unless the pipeline has an all_done block: then
+    the stages that can still run do. The run waits for the stages already running (a thread
+    cannot be stopped) and raises the first failure, with the others noted.
     """
     import asyncio
 
     global_vars = global_vars or {}
-    pending = [list(stage) for stage in fusion_plan(pipeline)]
+    if fuse:
+        pending = [list(stage) for stage in fusion_plan(pipeline)]
+    else:
+        # Block fusion off: each block is a stage of its own.
+        pending = [[b.uuid] for b in pipeline.blocks_by_uuid.values() if executable(b)]
     limit = stage_limit(pipeline, max_parallel)
     started_at = datetime.now(timezone.utc)
     prepared = None
@@ -656,16 +745,35 @@ async def execute_in_stages(
             print(f'[WARNING] The run record could not be prepared: {error}')
     tracking = await asyncio.to_thread(cli_tracking, pipeline, execution_partition)
     summary: List[Dict] = []
-    done: set = set()
+    # Block uuid to the status its block run would have.
+    statuses: Dict[str, str] = {}
     running: Dict = {}
     failures: List = []
+    # An all_done block runs after a failed block, as in a scheduled run.
+    keep_going = continues_after_failure(pipeline)
 
-    def ready(stage: List[str]) -> bool:
+    def decision(stage: List[str]) -> Decision:
+        """Whether the stage runs, waits, or ends as its first block's rule says."""
         head = pipeline.get_block(stage[0])
-        return all(
-            u.uuid in done for u in (head.upstream_blocks or [])
+        return decide(block_trigger_rule(head), [
+            statuses.get(u.uuid) for u in (head.upstream_blocks or [])
             if getattr(u, 'type', None) is None or executable(u)
-        )
+        ])
+
+    def settle() -> None:
+        """Stages that will not run: their blocks end skipped or upstream failed."""
+        settled = True
+        while settled:
+            settled = False
+            for stage in list(pending):
+                outcome = decision(stage)
+                if outcome in (Decision.UPSTREAM_FAILED, Decision.CONDITION_FAILED):
+                    pending.remove(stage)
+                    settled = True
+                    for uuid in stage:
+                        statuses[uuid] = BlockRun.BlockRunStatus(outcome.value)
+                        summary.append(dict(block=uuid, seconds=None, tests=None,
+                                            failed=False, status=outcome.value))
 
     def exclusive(stage: List[str]) -> bool:
         # Blocks that change process-wide state (environment, MLflow's tracking URI,
@@ -676,8 +784,9 @@ async def execute_in_stages(
         )
 
     while pending or running:
-        if not failures:
-            for stage in [s for s in pending if ready(s)]:
+        if not failures or keep_going:
+            settle()
+            for stage in [s for s in pending if decision(s) == Decision.RUN]:
                 if limit is not None and len(running) >= limit:
                     break
                 if running and over_memory_limit():
@@ -688,12 +797,12 @@ async def execute_in_stages(
                     break
                 task = asyncio.ensure_future(asyncio.to_thread(
                     _run_stage_in_process, pipeline, stage, global_vars, run_tests,
-                    update_status, execution_partition, tracking, summary,
+                    update_status, execution_partition, tracking, summary, statuses,
                 ))
                 running[task] = stage
                 pending.remove(stage)
         if not running:
-            if failures:
+            if failures or not pending:
                 break
             raise RuntimeError(
                 'The pipeline has blocks whose upstream blocks never run: '
@@ -705,8 +814,6 @@ async def execute_in_stages(
             error = task.exception()
             if error is not None:
                 failures.append((stage, error))
-            else:
-                done.update(stage)
     print_run_summary(summary, run_tests)
     if record_run:
         _record_cli_run(pipeline, prepared, summary, global_vars, started_at, bool(failures),

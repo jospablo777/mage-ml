@@ -47,6 +47,7 @@ from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_con
 from mage_ai.orchestration.db import end_transaction
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.orchestration.run_lineage import current_pipeline_run_id
+from mage_ai.orchestration.trigger_rules import missing_upstream_outputs
 from mage_ai.shared.dates import utc_now
 from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.utils import clean_name
@@ -640,6 +641,11 @@ class BlockExecutor:
                         outputs_cache = block_run_outputs_cache
                         if fused and (self.retry_metadata.get('attempts') or 1) > 1:
                             outputs_cache = None
+                        # A block with a trigger rule gets None from an upstream block
+                        # that did not complete, not that block's output of another run.
+                        missing = missing_upstream_outputs(self.block, pipeline_run)
+                        if missing:
+                            outputs_cache = {**(outputs_cache or {}), **missing}
 
                         try:
                             return self._execute(

@@ -81,3 +81,38 @@ blocks:
 
 Runs skip the block and the blocks downstream of it, which end as `condition_failed`, as a
 false condition skips them; the run completes. Uncheck the setting to run the block again.
+
+## Trigger rules
+
+A block runs when every upstream block completed. Its trigger rule changes that: choose it
+under **Trigger rule** in the block's settings, or set `trigger_rule` in its
+`configuration`.
+
+| Rule | The block runs when | A failed upstream block | Skipped upstream blocks |
+| --- | --- | --- | --- |
+| `all_success` (default) | every upstream block completed | makes it `upstream_failed` | skip it |
+| `none_failed_min_one_success` | none failed and at least one completed | makes it `upstream_failed` | skip it only if all were skipped |
+| `all_done` | every upstream block finished, however it ended | does not stop it | do not stop it |
+
+`none_failed_min_one_success` is the join after branches with conditions: it runs after the
+branch that ran. `all_done` is for cleanup and alerts that run after a failure.
+
+```yaml
+blocks:
+- uuid: join_branches
+  configuration:
+    trigger_rule: none_failed_min_one_success
+- uuid: drop_staging_tables
+  configuration:
+    trigger_rule: all_done
+```
+
+- An upstream block that was skipped or failed gives the block `None` as its input.
+- A failed block still fails the run. In a pipeline with an `all_done` block, the run goes
+  on after a failure, as with **Allow blocks to fail**, and fails once no other block can
+  run.
+- Trigger rules apply to Python blocks of batch pipelines, not to dynamic, replicated or
+  data integration blocks, or to blocks after a dynamic block.
+- Triggers and `mage run` apply trigger rules, conditions and disabled blocks alike.
+  `mage run` cannot apply them to a pipeline with dynamic, data integration or replicated
+  blocks, or callbacks: it says so and runs every block.

@@ -52,6 +52,7 @@ from mage_ai.orchestration.metrics.pipeline_run import (
 from mage_ai.orchestration.notification.config import NotificationConfig
 from mage_ai.orchestration.notification.sender import NotificationSender
 from mage_ai.orchestration.pipeline_callbacks import run_pipeline_callbacks
+from mage_ai.orchestration.trigger_rules import continues_after_failure
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
 from mage_ai.orchestration.utils.git import log_git_sync, run_git_sync
 from mage_ai.orchestration.utils.resources import get_compute, get_memory
@@ -128,12 +129,13 @@ class PipelineScheduler:
 
         self.concurrency_config = ConcurrencyConfig.load(config=self.pipeline.concurrency_config)
 
-        # Other pipeline scheduling settings
+        # Other pipeline scheduling settings. An all_done block runs after a failed block,
+        # so a run of its pipeline goes on after a failure and fails when it ends.
         self.allow_blocks_to_fail = (
             self.pipeline_schedule.get_settings().allow_blocks_to_fail
             if self.pipeline_schedule
             else False
-        )
+        ) or continues_after_failure(self.pipeline)
 
     @safe_db_query
     def start(self, should_schedule: bool = True) -> bool:

@@ -4,6 +4,13 @@
 
 ### Behavior changes to check before upgrading
 
+- A Python transformer in a data integration pipeline gets up to 10,000 records of a
+  stream per call, not one: about 140 times faster, and the rows it adds are written (only
+  the first row it returned was). Code written for one record at a time sets
+  `records_per_call: 1` (**Records per call** in the block's settings); when such code
+  fails, the error says so.
+- `mage run` skips disabled blocks and blocks whose condition is false, with the blocks
+  after them, as triggers do; it ran them.
 - With `MAGE_RESTART_STREAMING_PIPELINES_ON_REQUIREMENTS_CHANGE`, streaming runs restart
   after MageML installs `requirements.txt` (a git pull or reset that installs
   requirements), not when the file changes: an edit that was not installed restarted runs
@@ -23,6 +30,13 @@
   logged: each write was a line of its own and blank lines were dropped.
 - Airflow's `create_dags` passes the schedule as `schedule` to Airflow 2.4 and later
   (Airflow 3 refused `schedule_interval`).
+
+### Pipelines
+
+- Trigger rules (upstream #4704): `none_failed_min_one_success` runs a join after the branch
+  that ran, `all_done` runs cleanup and alerts after a failure. An upstream block that was
+  skipped or failed gives the block `None`; a failed block still fails the run. Set in the
+  block's settings; triggers and `mage run` apply them.
 
 ### Server
 

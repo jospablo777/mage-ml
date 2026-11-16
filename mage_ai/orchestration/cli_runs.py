@@ -79,6 +79,9 @@ def record(
         if row is None:
             status = BlockRun.BlockRunStatus.UPSTREAM_FAILED if failed \
                 else BlockRun.BlockRunStatus.CANCELLED
+        elif row.get('status'):
+            # Skipped, or not run after a failed upstream block.
+            status = BlockRun.BlockRunStatus(row['status'])
         elif row.get('failed'):
             status = BlockRun.BlockRunStatus.FAILED
         else:

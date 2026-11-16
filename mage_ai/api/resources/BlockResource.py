@@ -13,6 +13,10 @@ from mage_ai.cache.block_action_object.constants import (
 )
 from mage_ai.data_preparation.models.block import Block
 from mage_ai.data_preparation.models.block.block_factory import BlockFactory
+from mage_ai.data_preparation.models.block.integration.records import (
+    CONFIG_KEY_RECORDS_PER_CALL,
+    records_per_call,
+)
 from mage_ai.data_preparation.models.block.utils import clean_name
 from mage_ai.data_preparation.models.constants import (
     FILE_EXTENSION_TO_BLOCK_LANGUAGE,
@@ -27,6 +31,7 @@ from mage_ai.data_preparation.templates.data_integrations.constants import (
     TEMPLATE_TYPE_DATA_INTEGRATION,
 )
 from mage_ai.data_preparation.utils.block.convert_content import convert_to_block
+from mage_ai.orchestration import trigger_rules
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.orchestration.db.models.schedules import PipelineRun
 from mage_ai.presenters.blocks.graph import build_blocks_for_pipeline_run
@@ -372,6 +377,26 @@ class BlockResource(GenericResource):
         update_state = query.get('update_state', [False])
         if update_state:
             update_state = update_state[0]
+
+        configuration = payload.get('configuration')
+        if isinstance(configuration, dict):
+            message = None
+            if CONFIG_KEY_RECORDS_PER_CALL in configuration:
+                try:
+                    records_per_call(configuration)
+                except ValueError as invalid:
+                    message = str(invalid)
+            if message is None:
+                message = trigger_rules.validation_error(
+                    self.model.pipeline,
+                    self.model,
+                    configuration.get(trigger_rules.CONFIG_KEY_TRIGGER_RULE),
+                )
+            if message:
+                error = ApiError.RESOURCE_INVALID.copy()
+                error.update(message=message)
+                raise ApiError(error)
+
         self.model.update(
             payload,
             update_state=update_state,
