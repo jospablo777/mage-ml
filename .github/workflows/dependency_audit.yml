@@ -13,6 +13,8 @@ on:
       - mage_ai/frontend/package.json
       - mage_ai/frontend/yarn.lock
       - .github/workflows/dependency_audit.yml
+      - scripts/audit_dependencies.sh
+      - scripts/yarn_audit.py
   push:
     branches: [master]
     paths:
@@ -26,6 +28,8 @@ on:
       - mage_ai/frontend/package.json
       - mage_ai/frontend/yarn.lock
       - .github/workflows/dependency_audit.yml
+      - scripts/audit_dependencies.sh
+      - scripts/yarn_audit.py
   schedule:
     - cron: '20 6 * * 1'
   workflow_dispatch:
@@ -45,29 +49,9 @@ jobs:
         run: python -m pip install uv==0.11.29
       - name: Install audit tooling
         run: uv sync --locked --only-group dev
-      - name: Export production dependencies
-        run: >-
-          uv export --locked --extra all --extra integrations --no-default-groups
-          --no-hashes --no-emit-workspace --output-file /tmp/mage-runtime-requirements.txt
-      - name: Check published advisories
-        run: >-
-          uv run --no-sync pip-audit --disable-pip --no-deps
-          --requirement /tmp/mage-runtime-requirements.txt
-      # The whole lock, every extra included, against OSV, which also has advisories that
-      # pip-audit's source lacks.
-      # Accepted while no fixed release exists (the audit fails again once one does; a GHSA ID
-      # also covers its PYSEC alias):
-      # chromadb, only in the opt-in chroma extra. The advisories are about Chroma's HTTP
-      # server and its authorization providers; MageML runs Chroma embedded and starts no
-      # server.
-      # Ignored: PYSEC-2023-235 is about Couchbase Server 7.2.0 (a key in its debug.log),
-      # filed against the Python SDK with no version bound.
-      - name: Check OSV advisories for every extra
-        run: >-
-          uv audit --frozen --preview-features audit-command
-          --ignore-until-fixed GHSA-f4j7-r4q5-qw2c --ignore-until-fixed GHSA-36p7-vc44-83pf
-          --ignore-until-fixed GHSA-2wm9-hf6c-p5cr --ignore-until-fixed GHSA-xph7-9rjv-w5fr
-          --ignore PYSEC-2023-235
+      # The accepted advisories are listed once, in the script.
+      - name: Check the root lock (pip-audit and OSV, every extra)
+        run: scripts/audit_dependencies.sh python
 
   runtime_helpers:
     runs-on: ubuntu-latest
@@ -83,18 +67,8 @@ jobs:
         run: |
           python -m pip install uv==0.11.29
           uv sync --locked --only-group dev
-      - name: Export locked runtime
-        run: >-
-          uv export --project runtimes/${{ matrix.runtime }} --locked --no-default-groups
-          --no-hashes --output-file /tmp/mage-helper-requirements.txt
-      - name: Check published advisories
-        run: >-
-          uv run --no-sync pip-audit --disable-pip --no-deps
-          --requirement /tmp/mage-helper-requirements.txt
-      - name: Check OSV advisories
-        run: >-
-          uv audit --frozen --preview-features audit-command
-          --project runtimes/${{ matrix.runtime }}
+      - name: Check the runtime lock
+        run: scripts/audit_dependencies.sh runtime ${{ matrix.runtime }}
 
   frontend:
     runs-on: ubuntu-latest
@@ -106,11 +80,7 @@ jobs:
       - name: Install Yarn
         run: npm install --global yarn@1.22.22
       - name: Check frontend advisories
-        working-directory: mage_ai/frontend
-        run: |
-          yarn install --frozen-lockfile --ignore-scripts --non-interactive
-          set +o pipefail
-          yarn audit --json | python3 ../../scripts/yarn_audit.py
+        run: scripts/audit_dependencies.sh frontend
 
   # RustSec advisories for every Cargo.lock: the engine, ColumnAtlas, the Rust block SDK and
   # the playground's Rust blocks.
@@ -122,20 +92,4 @@ jobs:
         with:
           tool: cargo-audit
       - name: Audit the Rust dependencies
-        # Accepted until Polars (0.55.2, the newest) updates them: quick-xml through
-        # object_store, only reachable from a cloud storage server that sends crafted XML
-        # (RUSTSEC-2026-0194, RUSTSEC-2026-0195); bincode unmaintained (RUSTSEC-2025-0141).
-        # rustls-pemfile unmaintained (RUSTSEC-2025-0134), no known vulnerability: the
-        # mysql crate's TLS needs it to read MYSQL_SSL_CA; the SDK's mysql feature only.
-        # webpki-roots 0.26.11 (RUSTSEC-2026-0381) has no fixed 0.26 release: it re-exports
-        # webpki-roots 1.x, which is 1.0.10, the fixed roots (async-nats > tokio-websockets).
-        run: |
-          status=0
-          for lock in $(git ls-files '*Cargo.lock'); do
-            echo "== $lock"
-            cargo audit --file "$lock" --deny warnings \
-              --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
-              --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2025-0134 \
-              --ignore RUSTSEC-2026-0381 || status=1
-          done
-          exit $status
+        run: scripts/audit_dependencies.sh rust

@@ -93,7 +93,7 @@ Tests that run blocks restart the kernel in `beforeEach`.
 | Workflow | When | What it checks |
 | --- | --- | --- |
 | `build_and_test.yml` | Push to `master` and pull requests that change `mage_ai/`, `mage_integrations/`, `vendor/`, `runtimes/`, `rust/`, `integration_tests/`, `pyproject.toml`, `uv.lock` or the workflow; manual | Lint, Rust, packaging, integration tests, unit tests and the browser tests |
-| `dependency_audit.yml` | Dependency changes; Mondays 06:20 UTC; manual | Known vulnerabilities in the Python and JavaScript dependencies |
+| `dependency_audit.yml` | Dependency changes; Mondays 06:20 UTC; manual | Known vulnerabilities in the Python, Rust and JavaScript dependencies (`scripts/audit_dependencies.sh`) |
 | `codeql-analysis.yml` | Tuesdays 16:24 UTC; manual | CodeQL code scanning |
 | `trivy.yml` | Tuesdays 01:35 UTC; manual | Trivy scan of the image and the repository |
 | `lint_docker_image.yml` | Pull requests that change the Dockerfile; manual | Dockerfile lint |
@@ -223,6 +223,23 @@ cd /tmp && mage init test_project && REQUIRE_USER_AUTHENTICATION=1 mage start te
 cd mage_ai/frontend && MAGE_TEST_SERVER_URL=http://127.0.0.1:6797 \
   npx playwright test -c playwright.config.ci.ts
 ```
+
+### Dependency vulnerabilities
+
+`scripts/audit_dependencies.sh` runs the checks of `dependency_audit.yml`, which calls it:
+pip-audit and `uv audit` (OSV) for the root lock and each `runtimes/*` lock, `cargo audit`
+for every `Cargo.lock`, and `yarn audit` for the frontend. It needs uv with the dev group
+synced, `cargo install cargo-audit`, and yarn.
+
+```bash
+scripts/audit_dependencies.sh            # every check
+scripts/audit_dependencies.sh rust       # or python, runtimes, frontend
+```
+
+The accepted advisories are listed in the script with the reason for each. To fix one,
+upgrade to the smallest patched release (`uv lock --upgrade-package <name>`,
+`cargo update -p <crate>@<version>` in the lock's folder, or a version or `resolutions`
+entry in `package.json`), then run the unit, Rust and browser suites.
 
 ### The whole workflow
 
