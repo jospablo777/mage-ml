@@ -28,6 +28,14 @@ from mage_ai.server.server import (
 from mage_ai.tests.base_test import AsyncDBTestCase
 
 
+def request_to(uri: str) -> tornado.httputil.HTTPServerRequest:
+    # Tornado 6.6 deprecates the method and uri arguments for start_line.
+    return tornado.httputil.HTTPServerRequest(
+        start_line=tornado.httputil.RequestStartLine('GET', uri, 'HTTP/1.1'),
+        headers=tornado.httputil.HTTPHeaders({'Host': 'localhost'}),
+    )
+
+
 class ServerTests(AsyncDBTestCase):
     def setUp(self):
         self.loop = asyncio.new_event_loop()
@@ -56,24 +64,15 @@ class ServerTests(AsyncDBTestCase):
     @patch('mage_ai.server.server.ROUTES_BASE_PATH', 'test_prefix')
     def test_make_app_with_update_routes(self):
         app = make_app(update_routes=True)
-        request = tornado.httputil.HTTPServerRequest(
-            method='GET',
-            uri='/test_prefix',
-        )
+        request = request_to('/test_prefix')
         handler = app.default_router.find_handler(request)
         self.assertIsNotNone(handler)
 
-        request = tornado.httputil.HTTPServerRequest(
-            method='GET',
-            uri='/test_prefix/pipelines',
-        )
+        request = request_to('/test_prefix/pipelines')
         handler = app.default_router.find_handler(request)
         self.assertIsNotNone(handler)
 
-        request = tornado.httputil.HTTPServerRequest(
-            method='GET',
-            uri='/pipelines',
-        )
+        request = request_to('/pipelines')
         handler = app.default_router.find_handler(request)
         self.assertIsNone(handler)
 

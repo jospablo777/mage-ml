@@ -42,7 +42,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "process", "signal", "time", "sync", "fs", "io-util", "io-std"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 croner = "3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 chrono-tz = "0.10"

@@ -38,6 +38,15 @@
   skipped or failed gives the block `None`; a failed block still fails the run. Set in the
   block's settings; triggers and `mage run` apply them.
 
+### Security
+
+- Next.js 15.5.29: 15.5.27 had an unauthenticated remote code execution through the image
+  optimization API with SVG files, and a denial of service. Also follow-redirects, fast-uri,
+  glob and minimatch in the frontend; tornado, filelock, dnspython, gitpython, oauthlib,
+  pyasn1, pymongo, soupsieve, nbconvert and others in Python; certifi 2026.10.23 (dbt-snowflake
+  1.12.5 lifted its bound); zstd, tokio, arrow, ctutils and the bundled SQLite (rusqlite 0.43)
+  in the Rust engine and SDK.
+
 ### Server
 
 - With `MAGE_GATEWAY_AUTHZ_SHADOW=1`, the gateway decides every API request, writes and their

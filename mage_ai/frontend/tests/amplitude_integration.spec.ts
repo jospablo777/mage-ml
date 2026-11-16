@@ -17,7 +17,10 @@ import { expect, test } from './base';
  */
 
 const PORT = Number(process.env.MAGE_E2E_AMPLITUDE_PORT || 18766);
-const AMPLITUDE_URL = `http://127.0.0.1:${PORT}`;
+// A stand-in already running where the server reaches it, such as inside the server's
+// container; otherwise the test starts one here.
+const EXTERNAL_AMPLITUDE_URL = process.env.MAGE_E2E_AMPLITUDE_URL;
+const AMPLITUDE_URL = EXTERNAL_AMPLITUDE_URL || `http://127.0.0.1:${PORT}`;
 const SHOTS = process.env.MAGE_E2E_SCREENSHOTS;
 const SUFFIX = Date.now().toString(36);
 const REPO = path.resolve(__dirname, '..', '..', '..');
@@ -34,11 +37,13 @@ async function shot(page, name: string) {
 }
 
 test.beforeAll(async ({ playwright }, testInfo) => {
-  amplitude = spawn(
-    process.env.MAGE_E2E_PYTHON || 'python3',
-    ['-m', 'mage_ai.cli.main', 'examples', 'amplitude-server', '--port', String(PORT)],
-    { cwd: REPO, stdio: 'ignore' },
-  );
+  if (!EXTERNAL_AMPLITUDE_URL) {
+    amplitude = spawn(
+      process.env.MAGE_E2E_PYTHON || 'python3',
+      ['-m', 'mage_ai.cli.main', 'examples', 'amplitude-server', '--port', String(PORT)],
+      { cwd: REPO, stdio: 'ignore' },
+    );
+  }
   await expect.poll(async () => {
     try {
       return (await fetch(`${AMPLITUDE_URL}/api/2/taxonomy/category`)).status;

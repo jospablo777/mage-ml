@@ -24,7 +24,7 @@
     "@codingame/monaco-vscode-keybindings-service-override": "^5.2.0",
     "@codingame/monaco-vscode-python-default-extension": "^5.2.0",
     "@monaco-editor/react": "^4.6.0",
-    "@next/third-parties": "15.5.27",
+    "@next/third-parties": "15.5.29",
     "@tanstack/react-query": "^5.45.0",
     "@types/moment-duration-format": "^2.2.5",
     "@types/react-table": "^7.7.12",
@@ -63,7 +63,7 @@
     "monaco-editor-wrapper": "^5.2.0",
     "monaco-languageclient": "^8.5.0",
     "monaco-themes": "^0.4.4",
-    "next": "15.5.27",
+    "next": "15.5.29",
     "next-cookies": "^2.0.3",
     "plist": "^3.1.0",
     "raw-loader": "^4.0.2",
@@ -121,7 +121,7 @@
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.39.5",
-    "eslint-config-next": "15.5.27",
+    "eslint-config-next": "15.5.29",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-storybook": "^10.6.3",
     "eslint-plugin-unused-imports": "^4.0.0",
@@ -145,6 +145,10 @@
     "@types/react-dom": "^18.3.0",
     "csstype": "^3.2.3",
     "universal-cookie": "^8.1.2",
-    "linkify-it": "^5.0.2"
+    "linkify-it": "^5.0.2",
+    "follow-redirects": "^1.16.2",
+    "fast-uri": "^3.1.9",
+    "**/@joshwooding/vite-plugin-react-docgen-typescript/glob": "^14.0.6",
+    "**/@typescript-eslint/typescript-estree/minimatch": "^11.0.8"
   }
 }

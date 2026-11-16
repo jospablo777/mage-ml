@@ -15,7 +15,7 @@ thiserror.workspace = true
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 libc = "0.2"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tokio = { version = "1.47", features = ["rt"] }
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 uuid = { version = "1", features = ["v7"] }

@@ -108,10 +108,15 @@ jobs:
           image=mageml:${{ github.sha }}
           container=mage-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           docker run --detach --name "$container" --publish 127.0.0.1:16789:6789 \
+            --publish 127.0.0.1:18766:18766 \
             --env REQUIRE_USER_AUTHENTICATION=1 --env DISABLE_AUTO_BROWSER_OPEN=1 "$image"
           trap 'docker logs "$container"; docker rm --force "$container"' EXIT
           python scripts/verify_server.py http://127.0.0.1:16789
+          # The Amplitude test's stand-in runs where the server reaches it, in the container.
+          docker exec --detach "$container" /opt/mage/bin/python -m mage_ai.cli.main \
+            examples amplitude-server --port 18766 --host 0.0.0.0
           MAGE_TEST_SERVER_URL=http://127.0.0.1:16789 \
+          MAGE_E2E_AMPLITUDE_URL=http://127.0.0.1:18766 \
             yarn --cwd mage_ai/frontend playwright test -c playwright.config.ci.ts
           docker stop --time 10 "$container"
           case "$(docker inspect --format '{{.State.ExitCode}}' "$container")" in
