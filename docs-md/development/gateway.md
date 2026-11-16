@@ -119,6 +119,18 @@ each disagreement among the recent differences. File uploads and other bodies go
 they come and are not counted. The server still decides; the counts are what moving
 authorization to Rust is measured by.
 
+### Refusing in the gateway
+
+`MAGE_GATEWAY_AUTHZ=enforce` uses the same decisions to refuse: a request the recorded
+policies refuse is answered by the gateway, as the server answers a refused request (status
+200 with a 403 `unauthorized_access` error; the message names the role and the action), and
+never reaches the server. Requests the policies allow, or that the gateway cannot decide
+(uncovered or failed, above), go to the server, which still decides them, so a rule the
+matrix lacks can only let a request through to the server, never refuse one the server would
+allow. Refusals are counted as `refused`; allowed requests are still compared. Keep it off
+with user permissions on (the gateway decides nothing then) and after changing a policy until
+the matrix is recorded again (`scripts/contracts/record.py`).
+
 ## Measured
 
 `integration_tests/gateway` (`make -C integration_tests test-gateway`) runs `mage start`
@@ -142,6 +154,7 @@ with the gateway and checks:
 | The same suite with `MAGE_GATEWAY_SERVE=block_runs,pipeline_run,pipeline_runs` | 38 passed, 4 skipped; the gateway answered 50 of the pages' reads (46 runs lists, the overview's included), none unsupported |
 | The same suite with all five routes served | 38 passed, 4 skipped; the gateway answered 68 of the pages' reads (46 runs lists, 14 triggers lists, 4 logs, 3 block runs lists, a run), and the ten it also asked the server for were equal |
 | `GET /api/monitor_stats`: ten queries of the overview and the monitor pages, on SQLite; the same SQL on PostgreSQL in a unit test | All ten equal |
+| `MAGE_GATEWAY_AUTHZ=enforce`: a viewer creating a pipeline, an editor creating one, a viewer listing them | The viewer's create refused by the gateway (not created, counted once); the others reached the server |
 | `MAGE_GATEWAY_AUTHZ_SHADOW=1`: every recorded `GET /api` read, and pipeline and backfill writes (one with an attribute an editor may not write on create), as the owner, an editor, a viewer, a user with no role and a caller without a session | Every decision as the server's |
 | The Playwright suite with `MAGE_GATEWAY_AUTHZ_SHADOW=1` and six routes served | 41 passed, 4 skipped; 877 requests over 68 resources and actions (writes included) decided, all as the server's, none uncounted |
 

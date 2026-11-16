@@ -124,3 +124,43 @@ def test_every_recorded_read_is_decided_as_the_server_decides_it(authz):
     writes = {k: c for k, c in counts.items() if k.endswith(' create')}
     assert writes['backfills create']['agree'] == 2 * len(sessions), writes
     assert writes['pipelines create']['agree'] >= len(sessions), writes
+
+
+@pytest.fixture(scope='module')
+def enforced(tmp_path_factory):
+    for port, _upstream, folder in run_server(tmp_path_factory, MAGE_GATEWAY_AUTHZ='enforce'):
+        yield port, folder
+
+
+def test_the_gateway_refuses_what_the_policies_refuse(enforced):
+    """MAGE_GATEWAY_AUTHZ=enforce: the gateway answers a refused request itself, in the
+    server's shape; allowed requests reach the server."""
+    gateway, folder = enforced
+    add_users(folder)
+    api = f'http://127.0.0.1:{gateway}/api'
+    owner = session_for(gateway, 'admin@admin.com', 'admin')
+    viewer = session_for(gateway, 'viewer@example.com', 'password')
+    editor = session_for(gateway, 'editor@example.com', 'password')
+
+    refused = viewer.post(f'{api}/pipelines', json=dict(pipeline=dict(
+        name='enforced_viewer', type='python',
+    )), timeout=60)
+    assert refused.status_code == 200
+    error = refused.json()['error']
+    assert error['code'] == 403 and error['type'] == 'unauthorized_access'
+    assert error['message'].startswith(
+        'Unauthorized access: the viewer role may not create pipelines'), error
+
+    created = editor.post(f'{api}/pipelines', json=dict(pipeline=dict(
+        name='enforced_editor', type='python',
+    )), timeout=60).json()
+    assert created['pipeline']['uuid'] == 'enforced_editor', created
+    assert viewer.get(f'{api}/pipelines', timeout=60).json().get('error') is None
+
+    names = {p['uuid'] for p in owner.get(f'{api}/pipelines', timeout=60).json()['pipelines']}
+    assert 'enforced_editor' in names and 'enforced_viewer' not in names
+
+    counts = requests.get(
+        f'http://127.0.0.1:{gateway}/__gateway/shadow', timeout=10,
+    ).json()['authorization']
+    assert counts['pipelines create']['refused'] == 1, counts

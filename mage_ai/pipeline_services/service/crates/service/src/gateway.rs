@@ -250,6 +250,19 @@ async fn forward(
     } else {
         (body.boxed(), hyper::body::Bytes::new())
     };
+    // MAGE_GATEWAY_AUTHZ=enforce: a request the recorded policies refuse is answered here,
+    // as the server would, without reaching it. Allowed and undecided ones go on.
+    if authz_read
+        && crate::gateway_policy::enforce()
+        && let Some(shadow) = &upstream.shadow
+        && let Some(decision) = shadow
+            .authorize(&method, &route_path, &query, &parts.headers, &payload)
+            .await
+        && !decision.allowed
+    {
+        shadow.count_refused(&decision);
+        return refused(&decision);
+    }
     let reread_headers = parts.headers.clone();
     let path = parts
         .uri
@@ -516,6 +529,41 @@ fn forwarded_for(headers: &mut HeaderMap, peer: SocketAddr) {
     }
 }
 
+/// The server's answer to a request its policies refuse: status 200 with a 403 error, the
+/// shape BaseHandler.write_error writes for an ApiError.
+fn refused(decision: &crate::gateway_shadow::Decision) -> Response<Body> {
+    let message = format!(
+        "Unauthorized access: the {} role may not {} {}{}.",
+        decision.role,
+        decision.action,
+        decision.resource,
+        if decision.names.is_empty() && decision.attributes.is_empty() {
+            ""
+        } else {
+            " with the query or attributes sent"
+        },
+    );
+    let body = serde_json::json!({
+        "error": {
+            "code": 403,
+            "exception": message,
+            "message": message,
+            "type": "unauthorized_access",
+        },
+        "url_parameters": {},
+    });
+    let mut response = Response::new(
+        Full::new(Bytes::from(body.to_string()))
+            .map_err(|never| match never {})
+            .boxed(),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
 fn answer(status: StatusCode, message: &str) -> Response<Body> {
     let mut response = Response::new(
         Full::new(Bytes::from(format!("{message}\n")))
@@ -533,6 +581,31 @@ fn answer(status: StatusCode, message: &str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_refusal_has_the_servers_shape() {
+        let decision = crate::gateway_shadow::Decision {
+            action: "create",
+            allowed: false,
+            attributes: vec!["name".into()],
+            key: "pipelines create".into(),
+            names: vec![],
+            resource: "pipelines".into(),
+            role: "viewer",
+        };
+        let response = refused(&decision);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["error"]["code"], 403);
+        assert_eq!(value["error"]["type"], "unauthorized_access");
+        assert_eq!(
+            value["error"]["message"],
+            "Unauthorized access: the viewer role may not create pipelines with the query or \
+             attributes sent."
+        );
+        assert_eq!(crate::gateway_policy::server_decision(&body), Some(false));
+    }
 
     #[test]
     fn hop_by_hop_headers_stop_and_an_upgrade_keeps_its_two() {

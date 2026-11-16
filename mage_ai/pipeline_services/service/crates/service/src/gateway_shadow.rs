@@ -161,10 +161,23 @@ pub struct Shadow {
 struct AuthzCounts {
     agree: u64,
     disagree: u64,
+    /// Refused by the gateway itself, without the server (MAGE_GATEWAY_AUTHZ=enforce).
+    refused: u64,
     /// The matrix has no rule for the mode, or the decision needs what it does not record
     /// (user permissions on).
     uncovered: u64,
     failed: u64,
+}
+
+/// The gateway's authorization decision for a request (Shadow::authorize).
+pub struct Decision {
+    pub action: &'static str,
+    pub allowed: bool,
+    pub attributes: Vec<String>,
+    pub key: String,
+    pub names: Vec<String>,
+    pub resource: String,
+    pub role: &'static str,
 }
 
 impl Shadow {
@@ -231,7 +244,8 @@ impl Shadow {
             }),
             counts: Mutex::new(BTreeMap::new()),
             differences: Mutex::new(VecDeque::new()),
-            authorization: std::env::var("MAGE_GATEWAY_AUTHZ_SHADOW").as_deref() == Ok("1"),
+            authorization: std::env::var("MAGE_GATEWAY_AUTHZ_SHADOW").as_deref() == Ok("1")
+                || crate::gateway_policy::enforce(),
             authz_counts: Mutex::new(BTreeMap::new()),
         })
     }
@@ -504,8 +518,84 @@ impl Shadow {
         self.authorization && self.auth.is_some()
     }
 
-    /// The gateway's decision for an API read, from the recorded policies, against the
-    /// server's answer to it.
+    /// The gateway's decision for an API request, from the recorded policies: None when
+    /// it has none (another kind of request, a caller it cannot place, a rule it does not
+    /// record), each such case counted under the request's resource and action.
+    pub async fn authorize(
+        &self,
+        method: &hyper::Method,
+        path: &str,
+        query: &str,
+        headers: &hyper::HeaderMap,
+        payload: &[u8],
+    ) -> Option<Decision> {
+        use crate::gateway_auth::{Caller, caller, viewer};
+        use crate::gateway_policy::{checked_names, matrix, mode, payload_attributes};
+
+        let settings = self.auth.as_ref()?;
+        let (resource, action) = matrix().target_for(method, path)?;
+        let key = format!("{resource} {action}");
+        // Policies with user permissions on read entity grants the matrix does not record.
+        if crate::gateway_policy::user_permissions() {
+            self.count_authz(&key, |c| &mut c.uncovered);
+            return None;
+        }
+        let parsed = Query::parse(query);
+        let role = match caller(&self.metadata, settings, headers, &parsed.0).await {
+            Ok(Caller::Open) => return None,
+            Ok(Caller::Public) => "anonymous",
+            // The middleware answers these before any policy.
+            Ok(Caller::Refused(_)) => return None,
+            Ok(Caller::User(user)) => match viewer(&self.metadata, settings, user).await {
+                Ok(viewer) => viewer.role(),
+                Err(_) => {
+                    self.count_authz(&key, |c| &mut c.failed);
+                    return None;
+                }
+            },
+            Err(_) => {
+                self.count_authz(&key, |c| &mut c.failed);
+                return None;
+            }
+        };
+        let names: Vec<String> = checked_names(&parsed.0)
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let Some(attributes) = payload_attributes(payload) else {
+            self.count_authz(&key, |c| &mut c.uncovered);
+            return None;
+        };
+        let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let attribute_refs: Vec<&str> = attributes.iter().map(String::as_str).collect();
+        let Some(allowed) =
+            matrix().decide_write(&resource, action, mode(), role, &name_refs, &attribute_refs)
+        else {
+            self.count_authz(&key, |c| &mut c.uncovered);
+            return None;
+        };
+        Some(Decision {
+            action,
+            allowed,
+            attributes,
+            key,
+            names,
+            resource,
+            role,
+        })
+    }
+
+    fn count_authz(&self, key: &str, field: fn(&mut AuthzCounts) -> &mut u64) {
+        let mut counts = self.authz_counts.lock().unwrap_or_else(|p| p.into_inner());
+        *field(counts.entry(key.to_string()).or_default()) += 1;
+    }
+
+    /// A request the gateway refused itself (MAGE_GATEWAY_AUTHZ=enforce).
+    pub fn count_refused(&self, decision: &Decision) {
+        self.count_authz(&decision.key, |c| &mut c.refused);
+    }
+
+    /// The gateway's decision for an API request against the server's answer to it.
     pub async fn compare_authorization(
         &self,
         method: &hyper::Method,
@@ -515,65 +605,23 @@ impl Shadow {
         payload: &[u8],
         served: &[u8],
     ) {
-        use crate::gateway_auth::{Caller, caller, viewer};
-        use crate::gateway_policy::{
-            checked_names, matrix, mode, payload_attributes, server_decision,
-        };
-
-        let Some(settings) = &self.auth else { return };
-        let Some((resource, action)) = matrix().target_for(method, path) else {
+        let Some(server) = crate::gateway_policy::server_decision(served) else {
             return;
         };
-        let Some(server) = server_decision(served) else {
+        let Some(decision) = self.authorize(method, path, query, headers, payload).await else {
             return;
         };
-        let key = format!("{resource} {action}");
-        let count = |field: fn(&mut AuthzCounts) -> &mut u64| {
-            let mut counts = self.authz_counts.lock().unwrap_or_else(|p| p.into_inner());
-            *field(counts.entry(key.clone()).or_default()) += 1;
-        };
-        // Policies with user permissions on read entity grants the matrix does not record.
-        if crate::gateway_policy::user_permissions() {
-            count(|c| &mut c.uncovered);
-            return;
-        }
-        let parsed = Query::parse(query);
-        let role = match caller(&self.metadata, settings, headers, &parsed.0).await {
-            Ok(Caller::Open) => return,
-            Ok(Caller::Public) => "anonymous",
-            // The middleware answers these before any policy.
-            Ok(Caller::Refused(_)) => return,
-            Ok(Caller::User(user)) => match viewer(&self.metadata, settings, user).await {
-                Ok(viewer) => viewer.role(),
-                Err(_) => {
-                    count(|c| &mut c.failed);
-                    return;
-                }
-            },
-            Err(_) => {
-                count(|c| &mut c.failed);
-                return;
-            }
-        };
-        let names = checked_names(&parsed.0);
-        let Some(attributes) = payload_attributes(payload) else {
-            count(|c| &mut c.uncovered);
-            return;
-        };
-        let attributes: Vec<&str> = attributes.iter().map(String::as_str).collect();
-        match matrix().decide_write(&resource, action, mode(), role, &names, &attributes) {
-            None => count(|c| &mut c.uncovered),
-            Some(gateway) if gateway == server => count(|c| &mut c.agree),
-            Some(gateway) => {
-                count(|c| &mut c.disagree);
-                self.note(
-                    "authorization",
-                    json!({"authorization": key, "role": role, "query": names,
-                           "attributes": attributes,
-                           "server": if server { "allowed" } else { "refused" },
-                           "gateway": if gateway { "allowed" } else { "refused" }}),
-                );
-            }
+        if decision.allowed == server {
+            self.count_authz(&decision.key, |c| &mut c.agree);
+        } else {
+            self.count_authz(&decision.key, |c| &mut c.disagree);
+            self.note(
+                "authorization",
+                json!({"authorization": decision.key, "role": decision.role,
+                       "query": decision.names, "attributes": decision.attributes,
+                       "server": if server { "allowed" } else { "refused" },
+                       "gateway": if decision.allowed { "allowed" } else { "refused" }}),
+            );
         }
     }
 

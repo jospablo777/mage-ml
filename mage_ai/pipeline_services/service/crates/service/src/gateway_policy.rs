@@ -278,6 +278,13 @@ pub fn mode() -> u8 {
         .unwrap_or(0)
 }
 
+/// Whether the gateway refuses, without the server, the API requests the recorded policies
+/// refuse (MAGE_GATEWAY_AUTHZ=enforce). The requests they allow, or have no rule for, go to
+/// the server, which still decides them.
+pub fn enforce() -> bool {
+    std::env::var("MAGE_GATEWAY_AUTHZ").as_deref() == Ok("enforce")
+}
+
 /// Whether the server has user permissions on (MAGE_GATEWAY_REQUIRE_USER_PERMISSIONS): the
 /// policies then read grants per entity, which the matrix does not record.
 pub fn user_permissions() -> bool {

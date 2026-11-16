@@ -49,6 +49,9 @@
 
 ### Server
 
+- With `MAGE_GATEWAY_AUTHZ=enforce`, the gateway refuses the API requests the recorded
+  policies refuse, without the server; the others still go to the server, which decides
+  them.
 - A block whose run ended while the editor's connection was down no longer shows running
   until the kernel is interrupted: on each reconnection the editor asks which blocks still
   run and shows their stored outputs. The editor keeps reconnecting (it gave up after 30
