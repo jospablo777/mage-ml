@@ -98,6 +98,11 @@ async def execute_operation(
     timing('api.time', api_time, tags)
     timing('sql.time', api_time, tags)
 
+    # A sign-in sets the HttpOnly session cookie; a sign-out clears it (I-25).
+    from mage_ai.authentication import session_cookie
+
+    session_cookie.apply(handler, child or resource, action, response)
+
     if action == LIST and resource == 'files':
         body = await run_file_work(
             simplejson.dumps,

@@ -87,7 +87,10 @@ Send the API key in the `X-API-KEY` header, as the `api_key` query parameter, or
 ### OAuth token
 
 Create a [session](/extensibility/api-reference/sessions/overview) to get a token. The
-`token` in the session payload is **encoded**. There are three ways to send it:
+`token` in the session payload is **encoded**. The answer to the sign-in also sets it as the
+`oauth_token` cookie, HttpOnly and `SameSite=Strict`, so a browser or a client that keeps
+cookies (such as a `requests.Session`) sends it without more code. There are three ways to
+send it:
 
 1. The encoded token in the cookie header:
 

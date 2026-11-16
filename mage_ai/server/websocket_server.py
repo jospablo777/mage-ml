@@ -184,6 +184,14 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
     def on_close(self):
         WebSocketServer.clients.discard(self)
 
+    def __cookie_user(self):
+        from mage_ai.api.middleware import user_from_cookie
+
+        try:
+            return user_from_cookie(self.request.headers.get('Cookie', ''))
+        except Exception:
+            return None
+
     def __signed_in_by_cookie(self) -> bool:
         from mage_ai.api.middleware import user_from_cookie
 
@@ -218,6 +226,10 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                 oauth_token, _ = authenticate_client_and_token(oauth_client.id, token)
                 if oauth_token:
                     user = oauth_token.user
+        elif REQUIRE_USER_AUTHENTICATION:
+            # The pages cannot read the HttpOnly session cookie to send its token (I-25):
+            # the user is the one the handshake's cookie names.
+            user = self.__cookie_user()
 
         repo_path = get_repo_path(user=user)
         pipeline = None
@@ -232,9 +244,11 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         if REQUIRE_USER_AUTHENTICATION or DISABLE_NOTEBOOK_EDIT_ACCESS:
             valid = not REQUIRE_USER_AUTHENTICATION
 
-            if oauth_client:
-                valid = (oauth_token is not None) and oauth_token.is_valid()
-                if valid and oauth_token and user:
+            if oauth_client or user is not None:
+                valid = user is not None if not oauth_client else (
+                    (oauth_token is not None) and oauth_token.is_valid()
+                )
+                if valid and user:
                     try:
                         if pipeline_uuid:
                             await PipelineResource.policy_class()(

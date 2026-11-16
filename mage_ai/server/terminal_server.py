@@ -226,6 +226,10 @@ class TerminalWebsocketServer(terminado.TermSocket):
                     else:
                         # If the user is deleted, set valid to False
                         valid = False
+            elif not token:
+                # The pages cannot read the HttpOnly session cookie to send its token
+                # (I-25): an editor signed in by the handshake's cookie may type.
+                valid = self.__editor_by_cookie()
             if not valid or is_disable_pipeline_edit_access():
                 return self.send_json_message(
                     ['stdout', f'{command[1]}\nUnauthorized access to the terminal.'])

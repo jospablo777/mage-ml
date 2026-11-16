@@ -7,7 +7,7 @@ import {
   getCurrentUserLocalStorageKey,
   removeUser,
 } from '@utils/session';
-import { getToken, removeToken, setToken } from './token';
+import { getSessionExpires, getToken, removeToken, setToken } from './token';
 import { isJsonString } from '@utils/string';
 import { redirectToUrl } from '@utils/url';
 
@@ -28,8 +28,11 @@ export default class AuthToken {
     try {
       if (token) {
         this.decodedToken = jwtDecode(token);
-      } else {
+      } else if (getToken()) {
         this.decodedToken = jwtDecode(getToken());
+      } else {
+        // The HttpOnly session cookie: its token stays with the browser, which sends it.
+        this.decodedToken = { expires: getSessionExpires(), token: null };
       }
     } catch (e) {
     }
@@ -50,7 +53,7 @@ export default class AuthToken {
   }
 
   get isValid(): boolean {
-    return this.decodedToken.token && !this.isExpired;
+    return (!!this.decodedToken.token || this.decodedToken.expires > 0) && !this.isExpired;
   }
 
   static isLoggedIn() {

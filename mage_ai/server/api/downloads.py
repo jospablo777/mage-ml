@@ -44,6 +44,12 @@ class ApiDownloadHandler(BaseHandler):
                         oauth_token.user
                     if authenticated:
                         user = oauth_token.user
+            elif not token:
+                # The pages cannot read the HttpOnly session cookie to send its token (I-25).
+                from mage_ai.api.middleware import user_from_cookie
+
+                user = user_from_cookie(self.request.headers.get('Cookie', ''))
+                authenticated = user is not None
             if not authenticated:
                 return self.refuse(401, 'Sign in to download block output.')
             # A signed-in user with no access to the pipeline (no role, or kept out of it by

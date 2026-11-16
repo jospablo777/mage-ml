@@ -30,6 +30,11 @@
   logged: each write was a line of its own and blank lines were dropped.
 - Airflow's `create_dags` passes the schedule as `schedule` to Airflow 2.4 and later
   (Airflow 3 refused `schedule_interval`).
+- Sign-in sets the session token as an HttpOnly cookie (`SameSite=Strict`); the pages no
+  longer read it, so a script injected into a page cannot take the session. Scripts and
+  other clients keep sending `Authorization: Bearer <token>`. Signing out clears the cookie
+  on the server. A session signed in before the upgrade keeps its readable cookie until it
+  signs out or signs in again.
 
 ### Pipelines
 
