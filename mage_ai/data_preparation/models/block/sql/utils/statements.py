@@ -1,6 +1,6 @@
 """
 SQL statement helpers: split a query string into statements and find the table that a
-CREATE, INSERT, UPDATE or DROP statement names. They use only the standard library, so
+CREATE, SELECT INTO, INSERT, UPDATE or DROP statement names. They use only the standard library, so
 exported pipeline services load this module on its own.
 """
 import re
@@ -61,6 +61,21 @@ def extract_create_statement_table_name(text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def extract_select_into_table_name(text: str) -> Optional[str]:
+    """
+    The table a SELECT ... INTO <table> statement makes (SQL Server's and PostgreSQL's
+    CREATE TABLE AS). A raw SQL block with one was taken for a query and its rows fetched,
+    which fails: the statement returns none.
+    """
+    match = re.search(
+        r'(?:^|;)\s*select\b[^;]*?\binto\s+((?:\[[^\]]+\]|"(?:[^"]|"")*"|[\w#.])+)\s',
+        # Without string literals, whose text could hold the word.
+        re.sub(r"'(?:[^']|'')*'", "''", remove_comments(text)) + ' ',
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
 def extract_insert_statement_table_names(text: str) -> List[str]:
     matches = re.findall(
         r'insert(?:\s+ignore)?(?:\s+overwrite)?(?:\s+into)?[\s]+([\w.]+)',
@@ -92,7 +107,7 @@ def extract_full_table_name(text: str) -> Optional[str]:
     if not text:
         return None
 
-    table_name = extract_create_statement_table_name(text)
+    table_name = extract_create_statement_table_name(text) or extract_select_into_table_name(text)
     if table_name:
         return table_name
 
@@ -107,7 +122,7 @@ def extract_full_table_name(text: str) -> Optional[str]:
 
 
 def has_create_or_insert_statement(text: str) -> bool:
-    table_name = extract_create_statement_table_name(text)
+    table_name = extract_create_statement_table_name(text) or extract_select_into_table_name(text)
     if table_name:
         return True
 

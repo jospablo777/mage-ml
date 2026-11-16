@@ -183,6 +183,12 @@ db2 = [
 druid = [
   "pydruid>=0.6.9",
 ]
+# SQL Server through pymssql, whose wheels carry FreeTDS (no ODBC driver to install).
+# Exported services use it; MageML's notebook connects with pyodbc unless MSSQL_DRIVER is
+# pymssql.
+mssql = [
+  "pymssql>=2.4.6,<3",
+]
 # IBM MQ in streaming pipelines run by MageML; needs the IBM MQ client installed. Exported
 # services use the engine's own connector instead.
 ibm-mq = [
@@ -261,6 +267,7 @@ all = [
   "mage-ml[google-cloud-storage]",
   "mage-ml[mlflow]",
   "mage-ml[mongodb]",
+  "mage-ml[mssql]",
   "mage-ml[oracle]",
   "mage-ml[pinot]",
   "mage-ml[pointblank]",

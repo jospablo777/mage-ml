@@ -45,6 +45,16 @@ db2:
   DB2_USER: db2inst1
   DB2_PASSWORD: "{{ env_var('MAGE_TEST_DB2_PASSWORD') }}"
   DB2_SCHEMA: "{{ env_var('MAGE_TEST_DB2_SCHEMA') }}"
+# SQL Server's protocol on Babelfish for PostgreSQL, through pymssql (FreeTDS), in the schema
+# of one test (MAGE_TEST_MSSQL_SCHEMA, which the test sets).
+mssql:
+  MSSQL_DATABASE: master
+  MSSQL_DRIVER: pymssql
+  MSSQL_HOST: 127.0.0.1
+  MSSQL_PORT: "{{ env_var('MAGE_TEST_MSSQL_PORT') }}"
+  MSSQL_USER: babelfish_user
+  MSSQL_PASSWORD: "{{ env_var('MAGE_TEST_MSSQL_PASSWORD') }}"
+  MSSQL_SCHEMA: "{{ env_var('MAGE_TEST_MSSQL_SCHEMA') }}"
 # The schema of one test, from MAGE_TEST_SCHEMA, which the test sets. SQL blocks
 # interpolate their profile, not their schema.
 test_schema:

@@ -85,6 +85,14 @@ PROVIDERS = {
         no_schema=False,
         full_names=True,
     ),
+    # Upstream tables go to the profile's schema and {{ df_N }} is schema.table (Mage's
+    # block/sql/mssql.py). Services connect with pymssql, which carries FreeTDS: the image
+    # needs no ODBC driver.
+    'sqlserver': dict(
+        profile_keys=('MSSQL_DATABASE', 'MSSQL_SCHEMA', 'MSSQL_HOST', 'MSSQL_PORT'),
+        no_schema=False,
+        full_names=False,
+    ),
     # Druid takes queries, not writes (Mage's Druid client raises on export): its blocks run
     # raw SQL, and {{ df_N }} is a datasource's name.
     'druid': dict(
@@ -455,7 +463,8 @@ def interpolate_input(
     return query
 
 
-def execute_raw_sql(loader, query: str, configuration: Dict, limit: int = 1000) -> List:
+def execute_raw_sql(loader, query: str, configuration: Dict, limit: int = 1000,
+                    top: bool = False) -> List:
     helpers = statements()
     if configuration.get('disable_query_preprocessing'):
         result = loader.execute_query_raw(query, configuration=configuration)
@@ -470,7 +479,11 @@ def execute_raw_sql(loader, query: str, configuration: Dict, limit: int = 1000) 
     if has_create_or_insert or has_update:
         full_name = helpers.extract_full_table_name(query)
         if full_name:
-            queries.append(f'SELECT * FROM {full_name} LIMIT {int(limit)}')
+            # SQL Server reads the first rows with TOP, not LIMIT.
+            queries.append(
+                f'SELECT TOP({int(limit)}) * FROM {full_name}' if top
+                else f'SELECT * FROM {full_name} LIMIT {int(limit)}'
+            )
             fetch.append(full_name)
     results = loader.execute_queries(queries, commit=True, fetch_query_at_indexes=fetch)
     last = results[-1] if results else None
@@ -510,6 +523,12 @@ def _loader(provider: str, config_loader):
         from mage_ai.io.druid import Druid
 
         return Druid.with_config(config_loader)
+    if provider == 'sqlserver':
+        from mage_ai.io.mssql import MSSQL
+
+        loader = MSSQL.with_config(config_loader)
+        loader.settings['driver'] = 'pymssql'
+        return loader
     from mage_ai.io.duckdb import DuckDB
 
     return DuckDB.with_config(config_loader)
@@ -614,6 +633,24 @@ def run(block: Dict, inputs: List, variables: Dict, repo_path: str) -> List:
             return [loader.load(
                 f'SELECT * FROM {loader._full_table_name(schema, table)}', limit=limit,
                 verbose=False,
+            )]
+        if name == 'sqlserver':
+            upload_upstream_tables(
+                loader, configuration, upstreams, inputs, query, io_config, provider,
+            )
+            query = interpolate_input(
+                loader, configuration, upstreams, query, default_database=False,
+                name=lambda db, sc, tn: f'{sc}.{tn}' if sc else tn,
+                copied=_copied(configuration, io_config, provider),
+            )
+            schema = schema or loader.default_schema()
+            query = render(query, variables)
+            if configuration.get('use_raw_sql'):
+                return execute_raw_sql(loader, query, configuration, limit, top=True)
+            loader.export(None, schema, table, query_string=query, **options)
+            return [loader.load(
+                f'SELECT TOP {int(limit)} * FROM {loader._full_table_name(schema, table)}',
+                limit=limit, verbose=False,
             )]
         if name == 'redshift':
             # Mage's Redshift branch: names database.schema.table, the database unquoted.

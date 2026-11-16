@@ -91,7 +91,7 @@ Python, [R](../guides/blocks/r-blocks.md), [Rust](../guides/blocks/rust-blocks.m
   image with R blocks is based on Debian trixie and is larger.
 
 - **SQL** blocks on PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake,
-  Redshift, Db2 and Druid run as in a Mage pipeline
+  Redshift, Db2, Druid and SQL Server run as in a Mage pipeline
   run: upstream outputs that the
   query reads as `{{ df_1 }}` are written to tables first (the table of an upstream SQL
   block on the same database is used directly), the query is rendered with the run's
@@ -102,10 +102,15 @@ Python, [R](../guides/blocks/r-blocks.md), [Rust](../guides/blocks/rust-blocks.m
   compared with Mage's over stand-ins for the clients on DuckDB, request by request and row
   by row. Druid takes queries only, as in Mage, so its blocks run with raw SQL on; a Druid
   block that would write its table stops the export with that reason.
+  SQL Server blocks connect with pymssql (install `mage-ml[mssql]` before exporting), whose
+  wheels carry FreeTDS, so the image needs no ODBC driver; the profile's `MSSQL_DRIVER` is
+  not used there. Their SQL runs on Babelfish for PostgreSQL in the tests, which speaks
+  SQL Server's protocol; writing upstream frames goes through SQLAlchemy, whose connection
+  Babelfish does not support, and is compared with Mage's over a stand-in.
 
 Blocks the service cannot run stop the export with the block named and the reason, so
 nothing silently disappears: sensors, dynamic blocks, callbacks, conditional blocks written
-in R or Rust, SQL blocks on other databases (SQL Server, Pinot and others), SQL blocks that use `block_output()`, and blocks that read their upstream with
+in R or Rust, SQL blocks on other databases (Pinot and others), SQL blocks that use `block_output()`, and blocks that read their upstream with
 chunk or batch settings are not supported yet. Chart, markdown and scratchpad blocks are
 notebook only and are left out.
 

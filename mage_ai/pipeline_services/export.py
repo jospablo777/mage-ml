@@ -521,7 +521,7 @@ SERVICE_DIR = '/srv/mage-service'
 
 SQL_PROVIDERS = (
     'postgres', 'mysql', 'duckdb', 'clickhouse', 'trino', 'bigquery', 'snowflake', 'redshift',
-    'db2', 'druid',
+    'db2', 'druid', 'sqlserver',
 )
 
 
@@ -539,6 +539,8 @@ SQL_CLIENTS = {
     'redshift': ('redshift_connector', 'redshift'),
     'db2': ('ibm_db', 'db2'),
     'druid': ('pydruid', 'druid'),
+    # pymssql's wheels carry FreeTDS, so the image needs no ODBC driver.
+    'sqlserver': ('pymssql', 'mssql'),
 }
 
 
@@ -564,8 +566,8 @@ def _sql_unsupported(block) -> Optional[str]:
     if provider not in SQL_PROVIDERS:
         return (
             f'a SQL block on {provider or "no data provider"}; services run SQL blocks on '
-            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift, Db2 '
-            'and Druid.'
+            'PostgreSQL, MySQL, DuckDB, ClickHouse, Trino, BigQuery, Snowflake, Redshift, Db2, '
+            'Druid and SQL Server.'
         )
     if provider == 'druid' and not configuration.get('use_raw_sql'):
         return ('a Druid SQL block that writes its table; Druid takes queries only, so its '
@@ -2958,6 +2960,9 @@ def _requirements(capture_: Capture) -> Dict[str, str]:
             candidates += ['ibm_db', 'ibm_db_dbi', 'mage_ai.io.db2']
         if 'druid' in providers:
             candidates += ['pydruid', 'pydruid.db.api', 'mage_ai.io.druid']
+        if 'sqlserver' in providers:
+            # pymssql and its SQLAlchemy dialect, for the blocks' tables.
+            candidates += ['pymssql', 'sqlalchemy.dialects.mssql.pymssql', 'mage_ai.io.mssql']
     if capture_.needs_r:
         # What Mage's R runner imports to pass tables and database settings to R.
         candidates += [

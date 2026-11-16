@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from typing import IO, Any, List, Union
 
 import numpy as np
-import pyodbc
 import simplejson
 from pandas import DataFrame, Series
 from sqlalchemy import create_engine
@@ -16,6 +15,10 @@ from mage_ai.io.export_utils import PandasTypes, insert_rows
 from mage_ai.io.sql import BaseSQL
 from mage_ai.shared.hash import extract
 from mage_ai.shared.parsers import encode_complex
+
+# MSSQL_DRIVER values that connect with pymssql, whose wheels carry FreeTDS: no ODBC driver
+# to install. Exported services use it (pipeline_services/runtime/sql.py).
+PYMSSQL_DRIVERS = ('pymssql', 'freetds')
 
 MERGE_TABLE_SQL = '''MERGE {table_name} AS t
 USING (VALUES
@@ -56,6 +59,16 @@ class MSSQL(BaseSQL):
             **kwargs,
         )
 
+    @property
+    def uses_pymssql(self) -> bool:
+        settings = getattr(self, 'settings', None) or {}
+        return str(settings.get('driver') or '').lower() in PYMSSQL_DRIVERS
+
+    @property
+    def placeholder(self) -> str:
+        """A parameter in a statement: pyodbc takes ?, pymssql %s."""
+        return '%s' if self.uses_pymssql else '?'
+
     def _port(self):
         """
         The port to connect to, unless the server names one (host,1444) or a named instance
@@ -94,6 +107,23 @@ class MSSQL(BaseSQL):
         return self.settings.get('schema') or 'dbo'
 
     def open(self) -> None:
+        if self.uses_pymssql:
+            import pymssql
+
+            with self.printer.print_msg('Opening connection to MSSQL database'):
+                options = dict(
+                    server=self.settings['server'],
+                    user=self.settings['user'],
+                    password=self.settings['password'],
+                    database=self.settings['database'],
+                )
+                if self._port():
+                    options['port'] = str(self._port())
+                self._ctx = pymssql.connect(**options)
+            return
+
+        import pyodbc
+
         with self.printer.print_msg('Opening connection to MSSQL database'):
             self._ctx = pyodbc.connect(
                 self.connection_string,
@@ -170,7 +200,7 @@ class MSSQL(BaseSQL):
                 )
             return val
 
-        values_placeholder = ', '.join(["?" for i in range(len(df.columns))])
+        values_placeholder = ', '.join([self.placeholder for i in range(len(df.columns))])
         # Text columns lose the double quotes that serializing can add.
         values = insert_rows(df, serialize=serialize_obj, strip_quotes=True)
 
@@ -185,25 +215,37 @@ class MSSQL(BaseSQL):
         if_exists: ExportWritePolicy = None,
         **kwargs,
     ):
-        connection_url = URL.create(
-            'mssql+pyodbc',
-            username=self.settings['user'],
-            password=self.settings['password'],
-            host=self.settings['server'],
-            port=self._port(),
-            database=self.settings['database'],
-            query=dict(
-                driver=self.settings['driver'],
-                ENCRYPT='yes',
-                TrustServerCertificate='yes',
-            ),
-        )
         conn_kwargs = extract(kwargs, ['pool_size', 'max_overflow'])
-        engine = create_engine(
-            connection_url,
-            fast_executemany=True,
-            **conn_kwargs,
-        )
+        if self.uses_pymssql:
+            connection_url = URL.create(
+                'mssql+pymssql',
+                username=self.settings['user'],
+                password=self.settings['password'],
+                host=self.settings['server'],
+                port=self._port(),
+                database=self.settings['database'],
+            )
+            engine = create_engine(connection_url, **conn_kwargs)
+        else:
+            connection_url = URL.create(
+                'mssql+pyodbc',
+                username=self.settings['user'],
+                password=self.settings['password'],
+                host=self.settings['server'],
+                port=self._port(),
+                database=self.settings['database'],
+                query=dict(
+                    driver=self.settings['driver'],
+                    ENCRYPT='yes',
+                    TrustServerCertificate='yes',
+                ),
+            )
+            engine = create_engine(
+                connection_url,
+                fast_executemany=True,
+                **conn_kwargs,
+            )
+        placeholder = self.placeholder
 
         unique_conflict_method = kwargs.get('unique_conflict_method')
         unique_constraints = kwargs.get('unique_constraints')
@@ -220,7 +262,7 @@ class MSSQL(BaseSQL):
                     else:
                         table_name = table.name
 
-                    values_placeholder = ', '.join(['?' for i in range(len(keys))])
+                    values_placeholder = ', '.join([placeholder for i in range(len(keys))])
                     values = [tuple(row) for row in data_iter]
                     sql = MERGE_TABLE_SQL.format(
                         table_name=table_name,

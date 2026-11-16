@@ -27,7 +27,11 @@ default:
 
 ## Dependencies
 
-To connect to the Microsoft SQL Server, you'll need to make sure the driver is installed.
+To connect without an ODBC driver, install `mage-ml[mssql]` and set `MSSQL_DRIVER: pymssql`:
+pymssql's wheels carry FreeTDS, an open source client for SQL Server's protocol. Exported
+services always connect this way.
+
+With an ODBC driver name in `MSSQL_DRIVER`, the driver must be installed.
 The image built from the repository's Dockerfile includes ODBC Driver 18.
 To use another ODBC driver version, build a custom image on top of the MageML image and install the driver.
 Here is the doc for installing ODBC drivers for SQL Server: https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server

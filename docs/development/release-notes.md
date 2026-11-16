@@ -33,6 +33,12 @@
 
 ### Pipelines
 
+- Exported services run SQL blocks on SQL Server, through pymssql (FreeTDS): the image needs
+  no ODBC driver. MageML connects the same way with `MSSQL_DRIVER: pymssql`
+  (`mage-ml[mssql]`).
+- A raw SQL block with `SELECT ... INTO <table>` (SQL Server's and PostgreSQL's way to
+  create a table from a query) reads the table it made; its rows were fetched from the
+  statement, and the block failed.
 - Trigger rules (upstream #4704): `none_failed_min_one_success` runs a join after the branch
   that ran, `all_done` runs cleanup and alerts after a failure. An upstream block that was
   skipped or failed gives the block `None`; a failed block still fails the run. Set in the

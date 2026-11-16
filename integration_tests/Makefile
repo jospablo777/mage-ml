@@ -53,6 +53,9 @@ export MAGE_TEST_RABBITMQ_USER ?= mage
 export MAGE_TEST_RABBITMQ_PASSWORD ?= p@ss/w:rd%
 export MAGE_TEST_DB2_PORT ?= 15050
 export MAGE_TEST_DB2_PASSWORD ?= db2-Pass1
+# SQL Server's protocol on Babelfish for PostgreSQL (the image's default user and password).
+export MAGE_TEST_MSSQL_PORT ?= 11433
+export MAGE_TEST_MSSQL_PASSWORD ?= 12345678
 export MAGE_TEST_IBM_MQ_PORT ?= 11414
 export MAGE_TEST_IBM_MQ_WEB_PORT ?= 19443
 export MAGE_TEST_IBM_MQ_USER ?= app

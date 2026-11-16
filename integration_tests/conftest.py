@@ -602,6 +602,42 @@ def db2_settings():
                 password=os.environ['MAGE_TEST_DB2_PASSWORD'])
 
 
+@pytest.fixture(scope='session')
+def mssql_settings():
+    port = os.getenv('MAGE_TEST_MSSQL_PORT')
+    if not port:
+        pytest.skip('SQL Server is not configured: MAGE_TEST_MSSQL_PORT unset')
+    pytest.importorskip('pymssql')
+    return dict(database='master', host='127.0.0.1', port=int(port), user='babelfish_user',
+                password=os.environ['MAGE_TEST_MSSQL_PASSWORD'], driver='pymssql')
+
+
+@pytest.fixture
+def mssql_schema(mssql_settings, monkeypatch):
+    """A schema of one test, dropped with its tables after it."""
+    import pymssql
+
+    name = f'it_{uuid.uuid4().hex[:10]}'
+    connection = pymssql.connect(
+        server=mssql_settings['host'], port=str(mssql_settings['port']),
+        user=mssql_settings['user'], password=mssql_settings['password'],
+        database=mssql_settings['database'], autocommit=True,
+    )
+    monkeypatch.setenv('MAGE_TEST_MSSQL_SCHEMA', name)
+    with connection.cursor() as cursor:
+        cursor.execute(f'CREATE SCHEMA {name}')
+    yield name, connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            'SELECT table_name FROM information_schema.tables WHERE table_schema = %s', (name,),
+        )
+        for (table,) in cursor.fetchall():
+            cursor.execute(f'DROP TABLE {name}.{table}')
+        cursor.execute(f'DROP SCHEMA {name}')
+    connection.close()
+
+
 @pytest.fixture
 def db2_schema(db2_settings, monkeypatch):
     """A schema of one test, dropped with its tables after it."""

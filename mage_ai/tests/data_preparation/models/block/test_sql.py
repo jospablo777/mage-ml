@@ -108,6 +108,27 @@ UPDATE t SET price = price * 1.1
         ]:
             self.assertEqual(extract_create_statement_table_name(statement), table, statement)
 
+    def test_the_table_a_select_into_statement_makes(self):
+        from mage_ai.data_preparation.models.block.sql.utils.statements import (
+            extract_full_table_name,
+            extract_select_into_table_name,
+            has_create_or_insert_statement,
+        )
+
+        for statement, table in [
+            ('SELECT * INTO s.copy FROM s.orders', 's.copy'),
+            ('select region, count(*) as n\ninto [my schema].[totals]\nfrom t group by region',
+             '[my schema].[totals]'),
+            ('SELECT 1 AS a INTO #scratch', '#scratch'),
+            ('DROP TABLE x; SELECT * INTO x FROM y', 'x'),
+            ('INSERT INTO s.t SELECT * FROM u', None),
+            ('SELECT * FROM t', None),
+            ("SELECT 'into x ' AS label FROM t", None),
+        ]:
+            self.assertEqual(extract_select_into_table_name(statement), table, statement)
+        self.assertTrue(has_create_or_insert_statement('SELECT * INTO s.copy FROM s.orders'))
+        self.assertEqual(extract_full_table_name('SELECT * INTO s.copy FROM s.orders'), 's.copy')
+
     def test_table_name_parts_from_query(self):
         query1 = 'select * from demo_db1.demo_schema1.demo_table1'
         query2 = 'SELECT * FROM demo_db2.demo_schema2.demo_table2;'
