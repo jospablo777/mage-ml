@@ -876,6 +876,69 @@ def verify_fusion(
         raise typer.Exit(code=1)
 
 
+@app.command('project-export')
+def project_export(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    output: str = typer.Argument(..., help='the zip to write.'),
+    pipelines: str = typer.Option('', help='pipelines to export, comma separated; all if empty.'),
+):
+    """
+    Export pipelines as one zip: each pipeline's folder (metadata.yaml, triggers.yaml,
+    README), its blocks' files and the data contracts they name, with a manifest.
+    io_config.yaml and secrets are not included.
+    """
+    from mage_ai.data_preparation import project_archive
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+    try:
+        names = [p.strip() for p in pipelines.split(',') if p.strip()]
+        content = project_archive.export(project_path, names or None)
+    except project_archive.ArchiveError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    with open(output, 'wb') as file:
+        file.write(content)
+    typer.echo(f'Wrote {output} ({len(content):,} bytes).')
+
+
+@app.command('project-import')
+def project_import(
+    project_path: str = typer.Argument(..., help='path of the MageML project.'),
+    archive: str = typer.Argument(..., help='a zip made by mage project-export.'),
+    mode: str = typer.Option(
+        'skip', help='skip: leave pipelines the project has; replace: overwrite them.'),
+    dry_run: bool = typer.Option(False, help='print what would change, and write nothing.'),
+):
+    """
+    Import pipelines exported with mage project-export. Each file is new, the same as the
+    project's, or different. With skip, the project's pipelines stay as they are and the
+    import stops if it would change a block file the project has.
+    """
+    from mage_ai.data_preparation import project_archive
+    from mage_ai.settings.repo import set_repo_path
+
+    project_path = os.path.abspath(project_path)
+    set_repo_path(project_path)
+    with open(archive, 'rb') as file:
+        content = file.read()
+    try:
+        planned = project_archive.plan(project_path, content, mode)
+        for entry in planned['pipelines']:
+            typer.echo(f"{entry['action']:<8} pipeline {entry['uuid']}")
+        for entry in planned['files']:
+            if entry['action'] != 'keep':
+                typer.echo(f"{entry['action']:<8} {entry['path']} ({entry['status']})")
+        if dry_run:
+            return
+        result = project_archive.import_archive(project_path, content, mode)
+    except project_archive.ArchiveError as error:
+        print(f'[red]{_e(error)}[/red]')
+        raise typer.Exit(code=2)
+    typer.echo(f"Wrote {len(result['written'])} files.")
+
+
 r_app = typer.Typer(
     cls=OrderCommands,
     help='Manage the rv environment that R blocks run in.',

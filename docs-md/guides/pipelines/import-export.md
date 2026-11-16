@@ -1,0 +1,39 @@
+# Import and export pipelines
+
+*Move pipelines between projects as one zip, and see what an import would change before it writes.*
+
+**Settings > Workspace > Import and export** exports pipelines as one zip and imports such
+a zip into this project. The same is on the command line:
+
+```bash
+mage project-export path/to/project pipelines.zip --pipelines orders,features
+mage project-import path/to/other_project pipelines.zip --dry-run
+mage project-import path/to/other_project pipelines.zip --mode replace
+```
+
+## What the zip holds
+
+Each pipeline's folder (`metadata.yaml`, `triggers.yaml`, its README and images), its
+blocks' files (conditionals and callbacks too), and the data contracts its blocks name, with
+`mageml-project.json`: the MageML version, the pipelines with the files each needs, and the
+SHA-256 of every file. `io_config.yaml`, secrets, `.env` files and block outputs are never in
+it; the project you import into needs its own connection settings.
+
+## Importing
+
+An import is planned first. Each file is **new**, the **same** as this project's, or
+**different**:
+
+| Mode | Pipelines this project has | Their files | Other different files |
+| --- | --- | --- | --- |
+| Keep pipelines this project has (`skip`, the default) | Left as they are | Not written | Refused: a block or contract file this project has with other content, which its pipelines may run |
+| Replace them (`replace`) | Overwritten | Written | Written |
+
+Files that are the same are never written. Nothing is written if the plan has a conflict.
+
+The zip may write only to the project's pipeline, block and contract folders, may unpack to
+at most 200 MB and 20,000 files, and each file must match its checksum in the manifest.
+
+Triggers come with `triggers.yaml`; their run history stays in the project they ran in.
+Through the API, the same is `POST /api/project_archives` with `action` `export`, `plan` or
+`import` (the zip in base64 as `content`), for editors and up.

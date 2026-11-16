@@ -64,6 +64,7 @@ export const PIPELINE_DOCUMENTATIONS: 'pipeline_documentations' = 'pipeline_docu
 export const PIPELINE_DEPENDENCIES: 'pipeline_dependencies' = 'pipeline_dependencies';
 export const AUDIT_EVENTS: 'audit_events' = 'audit_events';
 export const SERVER_HEALTH: 'server_health' = 'server_health';
+export const PROJECT_ARCHIVES: 'project_archives' = 'project_archives';
 export const PIPELINE_SERVICE_EXPORTS: 'pipeline_service_exports' = 'pipeline_service_exports';
 export const LANGUAGE_SETUPS: 'language_setups' = 'language_setups';
 export const PIPELINE_SERVICES: 'pipeline_services' = 'pipeline_services';
@@ -182,6 +183,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_DEPENDENCIES],
   [AUDIT_EVENTS],
   [SERVER_HEALTH],
+  [PROJECT_ARCHIVES],
   [PIPELINE_SERVICE_EXPORTS],
   [LANGUAGE_SETUPS],
   [PIPELINE_SERVICES],

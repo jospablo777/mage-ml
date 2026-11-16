@@ -33,6 +33,10 @@
 
 ### Pipelines
 
+- Pipelines move between projects as one zip: Settings > Workspace > Import and export, or
+  `mage project-export` and `mage project-import`. An import shows what each file would
+  become first, keeps the project's pipelines or replaces them, and never writes
+  `io_config.yaml`, secrets or files outside the project's folders.
 - A Dependencies page draws the pipelines that start or feed other pipelines (after-run
   triggers, global data products, `trigger_pipeline` calls in blocks) with each pipeline's
   last run, and lists each link.

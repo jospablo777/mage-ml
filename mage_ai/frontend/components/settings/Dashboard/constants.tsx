@@ -3,6 +3,7 @@ import { REQUIRE_USER_AUTHENTICATION, REQUIRE_USER_PERMISSIONS } from '@utils/se
 import {
   BlocksSeparated,
   DocumentIcon,
+  File,
   Insights,
   Locked,
   Settings,
@@ -18,6 +19,7 @@ export const SECTION_ITEM_UUID_PREFERENCES = 'Preferences';
 export const SECTION_ITEM_UUID_PLATFORM_PREFERENCES = 'Preferences';
 export const SECTION_ITEM_UUID_PLATFORM_SETTINGS = 'Settings';
 export const SECTION_ITEM_UUID_SERVER_HEALTH = 'Server health';
+export const SECTION_ITEM_UUID_IMPORT_EXPORT = 'Import and export';
 export const SECTION_ITEM_UUID_USERS = 'Users';
 export const SECTION_UUID_WORKSPACE = 'Workspace';
 
@@ -63,6 +65,13 @@ export const SECTIONS = ({ owner, roles, project_access }: UserType, opts?: {
         href: '/settings/workspace/sync-data',
       },
       uuid: SECTION_ITEM_UUID_GIT_SETTINGS,
+    },
+    {
+      Icon: File,
+      linkProps: {
+        href: '/settings/workspace/import-export',
+      },
+      uuid: SECTION_ITEM_UUID_IMPORT_EXPORT,
     },
   ];
 

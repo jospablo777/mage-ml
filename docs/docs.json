@@ -495,7 +495,8 @@
               "guides/pipelines/monitoring",
               "guides/community-examples",
               "guides/pipelines/documentation",
-              "guides/pipelines/dependencies"
+              "guides/pipelines/dependencies",
+              "guides/pipelines/import-export"
             ]
           },
           {

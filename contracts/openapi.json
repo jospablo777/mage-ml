@@ -4800,6 +4800,17 @@
     },
     "type": "object"
    },
+   "ProjectArchive": {
+    "properties": {
+     "content": {},
+     "file_name": {},
+     "id": {},
+     "plan": {},
+     "size": {},
+     "written": {}
+    },
+    "type": "object"
+   },
    "PullRequest": {
     "properties": {
      "body": {},
@@ -15767,6 +15778,46 @@
     }
    ]
   },
+  "/api/project_archives": {
+   "post": {
+    "operationId": "create_project_archives",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "project_archive": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "project_archive": {
+           "$ref": "#/components/schemas/ProjectArchive"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create project_archives",
+    "tags": [
+     "project_archives"
+    ]
+   }
+  },
   "/api/projects": {
    "get": {
     "operationId": "list_projects",
@@ -21105,6 +21156,12 @@
    ],
    "schema": "Pipeline"
   },
+  "project_archives": {
+   "operations": [
+    "create"
+   ],
+   "schema": "ProjectArchive"
+  },
   "projects": {
    "operations": [
     "list",
@@ -21466,6 +21523,7 @@
   "pipeline_service_models": "no list or detail reached",
   "pipeline_services": "no list or detail reached",
   "pipeline_triggers": "get /api/pipeline_triggers: error 400: Pipeline triggers belong to a pipeline: /api/pipelines/<uuid>/pipeline_triggers.",
+  "project_archives": "no list or detail reached",
   "pull_requests": "no list or detail reached",
   "role_permissions": "get /api/role_permissions: error 403: The list action is disabled for role_permissions.",
   "run_records": "no list or detail reached",
