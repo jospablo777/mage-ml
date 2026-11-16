@@ -49,6 +49,11 @@
 
 ### Server
 
+- A block whose run ended while the editor's connection was down no longer shows running
+  until the kernel is interrupted: on each reconnection the editor asks which blocks still
+  run and shows their stored outputs. The editor keeps reconnecting (it gave up after 30
+  seconds), and a client whose connection closed no longer stops the others from getting
+  a message.
 - With `MAGE_GATEWAY_AUTHZ_SHADOW=1`, the gateway decides every API request, writes and their
   payload attributes included, from the recorded policies and counts where it agrees with
   the server: the measure for moving authorization to Rust. Every recorded read and the

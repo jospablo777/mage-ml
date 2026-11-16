@@ -95,6 +95,7 @@ class KernelResource(GenericResource):
                 elif KernelOperation.RESTART == action_type:
                     num_processes = payload.get('num_processes', None)
                     await KernelManager.restart_kernel_async(uuid, num_processes=num_processes)
+                    clear_running_blocks()
                 elif KernelOperation.TERMINATE == action_type:
                     await KernelManager.terminate_kernel_async(uuid)
                 return self
@@ -112,6 +113,7 @@ class KernelResource(GenericResource):
             if KernelOperation.INTERRUPT == action_type:
                 self.model.interrupt()
             elif KernelOperation.RESTART == action_type:
+                clear_running_blocks()
                 try:
                     self.model.restart()
                 except RuntimeError as e:
@@ -144,3 +146,9 @@ class KernelResource(GenericResource):
         self.on_update_callback = _callback
 
         return self
+
+
+def clear_running_blocks() -> None:
+    from mage_ai.server.websocket_server import WebSocketServer
+
+    WebSocketServer.clear_running()

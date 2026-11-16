@@ -169,6 +169,10 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
     # classmethod.
     clients = set()
     running_executions_mapping = dict()
+    # Executions the kernel reported busy and not idle yet: msg_id to the block's identity.
+    # A client that reconnects asks for them (running_blocks): the idle message of a run
+    # that ended while it was away never reaches it, and its block showed running forever.
+    running_blocks = dict()
 
     def open(self):
         # Every client gets the kernel's outputs, so with authentication on a client joins
@@ -268,6 +272,13 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
 
         # Signed in, or no sign-in required: this client gets the kernel's outputs.
         WebSocketServer.clients.add(self)
+
+        if message.get('running_blocks'):
+            self.write_message(json.dumps(dict(
+                msg_type='running_blocks',
+                running_blocks=list(WebSocketServer.running_blocks.values()),
+            )))
+            return
 
         output = message.get('output')
         if output:
@@ -423,13 +434,36 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         # it will trigger this send_message from the WebSocket subscriber.
         # This log message is unnecessary and publishing to clients is also unnecessary.
         if block_uuid or pipeline_uuid:
+            # A whole pipeline's run ends with one idle message for the pipeline, which the
+            # editor handles itself; block runs are tracked.
+            if to is None and block_uuid and message.get('msg_type') != 'stream_pipeline':
+                cls.track_running(msg_id, message.get('execution_state'), output_dict)
+
             logger.info(
                 f'[{block_uuid}] Sending message for {msg_id} to '
                 f'{len(cls.clients)} client(s):\n{json.dumps(message_final, indent=2)}'
             )
 
+            text = json.dumps(message_final)
             for client in [to] if to is not None else list(cls.clients):
-                client.write_message(json.dumps(message_final))
+                # A client whose connection closed before on_close ran raised here, and the
+                # clients after it never got the message, an idle state included.
+                try:
+                    client.write_message(text)
+                except tornado.websocket.WebSocketClosedError:
+                    cls.clients.discard(client)
+
+    @classmethod
+    def track_running(cls, msg_id: str, execution_state: str, block: Dict) -> None:
+        if execution_state == 'busy':
+            cls.running_blocks[msg_id] = block
+        elif execution_state == 'idle':
+            cls.running_blocks.pop(msg_id, None)
+
+    @classmethod
+    def clear_running(cls) -> None:
+        """After a kernel restart: its executions end without an idle message."""
+        cls.running_blocks.clear()
 
     async def __execute_block(
         self,

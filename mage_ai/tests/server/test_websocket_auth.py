@@ -137,3 +137,24 @@ class WebSocketAuthTest(AsyncHTTPTestCase):
             self.assertEqual(kind, 'stdout')
             self.assertIn('exited as it started', text)
             editor.close()
+
+    @gen_test
+    async def test_a_reconnected_editor_learns_which_blocks_still_run(self):
+        """A run's idle message sent while the editor was disconnected never reached it, and
+        the block showed running until the kernel was interrupted (I-125)."""
+        WebSocketServer.running_blocks.clear()
+        self.addCleanup(WebSocketServer.running_blocks.clear)
+        WebSocketServer.send_message(dict(OUTPUT, msg_id='m2', execution_state='busy'))
+
+        with patch('mage_ai.server.websocket_server.REQUIRE_USER_AUTHENTICATION', False):
+            editor = await self.connect('/websocket/')
+            editor.write_message(json.dumps(dict(running_blocks=True)))
+            reply = json.loads(await self.received(editor, 5))
+            self.assertEqual(reply['msg_type'], 'running_blocks')
+            self.assertEqual([b['uuid'] for b in reply['running_blocks']], ['load_orders'])
+
+            # Asking also joins the editor to the outputs.
+            WebSocketServer.send_message(dict(OUTPUT, msg_id='m2'))
+            self.assertEqual(json.loads(await self.received(editor))['execution_state'], 'idle')
+            self.assertEqual(WebSocketServer.running_blocks, {})
+            editor.close()

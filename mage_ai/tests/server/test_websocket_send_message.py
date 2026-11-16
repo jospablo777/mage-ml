@@ -1,8 +1,14 @@
-"""Outputs sent to the notebook keep their shape after secrets are hidden in them."""
+"""
+Outputs sent to the notebook keep their shape after secrets are hidden in them; a closed
+client does not stop the others from getting them; running blocks are tracked for clients
+that reconnect (I-125).
+"""
 import json
 import os
 import unittest
 from unittest.mock import patch
+
+import tornado.websocket
 
 from mage_ai.server.websocket_server import WebSocketServer
 
@@ -15,6 +21,11 @@ class FakeClient:
         self.messages.append(json.loads(message))
 
 
+class ClosedClient:
+    def write_message(self, message):
+        raise tornado.websocket.WebSocketClosedError()
+
+
 class SendMessageTest(unittest.TestCase):
     def setUp(self):
         self.client = FakeClient()
@@ -23,7 +34,8 @@ class SendMessageTest(unittest.TestCase):
             WebSocketServer, 'running_executions_mapping', {'m1': dict(block_uuid='draw')},
         )
         hide = patch('mage_ai.server.websocket_server.HIDE_ENV_VAR_VALUES', True)
-        for p in (clients, mapping, hide):
+        running = patch.object(WebSocketServer, 'running_blocks', {})
+        for p in (clients, mapping, hide, running):
             p.start()
             self.addCleanup(p.stop)
 
@@ -50,6 +62,32 @@ class SendMessageTest(unittest.TestCase):
         self.assertNotIn('s3cret-value-1234', html)
         self.assertIsInstance(lines, list)
         self.assertNotIn('s3cret-value-1234', lines[1])
+
+
+    def test_a_closed_client_does_not_stop_the_others(self):
+        closed = ClosedClient()
+        WebSocketServer.clients.clear()
+        WebSocketServer.clients.update([closed, self.client])
+
+        WebSocketServer.send_message(dict(msg_id='m1', execution_state='idle'))
+
+        self.assertEqual(self.client.messages[0]['execution_state'], 'idle')
+        self.assertNotIn(closed, WebSocketServer.clients)
+
+    def test_a_block_runs_from_busy_to_idle(self):
+        WebSocketServer.send_message(dict(msg_id='m1', execution_state='busy'))
+        self.assertEqual(
+            list(WebSocketServer.running_blocks.values()),
+            [dict(block_type=None, pipeline_uuid=None, uuid='draw')],
+        )
+
+        WebSocketServer.send_message(dict(msg_id='m1', execution_state='idle'))
+        self.assertEqual(WebSocketServer.running_blocks, {})
+
+    def test_a_kernel_restart_ends_every_run(self):
+        WebSocketServer.send_message(dict(msg_id='m1', execution_state='busy'))
+        WebSocketServer.clear_running()
+        self.assertEqual(WebSocketServer.running_blocks, {})
 
 
 if __name__ == '__main__':

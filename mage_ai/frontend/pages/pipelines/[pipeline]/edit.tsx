@@ -1,5 +1,5 @@
 import moment from 'moment';
-import useWebSocket from 'react-use-websocket';
+import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { ThemeContext } from 'styled-components';
 import {
   useCallback,
@@ -2459,12 +2459,39 @@ function PipelineDetailPage({
 
   // WebSocket
   const {
+    readyState,
     sendMessage,
   } = useWebSocket(getWebSocket(), {
     onClose: () => DEBUG(() => console.log('socketUrlPublish closed')),
     onMessage: (lastMessage) => {
       if (lastMessage) {
         const message: KernelOutputType = JSON.parse(lastMessage.data);
+
+        // The server's answer, on each (re)connection, to which blocks still run: a run
+        // that ended while the connection was down sent its idle message to nobody.
+        // @ts-ignore
+        if ('running_blocks' === message.msg_type) {
+          // @ts-ignore
+          const running: { block_type?: string; uuid: string }[] = message.running_blocks || [];
+          let ended = false;
+          setRunningBlocks((runningBlocksPrevious) => {
+            const still = blocks.filter(({ type: type2, uuid: uuid2 }) => running.some(
+              ({ block_type: blockType2, uuid: uuid3 }) => uuid3 === uuid2
+                && (!blockType2 || blockType2 === type2),
+            ));
+            ended = runningBlocksPrevious.some(({ uuid: uuid2 }) => !still.some(
+              ({ uuid: uuid3 }) => uuid3 === uuid2,
+            ));
+
+            return still;
+          });
+          if (ended) {
+            // Its outputs went to nobody either: show the stored ones.
+            fetchPipeline();
+          }
+
+          return;
+        }
         const {
           block_type: blockType,
           execution_state: executionState,
@@ -2522,8 +2549,10 @@ function PipelineDetailPage({
       }
     },
     onOpen: () => DEBUG(() => console.log('socketUrlPublish opened')),
-    reconnectAttempts: 10,
-    reconnectInterval: 3000,
+    // Ten attempts 3 s apart gave up after 30 s, and a laptop back from sleep never
+    // reconnected: keep trying, backing off to 30 s.
+    reconnectAttempts: Number.MAX_SAFE_INTEGER,
+    reconnectInterval: (attempt: number) => Math.min(1000 * (2 ** attempt), 30000),
     shouldReconnect: () => {
       // Will attempt to reconnect on all close events, such as server shutting down.
       DEBUG(() => console.log('Attempting to reconnect...'));
@@ -2531,6 +2560,16 @@ function PipelineDetailPage({
       return true;
     },
   });
+
+  useEffect(() => {
+    if (ReadyState.OPEN === readyState) {
+      sendMessage(JSON.stringify({
+        ...sharedWebsocketData,
+        running_blocks: true,
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyState]);
 
   const executePipeline = useCallback(() => {
     // A development run reads with a consumer group of its own, but its sinks are real:
