@@ -1,6 +1,10 @@
 # Release notes
 
-## Unreleased
+## MageML 0.3.0 (2026-11-16)
+
+Changes since 0.2.0. The main additions are the run engine for triggered runs, compiled SQL
+chains, an Airflow provider, Python workers, monitors and data contracts in services, and
+a round of security fixes to the server's access checks.
 
 ### Behavior changes to check before upgrading
 
@@ -35,28 +39,6 @@
   other clients keep sending `Authorization: Bearer <token>`. Signing out clears the cookie
   on the server. A session signed in before the upgrade keeps its readable cookie until it
   signs out or signs in again.
-
-### Pipelines
-
-- Pipelines move between projects as one zip: Settings > Workspace > Import and export, or
-  `mage project-export` and `mage project-import`. An import shows what each file would
-  become first, keeps the project's pipelines or replaces them, and never writes
-  `io_config.yaml`, secrets or files outside the project's folders.
-- A Dependencies page draws the pipelines that start or feed other pipelines (after-run
-  triggers, global data products, `trigger_pipeline` calls in blocks) with each pipeline's
-  last run, and lists each link.
-- Deleting a pipeline makes its triggers inactive; they stayed active for a pipeline that
-  no longer existed.
-- Exported services run SQL blocks on SQL Server, through pymssql (FreeTDS): the image needs
-  no ODBC driver. MageML connects the same way with `MSSQL_DRIVER: pymssql`
-  (`mage-ml[mssql]`).
-- A raw SQL block with `SELECT ... INTO <table>` (SQL Server's and PostgreSQL's way to
-  create a table from a query) reads the table it made; its rows were fetched from the
-  statement, and the block failed.
-- Trigger rules (upstream #4704): `none_failed_min_one_success` runs a join after the branch
-  that ran, `all_done` runs cleanup and alerts after a failure. An upstream block that was
-  skipped or failed gives the block `None`; a failed block still fails the run. Set in the
-  block's settings; triggers and `mage run` apply them.
 
 ### Security
 
@@ -188,6 +170,25 @@
 
 ### Pipelines
 
+- Pipelines move between projects as one zip: Settings > Workspace > Import and export, or
+  `mage project-export` and `mage project-import`. An import shows what each file would
+  become first, keeps the project's pipelines or replaces them, and never writes
+  `io_config.yaml`, secrets or files outside the project's folders.
+- A Dependencies page draws the pipelines that start or feed other pipelines (after-run
+  triggers, global data products, `trigger_pipeline` calls in blocks) with each pipeline's
+  last run, and lists each link.
+- Deleting a pipeline makes its triggers inactive; they stayed active for a pipeline that
+  no longer existed.
+- Exported services run SQL blocks on SQL Server, through pymssql (FreeTDS): the image needs
+  no ODBC driver. MageML connects the same way with `MSSQL_DRIVER: pymssql`
+  (`mage-ml[mssql]`).
+- A raw SQL block with `SELECT ... INTO <table>` (SQL Server's and PostgreSQL's way to
+  create a table from a query) reads the table it made; its rows were fetched from the
+  statement, and the block failed.
+- Trigger rules (upstream #4704): `none_failed_min_one_success` runs a join after the branch
+  that ran, `all_done` runs cleanup and alerts after a failure. An upstream block that was
+  skipped or failed gives the block `None`; a failed block still fails the run. Set in the
+  block's settings; triggers and `mage run` apply them.
 - A run the scheduler cancels, such as one a trigger skips while the previous run still
   runs, says why on the runs page; it looked like a run someone stopped.
 - The Algolia exporter fails the block when the export fails; it logged the error and the
@@ -677,7 +678,6 @@
 - A scheduler pass read each pipeline's files about five times and the project's
   metadata.yaml four times for each running pipeline run; it now reads them once per pass.
   With 50 runs in flight a pass took 0.18 seconds instead of 0.22.
-
 - Where the engine is installed (`uv pip install "mage-ml[services]"`, `mageml-engine`
   0.2.0, `mage-service jobs`), the scheduler's jobs run in its warm Python workers instead
   of a new process per block or stage; `MAGE_JOB_ENGINE=off` keeps a process per job. A job starts without starting Python or importing MageML: a fused run of a
