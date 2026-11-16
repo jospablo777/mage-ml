@@ -665,6 +665,10 @@
 
 ### Scheduler
 
+- A block run's worker that the scheduler gave up on (a reset, a timeout, a cancel or a
+  manual retry, after which another worker claimed the block run) no longer writes the
+  block's outputs over those of the newer attempt: each output write checks the attempt
+  first, and the superseded worker stops without retrying or running failure callbacks.
 - The per-run scheduler lock in Redis is renewed while a tick runs. It expired after 60
   seconds, so a longer tick let a second replica act on the same pipeline run.
 - A scheduler pass read each pipeline's files about five times and the project's

@@ -55,9 +55,13 @@ So the implementation adds attempts to block runs instead of a new queue.
 
 1. **Interrupted blocks start over.** A block interrupted by a scheduler restart runs
    again from the beginning; long blocks need their own checkpoints.
-2. **Stale outputs.** Outputs are stored per partition and block without an attempt, so a
-   superseded worker can still overwrite the files of a newer attempt before its status
-   write is rejected.
+2. **Stale outputs, narrowed.** Outputs are stored per partition and block without an
+   attempt. Before each output write (`VariableManager.add_variable`, each chunk of a
+   chunked output included) a worker checks in one query that its block run is RUNNING
+   with the attempt it claimed (`orchestration/attempt_fence.py`); a superseded worker
+   raises `SupersededAttempt`, which is not retried and runs no failure callback. A worker
+   superseded during a write still finishes that write: the window is one write, not the
+   rest of the block's run.
 3. **Without `REDIS_URL`, replicas share no job ownership.** The scheduler's per-run Redis
    lock is a lease (`DistributedLock.held`): held for a tick, renewed every third of its
    60 s expiry while the tick runs, released after it; the expiry only frees the lock of a

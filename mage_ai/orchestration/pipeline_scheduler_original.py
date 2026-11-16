@@ -27,6 +27,7 @@ from mage_ai.data_preparation.models.triggers import (
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.shared.retry import resolve_retry_config
 from mage_ai.data_preparation.sync.git_sync import get_sync_config
+from mage_ai.orchestration import attempt_fence
 from mage_ai.orchestration.after_runs import start_followers
 from mage_ai.orchestration.concurrency import ConcurrencyConfig, OnLimitReached
 from mage_ai.orchestration.db import db_connection, safe_db_query
@@ -1636,25 +1637,26 @@ def run_block(
             block.retry_config,
         )
 
-    return ExecutorFactory.get_block_executor(
-        pipeline,
-        block_uuid,
-        block_run_id=block_run.id,
-        execution_partition=execution_partition,
-    ).execute(
-        block_run_id=block_run.id,
-        global_vars=variables,
-        input_from_output=input_from_output,
-        on_complete=on_complete,
-        on_failure=pipeline_scheduler.on_block_failure,
-        pipeline_run_id=pipeline_run_id,
-        retry_config=retry_config,
-        runtime_arguments=runtime_arguments,
-        tags=tags,
-        template_runtime_configuration=template_runtime_configuration,
-        verify_output=verify_output,
-        block_run_dicts=block_run_dicts,
-    )
+    with attempt_fence.holding(block_run.id, attempt):
+        return ExecutorFactory.get_block_executor(
+            pipeline,
+            block_uuid,
+            block_run_id=block_run.id,
+            execution_partition=execution_partition,
+        ).execute(
+            block_run_id=block_run.id,
+            global_vars=variables,
+            input_from_output=input_from_output,
+            on_complete=on_complete,
+            on_failure=pipeline_scheduler.on_block_failure,
+            pipeline_run_id=pipeline_run_id,
+            retry_config=retry_config,
+            runtime_arguments=runtime_arguments,
+            tags=tags,
+            template_runtime_configuration=template_runtime_configuration,
+            verify_output=verify_output,
+            block_run_dicts=block_run_dicts,
+        )
 
 
 def run_stage(
@@ -1793,7 +1795,9 @@ def run_stage(
             if plans.chains_with(block, following):
                 next_block = following.uuid
         try:
-            with plans.stage_context(next_block, pipeline_run_id):
+            with plans.stage_context(next_block, pipeline_run_id), attempt_fence.holding(
+                block_run_id, pipeline_scheduler.attempts.get(block_run_id),
+            ):
                 result = ExecutorFactory.get_block_executor(
                     pipeline,
                     block_uuid,

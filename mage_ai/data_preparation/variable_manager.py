@@ -18,6 +18,7 @@ from mage_ai.data_preparation.models.variables.utils import (
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.storage.local_storage import LocalStorage
 from mage_ai.io.base import ExportWritePolicy
+from mage_ai.orchestration import attempt_fence
 from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path, get_variables_dir
 from mage_ai.settings.server import MEMORY_MANAGER_V2
@@ -80,6 +81,8 @@ class VariableManager:
             block
             block/data_integration/utils
         """
+        # A superseded block run attempt does not write over the current one's (I-277).
+        attempt_fence.check()
         basic_iterable = False
         if not disable_variable_type_inference:
             variable_type, basic_iterable = infer_variable_type(
@@ -229,6 +232,7 @@ class VariableManager:
         Used by:
             block
         """
+        attempt_fence.check()
         variable_type, _ = infer_variable_type(
             data,
             repo_path=self.repo_path,

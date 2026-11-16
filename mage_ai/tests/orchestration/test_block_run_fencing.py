@@ -6,10 +6,11 @@ longer overwrite what happened since.
 """
 from unittest.mock import patch
 
-from mage_ai.orchestration import fusion
+from mage_ai.orchestration import attempt_fence, fusion
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.orchestration.pipeline_scheduler import PipelineScheduler
 from mage_ai.orchestration.pipeline_scheduler_original import run_block
+from mage_ai.shared.retry import retry
 from mage_ai.tests.base_test import AsyncDBTestCase, DBTestCase
 from mage_ai.tests.factory import (
     create_pipeline_run_with_schedule,
@@ -146,3 +147,86 @@ class RetryStopsRunningJobsTest(AsyncDBTestCase):
         manager.return_value.kill_block_run_job.assert_any_call(running.id)
         running.refresh()
         self.assertEqual(running.status, BlockRun.BlockRunStatus.INITIAL)
+
+
+class StaleOutputsTest(DBTestCase):
+    """I-277: a worker superseded while its block ran does not write the block's outputs."""
+
+    def setUp(self):
+        super().setUp()
+        self.pipeline = create_pipeline_with_blocks(
+            self.faker.unique.name(), self.repo_path,
+        )
+        self.pipeline_run = create_pipeline_run_with_schedule(
+            pipeline_uuid=self.pipeline.uuid,
+            status=PipelineRun.PipelineRunStatus.RUNNING,
+        )
+        self.pipeline_run.create_block_runs()
+        self.block_run = BlockRun.get(
+            pipeline_run_id=self.pipeline_run.id, block_uuid='block1',
+        )
+
+    def write_block(self, body: str) -> None:
+        block = self.pipeline.get_block('block1')
+        with open(block.file_path, 'w') as file:
+            file.write(
+                'from mage_ai.orchestration import fusion\n'
+                'from mage_ai.orchestration.db.models.schedules import BlockRun\n\n\n'
+                '@data_loader\n'
+                'def load(*args, **kwargs):\n'
+                f'{body}'
+                "    return {'value': [1, 2, 3]}\n"
+            )
+
+    def outputs(self):
+        return self.pipeline.get_block('block1').output_variables(
+            execution_partition=self.pipeline_run.execution_partition,
+        )
+
+    def test_the_current_attempt_writes_its_outputs(self):
+        self.write_block('')
+
+        run_block(self.pipeline_run.id, self.block_run.id, {}, {}, claim=True)
+
+        self.block_run.refresh()
+        self.assertEqual(self.block_run.status, BlockRun.BlockRunStatus.COMPLETED)
+        self.assertEqual(self.outputs(), ['output_0'])
+
+    def test_a_worker_reset_and_claimed_again_while_running_writes_nothing(self):
+        # While the block runs, the scheduler gives up on this worker and another claims
+        # the block run.
+        self.write_block(
+            f'    BlockRun.get_by_id({self.block_run.id}).update(status=BlockRun.BlockRunStatus.INITIAL)\n'  # noqa: E501
+            f'    fusion.claim_block_run({self.block_run.id}, {self.pipeline_run.id})\n'
+        )
+
+        with patch('mage_ai.data_preparation.executors.block_executor.BlockExecutor'
+                   '.execute_callback') as callbacks:
+            with self.assertRaises(attempt_fence.SupersededAttempt):
+                run_block(self.pipeline_run.id, self.block_run.id, {}, {}, claim=True)
+
+        self.block_run.refresh()
+        self.assertEqual(self.block_run.status, BlockRun.BlockRunStatus.RUNNING)
+        self.assertEqual(self.block_run.attempt, 2)
+        self.assertNotIn('error', self.block_run.metrics or {})
+        self.assertEqual(self.outputs(), [])
+        callbacks.assert_not_called()
+
+    def test_superseded_writes_are_not_retried(self):
+        calls = []
+
+        @retry(retries=3, delay=0)
+        def write():
+            calls.append(1)
+            raise attempt_fence.SupersededAttempt('superseded')
+
+        with self.assertRaises(attempt_fence.SupersededAttempt):
+            write()
+        self.assertEqual(len(calls), 1)
+
+    def test_outside_a_claimed_attempt_writes_are_not_checked(self):
+        with patch.object(attempt_fence, 'current_attempt') as current:
+            attempt_fence.check()
+            with attempt_fence.holding(self.block_run.id, None):
+                attempt_fence.check()
+        current.assert_not_called()

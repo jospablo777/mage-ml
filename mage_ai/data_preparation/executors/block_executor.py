@@ -44,6 +44,7 @@ from mage_ai.data_preparation.models.project import Project
 from mage_ai.data_preparation.models.project.constants import FeatureUUID
 from mage_ai.data_preparation.models.triggers import ScheduleInterval, ScheduleType
 from mage_ai.data_preparation.shared.retry import RetryConfig, resolve_retry_config
+from mage_ai.orchestration.attempt_fence import SupersededAttempt
 from mage_ai.orchestration.db import end_transaction
 from mage_ai.orchestration.db.models.schedules import BlockRun, PipelineRun
 from mage_ai.orchestration.run_lineage import current_pipeline_run_id
@@ -696,6 +697,11 @@ class BlockExecutor:
                     self._recorded = self._output_record()
                     self._check_releases(self._recorded, tags)
                 except Exception as error:
+                    if isinstance(error, SupersededAttempt):
+                        # Another attempt owns the block run: its status and failure
+                        # callbacks are that attempt's.
+                        self.logger.warning(str(error), **tags)
+                        raise
                     self.logger.exception(
                         f'Failed to execute block {self.block.uuid}',
                         **merge_dict(

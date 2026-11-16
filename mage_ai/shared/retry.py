@@ -37,6 +37,8 @@ def retry(
 
                     return func(*args, **kwargs)
                 except Exception as e:
+                    if getattr(e, 'retryable', True) is False:
+                        raise
                     if logger is None:
                         print(
                             'Exception thrown when attempting to run %s, attempt '
