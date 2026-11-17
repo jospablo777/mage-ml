@@ -233,8 +233,10 @@ jobs:
             runner: ubuntu-24.04
           - id: linux-aarch64
             runner: ubuntu-24.04-arm
+          # macos-14 is Apple Silicon too and more often free: on 2026-11-17 macos-15 found
+          # no runner within GitHub's 15 minutes three times. Supported macOS is 12 or newer.
           - id: macos-arm64
-            runner: macos-15
+            runner: macos-14
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
