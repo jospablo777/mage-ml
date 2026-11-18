@@ -24,7 +24,14 @@ from pathlib import Path
 # Each package published besides mage-ml: where its version is, and the folders its wheel is
 # built from. mage-ml takes the release's own version, which the release contract checks.
 PACKAGES = {
-    'column-atlas-native': ('rust/column_atlas/pyproject.toml', ['rust/column_atlas']),
+    # With every crate it compiles in by path (test_unchanged_sources checks the list
+    # against rust/column_atlas/Cargo.toml).
+    'column-atlas-native': ('rust/column_atlas/pyproject.toml', [
+        'rust/column_atlas',
+        'mage_ai/data_preparation/models/block/rust/sdk',
+        'mage_ai/pipeline_services/service/crates/checks',
+        'mage_ai/pipeline_services/service/crates/log-window',
+    ]),
     'mage-integrations': ('mage_integrations/pyproject.toml', ['mage_integrations']),
     'singer-python': ('vendor/singer-python/pyproject.toml', ['vendor/singer-python']),
     'mageml-engine': (

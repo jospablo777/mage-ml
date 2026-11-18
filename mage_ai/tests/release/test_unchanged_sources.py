@@ -72,3 +72,44 @@ class UnchangedSourcesTest(unittest.TestCase):
                     '[project]\nname = "column-atlas-native"\nversion = "1.0.1"\n')
         self.assertEqual(unchanged.check(self.root, self.manifest), [])
         self.assertEqual(unchanged.check(self.root, {'artifacts': []}), [])
+
+
+def path_dependencies(crate: Path) -> set[Path]:
+    """The crates a crate compiles in by path, recursively, resolved."""
+    import tomllib
+
+    found: set[Path] = set()
+    manifest = tomllib.loads((crate / 'Cargo.toml').read_text())
+    for section in ('dependencies', 'build-dependencies'):
+        for spec in (manifest.get(section) or {}).values():
+            if isinstance(spec, dict) and 'path' in spec:
+                dependency = (crate / spec['path']).resolve()
+                if dependency not in found:
+                    found.add(dependency)
+                    found |= path_dependencies(dependency)
+    return found
+
+
+class NativeSourcesTest(unittest.TestCase):
+    """The native package covers every crate it compiles in (I-457)."""
+
+    crate = ROOT / 'rust' / 'column_atlas'
+
+    def test_the_release_check_watches_every_crate_of_the_native_package(self) -> None:
+        watched = {(ROOT / path).resolve()
+                   for path in unchanged.PACKAGES['column-atlas-native'][1]}
+        for dependency in path_dependencies(self.crate):
+            self.assertIn(dependency, watched, dependency.relative_to(ROOT))
+
+    def test_uv_rebuilds_the_extension_when_a_crate_it_compiles_in_changes(self) -> None:
+        import tomllib
+
+        keys = {
+            (self.crate / entry['file']).resolve().as_posix()
+            for entry in tomllib.loads((self.crate / 'pyproject.toml').read_text())
+            ['tool']['uv']['cache-keys'] if 'file' in entry
+        }
+        for dependency in path_dependencies(self.crate):
+            for pattern in ('Cargo.toml', 'src/**/*.rs'):
+                self.assertIn(f'{dependency.as_posix()}/{pattern}', keys,
+                              dependency.relative_to(ROOT))

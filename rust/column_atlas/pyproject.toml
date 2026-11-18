@@ -27,4 +27,9 @@ cache-keys = [
   # The PostgreSQL client comes from the Rust block SDK (the postgres feature).
   { file = "../../mage_ai/data_preparation/models/block/rust/sdk/Cargo.toml" },
   { file = "../../mage_ai/data_preparation/models/block/rust/sdk/src/**/*.rs" },
+  # Contract checks, monitors and log windows come from the engine's workspace.
+  { file = "../../mage_ai/pipeline_services/service/crates/checks/Cargo.toml" },
+  { file = "../../mage_ai/pipeline_services/service/crates/checks/src/**/*.rs" },
+  { file = "../../mage_ai/pipeline_services/service/crates/log-window/Cargo.toml" },
+  { file = "../../mage_ai/pipeline_services/service/crates/log-window/src/**/*.rs" },
 ]
