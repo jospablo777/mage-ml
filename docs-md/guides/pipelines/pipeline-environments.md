@@ -163,6 +163,17 @@ blocks:
 - Tables cross between a worker and MageML's Python as Arrow, so a worker that returns
   pandas frames needs pyarrow. A worker does not import MageML: blocks in it can't import
   `mage_ai` helpers unless the worker has their packages.
+- **Combining workers.** When a pipeline uses two workers or more, its **Settings** says
+  in one line whether they can run as one: with the same package versions (and how much
+  less to install), if some packages change version (which ones), or not (uv's reason).
+  **Show what each worker installs** shows each worker's size from its `uv.lock`, and
+  **Combine into one worker** writes a worker with all their dependencies, moves the
+  pipeline's blocks to it and prepares it; the old workers stay until you delete them.
+  Blocks of one worker share one process and its memory, and a crash stops the blocks
+  after it, so keep a worker apart (a GPU worker, a native library that must run alone)
+  with `combine = false` under `[tool.mageml.worker]`.
+  `POST /api/python_worker_combinations` with `{"workers": ["feast", "mlflow"]}` answers
+  the same question.
 - A service exports the workers its blocks use. The blocks without a worker (or, when
   every block has one, the worker most of them select) run in the image's Python, with
   that environment's packages; each other worker becomes a virtual environment of its own

@@ -16,6 +16,12 @@
   585,000 messages a second with a Python block and 890,000 with a Rust block, with re-reads
   after a lost assignment still bounded by 8 batches per partition.
 
+### Server
+
+- A finished pipeline run no longer shows as running: an API request that only read left
+  its database transaction open, and the server's thread kept reading the database as it
+  was then. Each request now ends its transaction; a failed one rolls back.
+
 ### Behavior changes to check before upgrading
 
 - Consecutive Rust blocks with different connection profiles no longer compile into one
@@ -30,6 +36,10 @@
 - Add a Python worker from a template (Feast, MLflow, ML inference, Polars, or empty): `mage
   workers new <name> --template feast`, or **Add a Python worker** in the pipeline's
   settings. It is written, locked with uv and prepared, with uv's output on the page.
+- A pipeline's settings say whether its Python workers can run as one, checked with uv:
+  with the same versions (and how much less to install), if some packages change version
+  (listed), or not (uv's reason); **Combine into one worker** writes the combined worker,
+  moves the blocks and prepares it. `combine = false` keeps a worker apart.
 - `mage workers assign feast <pipeline> --chain <block>` moves every block of a chain (or
   `--blocks a,b`) to a Python worker at once.
 - Compiling checks each Python block's imports in the environment it runs in (its Python

@@ -475,6 +475,27 @@ class NamedWorkerTest(DBTestCase):
         viewer = create_user(roles_new=[Role.get_role('Viewer')])
         self.assertEqual(ask(viewer, ['old-six', 'new-six'])['error']['code'], 403)
 
+    def test_combining_writes_one_worker_and_moves_the_blocks_to_it(self):
+        self.worker('feast', dependencies=['six==1.16.0'], lock=False)
+        self.worker('mlflow', dependencies=['packaging==24.1'], lock=False)
+        pipeline, load, transform = self.pipeline(
+            environment=dict(worker='feast'), transform_worker='mlflow',
+        )
+        folder, moved = environments.combine_into(pipeline, ['feast', 'mlflow'], 'features')
+        self.assertEqual(sorted(moved), sorted([load, transform]))
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        self.assertEqual(pipeline.environment['worker'], 'features')
+        self.assertEqual(pipeline.get_block(transform).configuration['python_worker'],
+                         'features')
+        # load inherits the pipeline's worker, so it has none of its own.
+        self.assertNotIn('python_worker', pipeline.get_block(load).configuration or {})
+        worker = environments.named_workers(self.repo_path)['features']
+        self.assertEqual(worker.label, 'feast + mlflow')
+        text = (folder / 'pyproject.toml').read_text()
+        self.assertIn('dependencies = ["six==1.16.0", "packaging==24.1", "pyarrow"]', text)
+        # The old workers stay until someone deletes them.
+        self.assertIn('feast', environments.named_workers(self.repo_path))
+
     def test_a_worker_kept_apart_is_not_combined(self):
         environments._combine_cache.clear()
         folder = self.worker('gpu', dependencies=['six==1.16.0'])
@@ -762,6 +783,44 @@ class NewWorkerTest(DBTestCase):
         self.assertIn('"pandas>=2.2,<3"', text)
         self.assertIn('label = "Online features"', text)
         self.assertIn('description = "Feature retrieval with Feast, which needs pandas 2"', text)
+
+    def test_the_api_combines_workers_for_a_pipeline_and_prepares_the_new_one(self):
+        from mage_ai.data_preparation.models.block import Block
+
+        for name, dependency in (('feast', 'six==1.16.0'), ('mlflow', 'packaging==24.1')):
+            folder = Path(self.repo_path, environments.WORKERS_DIR, name)
+            folder.mkdir(parents=True)
+            (folder / 'pyproject.toml').write_text(
+                f'[project]\nname = "{name}"\nversion = "0"\ndependencies = ["{dependency}"]\n')
+        pipeline = Pipeline.create(self.faker.unique.name(), repo_path=self.repo_path)
+        uuids = []
+        for worker in ('feast', 'mlflow'):
+            block = Block.create(f'{pipeline.uuid}_{worker}', 'data_loader', self.repo_path,
+                                 pipeline=pipeline, configuration=dict(python_worker=worker))
+            uuids.append(block.uuid)
+
+        steps = []
+        with patch.object(environments, '_run',
+                          side_effect=lambda command, log: steps.append(command[1])), \
+                patch.object(environments, 'prepare',
+                             side_effect=lambda worker, log=print: steps.append('prepare')):
+            self.call(dict(name='both', combine=['feast', 'mlflow'],
+                           pipeline_uuid=pipeline.uuid))
+            for _ in range(100):
+                job = environments.prepare_job(self.repo_path, 'both')
+                if job and job['state'] != 'running':
+                    break
+                time.sleep(0.05)
+        self.assertEqual(steps, ['lock', 'prepare'])
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        self.assertEqual(
+            [pipeline.get_block(u).configuration['python_worker'] for u in uuids],
+            ['both', 'both'],
+        )
+        self.assertEqual(environments.named_workers(self.repo_path)['both'].label,
+                         'feast + mlflow')
+        refused = self.call(dict(name='other', combine=['feast'], pipeline_uuid=pipeline.uuid))
+        self.assertEqual(refused['error']['code'], 400)
 
     def test_names_and_templates_are_checked_before_anything_is_written(self):
         for payload, message in (

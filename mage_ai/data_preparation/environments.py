@@ -36,6 +36,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -770,6 +771,56 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
         with _combine_lock:
             _combine_cache[key] = dict(result)
     return result
+
+
+def combine_into(
+    pipeline, aliases: List[str], name: str, label: Optional[str] = None,
+) -> Tuple[Path, List[str]]:
+    """
+    Combines Python workers for a pipeline in MageML: a new worker with the union of their
+    dependencies (python_workers/<name>/, its label naming them), and the pipeline's blocks
+    that selected one of them moved to it. The old workers stay. Lock and prepare it with
+    start_prepare(..., lock=True). Returns its folder and the blocks moved.
+    """
+    import tomllib
+
+    workers = named_workers(pipeline.repo_path)
+    chosen = [workers[normalized_alias(a)] for a in aliases if normalized_alias(a) in workers]
+    if len(chosen) < 2:
+        raise PipelineEnvironmentError('Name two Python workers or more to combine.')
+    dependencies = []
+    for worker in chosen:
+        project = tomllib.loads(
+            (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
+        dependencies += project.get('dependencies') or []
+    folder = new_worker(
+        pipeline.repo_path, name, 'empty',
+        label=label or ' + '.join(w.display_name for w in chosen),
+        description=f'Combines {", ".join(w.alias for w in chosen)}',
+    )
+    pyproject = folder / 'pyproject.toml'
+    text = pyproject.read_text()
+    listed = ', '.join(json.dumps(d) for d in dict.fromkeys(dependencies + ['pyarrow']))
+    pyproject.write_text(re.sub(r'dependencies = \[.*?\]', f'dependencies = [{listed}]', text,
+                                count=1))
+    combined = {w.alias for w in chosen}
+    alias = normalized_alias(name)
+    # Blocks that name one of them; blocks that inherit the pipeline's worker follow it.
+    moving = [
+        uuid for uuid, block in pipeline.blocks_by_uuid.items()
+        if normalized_alias((block.configuration or {}).get('python_worker') or '') in combined
+    ]
+    moved = assign_worker(pipeline, moving, alias) if moving else []
+    environment = getattr(pipeline, 'environment', None)
+    if isinstance(environment, dict) and \
+            normalized_alias(environment.get('worker') or '') in combined:
+        pipeline.environment = dict(environment, worker=alias)
+        pipeline.save()
+        moved += [
+            uuid for uuid, block in pipeline.blocks_by_uuid.items()
+            if uuid not in moved and worker_selection(block) == alias
+        ]
+    return folder, moved
 
 
 def _offline(stderr: str) -> bool:

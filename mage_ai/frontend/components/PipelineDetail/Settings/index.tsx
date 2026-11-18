@@ -14,6 +14,7 @@ import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
 import NewPythonWorker from './NewPythonWorker';
+import WorkerCombination from './WorkerCombination';
 import PythonWorkerStatus, { PythonWorkerType, workerLabel } from './PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
 import SetupSection, { SetupSectionRow } from '@components/shared/SetupSection';
@@ -80,6 +81,22 @@ function PipelineSettings({
     () => dataWorkers?.python_workers || [],
     [dataWorkers],
   );
+  // The named workers the saved pipeline's Python blocks run in.
+  const usedWorkers: string[] = useMemo(() => {
+    const names = new Set<string>();
+    const fallback = pipeline?.environment?.worker;
+    blocks.forEach((block) => {
+      if (block?.language !== 'python') {
+        return;
+      }
+      const chosen = block?.configuration?.python_worker || fallback;
+      if (chosen && chosen !== 'mage' && workers.some(w => w.name === chosen)) {
+        names.add(chosen);
+      }
+    });
+
+    return Array.from(names);
+  }, [blocks, pipeline, workers]);
 
   const [pipelineAttributesTouched, setPipelineAttributesTouched] = useState<boolean>(false);
 
@@ -366,6 +383,7 @@ function PipelineSettings({
                   a uv project in python_workers/&lt;name&gt;/ with its uv.lock.
                 </Text>
               )}
+              <WorkerCombination pipelineUUID={pipelineUUID} workers={usedWorkers} />
               <NewPythonWorker
                 onAdded={(name) => {
                   reloadWorkers();

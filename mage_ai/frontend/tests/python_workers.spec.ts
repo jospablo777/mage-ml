@@ -121,3 +121,48 @@ test('a Python worker is added from a template, locked and prepared', async ({ p
       .catch(() => null);
   }
 });
+
+test('two workers with the same versions combine into one for a pipeline', async ({ page }) => {
+  test.setTimeout(240_000);
+  const pair = [`e2e-first-${SUFFIX}`, `e2e-second-${SUFFIX}`];
+  const combined = `e2e-both-${SUFFIX}`;
+  for (const worker of pair) {
+    await api.writeFile(`python_workers/${worker}`, 'pyproject.toml',
+      PYPROJECT.split(WORKER).join(worker).replace('Tools worker', worker));
+    await api.writeFile(`python_workers/${worker}`, 'uv.lock', LOCK.split(WORKER).join(worker));
+  }
+  const uuid = await api.createPipeline(`ui_combine_${SUFFIX}`);
+  await api.addBlock(uuid, { content: LOAD, name: `combine_load_${SUFFIX}`, type: 'data_loader' });
+  await api.addBlock(uuid, {
+    content: LOAD.replace('@data_loader', '@transformer').replace('def load(', 'def transform(data, '),
+    name: `combine_next_${SUFFIX}`,
+    type: 'transformer',
+    upstream_blocks: [`combine_load_${SUFFIX}`],
+  });
+  for (const [index, worker] of pair.entries()) {
+    const name = index === 0 ? `combine_load_${SUFFIX}` : `combine_next_${SUFFIX}`;
+    await api.call('PUT', `pipelines/${uuid}/blocks/${name}`, {
+      block: { configuration: { python_worker: worker } },
+    });
+  }
+  try {
+    await page.goto(`/pipelines/${uuid}/settings`);
+    await expect(page.getByText(/can run as one worker with the same package versions/))
+      .toBeVisible({ timeout: 60_000 });
+    await page.getByText('Show what each worker installs', { exact: true }).click();
+    await expect(page.getByText(/they share memory, and a crash/)).toBeVisible();
+    await page.getByLabel('Name of the combined worker').fill(combined);
+    await page.getByRole('button', { name: 'Combine into one worker' }).click();
+    await expect.poll(async () => {
+      const { pipeline } = await api.call('GET', `pipelines/${uuid}`);
+
+      return pipeline.blocks.map(b => b.configuration?.python_worker);
+    }, { timeout: 60_000 }).toEqual([combined, combined]);
+  } finally {
+    await api.deletePipeline(uuid);
+    for (const worker of [...pair, combined]) {
+      await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${worker}`)}`)
+        .catch(() => null);
+    }
+  }
+});
