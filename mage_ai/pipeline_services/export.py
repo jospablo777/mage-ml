@@ -437,24 +437,27 @@ def _pipeline_environment(pipeline, problems: List[str], capture_: Capture = Non
         return None
 
 
+def _image_python(capture_: Capture) -> str:
+    return (capture_.environment.python if capture_.environment is not None
+            else f'{sys.version_info.major}.{sys.version_info.minor}')
+
+
 def _check_extra_workers(capture_: Capture, problems: List[str]) -> None:
     """
-    Each extra Python worker builds from its uv.lock on the image's Python: it needs a lock
-    and the same Python version.
+    Each extra Python worker builds from its uv.lock: it needs a lock. A worker on another
+    Python than the image's gets that Python from uv in the image (_worker_installs).
     """
-    image_python = (capture_.environment.python if capture_.environment is not None
-                    else f'{sys.version_info.major}.{sys.version_info.minor}')
+    image_python = _image_python(capture_)
     for alias, worker in sorted(capture_.extra_workers.items()):
         if not (Path(worker.definition) / 'uv.lock').is_file():
             problems.append(
                 f'Python worker {alias} has no uv.lock: run uv lock in '
                 f'{worker.relative_definition()}; the image installs exactly what it locks.'
             )
-        if worker.python != image_python:
-            problems.append(
-                f'Python worker {alias} uses Python {worker.python} and the image Python '
-                f'{image_python}; a service builds its workers on the image\'s Python. '
-                f'Set {worker.relative_definition()}/.python-version to {image_python}.'
+        elif worker.python != image_python:
+            capture_.notes.append(
+                f'Python worker {alias} runs on Python {worker.python}, the image\'s Python '
+                f'is {image_python}: the image installs Python {worker.python} with uv for it.'
             )
 
 
@@ -3101,8 +3104,9 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
     for alias, worker in sorted(capture_.extra_workers.items()):
         target = out_dir / 'workers' / alias
         target.mkdir(parents=True, exist_ok=True)
-        for name in ('pyproject.toml', 'uv.lock'):
-            shutil.copy2(Path(worker.definition) / name, target / name)
+        for name in ('pyproject.toml', 'uv.lock', '.python-version'):
+            if (Path(worker.definition) / name).is_file():
+                shutil.copy2(Path(worker.definition) / name, target / name)
     if capture_.rust_blocks:
         _copy_rust_workspace(capture_, out_dir / 'rust')
     if capture_.r_project is not None:
@@ -3859,11 +3863,26 @@ def _uses_sdk_feature(capture_: Capture, feature: str) -> bool:
     return False
 
 
+# Where the image keeps the Pythons uv installs for workers on another Python than its own.
+WORKER_PYTHONS_DIR = '/opt/mage-python'
+
+
 def _worker_installs(capture_: Capture, uv_version: str) -> str:
-    """The image's extra Python workers: each a virtual environment on the image's Python,
-    built from its uv.lock."""
+    """The image's extra Python workers: each a virtual environment built from its uv.lock,
+    on the image's Python or, for a worker on another one, on that Python from uv."""
     steps = []
-    for alias in sorted(capture_.extra_workers):
+    image_python = _image_python(capture_)
+    for alias, worker in sorted(capture_.extra_workers.items()):
+        if worker.python == image_python:
+            venv = ('    UV_PYTHON_DOWNLOADS=never uv venv .venv --python /usr/local/bin/python3 '
+                    '&& \\\n')
+        else:
+            # From python-build-standalone, or UV_PYTHON_INSTALL_MIRROR in the uv-env
+            # secret for a build without the internet.
+            venv = (f'    export UV_PYTHON_INSTALL_DIR={WORKER_PYTHONS_DIR} && \\\n'
+                    f'    uv python install {worker.python} && \\\n'
+                    f'    UV_PYTHON_DOWNLOADS=never uv venv .venv --python {worker.python} '
+                    '&& \\\n')
         steps.append(
             f'# Python worker {alias}: the blocks that select it run in this environment.\n'
             f'COPY workers/{alias}/ {SERVICE_DIR}/workers/{alias}/\n'
@@ -3872,7 +3891,7 @@ def _worker_installs(capture_: Capture, uv_version: str) -> str:
             f'    cd {SERVICE_DIR}/workers/{alias} && \\\n'
             '    if [ -f /run/secrets/uv-env ]; then \\\n'
             '      set -a; . /run/secrets/uv-env; set +a; fi && \\\n'
-            '    UV_PYTHON_DOWNLOADS=never uv venv .venv --python /usr/local/bin/python3 && \\\n'
+            f'{venv}'
             '    uv sync --locked --no-dev --no-install-project --no-cache \\\n'
             '      --compile-bytecode && \\\n'
             '    pip uninstall -y uv\n'

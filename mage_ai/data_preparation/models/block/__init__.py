@@ -3366,9 +3366,7 @@ class Block(
 
             if is_dynamic_block(self) or is_dynamic_block_child(self) or is_replicated_block(self):
                 raise environments.PipelineEnvironmentError(
-                    f'Block {self.uuid} is dynamic or replicated, which cannot run in a pipeline '
-                    'environment yet; remove the environment from the pipeline settings or '
-                    'make the block static.'
+                    environments.dynamic_block_problem(self.uuid, environment)
                 )
         return environment
 

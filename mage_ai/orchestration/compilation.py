@@ -322,7 +322,33 @@ def _check_python(pipeline, unit: Unit) -> None:
     if errors:
         raise CompileError('\n\n'.join(errors))
     unit.warnings.extend(_missing_imports(pipeline, unit.block_uuids))
+    errors = _dynamic_blocks_in_workers(pipeline, unit.block_uuids)
+    if errors:
+        raise CompileError('\n\n'.join(errors))
     unit.state = 'checked'
+
+
+def _dynamic_blocks_in_workers(pipeline, uuids: List[str]) -> List[str]:
+    """Dynamic and replicated blocks set to run in a Python worker: their runs would fail."""
+    from mage_ai.data_preparation import environments
+    from mage_ai.data_preparation.models.block.dynamic.utils import (
+        is_dynamic_block,
+        is_dynamic_block_child,
+        is_replicated_block,
+    )
+
+    try:
+        workers = environments.named_workers(pipeline.repo_path)
+    except environments.PipelineEnvironmentError:
+        return []
+    problems = []
+    for uuid in uuids:
+        block = pipeline.get_block(uuid)
+        worker = workers.get(environments.worker_selection(block) or '')
+        if worker is not None and (is_dynamic_block(block) or is_dynamic_block_child(block)
+                                   or is_replicated_block(block)):
+            problems.append(environments.dynamic_block_problem(uuid, worker))
+    return problems
 
 
 def _imported(tree) -> List[str]:
@@ -453,7 +479,92 @@ def _missing_imports(pipeline, uuids: List[str]) -> List[str]:
                 warnings.append(
                     f'{uuid} imports {module}, which {name(alias)} does not have{where}: {fix}.'
                 )
+    warnings += _mageml_imports_in_workers(pipeline, uuids, workers)
     return warnings
+
+
+# The worker gives blocks the decorators; MageML's templates import them only outside one.
+_PROVIDED = ('mage_ai.data_preparation.decorators',)
+# Imports each module given and prints "<module>\t<missing module>" for each that fails on
+# a module the interpreter does not have.
+_IMPORT_PROBE = (
+    'import importlib, sys\n'
+    'for name in sys.argv[1:]:\n'
+    '    try:\n'
+    '        importlib.import_module(name)\n'
+    '    except ModuleNotFoundError as error:\n'
+    '        print(f"{name}\\t{error.name}")\n'
+    '    except Exception:\n'
+    '        pass\n'
+)
+
+
+def _mageml_imports_in_workers(pipeline, uuids: List[str], workers) -> List[str]:
+    """
+    MageML's own modules a block in a Python worker imports (a connector from a block
+    template), imported in the worker: MageML's code is on its path, its packages are not.
+    """
+    import ast
+    import subprocess
+
+    from mage_ai.data_preparation import environments
+
+    wanted: Dict[str, Dict[str, List[str]]] = {}
+    for uuid in uuids:
+        block = pipeline.get_block(uuid)
+        alias = environments.worker_selection(block)
+        worker = workers.get(alias) if alias else None
+        if worker is None or not worker.prepared:
+            continue
+        try:
+            tree = ast.parse(_code(block))
+        except SyntaxError:
+            continue
+        modules = sorted({
+            name for name in _imported_modules(tree)
+            if name.split('.')[0] == 'mage_ai' and name not in _PROVIDED
+        })
+        if modules:
+            wanted.setdefault(alias, {})[uuid] = modules
+    warnings = []
+    mage_root = str(Path(environments.__file__).resolve().parents[2])
+    for alias, blocks in wanted.items():
+        worker = workers[alias]
+        modules = sorted({m for found in blocks.values() for m in found})
+        try:
+            probe = subprocess.run(
+                [str(worker.python_executable), '-c', _IMPORT_PROBE, *modules],
+                capture_output=True, text=True, timeout=120, cwd=pipeline.repo_path,
+                env={**os.environ, 'PYTHONPATH': mage_root},
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        missing = dict(line.split('\t', 1) for line in probe.stdout.splitlines() if '\t' in line)
+        for uuid, found in blocks.items():
+            for module in found:
+                if module not in missing:
+                    continue
+                package = missing[module].split('.')[0]
+                warnings.append(
+                    f"{uuid} imports MageML's {module}, which needs {package}; "
+                    f'{worker.display_name} ({alias}) does not have it: add {package} to '
+                    f'{worker.relative_definition()}/pyproject.toml and run uv lock, or run '
+                    "the block in MageML's Python."
+                )
+    return warnings
+
+
+def _imported_modules(tree) -> List[str]:
+    """The full names of the modules a file imports."""
+    import ast
+
+    names = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.append(node.module)
+    return names
 
 
 # Parses each file given; prints "<path>\t<message>" for each that does not parse, with

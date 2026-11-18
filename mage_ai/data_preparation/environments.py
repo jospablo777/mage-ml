@@ -161,7 +161,11 @@ class NamedWorker:
 
 
 def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
-    """The project's Python workers, by alias (the normalized [project].name)."""
+    """
+    The project's Python workers, by alias: the normalized name of the worker's folder,
+    python_workers/<name>/. Its [project].name is free, so a worker named feast can depend
+    on feast (_check_project_name).
+    """
     import tomllib
 
     root = Path(repo_path) / WORKERS_DIR
@@ -172,16 +176,15 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
         relative = f'{WORKERS_DIR}/{folder.name}'
         try:
             parsed = tomllib.loads((folder / 'pyproject.toml').read_text())
-            project = parsed.get('project') or {}
         except (OSError, tomllib.TOMLDecodeError) as error:
             raise PipelineEnvironmentError(
                 f'{relative}/pyproject.toml cannot be read: {error}'
             )
-        alias = normalized_alias(project.get('name') or folder.name)
+        alias = normalized_alias(folder.name)
         if alias in workers:
             raise PipelineEnvironmentError(
                 f'Python workers {workers[alias].relative_definition()} and {relative} are '
-                f'both named {alias}; names compare without case, "-", "_" or ".".'
+                f'both named {alias}; folder names compare without case, "-", "_" or ".".'
             )
         lock = folder / 'uv.lock'
         digest = hashlib.sha256()
@@ -189,7 +192,7 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
         digest.update(lock.read_bytes() if lock.is_file() else b'')
         version_file = folder / '.python-version'
         python = (version_file.read_text().strip() if version_file.is_file()
-                  else f'{sys.version_info.major}.{sys.version_info.minor}')
+                  else _worker_python((parsed.get('project') or {}).get('requires-python')))
         settings = (((parsed.get('tool') or {}).get('mageml') or {}).get('worker') or {})
         label = settings.get('label')
         description = settings.get('description')
@@ -200,6 +203,30 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
             combine=settings.get('combine', True) is not False,
         )
     return workers
+
+
+def _worker_python(requires: Optional[str]) -> str:
+    """
+    The Python a worker without a .python-version runs on: MageML's when its
+    requires-python allows it, else the closest one it allows (the lowest above MageML's,
+    or the highest below). Without this, uv sync gave a worker with requires-python >= 3.13
+    the newest Python it had while the worker said MageML's.
+    """
+    own = f'{sys.version_info.major}.{sys.version_info.minor}'
+    if not requires:
+        return own
+    from packaging.specifiers import InvalidSpecifier, SpecifierSet
+
+    try:
+        allowed = SpecifierSet(requires)
+    except InvalidSpecifier:
+        return own
+    minors = [m for m in range(8, 30)
+              if allowed.contains(f'3.{m}.0') or allowed.contains(f'3.{m}.99')]
+    if sys.version_info.minor in minors or not minors:
+        return own
+    above = [m for m in minors if m > sys.version_info.minor]
+    return f'3.{min(above) if above else max(minors)}'
 
 
 def environment_bytes(pyproject: bytes) -> bytes:
@@ -237,7 +264,35 @@ def worker_selection(block) -> Optional[str]:
     if not selected:
         return None
     alias = normalized_alias(selected)
-    return 'mage' if alias in BUILTIN_WORKERS else alias
+    if alias in BUILTIN_WORKERS:
+        return 'mage'
+    repo_path = getattr(block, 'repo_path', None) or os.getcwd()
+    return _folder_alias(repo_path, alias)
+
+
+def _folder_alias(repo_path: str, alias: str) -> str:
+    """
+    The worker a selection names. Workers were named by their [project].name before their
+    folder: a block that selects a worker by its project name selects that worker.
+    """
+    import tomllib
+
+    root = Path(repo_path) / WORKERS_DIR
+    if not root.is_dir():
+        return alias
+    folders = {
+        normalized_alias(p.name): p for p in root.iterdir() if (p / 'pyproject.toml').is_file()
+    }
+    if alias in folders:
+        return alias
+    for folder_alias, folder in folders.items():
+        try:
+            project = tomllib.loads((folder / 'pyproject.toml').read_text()).get('project')
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if normalized_alias((project or {}).get('name') or '') == alias:
+            return folder_alias
+    return alias
 
 
 def block_worker(block) -> Optional[NamedWorker]:
@@ -458,13 +513,37 @@ def _build(environment: Environment, log) -> None:
             pins=list(environment.pins),
             packages=frozen,
         ), indent=2) + '\n')
+        shutil.rmtree(final, ignore_errors=True)
         os.replace(staging, final)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
 
+def _check_project_name(worker: NamedWorker) -> None:
+    """
+    A project named like one of its dependencies (a worker "pandas" that lists pandas): uv
+    takes the project for the package, so the lock fails on a version or, unpinned, the
+    package is never installed and the blocks fail on import.
+    """
+    import tomllib
+
+    project = tomllib.loads(
+        (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
+    name = (project.get('name') or '').lower().replace('_', '-').replace('.', '-')
+    for dependency in project.get('dependencies') or []:
+        required = (_requirement_name(dependency) or '').replace('.', '-')
+        if name and required == name:
+            raise PipelineEnvironmentError(
+                f'Python worker "{worker.alias}": its project is named "{project["name"]}", '
+                f'like the package it needs, so uv would take the project for the package. '
+                f'Rename it in {worker.relative_definition()}/pyproject.toml, such as '
+                f'name = "mageml-worker-{worker.alias}", and lock it again.'
+            )
+
+
 def _build_worker(worker: NamedWorker, log) -> None:
+    _check_project_name(worker)
     uv = _uv()
     definition = Path(worker.definition)
     relative = worker.relative_definition()
@@ -497,6 +576,7 @@ def _build_worker(worker: NamedWorker, log) -> None:
             raise PipelineEnvironmentError(
                 f'Python worker "{worker.alias}" could not be prepared: {text}'
             ) from error
+        _check_python(worker, staging)
         python = staging / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
         frozen = subprocess.run(
             [uv, 'pip', 'freeze', '--python', str(python)],
@@ -506,14 +586,70 @@ def _build_worker(worker: NamedWorker, log) -> None:
             identity=worker.identity,
             worker=worker.alias,
             definition=relative,
+            # The worker's folder, which _remove_superseded matches environments by.
+            source=str(definition.resolve()),
+            prepared_at=time.time(),
             digest=worker.digest,
             python=worker.python,
             packages=frozen,
         ), indent=2) + '\n')
+        # An environment left without its marker (a cleanup stopped halfway) would make the
+        # replace fail on a folder that is not empty, every time.
+        shutil.rmtree(final, ignore_errors=True)
         os.replace(staging, final)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    _remove_superseded(worker, log)
+
+
+# Environments of one worker folder kept: the current one and the one before, which a run
+# that started before the change may still use.
+KEPT_ENVIRONMENTS = 2
+
+
+def _remove_superseded(worker: NamedWorker, log) -> None:
+    """
+    Removes the environments of the worker's folder older than the last KEPT_ENVIRONMENTS:
+    each change of its lock prepares a new one, and a Feast worker's is about a gigabyte.
+    Environments of other folders and projects are not touched.
+    """
+    source = str(Path(worker.definition).resolve())
+    found = []
+    for marker in environments_dir().glob(f'*/{MARKER}'):
+        try:
+            recorded = json.loads(marker.read_text())
+        except (OSError, ValueError):
+            continue
+        if recorded.get('source') == source:
+            found.append((recorded.get('prepared_at') or 0, marker.parent))
+    for _, directory in sorted(found, reverse=True)[KEPT_ENVIRONMENTS:]:
+        if directory == worker.directory:
+            continue
+        log(f'Removing the superseded environment {directory.name} of {worker.alias}.')
+        # The marker first: a removal stopped halfway leaves an environment never used.
+        (directory / MARKER).unlink(missing_ok=True)
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def _check_python(worker: NamedWorker, environment: Path) -> None:
+    """uv sync replaces an environment whose Python its requires-python does not allow; a
+    worker must run on the Python it says (the pages, the combine check and exports use it)."""
+    try:
+        config = (environment / 'pyvenv.cfg').read_text()
+    except OSError:
+        return
+    found = next((line.split('=', 1)[1].strip() for line in config.splitlines()
+                  if line.split('=', 1)[0].strip() in ('version_info', 'version')), None)
+    if not found:
+        return
+    wanted = worker.python.removeprefix('cpython-').removeprefix('python')
+    if found.split('.')[:2] != wanted.split('.')[:2]:
+        raise PipelineEnvironmentError(
+            f'Python worker "{worker.alias}" asks for Python {worker.python}, and its '
+            f'requires-python made uv use Python {found}. Make .python-version and '
+            f'requires-python in {worker.relative_definition()} agree, and lock it again.'
+        )
 
 
 def prepare(worker: NamedWorker, log=print) -> Path:
@@ -614,7 +750,9 @@ def new_worker(
     dependencies = ', '.join(json.dumps(d) for d in chosen['dependencies'])
     (folder / 'pyproject.toml').write_text(
         '[project]\n'
-        f'name = "{alias}"\n'
+        # Not the alias alone: a worker named "feast" would be a project "feast" that
+        # depends on feast (_check_project_name).
+        f'name = "mageml-worker-{alias}"\n'
         'version = "0"\n'
         f'requires-python = ">={sys.version_info.major}.{sys.version_info.minor}"\n'
         f'dependencies = [{dependencies}]\n'
@@ -885,6 +1023,7 @@ def start_prepare(repo_path: str, alias: str, lock: bool = False) -> Dict:
     def run():
         try:
             if lock:
+                _check_project_name(worker)
                 log(f'Locking {worker.relative_definition()} with uv.')
                 _run([_uv(), 'lock', '--project', worker.definition], log)
                 prepared = named_workers(repo_path)[worker.alias]
@@ -936,6 +1075,66 @@ def _forward(stream, sink) -> threading.Thread:
     thread = threading.Thread(target=pump, daemon=True)
     thread.start()
     return thread
+
+
+def dynamic_block_problem(block_uuid: str, environment) -> str:
+    """Why a dynamic or replicated block cannot run where it is set to, and what to do."""
+    if isinstance(environment, NamedWorker):
+        return (f'Block {block_uuid} is dynamic or replicated, which cannot run in Python '
+                f'worker "{environment.alias}" yet: choose MageML\'s Python for it in its '
+                'settings, or make the block static.')
+    return (f'Block {block_uuid} is dynamic or replicated, which cannot run in a pipeline '
+            'environment yet; remove the environment from the pipeline settings or make the '
+            'block static.')
+
+
+def _missing_module_hint(environment, message: str, details: str) -> Optional[str]:
+    """What to do about a module a worker does not have: the block's own import, or one of
+    MageML's modules (a connector from a block template) that needs it."""
+    import re
+
+    match = re.search(r"No module named '([^']+)'", message)
+    if not match or not isinstance(environment, NamedWorker):
+        return None
+    package = match.group(1).split('.')[0]
+    where = f'{environment.relative_definition()}/pyproject.toml'
+    files = re.findall(r'File "([^"]+)", line', details)
+    mage_root = Path(__file__).resolve().parents[1]
+    importer = next((f for f in reversed(files) if f.endswith('.py')), '')
+    if importer and Path(importer).resolve().is_relative_to(mage_root):
+        module = Path(importer).resolve().relative_to(mage_root.parent).with_suffix('')
+        return (f'MageML\'s {".".join(module.parts)} needs {package}, which Python worker '
+                f'"{environment.alias}" does not have: a worker has only its own packages. '
+                f'Add {package} to {where} and lock it again, or run this block in MageML\'s '
+                'Python.')
+    return (f'Python worker "{environment.alias}" does not have {package}: add it to '
+            f'{where} and lock it again.')
+
+
+def _exit_message(environment, code: int) -> str:
+    """Why a worker's process ended before the block's result, said for people."""
+    import signal
+
+    who = (f'Python worker "{environment.alias}"' if isinstance(environment, NamedWorker)
+           else "The pipeline environment's Python")
+    number = None
+    if code is not None and code < 0:
+        number = -code
+    elif code is not None and HAS_PROCESS_GROUPS and 128 < code <= 128 + 64:
+        # The supervisor (supervised_command) exits with 128 + the signal that ended it.
+        number = code - 128
+    if number:
+        try:
+            name = signal.Signals(number).name
+        except ValueError:
+            name = f'signal {number}'
+        how = f'was stopped by {name} (exit code {code})'
+        if number == getattr(signal, 'SIGKILL', 9):
+            how += ', which the system sends when memory runs out'
+    else:
+        how = f'exited with code {code}'
+    return (f'{who} {how} before the block returned its result. What the block printed last '
+            'is in its log.')
 
 
 def run_block(
@@ -1032,16 +1231,14 @@ def run_block(
                 pump.join(timeout=5)
         result = next((m for m in messages if m.get('type') == 'result'), None)
         if result is None:
-            raise PipelineEnvironmentError(
-                f'The environment\'s Python exited with code {process.returncode} before it '
-                'returned the block\'s result.'
-            )
+            raise PipelineEnvironmentError(_exit_message(environment, process.returncode))
         if not result.get('ok'):
             error = result.get('error') or {}
             details = error.get('details') or ''
+            message = error.get('message') or 'The block failed.'
+            hint = _missing_module_hint(environment, message, details)
             raise PipelineEnvironmentError(
-                f"{error.get('message') or 'The block failed.'}"
-                + (f'\n\n{details}' if details else '')
+                message + (f' {hint}' if hint else '') + (f'\n\n{details}' if details else '')
             )
         outputs = [worker.read_input(record) for record in result.get('outputs') or []]
         return outputs, list(result.get('tests') or [])

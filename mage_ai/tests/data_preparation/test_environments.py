@@ -5,6 +5,7 @@ packages; skipped where uv is not installed.
 """
 import asyncio
 import importlib.metadata
+import json
 import shutil
 import subprocess
 import sys
@@ -661,17 +662,32 @@ class NamedWorkerTest(DBTestCase):
         self.assertIn('COPY workers/legacy/ /srv/mage-service/workers/legacy/', dockerfile)
         self.assertIn('uv sync --locked --no-dev', dockerfile)
 
-    def test_an_extra_worker_needs_a_lock_and_the_images_python(self):
+    def test_an_extra_worker_needs_a_lock_and_gets_its_own_python_in_the_image(self):
         from mage_ai.pipeline_services import export
 
         folder = self.worker(name='other', lock=False)
-        (folder / '.python-version').write_text('3.11\n')
+        (folder / '.python-version').write_text('3.13\n')
         mixed, load, _ = self.pipeline(load_worker='other')
         with self.assertRaises(export.ExportError) as caught:
             export.capture(self.repo_path, [mixed.uuid])
-        problems = '\n'.join(caught.exception.problems)
-        self.assertIn('Python worker other has no uv.lock', problems)
-        self.assertIn('Python worker other uses Python 3.11', problems)
+        self.assertIn('Python worker other has no uv.lock', '\n'.join(caught.exception.problems))
+
+        # Locked, it exports: the image installs Python 3.13 with uv for it, and the
+        # worker keeps its .python-version.
+        import subprocess
+
+        subprocess.run(['uv', 'lock', '--project', str(folder)], check=True,
+                       capture_output=True)
+        captured = export.capture(self.repo_path, [mixed.uuid])
+        self.assertIn('Python worker other runs on Python 3.13', '\n'.join(captured.notes))
+        dockerfile = export._worker_installs(captured, '0.11.29')
+        self.assertIn('uv python install 3.13', dockerfile)
+        self.assertIn('uv venv .venv --python 3.13', dockerfile)
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        directory = Path(export.write(captured, out))
+        self.assertEqual((directory / 'workers' / 'other' / '.python-version').read_text(),
+                         '3.13\n')
 
 
 class WorkersCommandTest(unittest.TestCase):
@@ -701,14 +717,122 @@ class WorkersCommandTest(unittest.TestCase):
     def test_two_workers_with_one_name_are_refused(self):
         project = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, project, True)
-        for folder, name in (('a', 'Feast_Store'), ('b', 'feast-store')):
+        for folder in ('Feast_Store', 'feast-store'):
             path = project / environments.WORKERS_DIR / folder
             path.mkdir(parents=True)
-            (path / 'pyproject.toml').write_text(f'[project]\nname = "{name}"\n')
+            (path / 'pyproject.toml').write_text('[project]\nname = "same"\n')
         with self.assertRaisesRegex(
             environments.PipelineEnvironmentError, 'both named feast-store',
         ):
             environments.named_workers(str(project))
+
+    def test_a_worker_runs_on_the_python_its_requires_python_allows(self):
+        own = f'{sys.version_info.major}.{sys.version_info.minor}'
+        # uv sync gave requires-python >= 3.13 the newest Python while the worker said 3.12.
+        cases = {
+            None: own, f'>={own}': own, '>=3.13': '3.13', '==3.11.*': '3.11',
+            '<3.12': '3.11', '~=3.13.1': '3.13', 'not a specifier': own,
+        }
+        for requires, python in cases.items():
+            self.assertEqual(environments._worker_python(requires), python, requires)
+
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        folder = project / environments.WORKERS_DIR / 'newer'
+        folder.mkdir(parents=True)
+        (folder / 'pyproject.toml').write_text('[project]\nrequires-python = ">=3.13"\n')
+        worker = environments.named_workers(str(project))['newer']
+        self.assertEqual(worker.python, '3.13')
+        (folder / '.python-version').write_text('3.14\n')
+        worker = environments.named_workers(str(project))['newer']
+        self.assertEqual(worker.python, '3.14')
+
+        environment = project / 'environment'
+        environment.mkdir()
+        (environment / 'pyvenv.cfg').write_text('home = /x\nversion_info = 3.14.6\n')
+        environments._check_python(worker, environment)
+        (environment / 'pyvenv.cfg').write_text('home = /x\nversion_info = 3.12.11\n')
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError,
+            'asks for Python 3.14, and its requires-python made uv use Python 3.12.11',
+        ):
+            environments._check_python(worker, environment)
+
+    def test_a_prepare_removes_the_older_environments_of_its_worker_only(self):
+        cache = Path(tempfile.mkdtemp())
+        project = Path(tempfile.mkdtemp())
+        for path in (cache, project):
+            self.addCleanup(shutil.rmtree, path, True)
+        folder = project / environments.WORKERS_DIR / 'feast'
+        folder.mkdir(parents=True)
+        (folder / 'pyproject.toml').write_text('[project]\nname = "mageml-worker-feast"\n')
+        other = str(project / environments.WORKERS_DIR / 'other')
+
+        def environment(name, source, prepared_at):
+            directory = cache / name
+            directory.mkdir()
+            (directory / environments.MARKER).write_text(json.dumps(dict(
+                source=source, prepared_at=prepared_at)))
+            return directory
+
+        with patch.dict('os.environ', {environments.ENVIRONMENTS_DIR_ENV: str(cache)}):
+            worker = environments.named_workers(str(project))['feast']
+            source = str(folder.resolve())
+            oldest = environment('oldest', source, 1)
+            older = environment('older', source, 2)
+            previous = environment('previous', source, 3)
+            current = environment(worker.directory.name, source, 4)
+            not_ours = environment('not_ours', other, 0)
+            before_markers = cache / 'unmarked'
+            (before_markers / environments.MARKER).parent.mkdir()
+            (before_markers / environments.MARKER).write_text('{}')
+            lines = []
+            environments._remove_superseded(worker, lines.append)
+        self.assertEqual(sorted(p.name for p in cache.iterdir()),
+                         sorted([current.name, previous.name, not_ours.name, 'unmarked']))
+        self.assertFalse(oldest.exists() or older.exists())
+        self.assertEqual(len(lines), 2)
+
+    def test_a_worker_is_named_by_its_folder_and_found_by_its_old_project_name(self):
+        from types import SimpleNamespace
+
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        # A worker made before workers were named by their folder.
+        path = project / environments.WORKERS_DIR / 'features'
+        path.mkdir(parents=True)
+        (path / 'pyproject.toml').write_text('[project]\nname = "feast-store"\n')
+        self.assertEqual(list(environments.named_workers(str(project))), ['features'])
+
+        def block(selected):
+            return SimpleNamespace(configuration=dict(python_worker=selected),
+                                   repo_path=str(project), pipeline=None)
+
+        self.assertEqual(environments.worker_selection(block('Feast_Store')), 'features')
+        self.assertEqual(environments.worker_selection(block('features')), 'features')
+        self.assertEqual(environments.worker_selection(block('other')), 'other')
+
+    def test_a_worker_named_like_the_package_it_needs_is_written_and_checked(self):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        # uv takes a project "feast" for the feast it depends on: the lock fails on the
+        # version, or the package is never installed.
+        folder = environments.new_worker(str(project), 'feast', 'feast')
+        self.assertIn('name = "mageml-worker-feast"', (folder / 'pyproject.toml').read_text())
+        worker = environments.named_workers(str(project))['feast']
+        environments._check_project_name(worker)
+
+        own = project / environments.WORKERS_DIR / 'pandas'
+        own.mkdir(parents=True)
+        (own / 'pyproject.toml').write_text(
+            '[project]\nname = "Pandas"\ndependencies = ["pandas>=2", "pyarrow"]\n')
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError,
+            'its project is named "Pandas", like the package it needs.*'
+            'name = "mageml-worker-pandas"',
+        ):
+            environments.prepare(environments.named_workers(str(project))['pandas'],
+                                 log=lambda _: None)
 
 
 class RunRecordWorkersTest(DBTestCase):

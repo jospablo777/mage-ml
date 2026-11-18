@@ -24,12 +24,33 @@
 
 ### Behavior changes to check before upgrading
 
+- A Python worker is named by its folder, `python_workers/<name>/`, not by its project's
+  name: a worker named feast can now depend on feast. Blocks that select a worker by its
+  old project name still find it. New workers' projects are named `mageml-worker-<name>`.
+- A worker without `.python-version` whose `requires-python` excludes MageML's Python runs
+  on the closest Python it allows; before, it said MageML's version and ran on the newest
+  one uv had.
 - Consecutive Rust blocks with different connection profiles no longer compile into one
   chain in MageML runs; they compiled together while `mage compile` and exported services
   kept them apart, and one Rust process reads one profile. Each now runs with its own.
 
 ### Pipelines
 
+- Python workers are tested across pandas and Python versions (pandas 2.2 next to MageML's
+  pandas 3, Python 3.13 next to 3.12), block by block, fused and exported. What a block
+  receives from another worker is what it would receive in MageML's Python: types,
+  missing values, time zones, categories, indexes and columns of lists. A million rows
+  cross three workers in about 4 seconds.
+- A table reaches a worker as what it has: a Polars table as pandas in a worker without
+  Polars, and the other way round. Columns of lists (tags, embeddings) cross as Arrow,
+  so a worker with another pandas reads them.
+- A worker's failures say what to do: which package a MageML connector needs, which
+  signal stopped the worker (and that SIGKILL is how the system ends a process out of
+  memory), each failed test's message, and that dynamic blocks run in MageML's Python. The
+  compile check warns about the packages a worker block's MageML imports need.
+- Exported services build a worker on its own Python, installed with uv in the image.
+- Preparing a worker removes its environments older than the last two, which a worker's
+  lock changes left behind (a Feast worker's is about a gigabyte).
 - Where each Python block runs is visible: its block in the editor shows its worker
   ("Feast worker", or "Feast worker · not prepared" while it would fail), the dependency
   graph names it, and the pipeline's settings list every Python block with where it runs,

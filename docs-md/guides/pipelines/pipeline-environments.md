@@ -86,12 +86,14 @@ can load features with Feast, which needs pandas 2, while the blocks around it r
 MageML's pandas 3.
 
 A worker is a [uv project](https://docs.astral.sh/uv/concepts/projects/) in
-`python_workers/<name>/`, with its `pyproject.toml` and `uv.lock` in Git:
+`python_workers/<name>/`, with its `pyproject.toml` and `uv.lock` in Git. The folder names
+the worker; the project's own name must not be one of the packages it needs, or uv takes
+the project for the package:
 
 ```toml
 # python_workers/feast/pyproject.toml
 [project]
-name = "feast"
+name = "mageml-worker-feast"
 version = "0"
 requires-python = ">=3.12"
 dependencies = [
