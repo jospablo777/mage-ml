@@ -376,11 +376,12 @@ jobs:
           entries = json.load(sys.stdin)
           names = [e if isinstance(e, str) else e["name"] for e in entries]
           print(" ".join(names))' > /tmp/r-sysdeps
-          if [ -s /tmp/r-sysdeps ]; then
-            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-            sudo apt-get update
-            sudo apt-get install -y $(cat /tmp/r-sysdeps)
-          fi
+          # rv builds a package from source when the binary repository has no build of its
+          # version (curl 8.0.0 on 2026-11-18), and sysdeps did not list curl's headers.
+          echo libcurl4-openssl-dev >> /tmp/r-sysdeps
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+          sudo apt-get update
+          sudo apt-get install -y $(cat /tmp/r-sysdeps)
       - name: Install the R test environment
         if: matrix.r
         run: make -C integration_tests r-env
