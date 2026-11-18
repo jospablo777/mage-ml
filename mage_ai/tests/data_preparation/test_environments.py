@@ -663,6 +663,51 @@ class NamedWorkerTest(DBTestCase):
         self.assertIn('COPY workers/legacy/ /srv/mage-service/workers/legacy/', dockerfile)
         self.assertIn('uv sync --locked --no-dev', dockerfile)
 
+    def test_an_export_builds_workers_with_the_same_versions_as_one_environment(self):
+        from mage_ai.pipeline_services import export
+
+        environments._combine_cache.clear()
+        self.worker('alpha', dependencies=['six==1.16.0'])
+        self.worker('beta', dependencies=['six==1.16.0', 'packaging==24.1'])
+        self.worker('gamma', dependencies=['six==1.17.0'])
+        pipeline, load, transform = self.pipeline(load_worker='alpha', transform_worker='beta')
+        last = Block.create(f'{pipeline.uuid}_last', 'transformer', self.repo_path,
+                            pipeline=pipeline, upstream_block_uuids=[transform],
+                            configuration=dict(python_worker='gamma'))
+        Path(last.file_path).write_text(textwrap.dedent(WORKER_TRANSFORM))
+        tail = Block.create(f'{pipeline.uuid}_tail', 'transformer', self.repo_path,
+                            pipeline=pipeline, upstream_block_uuids=[last.uuid])
+        Path(tail.file_path).write_text(textwrap.dedent(WORKER_TRANSFORM))
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+
+        captured = export.capture(self.repo_path, [pipeline.uuid])
+        # alpha and beta resolve to the same versions; gamma's six differs.
+        self.assertEqual(captured.manifest['python_workers'], {
+            'alpha.beta': 'workers/alpha.beta/.venv/bin/python',
+            'gamma': 'workers/gamma/.venv/bin/python',
+        })
+        blocks = {b['uuid']: b for b in captured.manifest['pipelines'][0]['blocks']}
+        self.assertEqual([blocks[u].get('python_worker') for u in (load, transform, last.uuid)],
+                         ['alpha.beta', 'alpha.beta', 'gamma'])
+        self.assertIn('Python workers alpha, beta resolve to the same package versions',
+                      '\n'.join(captured.notes))
+
+        out = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, out, True)
+        with patch.object(export, '_write_python_lock'):
+            export.write(captured, str(out), force=True)
+        pins = (out / 'workers' / 'alpha.beta' / 'requirements.txt').read_text()
+        self.assertIn('six==1.16.0', pins)
+        self.assertIn('packaging==24.1', pins)
+        dockerfile = (out / 'Dockerfile').read_text()
+        self.assertIn('COPY workers/alpha.beta/ /srv/mage-service/workers/alpha.beta/', dockerfile)
+        self.assertIn('uv pip sync --python .venv/bin/python', dockerfile)
+        self.assertIn('COPY workers/gamma/', dockerfile)
+
+        with patch.dict('os.environ', {'MAGE_EXPORT_MERGE_WORKERS': '0'}):
+            apart = export.capture(self.repo_path, [pipeline.uuid])
+        self.assertEqual(sorted(apart.manifest['python_workers']), ['alpha', 'beta', 'gamma'])
+
     def test_an_extra_worker_needs_a_lock_and_gets_its_own_python_in_the_image(self):
         from mage_ai.pipeline_services import export
 

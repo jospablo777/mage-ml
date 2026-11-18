@@ -114,6 +114,9 @@ class Capture:
     # image, for the blocks that select it (block_workers: (pipeline, block) -> alias).
     extra_workers: Dict[str, Any] = field(default_factory=dict)
     block_workers: Dict[Tuple[str, str], str] = field(default_factory=dict)
+    # Extra workers whose packages resolve to the same versions, built as one environment:
+    # name -> dict(members, python, resolved) (_merge_extra_workers).
+    merged_workers: Dict[str, Dict] = field(default_factory=dict)
     # Modules that read the included model files (.cbm: catboost), for the requirements.
     artifact_modules: Set[str] = field(default_factory=set)
     # Stream source and sink YAML files: their settings are in the manifest and only the
@@ -250,11 +253,6 @@ def capture(
         if entry:
             pipelines.append(entry)
         environments[uuid] = _pipeline_environment(pipeline, problems, capture_)
-    for entry in pipelines:
-        for block in entry.get('blocks') or []:
-            alias = capture_.block_workers.get((entry['uuid'], block['uuid']))
-            if alias:
-                block['python_worker'] = alias
     _check_after_runs(pipelines, notes, problems)
     for entry in pipelines:
         _check_integers(entry, problems)
@@ -264,6 +262,12 @@ def capture(
     _check_extra_workers(capture_, problems)
     if problems:
         raise ExportError(problems)
+    _merge_extra_workers(capture_)
+    for entry in pipelines:
+        for block in entry.get('blocks') or []:
+            alias = capture_.block_workers.get((entry['uuid'], block['uuid']))
+            if alias:
+                block['python_worker'] = alias
 
     _include_shared_code(capture_, problems)
     _include_artifacts(capture_, includes or [], problems)
@@ -289,10 +293,10 @@ def capture(
         pipelines=pipelines,
     )
     capture_.manifest['environment'] = _environment(capture_)
-    if capture_.extra_workers:
+    if capture_.extra_workers or capture_.merged_workers:
         capture_.manifest['python_workers'] = {
             alias: f'workers/{alias}/.venv/bin/python'
-            for alias in sorted(capture_.extra_workers)
+            for alias in sorted([*capture_.extra_workers, *capture_.merged_workers])
         }
     if alerts:
         capture_.manifest['alerts'] = alerts
@@ -435,6 +439,59 @@ def _pipeline_environment(pipeline, problems: List[str], capture_: Capture = Non
     except environments.PipelineEnvironmentError as error:
         problems.append(str(error))
         return None
+
+
+def _merge_extra_workers(capture_: Capture) -> None:
+    """
+    Builds the extra workers whose packages resolve to the same versions as one environment
+    (environments.combine_check, state same): the image holds those packages once, and the
+    service runs their blocks in one process, so a chain no longer stops between them. The
+    versions are the same, so the blocks run as they would apart. A worker with
+    combine = false, or a check uv could not make, stays apart.
+    MAGE_EXPORT_MERGE_WORKERS=0 keeps every worker apart.
+    """
+    from mage_ai.data_preparation import environments
+
+    if len(capture_.extra_workers) < 2 or \
+            (os.getenv('MAGE_EXPORT_MERGE_WORKERS') or '1').lower() in ('0', 'false', 'off'):
+        return
+    repo_path = str(capture_.project)
+    groups: List[List[str]] = []
+    answers: Dict[Tuple[str, ...], Dict] = {}
+    for alias in sorted(capture_.extra_workers):
+        for group in groups:
+            try:
+                answer = environments.combine_check(repo_path, group + [alias])
+            except environments.PipelineEnvironmentError:
+                continue
+            if answer.get('state') == 'same' and answer.get('resolved'):
+                group.append(alias)
+                answers[tuple(group)] = answer
+                break
+        else:
+            groups.append([alias])
+    for group in groups:
+        if len(group) < 2:
+            continue
+        answer = answers[tuple(group)]
+        name = '.'.join(group)
+        capture_.merged_workers[name] = dict(
+            members=group,
+            python=capture_.extra_workers[group[0]].python,
+            resolved=answer['resolved'],
+        )
+        for key, alias in list(capture_.block_workers.items()):
+            if alias in group:
+                capture_.block_workers[key] = name
+        for alias in group:
+            capture_.extra_workers.pop(alias)
+        saved = answer.get('saved_bytes') or 0
+        capture_.notes.append(
+            f'Python workers {", ".join(group)} resolve to the same package versions: the '
+            f'image builds one environment for them ({name})'
+            + (f', {round(saved / 1e6)} MB less,' if saved >= 1e6 else ',')
+            + ' and runs their blocks in one process.'
+        )
 
 
 def _image_python(capture_: Capture) -> str:
@@ -3101,6 +3158,12 @@ def write(capture_: Capture, out: str, force: bool = False) -> Path:
         dependencies += model_requirements
         dependencies += _project_requirements(capture_, set(capture_.requirements))
         _write_python_lock(capture_, out_dir, dependencies)
+    for name, merged in sorted(capture_.merged_workers.items()):
+        # The exact versions of the merged workers; installed with uv pip sync.
+        target = out_dir / 'workers' / name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / 'requirements.txt').write_text(merged['resolved'])
+        (target / '.python-version').write_text(f"{merged['python']}\n")
     for alias, worker in sorted(capture_.extra_workers.items()):
         target = out_dir / 'workers' / alias
         target.mkdir(parents=True, exist_ok=True)
@@ -3872,29 +3935,40 @@ def _worker_installs(capture_: Capture, uv_version: str) -> str:
     on the image's Python or, for a worker on another one, on that Python from uv."""
     steps = []
     image_python = _image_python(capture_)
-    for alias, worker in sorted(capture_.extra_workers.items()):
-        if worker.python == image_python:
+    entries = [(alias, worker.python, None) for alias, worker in capture_.extra_workers.items()]
+    entries += [(name, merged['python'], merged['members'])
+                for name, merged in capture_.merged_workers.items()]
+    for alias, python, members in sorted(entries, key=lambda e: e[0]):
+        if python == image_python:
             venv = ('    UV_PYTHON_DOWNLOADS=never uv venv .venv --python /usr/local/bin/python3 '
                     '&& \\\n')
         else:
             # From python-build-standalone, or UV_PYTHON_INSTALL_MIRROR in the uv-env
             # secret for a build without the internet.
             venv = (f'    export UV_PYTHON_INSTALL_DIR={WORKER_PYTHONS_DIR} && \\\n'
-                    f'    uv python install {worker.python} && \\\n'
-                    f'    UV_PYTHON_DOWNLOADS=never uv venv .venv --python {worker.python} '
+                    f'    uv python install {python} && \\\n'
+                    f'    UV_PYTHON_DOWNLOADS=never uv venv .venv --python {python} '
                     '&& \\\n')
+        if members:
+            title = (f'# Python workers {", ".join(members)}: the same package versions, one '
+                     'environment, from their resolved versions.\n')
+            install = ('    uv pip sync --python .venv/bin/python --no-cache --compile-bytecode '
+                       'requirements.txt && \\\n')
+        else:
+            title = f'# Python worker {alias}: the blocks that select it run in this environment.\n'
+            install = ('    uv sync --locked --no-dev --no-install-project --no-cache \\\n'
+                       '      --compile-bytecode && \\\n')
         steps.append(
-            f'# Python worker {alias}: the blocks that select it run in this environment.\n'
-            f'COPY workers/{alias}/ {SERVICE_DIR}/workers/{alias}/\n'
+            title
+            + f'COPY workers/{alias}/ {SERVICE_DIR}/workers/{alias}/\n'
             'RUN --mount=type=secret,id=uv-env,required=false \\\n'
             f'    pip install uv=={uv_version} && \\\n'
             f'    cd {SERVICE_DIR}/workers/{alias} && \\\n'
             '    if [ -f /run/secrets/uv-env ]; then \\\n'
             '      set -a; . /run/secrets/uv-env; set +a; fi && \\\n'
             f'{venv}'
-            '    uv sync --locked --no-dev --no-install-project --no-cache \\\n'
-            '      --compile-bytecode && \\\n'
-            '    pip uninstall -y uv\n'
+            + install
+            + '    pip uninstall -y uv\n'
         )
     return ''.join(steps)
 

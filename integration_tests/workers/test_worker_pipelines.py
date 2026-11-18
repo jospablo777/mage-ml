@@ -730,3 +730,60 @@ def test_twenty_blocks_in_one_worker_run_in_a_warm_process(workers):
     # One process for the twenty blocks: Python's start and the imports once, not twenty times.
     assert len(set(pids)) == 1, pids
     assert seconds < 20, seconds
+
+
+def test_an_exported_service_runs_workers_with_the_same_versions_in_one_process(
+    workers, tmp_path,
+):
+    from integration_tests.exported_services import export_service, run_service
+    from mage_ai.data_preparation import environments
+
+    for name in ('same-a', 'same-b'):
+        write_worker(Path(workers, environments.WORKERS_DIR, name), name, '>=3.12',
+                     WORKERS['pandas2'][1])
+    try:
+        pipeline = pipeline_of(workers, [
+            ('load', 'data_loader', None, '''
+                import pandas as pd
+
+                @data_loader
+                def load(*args, **kwargs):
+                    return pd.DataFrame({'id': [1, 2, 3]})
+            '''),
+            ('first', 'transformer', 'same-a', '''
+                import os
+
+                @transformer
+                def first(data, *args, **kwargs):
+                    return data.assign(first_pid=os.getpid())
+            '''),
+            ('second', 'transformer', 'same-b', '''
+                import os
+                import pandas as pd
+
+                @transformer
+                def second(data, *args, **kwargs):
+                    assert pd.__version__ == '2.2.3', pd.__version__
+                    return data.assign(second_pid=os.getpid())
+            '''),
+        ])
+        directory = export_service(workers, pipeline.uuid, tmp_path)
+        manifest = json.loads((directory / 'service.json').read_text())
+        assert set(manifest['python_workers']) == {'same-a.same-b'}, manifest['python_workers']
+        # As the image's Dockerfile does: one environment from the resolved versions.
+        folder = directory / 'workers' / 'same-a.same-b'
+        subprocess.run(['uv', 'venv', '.venv', '--python', sys.executable], cwd=folder,
+                       check=True, capture_output=True)
+        subprocess.run(['uv', 'pip', 'sync', '--python', '.venv/bin/python',
+                        'requirements.txt'], cwd=folder, check=True, capture_output=True)
+        result = run_service(directory, pipeline.uuid, tmp_path)
+        [last] = [b for b in result['blocks'] if b['block'].startswith('second_')]
+        from mage_ai.pipeline_services.runtime import worker
+
+        frame = worker.read_input(last['outputs'][0])
+        assert frame['id'].tolist() == [1, 2, 3]
+        # One environment, one process: the two blocks ran as one chain.
+        assert frame['first_pid'].tolist() == frame['second_pid'].tolist()
+    finally:
+        for name in ('same-a', 'same-b'):
+            shutil.rmtree(Path(workers, environments.WORKERS_DIR, name), ignore_errors=True)

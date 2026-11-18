@@ -252,3 +252,11 @@ A [service](../../production/pipeline-services.md) exports the workers its block
 worker becomes a virtual environment of its own in the image, built from its `uv.lock`;
 a worker on another Python than the image's gets that Python from uv in the image (for a
 build without the internet, set `UV_PYTHON_INSTALL_MIRROR` in the `uv-env` secret).
+
+Workers whose packages resolve to the same versions are built as one environment: the
+image holds their packages once, and the service runs their blocks in one process, so a
+chain of blocks no longer stops between them. Their blocks run with the versions they
+would have apart. The export's notes say which workers it combined and how much smaller
+the image is. A worker with `combine = false` stays apart, and `MAGE_EXPORT_MERGE_WORKERS=0`
+keeps every worker apart. In MageML runs each worker keeps its own environment; the
+pipeline's settings say which of its workers could run as one.

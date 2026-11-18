@@ -62,7 +62,9 @@
   signal stopped the worker (and that SIGKILL is how the system ends a process out of
   memory), each failed test's message, and that dynamic blocks run in MageML's Python. The
   compile check warns about the packages a worker block's MageML imports need.
-- Exported services build a worker on its own Python, installed with uv in the image.
+- Exported services build a worker on its own Python, installed with uv in the image, and
+  build workers whose packages resolve to the same versions as one environment: their
+  packages once in the image, their blocks in one process and one chain.
 - Preparing a worker removes its environments older than the last two, which a worker's
   lock changes left behind (a Feast worker's is about a gigabyte).
 - Where each Python block runs is visible: its block in the editor shows its worker

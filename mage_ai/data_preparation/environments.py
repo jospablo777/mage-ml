@@ -962,7 +962,10 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
                             str(folder / 'combined.txt')]
                 pinned = run(compile_ + constraints, timeout=300)
                 if pinned.returncode == 0:
-                    result.update(state='same', changes={})
+                    # The exact versions, which one environment for them all installs
+                    # (an exported service builds it, export._merge_extra_workers).
+                    result.update(state='same', changes={},
+                                  resolved=(folder / 'combined.txt').read_text())
                 else:
                     logger.info('Python workers %s do not resolve at their locked versions: %s',
                                 ', '.join(w.alias for w in chosen), pinned.stderr.strip())
@@ -979,6 +982,8 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
                             state='changes' if any(changes.values()) else 'same',
                             changes=changes,
                         )
+                        if result['state'] == 'same':
+                            result['resolved'] = resolved
                     elif _offline(free.stderr):
                         result.update(state='unchecked', reason=(
                             'uv could not reach the package index to check them.'))
