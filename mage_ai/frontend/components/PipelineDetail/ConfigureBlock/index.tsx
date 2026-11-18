@@ -402,7 +402,7 @@ function ConfigureBlock({
             )}
             {workers.map(w => (
               <option key={w.name} value={w.name}>
-                {w.label || w.name}{w.prepared ? '' : ' · not prepared'}
+                {w.label || w.name}{w.broken ? ' · broken' : w.prepared ? '' : ' · not prepared'}
               </option>
             ))}
           </Select>

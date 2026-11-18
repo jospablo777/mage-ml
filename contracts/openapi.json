@@ -4842,6 +4842,9 @@
    },
    "PythonWorker": {
     "properties": {
+     "broken": {
+      "type": "null"
+     },
      "builtin": {
       "type": "null"
      },
@@ -4881,6 +4884,9 @@
       "type": "null"
      },
      "label": {
+      "type": "null"
+     },
+     "lock_problem": {
       "type": "null"
      },
      "locked": {

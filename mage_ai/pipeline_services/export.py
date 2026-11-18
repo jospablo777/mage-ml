@@ -411,11 +411,14 @@ def _pipeline_environment(pipeline, problems: List[str], capture_: Capture = Non
         workers = {s for s in selections.values() if s not in (None, 'mage')}
         if not workers:
             return environments.pipeline_environment(pipeline)
-        named = environments.named_workers(pipeline.repo_path)
+        named, broken = environments._scan_workers(pipeline.repo_path)
         missing = sorted(alias for alias in workers if alias not in named)
         for alias in missing:
-            problems.append(f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which '
-                            'does not exist.')
+            problems.append(
+                f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which cannot be '
+                f'used: {broken[alias]["reason"]}' if alias in broken else
+                f'Pipeline {pipeline.uuid} selects Python worker "{alias}", which does not '
+                'exist.')
         if missing:
             return None
         if len(set(selections.values())) == 1:

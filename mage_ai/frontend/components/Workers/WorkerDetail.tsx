@@ -512,6 +512,13 @@ function WorkerDetail({ name }: { name: string }) {
       setDraft(declared);
     }
   }, [declared, draft, worker]);
+  // A worker that cannot be read opens on its file, the place to fix it.
+  const broken = !!worker?.broken;
+  useEffect(() => {
+    if (broken) {
+      setTab('files');
+    }
+  }, [broken]);
 
   // Asked again whenever its pyproject.toml or uv.lock changes: each is a new lock to check.
   const { data: dataHeld } = api.python_worker_held_packages.detail(
@@ -619,7 +626,17 @@ function WorkerDetail({ name }: { name: string }) {
         </FlexContainer>
       </HeaderStyle>
 
-      {(!worker.prepared || worker.job?.state === 'running' || worker.job?.problems?.length > 0) && (
+      {(worker.broken || worker.lock_problem) && (
+        <Spacing mt={2}>
+          <ErrorCallout
+            message={worker.broken || worker.lock_problem}
+            title={worker.broken ? 'This worker cannot run blocks until its pyproject.toml is fixed'
+              : 'Its uv.lock cannot be read'}
+          />
+        </Spacing>
+      )}
+
+      {!worker.broken && (!worker.prepared || worker.job?.state === 'running' || worker.job?.problems?.length > 0) && (
         <Spacing mt={2}>
           <CardStyle>
             <Text bold>{state.label}: {state.hint}</Text>

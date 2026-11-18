@@ -613,6 +613,20 @@ class NamedWorkerTest(DBTestCase):
         ):
             pipeline.get_block(load).execute_sync()
 
+    def test_a_broken_worker_is_named_with_why_in_a_run_and_an_export(self):
+        from mage_ai.pipeline_services import export
+
+        folder = self.worker(name='mangled')
+        (folder / 'pyproject.toml').write_text('<<<<<<< HEAD\n[project]\n')
+        pipeline, load, _ = self.pipeline(load_worker='mangled')
+        with self.assertRaisesRegex(
+            Exception, 'selects Python worker "mangled", which cannot be used: '
+                       'python_workers/mangled/pyproject.toml cannot be read',
+        ):
+            pipeline.get_block(load).execute_sync()
+        with self.assertRaisesRegex(export.ExportError, 'which cannot be used'):
+            export.capture(self.repo_path, [pipeline.uuid])
+
     def test_a_lock_that_does_not_match_its_project_says_to_lock_again(self):
         folder = self.worker(name='stale')
         pyproject = folder / 'pyproject.toml'
@@ -910,10 +924,59 @@ class WorkersCommandTest(unittest.TestCase):
             path = project / environments.WORKERS_DIR / folder
             path.mkdir(parents=True)
             (path / 'pyproject.toml').write_text('[project]\nname = "same"\n')
-        with self.assertRaisesRegex(
-            environments.PipelineEnvironmentError, 'both named feast-store',
-        ):
-            environments.named_workers(str(project))
+        # Neither runs a block: which one a block meant is not known.
+        self.assertEqual(environments.named_workers(str(project)), {})
+        broken = environments.broken_workers(str(project))
+        self.assertRegex(broken['feast-store']['reason'],
+                         'python_workers/Feast_Store and python_workers/feast-store are both '
+                         'named feast-store')
+
+    def test_a_worker_that_cannot_be_read_leaves_the_others_working(self):
+        # One pyproject.toml that is not TOML made every worker, and every block in one,
+        # fail with its error.
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        for name, text in (('good', '[project]\nname = "w"\n'), ('bad', '[project\nname ='),
+                           ('memory', '[tool.mageml.worker]\nmemory = "plenty"\n')):
+            folder = project / environments.WORKERS_DIR / name
+            folder.mkdir(parents=True)
+            (folder / 'pyproject.toml').write_text(text)
+
+        self.assertEqual(list(environments.named_workers(str(project))), ['good'])
+        broken = environments.broken_workers(str(project))
+        self.assertEqual(sorted(broken), ['bad', 'memory'])
+        self.assertIn('python_workers/bad/pyproject.toml cannot be read', broken['bad']['reason'])
+        self.assertIn('memory: "plenty" is not a size', broken['memory']['reason'])
+
+        from types import SimpleNamespace
+
+        block = SimpleNamespace(uuid='score', repo_path=str(project),
+                                configuration=dict(python_worker='bad'), pipeline=None)
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'Block score selects Python worker "bad", which cannot be '
+                                    'used: python_workers/bad/pyproject.toml cannot be read'):
+            environments.block_worker(block)
+
+    def test_a_uv_check_that_times_out_is_unchecked_not_an_error(self):
+        import subprocess
+
+        workers = {}
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        for name in ('one', 'two'):
+            folder = project / environments.WORKERS_DIR / name
+            folder.mkdir(parents=True)
+            (folder / 'pyproject.toml').write_text(
+                f'[project]\nname = "mageml-worker-{name}"\ndependencies = ["six"]\n')
+            (folder / 'uv.lock').write_text('version = 1\n')
+            workers[name] = folder
+
+        def slow(command, **kwargs):
+            raise subprocess.TimeoutExpired(command, kwargs.get('timeout'))
+
+        with patch.object(environments.subprocess, 'run', side_effect=slow):
+            answer = environments.combine_check(str(project), ['one', 'two'])
+        self.assertEqual(answer['state'], 'unchecked')
 
     def test_sizes_are_read_in_people_s_units(self):
         cases = {'4 GiB': 4 * 2 ** 30, '512MB': 512 * 10 ** 6, '2g': 2 * 10 ** 9,

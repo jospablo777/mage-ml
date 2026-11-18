@@ -166,42 +166,66 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
     """
     The project's Python workers, by alias: the normalized name of the worker's folder,
     python_workers/<name>/. Its [project].name is free, so a worker named feast can depend
-    on feast (_check_project_name).
+    on feast (_check_project_name). A worker that cannot be read is left out, and only it:
+    broken_workers says why.
     """
+    return _scan_workers(repo_path)[0]
+
+
+def broken_workers(repo_path: str) -> Dict[str, Dict[str, str]]:
+    """
+    The workers named_workers leaves out, by alias, with why: a pyproject.toml that is not
+    TOML, a memory setting that is not a size, two folders with one name. One broken
+    worker keeps every other one working; a block that selects it says why it cannot run.
+    """
+    return _scan_workers(repo_path)[1]
+
+
+def _scan_workers(repo_path: str) -> Tuple[Dict[str, NamedWorker], Dict[str, Dict[str, str]]]:
     import tomllib
 
     root = Path(repo_path) / WORKERS_DIR
     workers: Dict[str, NamedWorker] = {}
+    broken: Dict[str, Dict[str, str]] = {}
     if not root.is_dir():
-        return workers
+        return workers, broken
     for folder in sorted(p for p in root.iterdir() if (p / 'pyproject.toml').is_file()):
         relative = f'{WORKERS_DIR}/{folder.name}'
-        try:
-            parsed = tomllib.loads((folder / 'pyproject.toml').read_text())
-        except (OSError, tomllib.TOMLDecodeError) as error:
-            raise PipelineEnvironmentError(
-                f'{relative}/pyproject.toml cannot be read: {error}'
-            )
         alias = normalized_alias(folder.name)
-        if alias in workers:
-            raise PipelineEnvironmentError(
-                f'Python workers {workers[alias].relative_definition()} and {relative} are '
-                f'both named {alias}; folder names compare without case, "-", "_" or ".".'
-            )
+        if alias in workers or alias in broken:
+            # Neither runs a block: which one was meant is not known.
+            first = workers.pop(alias, None)
+            other = first.relative_definition() if first else broken[alias]['definition']
+            broken[alias] = dict(definition=relative, reason=(
+                f'Python workers {other} and {relative} are both named {alias}; folder names '
+                'compare without case, "-", "_" or ".". Rename one of the folders.'))
+            continue
+        try:
+            text = (folder / 'pyproject.toml').read_text()
+            parsed = tomllib.loads(text)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+            broken[alias] = dict(definition=relative,
+                                 reason=f'{relative}/pyproject.toml cannot be read: {error}.')
+            continue
         lock = folder / 'uv.lock'
         digest = hashlib.sha256()
         digest.update(environment_bytes((folder / 'pyproject.toml').read_bytes()))
         digest.update(lock.read_bytes() if lock.is_file() else b'')
         version_file = folder / '.python-version'
+        project = parsed.get('project') if isinstance(parsed.get('project'), dict) else {}
         python = (version_file.read_text().strip() if version_file.is_file()
-                  else _worker_python((parsed.get('project') or {}).get('requires-python')))
-        settings = (((parsed.get('tool') or {}).get('mageml') or {}).get('worker') or {})
+                  else _worker_python(project.get('requires-python')))
+        tool = parsed.get('tool') if isinstance(parsed.get('tool'), dict) else {}
+        mageml = tool.get('mageml') if isinstance(tool.get('mageml'), dict) else {}
+        settings = mageml.get('worker') if isinstance(mageml.get('worker'), dict) else {}
         label = settings.get('label')
         description = settings.get('description')
         try:
             memory_limit = parse_bytes(settings.get('memory'))
         except ValueError as error:
-            raise PipelineEnvironmentError(f'{relative}/pyproject.toml: memory: {error}')
+            broken[alias] = dict(definition=relative,
+                                 reason=f'{relative}/pyproject.toml: memory: {error}')
+            continue
         workers[alias] = NamedWorker(
             alias=alias, definition=str(folder), python=python, digest=digest.hexdigest(),
             label=str(label).strip() or None if label else None,
@@ -209,7 +233,7 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
             combine=settings.get('combine', True) is not False,
             memory_limit=memory_limit,
         )
-    return workers
+    return workers, broken
 
 
 _UNITS = dict(b=1, k=10 ** 3, m=10 ** 6, g=10 ** 9, t=10 ** 12,
@@ -336,8 +360,13 @@ def block_worker(block) -> Optional[NamedWorker]:
     if alias is None or alias == 'mage':
         return None
     repo_path = getattr(block, 'repo_path', None) or os.getcwd()
-    workers = named_workers(repo_path)
+    workers, broken = _scan_workers(repo_path)
     worker = workers.get(alias)
+    if worker is None and alias in broken:
+        raise PipelineEnvironmentError(
+            f'Block {block.uuid} selects Python worker "{alias}", which cannot be used: '
+            f'{broken[alias]["reason"]} Fix it on the Workers page or in the file.'
+        )
     if worker is None:
         known = ', '.join(sorted(workers)) or f'none (add one in {WORKERS_DIR}/<name>/)'
         raise PipelineEnvironmentError(
@@ -986,8 +1015,15 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
             folder = Path(directory)
             # uv runs in the scratch folder: the server's working directory and its
             # pyproject.toml settings do not change the answer.
-            run = functools.partial(subprocess.run, capture_output=True, cwd=folder, text=True,
-                                    env=uv_env())
+            def run(command: List[str], timeout: int):
+                try:
+                    return subprocess.run(command, capture_output=True, cwd=folder, text=True,
+                                          env=uv_env(), timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Answered as unchecked (_offline), never raised into an export.
+                    return subprocess.CompletedProcess(
+                        command, 124, '', f'uv timed out after {timeout} s')
+
             requirements, constraints, failed = [], [], None
             for worker in chosen:
                 project = tomllib.loads(
@@ -1108,7 +1144,7 @@ def combine_into(
 def _offline(stderr: str) -> bool:
     text = plain(stderr).lower()
     return any(s in text for s in ('failed to fetch', 'error sending request', 'dns error',
-                                   'network is unreachable', 'offline'))
+                                   'network is unreachable', 'offline', 'timed out'))
 
 
 def _resolver_reason(stderr: str) -> str:

@@ -21,6 +21,8 @@ export type PythonWorkerJobType = {
 };
 
 export type PythonWorkerType = {
+  // Why its pyproject.toml cannot be used: it runs no block until fixed.
+  broken?: string;
   // False when its pyproject.toml keeps it apart from other workers.
   combine?: boolean;
   definition?: string;

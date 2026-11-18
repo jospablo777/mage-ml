@@ -270,6 +270,52 @@ class PythonWorkersTest(DBTestCase):
                 '[project]\nname = "w"\ndependencies = ["feast==0.68.0", "pandas==3.1.1"]\n'),
             'feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1.')
 
+    def test_a_worker_that_cannot_be_read_is_listed_with_why_and_fixed_from_its_file(self):
+        self.worker()
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'broken')
+        folder.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / 'pyproject.toml').write_text('[project\nname =')
+
+        listed = {w['name']: w for w in python_workers.overview(self.repo_path)}
+        self.assertTrue(listed['tools'].get('locked'), 'the other workers still work')
+        self.assertIn('cannot be read', listed['broken']['broken'])
+        shown = python_workers.detail(self.repo_path, 'broken')
+        self.assertEqual((shown['pyproject'], shown['packages']), ('[project\nname =', []))
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'Python worker broken cannot be used'):
+            python_workers.update(self.repo_path, 'broken', dependencies=['six'])
+
+        python_workers.save_pyproject(self.repo_path, 'broken', PYPROJECT.format(
+            name='broken', dependencies='["six==1.16.0"]', label='Fixed'))
+        self.assertIn('broken', environments.named_workers(self.repo_path))
+        self.assertTrue((folder / 'uv.lock').is_file())
+
+    def test_a_uv_lock_that_cannot_be_read_is_shown_and_locked_anew_on_save(self):
+        folder = self.worker()
+        (folder / 'uv.lock').write_text('garbage [[[')
+
+        self.assertIn('uv.lock cannot be read', python_workers.detail(
+            self.repo_path, 'tools')['lock_problem'])
+        self.assertEqual(python_workers.held_back(self.repo_path, 'tools')['state'],
+                         'unchecked')
+        result = python_workers.update(self.repo_path, 'tools', dependencies=['six==1.17.0'])
+        self.assertEqual(result['changes'], [{'package': 'six', 'from': None, 'to': '1.17.0'}])
+        self.assertIn('version = "1.17.0"', (folder / 'uv.lock').read_text())
+
+    def test_a_lock_that_takes_too_long_says_so_and_changes_nothing(self):
+        folder = self.worker()
+        before = (folder / 'pyproject.toml').read_text()
+
+        def slow(command, **kwargs):
+            raise subprocess.TimeoutExpired(command, kwargs.get('timeout'))
+
+        with patch.object(python_workers.subprocess, 'run', side_effect=slow), \
+                self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                       'uv took over 10 minutes to lock'):
+            python_workers.update(self.repo_path, 'tools', dependencies=['six==1.17.0'])
+        self.assertEqual((folder / 'pyproject.toml').read_text(), before)
+
     def test_a_package_only_locked_before_its_newest_release_is_behind(self):
         self.worker(dependencies=('six',), upgrade_package='six==1.16.0')
 

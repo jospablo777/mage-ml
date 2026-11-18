@@ -35,6 +35,8 @@ export type PackageChangeType = {
 };
 
 export type WorkerType = {
+  // Why its pyproject.toml cannot be used; it runs no block until fixed.
+  broken?: string;
   // MageML's own Python (name mage): shown read only, with how to change it.
   builtin?: boolean;
   commands?: string[];
@@ -57,6 +59,8 @@ export type WorkerType = {
   job?: PythonWorkerJobType;
   label?: string;
   locked?: boolean;
+  // Its uv.lock cannot be read; saving the packages locks them anew.
+  lock_problem?: string;
   // Bytes its processes may use; none without a limit.
   memory_limit?: number;
   name: string;

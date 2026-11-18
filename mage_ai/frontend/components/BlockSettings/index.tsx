@@ -602,7 +602,8 @@ function BlockSettings({
               <option value="mage">MageML&apos;s Python (built in)</option>
               {pythonWorkers.map(worker => (
                 <option key={worker.name} value={worker.name}>
-                  {worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`}
+                  {worker.broken ? `${workerLabel(worker)} · broken`
+                    : worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`}
                 </option>
               ))}
             </Select>

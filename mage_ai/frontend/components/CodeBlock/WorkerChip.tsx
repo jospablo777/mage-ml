@@ -75,11 +75,15 @@ function WorkerChip({ block, onChange, pipeline }: {
   const found = worker ? workers.find(w => w.name === worker) : null;
   const missing = !!worker && !!data && !found;
   const unprepared = !!found && !found.prepared;
+  const broken = found?.broken;
   const name = worker ? labelOf(worker) : 'MageML\'s Python';
-  const text = missing ? `${worker} · missing` : unprepared ? `${name} · not prepared` : name;
+  const text = missing ? `${worker} · missing` : broken ? `${name} · broken`
+    : unprepared ? `${name} · not prepared` : name;
   const tip = missing
     ? `This block selects Python worker ${worker}, which the project does not have. Choose `
       + 'another.'
+    : broken
+      ? `Runs in ${name}, which cannot run blocks until it is fixed: ${broken}`
     : unprepared
       ? `Runs in ${name}, which is not prepared: the block fails until it is.`
       : worker
@@ -110,7 +114,7 @@ function WorkerChip({ block, onChange, pipeline }: {
     ...workers.map(w => ({
       label: () => mark(own === w.name, w.label || w.name),
       onClick: () => choose(w.name),
-      tag: w.prepared ? null : 'not prepared',
+      tag: w.broken ? 'broken' : w.prepared ? null : 'not prepared',
       uuid: `worker-${w.name}`,
     })),
     { isGroupingTitle: true, label: () => 'Workers', uuid: 'workers' },

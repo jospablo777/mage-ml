@@ -271,6 +271,10 @@ take 4.0 seconds; there, copying the inputs and outputs as Arrow files is the co
   `mage_ai.io` imports of block templates) need theirs: the compile check warns, and the
   error names the package to add.
 - Dynamic and replicated blocks run in MageML's Python; compiling refuses them in a worker.
+- A worker whose `pyproject.toml` is not TOML (an edit outside MageML, a merge conflict)
+  shows as **Broken** with the reason, and opens on its file to fix it; the other workers
+  keep working, and a block in it says why it cannot run. A `uv.lock` that cannot be read
+  is shown too, and saving the packages locks them anew.
 - A lock that resolves is not proof the packages work together: an old release can allow
   versions it never ran with. Watch for **Held back** packages, and run the blocks.
 - The run's variables reach a worker block as JSON values; others are left out.

@@ -3,6 +3,7 @@ from mage_ai.api.presenters.BasePresenter import BasePresenter
 
 class PythonWorkerPresenter(BasePresenter):
     default_attributes = [
+        'broken',
         'builtin',
         'changes',
         'combine',
@@ -16,6 +17,7 @@ class PythonWorkerPresenter(BasePresenter):
         'job',
         'kind',
         'label',
+        'lock_problem',
         'locked',
         'main_packages',
         'memory_limit',

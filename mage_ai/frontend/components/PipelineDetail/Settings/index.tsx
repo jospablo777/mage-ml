@@ -420,7 +420,8 @@ function PipelineSettings({
               )}
               {/* The blocks' own workers that are not prepared, prepared from here too. */}
               {workers
-                .filter(worker => !worker.prepared && usedWorkers.includes(worker.name)
+                .filter(worker => !worker.prepared && !worker.broken
+                  && usedWorkers.includes(worker.name)
                   && worker.name !== pipelineAttributes?.environment?.worker)
                 .map(worker => (
                   <PythonWorkerStatus
@@ -457,7 +458,8 @@ function PipelineSettings({
             options: [
               { label: 'MageML\'s Python (built in)', value: '' },
               ...workers.map(worker => ({
-                label: worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`,
+                label: worker.broken ? `${workerLabel(worker)} · broken`
+                  : worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`,
                 value: worker.name,
               })),
             ],

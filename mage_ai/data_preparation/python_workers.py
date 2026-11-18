@@ -158,15 +158,21 @@ def usage(repo_path: str) -> Dict[str, List[Dict]]:
 
 
 def _project(worker) -> Dict:
+    """The worker's [project] table, its dependencies a list of strings whatever the file says."""
     import tomllib
 
-    return tomllib.loads(
-        (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
+    project = tomllib.loads(
+        (Path(worker.definition) / 'pyproject.toml').read_text()).get('project')
+    project = dict(project) if isinstance(project, dict) else {}
+    dependencies = project.get('dependencies')
+    project['dependencies'] = ([str(d) for d in dependencies]
+                               if isinstance(dependencies, list) else [])
+    return project
 
 
 def _lock_text(worker) -> Optional[str]:
     path = Path(worker.definition) / 'uv.lock'
-    return path.read_text() if path.is_file() else None
+    return path.read_text(errors='replace') if path.is_file() else None
 
 
 def _digest(text: Optional[str]) -> str:
@@ -208,7 +214,15 @@ def overview(repo_path: str) -> List[Dict]:
             held_back=cached_held_back(worker),
         )
         workers.append(item)
-    return workers
+    # Listed with why, so the page can say it and open the file to fix it.
+    for alias, info in environments.broken_workers(repo_path).items():
+        workers.append(dict(
+            name=alias, label=None, description=None, python=None,
+            definition=info['definition'], broken=info['reason'], locked=False,
+            prepared=False, dependencies=[], size_bytes=None,
+            used_by=used.get(alias, []), security=dict(state='unchecked'), held_back=[],
+        ))
+    return sorted(workers, key=lambda w: w['name'])
 
 
 def detail(repo_path: str, alias: str) -> Dict:
@@ -216,8 +230,13 @@ def detail(repo_path: str, alias: str) -> Dict:
     declares it or another package needs it."""
     import column_atlas_native
 
-    worker = _worker(repo_path, alias)
+    worker = _worker(repo_path, alias, broken_ok=True)
     [item] = [w for w in overview(repo_path) if w['name'] == worker.alias]
+    item['pyproject'] = (Path(worker.definition) / 'pyproject.toml').read_text(
+        errors='replace')
+    if item.get('broken'):
+        item['packages'] = []
+        return item
     lock = _lock_text(worker)
     declared = {
         environments._requirement_name(d) for d in item['dependencies']
@@ -228,23 +247,52 @@ def detail(repo_path: str, alias: str) -> Dict:
             packages = json.loads(column_atlas_native.worker_lock_packages(
                 lock, server_platform(), worker.python))
         except ValueError as error:
-            raise PipelineEnvironmentError(
-                f'{worker.relative_definition()}/uv.lock cannot be read: {error}')
+            # Shown on its page; saving the packages or the file locks it again.
+            item['lock_problem'] = (
+                f'{worker.relative_definition()}/{error} Save the packages again to lock '
+                'them anew.')
     for package in packages:
         package['declared'] = package['name'] in declared
     item['packages'] = packages
-    item['pyproject'] = (Path(worker.definition) / 'pyproject.toml').read_text()
     return item
 
 
-def _worker(repo_path: str, alias: str):
-    workers = environments.named_workers(repo_path)
+def _worker(repo_path: str, alias: str, broken_ok: bool = False):
+    """
+    The worker named alias. With broken_ok, also one whose pyproject.toml cannot be read,
+    for the calls that fix or remove it (detail, save_pyproject, delete): it has the alias,
+    folder and Python those use.
+    """
+    workers, broken = environments._scan_workers(repo_path)
     name = environments.normalized_alias(alias or '')
     worker = workers.get(name)
+    if worker is None and broken_ok and name in broken:
+        return _BrokenWorker(repo_path, name, broken[name])
+    if worker is None and name in broken:
+        raise PipelineEnvironmentError(
+            f'Python worker {name} cannot be used: {broken[name]["reason"]}')
     if worker is None:
         raise PipelineEnvironmentError(
             f'There is no Python worker {alias}; workers: {", ".join(workers) or "none"}.')
     return worker
+
+
+class _BrokenWorker:
+    """A worker whose pyproject.toml cannot be read, as far as fixing or removing it goes."""
+
+    def __init__(self, repo_path: str, alias: str, info: Dict[str, str]):
+        self.alias = alias
+        self.definition = str(Path(repo_path) / info['definition'])
+        self.broken = info['reason']
+        version_file = Path(self.definition) / '.python-version'
+        try:
+            self.python = version_file.read_text().strip()
+        except OSError:
+            self.python = f'{sys.version_info.major}.{sys.version_info.minor}'
+        self.directory = None
+
+    def relative_definition(self) -> str:
+        return f'{environments.WORKERS_DIR}/{Path(self.definition).name}'
 
 
 # ---- adding a worker: locked before it exists --------------------------------------------
@@ -294,10 +342,7 @@ def create(
             document['project']['requires-python'] = f'>={python}'
             (folder / '.python-version').write_text(f'{python}\n')
         (folder / 'pyproject.toml').write_text(tomlkit.dumps(document))
-        result = subprocess.run(
-            [environments._uv(), 'lock', '--project', str(folder)],
-            capture_output=True, text=True, timeout=600, env=environments.uv_env(),
-        )
+        result = _uv_lock(folder)
         if result.returncode != 0:
             reason = ('uv could not reach the package index.'
                       if environments._offline(result.stderr)
@@ -350,10 +395,12 @@ def _lock_in(definition: Path, pyproject: Optional[str] = None,
             (copy / '.python-version').unlink(missing_ok=True)
             if python:
                 (copy / '.python-version').write_text(f'{python}\n')
-        result = subprocess.run(
-            [environments._uv(), 'lock', '--project', str(copy), *(upgrade or [])],
-            capture_output=True, text=True, timeout=600, env=environments.uv_env(),
-        )
+        result = _uv_lock(copy, upgrade)
+        if result.returncode != 0 and 'failed to parse `uv.lock`' in result.stderr.lower():
+            # The worker's uv.lock is broken (an edit, a merge conflict): locked anew from
+            # pyproject.toml, which is what saving the change writes anyway.
+            (copy / 'uv.lock').unlink(missing_ok=True)
+            result = _uv_lock(copy, upgrade)
         if result.returncode != 0:
             if environments._offline(result.stderr):
                 raise PipelineEnvironmentError(
@@ -369,6 +416,23 @@ def _lock_in(definition: Path, pyproject: Optional[str] = None,
         return (copy / 'uv.lock').read_text()
 
 
+LOCK_TIMEOUT = 600
+
+
+def _uv_lock(folder: Path, upgrade: Optional[List[str]] = None):
+    """uv lock in folder; a lock that takes over LOCK_TIMEOUT seconds says so."""
+    try:
+        return subprocess.run(
+            [environments._uv(), 'lock', '--project', str(folder), *(upgrade or [])],
+            capture_output=True, text=True, timeout=LOCK_TIMEOUT, env=environments.uv_env(),
+        )
+    except subprocess.TimeoutExpired:
+        raise PipelineEnvironmentError(
+            f'uv took over {LOCK_TIMEOUT // 60} minutes to lock the packages and was stopped; '
+            'nothing changed. A slow package index, or packages whose versions uv has to '
+            'try one by one: give the large ones a version range.')
+
+
 def _uv_output(stderr: str, lines: int = 40) -> str:
     """uv's own words after the summary, for the page's "Show uv's output": a blank line,
     then its last lines without the progress ones."""
@@ -380,7 +444,11 @@ def _uv_output(stderr: str, lines: int = 40) -> str:
 def _changes(old: Optional[str], new: str) -> List[Dict]:
     import column_atlas_native
 
-    return json.loads(column_atlas_native.worker_lock_diff(old or '', new))
+    try:
+        return json.loads(column_atlas_native.worker_lock_diff(old or '', new))
+    except ValueError:
+        # The old lock could not be read (a broken file): every package is new.
+        return json.loads(column_atlas_native.worker_lock_diff('', new))
 
 
 def _check_requirements(dependencies: List[str]) -> List[str]:
@@ -523,7 +591,7 @@ def save_pyproject(repo_path: str, alias: str, text: str, accept_older: bool = F
     """
     import tomllib
 
-    worker = _worker(repo_path, alias)
+    worker = _worker(repo_path, alias, broken_ok=True)
     try:
         parsed = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
@@ -786,6 +854,11 @@ def held_back(repo_path: str, alias: str, refresh: bool = False) -> Dict:
         return dict(name=worker.alias, state='unchecked', packages=[],
                     reason='The worker has no uv.lock yet.')
     pyproject = (Path(worker.definition) / 'pyproject.toml').read_text()
+    try:
+        _lock_packages(lock, worker.python)
+    except ValueError as error:
+        return dict(name=worker.alias, state='unchecked', packages=[],
+                    reason=f'{worker.relative_definition()}/{error}')
     path = _held_back_path(lock, pyproject)
     if not refresh:
         try:
@@ -894,8 +967,11 @@ def _older_releases(pyproject: str, lock: str, python: str, lock_trial,
     packages, _ = _held(pyproject, lock, python, lock_trial)
     before = {}
     if old_lock:
-        before = {canonicalize_name(p['name']): p['version']
-                  for p in json.loads(_lock_packages(old_lock, python))}
+        try:
+            before = {canonicalize_name(p['name']): p['version']
+                      for p in json.loads(_lock_packages(old_lock, python))}
+        except ValueError:
+            before = {}
     older = []
     for package in packages:
         if package['state'] != 'held' or before.get(package['package']) == package['locked']:
@@ -1017,7 +1093,7 @@ def _held_reason(name: str, latest: str, uv_reason: str, listed: List[str]) -> s
 def delete(repo_path: str, alias: str) -> Dict:
     """Removes the worker's folder and its prepared environments; refused while a block
     runs in it, naming those blocks."""
-    worker = _worker(repo_path, alias)
+    worker = _worker(repo_path, alias, broken_ok=True)
     used = usage(repo_path).get(worker.alias) or []
     if used:
         where = '; '.join(f'{u["pipeline"]} ({", ".join(u["blocks"])})' for u in used)
@@ -1032,7 +1108,8 @@ def delete(repo_path: str, alias: str) -> Dict:
             recorded = json.loads(marker.read_text())
         except (OSError, ValueError):
             continue
-        if recorded.get('source') == source or marker.parent == worker.directory:
+        if recorded.get('source') == source or (
+                worker.directory is not None and marker.parent == worker.directory):
             marker.unlink(missing_ok=True)
             shutil.rmtree(marker.parent, ignore_errors=True)
             removed += 1

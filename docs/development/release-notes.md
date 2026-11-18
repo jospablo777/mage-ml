@@ -59,6 +59,11 @@
   lock such an old release asks first ("uv would lock feast 0.20.0 from April 2022, 4
   years old; the newest is 0.68.0...") and changes nothing until confirmed; versions that
   cannot go together are refused in one sentence naming the package and the line.
+- One worker whose `pyproject.toml` cannot be read no longer stops every worker (the
+  Workers page, and every block in any worker, failed with its error): it shows as
+  **Broken** with the reason and opens on its file to fix it. A `uv.lock` that cannot be
+  read is relocked on the next save, and uv locks or checks that take too long stop with
+  a message instead of an error page.
 - **MageML (default)** heads the Workers page: MageML's own Python, where every block
   without a worker runs, with its Python, main packages and the uv command that changes
   it for the way MageML is installed (a uv project, a uv tool, the Docker image). The app

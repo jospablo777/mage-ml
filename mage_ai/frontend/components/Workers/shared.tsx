@@ -134,6 +134,9 @@ export function usageText(usedBy?: WorkerUsageType[]): string {
 
 // Whether a worker can run blocks, said once for the list and the page.
 export function workerState(worker: WorkerType): { label: string; tone: ToneType; hint: string } {
+  if (worker.broken) {
+    return { hint: worker.broken, label: 'Broken', tone: 'negative' };
+  }
   if (worker.job?.state === 'running') {
     return { hint: 'uv is installing its packages.', label: 'Preparing', tone: 'info' };
   }

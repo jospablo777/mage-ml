@@ -173,3 +173,34 @@ test('MageML\'s own Python is shown with how to change it, and the app does not 
     await expect(api.call('DELETE', 'python_workers/mage')).rejects.toThrow(
       /change it with uv in a terminal/);
   });
+
+test('a worker whose pyproject.toml cannot be read is shown broken, with why, and fixed',
+  async ({ page }) => {
+    const broken = `e2e-broken-${SUFFIX}`;
+    await api.writeFile(`python_workers/${broken}`, 'pyproject.toml', '[project\nname =');
+    try {
+      await page.goto('/workers');
+      const row = page.getByRole('link', { name: `Open ${broken}` });
+      await expect(row).toContainText('Broken');
+      await row.click();
+      const problem = page.getByRole('alert').filter({ hasText: 'cannot run blocks' });
+      await expect(problem).toContainText('pyproject.toml cannot be read');
+      // It opens on its file, the place to fix it.
+      await expect(page.getByText(`python_workers/${broken}/pyproject.toml`, { exact: true }))
+        .toBeVisible();
+
+      await api.call('PUT', `python_workers/${broken}`, {
+        python_worker: {
+          accept_older: true,
+          pyproject: `[project]\nname = "mageml-worker-${broken}"\nversion = "0"\n`
+            + 'requires-python = ">=3.12"\ndependencies = ["six==1.16.0"]\n',
+        },
+      });
+      await page.reload();
+      await expect(page.getByText(`python_workers/${broken}/`, { exact: true })).toBeVisible();
+      await expect(problem).toBeHidden();
+    } finally {
+      await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${broken}`)}`)
+        .catch(() => null);
+    }
+  });
