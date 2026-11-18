@@ -2195,6 +2195,7 @@ function PipelineDetailPage({
         onClose={hideAddBlockModal}
         onSave={(opts: {
           color?: BlockColorEnum;
+          configuration?: { [key: string]: any };
           language?: BlockLanguageEnum;
           name?: string;
         } = {}) => {

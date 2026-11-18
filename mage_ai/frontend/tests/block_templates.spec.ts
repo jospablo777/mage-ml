@@ -26,10 +26,32 @@ test.beforeEach(async ({ page }) => {
   await newPipeline(page);
 });
 
+function menuItem(page: Page, name: string) {
+  return page.getByRole('menuitem', { exact: true, name }).filter({ visible: true }).first();
+}
+
+test('Python comes first in each block type, its base template on top', async ({ page }) => {
+  await page.getByText('All blocks').first().click();
+  for (const blockType of ['Data loader', 'Transformer', 'Data exporter']) {
+    await visible(page, blockType).hover();
+    const languages = await page.getByRole('menuitem').filter({ visible: true })
+      .allInnerTexts();
+    const python = languages.findIndex(text => text.trim() === 'Python');
+    expect(python, blockType).toBeGreaterThanOrEqual(0);
+    expect(python, blockType).toBeLessThan(languages.findIndex(text => text.trim() === 'SQL'));
+    await menuItem(page, 'Python').hover();
+    await expect(visible(page, 'Base template (generic)')).toBeVisible();
+  }
+  await visible(page, 'Base template (generic)').click();
+  await page.getByRole('button', { name: 'Save and add' }).click();
+  await expect(page.getByText('@data_exporter').first()).toBeVisible();
+});
+
 test('Python sources are listed by family and make their blocks', async ({ page }) => {
   await page.getByText('All blocks').first().click();
-  // The Python families follow the R, Rust and SQL items, under a Python title.
+  // The Python families are under Python, as SQL's are under SQL.
   await visible(page, 'Data loader').hover();
+  await menuItem(page, 'Python').hover();
   for (const family of ['APIs', 'Cloud storage', 'Databases', 'Vector databases']) {
     await expect(visible(page, family)).toBeVisible();
   }
@@ -50,8 +72,7 @@ test('SQL templates are listed under SQL and make their blocks', async ({ page }
   await page.getByText('All blocks').first().click();
   await visible(page, 'Transformer').hover();
   // The menu item; the page has other SQL text.
-  await page.getByRole('menuitem', { exact: true, name: 'SQL' })
-    .filter({ visible: true }).first().hover();
+  await menuItem(page, 'SQL').hover();
   for (const name of ['Base template (generic)', 'Deduplicate', 'Date spine', 'Running total']) {
     await expect(visible(page, name)).toBeVisible();
   }
@@ -64,6 +85,7 @@ test('Python transformer templates are listed by family and make Polars blocks',
   await page.waitForResponse(response => response.url().includes('/api/block_templates'));
   await page.getByText('All blocks').first().click();
   await visible(page, 'Transformer').hover();
+  await menuItem(page, 'Python').hover();
   for (const family of ['Data cleaning', 'Feature extraction', 'Machine learning']) {
     await expect(visible(page, family)).toBeVisible();
   }

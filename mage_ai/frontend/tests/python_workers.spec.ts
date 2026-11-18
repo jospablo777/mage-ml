@@ -101,7 +101,7 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
   await expect.poll(blockWorker).toBe(null);
   // So does the block in the editor.
   await page.goto(`/pipelines/${pipelineUUID}/edit`);
-  await expect(page.getByRole('button', { name: 'Python worker: Tools worker · not prepared' }))
+  await expect(page.getByRole('button', { name: 'Runs in: Tools worker · not prepared' }))
     .toBeVisible();
 
   // Locked, the page prepares it and shows what uv printed.
@@ -112,7 +112,7 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
     timeout: 120_000,
   });
   await page.goto(`/pipelines/${pipelineUUID}/edit`);
-  await expect(page.getByRole('button', { name: 'Python worker: Tools worker' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Runs in: Tools worker' })).toBeVisible();
 
   const run = await api.runOnce(pipelineUUID, `worker_${SUFFIX}`);
   expect(run.status).toBe('completed');

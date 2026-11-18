@@ -18,6 +18,9 @@ import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
+import api from '@api';
+import { PythonWorkerType } from '@components/PipelineDetail/Settings/PythonWorker';
+import { WORKER_BLOCK_TYPES } from '@components/CodeBlock/WorkerChip';
 import {
   AlertTriangle,
   Locked,
@@ -46,6 +49,7 @@ type ConfigureBlockProps = {
   onClose: () => void;
   onSave: (opts: {
     color?: BlockColorEnum;
+    configuration?: { [key: string]: any };
     language?: BlockLanguageEnum;
     name: string;
   }) => void;
@@ -77,6 +81,12 @@ function ConfigureBlock({
     type: block?.type,
   });
 
+  // Where a new Python block runs: '' for the pipeline's default (MageML's Python without
+  // one), 'mage' for MageML's Python, or a worker's name.
+  const [pythonWorker, setPythonWorker] = useState<string>('');
+  const { data: dataWorkers } = api.python_workers.list({}, { revalidateOnFocus: false });
+  const workers: PythonWorkerType[] = dataWorkers?.python_workers || [];
+
   const blockNameStartsWithNumber = useMemo(() =>
     !!blockAttributes?.name && startsWithNumber(blockAttributes?.name || ''),
     [blockAttributes?.name],
@@ -85,10 +95,17 @@ function ConfigureBlock({
   const handleOnSave = useCallback(() => {
     onSave({
       ...blockAttributes,
+      ...(pythonWorker ? {
+        configuration: {
+          // @ts-ignore
+          ...(block?.configuration || {}),
+          python_worker: pythonWorker,
+        },
+      } : {}),
       name: blockAttributes?.name || defaultName,
     });
     onClose();
-  }, [blockAttributes, defaultName, onClose, onSave]);
+  }, [block, blockAttributes, defaultName, onClose, onSave, pythonWorker]);
     
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -352,6 +369,43 @@ function ConfigureBlock({
 
             <Spacing mr={(isCustomBlock || isDataIntegration) ? 1 : 2} />
           </FlexContainer>
+        </RowStyle>
+      )}
+
+      {!isUpdatingBlock && !isReplacingBlock
+        && (customTemplate?.language || blockAttributes?.language) === BlockLanguageEnum.PYTHON
+        && WORKER_BLOCK_TYPES.includes(blockAttributes?.type || block?.type) && (
+        <RowStyle>
+          <div>
+            <Text default>Runs in</Text>
+            {!workers.length && (
+              <Text muted xsmall>Add workers for other packages in Workers.</Text>
+            )}
+          </div>
+          <Select
+            alignRight
+            aria-label="Runs in"
+            noBackground
+            noBorder
+            onChange={e => setPythonWorker(e.target.value)}
+            value={pythonWorker}
+          >
+            <option value="">
+              {pipeline?.environment?.worker
+                ? `The pipeline's default: ${workers.find(
+                  w => w.name === pipeline.environment.worker)?.label
+                  || pipeline.environment.worker}`
+                : 'MageML\'s Python'}
+            </option>
+            {pipeline?.environment?.worker && (
+              <option value="mage">MageML&apos;s Python</option>
+            )}
+            {workers.map(w => (
+              <option key={w.name} value={w.name}>
+                {w.label || w.name}{w.prepared ? '' : ' · not prepared'}
+              </option>
+            ))}
+          </Select>
         </RowStyle>
       )}
 

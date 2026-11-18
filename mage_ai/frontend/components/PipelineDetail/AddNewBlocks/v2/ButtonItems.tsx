@@ -221,8 +221,7 @@ function ButtonItems({
       pipelineType,
     ]);
 
-  // SQL and R come first, as one entry each, so that they stay in view above the long
-  // list of Python templates; R opens its templates.
+  // SQL, R and Rust as one entry each, each opening its templates (pythonItem, Python's).
   const buildNonPythonItems = useCallback((blockType: BlockTypeEnum): FlyoutMenuItemType[] => [
     // The SQL templates of the block type, when it has some, under the base template.
     blockTemplatesByBlockType?.[blockType]?.[BlockLanguageEnum.SQL]?.items?.length >= 1
@@ -300,16 +299,24 @@ function ButtonItems({
     blockTemplatesByBlockType,
   ]);
 
+  // Python as one entry like SQL, R and Rust, and first: under a grey title below them it
+  // read as unavailable. Its base template leads; the template families follow.
+  const pythonItem = useCallback((
+    blockType: BlockTypeEnum,
+    items: FlyoutMenuItemType[],
+  ): FlyoutMenuItemType => {
+    const isBase = (item: FlyoutMenuItemType) => item?.label?.() === 'Base template (generic)';
+    return {
+      items: (items || []).filter(isBase).concat((items || []).filter(item => !isBase(item))),
+      label: () => 'Python',
+      uuid: `${BlockLanguageEnum.PYTHON}/${blockType}`,
+    };
+  }, []);
+
   const dataLoaderGroupItems = useMemo(() => {
     // @ts-ignore
-    const arr = buildNonPythonItems(BlockTypeEnum.DATA_LOADER).concat([
-      {
-        isGroupingTitle: true,
-        label: () => 'Python',
-        uuid: `${BlockLanguageEnum.PYTHON}${BlockTypeEnum.DATA_LOADER}/group`,
-      },
-      // @ts-ignore
-    ]).concat(itemsDataLoader);
+    const arr = [pythonItem(BlockTypeEnum.DATA_LOADER, itemsDataLoader)]
+      .concat(buildNonPythonItems(BlockTypeEnum.DATA_LOADER));
 
     if (itemsDataLoaderSource) {
       arr.push(...[
@@ -340,18 +347,13 @@ function ButtonItems({
     buildNonPythonItems,
     itemsDataLoader,
     itemsDataLoaderSource,
+    pythonItem,
   ]);
 
   const dataExporterGroupItems = useMemo(() => {
     // @ts-ignore
-    const arr = buildNonPythonItems(BlockTypeEnum.DATA_EXPORTER).concat([
-      {
-        isGroupingTitle: true,
-        label: () => 'Python',
-        uuid: `${BlockLanguageEnum.PYTHON}${BlockTypeEnum.DATA_EXPORTER}/group`,
-      },
-      // @ts-ignore
-    ]).concat(itemsDataExporter);
+    const arr = [pythonItem(BlockTypeEnum.DATA_EXPORTER, itemsDataExporter)]
+      .concat(buildNonPythonItems(BlockTypeEnum.DATA_EXPORTER));
 
     if (itemsDataExporterDestination) {
       arr.push(...[
@@ -374,6 +376,7 @@ function ButtonItems({
     buildNonPythonItems,
     itemsDataExporter,
     itemsDataExporterDestination,
+    pythonItem,
   ]);
 
   const itemsCustom = useMemo(() => [
@@ -477,14 +480,8 @@ function ButtonItems({
       //     size={ICON_SIZE}
       //   />
       // ),
-      items: [
-        {
-          isGroupingTitle: true,
-          label: () => 'Python',
-          uuid: `${BlockLanguageEnum.PYTHON}${BlockTypeEnum.SENSOR}/group`,
-        },
-        // @ts-ignore
-      ].concat(itemsSensors),
+      // Sensors are Python blocks only.
+      items: itemsSensors,
       label: () => BLOCK_TYPE_NAME_MAPPING[BlockTypeEnum.SENSOR],
       uuid: `${BlockTypeEnum.SENSOR}/${BlockLanguageEnum.PYTHON}`,
     },
@@ -549,14 +546,8 @@ function ButtonItems({
       //   />
       // ),
       // @ts-ignore
-      items: buildNonPythonItems(BlockTypeEnum.TRANSFORMER).concat([
-        {
-          isGroupingTitle: true,
-          label: () => 'Python',
-          uuid: [BlockLanguageEnum.PYTHON, BlockTypeEnum.TRANSFORMER, 'group'].join('/'),
-        },
-        // @ts-ignore
-      ]).concat(itemsTransformer),
+      items: [pythonItem(BlockTypeEnum.TRANSFORMER, itemsTransformer)]
+        .concat(buildNonPythonItems(BlockTypeEnum.TRANSFORMER)),
       label: () => BLOCK_TYPE_NAME_MAPPING[BlockTypeEnum.TRANSFORMER],
       uuid: [BlockLanguageEnum.PYTHON, BlockTypeEnum.TRANSFORMER].join('/'),
     },
@@ -646,6 +637,7 @@ function ButtonItems({
     itemsMoreUUIDs,
     itemsSensors,
     itemsTransformer,
+    pythonItem,
     setButtonMenuOpenIndex,
     showBrowseTemplates,
     showGlobalDataProducts,
