@@ -360,6 +360,23 @@ def environments_dir() -> Path:
     return Path(cache) / 'mage' / 'environments'
 
 
+def uv_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """
+    The environment to run uv in: without colors, which uv prints with FORCE_COLOR set (as
+    Playwright sets it for the server) even without a terminal, and which would reach
+    messages as escape codes.
+    """
+    return dict(os.environ if base is None else base, NO_COLOR='1')
+
+
+def plain(text: str) -> str:
+    """Text a program printed, without the terminal's color escape codes."""
+    return _ESCAPES.sub('', text or '')
+
+
+_ESCAPES = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+
+
 def _uv() -> str:
     uv = shutil.which('uv')
     if uv is None:
@@ -486,7 +503,8 @@ def _run(command: List[str], log) -> None:
 def _run_with_env(command: List[str], log, env: Optional[Dict[str, str]]) -> None:
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        encoding='utf-8', errors='replace', start_new_session=HAS_PROCESS_GROUPS, env=env,
+        encoding='utf-8', errors='replace', start_new_session=HAS_PROCESS_GROUPS,
+        env=uv_env(env),
     )
     timed_out = threading.Event()
 
@@ -966,7 +984,8 @@ def combine_check(repo_path: str, aliases: List[str]) -> Dict:
             folder = Path(directory)
             # uv runs in the scratch folder: the server's working directory and its
             # pyproject.toml settings do not change the answer.
-            run = functools.partial(subprocess.run, capture_output=True, cwd=folder, text=True)
+            run = functools.partial(subprocess.run, capture_output=True, cwd=folder, text=True,
+                                    env=uv_env())
             requirements, constraints, failed = [], [], None
             for worker in chosen:
                 project = tomllib.loads(
@@ -1085,14 +1104,14 @@ def combine_into(
 
 
 def _offline(stderr: str) -> bool:
-    text = stderr.lower()
+    text = plain(stderr).lower()
     return any(s in text for s in ('failed to fetch', 'error sending request', 'dns error',
                                    'network is unreachable', 'offline'))
 
 
 def _resolver_reason(stderr: str) -> str:
     """uv's explanation of a conflict, in one line: its first 'Because ...' sentence."""
-    lines = [line.strip(' │╰─▶×') for line in stderr.splitlines()]
+    lines = [line.strip(' │╰─▶×') for line in plain(stderr).splitlines()]
     text = ' '.join(line for line in lines if line)
     start = text.find('Because')
     reason = text[start:] if start >= 0 else text

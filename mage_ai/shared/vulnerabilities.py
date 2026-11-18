@@ -8,6 +8,7 @@ preferring the package's current line (1.4.x before 2.x); one advisory's fix alo
 leave another open (I-454).
 """
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -89,6 +90,8 @@ def audit(project: str, uv: str = 'uv', timeout: int = 300) -> List[VulnerablePa
         [uv, 'audit', '--frozen', '--preview-features', 'audit-command', '--project', project,
          '--output-format', 'json'],
         capture_output=True, text=True, timeout=timeout,
+        # Without colors, which FORCE_COLOR turns on: the error is shown as text.
+        env=dict(os.environ, NO_COLOR='1'),
     )
     try:
         report = json.loads(result.stdout)

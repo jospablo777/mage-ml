@@ -223,7 +223,7 @@ def create(
         (folder / 'pyproject.toml').write_text(tomlkit.dumps(document))
         result = subprocess.run(
             [environments._uv(), 'lock', '--project', str(folder)],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=600, env=environments.uv_env(),
         )
         if result.returncode != 0:
             reason = ('uv could not reach the package index.'
@@ -266,7 +266,7 @@ def _locked_copy(worker, pyproject: Optional[str] = None,
                 (copy / '.python-version').write_text(f'{python}\n')
         result = subprocess.run(
             [environments._uv(), 'lock', '--project', str(copy), *(upgrade or [])],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=600, env=environments.uv_env(),
         )
         if result.returncode != 0:
             if environments._offline(result.stderr):
@@ -282,7 +282,7 @@ def _locked_copy(worker, pyproject: Optional[str] = None,
 def _uv_output(stderr: str, lines: int = 40) -> str:
     """uv's own words after the summary, for the page's "Show uv's output": a blank line,
     then its last lines without the progress ones."""
-    kept = [line.rstrip() for line in (stderr or '').splitlines()
+    kept = [line.rstrip() for line in environments.plain(stderr).splitlines()
             if line.strip() and not line.strip().startswith(('Using ', 'Resolved ', 'Updating '))]
     return '\n\n' + '\n'.join(kept[-lines:]) if kept else ''
 
@@ -432,6 +432,14 @@ def save_pyproject(repo_path: str, alias: str, text: str) -> Dict:
     if not isinstance(project, dict):
         raise PipelineEnvironmentError(
             'pyproject.toml needs a [project] table with its name, version and dependencies.')
+    if not isinstance(project.get('name'), str) or not project['name'].strip():
+        raise PipelineEnvironmentError(
+            f'pyproject.toml\'s [project] needs a name, such as name = '
+            f'"mageml-worker-{worker.alias}".')
+    if not isinstance(project.get('dependencies', []), list):
+        raise PipelineEnvironmentError(
+            'dependencies in pyproject.toml is a list of packages, such as dependencies = '
+            '["pandas", "scikit-learn>=1.5"].')
     _check_requirements(project.get('dependencies') or [])
     name = str(project.get('name') or '').lower().replace('_', '-').replace('.', '-')
     for dependency in project.get('dependencies') or []:

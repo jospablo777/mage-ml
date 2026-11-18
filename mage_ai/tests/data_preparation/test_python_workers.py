@@ -159,6 +159,8 @@ class PythonWorkersTest(DBTestCase):
         for text, message in (
             ('[project\nname = "x"', 'is not valid TOML'),
             ('[tool.uv]\n', 'needs a \\[project\\] table'),
+            ('[project]\n', 'needs a name, such as name = "mageml-worker-tools"'),
+            ('[project]\nname = "x"\ndependencies = "six"\n', 'is a list of packages'),
             (before['pyproject.toml'].replace('mageml-worker-tools', 'six'),
              'like the package it needs'),
             (before['pyproject.toml'].replace('six==1.16.0', 'six==99.0'), 'nothing changed'),
@@ -172,6 +174,20 @@ class PythonWorkersTest(DBTestCase):
         result = python_workers.save_pyproject(self.repo_path, 'tools', edited)
         self.assertEqual(result['changes'][0]['to'], '1.17.0')
         self.assertEqual((folder / 'pyproject.toml').read_text(), edited)
+
+    def test_uv_output_in_a_message_has_no_color_codes(self):
+        # FORCE_COLOR (Playwright sets it for the server it starts) made uv color its errors,
+        # and the Workers page showed the escape codes.
+        folder = self.worker()
+        text = (folder / 'pyproject.toml').read_text().replace('six==1.16.0', 'six==99.0')
+
+        with patch.dict('os.environ', {'FORCE_COLOR': '1'}), \
+                self.assertRaises(environments.PipelineEnvironmentError) as raised:
+            python_workers.save_pyproject(self.repo_path, 'tools', text)
+
+        self.assertIn('there is no version of six==99.0', str(raised.exception))
+        self.assertNotIn('\x1b', str(raised.exception))
+        self.assertEqual(environments.plain('\x1b[1m\x1b[31merror\x1b[39m\x1b[0m: no'), 'error: no')
 
     def test_a_memory_limit_is_set_checked_and_cleared(self):
         folder = self.worker()

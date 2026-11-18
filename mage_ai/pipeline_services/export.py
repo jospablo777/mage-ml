@@ -3411,6 +3411,8 @@ def _write_python_lock(capture_: Capture, out_dir: Path, dependencies: List[str]
         k: v for k, v in os.environ.items()
         if k not in ('UV_PROJECT_ENVIRONMENT', 'VIRTUAL_ENV')
     }
+    # Its error is shown as text: no colors, which FORCE_COLOR turns on.
+    env['NO_COLOR'] = '1'
     result = subprocess.run(
         [uv, 'lock', '--project', str(out_dir), '--python', python],
         capture_output=True, text=True, timeout=900, env=env,

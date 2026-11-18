@@ -80,7 +80,8 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   await expect(page.getByText('six', { exact: false }).first()).toBeVisible();
   await page.locator('.view-lines').first().click();
   await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.type('[project');
+  // Not '[project': the editor closes the bracket, and [project] is TOML.
+  await page.keyboard.type('name =');
   await page.getByRole('button', { name: 'Save and prepare' }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'is not valid TOML' })).toBeVisible();
   await page.getByRole('button', { name: 'Discard changes' }).click();
