@@ -499,7 +499,10 @@ def _build(environment: Environment, log) -> None:
             file.write('\n'.join(environment.requirements + environment.pins) + '\n')
             requirements_path = file.name
         try:
-            _run([uv, 'pip', 'install', '--python', str(python), '-r', requirements_path], log)
+            # Compiled now, while people wait for the build, not on the first block run
+            # (pandas and pyarrow took 12 s there).
+            _run([uv, 'pip', 'install', '--compile-bytecode', '--python', str(python), '-r',
+                  requirements_path], log)
         finally:
             os.unlink(requirements_path)
         frozen = subprocess.run(
@@ -562,7 +565,9 @@ def _build_worker(worker: NamedWorker, log) -> None:
         environment.pop('VIRTUAL_ENV', None)
         try:
             _run_with_env(
-                [uv, 'sync', '--locked', '--no-dev', '--no-install-project',
+                # --compile-bytecode: compiled while people wait for the prepare, not on
+                # the first block run (pandas and pyarrow took 12 s there).
+                [uv, 'sync', '--locked', '--no-dev', '--no-install-project', '--compile-bytecode',
                  '--project', str(definition)],
                 log, environment,
             )
@@ -578,6 +583,7 @@ def _build_worker(worker: NamedWorker, log) -> None:
             ) from error
         _check_python(worker, staging)
         python = staging / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+        _import_once(python, worker, log)
         frozen = subprocess.run(
             [uv, 'pip', 'freeze', '--python', str(python)],
             capture_output=True, text=True, timeout=120,
@@ -630,6 +636,59 @@ def _remove_superseded(worker: NamedWorker, log) -> None:
         # The marker first: a removal stopped halfway leaves an environment never used.
         (directory / MARKER).unlink(missing_ok=True)
         shutil.rmtree(directory, ignore_errors=True)
+
+
+# Imports, in the new environment, the table libraries and the modules of the packages the
+# worker lists; prints the ones that fail.
+_IMPORT_ONCE = """
+import importlib, importlib.metadata as metadata, json, sys
+wanted = {name.lower().replace('_', '-') for name in json.loads(sys.argv[1])}
+modules = ['pyarrow', 'pandas', 'polars', 'numpy']
+for module, distributions in metadata.packages_distributions().items():
+    if module.startswith('_') or module in modules:
+        continue
+    if any(d.lower().replace('_', '-') in wanted for d in distributions):
+        modules.append(module)
+for module in modules:
+    try:
+        importlib.import_module(module)
+    except ModuleNotFoundError as error:
+        if error.name != module:
+            print(f'{module}: {error}')
+    except Exception as error:
+        print(f'{module}: {type(error).__name__}: {error}')
+"""
+
+
+def _import_once(python: Path, worker: NamedWorker, log) -> None:
+    """
+    Imports the worker's packages once, as the prepare's last step: the first load of
+    freshly installed native libraries is slow (11.6 s for pandas and pyarrow on macOS,
+    which checks new binaries; 0.2 s after), and it is paid here instead of in the first
+    block run. A package that does not import is reported; the prepare still completes,
+    as some import only with a GPU or credentials.
+    """
+    import tomllib
+
+    try:
+        project = tomllib.loads(
+            (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        project = {}
+    names = [n for n in (_requirement_name(d) for d in project.get('dependencies') or []) if n]
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            [str(python), '-c', _IMPORT_ONCE, json.dumps(names)],
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        log('Importing its packages took over 10 minutes; the first block run will finish it.')
+        return
+    for line in (result.stdout + result.stderr).strip().splitlines()[-20:]:
+        log(f'Could not import {line}')
+    log(f'Imported its packages once ({time.monotonic() - started:.1f} s), so the first block '
+        'run starts at once.')
 
 
 def _check_python(worker: NamedWorker, environment: Path) -> None:
@@ -1111,6 +1170,48 @@ def _missing_module_hint(environment, message: str, details: str) -> Optional[st
             f'{where} and lock it again.')
 
 
+def _run_in_new_process(python, repo_path: str, request: Dict) -> Dict:
+    """Runs one request in a worker process of its own (MAGE_WARM_WORKERS=0)."""
+    from mage_ai.data_preparation import warm_workers
+
+    read_fd, write_fd = os.pipe()
+    process = subprocess.Popen(
+        supervised_command([str(python), '-u', str(WORKER)]),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        env=warm_workers.worker_env(repo_path, write_fd),
+        cwd=str(repo_path),
+        pass_fds=(write_fd,),
+        start_new_session=HAS_PROCESS_GROUPS,
+    )
+    os.close(write_fd)
+    pumps = [
+        _forward(process.stdout, lambda line: print(line, end='', flush=True)),
+        _forward(process.stderr, lambda line: print(line, end='', file=sys.stderr, flush=True)),
+    ]
+    try:
+        process.stdin.write(json.dumps(request) + '\n')
+        process.stdin.write(json.dumps(dict(op='shutdown', id='bye')) + '\n')
+        process.stdin.close()
+        with os.fdopen(read_fd, encoding='utf-8') as replies:
+            messages = [json.loads(line) for line in replies if line.strip()]
+        process.wait()
+    except BaseException:
+        stop_process_group(process)
+        raise
+    finally:
+        for pump in pumps:
+            pump.join(timeout=5)
+    result = next((m for m in messages if m.get('type') == 'result'), None)
+    if result is None:
+        raise warm_workers.WorkerExited(process.returncode)
+    return result
+
+
 def _exit_message(environment, code: int) -> str:
     """Why a worker's process ended before the block's result, said for people."""
     import signal
@@ -1177,61 +1278,16 @@ def run_block(
             output_dir=str(directory / 'outputs'),
             run_tests=True,
         )
-        read_fd, write_fd = os.pipe()
         repo_path = getattr(block, 'repo_path', None) or os.getcwd()
-        env = dict(
-            os.environ,
-            MAGE_REPO_PATH=str(repo_path),
-            MAGE_WORKER_REPLY_FD=str(write_fd),
-            MAGE_SUPERVISE_PASS_FDS=str(write_fd),
-            PYTHONUNBUFFERED='1',
-        )
-        # The environment's packages first; Mage's own code stays importable for blocks
-        # that use its helpers, as long as the environment has their dependencies.
-        mage_root = str(Path(__file__).resolve().parents[2])
-        env['PYTHONPATH'] = os.pathsep.join(
-            p for p in (env.get('PYTHONPATH'), mage_root) if p
-        )
-        env.pop('VIRTUAL_ENV', None)
-        # A run on the engine's job worker has its protocol descriptor named here; this
-        # worker reads its request on stdin.
-        env.pop('MAGE_WORKER_REQUEST_FD', None)
-        process = subprocess.Popen(
-            supervised_command([str(python), '-u', str(WORKER)]),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            env=env,
-            cwd=str(repo_path),
-            pass_fds=(write_fd,),
-            start_new_session=HAS_PROCESS_GROUPS,
-        )
-        os.close(write_fd)
-        pumps = [
-            _forward(process.stdout, lambda line: print(line, end='', flush=True)),
-            _forward(
-                process.stderr, lambda line: print(line, end='', file=sys.stderr, flush=True),
-            ),
-        ]
+        from mage_ai.data_preparation import warm_workers
+
         try:
-            process.stdin.write(json.dumps(request) + '\n')
-            process.stdin.write(json.dumps(dict(op='shutdown', id='bye')) + '\n')
-            process.stdin.close()
-            with os.fdopen(read_fd, encoding='utf-8') as replies:
-                messages = [json.loads(line) for line in replies if line.strip()]
-            process.wait()
-        except BaseException:
-            stop_process_group(process)
-            raise
-        finally:
-            for pump in pumps:
-                pump.join(timeout=5)
-        result = next((m for m in messages if m.get('type') == 'result'), None)
-        if result is None:
-            raise PipelineEnvironmentError(_exit_message(environment, process.returncode))
+            if warm_workers.enabled():
+                result = warm_workers.call(str(python), str(repo_path), str(WORKER), request)
+            else:
+                result = _run_in_new_process(python, repo_path, request)
+        except warm_workers.WorkerExited as exited:
+            raise PipelineEnvironmentError(_exit_message(environment, exited.returncode))
         if not result.get('ok'):
             error = result.get('error') or {}
             details = error.get('details') or ''

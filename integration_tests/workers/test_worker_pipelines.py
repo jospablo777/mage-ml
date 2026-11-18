@@ -701,3 +701,32 @@ def test_a_dynamic_block_in_a_worker_is_refused_at_compile_and_at_run(workers):
     assert statuses(pipeline_run)['load'] == 'failed'
     assert expected in error_of(by_name(pipeline_run)['load'])
     assert statuses(pipeline_run)['after'] != 'completed'
+
+
+def test_twenty_blocks_in_one_worker_run_in_a_warm_process(workers):
+    from mage_ai.orchestration import fusion
+
+    blocks = [('b0', 'data_loader', 'pandas2', '''
+        import os
+
+        @data_loader
+        def load(*args, **kwargs):
+            return {'pids': [os.getpid()]}
+    ''')]
+    for index in range(1, 20):
+        blocks.append((f'b{index}', 'transformer', 'pandas2', '''
+            import os
+
+            @transformer
+            def step(data, *args, **kwargs):
+                return {'pids': data['pids'] + [os.getpid()]}
+        '''))
+    pipeline = pipeline_of(workers, blocks)
+    started = time.monotonic()
+    pipeline_run = completed(run(pipeline, fusion.BLOCK_FUSION_CHAINS))
+    seconds = time.monotonic() - started
+    pids = output(pipeline, pipeline_run, 'b19')['pids']
+    print(f'20 blocks in one worker: {seconds:.2f} s, {len(set(pids))} processes')
+    # One process for the twenty blocks: Python's start and the imports once, not twenty times.
+    assert len(set(pids)) == 1, pids
+    assert seconds < 20, seconds

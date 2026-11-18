@@ -43,6 +43,11 @@
   after a preview; its `pyproject.toml` edited as text; renamed or deleted. Every change
   is locked by uv in a copy first: one that does not resolve changes nothing and says why.
   See [Python workers](../guides/pipelines/python-workers.md).
+- Blocks in a Python worker run in warm processes that stay up between blocks: 5 ms
+  instead of 228 ms per block (Python's start and the pandas imports once), twenty small
+  blocks in 1.6 s instead of 3.4 s. Preparing a worker imports its packages once, so the
+  first run after it does not wait for the first load of native libraries (11.6 s for
+  pandas and pyarrow on macOS). `MAGE_WARM_WORKERS=0` turns it off.
 - Every Python block's header says where it runs and changes it in one click; the dialog
   that adds a block asks too. Python comes first in the add-block menu.
 - Python workers are tested across pandas and Python versions (pandas 2.2 next to MageML's

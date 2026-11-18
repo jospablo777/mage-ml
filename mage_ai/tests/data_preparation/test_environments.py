@@ -6,6 +6,7 @@ packages; skipped where uv is not installed.
 import asyncio
 import importlib.metadata
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -688,6 +689,120 @@ class NamedWorkerTest(DBTestCase):
         directory = Path(export.write(captured, out))
         self.assertEqual((directory / 'workers' / 'other' / '.python-version').read_text(),
                          '3.13\n')
+
+
+@unittest.skipIf(shutil.which('uv') is None, 'uv is not installed')
+class WarmWorkerTest(DBTestCase):
+    """
+    Blocks in a Python worker run in warm processes (data_preparation/warm_workers.py): one
+    per block cost about 200 ms (Python's start, pandas and pyarrow), a warm one 5 ms.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.cache = tempfile.mkdtemp()
+        cls.patcher = patch.dict('os.environ', {environments.ENVIRONMENTS_DIR_ENV: cls.cache})
+        cls.patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        from mage_ai.data_preparation import warm_workers
+
+        warm_workers.stop_all()
+        cls.patcher.stop()
+        shutil.rmtree(cls.cache, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        from mage_ai.data_preparation import warm_workers
+
+        warm_workers.stop_all()
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'plain')
+        folder.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / 'pyproject.toml').write_text(
+            '[project]\nname = "mageml-worker-plain"\nversion = "0"\n'
+            'requires-python = ">=3.12"\ndependencies = []\n')
+        subprocess.run(['uv', 'lock', '--project', str(folder)], check=True,
+                       capture_output=True)
+        self.worker = environments.named_workers(self.repo_path)['plain']
+        environments.prepare(self.worker, log=lambda _: None)
+
+    def run_code(self, body: str):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+
+        block = SimpleNamespace(uuid='warm', type='data_loader', configuration={},
+                                file_path='', repo_path=self.repo_path)
+        code = 'import os, sys, time\n\n@data_loader\ndef load(*args, **kwargs):\n' + \
+            textwrap.indent(textwrap.dedent(body), '    ')
+        printed = io.StringIO()
+        with redirect_stdout(printed):
+            outputs, _ = environments.run_block(block, self.worker, code, [], {})
+        return outputs[0], printed.getvalue()
+
+    def test_blocks_reuse_a_warm_process_and_print_to_their_own_output(self):
+        # Preparing imports its packages once: their first load is paid there, not here.
+        (self.worker.directory / environments.MARKER).unlink()
+        lines = []
+        environments.prepare(self.worker, log=lines.append)
+        self.assertTrue(any('Imported its packages once' in line for line in lines), lines)
+        first, printed_first = self.run_code("print('first block')\nreturn os.getpid()")
+        second, printed_second = self.run_code("print('second block')\nreturn os.getpid()")
+        self.assertEqual(first, second)
+        self.assertIn('first block', printed_first)
+        self.assertNotIn('second block', printed_first)
+        self.assertIn('second block', printed_second)
+        self.assertNotIn('mage-end', printed_first + printed_second)
+
+        with patch.dict('os.environ', {'MAGE_WARM_WORKERS': '0'}):
+            alone, _ = self.run_code('return os.getpid()')
+        self.assertNotEqual(alone, first)
+
+    def test_a_block_does_not_move_the_next_ones_directory(self):
+        self.run_code("os.chdir('/')\nreturn 1")
+        where, _ = self.run_code('return os.getcwd()')
+        self.assertEqual(os.path.realpath(where), os.path.realpath(self.repo_path))
+
+    def test_a_process_that_dies_fails_its_block_and_the_next_gets_a_new_one(self):
+        before, _ = self.run_code('return os.getpid()')
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'Python worker "plain" exited with code 7'):
+            self.run_code('os._exit(7)')
+        after, _ = self.run_code('return os.getpid()')
+        self.assertNotEqual(before, after)
+
+    def test_blocks_at_once_get_processes_of_their_own(self):
+        import threading
+
+        pids = []
+
+        def run():
+            pids.append(self.run_code('time.sleep(0.5)\nreturn os.getpid()')[0])
+
+        threads = [threading.Thread(target=run) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(set(pids)), 2)
+
+    def test_a_worn_process_is_replaced_and_a_forked_child_starts_its_own(self):
+        from mage_ai.data_preparation import warm_workers
+
+        with patch.object(warm_workers, 'MAX_REQUESTS', 2):
+            pids = [self.run_code('return os.getpid()')[0] for _ in range(3)]
+        self.assertEqual(pids[0], pids[1])
+        self.assertNotEqual(pids[1], pids[2])
+
+        self.assertEqual(warm_workers.idle_count(), 1)
+        # As a process forked from this one sees the pool: not its own processes.
+        with patch.object(warm_workers, '_owner', -1):
+            child, _ = self.run_code('return os.getpid()')
+        self.assertNotIn(child, pids)
 
 
 class WorkersCommandTest(unittest.TestCase):

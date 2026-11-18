@@ -148,9 +148,12 @@ background and are kept for 12 hours per lock.
   environments of a worker and removes older ones.
 - **Python.** Without `.python-version`, a worker runs on MageML's Python when its
   `requires-python` allows it, else on the closest version it allows.
-- **Runs.** A block in a worker runs in a process of that environment: MageML writes its
-  inputs, the worker runs the block and writes its outputs, MageML reads them. What it
-  prints goes to the block's log; an error comes back with the block's traceback.
+- **Runs.** A block in a worker runs in a warm process of that environment: MageML writes
+  its inputs, the worker runs the block and writes its outputs, MageML reads them. What it
+  prints goes to the block's log; an error comes back with the block's traceback. A
+  process that crashes is replaced, one is recycled after 500 blocks or 2 GB of memory,
+  and a block that changes directory does not move the next one. `MAGE_WARM_WORKERS=0`
+  starts a process per block.
 
 ### How values cross
 
@@ -168,10 +171,21 @@ the same packages reads back; return a table or JSON values between workers inst
 
 ## Performance
 
-Measured on an M-series Mac, a million rows of four columns crossing three workers (pandas
-2.2, Python 3.13, Polars) and back: 4.1 seconds for the run, 0.1 to 0.5 seconds per
-block. Each block in a worker starts a process and copies its inputs and outputs as Arrow
-files, so:
+A worker's blocks run in warm processes: the first block starts a process of the worker,
+which stays up for the next ones (and for the editor's next run), so Python's start and
+the imports of pandas and pyarrow are paid once. Blocks that run at the same time get
+processes of their own; an idle process stops after 5 minutes. Measured on an M-series
+Mac:
+
+| | A process per block | Warm processes |
+| --- | --- | --- |
+| One block on 1,000 rows (pandas, pyarrow) | 228 ms | 5 ms |
+| Twenty small blocks in one worker, through the scheduler | 3.4 s | 1.6 s |
+
+Preparing a worker imports its packages once, so the slow first load of new native
+libraries (11.6 s for pandas and pyarrow on macOS) happens there, not in the first run.
+A million rows of four columns crossing three workers (pandas 2.2, Python 3.13, Polars)
+take 4.0 seconds; there, copying the inputs and outputs as Arrow files is the cost, so:
 
 - Keep consecutive blocks that need the same packages in one worker, and blocks that
   MageML's Python can run in MageML's Python.

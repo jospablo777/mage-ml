@@ -48,6 +48,9 @@ class BlockError(Exception):
         self.block_uuid = block_uuid
 
 
+# The line a warm worker prints on stdout and stderr after a request that asks for it
+# (end_marker): MageML files every line before it under that request's block.
+END_MARKER = '\x1emage-end '
 # The line a chain prints before each block's output, so the service files the lines
 # after it under that block.
 BLOCK_MARKER = '\x1emage-block '
@@ -1389,6 +1392,8 @@ def serve(requests=None, channel=None) -> None:
         if request.get('op') == 'shutdown':
             _reply(channel, dict(type='bye', id=request_id))
             return
+        # A block that changes directory does not move the next request's.
+        directory = os.getcwd()
         try:
             if request.get('op') == 'stream':
                 # The reply holds the outputs' JSON: a Polars output is not made a list.
@@ -1420,6 +1425,13 @@ def serve(requests=None, channel=None) -> None:
                 details=traceback.format_exc(),
             ))
         finally:
+            try:
+                os.chdir(directory)
+            except OSError:
+                pass
+            if request.get('end_marker'):
+                print(f'{END_MARKER}{request_id}', flush=True)
+                print(f'{END_MARKER}{request_id}', file=sys.stderr, flush=True)
             sys.stdout.flush()
             sys.stderr.flush()
         message['rss_bytes'] = _rss_bytes()
