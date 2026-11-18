@@ -330,6 +330,31 @@ fn worker_lock_changes(lock: String, resolved: String) -> PyResult<String> {
     json(&changes(&lock, &resolved))
 }
 
+/// Each package a Python worker's uv.lock installs on a platform, largest first: JSON list of
+/// {name, version, bytes, built}.
+#[pyfunction]
+fn worker_lock_packages(lock: String, platform: String, python: String) -> PyResult<String> {
+    use mage_service_core::workers::{Lock, Platform};
+
+    let platform: Platform = serde_json::from_value(serde_json::Value::String(platform))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("platform: {e}")))?;
+    let lock =
+        Lock::parse(&lock).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    json(&lock.package_sizes(platform, &python))
+}
+
+/// What a new uv.lock changes from an old one: JSON list of {package, from, to}, from or to
+/// null for a package added or removed.
+#[pyfunction]
+fn worker_lock_diff(old: String, new: String) -> PyResult<String> {
+    use mage_service_core::workers::{diff, Lock};
+
+    let parse = |text: &str| {
+        Lock::parse(text).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    };
+    json(&diff(&parse(&old)?, &parse(&new)?))
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(log_window, module)?)?;
@@ -337,6 +362,8 @@ fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(worker_lock_size, module)?)?;
     module.add_function(wrap_pyfunction!(worker_locks_size, module)?)?;
     module.add_function(wrap_pyfunction!(worker_lock_changes, module)?)?;
+    module.add_function(wrap_pyfunction!(worker_lock_packages, module)?)?;
+    module.add_function(wrap_pyfunction!(worker_lock_diff, module)?)?;
     module.add_function(wrap_pyfunction!(log_search, module)?)?;
     #[cfg(feature = "postgres")]
     {

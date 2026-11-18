@@ -106,6 +106,25 @@ pub struct Size {
     pub built: Vec<String>,
 }
 
+/// One locked package and what it installs on a platform.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSize {
+    pub name: String,
+    pub version: String,
+    pub bytes: u64,
+    /// No wheel for the platform: the sdist's size counts, and installing builds it.
+    pub built: bool,
+}
+
+/// A package a new lock adds (no `from`), removes (no `to`) or moves to other versions.
+/// A package locked at several versions (for different Pythons) lists them joined by ", ".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Update {
+    pub package: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
 /// A package whose version differs between a worker's lock and a combined resolution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Change {
@@ -140,6 +159,61 @@ impl Lock {
     pub fn size(&self, platform: Platform, python: &str) -> Size {
         size_of(self.packages.iter(), platform, python)
     }
+
+    /// Each locked package with what it installs on the platform, largest first.
+    pub fn package_sizes(&self, platform: Platform, python: &str) -> Vec<PackageSize> {
+        let mut found: Vec<PackageSize> = self
+            .packages
+            .iter()
+            .filter(|p| !is_project(p))
+            .filter_map(|p| {
+                let size = size_of(std::iter::once(p), platform, python);
+                Some(PackageSize {
+                    name: normalize(&p.name),
+                    version: p.version.clone()?,
+                    bytes: size.bytes,
+                    built: !size.built.is_empty(),
+                })
+            })
+            .collect();
+        found.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
+        found
+    }
+
+    /// Each package's locked versions, joined by ", " when there are several.
+    fn versions(&self) -> BTreeMap<String, String> {
+        let mut versions: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+        for package in self.packages() {
+            versions
+                .entry(package.name)
+                .or_default()
+                .insert(package.version);
+        }
+        versions
+            .into_iter()
+            .map(|(name, set)| (name, set.into_iter().collect::<Vec<_>>().join(", ")))
+            .collect()
+    }
+}
+
+/// What a new lock changes from an old one: packages added, removed or at other versions,
+/// by name.
+pub fn diff(old: &Lock, new: &Lock) -> Vec<Update> {
+    let (before, after) = (old.versions(), new.versions());
+    let mut names: Vec<&String> = before.keys().chain(after.keys()).collect();
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let (from, to) = (before.get(name), after.get(name));
+            (from != to).then(|| Update {
+                package: name.clone(),
+                from: from.cloned(),
+                to: to.cloned(),
+            })
+        })
+        .collect()
 }
 
 /// What several locks install as one environment: a package they share at one version
@@ -261,6 +335,57 @@ pub fn changes(lock: &Lock, resolved: &str) -> Vec<Change> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_sizes_are_per_platform_and_largest_first() {
+        let lock = Lock::parse(LOCK).unwrap();
+        let sizes = lock.package_sizes(Platform::LinuxX86_64, "3.12");
+        let named: Vec<(&str, u64, bool)> = sizes
+            .iter()
+            .map(|p| (p.name.as_str(), p.bytes, p.built))
+            .collect();
+        assert_eq!(named[0], ("pyarrow", 53, false));
+        assert!(named.contains(&("six", 11, false)));
+        assert!(
+            sizes.iter().all(|p| p.name != "worker"),
+            "the project is not a package"
+        );
+    }
+
+    #[test]
+    fn a_diff_lists_added_removed_and_moved_packages() {
+        let old = Lock::parse(LOCK).unwrap();
+        let new = Lock::parse(
+            &LOCK
+                .replace("version = \"1.16.0\"", "version = \"1.17.0\"")
+                .replace("name = \"orjson\"", "name = \"ujson\""),
+        )
+        .unwrap();
+        let updates = diff(&old, &new);
+        let as_tuples: Vec<(&str, Option<&str>, Option<&str>)> = updates
+            .iter()
+            .map(|u| (u.package.as_str(), u.from.as_deref(), u.to.as_deref()))
+            .collect();
+        assert_eq!(
+            as_tuples,
+            vec![
+                ("orjson", Some("3.11.0"), None),
+                ("six", Some("1.16.0"), Some("1.17.0")),
+                ("ujson", None, Some("3.11.0")),
+            ]
+        );
+        assert!(diff(&old, &old).is_empty());
+    }
+
+    #[test]
+    fn a_package_locked_at_two_versions_is_compared_as_both() {
+        let two = "[[package]]\nname = \"numpy\"\nversion = \"2.2.6\"\n\n\
+                   [[package]]\nname = \"numpy\"\nversion = \"2.3.1\"\n";
+        let one = "[[package]]\nname = \"numpy\"\nversion = \"2.3.1\"\n";
+        let updates = diff(&Lock::parse(two).unwrap(), &Lock::parse(one).unwrap());
+        assert_eq!(updates[0].from.as_deref(), Some("2.2.6, 2.3.1"));
+        assert_eq!(updates[0].to.as_deref(), Some("2.3.1"));
+    }
 
     const LOCK: &str = r#"
 version = 1
