@@ -1867,6 +1867,10 @@ class Pipeline:
         # If there are no blocks or the order has not changed
         if min_length == 0 or uuids_new[:min_length] == uuids_old[:min_length]:
             return False
+        # An order names every block. Fewer is an update of those blocks, not a new order:
+        # the blocks it leaves out stay (they were dropped from the pipeline before).
+        if sorted(uuids_new) != sorted(uuids_old):
+            return False
 
         block_configs_by_uuids = index_by(lambda x: x['uuid'], self.block_configs)
         new_indexes_by_uuid = {uuid: index for index, uuid in enumerate(uuids_new)}

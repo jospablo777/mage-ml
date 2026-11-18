@@ -368,6 +368,28 @@ class NamedWorkerTest(DBTestCase):
         Path(transform.file_path).write_text(textwrap.dedent(WORKER_TRANSFORM))
         return Pipeline.get(pipeline.uuid, repo_path=self.repo_path), load.uuid, transform.uuid
 
+    def test_the_settings_table_sets_and_clears_where_a_block_runs(self):
+        # What the pipeline settings' Save sends for the blocks whose worker changed.
+        pipeline, load, transform = self.pipeline(
+            environment=dict(worker='feast'), load_worker='mlflow',
+        )
+
+        def update(block, worker):
+            configuration = dict(pipeline.get_block(block).configuration or {})
+            asyncio.run(pipeline.update(dict(blocks=[dict(
+                configuration={**configuration, 'python_worker': worker}, uuid=block,
+            )]), update_content=True))
+            saved = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+            # Only that block is sent: the other one stays, in its place.
+            self.assertEqual(list(saved.blocks_by_uuid), [load, transform])
+            return environments.worker_selection(saved.get_block(block))
+
+        self.assertEqual(update(transform, 'mage'), 'mage')
+        # Cleared with null: the configuration is not empty, so it is saved, and the block
+        # runs in the pipeline's default.
+        self.assertEqual(update(load, None), 'feast')
+        self.assertEqual(update(transform, None), 'feast')
+
     def test_a_worker_has_the_name_and_description_people_give_it(self):
         folder = self.worker('feast', lock=False)
         before = environments.named_workers(self.repo_path)['feast']
