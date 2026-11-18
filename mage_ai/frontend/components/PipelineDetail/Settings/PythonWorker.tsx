@@ -89,6 +89,14 @@ function PythonWorkerStatus({
       }),
     },
   );
+  // A worker added a moment ago appears with its prepare already running: the list
+  // reloads after this panel first rendered without it.
+  useEffect(() => {
+    if (worker?.job && !job) {
+      setJob(worker.job);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worker?.job]);
   const running = job?.state === 'running';
   const { data } = api.python_workers.detail(
     running ? worker?.name : null,

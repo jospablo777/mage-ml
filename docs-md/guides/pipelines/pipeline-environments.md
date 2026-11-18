@@ -110,6 +110,31 @@ mage workers prepare feast      # uv sync --locked into the environment cache
 mage workers list               # each worker and whether it is prepared
 ```
 
+Or start from a template, which writes the `pyproject.toml`, locks it and prepares it:
+
+```bash
+mage workers new feast --template feast --label "Feast worker"
+```
+
+| Template | Starts with |
+| --- | --- |
+| `feast` | Feast, pandas 2 |
+| `mlflow` | MLflow, pandas |
+| `ml-inference` | scikit-learn, ONNX Runtime, joblib, pandas |
+| `polars` | Polars |
+| `empty` | pyarrow only |
+
+Every template has pyarrow: tables cross between workers as Arrow. The pipeline's
+**Settings** has **Add a Python worker** with the same templates.
+
+To move several blocks, or a whole chain, to a worker at once:
+
+```bash
+mage workers assign feast my_pipeline --blocks online_features,join_features
+mage workers assign feast my_pipeline --chain online_features   # its whole chain
+mage workers assign mage my_pipeline --blocks score             # MageML's own Python
+```
+
 In the editor, the pipeline's **Settings** has **Python worker**, which lists the
 project's workers and prepares the chosen one with **Prepare**, showing what uv prints;
 each block's settings have **Python worker** too. In `metadata.yaml`, a block selects its

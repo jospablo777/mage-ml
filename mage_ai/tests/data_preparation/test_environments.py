@@ -388,6 +388,32 @@ class NamedWorkerTest(DBTestCase):
         [described] = environments.describe_workers(self.repo_path)
         self.assertEqual((described['name'], described['label']), ('feast', 'Feast worker'))
 
+    def test_several_blocks_get_a_worker_at_once_and_nothing_changes_on_a_bad_one(self):
+        self.worker('feast', lock=False)
+        pipeline, load, transform = self.pipeline()
+        changed = environments.assign_worker(pipeline, [load, transform], 'Feast')
+        self.assertEqual(changed, [load, transform])
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        self.assertEqual(
+            [pipeline.get_block(u).configuration.get('python_worker') for u in (load, transform)],
+            ['feast', 'feast'],
+        )
+        # Already there: nothing to change.
+        self.assertEqual(environments.assign_worker(pipeline, [load], 'feast'), [])
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'no Python worker'):
+            environments.assign_worker(pipeline, [load], 'spark')
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'has no block'):
+            environments.assign_worker(pipeline, [load, 'missing'], None)
+        self.assertEqual(
+            pipeline.get_block(load).configuration.get('python_worker'), 'feast',
+            'a bad block in the list changes none of them',
+        )
+        self.assertEqual(environments.assign_worker(pipeline, [load], None), [load])
+        self.assertEqual(environments.assign_worker(pipeline, [transform], 'mage'), [transform])
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+        self.assertNotIn('python_worker', pipeline.get_block(load).configuration or {})
+        self.assertEqual(pipeline.get_block(transform).configuration['python_worker'], 'mage')
+
     def test_the_digest_of_a_worker_without_mageml_settings_is_unchanged(self):
         # Workers prepared before labels existed keep their environments.
         text = b'[project]\nname = "x"\n\n[tool.uv]\nindex-url = "https://example.com"\n'
@@ -614,3 +640,66 @@ class PythonWorkerApiTest(DBTestCase):
         missing = self.call(OperationType.DETAIL, pk='other')
         self.assertEqual(missing['error']['code'], 404)
         self.assertIn('workers: feast', missing['error']['message'])
+
+
+class NewWorkerTest(DBTestCase):
+    """A Python worker added from a template: written, then locked and prepared in the
+    background; its name checked first."""
+
+    def setUp(self):
+        super().setUp()
+        from mage_ai.tests.factory import create_user
+
+        self.owner = create_user(_owner=True)
+        self.addCleanup(shutil.rmtree, Path(self.repo_path, environments.WORKERS_DIR), True)
+
+    def call(self, payload):
+        from mage_ai.api.operations.base import BaseOperation
+        from mage_ai.api.operations.constants import OperationType
+
+        return asyncio.run(BaseOperation(
+            action=OperationType.CREATE, payload=dict(python_worker=payload),
+            resource='python_workers', user=self.owner,
+        ).execute())
+
+    def test_a_worker_from_a_template_is_written_locked_and_prepared(self):
+        steps = []
+
+        def fake_run(command, log):
+            steps.append(command[1])
+            log('Resolved 12 packages')
+            folder = Path(command[-1])
+            (folder / 'uv.lock').write_text('version = 1\n')
+
+        def fake_prepare(worker, log=print):
+            steps.append(f'prepare {worker.alias} {worker.label}')
+
+        with patch.object(environments, '_run', side_effect=fake_run), \
+                patch.object(environments, 'prepare', side_effect=fake_prepare):
+            started = self.call(dict(name='Feast', template='feast', label='Online features'))
+            for _ in range(100):
+                job = environments.prepare_job(self.repo_path, 'feast')
+                if job['state'] != 'running':
+                    break
+                time.sleep(0.05)
+
+        self.assertEqual(started['python_worker']['name'], 'feast')
+        self.assertEqual(job['state'], 'completed', job['problems'])
+        self.assertEqual(steps, ['lock', 'prepare feast Online features'])
+        pyproject = Path(self.repo_path, environments.WORKERS_DIR, 'feast', 'pyproject.toml')
+        text = pyproject.read_text()
+        self.assertIn('"pandas>=2.2,<3"', text)
+        self.assertIn('label = "Online features"', text)
+        self.assertIn('description = "Feature retrieval with Feast, which needs pandas 2"', text)
+
+    def test_names_and_templates_are_checked_before_anything_is_written(self):
+        for payload, message in (
+            (dict(name='my worker!', template='empty'), 'letters, digits and "-"'),
+            (dict(name='tools', template='spark'), 'no worker template spark'),
+            (dict(name='mage', template='empty'), 'exists already'),
+        ):
+            with self.subTest(payload=payload):
+                result = self.call(payload)
+                self.assertEqual(result['error']['code'], 400)
+                self.assertIn(message, result['error']['message'])
+        self.assertFalse(Path(self.repo_path, environments.WORKERS_DIR, 'tools').exists())

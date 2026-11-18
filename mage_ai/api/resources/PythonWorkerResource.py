@@ -8,7 +8,8 @@ from mage_ai.settings.repo import get_repo_path
 class PythonWorkerResource(GenericResource):
     """
     The project's Python workers (python_workers/<name>/): GET /api/python_workers lists
-    them with whether each is prepared; POST prepares one in the background; GET
+    them with whether each is prepared; POST prepares one in the background, or with a
+    template adds a worker, locks it and prepares it; GET
     /api/python_workers/<name> gives it with its prepare's state and every line uv printed.
     """
 
@@ -29,8 +30,19 @@ class PythonWorkerResource(GenericResource):
         name = payload.get('name')
         if not isinstance(name, str) or not name.strip():
             raise ApiError(dict(code=400, message='Name the Python worker to prepare.'))
+        repo_path = get_repo_path(user=user)
+        template = payload.get('template')
+        if template:
+            try:
+                environments.new_worker(
+                    repo_path, name, template,
+                    label=payload.get('label') or None,
+                    description=payload.get('description') or None,
+                )
+            except environments.PipelineEnvironmentError as error:
+                raise ApiError(dict(code=400, message=str(error)))
         try:
-            job = environments.start_prepare(get_repo_path(user=user), name)
+            job = environments.start_prepare(repo_path, name, lock=bool(template))
         except environments.PipelineEnvironmentError as error:
             raise ApiError(dict(code=404, message=str(error)))
         return cls(dict(name=job['name'], job=job), user, **kwargs)

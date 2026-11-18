@@ -13,6 +13,7 @@ import FusionVerification from './FusionVerification';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
+import NewPythonWorker from './NewPythonWorker';
 import PythonWorkerStatus, { PythonWorkerType, workerLabel } from './PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
 import SetupSection, { SetupSectionRow } from '@components/shared/SetupSection';
@@ -361,10 +362,19 @@ function PipelineSettings({
               </Text>
               {!workers.length && (
                 <Text muted small>
-                  This project has no Python workers yet: add a uv project in
-                  python_workers/&lt;name&gt;/ and run uv lock in it.
+                  This project has no Python workers yet: add one from a template below, or
+                  a uv project in python_workers/&lt;name&gt;/ with its uv.lock.
                 </Text>
               )}
+              <NewPythonWorker
+                onAdded={(name) => {
+                  reloadWorkers();
+                  setPipelineAttributes(prev => ({
+                    ...prev,
+                    environment: { ...prev?.environment, worker: name },
+                  }));
+                }}
+              />
               {!!pipelineAttributes?.environment?.worker && (
                 <PythonWorkerStatus
                   key={pipelineAttributes?.environment?.worker}

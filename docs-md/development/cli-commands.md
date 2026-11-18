@@ -30,6 +30,7 @@ In a uv project, run the commands with `uv run mage ...` from the project folder
 | [`verify-fusion`](#verify-fusion) | Run a pipeline block by block and fused, and compare the outputs |
 | [`project-export`](#project-export) | Export pipelines, their blocks and contracts as one zip |
 | [`project-import`](#project-import) | Import such a zip, planned first |
+| [`workers new`, `workers list`, `workers prepare`, `workers assign`](#python-workers) | Add, list, prepare and assign the project's Python workers |
 | [`r setup`, `r init`, `r sync`, `r status`](#r-blocks) | Manage the rv environment that R blocks run in |
 | [`rust init`, `rust build`, `rust status`](#rust-blocks) | Manage the Cargo workspace that Rust blocks build in |
 | [`export service`](#export-service) | Export pipelines as a standalone Docker service |
@@ -414,6 +415,17 @@ mage project-import <project_path> <archive.zip> [--mode skip|replace] [--dry-ru
 ```
 
 ---
+
+## Python workers
+
+Named Python environments in `python_workers/<name>/` that blocks select. The project
+defaults to the current directory (`--project`). See
+[Python workers](../guides/pipelines/pipeline-environments.md#python-workers).
+
+- `mage workers new <name> [--template feast|mlflow|ml-inference|polars|empty] [--label "Feast worker"] [--no-prepare]`: write the worker's `pyproject.toml` from a template, lock it with uv and prepare it.
+- `mage workers list`: each worker, its label, Python version and whether it is prepared.
+- `mage workers prepare [name ...]`: build each worker's environment from its `uv.lock`.
+- `mage workers assign <worker|mage|pipeline> <pipeline> [--blocks a,b] [--chain <block>]`: set the Python worker of several blocks, or of every block in a block's chain, at once; `mage` is MageML's own Python and `pipeline` the pipeline's worker.
 
 ## R blocks
 

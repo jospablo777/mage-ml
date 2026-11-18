@@ -60,7 +60,7 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 
 test.afterAll(async () => {
   await api.deletePipeline(pipelineUUID);
-  await api.call('DELETE', `files/${encodeURIComponent(FOLDER)}`).catch(() => null);
+  await api.call('DELETE', `folders/${encodeURIComponent(FOLDER)}`).catch(() => null);
   await apiContext.dispose();
 });
 
@@ -93,4 +93,28 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
   expect(run.status).toBe('completed');
   const { block_runs: blockRuns } = await api.call('GET', `pipeline_runs/${run.id}/block_runs`);
   expect(blockRuns.map(b => b.status)).toEqual(['completed']);
+});
+
+test('a Python worker is added from a template, locked and prepared', async ({ page }) => {
+  // uv locks and installs pyarrow.
+  test.setTimeout(240_000);
+  const name = `e2e-added-${SUFFIX}`;
+  await page.goto(`/pipelines/${pipelineUUID}/settings`);
+  await page.getByText('Add a Python worker', { exact: true }).click();
+  await page.getByLabel('Template').selectOption('empty');
+  await page.getByLabel('Name in YAML').fill(name);
+  await page.getByLabel('Name shown').fill('Added worker');
+  await page.getByRole('button', { name: 'Add and prepare' }).click();
+  try {
+    // Selected for the pipeline, it shows the prepare's progress until it is ready.
+    await expect(page.getByText(/Prepared: \d+ packages from its uv.lock/)).toBeVisible({
+      timeout: 180_000,
+    });
+    const { python_workers: workers } = await api.call('GET', 'python_workers');
+    const added = workers.find(w => w.name === name);
+    expect([added?.label, added?.locked, added?.prepared]).toEqual(['Added worker', true, true]);
+  } finally {
+    await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${name}`)}`)
+      .catch(() => null);
+  }
 });

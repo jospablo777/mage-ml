@@ -1516,11 +1516,13 @@ def workers_list(project: str = SERVICE_PROJECT):
     except environments.PipelineEnvironmentError as error:
         _service_error(error)
     if not workers:
-        typer.echo(f'No Python workers: add a uv project in {environments.WORKERS_DIR}/<name>/.')
+        typer.echo('No Python workers: add one with mage workers new <name> --template feast, '
+                   f'or a uv project in {environments.WORKERS_DIR}/<name>/.')
         return
     for alias, worker in workers.items():
         state = 'prepared' if worker.prepared else 'not prepared'
-        typer.echo(f'{alias}  Python {worker.python}  {state}  ({worker.relative_definition()})')
+        name = f'{alias} ({worker.label})' if worker.label else alias
+        typer.echo(f'{name}  Python {worker.python}  {state}  ({worker.relative_definition()})')
 
 
 WORKER_NAMES = typer.Argument(None, help='the workers; all of them by default.')
@@ -1551,6 +1553,81 @@ def workers_prepare(
             typer.echo(f'{worker.alias}: prepared.')
     except environments.PipelineEnvironmentError as error:
         _service_error(error)
+
+
+WORKER_TEMPLATE = typer.Option('empty', '--template', help='what it starts with: empty, feast, '
+                               'mlflow, ml-inference or polars.')
+WORKER_LABEL = typer.Option(None, '--label', help='the name the editor shows, such as '
+                            '"Feast worker"; the template\'s by default.')
+WORKER_PREPARE = typer.Option(True, '--prepare/--no-prepare', help='lock and prepare it now.')
+
+
+@workers_app.command('new')
+def workers_new(
+    name: str = typer.Argument(..., help='its name in YAML, such as feast.'),
+    template: str = WORKER_TEMPLATE,
+    label: Optional[str] = WORKER_LABEL,
+    prepare: bool = WORKER_PREPARE,
+    project: str = SERVICE_PROJECT,
+):
+    """Adds a Python worker in python_workers/<name>/ from a template, locked and prepared."""
+    from mage_ai.data_preparation import environments
+
+    repo = os.path.abspath(project)
+    try:
+        folder = environments.new_worker(repo, name, template, label=label)
+        typer.echo(f'Wrote {os.path.relpath(folder / "pyproject.toml", repo)}.')
+        if not prepare:
+            typer.echo(f'Lock it with: uv lock --project {os.path.relpath(folder, repo)}')
+            return
+        environments._run([environments._uv(), 'lock', '--project', str(folder)], typer.echo)
+        worker = environments.named_workers(repo)[environments.normalized_alias(name)]
+        environments.prepare(worker, log=typer.echo)
+        typer.echo(f'{worker.display_name} ({worker.alias}): prepared. Commit '
+                   f'{os.path.relpath(folder, repo)}/pyproject.toml and uv.lock.')
+    except environments.PipelineEnvironmentError as error:
+        _service_error(error)
+
+
+WORKER_BLOCKS = typer.Option(None, '--blocks', help='the blocks, comma separated.')
+WORKER_CHAIN = typer.Option(None, '--chain', help='a block: every block of its chain, as '
+                            'compiling plans it.')
+
+
+@workers_app.command('assign')
+def workers_assign(
+    worker: str = typer.Argument(..., help="a worker, mage for MageML's Python, or pipeline "
+                                 "for the pipeline's."),
+    pipeline_uuid: str = typer.Argument(..., help='the pipeline.'),
+    blocks: Optional[str] = WORKER_BLOCKS,
+    chain: Optional[str] = WORKER_CHAIN,
+    project: str = SERVICE_PROJECT,
+):
+    """Sets the Python worker of several blocks, or of a whole chain, at once."""
+    from mage_ai.data_preparation import environments
+    from mage_ai.data_preparation.models.pipeline import Pipeline
+    from mage_ai.orchestration import planning
+
+    repo = os.path.abspath(project)
+    pipeline = Pipeline.get(pipeline_uuid, repo_path=repo, check_if_exists=True)
+    if pipeline is None:
+        _service_error(f'There is no pipeline {pipeline_uuid} in {repo}.')
+    chosen = [b.strip() for b in (blocks or '').split(',') if b.strip()]
+    if chain:
+        group = planning.plan_pipeline(pipeline, groups=True, segments=False).group_of(chain)
+        if group is None:
+            _service_error(f'Pipeline {pipeline_uuid} has no block {chain}.')
+        chosen += [uuid for uuid in group if uuid not in chosen]
+    if not chosen:
+        _service_error('Name the blocks with --blocks a,b or a chain with --chain <block>.')
+    try:
+        changed = environments.assign_worker(
+            pipeline, chosen, None if worker == 'pipeline' else worker,
+        )
+    except environments.PipelineEnvironmentError as error:
+        _service_error(error)
+    typer.echo(f'{len(changed)} of {len(chosen)} blocks changed'
+               + (f': {", ".join(changed)}.' if changed else '.'))
 
 
 golden_app = typer.Typer(

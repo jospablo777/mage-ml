@@ -4828,6 +4828,9 @@
    },
    "PythonWorker": {
     "properties": {
+     "combine": {
+      "type": "boolean"
+     },
      "definition": {
       "type": "string"
      },
@@ -4835,11 +4838,17 @@
       "items": {},
       "type": "array"
      },
+     "description": {
+      "type": "null"
+     },
      "digest": {
       "type": "string"
      },
      "job": {
       "type": "null"
+     },
+     "label": {
+      "type": "string"
      },
      "locked": {
       "type": "boolean"

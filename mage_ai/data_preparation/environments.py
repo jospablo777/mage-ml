@@ -542,8 +542,119 @@ def describe_workers(repo_path: str) -> List[Dict]:
     return described
 
 
-def start_prepare(repo_path: str, alias: str) -> Dict:
-    """Prepares the worker in a thread; a prepare of it already running is returned."""
+# Starting points for a new Python worker: a name for people, what it is for, and the
+# packages it starts with. Tables cross between workers as Arrow, so each has pyarrow.
+WORKER_TEMPLATES = {
+    'empty': dict(
+        label='Python worker', description='Your own packages', dependencies=['pyarrow'],
+    ),
+    'feast': dict(
+        label='Feast worker',
+        description='Feature retrieval with Feast, which needs pandas 2',
+        dependencies=['feast>=0.50', 'pandas>=2.2,<3', 'pyarrow'],
+    ),
+    'mlflow': dict(
+        label='MLflow worker',
+        description='Models from an MLflow registry',
+        dependencies=['mlflow-skinny>=3', 'pandas', 'pyarrow'],
+    ),
+    'ml-inference': dict(
+        label='ML inference worker',
+        description='Scoring with scikit-learn and ONNX Runtime models',
+        dependencies=['scikit-learn', 'onnxruntime', 'joblib', 'pandas', 'pyarrow'],
+    ),
+    'polars': dict(
+        label='Polars worker', description='Data work with Polars',
+        dependencies=['polars', 'pyarrow'],
+    ),
+}
+
+
+def new_worker(
+    repo_path: str,
+    name: str,
+    template: str = 'empty',
+    label: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Path:
+    """Writes python_workers/<name>/pyproject.toml from a template; returns its folder. The
+    lock and the environment come after (start_prepare with lock=True, or uv lock)."""
+    import re
+
+    alias = normalized_alias(name or '')
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', alias):
+        raise PipelineEnvironmentError(
+            f'"{name}" cannot name a Python worker: use letters, digits and "-".'
+        )
+    if template not in WORKER_TEMPLATES:
+        raise PipelineEnvironmentError(
+            f'There is no worker template {template}; templates: '
+            f'{", ".join(WORKER_TEMPLATES)}.'
+        )
+    if alias in named_workers(repo_path) or alias in BUILTIN_WORKERS:
+        raise PipelineEnvironmentError(f'A Python worker named {alias} exists already.')
+    chosen = WORKER_TEMPLATES[template]
+    folder = Path(repo_path) / WORKERS_DIR / alias
+    folder.mkdir(parents=True, exist_ok=False)
+    dependencies = ', '.join(json.dumps(d) for d in chosen['dependencies'])
+    (folder / 'pyproject.toml').write_text(
+        '[project]\n'
+        f'name = "{alias}"\n'
+        'version = "0"\n'
+        f'requires-python = ">={sys.version_info.major}.{sys.version_info.minor}"\n'
+        f'dependencies = [{dependencies}]\n'
+        '\n'
+        '[tool.mageml.worker]\n'
+        f'label = {json.dumps(label or chosen["label"])}\n'
+        f'description = {json.dumps(description or chosen["description"])}\n'
+    )
+    return folder
+
+
+def assign_worker(pipeline, block_uuids: List[str], alias: Optional[str]) -> List[str]:
+    """Sets the Python worker of the pipeline's blocks: a worker's alias, 'mage' for
+    MageML's own Python, or None for the pipeline's. Every block is checked before any
+    changes. Returns the blocks whose worker changed."""
+    if alias not in (None, *BUILTIN_WORKERS):
+        workers = named_workers(pipeline.repo_path)
+        alias = normalized_alias(alias)
+        if alias not in workers:
+            raise PipelineEnvironmentError(
+                f'There is no Python worker {alias}; workers: {", ".join(workers) or "none"}.'
+            )
+    elif alias in BUILTIN_WORKERS:
+        alias = 'mage'
+    blocks = []
+    for uuid in block_uuids:
+        block = pipeline.get_block(uuid)
+        if block is None:
+            raise PipelineEnvironmentError(f'Pipeline {pipeline.uuid} has no block {uuid}.')
+        language = str(getattr(block.language, 'value', block.language))
+        block_type = str(getattr(block.type, 'value', block.type))
+        if language != 'python' or block_type not in SUPPORTED_BLOCK_TYPES:
+            raise PipelineEnvironmentError(
+                f'{uuid} is a {language} {block_type} block; Python workers run Python data '
+                'loaders, transformers, data exporters and custom blocks.'
+            )
+        blocks.append(block)
+    changed = []
+    for block in blocks:
+        configuration = dict(block.configuration or {})
+        if configuration.get('python_worker') == alias or \
+                (alias is None and 'python_worker' not in configuration):
+            continue
+        if alias is None:
+            configuration.pop('python_worker', None)
+        else:
+            configuration['python_worker'] = alias
+        block.update(dict(configuration=configuration))
+        changed.append(block.uuid)
+    return changed
+
+
+def start_prepare(repo_path: str, alias: str, lock: bool = False) -> Dict:
+    """Prepares the worker in a thread; a prepare of it already running is returned. With
+    lock, uv lock writes its uv.lock first (a new worker)."""
     worker = named_workers(repo_path).get(normalized_alias(alias))
     if worker is None:
         raise PipelineEnvironmentError(f'There is no Python worker {alias}.')
@@ -562,7 +673,13 @@ def start_prepare(repo_path: str, alias: str) -> Dict:
 
     def run():
         try:
-            prepare(worker, log=log)
+            if lock:
+                log(f'Locking {worker.relative_definition()} with uv.')
+                _run([_uv(), 'lock', '--project', worker.definition], log)
+                prepared = named_workers(repo_path)[worker.alias]
+            else:
+                prepared = worker
+            prepare(prepared, log=log)
             state, problems = 'completed', []
         except PipelineEnvironmentError as error:
             state, problems = 'failed', [str(error)]
