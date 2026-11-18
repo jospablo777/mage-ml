@@ -500,12 +500,21 @@ struct Table {
 impl Table {
     /// The broker confirmed committing `next` as the partition's next offset to read.
     /// Partitions not assigned here are left out.
-    fn confirm(&mut self, topic: &str, partition: i32, next: i64) {
+    /// Returns whether it moved the confirmed offset.
+    fn confirm(&mut self, topic: &str, partition: i32, next: i64) -> bool {
         let id = self.id(topic, partition);
-        if self.epochs.contains_key(&id) {
-            let confirmed = self.confirmed.entry(id).or_insert(next);
-            *confirmed = (*confirmed).max(next);
+        if !self.epochs.contains_key(&id) {
+            return false;
         }
+        let confirmed = self.confirmed.entry(id).or_insert(i64::MIN);
+        let moved = next > *confirmed;
+        *confirmed = (*confirmed).max(next);
+        moved
+    }
+
+    /// Whether a partition read past what the broker confirmed committing.
+    fn waiting_for_commits(&self) -> bool {
+        self.read_next.keys().any(|id| self.unconfirmed(*id) > 0)
     }
 
     /// Messages of the partition read past what the broker confirmed committing.
@@ -555,6 +564,8 @@ impl Table {
 enum Polled {
     /// Messages polled together: one handoff per chunk, not per message (I-84).
     Messages(Vec<Fetched>),
+    /// The broker confirmed commits: a partition held at its unconfirmed limit may read on.
+    Confirmed,
     Event(SourceEvent),
     Error(KafkaError),
 }
@@ -885,19 +896,21 @@ impl Committer {
         }
     }
 
-    /// Records the offsets the broker confirmed committing since the last call.
-    fn drain(&self, table: &Mutex<Table>) {
+    /// Records the offsets the broker confirmed committing since the last call; returns
+    /// whether one moved.
+    fn drain(&self, table: &Mutex<Table>) -> bool {
         use rdkafka::bindings as rd;
         use rdkafka::bindings::rd_kafka_resp_err_t::RD_KAFKA_RESP_ERR_NO_ERROR as NO_ERROR;
         use std::ffi::CStr;
 
+        let mut moved = false;
         // SAFETY: each event is ours until destroyed, and its list and topic names live as
         // long as the event.
         unsafe {
             loop {
                 let event = rd::rd_kafka_queue_poll(self.queue, 0);
                 if event.is_null() {
-                    return;
+                    return moved;
                 }
                 let list = rd::rd_kafka_event_topic_partition_list(event);
                 if rd::rd_kafka_event_error(event) == NO_ERROR && !list.is_null() {
@@ -906,7 +919,7 @@ impl Committer {
                     for element in elements {
                         if element.err == NO_ERROR && element.offset >= 0 {
                             let topic = CStr::from_ptr(element.topic).to_string_lossy();
-                            table.confirm(&topic, element.partition, element.offset);
+                            moved |= table.confirm(&topic, element.partition, element.offset);
                         }
                     }
                 }
@@ -980,12 +993,24 @@ fn poll_loop(
     let mut recommit_at = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         log.drain();
-        committer.drain(&table);
         // One message woke the stream's task and parked it again each time: the two
         // threads mostly waited on each other (I-84). The messages librdkafka already
         // holds go together.
-        let mut items = Vec::with_capacity(2);
-        match consumer.poll(Duration::from_millis(100)) {
+        let mut items = Vec::with_capacity(3);
+        // A partition at its unconfirmed limit waits for these answers: the stream hears
+        // of them at once, not with the next messages (I-460).
+        if committer.drain(&table) {
+            items.push(Polled::Confirmed);
+        }
+        // While commits are unanswered, answers are looked for every few milliseconds:
+        // with nothing left to fetch, a 100 ms poll held them back, and the stream read at
+        // a quarter of its speed.
+        let waiting = table
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .waiting_for_commits();
+        let timeout = Duration::from_millis(if waiting { 2 } else { 100 });
+        match consumer.poll(timeout) {
             Some(Ok(message)) => {
                 // Decoded here, on the poll thread: a new schema's first read from the
                 // registry waits here, not in the stream's loop.
@@ -1536,6 +1561,7 @@ impl Source for KafkaSource {
                 let wait = self.wait();
                 match tokio::time::timeout(wait, self.polled.recv()).await {
                     Ok(Some(Polled::Messages(chunk))) => self.carry_chunk(chunk),
+                    Ok(Some(Polled::Confirmed)) => {}
                     Ok(Some(Polled::Event(event))) => return Ok(self.handle(event)),
                     Ok(Some(Polled::Error(error))) => return Err(connector_error(error)),
                     Ok(None) => return Ok(SourceEvent::End),

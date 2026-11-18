@@ -7,6 +7,15 @@
 - lettre 0.11.24 in the engine (email alerts of exported services): 0.11.23 had six
   advisories published on 2026-11-18.
 
+### Stream services
+
+- Kafka streams read at full speed again: 0.3.0 read at most a quarter of 0.2.0's speed
+  (250,000 messages a second through one block, for Python and Rust alike). A partition
+  waits for the broker to confirm its commits after 8 batches, and the confirmations
+  reached the stream up to 100 ms late. Kafka to Kafka through one block now carries
+  585,000 messages a second with a Python block and 890,000 with a Rust block, with re-reads
+  after a lost assignment still bounded by 8 batches per partition.
+
 ### Behavior changes to check before upgrading
 
 - Consecutive Rust blocks with different connection profiles no longer compile into one

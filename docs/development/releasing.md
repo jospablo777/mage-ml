@@ -31,6 +31,12 @@ how to reproduce each check locally.
    python3 scripts/release/unchanged_sources.py previous.json
    ```
 2. Write `docs/development/releases/vX.Y.Z.md`, the text of the GitHub release.
+   Measure what the release claims: the stream benchmark with 500,000 messages
+   (`MAGE_BENCHMARK_MESSAGES=500000 uv run python -m pytest -s
+   integration_tests/benchmark/test_stream_benchmark.py -k "identity or source"` with
+   `MAGE_TEST_KAFKA_BOOTSTRAP` set) and the pipeline benchmark
+   (`python -m integration_tests.benchmark.pipelines`), against the previous release's
+   numbers; 0.3.0 shipped a stream slowdown of four times that only a measurement shows.
 3. Check locally: the unit tests, then build and qualify the wheels on this machine:
 
    ```bash
