@@ -189,6 +189,20 @@ take 4.0 seconds; there, copying the inputs and outputs as Arrow files is the co
 - Return tables (pandas, Polars, Arrow) between workers, not Python objects.
 - `mage compile` says where a chain of blocks moves between two workers.
 
+## Isolation
+
+- **Memory.** `memory = "4 GiB"` under `[tool.mageml.worker]`, or **Memory limit** in the
+  worker's settings, caps what its processes use. A block over it is stopped and fails
+  saying how much it used, instead of taking the server's memory; the next block runs in
+  a new process. The limit counts resident memory, measured every quarter second.
+- **Credentials.** A worker does not get MageML's own credentials: its metadata database
+  URL, the keys that sign sessions and downloads, the first owner's password and the
+  sign-in providers' secrets. The secrets blocks use, such as `MAGE_SECRET_*` and the
+  project's own variables, are there.
+- **Processes.** A block's code runs in the worker's process, not MageML's; a crash there
+  fails the block and leaves MageML running. The protocol between them is written down in
+  `docs/development/worker-protocol.md`, with a conformance suite.
+
 ## Caveats
 
 - A block in a worker has only the worker's packages. MageML's connectors (the
@@ -217,6 +231,7 @@ dependencies = [
 label = "Feature store"            # how the editor names it
 description = "Online features; pandas 2"
 combine = false                    # never combined with other workers
+memory = "4 GiB"                   # what its processes may use
 ```
 
 In `metadata.yaml`, a block selects a worker by name, and a pipeline sets the default for

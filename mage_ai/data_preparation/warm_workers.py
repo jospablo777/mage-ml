@@ -53,6 +53,65 @@ class WorkerExited(Exception):
         self.returncode = returncode
 
 
+# MageML's own credentials, which a block has no use for: its metadata database, the keys
+# that sign sessions and downloads, the first owner's password and the sign-in providers'
+# secrets. The secrets blocks use (MAGE_SECRET_*, a project's own variables) stay.
+PLATFORM_SECRETS = (
+    'ACTIVE_DIRECTORY_CLIENT_SECRET', 'DEFAULT_OWNER_PASSWORD', 'GHE_CLIENT_SECRET',
+    'GITLAB_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET', 'JWT_DOWNLOAD_SECRET', 'JWT_SECRET',
+    'LDAP_BIND_PASSWORD', 'MAGE_DATABASE_CONNECTION_URL', 'OIDC_CLIENT_SECRET',
+    'OKTA_CLIENT_SECRET',
+)
+
+
+class MemoryLimitExceeded(Exception):
+    """The worker's processes used more memory than its limit; they were stopped."""
+
+    def __init__(self, used: int, limit: int):
+        super().__init__(f'The worker used {used} bytes, over its limit of {limit}.')
+        self.used = used
+        self.limit = limit
+
+
+def _tree_rss(pid: int) -> int:
+    """The resident memory of a process and its children (the supervisor, the worker and
+    whatever a block started)."""
+    import psutil
+
+    try:
+        root = psutil.Process(pid)
+        processes = [root, *root.children(recursive=True)]
+    except psutil.Error:
+        return 0
+    total = 0
+    for process in processes:
+        try:
+            total += process.memory_info().rss
+        except psutil.Error:
+            continue
+    return total
+
+
+def watch_memory(process: subprocess.Popen, limit: Optional[int], stop: threading.Event,
+                 exceeded: List[int], interval: float = 0.25) -> Optional[threading.Thread]:
+    """Stops the process's group when its tree's resident memory passes limit; the
+    memory it used goes in exceeded."""
+    if not limit:
+        return None
+
+    def run():
+        while not stop.wait(interval):
+            used = _tree_rss(process.pid)
+            if used > limit:
+                exceeded.append(used)
+                stop_process_group(process)
+                return
+
+    thread = threading.Thread(target=run, daemon=True, name='worker-memory')
+    thread.start()
+    return thread
+
+
 def worker_env(repo_path: str, reply_fd: int) -> Dict[str, str]:
     """The environment a worker process runs with (environments.run_block's)."""
     env = dict(
@@ -70,6 +129,8 @@ def worker_env(repo_path: str, reply_fd: int) -> Dict[str, str]:
     # A run on the engine's job worker has its protocol descriptor named here; this worker
     # reads its requests on stdin.
     env.pop('MAGE_WORKER_REQUEST_FD', None)
+    for name in PLATFORM_SECRETS:
+        env.pop(name, None)
     return env
 
 
@@ -122,13 +183,15 @@ class WarmWorker:
     def alive(self) -> bool:
         return self.process.poll() is None
 
-    def call(self, request: Dict) -> Dict:
+    def call(self, request: Dict, memory_limit: Optional[int] = None) -> Dict:
         """Sends the request and returns its result message."""
         request_id = uuid.uuid4().hex
         request = dict(request, id=request_id, end_marker=True)
         ends = (threading.Event(), threading.Event())
         with self._ends_lock:
             self._ends[request_id] = ends
+        done, exceeded = threading.Event(), []
+        watch_memory(self.process, memory_limit, done, exceeded)
         try:
             self.process.stdin.write(json.dumps(request) + '\n')
             self.process.stdin.flush()
@@ -141,7 +204,10 @@ class WarmWorker:
                     result = message
                     break
             if result is None:
-                raise WorkerExited(self.process.wait())
+                code = self.process.wait()
+                if exceeded:
+                    raise MemoryLimitExceeded(exceeded[0], memory_limit)
+                raise WorkerExited(code)
             for event in ends:
                 event.wait(OUTPUT_SECONDS)
             self.requests += 1
@@ -156,6 +222,7 @@ class WarmWorker:
             self.stop()
             raise
         finally:
+            done.set()
             with self._ends_lock:
                 self._ends.pop(request_id, None)
 
@@ -210,7 +277,8 @@ def _reap() -> None:
             warm.stop()
 
 
-def call(python: str, repo_path: str, script: str, request: Dict) -> Dict:
+def call(python: str, repo_path: str, script: str, request: Dict,
+         memory_limit: Optional[int] = None) -> Dict:
     """Runs the request in a warm process of the environment whose interpreter is python."""
     global _reaper
     key = (str(python), str(repo_path))
@@ -230,7 +298,7 @@ def call(python: str, repo_path: str, script: str, request: Dict) -> Dict:
     if warm is None:
         warm = WarmWorker(str(python), str(repo_path), script)
     try:
-        result = warm.call(request)
+        result = warm.call(request, memory_limit=memory_limit)
     except BaseException:
         warm.stop()
         raise

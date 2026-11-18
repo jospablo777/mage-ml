@@ -4866,6 +4866,9 @@
      "locked": {
       "type": "boolean"
      },
+     "memory_limit": {
+      "type": "null"
+     },
      "name": {
       "type": "string"
      },

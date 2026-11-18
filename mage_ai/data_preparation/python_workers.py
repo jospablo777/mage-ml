@@ -128,6 +128,7 @@ def overview(repo_path: str) -> List[Dict]:
             description=worker.description,
             python=worker.python,
             combine=worker.combine,
+            memory_limit=worker.memory_limit,
             definition=worker.relative_definition(),
             locked=lock is not None,
             prepared=worker.prepared,
@@ -318,11 +319,13 @@ def update(
     description: Optional[str] = None,
     python: Optional[str] = None,
     combine: Optional[bool] = None,
+    memory: Optional[str] = None,
 ) -> Dict:
     """
     Changes a worker's packages (dependencies, the full list), its Python, how people name
-    it, or whether it may be combined. A change of packages or Python is locked in a copy
-    first and then prepared; the result has the packages that moved and the prepare job.
+    it, whether it may be combined, or the memory its processes may use ('' for no limit).
+    A change of packages or Python is locked in a copy first and then prepared; the result
+    has the packages that moved and the prepare job.
     """
     import tomlkit
 
@@ -367,7 +370,12 @@ def update(
                 notes.append(f'requires-python was {requires}, which excludes Python {python}; '
                              f'it is >={python} now.')
         needs_lock = True
-    if (label, description, combine) == (None, None, None):
+    if memory:
+        try:
+            environments.parse_bytes(memory)
+        except ValueError as error:
+            raise PipelineEnvironmentError(f'Memory: {error}')
+    if (label, description, combine, memory) == (None, None, None, None):
         settings = {}
     else:
         settings = document.setdefault('tool', tomlkit.table()).setdefault(
@@ -383,6 +391,11 @@ def update(
             settings.pop('combine', None)
         else:
             settings['combine'] = False
+    if memory is not None:
+        if memory.strip():
+            settings['memory'] = memory.strip()
+        else:
+            settings.pop('memory', None)
     text = tomlkit.dumps(document)
     result = dict(name=worker.alias, changes=[], job=None, notes=notes)
     if not needs_lock:

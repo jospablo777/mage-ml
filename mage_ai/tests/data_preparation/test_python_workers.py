@@ -173,6 +173,18 @@ class PythonWorkersTest(DBTestCase):
         self.assertEqual(result['changes'][0]['to'], '1.17.0')
         self.assertEqual((folder / 'pyproject.toml').read_text(), edited)
 
+    def test_a_memory_limit_is_set_checked_and_cleared(self):
+        folder = self.worker()
+        python_workers.update(self.repo_path, 'tools', memory='3 GiB')
+        self.assertEqual(environments.named_workers(self.repo_path)['tools'].memory_limit,
+                         3 * 2 ** 30)
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'Memory: "plenty" is not a size'):
+            python_workers.update(self.repo_path, 'tools', memory='plenty')
+        python_workers.update(self.repo_path, 'tools', memory='')
+        self.assertIsNone(environments.named_workers(self.repo_path)['tools'].memory_limit)
+        self.assertNotIn('memory', (folder / 'pyproject.toml').read_text())
+
     def test_a_name_change_needs_no_lock_and_keeps_the_environment(self):
         folder = self.worker()
         lock = (folder / 'uv.lock').read_text()

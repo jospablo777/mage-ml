@@ -99,6 +99,11 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   await page.getByLabel('Display name').fill('Renamed worker');
   await page.getByRole('button', { exact: true, name: 'Save' }).click();
   await expect(page.getByText('Renamed worker', { exact: true }).first()).toBeVisible();
+  // A memory limit, kept in the worker's pyproject.toml.
+  await page.getByLabel('Memory limit').fill('2 GiB');
+  await page.getByRole('button', { exact: true, name: 'Save' }).click();
+  await expect.poll(async () => (await api.call('GET', `python_workers/${NAME}`))
+    .python_worker.memory_limit).toBe(2 * 2 ** 30);
 
   await page.getByRole('button', { name: 'Delete worker' }).click();
   await page.getByRole('button', { name: 'Yes, delete it' }).click();

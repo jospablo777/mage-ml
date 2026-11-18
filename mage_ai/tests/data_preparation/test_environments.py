@@ -835,6 +835,35 @@ class WarmWorkerTest(DBTestCase):
             thread.join()
         self.assertEqual(len(set(pids)), 2)
 
+    def test_a_block_over_its_workers_memory_limit_is_stopped_and_says_so(self):
+        import dataclasses
+
+        self.worker = dataclasses.replace(self.worker, memory_limit=256 * 2 ** 20)
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError,
+            r'Python worker "plain" used [0-9.]+ MiB of memory, over its limit of 256 MiB, '
+            r'and was stopped. Raise memory under \[tool.mageml.worker\]',
+        ):
+            self.run_code("held = bytearray(600 * 2 ** 20)\ntime.sleep(5)\nreturn 1")
+        # The next block runs, in a new process.
+        self.assertEqual(self.run_code('return 2')[0], 2)
+        with patch.dict('os.environ', {'MAGE_WARM_WORKERS': '0'}), \
+                self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                       'over its limit of 256 MiB'):
+            self.run_code("held = bytearray(600 * 2 ** 20)\ntime.sleep(5)\nreturn 1")
+
+    def test_mageml_s_own_credentials_do_not_reach_a_worker(self):
+        with patch.dict('os.environ', {'JWT_SECRET': 'signing', 'MAGE_DATABASE_CONNECTION_URL':
+                                       'postgresql://u:p@db/mage', 'MAGE_SECRET_API': 'kept'}):
+            from mage_ai.data_preparation import warm_workers
+
+            warm_workers.stop_all()
+            seen, _ = self.run_code(
+                "return {k: os.environ.get(k) for k in ('JWT_SECRET', "
+                "'MAGE_DATABASE_CONNECTION_URL', 'MAGE_SECRET_API')}")
+        self.assertEqual(seen, dict(JWT_SECRET=None, MAGE_DATABASE_CONNECTION_URL=None,
+                                    MAGE_SECRET_API='kept'))
+
     def test_a_worn_process_is_replaced_and_a_forked_child_starts_its_own(self):
         from mage_ai.data_preparation import warm_workers
 
@@ -885,6 +914,16 @@ class WorkersCommandTest(unittest.TestCase):
             environments.PipelineEnvironmentError, 'both named feast-store',
         ):
             environments.named_workers(str(project))
+
+    def test_sizes_are_read_in_people_s_units(self):
+        cases = {'4 GiB': 4 * 2 ** 30, '512MB': 512 * 10 ** 6, '2g': 2 * 10 ** 9,
+                 '1.5 GiB': int(1.5 * 2 ** 30), 2 ** 30: 2 ** 30, '': None, None: None}
+        for value, size in cases.items():
+            self.assertEqual(environments.parse_bytes(value), size, value)
+        for value, message in (('lots', 'is not a size'), ('10 MB', 'less than 64 MiB')):
+            with self.assertRaisesRegex(ValueError, message):
+                environments.parse_bytes(value)
+        self.assertEqual(environments.format_bytes(int(1.5 * 2 ** 30)), '1.5 GiB')
 
     def test_a_worker_runs_on_the_python_its_requires_python_allows(self):
         own = f'{sys.version_info.major}.{sys.version_info.minor}'

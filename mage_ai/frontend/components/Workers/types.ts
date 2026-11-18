@@ -43,6 +43,8 @@ export type WorkerType = {
   job?: PythonWorkerJobType;
   label?: string;
   locked?: boolean;
+  // Bytes its processes may use; none without a limit.
+  memory_limit?: number;
   name: string;
   notes?: string[];
   // In the list, what the prepared environment holds; in the detail, the lock's packages.

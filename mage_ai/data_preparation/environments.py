@@ -125,6 +125,8 @@ class NamedWorker:
     label: Optional[str] = None
     description: Optional[str] = None
     combine: bool = True
+    # The memory its processes may use, in bytes ([tool.mageml.worker] memory = "4 GiB").
+    memory_limit: Optional[int] = None
 
     @property
     def display_name(self) -> str:
@@ -196,13 +198,46 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
         settings = (((parsed.get('tool') or {}).get('mageml') or {}).get('worker') or {})
         label = settings.get('label')
         description = settings.get('description')
+        try:
+            memory_limit = parse_bytes(settings.get('memory'))
+        except ValueError as error:
+            raise PipelineEnvironmentError(f'{relative}/pyproject.toml: memory: {error}')
         workers[alias] = NamedWorker(
             alias=alias, definition=str(folder), python=python, digest=digest.hexdigest(),
             label=str(label).strip() or None if label else None,
             description=str(description).strip() or None if description else None,
             combine=settings.get('combine', True) is not False,
+            memory_limit=memory_limit,
         )
     return workers
+
+
+_UNITS = dict(b=1, k=10 ** 3, m=10 ** 6, g=10 ** 9, t=10 ** 12,
+              ki=2 ** 10, mi=2 ** 20, gi=2 ** 30, ti=2 ** 40)
+
+
+def parse_bytes(value) -> Optional[int]:
+    """'4 GiB', '512MB', '2g' or a number of bytes; None for nothing."""
+    if value is None or value == '':
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number, unit = float(value), 'b'
+    else:
+        match = re.fullmatch(r'\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]i?)?b?\s*', str(value).lower())
+        if not match:
+            raise ValueError(f'"{value}" is not a size, such as 4 GiB or 512 MB.')
+        number, unit = float(match.group(1)), match.group(2) or 'b'
+    size = int(number * _UNITS[unit])
+    if size < 64 * 2 ** 20:
+        raise ValueError(f'"{value}" is less than 64 MiB, too little for Python to start.')
+    return size
+
+
+def format_bytes(size: int) -> str:
+    for unit, factor in (('GiB', 2 ** 30), ('MiB', 2 ** 20)):
+        if size >= factor:
+            return f'{size / factor:.1f}'.rstrip('0').rstrip('.') + f' {unit}'
+    return f'{size} bytes'
 
 
 def _worker_python(requires: Optional[str]) -> str:
@@ -1175,7 +1210,8 @@ def _missing_module_hint(environment, message: str, details: str) -> Optional[st
             f'{where} and lock it again.')
 
 
-def _run_in_new_process(python, repo_path: str, request: Dict) -> Dict:
+def _run_in_new_process(python, repo_path: str, request: Dict,
+                        memory_limit: Optional[int] = None) -> Dict:
     """Runs one request in a worker process of its own (MAGE_WARM_WORKERS=0)."""
     from mage_ai.data_preparation import warm_workers
 
@@ -1198,6 +1234,8 @@ def _run_in_new_process(python, repo_path: str, request: Dict) -> Dict:
         _forward(process.stdout, lambda line: print(line, end='', flush=True)),
         _forward(process.stderr, lambda line: print(line, end='', file=sys.stderr, flush=True)),
     ]
+    done, exceeded = threading.Event(), []
+    warm_workers.watch_memory(process, memory_limit, done, exceeded)
     try:
         process.stdin.write(json.dumps(request) + '\n')
         process.stdin.write(json.dumps(dict(op='shutdown', id='bye')) + '\n')
@@ -1209,10 +1247,13 @@ def _run_in_new_process(python, repo_path: str, request: Dict) -> Dict:
         stop_process_group(process)
         raise
     finally:
+        done.set()
         for pump in pumps:
             pump.join(timeout=5)
     result = next((m for m in messages if m.get('type') == 'result'), None)
     if result is None:
+        if exceeded:
+            raise warm_workers.MemoryLimitExceeded(exceeded[0], memory_limit)
         raise warm_workers.WorkerExited(process.returncode)
     return result
 
@@ -1286,11 +1327,21 @@ def run_block(
         repo_path = getattr(block, 'repo_path', None) or os.getcwd()
         from mage_ai.data_preparation import warm_workers
 
+        limit = getattr(environment, 'memory_limit', None)
         try:
             if warm_workers.enabled():
-                result = warm_workers.call(str(python), str(repo_path), str(WORKER), request)
+                result = warm_workers.call(str(python), str(repo_path), str(WORKER), request,
+                                           memory_limit=limit)
             else:
-                result = _run_in_new_process(python, repo_path, request)
+                result = _run_in_new_process(python, repo_path, request, memory_limit=limit)
+        except warm_workers.MemoryLimitExceeded as exceeded:
+            raise PipelineEnvironmentError(
+                f'Python worker "{environment.alias}" used {format_bytes(exceeded.used)} of '
+                f'memory, over its limit of {format_bytes(exceeded.limit)}, and was stopped. '
+                f'Raise memory under [tool.mageml.worker] in '
+                f'{environment.relative_definition()}/pyproject.toml, or give the block less '
+                'data at once.'
+            )
         except warm_workers.WorkerExited as exited:
             raise PipelineEnvironmentError(_exit_message(environment, exited.returncode))
         if not result.get('ok'):

@@ -130,6 +130,7 @@ class PythonWorkerResource(GenericResource):
                 description=payload.get('description'),
                 python=payload.get('python'),
                 combine=payload.get('combine'),
+                memory=payload.get('memory'),
             )
             self.model = dict(python_workers.detail(repo_path, self.model['name']), **result)
         except environments.PipelineEnvironmentError as error:

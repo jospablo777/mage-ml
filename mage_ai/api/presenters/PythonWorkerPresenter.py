@@ -12,6 +12,7 @@ class PythonWorkerPresenter(BasePresenter):
         'job',
         'label',
         'locked',
+        'memory_limit',
         'name',
         'notes',
         'packages',

@@ -325,6 +325,14 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
   const [description, setDescription] = useState(worker.description || '');
   const [python, setPython] = useState(worker.python || '');
   const [combine, setCombine] = useState(worker.combine !== false);
+  const memoryText = (bytes?: number) => {
+    if (!bytes) {
+      return '';
+    }
+    const gib = bytes / 2 ** 30;
+    return gib >= 1 ? `${Number(gib.toFixed(1))} GiB` : `${Math.round(bytes / 2 ** 20)} MiB`;
+  };
+  const [memory, setMemory] = useState(memoryText(worker.memory_limit));
   const [error, setError] = useState<string>(null);
   const [confirming, setConfirming] = useState(false);
   const [save, { isLoading }] = useMutation(
@@ -350,7 +358,8 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
   );
   const used = worker.used_by?.length > 0;
   const changed = label !== (worker.label || '') || description !== (worker.description || '')
-    || python !== (worker.python || '') || combine !== (worker.combine !== false);
+    || python !== (worker.python || '') || combine !== (worker.combine !== false)
+    || memory !== memoryText(worker.memory_limit);
 
   return (
     <>
@@ -386,6 +395,21 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
           />
         </Spacing>
         <Spacing mt={2}>
+          <FieldLabel>Memory limit</FieldLabel>
+          <TextInput
+            aria-label="Memory limit"
+            onChange={e => setMemory(e.target.value)}
+            placeholder="No limit, such as 4 GiB"
+            value={memory}
+          />
+          <Spacing mt={1}>
+            <Text muted xsmall>
+              A block whose processes use more is stopped, and says so, instead of taking the
+              server&apos;s memory.
+            </Text>
+          </Spacing>
+        </Spacing>
+        <Spacing mt={2}>
           <Checkbox
             checked={combine}
             label="May be combined with other workers when their packages fit together"
@@ -405,6 +429,9 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
             loading={isLoading}
             onClick={() => {
               const payload: any = { combine, description, label };
+              if (memory !== memoryText(worker.memory_limit)) {
+                payload.memory = memory;
+              }
               if (python !== worker.python) {
                 payload.python = python;
               }
@@ -655,7 +682,8 @@ function WorkerDetail({ name }: { name: string }) {
           }} worker={worker} />
         )}
         {tab === 'settings' && (
-          <SettingsTab key={JSON.stringify([worker.label, worker.description, worker.python])}
+          <SettingsTab key={JSON.stringify([worker.label, worker.description, worker.python,
+            worker.memory_limit])}
             onSaved={() => mutate()} worker={worker} />
         )}
       </Spacing>
