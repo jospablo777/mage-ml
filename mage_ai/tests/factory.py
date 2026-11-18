@@ -226,10 +226,12 @@ def create_user(
     password = password or faker.password()
     password_salt = generate_salt()
     password_hash = create_bcrypt_hash(password, password_salt)
+    # Unique: users stay in a test worker's database across tests, and two of the same
+    # name failed the user table's unique username (I-461).
     payload = merge_dict(
         dict(
-            email=faker.email(),
-            username=faker.name(),
+            email=faker.unique.email(),
+            username=faker.unique.name(),
         ),
         kwargs,
     )
