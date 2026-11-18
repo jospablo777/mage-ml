@@ -226,7 +226,7 @@ def summary_for(pipeline) -> Dict:
     )
     if plan is not None and fused:
         summary['segments'] = plan.segments
-        summary['findings'] = plan.findings
+        summary['findings'] = _with_worker_names(pipeline, plan.findings)
         sql_chains, sql_left_out = _sql_chains(pipeline, plan)
         if sql_chains or sql_left_out:
             summary.update(sql_chains=sql_chains, sql_left_out=sql_left_out)
@@ -235,6 +235,36 @@ def summary_for(pipeline) -> Dict:
 
         summary['stream'] = stream_plan(pipeline)
     return summary
+
+
+def _with_worker_names(pipeline, findings: List[Dict]) -> List[Dict]:
+    """The planner's findings, a switch between Python workers said with the names people
+    gave them ("Feast worker") rather than their aliases."""
+    from mage_ai.data_preparation import environments
+
+    if not any(f.get('code') == 'worker_switch' for f in findings):
+        return findings
+    try:
+        workers = environments.named_workers(pipeline.repo_path)
+    except environments.PipelineEnvironmentError:
+        return findings
+
+    def name(uuid):
+        alias = environments.worker_selection(pipeline.get_block(uuid))
+        if alias in (None, 'mage'):
+            return "MageML's Python"
+        worker = workers.get(alias)
+        return worker.display_name if worker else alias
+
+    named = []
+    for finding in findings:
+        if finding.get('code') == 'worker_switch':
+            finding = dict(finding, reason=(
+                f'{finding["block"]} runs in {name(finding["block"])} and {finding["next"]} '
+                f'in {name(finding["next"])}: the data moves between two processes.'
+            ))
+        named.append(finding)
+    return named
 
 
 def _sql_chains(pipeline, plan):

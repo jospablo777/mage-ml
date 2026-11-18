@@ -397,3 +397,32 @@ class ImportCheckTest(DBTestCase):
             'python_workers/feast/pyproject.toml and run uv lock or choose that worker for '
             'the block.',
         ])
+
+
+class WorkerSwitchNamesTest(DBTestCase):
+    def test_a_switch_between_workers_says_their_names(self):
+        from mage_ai.data_preparation import environments
+
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'feast')
+        folder.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        folder.joinpath('pyproject.toml').write_text(
+            '[project]\nname = "feast"\nversion = "0"\n\n'
+            '[tool.mageml.worker]\nlabel = "Feast worker"\n'
+        )
+        pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        load = Block.create(f'{self._testMethodName}_load', 'data_loader', self.repo_path,
+                            language='python', configuration=dict(python_worker='feast'))
+        pipeline.add_block(load)
+        score = Block.create(f'{self._testMethodName}_score', 'transformer', self.repo_path,
+                             language='python')
+        pipeline.add_block(score, upstream_block_uuids=[load.uuid])
+        pipeline = Pipeline.get(pipeline.uuid, repo_path=self.repo_path)
+
+        [finding] = [f for f in compilation.summary_for(pipeline)['findings']
+                     if f['code'] == 'worker_switch']
+        self.assertEqual(finding['reason'], (
+            f"{load.uuid} runs in Feast worker and {score.uuid} in MageML's Python: the data "
+            'moves between two processes.'
+        ))
