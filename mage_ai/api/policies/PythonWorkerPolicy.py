@@ -37,15 +37,17 @@ PythonWorkerPolicy.allow_read(
 PythonWorkerPolicy.allow_write(
     # template (with label and description) adds a worker from a template; combine with
     # pipeline_uuid combines workers for a pipeline.
-    ['combine', 'dependencies', 'description', 'label', 'name', 'pipeline_uuid', 'python',
-     'template'],
+    # accept_older: go on when the lock has a package below its newest release.
+    ['accept_older', 'combine', 'dependencies', 'description', 'label', 'name',
+     'pipeline_uuid', 'python', 'template'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.CREATE],
     condition=lambda policy: policy.has_at_least_editor_role(),
 )
 
 PythonWorkerPolicy.allow_write(
-    ['combine', 'dependencies', 'description', 'label', 'memory', 'pyproject', 'python'],
+    ['accept_older', 'combine', 'dependencies', 'description', 'label', 'memory', 'pyproject',
+     'python'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

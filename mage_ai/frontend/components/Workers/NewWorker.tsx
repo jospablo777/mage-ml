@@ -4,6 +4,7 @@ import { useMutation } from 'react-query';
 
 import Button from '@oracle/elements/Button';
 import ErrorCallout from './ErrorCallout';
+import OlderReleases from './OlderReleases';
 import FlexContainer from '@oracle/components/FlexContainer';
 import PackageEditor from './PackageEditor';
 import Select from '@oracle/elements/Inputs/Select';
@@ -16,7 +17,7 @@ import { BORDER_RADIUS } from '@oracle/styles/units/borders';
 import { CardStyle, FieldLabel, MonoStyle } from './shared';
 import { FONT_FAMILY_MEDIUM } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
-import { WorkerTemplateType, WorkerType } from './types';
+import { HeldPackageType, WorkerTemplateType, WorkerType } from './types';
 import { onSuccess } from '@api/utils/response';
 
 export const PYTHON_VERSIONS = ['3.11', '3.12', '3.13', '3.14'];
@@ -104,6 +105,7 @@ function NewWorker({ onCancel, onCreated, workers }: {
   const [packages, setPackages] = useState<string[]>([]);
   const [python, setPython] = useState('');
   const [error, setError] = useState<string>(null);
+  const [confirm, setConfirm] = useState<HeldPackageType[]>(null);
 
   const choose = (chosen: WorkerTemplateType) => {
     setTemplate(chosen);
@@ -125,13 +127,34 @@ function NewWorker({ onCancel, onCreated, workers }: {
     api.python_workers.useCreate(),
     {
       onSuccess: (response: any) => onSuccess(response, {
-        callback: ({ python_worker: created }) => onCreated(created?.name),
+        callback: ({ python_worker: created }) => {
+          if (created?.confirm?.length) {
+            // Nothing was added: the page asks whether to go on with the older releases.
+            setConfirm(created.confirm);
+            return;
+          }
+          onCreated(created?.name);
+        },
         onErrorCallback: response => setError(
           response?.error?.message || 'The worker was not added.',
         ),
       }),
     },
   );
+
+  const submit = (acceptOlder: boolean) => {
+    setError(null);
+    setConfirm(null);
+    // @ts-ignore
+    create({ python_worker: {
+      accept_older: acceptOlder || undefined,
+      dependencies: packages,
+      label: label || undefined,
+      name: folder,
+      python: python || undefined,
+      template: template?.id || 'empty',
+    } });
+  };
 
   return (
     <CardStyle>
@@ -197,7 +220,10 @@ function NewWorker({ onCancel, onCreated, workers }: {
             <FieldLabel>Python</FieldLabel>
             <Select
               aria-label="Python"
-              onChange={e => setPython(e.target.value)}
+              onChange={(e) => {
+                setConfirm(null);
+                setPython(e.target.value);
+              }}
               value={python}
             >
               <option value="">Same as MageML</option>
@@ -218,7 +244,13 @@ function NewWorker({ onCancel, onCreated, workers }: {
           Tables reach the worker as Arrow: keep pyarrow, with pandas or Polars.
         </Text>
         <Spacing mt={1}>
-          <PackageEditor onChange={setPackages} value={packages} />
+          <PackageEditor
+            onChange={(next) => {
+              setConfirm(null);
+              setPackages(next);
+            }}
+            value={packages}
+          />
         </Spacing>
       </Spacing>
 
@@ -227,23 +259,23 @@ function NewWorker({ onCancel, onCreated, workers }: {
           <ErrorCallout message={error} title="The worker was not added" />
         </Spacing>
       )}
+      {confirm && (
+        <Spacing mt={2}>
+          <OlderReleases
+            accepting={isLoading}
+            onAccept={() => submit(true)}
+            onCancel={() => setConfirm(null)}
+            packages={confirm}
+          />
+        </Spacing>
+      )}
 
       <Spacing mt={2}>
         <FlexContainer alignItems="center">
           <Button
             disabled={!!problem || isLoading}
             loading={isLoading}
-            onClick={() => {
-              setError(null);
-              // @ts-ignore
-              create({ python_worker: {
-                dependencies: packages,
-                label: label || undefined,
-                name: folder,
-                python: python || undefined,
-                template: template?.id || 'empty',
-              } });
-            }}
+            onClick={() => submit(false)}
             primary
           >
             Create and prepare

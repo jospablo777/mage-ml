@@ -37,6 +37,8 @@ export type PackageChangeType = {
 export type WorkerType = {
   changes?: PackageChangeType[];
   combine?: boolean;
+  // A save that would lock these below their newest release: nothing changed yet.
+  confirm?: HeldPackageType[];
   definition?: string;
   dependencies?: string[];
   description?: string;
@@ -108,9 +110,12 @@ export type HeldPackageType = {
   // Releases newer than the locked one.
   behind?: number;
   latest: string;
+  latest_uploaded?: string;
   locked: string;
   locked_uploaded?: string;
   package: string;
+  // What to ask before a save that would lock it (python_workers._older_releases).
+  question?: string;
   reason: string;
   state: 'held' | 'behind';
   uv_reason?: string;

@@ -93,8 +93,16 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   // locks feast 0.20.0 from 2022): here a constraint holds six at 1.16.0. The page says so,
   // with why, instead of calling it the latest.
   const { python_worker: current } = await api.call('GET', `python_workers/${NAME}`);
+  const held = await api.call('PUT', `python_workers/${NAME}`, {
+    python_worker: {
+      pyproject: `${current.pyproject}\n[tool.uv]\nconstraint-dependencies = ["six<1.17"]\n`,
+    },
+  });
+  // Asked first: nothing changed until the older release is accepted.
+  expect(held.python_worker.confirm.map(p => p.package)).toEqual(['six']);
   await api.call('PUT', `python_workers/${NAME}`, {
     python_worker: {
+      accept_older: true,
       pyproject: `${current.pyproject}\n[tool.uv]\nconstraint-dependencies = ["six<1.17"]\n`,
     },
   });
@@ -106,8 +114,23 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   await page.getByRole('button', { name: 'Keep 1.16.0' }).click();
   await expect(page.getByLabel('Version of six')).toHaveValue('1.16.0');
   await page.getByRole('button', { name: 'Discard changes' }).click();
+
+  // From an older pin back to Newest that fits: the page asks before going on with 1.16.0.
+  await page.getByLabel('Version of six').selectOption('1.15.0');
+  await page.getByRole('button', { name: 'Save and prepare' }).click();
+  await expect(page.getByText(/Saved: 1 package changed/)).toBeVisible({ timeout: 120_000 });
+  await page.getByLabel('Version of six').selectOption('');
+  await page.getByRole('button', { name: 'Save and prepare' }).click();
+  const question = page.getByRole('alertdialog', { name: 'Older releases' });
+  await expect(question).toContainText('uv would install six 1.16.0, not the newest',
+    { timeout: 120_000 });
+  await expect(question).toContainText(/uv would lock six 1\.16\.0 from .+ years old/);
+  await question.getByRole('button', { name: 'Go on with six 1.16.0' }).click();
+  await expect(question).toBeHidden({ timeout: 120_000 });
+  await expect.poll(async () => (await api.call('GET', `python_workers/${NAME}`))
+    .python_worker.dependencies).toEqual(['pyarrow', 'six']);
   await api.call('PUT', `python_workers/${NAME}`, {
-    python_worker: { pyproject: current.pyproject },
+    python_worker: { accept_older: true, pyproject: current.pyproject },
   });
   await page.reload();
 

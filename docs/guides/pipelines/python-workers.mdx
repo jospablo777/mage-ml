@@ -103,9 +103,23 @@ written before today's versions existed, so it can lock and still break. For exa
 `pandas==3.1.1` and `feast`, the newest Feast (0.68.0) needs `pandas<3`, so uv locks Feast
 0.20.0 from 2022, whose `pandas>=1.0.0` allows pandas 3.
 
-The page checks each listed package whose lock is below its newest release by locking a
-copy with the newest one required. When that does not lock, the package shows **Held
-back** with what the newest release needs and the line that rules it out:
+Before a new worker or a change is written, the page asks when uv would lock such an old
+release, and nothing changes until you say:
+
+```text
+uv would install feast 0.20.0, not the newest 0.68.0
+uv would lock feast 0.20.0 from April 2022, 4 years old; the newest is 0.68.0 (November
+2026). feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1.
+[Change the versions]  [Go on with feast 0.20.0]
+```
+
+Versions you chose that cannot go together are refused the same way, in one sentence:
+`feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1`, or `There is no
+release six==99.0 on the package index`, with uv's full output one click away.
+
+After that, the page checks each listed package whose lock is below its newest release by
+locking a copy with the newest one required. When that does not lock, the package shows
+**Held back** with what the newest release needs and the line that rules it out:
 
 ```text
 Held back at 0.20.0 (April 2022), 68 releases behind 0.68.0

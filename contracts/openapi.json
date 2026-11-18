@@ -4848,6 +4848,9 @@
      "combine": {
       "type": "boolean"
      },
+     "confirm": {
+      "type": "null"
+     },
      "definition": {
       "type": "string"
      },

@@ -15,6 +15,7 @@ one R session.
 
 | | |
 | --- | --- |
+| [Python workers](../guides/pipelines/python-workers.md) | A Python environment of its own for any block: Feast with pandas 2, MLflow 2 next to MLflow 3, any SDK with the versions it needs, in one pipeline. |
 | [Rust blocks](../guides/blocks/rust-blocks.md) | Loaders, transformers and exporters in Rust with Polars, compiled per chain. |
 | [R blocks](../guides/blocks/r-blocks.md) | dplyr and tidyverse blocks with a pinned environment (rv). |
 | [Compiled pipelines](../design/data-pipeline-management.md#pipeline-compilation) | Production runs fuse and compile chains of blocks; MageML checks and builds them ahead of the run. |

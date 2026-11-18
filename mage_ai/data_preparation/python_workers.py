@@ -20,7 +20,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from mage_ai.data_preparation import environments
 from mage_ai.data_preparation.environments import PipelineEnvironmentError
@@ -189,12 +189,15 @@ def create(
     description: Optional[str] = None,
     dependencies: Optional[List[str]] = None,
     python: Optional[str] = None,
+    accept_older: bool = False,
 ) -> Dict:
     """
     Adds a worker: its pyproject.toml from a template (its packages replaced by
     dependencies when given), locked by uv in a scratch folder, and only then
     python_workers/<name>/ with both files, prepared in the background. A package that does
-    not resolve leaves no worker behind.
+    not resolve leaves no worker behind. Unless accept_older, a lock with a package below
+    its newest release that does not fit (_older_releases) adds nothing and comes back in
+    confirm, for people to say whether to go on.
     """
     import tomlkit
 
@@ -229,10 +232,17 @@ def create(
         if result.returncode != 0:
             reason = ('uv could not reach the package index.'
                       if environments._offline(result.stderr)
-                      else environments._resolver_reason(result.stderr))
+                      else _conflict(result.stderr, (folder / 'pyproject.toml').read_text()))
             raise PipelineEnvironmentError(
                 f'uv could not lock these packages, so no worker was added: {reason}'
                 + _uv_output(result.stderr))
+        if not accept_older:
+            older = _older_releases(
+                (folder / 'pyproject.toml').read_text(), (folder / 'uv.lock').read_text(),
+                python or f'{sys.version_info.major}.{sys.version_info.minor}',
+                lambda text: _lock_in(folder, text))
+            if older:
+                return dict(name=folder.name, job=None, confirm=older)
         target = Path(repo_path) / environments.WORKERS_DIR / folder.name
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -256,9 +266,15 @@ def _locked_copy(worker, pyproject: Optional[str] = None,
     ["--upgrade-package", "name>=1.2"...]); returns the new uv.lock. Raises with uv's
     reason when it does not lock; the worker is not touched.
     """
+    return _lock_in(Path(worker.definition), pyproject, upgrade=upgrade, python=python)
+
+
+def _lock_in(definition: Path, pyproject: Optional[str] = None,
+             upgrade: Optional[List[str]] = None, python: Optional[str] = None) -> str:
+    """_locked_copy of a worker's folder, or of a new worker's before it exists."""
     with tempfile.TemporaryDirectory(prefix='mage_worker_') as directory:
-        copy = Path(directory) / Path(worker.definition).name
-        shutil.copytree(worker.definition, copy, ignore=shutil.ignore_patterns('.venv'))
+        copy = Path(directory) / definition.name
+        shutil.copytree(definition, copy, ignore=shutil.ignore_patterns('.venv'))
         if pyproject is not None:
             (copy / 'pyproject.toml').write_text(pyproject)
         if python is not None:
@@ -274,9 +290,13 @@ def _locked_copy(worker, pyproject: Optional[str] = None,
                 raise PipelineEnvironmentError(
                     'uv could not reach the package index to lock the change; nothing '
                     'changed.')
-            raise PipelineEnvironmentError(
-                f'uv could not lock the change, so nothing changed: '
-                f'{environments._resolver_reason(result.stderr)}' + _uv_output(result.stderr))
+            error = PipelineEnvironmentError(
+                'uv could not lock the change, so nothing changed: '
+                + _conflict(result.stderr, (copy / 'pyproject.toml').read_text())
+                + _uv_output(result.stderr))
+            # uv's own explanation, for _held.
+            error.uv_reason = environments._resolver_reason(result.stderr)
+            raise error
         return (copy / 'uv.lock').read_text()
 
 
@@ -321,12 +341,15 @@ def update(
     python: Optional[str] = None,
     combine: Optional[bool] = None,
     memory: Optional[str] = None,
+    accept_older: bool = False,
 ) -> Dict:
     """
     Changes a worker's packages (dependencies, the full list), its Python, how people name
     it, whether it may be combined, or the memory its processes may use ('' for no limit).
     A change of packages or Python is locked in a copy first and then prepared; the result
-    has the packages that moved and the prepare job.
+    has the packages that moved and the prepare job. Unless accept_older, a change that
+    would lock a package below its newest release because the newest does not fit changes
+    nothing and comes back in confirm (_older_releases).
     """
     import tomlkit
 
@@ -405,6 +428,12 @@ def update(
         return result
     old_lock = _lock_text(worker)
     new_lock = _locked_copy(worker, text, python=python, upgrade=upgrade)
+    if not accept_older:
+        older = _older_releases(text, new_lock, python or worker.python,
+                                lambda trial: _locked_copy(worker, trial, python=python),
+                                old_lock=old_lock)
+        if older:
+            return dict(result, confirm=older)
     _write(folder / 'pyproject.toml', text)
     _write(folder / 'uv.lock', new_lock)
     if python is not None:
@@ -416,11 +445,12 @@ def update(
     return result
 
 
-def save_pyproject(repo_path: str, alias: str, text: str) -> Dict:
+def save_pyproject(repo_path: str, alias: str, text: str, accept_older: bool = False) -> Dict:
     """
     Replaces the worker's pyproject.toml with text, as people edit it on the Workers page:
     refused when it is not TOML or names the project like one of its packages, locked in a
-    copy first, then written with its new lock and prepared.
+    copy first, then written with its new lock and prepared. Unless accept_older, a lock
+    with a package newly below its newest release comes back in confirm, as in update.
     """
     import tomllib
 
@@ -451,6 +481,11 @@ def save_pyproject(repo_path: str, alias: str, text: str) -> Dict:
                 f'"mageml-worker-{worker.alias}".')
     old_lock = _lock_text(worker)
     new_lock = _locked_copy(worker, text)
+    if not accept_older:
+        older = _older_releases(text, new_lock, worker.python,
+                                lambda trial: _locked_copy(worker, trial), old_lock=old_lock)
+        if older:
+            return dict(name=worker.alias, changes=[], job=None, confirm=older)
     folder = Path(worker.definition)
     _write(folder / 'pyproject.toml', text)
     _write(folder / 'uv.lock', new_lock)
@@ -637,16 +672,17 @@ def audit_stale_in_background(repo_path: str) -> None:
 
         def run():
             for alias, worker in environments.named_workers(repo_path).items():
-                if _lock_text(worker) is None:
-                    continue
-                cached = cached_audit(worker)
-                if cached.get('state') == 'unchecked' or cached.get('stale'):
-                    audit(repo_path, alias)
-                # Read from its cache when fresh; a new lock is checked once.
+                # A worker removed or changed meanwhile is checked on the next visit.
                 try:
+                    if _lock_text(worker) is None:
+                        continue
+                    cached = cached_audit(worker)
+                    if cached.get('state') == 'unchecked' or cached.get('stale'):
+                        audit(repo_path, alias)
+                    # Read from its cache when fresh; a new lock is checked once.
                     held_back(repo_path, alias)
-                except PipelineEnvironmentError:
-                    pass
+                except (PipelineEnvironmentError, OSError, ValueError):
+                    continue
 
         thread = threading.Thread(target=run, daemon=True, name='worker-audits')
         _audits_running[key] = thread
@@ -675,13 +711,6 @@ def held_back(repo_path: str, alias: str, refresh: bool = False) -> Dict:
     whose newest release locks is only behind (an update brings it). Kept per lock and
     pyproject.toml for AUDIT_SECONDS.
     """
-    import tomlkit
-    from packaging.requirements import InvalidRequirement, Requirement
-    from packaging.utils import canonicalize_name
-    from packaging.version import InvalidVersion, Version
-
-    from mage_ai.data_preparation import package_index
-
     worker = _worker(repo_path, alias)
     lock = _lock_text(worker)
     if lock is None:
@@ -696,9 +725,38 @@ def held_back(repo_path: str, alias: str, refresh: bool = False) -> Dict:
                 return dict(report, name=worker.alias)
         except (OSError, ValueError, KeyError):
             pass
+    packages, unreachable = _held(pyproject, lock, worker.python,
+                                  lambda trial: _locked_copy(worker, trial))
+    report = dict(
+        state='held' if any(p['state'] == 'held' for p in packages) else 'current',
+        checked_at=time.time(),
+        packages=packages,
+    )
+    if unreachable:
+        report['reason'] = ('The package index could not be reached for '
+                            + ', '.join(unreachable) + '.')
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write(path, json.dumps(report))
+    return dict(report, name=worker.alias)
+
+
+def _held(pyproject: str, lock: str, python: str, lock_trial) -> Tuple[List[Dict], List[str]]:
+    """
+    held_back's check of a pyproject.toml and its lock: lock_trial(text) locks a copy with
+    text as its pyproject.toml, raising when it does not lock. Returns the packages found
+    and the ones the package index did not answer for.
+    """
+    import tomlkit
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+
+    from mage_ai.data_preparation import package_index
+
     locked = {
         canonicalize_name(p['name']): p['version']
-        for p in json.loads(_lock_packages(lock, worker))
+        for p in json.loads(_lock_packages(lock, python))
     }
     document = tomlkit.parse(pyproject)
     listed = list(document.get('project', {}).get('dependencies') or [])
@@ -734,34 +792,108 @@ def held_back(repo_path: str, alias: str, refresh: bool = False) -> Dict:
         entry = dict(
             package=name, locked=version, latest=latest,
             locked_uploaded=(found.get('uploaded') or {}).get(version),
+            latest_uploaded=(found.get('uploaded') or {}).get(latest),
             behind=(found['versions'].index(version) if version in found['versions'] else None),
         )
         try:
-            _locked_copy(worker, tomlkit.dumps(trial))
+            lock_trial(tomlkit.dumps(trial))
         except PipelineEnvironmentError as error:
-            text = str(error)
-            if 'could not reach the package index' in text:
+            uv_reason = getattr(error, 'uv_reason', None)
+            if uv_reason is None:
+                # The package index did not answer.
                 unreachable.append(name)
                 continue
-            uv_reason = text.split('\n\n')[0].split('nothing changed: ', 1)[-1]
             entry.update(state='held', uv_reason=uv_reason,
                          reason=_held_reason(name, latest, uv_reason, listed))
         else:
             entry.update(state='behind', reason=(
                 f'{latest} fits the other packages: check for updates to move to it.'))
         packages.append(entry)
-    report = dict(
-        state='held' if any(p['state'] == 'held' for p in packages) else 'current',
-        checked_at=time.time(),
-        packages=packages,
-    )
-    if unreachable:
-        report['reason'] = ('The package index could not be reached for '
-                            + ', '.join(unreachable) + '.')
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _write(path, json.dumps(report))
-    return dict(report, name=worker.alias)
+    return packages, unreachable
+
+
+def _older_releases(pyproject: str, lock: str, python: str, lock_trial,
+                    old_lock: Optional[str] = None) -> List[Dict]:
+    """
+    The packages a change would lock below their newest release because the newest does
+    not fit (_held, state held), with the question to ask: "uv would lock feast 0.20.0 from
+    April 2022, 4 years old; the newest is 0.68.0...". A package held at the same version
+    before the change was already accepted and is not asked about again.
+    """
+    from packaging.utils import canonicalize_name
+
+    packages, _ = _held(pyproject, lock, python, lock_trial)
+    before = {}
+    if old_lock:
+        before = {canonicalize_name(p['name']): p['version']
+                  for p in json.loads(_lock_packages(old_lock, python))}
+    older = []
+    for package in packages:
+        if package['state'] != 'held' or before.get(package['package']) == package['locked']:
+            continue
+        age = _age(package.get('locked_uploaded'))
+        newest = _month(package.get('latest_uploaded'))
+        package['question'] = (
+            f"uv would lock {package['package']} {package['locked']}"
+            + (f' from {_month(package["locked_uploaded"])}' if package.get('locked_uploaded')
+               else '')
+            + (f', {age} old' if age else '')
+            + f"; the newest is {package['latest']}"
+            + (f' ({newest})' if newest else '')
+            + f". {package['reason']}"
+        )
+        older.append(package)
+    return older
+
+
+def _month(iso: Optional[str]) -> Optional[str]:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(iso.replace('Z', '+00:00')).strftime('%B %Y')
+    except (AttributeError, ValueError):
+        return None
+
+
+def _age(iso: Optional[str]) -> Optional[str]:
+    """How long ago a release came out, in years or months: "4 years"."""
+    from datetime import datetime, timezone
+
+    try:
+        then = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+    except (AttributeError, ValueError):
+        return None
+    months = int((datetime.now(timezone.utc) - then).days / 30.44)
+    if months >= 24:
+        return f'{months // 12} years'
+    if months >= 12:
+        return '1 year'
+    return f'{months} months' if months >= 2 else None
+
+
+def _conflict(stderr: str, pyproject: str) -> str:
+    """
+    Why uv could not lock, in one sentence where uv says which package needs what
+    ("feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1"), or that a
+    version does not exist; else uv's own explanation (environments._resolver_reason).
+    """
+    import re
+    import tomllib
+
+    reason = environments._resolver_reason(stderr)
+    text = ' '.join(reason.split())
+    try:
+        listed = [str(d) for d in (tomllib.loads(pyproject).get('project') or {}).get(
+            'dependencies') or []]
+    except tomllib.TOMLDecodeError:
+        listed = []
+    missing = re.search(r'there is no version of ([^\s,]+)', text, re.IGNORECASE)
+    if missing:
+        return f'There is no release {missing.group(1).rstrip(".")} on the package index.'
+    needs = re.search(r'([A-Za-z0-9_.\-]+)==([^\s,]+) depends on ', text)
+    if needs:
+        return _held_reason(needs.group(1), needs.group(2), reason, listed)
+    return reason
 
 
 def cached_held_back(worker) -> List[str]:
@@ -777,10 +909,10 @@ def cached_held_back(worker) -> List[str]:
     return [p['package'] for p in report.get('packages') or [] if p.get('state') == 'held']
 
 
-def _lock_packages(lock: str, worker) -> str:
+def _lock_packages(lock: str, python: str) -> str:
     import column_atlas_native
 
-    return column_atlas_native.worker_lock_packages(lock, server_platform(), worker.python)
+    return column_atlas_native.worker_lock_packages(lock, server_platform(), python)
 
 
 def _held_reason(name: str, latest: str, uv_reason: str, listed: List[str]) -> str:

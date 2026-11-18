@@ -5,6 +5,7 @@ class PythonWorkerPresenter(BasePresenter):
     default_attributes = [
         'changes',
         'combine',
+        'confirm',
         'definition',
         'dependencies',
         'description',

@@ -72,10 +72,13 @@ class PythonWorkerResource(GenericResource):
                     description=payload.get('description') or None,
                     dependencies=dependencies,
                     python=payload.get('python') or None,
+                    accept_older=bool(payload.get('accept_older')),
                 )
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))
-            return cls(dict(name=created['name'], job=created['job']), user, **kwargs)
+            # With confirm, nothing was added: the page asks whether to go on.
+            return cls(dict(name=created['name'], job=created['job'],
+                            confirm=created.get('confirm')), user, **kwargs)
         try:
             job = environments.start_prepare(repo_path, name, lock=bool(template))
         except environments.PipelineEnvironmentError as error:
@@ -97,7 +100,9 @@ class PythonWorkerResource(GenericResource):
         """
         PUT /api/python_workers/<name>: dependencies (the full list), python, label,
         description, combine. A change of packages or Python is locked in a copy first,
-        then prepared; the answer has the packages that moved and the prepare job.
+        then prepared; the answer has the packages that moved and the prepare job. A change
+        that would lock a package below its newest release changes nothing and answers with
+        confirm, unless accept_older.
         """
         import asyncio
 
@@ -117,7 +122,8 @@ class PythonWorkerResource(GenericResource):
                 raise ApiError(dict(code=400, message='pyproject is the file\'s text.'))
             try:
                 result = await asyncio.to_thread(
-                    python_workers.save_pyproject, repo_path, self.model['name'], pyproject)
+                    python_workers.save_pyproject, repo_path, self.model['name'], pyproject,
+                    accept_older=bool(payload.get('accept_older')))
                 self.model = dict(python_workers.detail(repo_path, self.model['name']), **result)
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))
@@ -131,6 +137,7 @@ class PythonWorkerResource(GenericResource):
                 python=payload.get('python'),
                 combine=payload.get('combine'),
                 memory=payload.get('memory'),
+                accept_older=bool(payload.get('accept_older')),
             )
             self.model = dict(python_workers.detail(repo_path, self.model['name']), **result)
         except environments.PipelineEnvironmentError as error:

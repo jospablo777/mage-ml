@@ -4,13 +4,14 @@ import { useMutation } from 'react-query';
 import Button from '@oracle/elements/Button';
 import CodeEditor from '@components/CodeEditor';
 import ErrorCallout from './ErrorCallout';
+import OlderReleases from './OlderReleases';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
 import { CardStyle, ChangesList, MonoStyle, plural } from './shared';
-import { WorkerType } from './types';
+import { HeldPackageType, WorkerType } from './types';
 import { onSuccess } from '@api/utils/response';
 
 // Monaco has no TOML mode; its ini mode colors TOML's tables, keys and strings.
@@ -45,12 +46,18 @@ function WorkerFiles({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
   const [error, setError] = useState<string>(null);
   const [saved, setSaved] = useState<WorkerType>(null);
   const [showLock, setShowLock] = useState(false);
+  const [confirm, setConfirm] = useState<HeldPackageType[]>(null);
   const [save, { isLoading }] = useMutation(
     api.python_workers.useUpdate(worker.name),
     {
       onSuccess: (response: any) => onSuccess(response, {
         callback: ({ python_worker: result }) => {
           setError(null);
+          if (result?.confirm?.length) {
+            setConfirm(result.confirm);
+            return;
+          }
+          setConfirm(null);
           setSaved(result);
           onSaved();
         },
@@ -79,7 +86,10 @@ function WorkerFiles({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
             fontLigatures={false}
             height={420}
             language={LANGUAGE}
-            onChange={value => setText(value)}
+            onChange={(value) => {
+              setConfirm(null);
+              setText(value);
+            }}
             onSave={() => {
               if (dirty) {
                 // @ts-ignore
@@ -93,6 +103,17 @@ function WorkerFiles({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
         </Spacing>
         {error && (
           <Spacing mt={2}><ErrorCallout message={error} title="Not saved" /></Spacing>
+        )}
+        {confirm && dirty && (
+          <Spacing mt={2}>
+            <OlderReleases
+              accepting={isLoading}
+              // @ts-ignore
+              onAccept={() => save({ python_worker: { accept_older: true, pyproject: text } })}
+              onCancel={() => setConfirm(null)}
+              packages={confirm}
+            />
+          </Spacing>
         )}
         {saved && !dirty && (
           <Spacing mt={2}>

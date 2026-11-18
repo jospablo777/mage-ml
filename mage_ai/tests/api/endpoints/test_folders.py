@@ -1,5 +1,6 @@
 import os
 import urllib.parse
+import uuid
 from unittest.mock import patch
 
 from mage_ai.settings.repo import get_repo_path
@@ -41,12 +42,18 @@ class FolderAPIEndpointTest(BaseAPIEndpointTest):
         self.count = get_count(self)
 
 
+
+def _folder_name(self) -> str:
+    # Each test has its own Faker, whose unique names repeat across tests, and the folders
+    # of earlier tests stay: Mark_Garcia existed already (FileExistsError).
+    return f"{self.faker.name().replace(' ', '_')}_{uuid.uuid4().hex[:8]}"
+
 build_create_endpoint_tests(
     FolderAPIEndpointTest,
     assert_after_create_count=lambda self: get_count(self) == self.count + 1,
     assert_before_create_count=lambda self: get_count(self) == self.count,
     build_payload=lambda self: dict(
-        name=self.faker.unique.name().replace(' ', '_'),
+        name=_folder_name(self),
         path=get_repo_path(root_project=False),
     ),
     resource='folders',
@@ -58,7 +65,7 @@ build_update_endpoint_tests(
     get_resource_id=lambda self: get_resource_id(self),
     build_payload=lambda self: dict(
         path=get_repo_path(root_project=False),
-        name=self.faker.unique.name().replace(' ', '_'),
+        name=_folder_name(self),
     ),
     get_model_before_update=get_model_before_update,
     assert_after_update=lambda self, result, model: model['name'] != result['name'],
@@ -120,7 +127,7 @@ build_create_endpoint_tests(
     assert_after_create_count=lambda self, mocks: get_count_pp(self) == self.count + 1,
     assert_before_create_count=lambda self, mocks: get_count_pp(self) == self.count,
     build_payload=lambda self: dict(
-        name=self.faker.unique.name().replace(' ', '_'),
+        name=_folder_name(self),
         path=get_repo_path(root_project=False),
     ),
     resource='folders',
@@ -138,7 +145,7 @@ build_update_endpoint_tests(
     get_resource_id=lambda self: get_resource_id(self),
     build_payload=lambda self: dict(
         path=get_repo_path(root_project=False),
-        name=self.faker.unique.name().replace(' ', '_'),
+        name=_folder_name(self),
     ),
     get_model_before_update=get_model_before_update,
     assert_after_update=lambda self, result, model, mocks: model['name'] != result['name'],

@@ -10,6 +10,7 @@ import Checkbox from '@oracle/elements/Checkbox';
 import ErrorCallout from './ErrorCallout';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
+import OlderReleases from './OlderReleases';
 import PackageEditor, { normalName } from './PackageEditor';
 import WorkerFiles from './WorkerFiles';
 import PythonWorkerStatus from '@components/PipelineDetail/Settings/PythonWorker';
@@ -503,6 +504,7 @@ function WorkerDetail({ name }: { name: string }) {
   const [error, setError] = useState<string>(null);
   const [preview, setPreview] = useState<WorkerUpdateType>(null);
   const [previewError, setPreviewError] = useState<string>(null);
+  const [confirm, setConfirm] = useState<HeldPackageType[]>(null);
 
   useEffect(() => {
     if (worker && draft === null) {
@@ -531,6 +533,12 @@ function WorkerDetail({ name }: { name: string }) {
       onSuccess: (response: any) => onSuccess(response, {
         callback: ({ python_worker: result }) => {
           setError(null);
+          if (result?.confirm?.length) {
+            // Nothing changed: the page asks whether to go on with the older releases.
+            setConfirm(result.confirm);
+            return;
+          }
+          setConfirm(null);
           setSaved(result);
           setDraft(result?.dependencies || null);
           mutate();
@@ -656,11 +664,32 @@ function WorkerDetail({ name }: { name: string }) {
                 first: if they do not fit together nothing changes.
               </Text>
               <Spacing mt={2}>
-                <PackageEditor held={held} locked={locked} onChange={setDraft}
-                  value={draft || []} />
+                <PackageEditor
+                  held={held}
+                  locked={locked}
+                  onChange={(next) => {
+                    // A question about other versions no longer applies.
+                    setConfirm(null);
+                    setDraft(next);
+                  }}
+                  value={draft || []}
+                />
               </Spacing>
               {error && (
                 <Spacing mt={2}><ErrorCallout message={error} title="Not saved" /></Spacing>
+              )}
+              {confirm && dirty && (
+                <Spacing mt={2}>
+                  <OlderReleases
+                    accepting={saving}
+                    // @ts-ignore
+                    onAccept={() => savePackages({
+                      python_worker: { accept_older: true, dependencies: draft },
+                    })}
+                    onCancel={() => setConfirm(null)}
+                    packages={confirm}
+                  />
+                </Spacing>
               )}
               {saved?.changes?.length > 0 && !dirty && (
                 <Spacing mt={2}>

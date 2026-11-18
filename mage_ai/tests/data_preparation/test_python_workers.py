@@ -221,6 +221,55 @@ class PythonWorkersTest(DBTestCase):
         self.assertEqual(python_workers.cached_held_back(worker), ['six'])
         self.assertEqual(python_workers.overview(self.repo_path)[0]['held_back'], ['six'])
 
+    def test_a_change_that_would_lock_an_older_release_asks_first(self):
+        # No version chosen, and the newest does not fit: nothing changes until people say
+        # to go on ("uv would lock feast 0.20.0 from April 2022, 4 years old...").
+        folder = self.worker(dependencies=('six==1.15.0',))
+        with (folder / 'pyproject.toml').open('a') as file:
+            file.write('\n[tool.uv]\nconstraint-dependencies = ["six<1.17"]\n')
+        subprocess.run(['uv', 'lock', '--project', str(folder)], check=True,
+                       capture_output=True)
+        before = {n: (folder / n).read_text() for n in ('pyproject.toml', 'uv.lock')}
+
+        with self.releases():
+            asked = python_workers.update(self.repo_path, 'tools', dependencies=['six'])
+        self.assertIsNone(asked['job'])
+        [package] = asked['confirm']
+        self.assertEqual((package['package'], package['locked'], package['latest']),
+                         ('six', '1.16.0', '1.17.0'))
+        self.assertRegex(package['question'],
+                         r'^uv would lock six 1\.16\.0 from May 2021, \d+ years old; the '
+                         r'newest is 1\.17\.0\. six 1\.17\.0 does not fit: Because')
+        self.assertEqual({n: (folder / n).read_text() for n in before}, before)
+
+        with self.releases():
+            done = python_workers.update(self.repo_path, 'tools', dependencies=['six'],
+                                         accept_older=True)
+        self.assertNotIn('confirm', done)
+        self.assertIn('"six"', (folder / 'pyproject.toml').read_text())
+        # Held at the same release as before the change: accepted once, not asked again.
+        with self.releases():
+                again = python_workers.update(self.repo_path, 'tools',
+                                          dependencies=['six', 'pyarrow'])
+        self.assertNotIn('confirm', again)
+
+    def test_versions_that_do_not_fit_are_refused_in_one_sentence(self):
+        with self.assertRaisesRegex(
+            environments.PipelineEnvironmentError,
+            r'^uv could not lock these packages, so no worker was added: There is no release '
+            r'six==99\.0 on the package index\.\n\n',
+        ):
+            python_workers.create(self.repo_path, 'other', dependencies=['six==99.0'])
+        self.assertFalse(Path(self.repo_path, environments.WORKERS_DIR, 'other').exists())
+        uv = ('Because feast==0.68.0 depends on pandas>=1.4.3,<3 and your project depends on '
+              'feast==0.68.0 and pandas==3.1.1, we can conclude that your project\'s '
+              'requirements are unsatisfiable.')
+        self.assertEqual(
+            python_workers._conflict(
+                f'  × No solution found when resolving dependencies:\n  ╰─▶ {uv}\n',
+                '[project]\nname = "w"\ndependencies = ["feast==0.68.0", "pandas==3.1.1"]\n'),
+            'feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1.')
+
     def test_a_package_only_locked_before_its_newest_release_is_behind(self):
         self.worker(dependencies=('six',), upgrade_package='six==1.16.0')
 

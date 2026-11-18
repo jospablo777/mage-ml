@@ -41,6 +41,7 @@ http://localhost:3333.
 | [Tutorial: ship a live service](docs-md/getting-started/service-tutorial.md) | Package pipelines as a service in the app, chain them, check their secrets, push to a registry |
 | [Machine learning tutorial](docs-md/guides/train/train-model.md) | Train a model in a pipeline |
 | [Playground](docs-md/getting-started/playground.md) | Try MageML with a seeded shop database and eleven pipelines |
+| [Python workers](docs-md/guides/pipelines/python-workers.md) | Give a block its own Python environment: Feast, MLflow or any SDK with the versions it needs |
 | [ColumnAtlas](docs-md/guides/blocks/column-atlas.md) | Explore any block output: profiles, sort and filter over the whole table |
 | [Compile pipelines](docs-md/guides/pipelines/compilation.md) | The performance optimization behind production runs |
 | [Rust blocks](docs-md/guides/blocks/rust-blocks.md) and [Rust setup](docs-md/guides/blocks/rust-setup.md) | Blocks in Rust with Polars |
@@ -53,6 +54,15 @@ http://localhost:3333.
 
 ## What MageML adds
 
+- **Python workers**: each block can run in a Python environment of its own, with its own
+  packages, versions and Python, chosen block by block. A Feast block that needs pandas 2,
+  an MLflow 2 block for a legacy model and an MLflow 3 block run in one pipeline next to
+  blocks on MageML's pandas 3. Any SDK whose pins clash with MageML or with each other
+  (Feast, MLflow, cloud SDKs, a vendor's client) now fits in a pipeline. The **Workers**
+  page creates and edits them, locks every change with uv before writing it, says when a
+  package would be held at an old release, and checks them for vulnerabilities. Workers
+  stay warm between blocks (5 ms per block), and exported services build each one into the
+  image. ([guide](docs-md/guides/pipelines/python-workers.md))
 - **Rust blocks**: loaders, transformers and exporters in Rust with Polars. Consecutive
   Rust blocks compile into one program with one optimized query.
   ([guide](docs-md/guides/blocks/rust-blocks.md))
@@ -96,6 +106,42 @@ http://localhost:3333.
 - **Self-contained**: MageML sends no usage statistics, and sign-in uses only the identity
   providers you configure.
 - **No generative AI features pushed to you.**
+
+## Python workers
+
+Before workers, a block could use only the packages of MageML's own Python. A package that
+pins pandas 2 (Feast), or two versions of one SDK (an MLflow 2 model and an MLflow 3 one),
+could not run in a pipeline at all. Now each block names the worker it runs in:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/python-workers.dark.svg">
+  <img alt="A pipeline whose blocks run in MageML's Python and in two workers, each with its own packages" src="docs/images/diagrams/python-workers.light.svg">
+</picture>
+
+A worker is a uv project in your project, so it goes into git with the pipelines:
+
+```text
+python_workers/feast/
+  pyproject.toml     # feast, pandas>=2.2,<3: what its blocks import
+  uv.lock            # every version, as uv resolved them
+  .python-version    # optional: another Python for this worker
+```
+
+- **Made in the app.** Workers, in the left navigation: start from a template (Feast,
+  MLflow, ML inference, Polars, empty), type packages as you would in `pyproject.toml`,
+  pick versions from the package index, choose the Python. A block's **Runs in** menu
+  picks its worker.
+- **Nothing breaks on save.** Every change is locked by uv in a copy first. Versions that
+  cannot go together are refused in one sentence (`feast 0.68.0 needs pandas<3, and the
+  worker lists pandas==3.1.1`). When uv would fall back to an old release of a package you
+  gave no version, the page asks first.
+- **Fast.** A worker is prepared once from its lock and kept on the server; its blocks run
+  in a warm process (5 ms per block instead of 228 ms). Tables cross between workers as
+  Arrow.
+- **Safe.** Each worker can have a memory limit, never sees MageML's own credentials, and
+  is checked against OSV for known vulnerabilities, with the fix one click away.
+- **Shipped.** An exported service builds each worker into the image, and workers that
+  resolve to the same versions become one environment.
 
 Every change from Mage 0.9.79 is in the [release notes](docs/development/release-notes.md),
 including the data-type fixes needed for pandas 3, Polars 2 and pyarrow 26.
