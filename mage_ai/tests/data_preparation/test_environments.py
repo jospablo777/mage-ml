@@ -447,6 +447,34 @@ class NamedWorkerTest(DBTestCase):
                 'same',
             )
 
+    def test_the_api_answers_whether_workers_combine_for_editors(self):
+        from mage_ai.api.operations.base import BaseOperation
+        from mage_ai.api.operations.constants import OperationType
+        from mage_ai.tests.factory import create_user
+
+        environments._combine_cache.clear()
+        self.worker('old-six', dependencies=['six==1.16.0'])
+        self.worker('new-six', dependencies=['six==1.17.0'])
+
+        def ask(user, workers):
+            return asyncio.run(BaseOperation(
+                action=OperationType.CREATE, payload=dict(python_worker_combination=dict(
+                    workers=workers)),
+                resource='python_worker_combinations', user=user,
+            ).execute())
+
+        from mage_ai.orchestration.db.models.oauth import Role
+
+        Role.create_default_roles()
+        editor = create_user(roles_new=[Role.get_role('Editor')])
+        result = ask(editor, ['old-six', 'new-six'])
+        self.assertIn('python_worker_combination', result, result)
+        answer = result['python_worker_combination']
+        self.assertEqual((answer['id'], answer['state']), ('old-six+new-six', 'conflict'))
+        self.assertEqual(ask(editor, ['old-six'])['error']['code'], 400)
+        viewer = create_user(roles_new=[Role.get_role('Viewer')])
+        self.assertEqual(ask(viewer, ['old-six', 'new-six'])['error']['code'], 403)
+
     def test_a_worker_kept_apart_is_not_combined(self):
         environments._combine_cache.clear()
         folder = self.worker('gpu', dependencies=['six==1.16.0'])

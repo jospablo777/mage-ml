@@ -4869,6 +4869,20 @@
     },
     "type": "object"
    },
+   "PythonWorkerCombination": {
+    "properties": {
+     "changes": {},
+     "combined_size": {},
+     "id": {},
+     "names": {},
+     "reason": {},
+     "saved_bytes": {},
+     "sizes": {},
+     "state": {},
+     "workers": {}
+    },
+    "type": "object"
+   },
    "Role": {
     "properties": {
      "created_at": {
@@ -16041,6 +16055,46 @@
     ]
    }
   },
+  "/api/python_worker_combinations": {
+   "post": {
+    "operationId": "create_python_worker_combinations",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "properties": {
+         "python_worker_combination": {
+          "type": "object"
+         }
+        },
+        "type": "object"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_combination": {
+           "$ref": "#/components/schemas/PythonWorkerCombination"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "create python_worker_combinations",
+    "tags": [
+     "python_worker_combinations"
+    ]
+   }
+  },
   "/api/python_workers": {
    "get": {
     "operationId": "list_python_workers",
@@ -21187,6 +21241,12 @@
    ],
    "schema": "PullRequest"
   },
+  "python_worker_combinations": {
+   "operations": [
+    "create"
+   ],
+   "schema": "PythonWorkerCombination"
+  },
   "python_workers": {
    "operations": [
     "list",
@@ -21534,6 +21594,7 @@
   "pipeline_triggers": "get /api/pipeline_triggers: error 400: Pipeline triggers belong to a pipeline: /api/pipelines/<uuid>/pipeline_triggers.",
   "project_archives": "no list or detail reached",
   "pull_requests": "no list or detail reached",
+  "python_worker_combinations": "no list or detail reached",
   "role_permissions": "get /api/role_permissions: error 403: The list action is disabled for role_permissions.",
   "run_records": "no list or detail reached",
   "rust_checks": "no list or detail reached",
