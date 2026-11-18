@@ -106,13 +106,16 @@ test('a Python worker is added from a template, locked and prepared', async ({ p
   await page.getByLabel('Name shown').fill('Added worker');
   await page.getByRole('button', { name: 'Add and prepare' }).click();
   try {
-    // Selected for the pipeline, it shows the prepare's progress until it is ready.
-    await expect(page.getByText(/Prepared: \d+ packages from its uv.lock/)).toBeVisible({
-      timeout: 180_000,
-    });
-    const { python_workers: workers } = await api.call('GET', 'python_workers');
-    const added = workers.find(w => w.name === name);
-    expect([added?.label, added?.locked, added?.prepared]).toEqual(['Added worker', true, true]);
+    // The first test's worker, prepared, may show until the list reloads: wait for this one.
+    await expect.poll(async () => {
+      const { python_workers: workers } = await api.call('GET', 'python_workers');
+      const added = workers.find(w => w.name === name);
+
+      return [added?.label, added?.locked, added?.prepared];
+    }, { timeout: 180_000 }).toEqual(['Added worker', true, true]);
+    await expect(page.getByText(/Prepared: \d+ packages from its uv.lock/)).toBeVisible();
+    await expect(page.locator('select').filter({ has: page.locator(`option[value="${name}"]`) })
+      .first()).toHaveValue(name);
   } finally {
     await api.call('DELETE', `folders/${encodeURIComponent(`python_workers/${name}`)}`)
       .catch(() => null);
