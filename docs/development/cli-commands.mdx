@@ -424,7 +424,7 @@ mage project-import <project_path> <archive.zip> [--mode skip|replace] [--dry-ru
 
 Named Python environments in `python_workers/<name>/` that blocks select. The project
 defaults to the current directory (`--project`). See
-[Python workers](/guides/pipelines/pipeline-environments#python-workers).
+[Python workers](/guides/pipelines/python-workers).
 
 - `mage workers new <name> [--template feast|mlflow|ml-inference|polars|empty] [--label "Feast worker"] [--no-prepare]`: write the worker's `pyproject.toml` from a template, lock it with uv and prepare it.
 - `mage workers list`: each worker, its label, Python version and whether it is prepared.

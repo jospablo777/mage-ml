@@ -600,7 +600,87 @@ def retail_pipeline(language: str) -> Diagram:
     return d
 
 
+MAGE_GREEN = '#2DA44E'
+
+
+def python_workers() -> Diagram:
+    """A pipeline whose blocks run in three Python environments, tables crossing as Arrow."""
+    d = Diagram(1100, 360, 'Python blocks in MageML\'s Python and in two workers')
+    blocks = [
+        (30, 'Load orders', 'python', 'pandas 3', MAGE_GREEN, "MageML's Python"),
+        (300, 'Online features', 'pandas', 'Feast, pandas 2.2', COLORS['uv'], 'Feast worker'),
+        (570, 'Score', 'scikitlearn', 'Python 3.13, scikit-learn', COLORS['scikitlearn'],
+         'Scoring worker'),
+        (840, 'Save scores', 'postgresql', 'pandas 3', MAGE_GREEN, "MageML's Python"),
+    ]
+    for x, label, slug, sub, color, env in blocks:
+        d.stage(x - 10, 60, 250, 92, color=color, label=env)
+        d.node(x, 74, 230, 64, label, slug, sub)
+    for left, right in ((260, 300), (530, 570), (800, 840)):
+        d.arrow([(left, 106), (right, 106)])
+    d.parts.append(logo('apachearrow', 196, 183, 16))
+    d.text(220, 196, 'Each block runs in its own environment; a table reaches the next one as '
+           'Arrow, whatever its pandas or Python.', size=12)
+    d.group(150, 222, 800, 112, 'python_workers/<name>/ in the project, in Git', COLORS['uv'])
+    d.node(170, 256, 230, 60, 'pyproject.toml', 'python', 'the packages you choose')
+    d.node(435, 256, 230, 60, 'uv.lock', 'uv', 'the exact versions')
+    d.node(700, 256, 230, 60, 'Prepared once', 'uv', 'cached on the server')
+    d.arrow([(400, 286), (435, 286)])
+    d.arrow([(665, 286), (700, 286)])
+    return d
+
+
+def worker_lifecycle() -> Diagram:
+    """From the packages people choose to the environment blocks run in."""
+    d = Diagram(1100, 250, 'How a Python worker is locked, prepared and used')
+    d.node(24, 40, 190, 60, 'Package index', 'pypi', 'PyPI or yours')
+    d.node(254, 40, 200, 60, 'pyproject.toml', 'python', 'packages, Python')
+    d.node(504, 40, 190, 60, 'uv.lock', 'uv', 'exact versions')
+    d.node(744, 40, 330, 60, 'Prepared environment', 'uv', 'once per lock, cached, kept 2 back')
+    d.arrow([(214, 70), (254, 70)])
+    d.arrow([(454, 70), (504, 70)], 'uv lock', label_at=(479, 60))
+    d.arrow([(694, 70), (744, 70)], 'uv sync', label_at=(719, 60))
+    d.node(744, 160, 155, 60, 'Block runs', 'python', 'in MageML')
+    d.node(919, 160, 155, 60, 'Service', 'docker', 'in its image')
+    d.arrow([(820, 100), (820, 160)])
+    d.arrow([(1000, 100), (1000, 160)], dashed=True)
+    d.text(24, 150, 'A change of packages is locked in a copy first: if it does not', size=12)
+    d.text(24, 168, 'resolve, nothing changes and uv says why. A worker on another', size=12)
+    d.text(24, 186, 'Python gets that Python from uv, here and in exported images.', size=12)
+    d.text(24, 214, 'Locks are checked against known vulnerabilities (OSV).', size=12)
+    return d
+
+
+def worker_values() -> Diagram:
+    """How each kind of value crosses from one Python environment to another."""
+    d = Diagram(1100, 330, 'How values cross between Python workers')
+    d.group(24, 30, 220, 270, 'A block returns', None)
+    d.group(856, 30, 220, 270, 'The next block gets', None)
+    rows = [
+        ('A table', 'pandas, Polars, Arrow', 'apachearrow', 'Arrow file', 'the same table',
+         MAGE_GREEN),
+        ('JSON values', 'dicts, lists, numbers', 'python', 'JSON', 'the same values', MAGE_GREEN),
+        ('A NumPy array', 'numbers, any shape', 'python', '.npy', 'the same array', MAGE_GREEN),
+        ('Another object', 'a model, a set', 'python', 'pickle', 'same packages only',
+         '#BF8700'),
+    ]
+    for i, (what, sub, slug, how, gets, color) in enumerate(rows):
+        y = 58 + i * 60
+        d.node(40, y, 188, 48, what, None, sub)
+        d.node(420, y, 260, 48, how, slug, 'written by the worker, read by the next',
+               color=color)
+        d.node(872, y, 188, 48, gets, None, '', color=None if color == MAGE_GREEN else color)
+        d.arrow([(228, y + 24), (420, y + 24)])
+        d.arrow([(680, y + 24), (872, y + 24)])
+    d.text(550, 318, 'A table arrives as what the worker has: pandas without Polars, Polars '
+           'without pandas. Lists in cells stay lists.', anchor='middle', size=11.5)
+    return d
+
+
 DIAGRAMS = {
+    'python-workers': python_workers,
+    'worker-lifecycle': worker_lifecycle,
+    'worker-values': worker_values,
     'pipeline-shapes': pipeline_shapes,
     'language-mixes': language_mixes,
     'playground-shapes': playground_shapes,

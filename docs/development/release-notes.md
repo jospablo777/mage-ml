@@ -36,6 +36,15 @@
 
 ### Pipelines
 
+- **Workers**, in the left navigation, manages the project's Python workers: each one's
+  state, Python, size, use and known vulnerabilities (a count on **Workers** says how
+  many need attention); a new worker from a template with its packages, versions and
+  Python; packages edited with a version picker from the package index, updated or fixed
+  after a preview; its `pyproject.toml` edited as text; renamed or deleted. Every change
+  is locked by uv in a copy first: one that does not resolve changes nothing and says why.
+  See [Python workers](/guides/pipelines/python-workers).
+- Every Python block's header says where it runs and changes it in one click; the dialog
+  that adds a block asks too. Python comes first in the add-block menu.
 - Python workers are tested across pandas and Python versions (pandas 2.2 next to MageML's
   pandas 3, Python 3.13 next to 3.12), block by block, fused and exported. What a block
   receives from another worker is what it would receive in MageML's Python: types,

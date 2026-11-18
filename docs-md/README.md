@@ -309,6 +309,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [Pipeline shapes](guides/pipelines/pipeline-shapes.md)
 - [Importing pipelines](guides/pipelines/importing-pipelines.md)
 - [Pipeline environments](guides/pipelines/pipeline-environments.md)
+- [Python workers](guides/pipelines/python-workers.md)
 - [Run records and reproducing runs](guides/pipelines/run-records.md)
 - [Experiments with MLflow](guides/pipelines/experiments.md)
 - [Model release checks](guides/pipelines/model-releases.md)
