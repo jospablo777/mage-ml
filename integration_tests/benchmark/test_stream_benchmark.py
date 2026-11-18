@@ -285,7 +285,9 @@ def test_the_source_does_not_cap_rust_blocks():
 
 
 def _record(result):
-    MEASURED[result['block']] = result['messages_per_second']
+    # Sink and source results name their sink or source, not a block.
+    if 'block' in result:
+        MEASURED[result['block']] = result['messages_per_second']
     if os.getenv('MAGE_BENCHMARK_RESULTS'):
         path = Path(os.environ['MAGE_BENCHMARK_RESULTS'])
         previous = json.loads(path.read_text()) if path.exists() else []

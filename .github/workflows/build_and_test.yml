@@ -371,7 +371,9 @@ jobs:
             | sudo tar -xz -C /usr/local/bin rv
           rv --version
           cd integration_tests/r_env
-          rv sysdeps --only-absent --json | python3 -c '
+          # Every system library the environment needs, installed or not: --only-absent
+          # missed curl's and fontconfig's headers when packages built from source (I-462).
+          rv sysdeps --json | python3 -c '
           import json, sys
           entries = json.load(sys.stdin)
           names = [e if isinstance(e, str) else e["name"] for e in entries]
