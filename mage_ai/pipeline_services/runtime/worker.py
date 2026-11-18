@@ -223,6 +223,31 @@ def _to_pandas(table):
     return frame
 
 
+# What an upstream block returns that only Python reads back (I-20): a Python object that is
+# not a table, JSON values, a NumPy array or a file goes between processes as a pickle.
+PICKLE_ALTERNATIVES = ('Return a table (pandas or Polars), JSON values (dicts, lists, '
+                       'numbers, strings) or a file path instead')
+
+
+def _read_pickle(record: Dict) -> Any:
+    """A pickled output. It reads back only where the packages that made it are installed
+    in compatible versions, such as another Python worker or MageML's own Python."""
+    kind = record.get('type') or 'Python object'
+    try:
+        with open(record['path'], 'rb') as file:
+            return pickle.load(file)
+    except Exception as error:
+        raise BlockError(
+            'input',
+            f'An upstream block returned a {kind}, which crosses between processes as a '
+            f'pickle, and this Python could not read it back ({type(error).__name__}: '
+            f'{error}). A pickle reads back only with the packages that wrote it, in '
+            f'compatible versions. {PICKLE_ALTERNATIVES}, or run both blocks in one Python '
+            'worker.',
+            traceback.format_exc(),
+        )
+
+
 def read_input(record: Dict) -> Any:
     """The value one input record stands for, as the upstream block returned it."""
     kind = record.get('kind')
@@ -239,8 +264,7 @@ def read_input(record: Dict) -> Any:
 
         return np.load(path, allow_pickle=False)
     if kind == 'pickle':
-        with open(path, 'rb') as file:
-            return pickle.load(file)
+        return _read_pickle(record)
     if kind != 'frame':
         raise BlockError('input', f'Unknown input kind {kind!r}.')
     origin = record.get('origin') or 'polars'
@@ -358,7 +382,25 @@ def _run_tests(block: Dict, results: List[Dict]) -> None:
         print(f'{len(results)}/{len(results)} tests passed.', flush=True)
 
 
+def _pickled(records: List) -> List[str]:
+    """The types of the pickled values among input records, lists included."""
+    found = []
+    for record in records or []:
+        if record.get('kind') == 'list':
+            found += _pickled(record.get('items'))
+        elif record.get('kind') == 'pickle':
+            found.append(record.get('type') or 'Python object')
+    return found
+
+
 def run_r_block(request: Dict, block: Dict, inputs: List) -> Tuple[List, List, float]:
+    pickled = _pickled(request.get('inputs'))
+    if pickled:
+        raise BlockError(
+            'input',
+            f'An upstream block returned a {pickled[0]}, a Python object R cannot read. '
+            f'{PICKLE_ALTERNATIVES}.',
+        )
     try:
         execution = _r_execution()
         with open(block['file'], encoding='utf-8') as file:

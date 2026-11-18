@@ -15,6 +15,10 @@
 
 ### Pipelines
 
+- A block whose upstream block returned a Python object that does not read back in its
+  environment (a pickle written with other packages) fails with the object's type and what
+  to return instead: a table, JSON values or a file, or both blocks in one Python worker.
+  An R block given a Python object says so before running.
 - One planner decides which blocks run together for MageML's scheduler, `mage run`, the
   Compile panel and exported services; they used four sets of rules. The Compile panel
   lists **Where chains stop**: each place a block and the next could run together but do

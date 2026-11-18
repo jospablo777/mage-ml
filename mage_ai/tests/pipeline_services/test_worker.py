@@ -916,3 +916,36 @@ class StreamTimersTest(WorkerTestCase):
         ''', name='watch')
         with self.assertRaisesRegex(worker.BlockError, 'a timer is a time in milliseconds'):
             self.stream([{'device': 'd1'}], chain=[bad])
+
+
+class PickledInputsTest(WorkerTestCase):
+    """I-20: a Python object crosses between processes as a pickle; when it cannot be read
+    back, or an R block gets one, the error says what was returned and what to return."""
+
+    def test_a_pickle_written_by_other_packages_fails_with_what_to_return(self):
+        record = dict(kind='pickle', path=os.path.join(self.directory, 'model.pickle'),
+                      type='feast.FeatureStore')
+        # A pickle of a class this Python does not have.
+        with open(record['path'], 'wb') as file:
+            file.write(b'\x80\x04\x95\x1b\x00\x00\x00\x00\x00\x00\x00\x8c\x0cmissing_pkg'
+                       b'\x94\x8c\x05Thing\x94\x93\x94)\x81\x94.')
+        with self.assertRaises(worker.BlockError) as caught:
+            worker.read_input(record)
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.phase, 'input')
+        self.assertIn('feast.FeatureStore', message)
+        self.assertIn('Return a table (pandas or Polars), JSON values', message)
+        self.assertIn('run both blocks in one Python worker', message)
+
+    def test_a_pickle_this_python_can_read_still_passes(self):
+        record = self.write(datetime(2024, 1, 1))
+        self.assertEqual(record['kind'], 'pickle')
+        self.assertEqual(worker.read_input(record), datetime(2024, 1, 1))
+
+    def test_an_r_block_refuses_a_python_object_before_running(self):
+        record = self.write(datetime(2024, 1, 1))
+        request = dict(inputs=[dict(kind='list', items=[record])])
+        with self.assertRaises(worker.BlockError) as caught:
+            worker.run_r_block(request, dict(uuid='plot', type='transformer', file='x.R'), [])
+        self.assertIn('a Python object R cannot read', str(caught.exception))
+        self.assertIn('datetime', str(caught.exception))
