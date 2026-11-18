@@ -4826,6 +4826,16 @@
     },
     "type": "object"
    },
+   "PythonPackage": {
+    "properties": {
+     "id": {},
+     "latest": {},
+     "name": {},
+     "prereleases": {},
+     "versions": {}
+    },
+    "type": "object"
+   },
    "PythonWorker": {
     "properties": {
      "changes": {
@@ -4917,6 +4927,26 @@
      "sizes": {},
      "state": {},
      "workers": {}
+    },
+    "type": "object"
+   },
+   "PythonWorkerTemplate": {
+    "properties": {
+     "dependencies": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "description": {
+      "type": "string"
+     },
+     "id": {
+      "type": "string"
+     },
+     "label": {
+      "type": "string"
+     }
     },
     "type": "object"
    },
@@ -16103,6 +16133,42 @@
     ]
    }
   },
+  "/api/python_packages/{id}": {
+   "get": {
+    "operationId": "detail_python_packages",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_package": {
+           "$ref": "#/components/schemas/PythonPackage"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail python_packages",
+    "tags": [
+     "python_packages"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
+  },
   "/api/python_worker_audits/{id}": {
    "get": {
     "operationId": "detail_python_worker_audits",
@@ -16176,6 +16242,38 @@
     "summary": "create python_worker_combinations",
     "tags": [
      "python_worker_combinations"
+    ]
+   }
+  },
+  "/api/python_worker_templates": {
+   "get": {
+    "operationId": "list_python_worker_templates",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "metadata": {
+           "type": "object"
+          },
+          "python_worker_templates": {
+           "items": {
+            "$ref": "#/components/schemas/PythonWorkerTemplate"
+           },
+           "type": "array"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "list python_worker_templates",
+    "tags": [
+     "python_worker_templates"
     ]
    }
   },
@@ -21501,6 +21599,12 @@
    ],
    "schema": "PullRequest"
   },
+  "python_packages": {
+   "operations": [
+    "detail"
+   ],
+   "schema": "PythonPackage"
+  },
   "python_worker_audits": {
    "operations": [
     "detail"
@@ -21512,6 +21616,12 @@
     "create"
    ],
    "schema": "PythonWorkerCombination"
+  },
+  "python_worker_templates": {
+   "operations": [
+    "list"
+   ],
+   "schema": "PythonWorkerTemplate"
   },
   "python_worker_updates": {
    "operations": [
@@ -21870,6 +21980,7 @@
   "pipeline_triggers": "get /api/pipeline_triggers: error 400: Pipeline triggers belong to a pipeline: /api/pipelines/<uuid>/pipeline_triggers.",
   "project_archives": "no list or detail reached",
   "pull_requests": "no list or detail reached",
+  "python_packages": "no list or detail reached",
   "python_worker_audits": "no list or detail reached",
   "python_worker_combinations": "no list or detail reached",
   "python_worker_updates": "no list or detail reached",

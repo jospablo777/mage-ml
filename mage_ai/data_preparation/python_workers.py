@@ -228,7 +228,8 @@ def create(
                       if environments._offline(result.stderr)
                       else environments._resolver_reason(result.stderr))
             raise PipelineEnvironmentError(
-                f'uv could not lock these packages, so no worker was added: {reason}')
+                f'uv could not lock these packages, so no worker was added: {reason}'
+                + _uv_output(result.stderr))
         target = Path(repo_path) / environments.WORKERS_DIR / folder.name
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -272,8 +273,16 @@ def _locked_copy(worker, pyproject: Optional[str] = None,
                     'changed.')
             raise PipelineEnvironmentError(
                 f'uv could not lock the change, so nothing changed: '
-                f'{environments._resolver_reason(result.stderr)}')
+                f'{environments._resolver_reason(result.stderr)}' + _uv_output(result.stderr))
         return (copy / 'uv.lock').read_text()
+
+
+def _uv_output(stderr: str, lines: int = 40) -> str:
+    """uv's own words after the summary, for the page's "Show uv's output": a blank line,
+    then its last lines without the progress ones."""
+    kept = [line.rstrip() for line in (stderr or '').splitlines()
+            if line.strip() and not line.strip().startswith(('Using ', 'Resolved ', 'Updating '))]
+    return '\n\n' + '\n'.join(kept[-lines:]) if kept else ''
 
 
 def _changes(old: Optional[str], new: str) -> List[Dict]:
@@ -321,8 +330,17 @@ def update(
     document = tomlkit.parse((folder / 'pyproject.toml').read_text())
     project = document.setdefault('project', tomlkit.table())
     needs_lock = False
+    upgrade: List[str] = []
     if dependencies is not None:
         checked = _check_requirements(dependencies)
+        # A package whose line changed gets the newest release its new line allows: uv lock
+        # keeps a locked version that still fits, so "six" after "six==1.16.0" stayed 1.16.0.
+        before = {environments._requirement_name(d): d.strip()
+                  for d in project.get('dependencies') or []}
+        for line in checked:
+            name = environments._requirement_name(line)
+            if name in before and before[name] != line:
+                upgrade += ['--upgrade-package', name]
         names = {environments._requirement_name(d) for d in checked}
         own = (project.get('name') or '').lower().replace('_', '-').replace('.', '-')
         if own in names:
@@ -371,7 +389,7 @@ def update(
         _write(folder / 'pyproject.toml', text)
         return result
     old_lock = _lock_text(worker)
-    new_lock = _locked_copy(worker, text, python=python)
+    new_lock = _locked_copy(worker, text, python=python, upgrade=upgrade)
     _write(folder / 'pyproject.toml', text)
     _write(folder / 'uv.lock', new_lock)
     if python is not None:

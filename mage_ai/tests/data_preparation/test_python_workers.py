@@ -141,6 +141,16 @@ class PythonWorkersTest(DBTestCase):
         self.assertIn('"six==1.17.0"', text)
         self.assertIn('label = "Tools worker"', text)
 
+    def test_a_package_without_its_version_gets_the_newest_release(self):
+        folder = self.worker(dependencies=['six==1.16.0', 'packaging==24.1'])
+        result = python_workers.update(self.repo_path, 'tools',
+                                       dependencies=['six', 'packaging==24.1'])
+        [change] = result['changes']
+        self.assertEqual((change['package'], change['from']), ('six', '1.16.0'))
+        self.assertNotEqual(change['to'], '1.16.0', 'uv kept the locked six')
+        self.assertIn('version = "24.1"', (folder / 'uv.lock').read_text(),
+                      'an unchanged line keeps its version')
+
     def test_a_name_change_needs_no_lock_and_keeps_the_environment(self):
         folder = self.worker()
         lock = (folder / 'uv.lock').read_text()
@@ -260,6 +270,11 @@ class PythonWorkersTest(DBTestCase):
                 action=action, pk=pk, payload=payload or {}, query=query or {},
                 resource=resource, user=user,
             ).execute())
+
+        templates = call(viewer, OperationType.LIST, 'python_worker_templates')
+        feast = next(t for t in templates['python_worker_templates'] if t['id'] == 'feast')
+        self.assertEqual(feast['dependencies'],
+                         environments.WORKER_TEMPLATES['feast']['dependencies'])
 
         shown = call(viewer, OperationType.DETAIL, 'python_workers', 'tools')['python_worker']
         self.assertEqual(shown['packages'][0]['name'], 'six')
