@@ -8,6 +8,7 @@ class PipelineServiceBuildPresenter(BasePresenter):
         'docker',
         'finished_at',
         'image',
+        'image_size',
         'lines',
         'name',
         'platform',

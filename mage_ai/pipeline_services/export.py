@@ -4417,6 +4417,129 @@ def build_image(
             ])
 
 
+# The parts of an exported image, in the order they are shown, and the steps of the
+# Dockerfile (_dockerfile) that make each one, matched in docker history's CreatedBy.
+IMAGE_PARTS = (
+    ('python', 'Python packages', ('UV_PROJECT_ENVIRONMENT=/usr/local', '/tmp/service-python',
+                                   'pip install --requirement /tmp/requirements.txt',
+                                   'requirements.txt /tmp/')),
+    ('r', 'R and its packages', ('r-base-core', 'rv sync', 'COPY r /srv/mage-service/r',
+                                 '/srv/mage-service/r-cache')),
+    ('runtime', 'MageML runtime', ('/out/mage-service', 'python ./python')),
+    ('rust_blocks', 'Rust blocks', ('/out/bin ./bin',)),
+    ('ibm_mq', 'IBM MQ client', ('/opt/mqm',)),
+    ('models', 'Models', ('models ./models',)),
+)
+# The first step _dockerfile adds to the base image: every layer before it is the base's.
+_OWN_FIRST_STEPS = ('PYTHONDONTWRITEBYTECODE=1', 'groupadd --system --gid 10001 mage')
+_WORKER_STEP = re.compile(rf'{SERVICE_DIR}/workers/([^/\s]+)|COPY workers/([^/\s]+)/')
+
+
+def _image_part(created_by: str, project: str) -> Tuple[str, str]:
+    """The part of the image a layer belongs to, as (key, label), from the step that made it."""
+    worker = _WORKER_STEP.search(created_by)
+    if worker:
+        alias = worker.group(1) or worker.group(2)
+        members = alias.split('.')
+        label = (f'Worker {alias}' if len(members) == 1
+                 else f'Workers {", ".join(members)}')
+        return f'worker:{alias}', label
+    for key, label, needles in IMAGE_PARTS:
+        if any(needle in created_by for needle in needles):
+            return key, label
+    if f'{project} ./{project}' in created_by or 'service.json ./service.json' in created_by:
+        return 'project', 'Project code'
+    return 'base', 'Base image'
+
+
+def image_parts(history: List[Tuple[int, str]], dockerfile: str) -> List[Dict]:
+    """
+    An image's size by part, from its layers (docker history, newest first, as (bytes,
+    CreatedBy)) and the Dockerfile that built it. Layers before the Dockerfile's own first step
+    are the base image's; parts without bytes are left out.
+    """
+    froms = [line.split()[1] for line in dockerfile.splitlines()
+             if line.startswith('FROM ') and ' AS ' not in line.upper()]
+    base = froms[-1] if froms else None
+    project = next((line.split()[2] for line in dockerfile.splitlines()
+                    if line.startswith('COPY --chown=mage:mage ') and line.split()[2] not in (
+                        'python', 'models', 'service.json') and '--from' not in line), '')
+    sizes: Dict[str, int] = {}
+    labels: Dict[str, str] = {}
+    own = False
+    for size, created_by in reversed(history):
+        own = own or any(step in created_by for step in _OWN_FIRST_STEPS)
+        key, label = _image_part(created_by, project) if own else ('base', 'Base image')
+        if key == 'base' and base:
+            label = f'Base image ({base})'
+        sizes[key] = sizes.get(key, 0) + max(int(size), 0)
+        labels[key] = label
+    order = ['base', 'python'] + sorted(k for k in sizes if k.startswith('worker:')) + [
+        key for key, _, _ in IMAGE_PARTS if key != 'python'] + ['project']
+    return [dict(key=key, label=labels[key], bytes=sizes[key])
+            for key in order if sizes.get(key)]
+
+
+def measure_image(tag: str, out_dir: Path) -> Optional[Dict]:
+    """
+    What a built image weighs, in all and by part (image_parts), from docker history. None
+    when docker does not have the image, as after a build for several platforms that only
+    pushed it.
+    """
+    docker = shutil.which('docker')
+    dockerfile = out_dir / 'Dockerfile'
+    if not docker or not dockerfile.is_file():
+        return None
+    try:
+        found = subprocess.run(
+            [docker, 'history', '--no-trunc', '--human=false', '--format',
+             '{{.Size}}\t{{.CreatedBy}}', tag],
+            capture_output=True, text=True, timeout=30,
+        )
+        inspected = subprocess.run(
+            [docker, 'image', 'inspect', '--format', '{{.Id}} {{.Os}}/{{.Architecture}}', tag],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if found.returncode != 0 or inspected.returncode != 0:
+        return None
+    history = []
+    for line in found.stdout.splitlines():
+        size, _, created_by = line.partition('\t')
+        if size.strip().isdigit():
+            history.append((int(size), created_by))
+    parts = image_parts(history, dockerfile.read_text())
+    image_id, _, platform = inspected.stdout.strip().partition(' ')
+    return dict(
+        bytes=sum(p['bytes'] for p in parts),
+        id=image_id,
+        image=tag,
+        parts=parts,
+        platform=platform or None,
+    )
+
+
+def describe_image_size(size: Dict, previous: Optional[Dict] = None) -> List[str]:
+    """An image's size by part as lines for a terminal, with the change since the build before."""
+    def megabytes(value: int) -> str:
+        return f'{value / 1e6:,.0f} MB' if value >= 1e6 else f'{value / 1e3:,.0f} kB'
+
+    def change(value: int, before: Optional[int]) -> str:
+        if before is None or abs(value - before) < 1e6:
+            return ''
+        return f'  ({"+" if value > before else "-"}{megabytes(abs(value - before))})'
+
+    earlier = {p['key']: p['bytes'] for p in (previous or {}).get('parts') or []}
+    width = max(len(p['label']) for p in size['parts']) if size['parts'] else 0
+    lines = [f"Image {size['image']}: {megabytes(size['bytes'])}"
+             + change(size['bytes'], (previous or {}).get('bytes'))]
+    for part in size['parts']:
+        lines.append(f"  {part['label']:<{width}}  {megabytes(part['bytes']):>9}"
+                     + change(part['bytes'], earlier.get(part['key'], 0 if previous else None)))
+    return lines
+
+
 # What docker prints when a build or push fails for a common reason, and what to do.
 BUILD_FAILURES = (
     (('cannot connect to the docker daemon', 'is the docker daemon running',

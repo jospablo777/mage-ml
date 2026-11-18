@@ -1453,6 +1453,7 @@ def export_service(
         except export.ExportError as error:
             typer.echo(error.problems[0], err=True)
             raise typer.Exit(code=1)
+        _echo_image_size(project_path, captured.name, image, out_dir)
         if push:
             typer.echo(f'Image {image} is pushed. Run it with:')
         else:
@@ -1889,6 +1890,20 @@ def service_test(
         raise typer.Exit(code=1)
 
 
+def _echo_image_size(project: str, name: str, image: str, directory) -> None:
+    """Prints what a built image weighs by part, and keeps it for the Services page."""
+    from pathlib import Path
+
+    from mage_ai.pipeline_services import export
+    from mage_ai.pipeline_services.exports import image_builds, record_build
+
+    size = record_build(project, name, image, Path(directory))
+    if size is not None:
+        builds = image_builds(project, name)
+        previous = builds[1] if len(builds) >= 2 else None
+        typer.echo('\n'.join(export.describe_image_size(size, previous)))
+
+
 @service_app.command('build')
 def service_build(
     name: str = typer.Argument(...),
@@ -1920,6 +1935,7 @@ def service_build(
             export.build_image(box, tag or name, platforms=platforms, push=push)
         except export.ExportError as error:
             _service_error(error)
+        _echo_image_size(project, name, tag or name, box)
         typer.echo(f'Image {tag or name} is {"pushed" if push else "built"}.')
 
 

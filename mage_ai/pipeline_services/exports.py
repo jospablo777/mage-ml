@@ -558,15 +558,17 @@ def start_build(
             job['lines'].append(line)
 
     def run():
+        size = None
         try:
             export.build_image(directory, image, platforms=platforms, push=push, on_line=on_line)
             state, problems = 'completed', []
+            size = record_build(repo_path, name, image, directory)
         except export.ExportError as error:
             state, problems = 'failed', list(error.problems)
         except Exception as error:
             state, problems = 'failed', [f'The build stopped on an error: {error}']
         with _jobs_lock:
-            job.update(finished_at=time.time(), problems=problems, state=state)
+            job.update(finished_at=time.time(), image_size=size, problems=problems, state=state)
 
     threading.Thread(target=run, daemon=True, name=f'build-{name}').start()
     return dict(job, lines=list(job['lines']))
@@ -576,3 +578,51 @@ def build_job(repo_path: str, name: str) -> Optional[Dict]:
     with _jobs_lock:
         job = _builds.get(_key(repo_path, name))
         return dict(job, lines=list(job['lines'])) if job else None
+
+
+# The builds kept per service: the Services page compares the last one with the one before.
+KEPT_BUILDS = 10
+
+
+def _builds_path(repo_path: str, name: str) -> Path:
+    # Next to the exports, not in one: exporting again replaces the export's folder.
+    return exports_root(repo_path) / '.builds' / f'{export_directory(repo_path, name).name}.json'
+
+
+def image_builds(repo_path: str, name: str) -> List[Dict]:
+    """The measured builds of a service's image, newest first."""
+    try:
+        builds = json.loads(_builds_path(repo_path, name).read_text())
+    except (OSError, ValueError):
+        return []
+    return builds if isinstance(builds, list) else []
+
+
+def record_build(repo_path: str, name: str, image: str, directory: Path) -> Optional[Dict]:
+    """
+    Measures a service's image after a build (export.measure_image) and keeps it with the
+    service's earlier builds. Returns the measure, or None when docker does not have the image
+    (a build for several platforms that only pushed it) or the measure failed: a build that
+    worked never fails here.
+    """
+    from mage_ai.pipeline_services import export
+
+    try:
+        size = export.measure_image(image, directory)
+        if size is None:
+            return None
+        service = json.loads((directory / 'service.json').read_text()).get('service') or {}
+        size.update(
+            built_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+            exported_at=service.get('exported_at'),
+            source_sha256=service.get('source_sha256'),
+        )
+        path = _builds_path(repo_path, name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        builds = [size] + image_builds(repo_path, name)
+        written = path.with_suffix('.tmp')
+        written.write_text(json.dumps(builds[:KEPT_BUILDS], indent=2))
+        os.replace(written, path)
+        return size
+    except (OSError, ValueError):
+        return None

@@ -4596,6 +4596,7 @@
     "properties": {
      "description": {},
      "exported_at": {},
+     "image_builds": {},
      "include": {},
      "max_runs": {},
      "model_registry": {},
@@ -4622,6 +4623,9 @@
       "type": "null"
      },
      "image": {
+      "type": "null"
+     },
+     "image_size": {
       "type": "null"
      },
      "lines": {

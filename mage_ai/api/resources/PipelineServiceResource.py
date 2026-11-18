@@ -34,7 +34,7 @@ def _with_export(
     deployments: Dict = None,
 ) -> Dict:
     """A saved service with its latest export from the app, if any, and its deployments."""
-    from mage_ai.pipeline_services.exports import list_exports
+    from mage_ai.pipeline_services.exports import image_builds, list_exports
 
     if exports_by_name is None:
         exports_by_name = {e['name']: e for e in list_exports(repo_path)}
@@ -44,6 +44,8 @@ def _with_export(
         **value,
         deployments=(deployments or {}).get(name, []),
         exported_at=latest['exported_at'] if latest else None,
+        # The last build measured and the one before, to compare.
+        image_builds=image_builds(repo_path, name)[:2],
         path=_definitions().location(repo_path, name),
     )
 
