@@ -6,8 +6,8 @@ packages; skipped where uv is not installed.
 import asyncio
 import importlib.metadata
 import shutil
-import sys
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
