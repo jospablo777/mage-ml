@@ -286,7 +286,7 @@ def capture(
         service=dict(
             name=service,
             project=project_path.name,
-            exported_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            exported_at=export_time(),
             mage_version=_mage_version(),
             source_sha256=digest.hexdigest(),
         ),
@@ -492,6 +492,17 @@ def _merge_extra_workers(capture_: Capture) -> None:
             + (f', {round(saved / 1e6)} MB less,' if saved >= 1e6 else ',')
             + ' and runs their blocks in one process.'
         )
+
+
+def export_time() -> str:
+    """
+    When the export was made: SOURCE_DATE_EPOCH when it is set, as reproducible builds do
+    (the same sources and locks then give the same files, byte for byte), else now.
+    """
+    epoch = os.getenv('SOURCE_DATE_EPOCH')
+    moment = (datetime.fromtimestamp(int(epoch), tz=timezone.utc) if epoch and epoch.isdigit()
+              else datetime.now(timezone.utc))
+    return moment.isoformat(timespec='seconds')
 
 
 def _image_python(capture_: Capture) -> str:
@@ -3470,7 +3481,7 @@ def _write_manifest(capture_: Capture, out_dir: Path) -> None:
         python = capture_.environment.python
     manifest = dict(
         name=capture_.name,
-        exported_at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        exported_at=export_time(),
         mageml=dict(version=version, commit=_git_commit(Path(__file__).resolve().parent)),
         project=dict(name=capture_.project.name, commit=_git_commit(capture_.project)),
         python=python if capture_.needs_python else None,

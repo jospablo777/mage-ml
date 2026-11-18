@@ -112,6 +112,18 @@ The folder is a Docker build context:
 | `deploy/`, `.tekton/` | Kubernetes, IBM Cloud Code Engine and Tekton files |
 | `report.txt`, `README.md` | The report above and how to run this service |
 
+### The same export from the same sources
+
+Every file of an export follows from the project, its locks and MageML's version, except
+the time it was made. Set `SOURCE_DATE_EPOCH` (seconds since 1970, as reproducible builds
+do; a release job can use its commit's time) and the export takes that time: the same
+sources then give the same export, and the same zip from the **Services** page, byte for
+byte.
+
+```bash
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) mage export service shop load_orders --out ./orders-service
+```
+
 ### Private package indexes
 
 Locking reads the index uv is set up with. For a private one, set it in the environment

@@ -48,6 +48,9 @@
   blocks in 1.6 s instead of 3.4 s. Preparing a worker imports its packages once, so the
   first run after it does not wait for the first load of native libraries (11.6 s for
   pandas and pyarrow on macOS). `MAGE_WARM_WORKERS=0` turns it off.
+- Exports are reproducible: with `SOURCE_DATE_EPOCH` set, the same sources give the same
+  export and the same zip, byte for byte (only the export time differed). The Services
+  page lists two exports made in the same second newest first.
 - A Python worker can have a memory limit (`memory = "4 GiB"`, or its settings): a block
   over it is stopped and says how much it used, instead of taking the server's memory.
   Workers no longer get MageML's own credentials (its database URL, signing keys, sign-in

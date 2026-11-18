@@ -98,6 +98,20 @@ class AppExportTest(AppExportBase):
         self.assertIn(f'shop-orders/{self.project.name}/utils/rates.py', names)
         self.assertTrue(all(name.startswith('shop-orders/') for name in names))
 
+    def test_the_same_sources_export_to_the_same_zip_with_source_date_epoch(self):
+        # I-23: the export time and the files' times made every export differ.
+        self.chain()
+        zips = []
+        with patch.dict('os.environ', {'SOURCE_DATE_EPOCH': '1795000000'}):
+            for _ in range(2):
+                self.create(pipeline_uuids=[self.pipeline.uuid], name='shop')
+                time.sleep(1.1)
+                with exports.zip_export(self.repo_path, 'shop') as archive:
+                    zips.append(archive.read())
+        self.assertEqual(zips[0], zips[1])
+        service = json.loads((self.root / 'shop' / 'service.json').read_text())
+        self.assertEqual(service['service']['exported_at'], '2026-11-18T11:06:40+00:00')
+
     def test_the_zip_streams_large_files_instead_of_reading_them_whole(self):
         import tracemalloc
 

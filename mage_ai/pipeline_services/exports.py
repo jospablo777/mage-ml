@@ -418,6 +418,7 @@ def list_exports(repo_path: str) -> List[Dict]:
     if not root.is_dir():
         return []
     found = []
+    written = {}
     for directory in root.iterdir():
         manifest_path = directory / 'service.json'
         if not _NAME.match(directory.name) or not manifest_path.is_file():
@@ -445,7 +446,9 @@ def list_exports(repo_path: str) -> List[Dict]:
                 if t.get('kind') == 'time'
             ),
         ))
-    return sorted(found, key=lambda e: e['exported_at'], reverse=True)
+        written[directory.name] = manifest_path.stat().st_mtime_ns
+    # Exports of the same second (exported_at has seconds) in the order they were written.
+    return sorted(found, key=lambda e: (e['exported_at'], written[e['name']]), reverse=True)
 
 
 def zip_export(repo_path: str, name: str):
@@ -456,6 +459,17 @@ def zip_export(repo_path: str, name: str):
     directory = export_directory(repo_path, name)
     if not (directory / 'service.json').is_file():
         raise FileNotFoundError(f'There is no export named {name}; export it again.')
+    import shutil
+    from datetime import datetime
+
+    # Every entry dated when the export was made, not when its file was written: the same
+    # export (SOURCE_DATE_EPOCH set) gives the same zip, byte for byte.
+    try:
+        made = datetime.fromisoformat(
+            json.loads((directory / 'service.json').read_text())['service']['exported_at'])
+        stamp = max(made.timetuple()[:6], (1980, 1, 1, 0, 0, 0))
+    except (KeyError, TypeError, ValueError):
+        stamp = (1980, 1, 1, 0, 0, 0)
     archive = tempfile.NamedTemporaryFile(suffix='.zip', mode='w+b')
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, folders, files in os.walk(directory):
@@ -464,8 +478,13 @@ def zip_export(repo_path: str, name: str):
                 path = Path(root) / file
                 if path.is_symlink():
                     continue
+                info = zipfile.ZipInfo.from_file(
+                    path, str(Path(name) / path.relative_to(directory)))
+                info.date_time = stamp
+                info.compress_type = zipfile.ZIP_DEFLATED
                 # Streamed: an export holds its models, which can be large files.
-                zipf.write(path, str(Path(name) / path.relative_to(directory)))
+                with open(path, 'rb') as source, zipf.open(info, 'w') as target:
+                    shutil.copyfileobj(source, target, 1024 * 1024)
     archive.seek(0)
     return archive
 
