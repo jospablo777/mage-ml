@@ -6,6 +6,7 @@ import Button from '@oracle/elements/Button';
 import ClickOutside from '@oracle/components/ClickOutside';
 import FlexContainer from '@oracle/components/FlexContainer';
 import KeyboardShortcutButton from '@oracle/elements/Button/KeyboardShortcutButton';
+import Link from '@oracle/elements/Link';
 import PipelineType from '@interfaces/PipelineType';
 import ProgressBar from '@oracle/components/ProgressBar';
 import Spacing from '@oracle/elements/Spacing';
@@ -330,6 +331,14 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
   const summary = compilation?.summary;
   const hint = polyglotHint(summary);
   const last = compilation?.last_compiled;
+  const [showAllStops, setShowAllStops] = useState(false);
+  // Where chains stop, but language switches (the hint shows them) and SQL pairs (the SQL
+  // chains section shows them).
+  const stops = useMemo(() => {
+    const sqlBlocks = new Set((summary?.sql_left_out || []).map(({ block }) => block));
+    return (summary?.findings || []).filter(finding => finding.code !== 'language_switch'
+      && !sqlBlocks.has(finding.block));
+  }, [summary]);
 
   useEffect(() => {
     if (pipeline?.updated_at) {
@@ -513,6 +522,23 @@ function CompileStatus({ pipeline }: CompileStatusProps) {
                 <Text inline muted small> runs on its own: {reason}</Text>
               </Text>
             ))}
+          </Spacing>
+            )}
+
+          {stops.length >= 1 && (
+          <Spacing mt={2}>
+            <Text bold small>Where chains stop</Text>
+            {(showAllStops ? stops : stops.slice(0, 5)).map(finding => (
+              <Text key={`${finding.block}:${finding.next}`} small>
+                <Text inline monospace small>{finding.block} → {finding.next}</Text>
+                <Text inline muted small> {finding.reason}</Text>
+              </Text>
+            ))}
+            {stops.length > 5 && (
+              <Link onClick={() => setShowAllStops(prev => !prev)} small>
+                {showAllStops ? 'Show fewer' : `Show all ${stops.length}`}
+              </Link>
+            )}
           </Spacing>
             )}
 

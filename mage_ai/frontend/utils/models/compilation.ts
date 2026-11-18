@@ -28,12 +28,26 @@ export type CompilationSummaryType = {
   fusion: boolean;
   language_switches: number;
   languages: string[];
+  // Each place a block and the next could chain but do not, with the planner's reason
+  // (mage_ai/orchestration/planning.py). level group: they run in separate processes;
+  // segment: they share a process but do not compile into one unit.
+  findings?: PlanFindingType[];
+  // Blocks that compile into one unit: a Rust or R plan, or SQL views.
+  segments?: { blocks: string[]; kind: 'r' | 'rust' | 'sql' }[];
   // SQL chains (ClickHouse, DuckDB, PostgreSQL): the blocks that become views, read by the last one in one query.
   sql_chains?: { blocks: string[]; views: string[] }[];
   // SQL blocks followed by another that stay out of a chain, with the reason.
   sql_left_out?: { block: string; reason: string }[];
   // A streaming pipeline: how it runs on the engine (mage_ai/streaming/plan.py).
   stream?: StreamPlanType;
+};
+
+export type PlanFindingType = {
+  block: string;
+  code: string;
+  level: 'group' | 'segment';
+  next: string;
+  reason: string;
 };
 
 export type StreamPlanType = {
