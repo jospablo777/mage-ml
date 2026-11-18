@@ -587,6 +587,7 @@ The MageML documentation as Markdown, for reading on GitHub. It is generated fro
 - [S3 with pandas and Polars](development/s3-integration.md)
 - [Scheduler soak test](development/scheduler-soak.md)
 - [Trino with pandas and Polars](development/trino-integration.md)
+- [Worker protocols](development/worker-protocol.md)
 - [Install dependencies](getting-started/install-dependencies.md)
 - [Use a completed pipeline](guides/train/complete-project.md)
 - [Compute management for Spark](integrations/compute/management.md)
