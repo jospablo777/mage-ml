@@ -189,7 +189,7 @@ async fn run_blocks(
         .into_iter()
         .cloned()
         .collect();
-    let chains = block_chains(pipeline, &order);
+    let chains = block_chains(&order);
     let chained: HashSet<String> = chains
         .values()
         .flat_map(|(_, chain)| chain.iter().skip(1).map(|b| b.uuid.clone()))
@@ -357,68 +357,71 @@ fn chain_kind(block: &Block) -> Option<ChainKind> {
     }
 }
 
-/// Chains of blocks that run as one unit, keyed by their first block: blocks of one kind
-/// where each is the only downstream block of the one before and has no other upstream
-/// block, so nothing else needs the outputs in between. Only the last block's outputs
-/// are written. MAGE_SERVICE_CHAINS=off runs every block on its own;
-/// MAGE_SERVICE_RUST_CHAINS=off does that for Rust blocks only.
-fn block_chains(pipeline: &Pipeline, order: &[Block]) -> HashMap<String, (ChainKind, Vec<Block>)> {
-    let mut chains = HashMap::new();
+/// Chains of blocks that run as one unit, keyed by their first block, from the planner that
+/// MageML uses too (mage_service_core::plan, I-18): blocks of one kind where each is the
+/// only downstream block of the one before and has no other upstream block, so nothing else
+/// needs the outputs in between. Only the last block's outputs are written.
+/// MAGE_SERVICE_CHAINS=off runs every block on its own; MAGE_SERVICE_RUST_CHAINS=off does
+/// that for Rust blocks only.
+fn block_chains(order: &[Block]) -> HashMap<String, (ChainKind, Vec<Block>)> {
+    use mage_service_core::plan;
+
     let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "off");
-    if off("MAGE_SERVICE_CHAINS") {
-        return chains;
-    }
-    let rust_off = off("MAGE_SERVICE_RUST_CHAINS");
-    let downstream = pipeline.downstream();
+    let facts: Vec<plan::BlockFacts> = order.iter().map(service_facts).collect();
+    let options = plan::Options {
+        target: plan::Target::Service,
+        groups: !off("MAGE_SERVICE_CHAINS"),
+        segments: false,
+        rust_chains: !off("MAGE_SERVICE_RUST_CHAINS"),
+    };
+    let Ok(planned) = plan::plan(&facts, &options) else {
+        return HashMap::new();
+    };
     let by_uuid: HashMap<&str, &Block> = order.iter().map(|b| (b.uuid.as_str(), b)).collect();
-    let mut assigned: HashSet<String> = HashSet::new();
-    for block in order {
-        // A block with conditions runs on its own, so its conditions see its inputs; one with
-        // a contract or monitors too, so its output is written and checked.
-        let Some(kind) = chain_kind(block).filter(|_| {
-            block.conditions.is_empty() && block.contract.is_none() && block.monitors.is_empty()
-        }) else {
-            continue;
-        };
-        if assigned.contains(&block.uuid) || (kind == ChainKind::Rust && rust_off) {
-            continue;
-        }
-        let mut chain = vec![block.clone()];
+    planned
+        .groups
+        .into_iter()
+        .filter(|group| group.len() > 1)
+        .filter_map(|group| {
+            let blocks: Vec<Block> = group.iter().map(|u| by_uuid[u.as_str()].clone()).collect();
+            let kind = chain_kind(&blocks[0])?;
+            Some((blocks[0].uuid.clone(), (kind, blocks)))
+        })
+        .collect()
+}
+
+/// What the planner needs to know about a block of a service.
+fn service_facts(block: &Block) -> mage_service_core::plan::BlockFacts {
+    use mage_service_core::plan::{BlockFacts, Language as PlanLanguage};
+
+    // A block with conditions runs on its own, so its conditions see its inputs; one with a
+    // contract or monitors too, so its output is written and checked.
+    let alone = if !block.conditions.is_empty() {
+        Some("conditions decide whether it runs".to_string())
+    } else if block.contract.is_some() {
+        Some("its data contract checks its own output".to_string())
+    } else if !block.monitors.is_empty() {
+        Some("its monitors check its own output".to_string())
+    } else {
+        None
+    };
+    BlockFacts {
+        uuid: block.uuid.clone(),
+        language: Some(match block.language {
+            Language::Python => PlanLanguage::Python,
+            Language::R => PlanLanguage::R,
+            Language::Rust => PlanLanguage::Rust,
+            Language::Sql => PlanLanguage::Sql,
+            Language::Window => PlanLanguage::Other,
+        }),
+        upstream: block.upstream.clone(),
+        worker: block.python_worker.clone(),
         // One Rust process has one MAGE_IO_CONFIG: blocks with different profiles split.
-        let mut profile = block.io_config.clone();
-        loop {
-            let last = chain.last().expect("a chain has a block");
-            let next = match downstream.get(last.uuid.as_str()).map(Vec::as_slice) {
-                Some([only]) => by_uuid.get(only).copied(),
-                _ => None,
-            };
-            let Some(next) = next else { break };
-            let compatible = kind != ChainKind::Rust
-                || match (&profile, &next.io_config) {
-                    (Some(a), Some(b)) => a == b,
-                    _ => true,
-                };
-            if chain_kind(next) != Some(kind)
-                || (kind == ChainKind::Worker && next.python_worker != block.python_worker)
-                || next.upstream.len() != 1
-                || !next.conditions.is_empty()
-                || next.contract.is_some()
-                || !next.monitors.is_empty()
-                || !compatible
-            {
-                break;
-            }
-            if profile.is_none() {
-                profile = next.io_config.clone();
-            }
-            chain.push(next.clone());
-        }
-        if chain.len() > 1 {
-            assigned.extend(chain.iter().map(|b| b.uuid.clone()));
-            chains.insert(block.uuid.clone(), (kind, chain));
-        }
+        profile: block.io_config.as_ref().map(|v| v.to_string()),
+        alone,
+        compiled: block.entry.is_some(),
+        ..Default::default()
     }
-    chains
 }
 
 pub fn sanitize(uuid: &str) -> String {
@@ -1587,7 +1590,7 @@ mod tests {
             .into_iter()
             .cloned()
             .collect();
-        let mut chains: Vec<Vec<String>> = block_chains(pipeline, &order)
+        let mut chains: Vec<Vec<String>> = block_chains(&order)
             .into_values()
             .map(|(_, c)| c.into_iter().map(|b| b.uuid).collect())
             .collect();

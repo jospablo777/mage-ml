@@ -381,6 +381,7 @@ dependencies = [
  "mage-block",
  "mage-checks",
  "mage-log-window",
+ "mage-service-core",
  "memchr",
  "polars",
  "pyo3",
@@ -1443,6 +1444,16 @@ version = "0.1.0"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "mage-service-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

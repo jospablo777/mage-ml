@@ -1680,7 +1680,7 @@ def run_stage(
     """
     from mage_ai.data_preparation.models.block import plans
     from mage_ai.data_preparation.models.constants import BlockLanguage
-    from mage_ai.orchestration import fusion
+    from mage_ai.orchestration import fusion, planning
     from mage_ai.orchestration.queue.process_queue import register_job_alias
 
     pipeline_run = PipelineRun.get_by_id(pipeline_run_id)
@@ -1703,6 +1703,8 @@ def run_stage(
         repo_config = get_repo_config(repo_path=get_repo_path())
 
     previous_output = None
+    # The plan's segments, built when the stage first has a block that may compile.
+    stage_plan = None
     for index, block_run_id in enumerate(block_run_ids):
         block_run = BlockRun.get_by_id(block_run_id)
         block_uuid = block_run.block_uuid
@@ -1791,9 +1793,11 @@ def run_stage(
         if next_id is not None and block is not None and block.language in (
             BlockLanguage.RUST, BlockLanguage.R, BlockLanguage.SQL,
         ):
-            following = pipeline.get_block(BlockRun.get_by_id(next_id).block_uuid)
-            if plans.chains_with(block, following):
-                next_block = following.uuid
+            following_uuid = BlockRun.get_by_id(next_id).block_uuid
+            if stage_plan is None:
+                stage_plan = planning.plan_pipeline(pipeline, groups=True)
+            if stage_plan.in_segment_with(block_uuid, following_uuid):
+                next_block = following_uuid
         try:
             with plans.stage_context(next_block, pipeline_run_id), attempt_fence.holding(
                 block_run_id, pipeline_scheduler.attempts.get(block_run_id),

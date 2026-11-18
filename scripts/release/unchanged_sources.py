@@ -31,6 +31,7 @@ PACKAGES = {
         'mage_ai/data_preparation/models/block/rust/sdk',
         'mage_ai/pipeline_services/service/crates/checks',
         'mage_ai/pipeline_services/service/crates/log-window',
+        'mage_ai/pipeline_services/service/crates/core',
     ]),
     'mage-integrations': ('mage_integrations/pyproject.toml', ['mage_integrations']),
     'singer-python': ('vendor/singer-python/pyproject.toml', ['vendor/singer-python']),

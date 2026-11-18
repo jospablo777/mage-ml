@@ -179,31 +179,43 @@ def may_plan(block, step: Dict) -> bool:
 def output_needed(block, has_tests: bool) -> bool:
     """
     Whether something needs the block's own output, so it computes its chain instead of
-    planning: it is an exporter or a conditional, has tests, a data contract or monitors,
-    or the pipeline keeps every block's output. compilation.py builds the same chains.
+    planning: see output_needed_reason.
+    """
+    return output_needed_reason(block, has_tests) is not None
+
+
+def output_needed_reason(block, has_tests: bool) -> Optional[str]:
+    """
+    Why something needs the block's own output: it is an exporter or a conditional, has
+    tests, a data contract or monitors, or the pipeline keeps every block's output. None
+    when nothing does.
     """
     from mage_ai.data_preparation.models.constants import BlockType
 
-    if block.type in (BlockType.DATA_EXPORTER, BlockType.CONDITIONAL) or has_tests:
-        return True
+    if block.type == BlockType.DATA_EXPORTER:
+        return 'it is an exporter'
+    if block.type == BlockType.CONDITIONAL:
+        return 'it is a condition'
+    if has_tests:
+        return 'it has tests'
     pipeline = block.pipeline
     if pipeline is not None and getattr(pipeline, 'keep_block_outputs', False):
-        return True
+        return 'the pipeline keeps every block\'s output'
     try:
         from mage_ai.data_preparation import contracts
 
         if contracts.binding_of(block) is not None:
-            return True
+            return 'it has a data contract'
     except Exception:
-        return True
+        return 'its data contract could not be read'
     try:
         from mage_ai.orchestration.monitors import monitors_for
 
         if pipeline is not None and monitors_for(block.repo_path, pipeline.uuid, block.uuid):
-            return True
+            return 'it has monitors'
     except Exception:
-        return True
-    return False
+        return 'its monitors could not be read'
+    return None
 
 
 def mark_failed(block_uuid: str, message: str) -> None:

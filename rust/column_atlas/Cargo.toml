@@ -33,6 +33,8 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 # use too.
 mage-checks = { path = "../../mage_ai/pipeline_services/service/crates/checks" }
 mage-log-window = { path = "../../mage_ai/pipeline_services/service/crates/log-window" }
+# The planner, so MageML and exported services chain pipelines one way.
+mage-service-core = { path = "../../mage_ai/pipeline_services/service/crates/core" }
 memchr = "2"
 # Keyed hashes of masked development copies (src/mask.rs).
 ring = "0.17"

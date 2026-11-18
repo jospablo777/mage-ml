@@ -283,9 +283,17 @@ fn mask_table(
     json(&report)
 }
 
+/// Which blocks of a pipeline run together (the planner of mage-service-core, I-18):
+/// `{"blocks": [...], "options": {...}}` in, the plan out, both JSON.
+#[pyfunction]
+fn plan_pipeline(input: String) -> PyResult<String> {
+    mage_service_core::plan::plan_json(&input).map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(log_window, module)?)?;
+    module.add_function(wrap_pyfunction!(plan_pipeline, module)?)?;
     module.add_function(wrap_pyfunction!(log_search, module)?)?;
     #[cfg(feature = "postgres")]
     {

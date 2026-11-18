@@ -83,6 +83,21 @@ against about 14.5 s.
 
 ## Which blocks join a chain
 
+One planner decides, for MageML's scheduler, `mage run`, the Compile panel and exported
+services alike: `plan.rs` in the engine's `mage-service-core`, reached from Python through
+`column_atlas_native.plan_pipeline` (`mage_ai/orchestration/planning.py`). Python describes
+each block (its language, worker, connection profile, and why it must run alone or write
+its own output) and the planner returns:
+
+| Output | MageML | Exported service |
+|---|---|---|
+| Groups | Stages: one process, any languages | Chains: one Rust binary, or one Python worker's request for Python, R and SQL blocks of the same named worker |
+| Segments | Rust plans, R plans and SQL views inside a stage | None (the Rust chain is the group) |
+| Findings | Each place a block and the next could chain but do not, with the reason | The same |
+
+The Compile panel lists the findings under **Where chains stop**, one line per stop
+(`load → clean  clean runs on its own: its settings turn fusion off`).
+
 A block joins its upstream's stage only when the upstream has no other downstream block,
 the block has no other upstream block, and neither is excluded below. Each rule comes
 from a reader or a runtime that needs a separate process or data in storage.
@@ -102,6 +117,12 @@ from a reader or a runtime that needs a separate process or data in storage.
 | Pipelines with `run_pipeline_in_one_process` | That setting already decides the process; it wins |
 | Blocks with `fusion: false` | The block runs alone: it starts a stage and ends it |
 | Streaming and integration pipelines | Their own executors |
+
+Within a stage, consecutive Rust blocks compile into one plan when they use one
+connection profile and nothing needs the earlier block's own output (an exporter, tests, a
+data contract, monitors, or a pipeline that keeps every output); consecutive R blocks
+likewise; and SQL blocks of one database and profile become views, every one but the last,
+which reads them in one query and may append to its own table.
 
 Fusion is a pipeline setting, `block_fusion: chains`, off by default in the first
 release. `fusion: false` on a block isolates it on both sides, for blocks that change

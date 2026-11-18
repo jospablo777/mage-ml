@@ -147,9 +147,8 @@ def _plural(count: int, word: str) -> str:
 
 def units_for(pipeline) -> List[Unit]:
     """What compiling the pipeline checks and builds, in the order it runs them."""
-    from mage_ai.data_preparation.models.block import plans
     from mage_ai.data_preparation.models.constants import BlockLanguage
-    from mage_ai.orchestration import fusion
+    from mage_ai.orchestration import planning
 
     blocks = compiled_blocks(pipeline)
     units = []
@@ -159,35 +158,18 @@ def units_for(pipeline) -> List[Unit]:
             units.append(Unit(f'{language}_check',
                               f'Check {_plural(len(uuids), f"{name} block")}', language, uuids))
 
-    if fusion.fusion_enabled(pipeline):
-        stages = fusion.fusion_plan(pipeline)
-    else:
-        stages = [[uuid] for uuid in pipeline.blocks_by_uuid]
-    for stage in stages:
-        position = 0
-        while position < len(stage):
-            block = pipeline.get_block(stage[position])
+    plan = planning.plan_pipeline(pipeline)
+    for group in plan.groups:
+        for uuid in group:
+            block = pipeline.get_block(uuid)
             if block is None or block.language != BlockLanguage.RUST:
-                position += 1
                 continue
-            members = [block]
-            while position + len(members) < len(stage):
-                previous = members[-1]
-                following = pipeline.get_block(stage[position + len(members)])
-                if (
-                    following is None
-                    or following.language != BlockLanguage.RUST
-                    or plans.output_needed(previous, _rust_tests(previous))
-                    or _profile(previous) != _profile(following)
-                ):
-                    break
-                members.append(following)
-            uuids = [b.uuid for b in members]
-            if len(members) > 1:
+            segment = plan.segment_of(uuid)
+            if segment is None:
+                units.append(Unit('rust_block', uuid, 'rust', [uuid]))
+            elif segment['blocks'][0] == uuid:
+                uuids = list(segment['blocks'])
                 units.append(Unit('rust_chain', ' → '.join(uuids), 'rust', uuids))
-            else:
-                units.append(Unit('rust_block', uuids[0], 'rust', uuids))
-            position += len(members)
     if any(_language(b) == 'r' for b in blocks):
         units.append(Unit('r_environment', 'R environment and packages', 'r', []))
     return units
@@ -197,8 +179,10 @@ def summary_for(pipeline) -> Dict:
     """
     The pipeline's chains by language and its language switches: each switch between
     blocks of different languages converts the data, so single-language chains run best.
+    The chains, compiled segments and the reasons blocks do not chain come from the
+    planner (planning.py).
     """
-    from mage_ai.orchestration import fusion
+    from mage_ai.orchestration import fusion, planning
 
     blocks = pipeline.blocks_by_uuid
     languages = sorted({_language(b) for b in code_blocks(pipeline)})
@@ -206,16 +190,20 @@ def summary_for(pipeline) -> Dict:
         1 for block in blocks.values() for down in (block.downstream_blocks or [])
         if down.uuid in blocks and down.language != block.language
     )
+    fused = fusion.fusion_enabled(pipeline)
+    # Only batch Python pipelines run in stages.
+    plan = planning.plan_pipeline(pipeline) \
+        if str(getattr(pipeline.type, 'value', pipeline.type)) == 'python' else None
     chains = [
         dict(
-            blocks=stage,
+            blocks=group,
             languages=sorted({
                 str(getattr(blocks[uuid].language, 'value', blocks[uuid].language))
-                for uuid in stage if uuid in blocks
+                for uuid in group if uuid in blocks
             }),
         )
-        for stage in (fusion.fusion_plan(pipeline) if fusion.fusion_enabled(pipeline) else [])
-        if len(stage) > 1
+        for group in (plan.groups if plan is not None and fused else [])
+        if len(group) > 1
     ]
     # The languages in pipeline order, consecutive blocks of one language merged:
     # [python ×1, rust ×2, r ×1] for a Python block, two Rust blocks and an R block.
@@ -230,13 +218,16 @@ def summary_for(pipeline) -> Dict:
         blocks=len(blocks),
         chains=chains,
         flow=flow,
-        fusion=fusion.fusion_enabled(pipeline),
+        fusion=fused,
         languages=languages,
         language_switches=switches,
     )
-    sql_chains, sql_left_out = _sql_chains(pipeline)
-    if sql_chains or sql_left_out:
-        summary.update(sql_chains=sql_chains, sql_left_out=sql_left_out)
+    if plan is not None and fused:
+        summary['segments'] = plan.segments
+        summary['findings'] = plan.findings
+        sql_chains, sql_left_out = _sql_chains(pipeline, plan)
+        if sql_chains or sql_left_out:
+            summary.update(sql_chains=sql_chains, sql_left_out=sql_left_out)
     if str(getattr(pipeline.type, 'value', pipeline.type)) == 'streaming':
         from mage_ai.streaming.plan import stream_plan
 
@@ -244,40 +235,28 @@ def summary_for(pipeline) -> Dict:
     return summary
 
 
-def _sql_chains(pipeline):
+def _sql_chains(pipeline, plan):
     """
-    The DuckDB SQL chains of a production run, and each SQL block followed in its stage by
-    another SQL block that stays out of a chain, with the reason.
+    The SQL chains of a production run (views, then the block that reads them), and each
+    SQL block followed in its stage by a SQL block it does not chain with, with the
+    planner's reason.
     """
-    from mage_ai.data_preparation.models.block import plans
     from mage_ai.data_preparation.models.constants import BlockLanguage
-    from mage_ai.orchestration import fusion
 
-    if not fusion.fusion_enabled(pipeline):
-        return [], []
-    chains, left_out = [], []
-    for stage in fusion.fusion_plan(pipeline):
-        blocks = [pipeline.get_block(uuid) for uuid in stage]
-        chain = []
-        for block, following in zip(blocks, blocks[1:] + [None]):
-            if block is None or block.language != BlockLanguage.SQL:
-                continue
-            if following is not None and following.language == BlockLanguage.SQL:
-                if plans.chains_with(block, following) and \
-                        not plans.output_needed(block, False):
-                    chain.append(block.uuid)
-                    continue
-                reason = plans.sql_view_problem(block)
-                if reason is None and plans.output_needed(block, False):
-                    reason = ('Its own rows are needed: it is an exporter, or has a data '
-                              'contract or monitors, or the pipeline keeps every output.')
-                left_out.append(dict(block=block.uuid, reason=reason or (
-                    'The next block uses another connection profile.'
-                )))
-            if chain:
-                chains.append(dict(blocks=chain + [block.uuid], views=list(chain)))
-                chain = []
-    return chains, left_out
+    chains = [
+        dict(blocks=list(segment['blocks']), views=list(segment['blocks'][:-1]))
+        for segment in plan.segments if segment['kind'] == 'sql'
+    ]
+    left_out = {}
+
+    def sql(uuid):
+        block = pipeline.get_block(uuid)
+        return block is not None and block.language == BlockLanguage.SQL
+
+    for finding in plan.findings:
+        if finding['level'] == 'segment' and sql(finding['block']) and sql(finding['next']):
+            left_out.setdefault(finding['block'], finding['reason'])
+    return chains, [dict(block=uuid, reason=reason) for uuid, reason in left_out.items()]
 
 
 def _check_python(pipeline, unit: Unit) -> None:

@@ -975,7 +975,7 @@ wheels = [
 
 [[package]]
 name = "column-atlas-native"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "rust/column_atlas" }
 
 [[package]]
@@ -4021,7 +4021,7 @@ dev = [
 
 [[package]]
 name = "mageml-engine"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/mageml-engine" }
 
 [[package]]

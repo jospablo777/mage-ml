@@ -119,18 +119,32 @@ def run_controlled(block) -> bool:
 
 def block_can_fuse(pipeline, block) -> bool:
     """Whether a block can run in a stage with the blocks before and after it."""
-    if block is None:
-        return False
-    if (block.configuration or {}).get('fusion') is False:
-        return False
+    return block is not None and alone_reason(pipeline, block) is None
+
+
+def alone_reason(pipeline, block) -> Optional[str]:
+    """Why a block runs alone instead of in a stage with its neighbours; None when it
+    can join one. The planner (planning.py) shows the reason in the Compile panel."""
+    configuration = block.configuration or {}
+    if configuration.get('fusion') is False:
+        return 'its settings turn fusion off'
     # Whether it runs is decided on its own, before it starts.
-    if run_controlled(block):
-        return False
-    return block_can_run_in_stage(pipeline, block)
+    if configuration.get('disabled'):
+        return 'it is disabled'
+    if has_trigger_rule(block):
+        return f'its trigger rule ({block_trigger_rule(block)}) decides whether it runs'
+    if getattr(block, 'conditional_blocks', None):
+        return 'conditions decide whether it runs'
+    return stage_problem(pipeline, block)
 
 
 def block_can_run_in_stage(pipeline, block) -> bool:
     """Whether a block can run in a stage of `mage run` in this process."""
+    return block is not None and stage_problem(pipeline, block) is None
+
+
+def stage_problem(pipeline, block) -> Optional[str]:
+    """Why a block cannot run in a stage at all; None when it can."""
     from mage_ai.data_preparation.executors.executor_factory import ExecutorFactory
     from mage_ai.data_preparation.models.block.dynamic.utils import (
         is_dynamic_block,
@@ -139,25 +153,26 @@ def block_can_run_in_stage(pipeline, block) -> bool:
         should_reduce_output,
     )
 
-    if block is None:
-        return False
     configuration = block.configuration or {}
     if configuration.get('variables'):
-        return False
+        return 'it sets variables of its own'
     # A block that declares resources waits for them on its own (resources.py).
     if configuration.get('resources'):
-        return False
-    if block.type not in FUSIBLE_BLOCK_TYPES or block.language not in FUSIBLE_LANGUAGES:
-        return False
-    if (
-        is_dynamic_block(block)
-        or is_dynamic_block_child(block)
-        or should_reduce_output(block)
-        or is_replicated_block(block)
-        or block.is_data_integration()
-    ):
-        return False
-    return ExecutorFactory.get_block_executor_type(pipeline, block) in LOCAL_EXECUTOR_TYPES
+        return 'it waits for the resources it declares'
+    if block.type not in FUSIBLE_BLOCK_TYPES:
+        return f'{getattr(block.type, "value", block.type)} blocks run on their own'
+    if block.language not in FUSIBLE_LANGUAGES:
+        return f'{getattr(block.language, "value", block.language)} blocks run on their own'
+    if is_dynamic_block(block) or is_dynamic_block_child(block) or should_reduce_output(block):
+        return 'it is dynamic: it runs once per item'
+    if is_replicated_block(block):
+        return 'it replicates another block'
+    if block.is_data_integration():
+        return 'it is a data integration block'
+    executor = ExecutorFactory.get_block_executor_type(pipeline, block)
+    if executor not in LOCAL_EXECUTOR_TYPES:
+        return f'it runs on the {getattr(executor, "value", executor)} executor'
+    return None
 
 
 def block_run_can_fuse(block_run: BlockRun) -> bool:
@@ -166,20 +181,19 @@ def block_run_can_fuse(block_run: BlockRun) -> bool:
     return not (SPECIAL_METRICS & set(metrics)) and not int(metrics.get('crashes') or 0)
 
 
-def next_in_chain(pipeline, block):
+def next_in_chain(pipeline, block, plan=None):
     """
-    The block that runs after this one in the same stage, or None: this block's only
-    downstream block, when that block has no other upstream block and both can fuse.
+    The block that runs after this one in the same stage, or None, from the planner
+    (planning.py): this block's only downstream block, when that block has no other
+    upstream block and both can fuse.
     """
-    downstream = block.downstream_blocks or []
-    if len(downstream) != 1:
+    from mage_ai.orchestration import planning
+
+    if block is None:
         return None
-    following = downstream[0]
-    if len(following.upstream_blocks or []) != 1:
-        return None
-    if not block_can_fuse(pipeline, block) or not block_can_fuse(pipeline, following):
-        return None
-    return following
+    plan = plan or planning.plan_pipeline(pipeline, groups=True, segments=False)
+    following = plan.next_in_group(block.uuid)
+    return pipeline.get_block(following) if following else None
 
 
 def stage_block_runs(pipeline, head: BlockRun, block_runs: List[BlockRun]) -> List[BlockRun]:
@@ -187,16 +201,19 @@ def stage_block_runs(pipeline, head: BlockRun, block_runs: List[BlockRun]) -> Li
     The block runs of the stage that starts with head: head, then each next block of the
     chain while its block run is the only one of its block and still INITIAL.
     """
+    from mage_ai.orchestration import planning
+
     block = pipeline.get_block(head.block_uuid)
     if not block_can_fuse(pipeline, block) or not block_run_can_fuse(head):
         return [head]
+    plan = planning.plan_pipeline(pipeline, groups=True, segments=False)
     runs_by_block = {}
     for block_run in block_runs:
         runs_by_block.setdefault(block_run.block_uuid, []).append(block_run)
 
     stage = [head]
     while True:
-        following = next_in_chain(pipeline, block)
+        following = next_in_chain(pipeline, block, plan)
         if following is None:
             break
         runs = runs_by_block.get(following.uuid) or []
@@ -212,28 +229,14 @@ def stage_block_runs(pipeline, head: BlockRun, block_runs: List[BlockRun]) -> Li
 def fusion_plan(pipeline) -> List[List[str]]:
     """
     The stages a run of the pipeline as saved compiles into, as lists of block uuids:
-    each chain of blocks that run in one process, and each block that runs alone. A run
-    builds the same stages from its block runs when it starts.
+    each chain of blocks that run in one process, and each block that runs alone, in the
+    order they can start. A run builds the same stages from its block runs when it starts.
     """
+    from mage_ai.orchestration import planning
+
     if pipeline is None or pipeline.type != PipelineType.PYTHON:
         return []
-    # Markdown, charts and scratchpads are not run.
-    blocks = [b for b in pipeline.blocks_by_uuid.values() if executable(b)]
-    continues = {
-        following.uuid for following in (next_in_chain(pipeline, b) for b in blocks)
-        if following is not None
-    }
-    stages = []
-    for block in blocks:
-        if block.uuid in continues:
-            continue
-        stage = [block.uuid]
-        following = next_in_chain(pipeline, block)
-        while following is not None:
-            stage.append(following.uuid)
-            following = next_in_chain(pipeline, following)
-        stages.append(stage)
-    return stages
+    return planning.plan_pipeline(pipeline, groups=True, segments=False).groups
 
 
 def passes_in_memory(output: Any) -> bool:
@@ -538,14 +541,17 @@ def _run_stage_in_process(pipeline, stage: List[str], global_vars: Dict, run_tes
     a Rust or R block followed by one of its language may plan (block/plans.py). Each
     block's status goes in statuses as a block run's would."""
     from mage_ai.data_preparation.models.block import plans
+    from mage_ai.orchestration import planning
     from mage_ai.orchestration.db import end_transaction
 
     statuses = statuses if statuses is not None else {}
     previous = None
+    plan = planning.plan_pipeline(pipeline, groups=True)
     for index, uuid in enumerate(stage):
         block = pipeline.get_block(uuid)
         following = pipeline.get_block(stage[index + 1]) if index + 1 < len(stage) else None
-        next_block = following.uuid if plans.chains_with(block, following) else None
+        next_block = following.uuid if following is not None and \
+            plan.in_segment_with(uuid, following.uuid) else None
         # Each block gets its own copy of the run's variables, as in a scheduled run.
         variables = member_variables(global_vars)
         if not _conditions_pass(block, variables, execution_partition):

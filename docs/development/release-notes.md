@@ -1,5 +1,20 @@
 # Release notes
 
+## Unreleased
+
+### Behavior changes to check before upgrading
+
+- Consecutive Rust blocks with different connection profiles no longer compile into one
+  chain in MageML runs; they compiled together while `mage compile` and exported services
+  kept them apart, and one Rust process reads one profile. Each now runs with its own.
+
+### Pipelines
+
+- One planner decides which blocks run together for MageML's scheduler, `mage run`, the
+  Compile panel and exported services; they used four sets of rules. The Compile panel
+  lists **Where chains stop**: each place a block and the next could run together but do
+  not, with the reason (a trigger rule, fusion off, tests, another worker or profile).
+
 ## MageML 0.3.0 (2026-11-16)
 
 Changes since 0.2.0. The main additions are the run engine for triggered runs, compiled SQL

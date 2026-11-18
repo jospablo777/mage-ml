@@ -20,7 +20,7 @@ dependencies = [
   "cachetools",
   "click>=8.3.3",
   # ColumnAtlas, the block output explorer: a Rust extension built from rust/column_atlas.
-  "column-atlas-native==0.2.0",
+  "column-atlas-native==0.2.1",
   "Faker>=40.41",
   "GitPython>=3.2,<4",
   "Jinja2>=3.1.6",
@@ -255,7 +255,7 @@ integrations = ["mage-integrations==0.2.0"]
 # Dependency profile used by the container image.
 # The Rust engine, mage-service: stream and pipeline services, and the scheduler's jobs in
 # warm workers (on by default when it is installed; MAGE_JOB_ENGINE=off turns it off).
-services = ["mageml-engine>=0.2.0"]
+services = ["mageml-engine>=0.2.1"]
 all = [
   "mage-ml[airtable]",
   "mage-ml[azure]",
