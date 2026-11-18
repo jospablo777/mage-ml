@@ -58,6 +58,14 @@
   lock such an old release asks first ("uv would lock feast 0.20.0 from April 2022, 4
   years old; the newest is 0.68.0...") and changes nothing until confirmed; versions that
   cannot go together are refused in one sentence naming the package and the line.
+- Warm worker processes start each block as a new process would: a changed project file
+  (a helper in `utils/`) is imported again instead of the copy the process kept, and a
+  block's changes to `os.environ` and `sys.path` do not reach the next block; at most four
+  processes stay idle per worker. A worker with pandas gets pyarrow (tables cross as
+  Arrow), and the page now shows what a save added or changed.
+- Feast, MLflow 2 next to MLflow 3, HTTP APIs, diamonds, a chain that changes worker at
+  every block and blocks of several pipelines at once are tested end to end in workers
+  (`integration_tests/workers`).
 - One worker whose `pyproject.toml` cannot be read no longer stops every worker (the
   Workers page, and every block in any worker, failed with its error): it shows as
   **Broken** with the reason and opens on its file to fix it. A `uv.lock` that cannot be

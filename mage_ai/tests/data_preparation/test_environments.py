@@ -826,6 +826,40 @@ class WarmWorkerTest(DBTestCase):
         where, _ = self.run_code('return os.getcwd()')
         self.assertEqual(os.path.realpath(where), os.path.realpath(self.repo_path))
 
+    def test_a_block_sees_the_projects_files_as_they_are_now(self):
+        # A warm process kept the helper module it imported first: an edit to the project's
+        # utils did not reach the next run, as it does in a new process.
+        helpers = Path(self.repo_path, 'utils', 'warm_helpers.py')
+        helpers.parent.mkdir(exist_ok=True)
+        self.addCleanup(helpers.unlink, True)
+        code = ('from utils.warm_helpers import VALUE\n'
+                "return dict(value=VALUE, pid=os.getpid())")
+        helpers.write_text('import os\nVALUE = 1\n\ndef pid():\n    return os.getpid()\n')
+        first, _ = self.run_code(code)
+        helpers.write_text('import os\nVALUE = 22\n\ndef pid():\n    return os.getpid()\n')
+        second, _ = self.run_code(code)
+        self.assertEqual((first['value'], second['value']), (1, 22))
+        self.assertEqual(first['pid'], second['pid'], 'the same warm process')
+
+    def test_what_a_block_does_to_the_environment_does_not_reach_the_next(self):
+        self.run_code("os.environ['LEAKED'] = 'yes'\nsys.path.insert(0, '/nowhere')\nreturn 1")
+        seen, _ = self.run_code(
+            "return dict(leaked=os.environ.get('LEAKED'), path='/nowhere' in sys.path)")
+        self.assertEqual(seen, dict(leaked=None, path=False))
+
+    def test_at_most_a_few_processes_wait_idle_per_environment(self):
+        import threading
+
+        from mage_ai.data_preparation import warm_workers
+
+        threads = [threading.Thread(target=self.run_code, args=('time.sleep(0.5)\nreturn 1',))
+                   for _ in range(warm_workers.MAX_IDLE_PER_ENVIRONMENT + 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(warm_workers.idle_count(), warm_workers.MAX_IDLE_PER_ENVIRONMENT)
+
     def test_a_process_that_dies_fails_its_block_and_the_next_gets_a_new_one(self):
         before, _ = self.run_code('return os.getpid()')
         with self.assertRaisesRegex(environments.PipelineEnvironmentError,

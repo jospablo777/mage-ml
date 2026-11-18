@@ -230,8 +230,14 @@ the same packages reads back; return a table or JSON values between workers inst
 A worker's blocks run in warm processes: the first block starts a process of the worker,
 which stays up for the next ones (and for the editor's next run), so Python's start and
 the imports of pandas and pyarrow are paid once. Blocks that run at the same time get
-processes of their own; an idle process stops after 5 minutes. Measured on an M-series
-Mac:
+processes of their own; at most four stay idle per worker
+(`MAGE_WARM_WORKER_MAX_IDLE`), and an idle one stops after 5 minutes.
+
+Each block in a warm process starts as it would in a new one: when a file of the project
+changed (a helper in `utils/`), the project's modules are imported again, and what a block
+did to `os.environ` or `sys.path` is undone. What a library keeps inside its own module
+(`mlflow.set_tracking_uri`) stays for the next block of that worker, as in any Python
+process: set it in each block that relies on it. Measured on an M-series Mac:
 
 | | A process per block | Warm processes |
 | --- | --- | --- |
@@ -272,6 +278,9 @@ take 4.0 seconds; there, copying the inputs and outputs as Arrow files is the co
   shows as **Broken** with the reason, and opens on its file to fix it; the other workers
   keep working, and a block in it says why it cannot run. A `uv.lock` that cannot be read
   is shown too, and saving the packages locks them anew.
+- Tables reach a worker as Arrow: a worker with pandas needs pyarrow (the Workers page
+  adds it next to pandas, and says so), a worker with Polars reads Arrow itself, and a
+  worker with neither gets values that are not tables only.
 - A lock that resolves is not proof the packages work together: an old release can allow
   versions it never ran with. Watch for **Held back** packages, and run the blocks.
 - The run's variables reach a worker block as JSON values; others are left out.

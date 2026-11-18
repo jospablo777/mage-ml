@@ -1370,6 +1370,67 @@ def _protocol_fd(variable: str, default: Optional[int]) -> Optional[int]:
     return fd
 
 
+# The project's own modules a warm process imported, with each file's (mtime_ns, size).
+_project_files: Dict[str, Tuple[int, int]] = {}
+
+
+def _forget_changed_project_modules() -> None:
+    """
+    A warm process (MageML's, end_marker) keeps the modules it imported; a fresh one reads
+    the project's files as they are now. When one of the project's own files changed or is
+    gone, every module of the project is imported again by the next block that needs it:
+    all of them, since one keeps the names it took from another.
+    """
+    import importlib
+
+    changed = False
+    for path, seen in list(_project_files.items()):
+        try:
+            stat = os.stat(path)
+            changed = changed or (stat.st_mtime_ns, stat.st_size) != seen
+        except OSError:
+            changed = True
+    if changed:
+        for name, _ in _project_modules():
+            sys.modules.pop(name, None)
+        _project_files.clear()
+        importlib.invalidate_caches()
+
+
+def _remember_project_modules() -> None:
+    """After a request: the project's modules it imported, as their files are now."""
+    for _, path in _project_modules():
+        if path not in _project_files:
+            try:
+                stat = os.stat(path)
+                _project_files[path] = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                pass
+
+
+# Each module's file when it is one of the project's, None when not, by module name: a
+# request then looks only at the modules imported since the last one (10 ms to 0.1).
+_classified: Dict[str, Optional[str]] = {}
+
+
+def _project_modules() -> List[Tuple[str, str]]:
+    root = os.path.realpath(os.environ.get('MAGE_REPO_PATH') or os.getcwd())
+    parent = os.path.dirname(root) + os.sep
+    owned = []
+    for name, module in list(sys.modules.items()):
+        if name not in _classified:
+            path = getattr(module, '__file__', None)
+            path = os.path.realpath(path) if path else None
+            # The project's files (imported as <project>.utils or utils), not installed
+            # packages.
+            mine = bool(path) and path.startswith(parent) and 'site-packages' not in path and (
+                path.startswith(root + os.sep) or name.split('.')[0] == os.path.basename(root))
+            _classified[name] = path if mine else None
+        if _classified[name]:
+            owned.append((name, _classified[name]))
+    return owned
+
+
 def serve(requests=None, channel=None) -> None:
     # Requests come on the descriptor MAGE_WORKER_REQUEST_FD names (the service uses 4 and
     # gives the worker /dev/null as stdin), or on stdin when it is not set.
@@ -1394,6 +1455,12 @@ def serve(requests=None, channel=None) -> None:
             return
         # A block that changes directory does not move the next request's.
         directory = os.getcwd()
+        warm = bool(request.get('end_marker'))
+        if warm:
+            # In MageML's warm processes each block starts as in a fresh one: the project's
+            # files as they are now, the environment and import path as the process began.
+            _forget_changed_project_modules()
+            environ, path = dict(os.environ), list(sys.path)
         try:
             if request.get('op') == 'stream':
                 # The reply holds the outputs' JSON: a Polars output is not made a list.
@@ -1429,6 +1496,12 @@ def serve(requests=None, channel=None) -> None:
                 os.chdir(directory)
             except OSError:
                 pass
+            if warm:
+                _remember_project_modules()
+                if dict(os.environ) != environ:
+                    os.environ.clear()
+                    os.environ.update(environ)
+                sys.path[:] = path
             if request.get('end_marker'):
                 print(f'{END_MARKER}{request_id}', flush=True)
                 print(f'{END_MARKER}{request_id}', file=sys.stderr, flush=True)

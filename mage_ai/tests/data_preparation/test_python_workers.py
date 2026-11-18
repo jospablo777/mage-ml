@@ -351,6 +351,20 @@ class PythonWorkersTest(DBTestCase):
                 listed),
             'feast 0.68.0 needs Python>=3.15, and the worker runs another Python.')
 
+    def test_pandas_gets_pyarrow_and_the_page_says_why(self):
+        # A worker with pandas and no pyarrow failed its first block that took a table:
+        # tables cross as Arrow, which pandas reads with pyarrow.
+        folder = self.worker()
+        with patch.object(python_workers, '_older_releases', return_value=[]):
+            result = python_workers.update(self.repo_path, 'tools',
+                                           dependencies=['six==1.16.0', 'pandas'])
+        self.assertEqual(result['notes'], [python_workers.PYARROW_NOTE])
+        self.assertIn('"pyarrow"', (folder / 'pyproject.toml').read_text())
+
+        self.assertEqual(python_workers._with_pyarrow(['polars']), (['polars'], None))
+        self.assertEqual(python_workers._with_pyarrow(['pandas', 'PyArrow>=17']),
+                         (['pandas', 'PyArrow>=17'], None))
+
     def test_a_memory_limit_is_set_checked_and_cleared(self):
         folder = self.worker()
         python_workers.update(self.repo_path, 'tools', memory='3 GiB')

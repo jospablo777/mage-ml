@@ -787,3 +787,158 @@ def test_an_exported_service_runs_workers_with_the_same_versions_in_one_process(
     finally:
         for name in ('same-a', 'same-b'):
             shutil.rmtree(Path(workers, environments.WORKERS_DIR, name), ignore_errors=True)
+
+
+NUMBERS = '''
+    import pandas as pd
+
+    @data_loader
+    def load(*args, **kwargs):
+        return pd.DataFrame({'id': list(range(1, 201)), 'amount': [i * 0.5 for i in range(1, 201)]})
+'''
+
+
+def test_a_diamond_across_three_workers_joins_in_a_worker_the_same_fused_and_not(workers):
+    # Three branches in three environments (pandas 2, Python 3.13, Polars only) join in a
+    # fourth: the Polars branch's table reaches pandas 2 as pandas.
+    pipeline = pipeline_of(workers, [
+        ('load', 'data_loader', None, NUMBERS),
+        ('double', 'transformer', 'pandas2', '''
+            @transformer
+            def double(data, *args, **kwargs):
+                return data.assign(doubled=data['amount'] * 2)[['id', 'doubled']]
+        ''', ['load']),
+        ('square', 'transformer', 'py313', '''
+            import sys
+
+            @transformer
+            def square(data, *args, **kwargs):
+                assert sys.version_info[:2] == (3, 13)
+                return data.assign(squared=data['amount'] ** 2)[['id', 'squared']]
+        ''', ['load']),
+        ('flag', 'transformer', 'polars', '''
+            import polars as pl
+
+            @transformer
+            def flag(data, *args, **kwargs):
+                assert isinstance(data, pl.DataFrame), type(data)
+                return data.with_columns(big=pl.col('amount') > 50).select('id', 'big')
+        ''', ['load']),
+        ('join', 'transformer', 'pandas2', '''
+            import pandas as pd
+
+            @transformer
+            def join(doubled, squared, flagged, *args, **kwargs):
+                assert pd.__version__.startswith('2.')
+                assert isinstance(flagged, pd.DataFrame), type(flagged)
+                return doubled.merge(squared, on='id').merge(flagged, on='id')
+        ''', ['double', 'square', 'flag']),
+        ('total', 'transformer', None, '''
+            @transformer
+            def total(data, *args, **kwargs):
+                return data.agg({'doubled': 'sum', 'squared': 'sum', 'big': 'sum'}).to_frame().T
+        '''),
+    ])
+    fused = assert_same_both_ways(pipeline)
+    total = output(pipeline, fused, 'total')
+    assert total['doubled'][0] == sum(i for i in range(1, 201))
+    assert total['squared'][0] == sum((i * 0.5) ** 2 for i in range(1, 201))
+    assert total['big'][0] == 100
+
+
+def test_a_chain_that_changes_worker_at_every_block_keeps_every_value(workers):
+    steps = ['pandas2', 'py313', None, 'polars', 'pandas2', None, 'py313', 'polars']
+    blocks = [('load', 'data_loader', None, NUMBERS)]
+    for index, worker in enumerate(steps):
+        blocks.append((f'step{index}', 'transformer', worker, '''
+            @transformer
+            def step(data, *args, **kwargs):
+                return data.with_columns((data['amount'] + 1).alias('amount')) \\
+                    if hasattr(data, 'with_columns') else data.assign(amount=data['amount'] + 1)
+        '''))
+    pipeline = pipeline_of(workers, blocks)
+    fused = assert_same_both_ways(pipeline)
+    last = output(pipeline, fused, f'step{len(steps) - 1}')
+    amounts = list(last['amount'])
+    assert amounts == [i * 0.5 + len(steps) for i in range(1, 201)]
+
+
+def test_blocks_run_at_once_across_workers_each_get_their_own_answer(workers):
+    # Four pipelines' blocks at the same time in one process, as people run them from the
+    # editor, each through three environments: every block gets a warm process of its own,
+    # and none sees another's values. (Scheduled runs run their blocks in job processes,
+    # each with its own warm processes.)
+    import threading
+
+    from mage_ai.data_preparation import warm_workers
+
+    pipelines = []
+    for seed in range(4):
+        pipelines.append(pipeline_of(workers, [
+            ('load', 'data_loader', None, f'''
+                import pandas as pd
+
+                @data_loader
+                def load(*args, **kwargs):
+                    return pd.DataFrame({{'seed': [{seed}] * 1000, 'n': range(1000)}})
+            '''),
+            ('first', 'transformer', 'pandas2', '''
+                import time
+
+                @transformer
+                def first(data, *args, **kwargs):
+                    time.sleep(0.3)
+                    return data.assign(n=data['n'] * 2)
+            '''),
+            ('second', 'transformer', 'py313', '''
+                @transformer
+                def second(data, *args, **kwargs):
+                    return data.assign(n=data['n'] + data['seed'])
+            '''),
+        ]))
+    errors = []
+
+    def go(pipeline):
+        try:
+            for uuid in pipeline.blocks_by_uuid:
+                pipeline.get_block(uuid).execute_sync()
+        except Exception as error:  # noqa: BLE001
+            errors.append(error)
+
+    threads = [threading.Thread(target=go, args=(p,)) for p in pipelines]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=300)
+    assert errors == []
+    for seed, pipeline in enumerate(pipelines):
+        [second] = [u for u in pipeline.blocks_by_uuid if u.startswith('second_')]
+        frame = pipeline.variable_manager.get_variable(pipeline.uuid, second, 'output_0')
+        assert set(frame['seed']) == {seed}
+        assert list(frame['n'][:3]) == [seed, 2 + seed, 4 + seed]
+    assert warm_workers.idle_count() <= 2 * warm_workers.MAX_IDLE_PER_ENVIRONMENT
+
+
+def test_a_diamond_across_workers_compiles_and_runs_the_same_fused_and_not(workers):
+    from mage_ai.orchestration import compilation
+
+    pipeline = pipeline_of(workers, [
+        ('load', 'data_loader', None, NUMBERS),
+        ('left', 'transformer', 'pandas2', IDENTITY.format(check='pass'), ['load']),
+        ('right', 'transformer', 'py313', IDENTITY.format(check='pass'), ['load']),
+        ('join', 'transformer', None, '''
+            @transformer
+            def join(left, right, *args, **kwargs):
+                return left.merge(right, on='id')
+        ''', ['left', 'right']),
+    ])
+    from mage_ai.orchestration import planning
+
+    compiled = compilation.start(pipeline, wait=True)
+    assert compiled.state in ('completed', 'nothing'), [
+        (u.label, u.state, u.error) for u in compiled.units]
+    plan = planning.plan_pipeline(pipeline)
+    # A diamond fuses no chain: each branch's table crosses through storage, and the plan
+    # names no switch inside a stage.
+    assert not [f for f in plan.findings if f.get('code') == 'worker_switch'], plan.findings
+    assert_same_both_ways(pipeline)

@@ -718,6 +718,11 @@ function WorkerDetail({ name }: { name: string }) {
                   <ChangesList changes={saved.changes} />
                 </Spacing>
               )}
+              {(saved?.notes || []).length > 0 && !dirty && (
+                <Spacing mt={1}>
+                  {saved.notes.map(note => <Text info key={note} small>{note}</Text>)}
+                </Spacing>
+              )}
               <Spacing mt={2}>
                 <FlexContainer>
                   <Button

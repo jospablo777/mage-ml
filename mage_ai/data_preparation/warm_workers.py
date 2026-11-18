@@ -5,7 +5,10 @@ new process costs about 200 ms (Python's start and importing pandas and pyarrow)
 one answers in milliseconds.
 
 - A process serves one request at a time; blocks that run at once get processes of their
-  own, and an idle one is reused.
+  own, and an idle one is reused. At most MAX_IDLE_PER_ENVIRONMENT stay idle per
+  environment: after twenty blocks at once, twenty processes do not wait five minutes.
+- Each request starts as in a new process: the project's changed modules are imported
+  again, and what a block did to os.environ or sys.path is undone (worker.serve).
 - What a block prints reaches its own log: the worker prints an end marker on stdout and
   stderr after each request, and a request returns once both arrived.
 - A process that ends during a request (a crash, the system out of memory) is dropped and
@@ -37,6 +40,7 @@ from mage_ai.shared.processes import (
 IDLE_SECONDS = int(os.getenv('MAGE_WARM_WORKER_IDLE_SECONDS') or 300)
 MAX_REQUESTS = int(os.getenv('MAGE_WARM_WORKER_MAX_REQUESTS') or 500)
 MAX_RSS_BYTES = int(os.getenv('MAGE_WARM_WORKER_MAX_RSS_BYTES') or 2 * 1024 ** 3)
+MAX_IDLE_PER_ENVIRONMENT = int(os.getenv('MAGE_WARM_WORKER_MAX_IDLE') or 4)
 # How long a request waits, after its result, for the lines printed before it.
 OUTPUT_SECONDS = 5
 
@@ -302,12 +306,15 @@ def call(python: str, repo_path: str, script: str, request: Dict,
     except BaseException:
         warm.stop()
         raise
-    if warm.worn():
-        warm.stop()
-    else:
+    kept = False
+    if not warm.worn():
         with _lock:
-            if os.getpid() == _owner:
-                _idle.setdefault(key, []).append(warm)
+            idle = _idle.setdefault(key, [])
+            if os.getpid() == _owner and len(idle) < MAX_IDLE_PER_ENVIRONMENT:
+                idle.append(warm)
+                kept = True
+    if not kept:
+        warm.stop()
     return result
 
 

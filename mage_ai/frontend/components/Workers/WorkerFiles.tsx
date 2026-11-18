@@ -122,6 +122,7 @@ function WorkerFiles({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
                 ? `: ${plural(saved.changes.length, 'package')} changed` : ''}
             </Text>
             {saved.changes?.length > 0 && <ChangesList changes={saved.changes} />}
+            {(saved.notes || []).map(note => <Text key={note} small warning>{note}</Text>)}
           </Spacing>
         )}
         <Spacing mt={2}>

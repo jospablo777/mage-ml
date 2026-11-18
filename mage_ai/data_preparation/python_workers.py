@@ -318,8 +318,11 @@ def create(
     """
     import tomlkit
 
+    notes = []
     if dependencies is not None:
-        dependencies = _check_requirements(dependencies)
+        dependencies, note = _with_pyarrow(_check_requirements(dependencies))
+        if note:
+            notes.append(note)
     with tempfile.TemporaryDirectory(prefix='mage_new_worker_') as directory:
         scratch = Path(directory)
         # new_worker checks the name and the template, and writes the pyproject.toml.
@@ -356,7 +359,7 @@ def create(
                 python or f'{sys.version_info.major}.{sys.version_info.minor}',
                 lambda text: _lock_in(folder, text))
             if older:
-                return dict(name=folder.name, job=None, confirm=older)
+                return dict(name=folder.name, job=None, confirm=older, notes=notes)
         target = Path(repo_path) / environments.WORKERS_DIR / folder.name
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -366,7 +369,8 @@ def create(
         staging = target.with_name(f'.{folder.name}.{os.getpid()}.new')
         shutil.copytree(folder, staging)
         os.replace(staging, target)
-    return dict(name=folder.name, job=environments.start_prepare(repo_path, folder.name))
+    return dict(name=folder.name, job=environments.start_prepare(repo_path, folder.name),
+                notes=notes)
 
 
 # ---- changing a worker: locked in a copy first -------------------------------------------
@@ -469,6 +473,32 @@ def _check_requirements(dependencies: List[str]) -> List[str]:
     return checked
 
 
+PYARROW_NOTE = ('pyarrow was added: tables reach a worker as Arrow, and pandas reads Arrow '
+                'with pyarrow.')
+
+
+def _with_pyarrow(dependencies: List[str]) -> Tuple[List[str], Optional[str]]:
+    """
+    The dependencies with pyarrow when they list pandas without it: a table reaches a worker
+    as Arrow, which pandas reads only with pyarrow (Polars reads it itself). Without it, the
+    first block that takes a table fails.
+    """
+    names = {(environments._requirement_name(d) or '').lower().replace('_', '-')
+             for d in dependencies}
+    if 'pandas' in names and 'pyarrow' not in names:
+        return [*dependencies, 'pyarrow'], PYARROW_NOTE
+    return dependencies, None
+
+
+def _lacks_pyarrow(lock: str, python: str) -> bool:
+    """Whether a lock installs pandas without pyarrow."""
+    try:
+        names = {p['name'] for p in json.loads(_lock_packages(lock, python))}
+    except ValueError:
+        return False
+    return 'pandas' in names and 'pyarrow' not in names
+
+
 def update(
     repo_path: str,
     alias: str,
@@ -496,8 +526,11 @@ def update(
     project = document.setdefault('project', tomlkit.table())
     needs_lock = False
     upgrade: List[str] = []
+    notes = []
     if dependencies is not None:
-        checked = _check_requirements(dependencies)
+        checked, note = _with_pyarrow(_check_requirements(dependencies))
+        if note:
+            notes.append(note)
         # A package whose line changed gets the newest release its new line allows: uv lock
         # keeps a locked version that still fits, so "six" after "six==1.16.0" stayed 1.16.0.
         before = {environments._requirement_name(d): d.strip()
@@ -516,7 +549,6 @@ def update(
             array.append(dependency)
         project['dependencies'] = array
         needs_lock = True
-    notes = []
     if python is not None:
         python = python.strip()
         if python and not python.replace('.', '').isdigit():
@@ -626,7 +658,11 @@ def save_pyproject(repo_path: str, alias: str, text: str, accept_older: bool = F
     folder = Path(worker.definition)
     _write(folder / 'pyproject.toml', text)
     _write(folder / 'uv.lock', new_lock)
-    return dict(name=worker.alias, changes=_changes(old_lock, new_lock),
+    notes = []
+    if _lacks_pyarrow(new_lock, worker.python):
+        notes.append('It installs pandas without pyarrow: a block that takes a table fails. '
+                     'Add pyarrow to its dependencies.')
+    return dict(name=worker.alias, changes=_changes(old_lock, new_lock), notes=notes,
                 job=environments.start_prepare(repo_path, worker.alias))
 
 
