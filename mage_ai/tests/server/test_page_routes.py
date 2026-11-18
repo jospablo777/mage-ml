@@ -1,7 +1,7 @@
 """
 Every page of the app has a server route: the built app is static, and the server renders
 index.html for the paths it knows and its 404 page for the others. /services shipped once
-without a route.
+without a route, and /workers.
 """
 import re
 import unittest
@@ -22,8 +22,9 @@ def top_level_paths():
             continue
         if (folder / 'index.tsx').is_file():
             paths.add(f'/{folder.name}')
-        else:
-            paths.update(f'/{folder.name}/{p.stem}' for p in folder.glob('*.tsx'))
+        # Its other pages too: /workers had a route and /workers/<name> none.
+        paths.update(f'/{folder.name}/{p.stem}' for p in folder.glob('*.tsx')
+                     if p.stem != 'index')
     # Dynamic segments such as [uuid] or [...slug] take a sample value.
     return sorted(re.sub(r'\[[^\]]+\]', 'sample', p) for p in paths)
 

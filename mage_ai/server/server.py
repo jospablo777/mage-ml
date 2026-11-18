@@ -302,6 +302,8 @@ def make_app(
         (r'/version-control', MainPageHandler),
         (r'/monitors', MainPageHandler),
         (r'/services', MainPageHandler),
+        (r'/workers', MainPageHandler),
+        (r'/workers/(.*)', MainPageHandler),
         (r'/pipeline-dependencies', MainPageHandler),
         (r'/compute', MainPageHandler),
         (r'/secrets', MainPageHandler),

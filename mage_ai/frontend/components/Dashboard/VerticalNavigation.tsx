@@ -12,7 +12,7 @@ import ProjectType, { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import Tooltip from '@oracle/components/Tooltip';
-import api from '@api'
+import api from '@api';
 import useProject from '@utils/models/project/useProject';
 import {
   BranchAlt,
@@ -50,7 +50,7 @@ const DEFAULT_NAV_ITEMS = ({
   project?: ProjectType;
   projectPlatformActivated?: boolean;
 }) => {
-  let miscItems = [
+  const miscItems = [
     {
       Icon: DocumentIcon,
       id: 'files',
@@ -146,6 +146,14 @@ const DEFAULT_NAV_ITEMS = ({
           },
         },
         {
+          Icon: TripleBoxes,
+          id: 'workers',
+          label: () => 'Workers',
+          linkProps: {
+            href: '/workers',
+          },
+        },
+        {
           Icon: Insights,
           id: 'monitors',
           label: () => 'Monitors',
@@ -180,6 +188,8 @@ const DEFAULT_NAV_ITEMS = ({
 
 export type NavigationItem = {
   Icon?: any;
+  // A count shown beside the label: items that need attention.
+  attention?: number;
   IconSelected?: any;
   disabled?: boolean;
   id: string;
@@ -214,12 +224,25 @@ function VerticalNavigation({
     project,
     projectPlatformActivated,
   } = useProject();
+  // Workers that need attention (not prepared, or with known vulnerabilities) show as a
+  // count on Workers, from any page.
+  const { data: dataWorkers } = api.python_workers.list({}, {
+    refreshInterval: 5 * 60 * 1000,
+    revalidateOnFocus: false,
+  });
+  const workersAttention = useMemo(() => (dataWorkers?.python_workers || []).filter(
+    w => !w.prepared || w.security?.state === 'vulnerable').length, [dataWorkers]);
   const defaultNavItems = useMemo(() => DEFAULT_NAV_ITEMS({
     featureEnabled,
     project,
     projectPlatformActivated,
-  }), [
+  }).map(group => ({
+    ...group,
+    items: group.items.map(item => item.id === 'workers' && workersAttention > 0
+      ? { ...item, attention: workersAttention } : item),
+  })), [
     project,
+    workersAttention,
   ]);
 
   const buildItem = useCallback((item, idx: number) => {
@@ -233,13 +256,16 @@ function VerticalNavigation({
       linkProps,
       onClick,
       tag,
+      attention,
     } = item;
     const selected: boolean = isSelected
       ? isSelected(pathname, item)
       : !!pathname.match(new RegExp(`^/${id}[/]*`));
 
     const IconToUse = (selected && IconSelected) ? IconSelected : Icon;
-    const displayText = label?.();
+    const displayText = attention > 0
+      ? `${label?.()} (${attention} need${attention === 1 ? 's' : ''} attention)`
+      : label?.();
 
     let buttonEl;
     let iconEl;
@@ -273,6 +299,7 @@ function VerticalNavigation({
 
       buttonEl = (
         <GradientButton
+          aria-label={displayText}
           backgroundGradient={PURPLE_BLUE}
           backgroundPanel
           basic
@@ -304,6 +331,8 @@ function VerticalNavigation({
 
       buttonEl = (
         <KeyboardShortcutButton
+          // The icon alone names nothing for a screen reader.
+          aria-label={displayText}
           disabled={disabled}
           inline
           linkProps={linkProps}
@@ -345,7 +374,7 @@ function VerticalNavigation({
         <FlexContainer alignItems="center">
           {iconEl}
           <Spacing mr={2} />
-          <Flex flex={1} alignItems="center" style={{ gap: 8 }}>
+          <Flex alignItems="center" flex={1} style={{ gap: 8 }}>
             <Text noWrapping>
               {displayText}
             </Text>
@@ -354,12 +383,17 @@ function VerticalNavigation({
               <div style={{
                 borderRadius: 100,
                 padding: '4px 10px',
-                backgroundColor: '#00000099'
+                backgroundColor: '#00000099',
               }}>
-                <Text small bold>
+                <Text bold small>
                   {tag}
                 </Text>
               </div>
+            )}
+            {attention > 0 && (
+              <Text bold small warning>
+                {attention}
+              </Text>
             )}
           </Flex>
         </FlexContainer>
@@ -373,7 +407,7 @@ function VerticalNavigation({
         onClick={onClick}
         selected={selected}
         {...(linkProps?.target ? {
-          ...linkProps
+          ...linkProps,
         } : {})}
       >
         {el}

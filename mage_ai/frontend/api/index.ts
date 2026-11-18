@@ -72,6 +72,10 @@ export const PIPELINE_SERVICE_BUILDS: 'pipeline_service_builds' = 'pipeline_serv
 export const PIPELINE_SERVICE_MODELS: 'pipeline_service_models' = 'pipeline_service_models';
 export const PYTHON_WORKERS: 'python_workers' = 'python_workers';
 export const PYTHON_WORKER_COMBINATIONS: 'python_worker_combinations' = 'python_worker_combinations';
+export const PYTHON_WORKER_AUDITS: 'python_worker_audits' = 'python_worker_audits';
+export const PYTHON_WORKER_UPDATES: 'python_worker_updates' = 'python_worker_updates';
+export const PYTHON_WORKER_TEMPLATES: 'python_worker_templates' = 'python_worker_templates';
+export const PYTHON_PACKAGES: 'python_packages' = 'python_packages';
 export const STREAM_SAMPLES: 'stream_samples' = 'stream_samples';
 export const STREAM_SAMPLE_RUNS: 'stream_sample_runs' = 'stream_sample_runs';
 export const STREAM_RUNS: 'stream_runs' = 'stream_runs';
@@ -192,6 +196,10 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PIPELINE_SERVICE_MODELS],
   [PYTHON_WORKERS],
   [PYTHON_WORKER_COMBINATIONS],
+  [PYTHON_WORKER_AUDITS],
+  [PYTHON_WORKER_UPDATES],
+  [PYTHON_WORKER_TEMPLATES],
+  [PYTHON_PACKAGES],
   [STREAM_SAMPLES, PIPELINES],
   [STREAM_SAMPLE_RUNS, PIPELINES],
   [STREAM_RUNS, PIPELINES],
