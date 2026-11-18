@@ -234,6 +234,28 @@ pub fn plan(blocks: &[BlockFacts], options: &Options) -> Result<Plan, PlanError>
         .collect();
     groups.sort_by_key(|g| position[g[0].as_str()]);
 
+    // In a MageML stage, consecutive Python blocks of different workers run in two processes,
+    // and the data moves between them as Arrow: the stage goes on, the Compile panel says so.
+    if options.target == Target::Mageml && options.groups {
+        for group in &groups {
+            for pair in group.windows(2) {
+                let (block, next) = (by_uuid[pair[0].as_str()], by_uuid[pair[1].as_str()]);
+                if block.language == Some(Language::Python)
+                    && next.language == Some(Language::Python)
+                    && block.worker != next.worker
+                {
+                    findings.push(Finding {
+                        level: Level::Segment,
+                        block: block.uuid.clone(),
+                        next: next.uuid.clone(),
+                        code: "worker_switch".into(),
+                        reason: worker_switch(block, next),
+                    });
+                }
+            }
+        }
+    }
+
     let mut segments = Vec::new();
     if options.target == Target::Mageml && options.groups && options.segments {
         let segment_rule: Box<Rule> = Box::new(segment_rule);
@@ -754,6 +776,32 @@ mod tests {
         );
         let codes: Vec<&str> = plan.findings.iter().map(|f| f.code.as_str()).collect();
         assert_eq!(codes, vec!["worker_switch", "runtime_switch"]);
+    }
+
+    #[test]
+    fn a_mageml_stage_crossing_python_workers_says_where() {
+        let mut features = block("features", Language::Python, &["load"]);
+        features.worker = Some("feast".into());
+        let blocks = [
+            block("load", Language::Python, &[]),
+            features,
+            block("score", Language::Python, &["features"]),
+        ];
+        let plan = plan(&blocks, &mageml()).unwrap();
+        // One stage still: the switches are advice, not breaks.
+        assert_eq!(groups(&plan), vec![vec!["load", "features", "score"]]);
+        let switches: Vec<(&str, &str)> = plan
+            .findings
+            .iter()
+            .filter(|f| f.code == "worker_switch")
+            .map(|f| (f.block.as_str(), f.next.as_str()))
+            .collect();
+        assert_eq!(switches, vec![("load", "features"), ("features", "score")]);
+        assert_eq!(
+            plan.findings[0].reason,
+            "load runs in the default worker and features in feast: the data moves between two \
+             processes."
+        );
     }
 
     #[test]
