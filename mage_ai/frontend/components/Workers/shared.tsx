@@ -214,3 +214,12 @@ export function ChangesList({ changes }: { changes: PackageChangeType[] }) {
     </TableStyle>
   );
 }
+
+// A field's name above it, where it stays readable whatever the field holds.
+export function FieldLabel({ children, htmlFor }: { children: any; htmlFor?: string }) {
+  return (
+    <label htmlFor={htmlFor} style={{ display: 'block', marginBottom: UNIT / 2 }}>
+      <Text bold small>{children}</Text>
+    </label>
+  );
+}

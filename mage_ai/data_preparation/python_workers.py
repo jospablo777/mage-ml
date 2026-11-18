@@ -162,6 +162,7 @@ def detail(repo_path: str, alias: str) -> Dict:
     for package in packages:
         package['declared'] = package['name'] in declared
     item['packages'] = packages
+    item['pyproject'] = (Path(worker.definition) / 'pyproject.toml').read_text()
     return item
 
 
@@ -399,6 +400,40 @@ def update(
     result['changes'] = _changes(old_lock, new_lock)
     result['job'] = environments.start_prepare(repo_path, worker.alias)
     return result
+
+
+def save_pyproject(repo_path: str, alias: str, text: str) -> Dict:
+    """
+    Replaces the worker's pyproject.toml with text, as people edit it on the Workers page:
+    refused when it is not TOML or names the project like one of its packages, locked in a
+    copy first, then written with its new lock and prepared.
+    """
+    import tomllib
+
+    worker = _worker(repo_path, alias)
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise PipelineEnvironmentError(f'pyproject.toml is not valid TOML: {error}.')
+    project = parsed.get('project')
+    if not isinstance(project, dict):
+        raise PipelineEnvironmentError(
+            'pyproject.toml needs a [project] table with its name, version and dependencies.')
+    _check_requirements(project.get('dependencies') or [])
+    name = str(project.get('name') or '').lower().replace('_', '-').replace('.', '-')
+    for dependency in project.get('dependencies') or []:
+        if name and (environments._requirement_name(dependency) or '').replace('.', '-') == name:
+            raise PipelineEnvironmentError(
+                f'The project is named "{project["name"]}", like the package it needs, so uv '
+                f'would take the project for the package: name it '
+                f'"mageml-worker-{worker.alias}".')
+    old_lock = _lock_text(worker)
+    new_lock = _locked_copy(worker, text)
+    folder = Path(worker.definition)
+    _write(folder / 'pyproject.toml', text)
+    _write(folder / 'uv.lock', new_lock)
+    return dict(name=worker.alias, changes=_changes(old_lock, new_lock),
+                job=environments.start_prepare(repo_path, worker.alias))
 
 
 def _write(path: Path, text: str) -> None:

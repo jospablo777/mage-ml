@@ -65,6 +65,8 @@ type CodeEditorProps = {
   block?: BlockType;
   containerWidth?: number | string;
   editorRef?: any;
+  // Off where operators are what the text means (">=" in a version range).
+  fontLigatures?: boolean;
   fontSize?: number;
   language?: string;
   minimap?: boolean;
@@ -94,6 +96,7 @@ function CodeEditor(
     block,
     containerWidth,
     editorRef: editorRefProp,
+    fontLigatures,
     fontSize = DEFAULT_FONT_SIZE,
     height,
     language,
@@ -398,7 +401,7 @@ function CodeEditor(
         options={{
           domReadOnly: readOnly,
           fontFamily: MONO_FONT_FAMILY_REGULAR,
-          fontLigatures: true,
+          fontLigatures: fontLigatures !== false,
           fontSize,
           hideCursorInOverviewRuler: true,
           lineNumbers: showLineNumbers ? 'on' : 'off',

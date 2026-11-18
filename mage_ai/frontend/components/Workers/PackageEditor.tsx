@@ -9,7 +9,7 @@ import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { Close } from '@oracle/icons';
-import { MonoStyle } from './shared';
+import { FieldLabel, MonoStyle } from './shared';
 import { UNIT } from '@oracle/styles/units/spacing';
 
 // A requirement as people write it: name, extras, version: "feast[redis]>=0.50".
@@ -212,9 +212,9 @@ function PackageEditor({ onChange, value }: {
     <div>
       <div style={{ alignItems: 'flex-end', display: 'flex', gap: UNIT }}>
         <div style={{ flex: 1 }}>
+          <FieldLabel>Add packages</FieldLabel>
           <TextInput
             aria-label="Add packages"
-            label="Add packages"
             monospace
             onChange={e => setAdding(e.target.value)}
             onKeyDown={(e) => {

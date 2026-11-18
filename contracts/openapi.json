@@ -4879,6 +4879,12 @@
      "prepared": {
       "type": "boolean"
      },
+     "pyproject": {
+      "type": [
+       "null",
+       "string"
+      ]
+     },
      "python": {
       "type": "string"
      },

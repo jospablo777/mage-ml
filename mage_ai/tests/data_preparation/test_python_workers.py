@@ -151,6 +151,28 @@ class PythonWorkersTest(DBTestCase):
         self.assertIn('version = "24.1"', (folder / 'uv.lock').read_text(),
                       'an unchanged line keeps its version')
 
+    def test_the_pyproject_is_edited_as_text_and_locked_first(self):
+        folder = self.worker()
+        before = {n: (folder / n).read_text() for n in ('pyproject.toml', 'uv.lock')}
+        self.assertEqual(python_workers.detail(self.repo_path, 'tools')['pyproject'],
+                         before['pyproject.toml'])
+        for text, message in (
+            ('[project\nname = "x"', 'is not valid TOML'),
+            ('[tool.uv]\n', 'needs a \\[project\\] table'),
+            (before['pyproject.toml'].replace('mageml-worker-tools', 'six'),
+             'like the package it needs'),
+            (before['pyproject.toml'].replace('six==1.16.0', 'six==99.0'), 'nothing changed'),
+        ):
+            with self.assertRaisesRegex(environments.PipelineEnvironmentError, message):
+                python_workers.save_pyproject(self.repo_path, 'tools', text)
+            self.assertEqual({n: (folder / n).read_text() for n in before}, before)
+
+        edited = before['pyproject.toml'].replace(
+            '"six==1.16.0"', '"six==1.17.0"').replace('# Kept', '# Still kept')
+        result = python_workers.save_pyproject(self.repo_path, 'tools', edited)
+        self.assertEqual(result['changes'][0]['to'], '1.17.0')
+        self.assertEqual((folder / 'pyproject.toml').read_text(), edited)
+
     def test_a_name_change_needs_no_lock_and_keeps_the_environment(self):
         folder = self.worker()
         lock = (folder / 'uv.lock').read_text()

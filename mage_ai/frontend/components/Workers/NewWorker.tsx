@@ -13,7 +13,7 @@ import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { BORDER_RADIUS } from '@oracle/styles/units/borders';
-import { CardStyle, MonoStyle } from './shared';
+import { CardStyle, FieldLabel, MonoStyle } from './shared';
 import { FONT_FAMILY_MEDIUM } from '@oracle/styles/fonts/primary';
 import { UNIT } from '@oracle/styles/units/spacing';
 import { WorkerTemplateType, WorkerType } from './types';
@@ -166,9 +166,9 @@ function NewWorker({ onCancel, onCreated, workers }: {
       <Spacing mt={3}>
         <FieldsStyle>
           <div>
+            <FieldLabel>Name</FieldLabel>
             <TextInput
               aria-label="Name"
-              label="Name"
               meta={{ error: name ? problem : null, touched: true }}
               monospace
               onChange={e => setName(e.target.value)}
@@ -182,9 +182,9 @@ function NewWorker({ onCancel, onCreated, workers }: {
             </Spacing>
           </div>
           <div>
+            <FieldLabel>Display name</FieldLabel>
             <TextInput
               aria-label="Display name"
-              label="Display name"
               onChange={e => setLabel(e.target.value)}
               value={label}
             />
@@ -193,9 +193,9 @@ function NewWorker({ onCancel, onCreated, workers }: {
             </Spacing>
           </div>
           <div>
+            <FieldLabel>Python</FieldLabel>
             <Select
               aria-label="Python"
-              label="Python"
               onChange={e => setPython(e.target.value)}
               value={python}
             >

@@ -16,6 +16,7 @@ class PythonWorkerPresenter(BasePresenter):
         'notes',
         'packages',
         'prepared',
+        'pyproject',
         'python',
         'security',
         'size_bytes',

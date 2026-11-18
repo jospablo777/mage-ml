@@ -45,7 +45,7 @@ PythonWorkerPolicy.allow_write(
 )
 
 PythonWorkerPolicy.allow_write(
-    ['combine', 'dependencies', 'description', 'label', 'python'],
+    ['combine', 'dependencies', 'description', 'label', 'pyproject', 'python'],
     scopes=[OauthScope.CLIENT_PRIVATE],
     on_action=[constants.UPDATE],
     condition=lambda policy: policy.has_at_least_editor_role(),

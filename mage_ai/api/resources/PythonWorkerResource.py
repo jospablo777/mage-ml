@@ -110,6 +110,18 @@ class PythonWorkerResource(GenericResource):
         ):
             raise ApiError(dict(code=400, message='dependencies is a list of requirements.'))
         repo_path = get_repo_path(user=self.current_user)
+        pyproject = payload.get('pyproject')
+        if pyproject is not None:
+            # The whole file, edited as text.
+            if not isinstance(pyproject, str):
+                raise ApiError(dict(code=400, message='pyproject is the file\'s text.'))
+            try:
+                result = await asyncio.to_thread(
+                    python_workers.save_pyproject, repo_path, self.model['name'], pyproject)
+                self.model = dict(python_workers.detail(repo_path, self.model['name']), **result)
+            except environments.PipelineEnvironmentError as error:
+                raise ApiError(dict(code=400, message=str(error)))
+            return
         try:
             result = await asyncio.to_thread(
                 python_workers.update, repo_path, self.model['name'],

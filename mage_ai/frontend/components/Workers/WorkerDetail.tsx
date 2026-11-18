@@ -11,6 +11,7 @@ import ErrorCallout from './ErrorCallout';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
 import PackageEditor from './PackageEditor';
+import WorkerFiles from './WorkerFiles';
 import PythonWorkerStatus from '@components/PipelineDetail/Settings/PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
 import Spacing from '@oracle/elements/Spacing';
@@ -20,6 +21,7 @@ import TextInput from '@oracle/elements/Inputs/TextInput';
 import api from '@api';
 import {
   BarStyle,
+  FieldLabel,
   CardStyle,
   ChangesList,
   MonoStyle,
@@ -354,27 +356,31 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
     <>
       <CardStyle>
         <FieldsStyle>
-          <TextInput
-            aria-label="Display name"
-            label="Display name"
-            onChange={e => setLabel(e.target.value)}
-            value={label}
-          />
-          <Select
-            aria-label="Python"
-            label="Python"
-            onChange={e => setPython(e.target.value)}
-            value={python}
-          >
-            {[...new Set([...PYTHON_VERSIONS, worker.python].filter(Boolean))].sort().map(v => (
-              <option key={v} value={v}>Python {v}</option>
-            ))}
-          </Select>
+          <div>
+            <FieldLabel>Display name</FieldLabel>
+            <TextInput
+              aria-label="Display name"
+              onChange={e => setLabel(e.target.value)}
+              value={label}
+            />
+          </div>
+          <div>
+            <FieldLabel>Python</FieldLabel>
+            <Select
+              aria-label="Python"
+              onChange={e => setPython(e.target.value)}
+              value={python}
+            >
+              {[...new Set([...PYTHON_VERSIONS, worker.python].filter(Boolean))].sort().map(v => (
+                <option key={v} value={v}>Python {v}</option>
+              ))}
+            </Select>
+          </div>
         </FieldsStyle>
         <Spacing mt={2}>
+          <FieldLabel>Description</FieldLabel>
           <TextInput
             aria-label="Description"
-            label="Description"
             onChange={e => setDescription(e.target.value)}
             value={description}
           />
@@ -447,6 +453,7 @@ function SettingsTab({ onSaved, worker }: { onSaved: () => void; worker: WorkerT
 
 const TABS = [
   { label: () => 'Packages', uuid: 'packages' },
+  { label: () => 'pyproject.toml', uuid: 'files' },
   { label: () => 'Security', uuid: 'security' },
   { label: () => 'Used by', uuid: 'used_by' },
   { label: () => 'Settings', uuid: 'settings' },
@@ -579,6 +586,8 @@ function WorkerDetail({ name }: { name: string }) {
           tabs={TABS.map(t => t.uuid === 'security' && worker.security?.state === 'vulnerable'
             ? { ...t, label: () => `Security (${worker.security.advisories})` } : t)}
           underlineStyle
+          // File names keep their case.
+          uppercase={false}
         />
       </Spacing>
 
@@ -638,6 +647,13 @@ function WorkerDetail({ name }: { name: string }) {
         )}
         {tab === 'security' && <SecurityTab onFix={() => askPreview(true)} worker={worker} />}
         {tab === 'used_by' && <UsedByTab worker={worker} />}
+        {tab === 'files' && (
+          // Rebuilt when the file changes elsewhere (the package list, an update).
+          <WorkerFiles key={(worker as any).pyproject} onSaved={() => {
+            setDraft(null);
+            mutate();
+          }} worker={worker} />
+        )}
         {tab === 'settings' && (
           <SettingsTab key={JSON.stringify([worker.label, worker.description, worker.python])}
             onSaved={() => mutate()} worker={worker} />

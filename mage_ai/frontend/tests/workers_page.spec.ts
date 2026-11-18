@@ -74,6 +74,19 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   const { python_worker: latest } = await api.call('GET', `python_workers/${NAME}`);
   expect(latest.dependencies).toEqual(['pyarrow', 'six']);
 
+  // The file itself: shown, and an edit that is not TOML changes nothing.
+  await page.getByRole('button', { name: 'pyproject.toml' }).click();
+  await expect(page.getByText(`python_workers/${NAME}/pyproject.toml`)).toBeVisible();
+  await expect(page.getByText('six', { exact: false }).first()).toBeVisible();
+  await page.locator('.view-lines').first().click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('[project');
+  await page.getByRole('button', { name: 'Save and prepare' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'is not valid TOML' })).toBeVisible();
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await page.getByText('Show uv.lock', { exact: true }).click();
+  await expect(page.getByText('requires-python', { exact: false }).last()).toBeVisible();
+
   await page.getByRole('button', { name: /^Used by/ }).click();
   await expect(page.getByText('No block runs in it yet.')).toBeVisible();
 
