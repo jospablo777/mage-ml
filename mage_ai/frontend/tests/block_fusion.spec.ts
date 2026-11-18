@@ -41,15 +41,15 @@ test('block fusion is on by default, shows the plan, and can be turned off and o
   const title = 'Run chains of blocks together (recommended)';
   await page.goto(`/pipelines/${pipelineUUID}/settings`);
   await expect(page.getByText(title, { exact: true })).toBeVisible();
-  // On by default: the saved pipeline's chain shows without touching the switch.
-  await expect(page.getByText(LOADER, { exact: true })).toBeVisible();
-  await expect(page.getByText(`→ ${TRANSFORMER}`, { exact: true })).toBeVisible();
-
   // The innermost element with the title and a switch: the setting's row.
   const row = page.locator('div')
     .filter({ has: page.getByText(title, { exact: true }) })
     .filter({ has: page.locator('input[type="checkbox"]') })
     .last();
+  // On by default: the saved pipeline's chain shows without touching the switch. In the
+  // row: the Python blocks' table further down names the blocks too.
+  await expect(row.getByText(LOADER, { exact: true })).toBeVisible();
+  await expect(row.getByText(`→ ${TRANSFORMER}`, { exact: true })).toBeVisible();
   const save = page.getByRole('button', { name: 'Save pipeline settings' });
   const fusion = async () => (await api.call('GET', `pipelines/${pipelineUUID}`)).pipeline;
 
