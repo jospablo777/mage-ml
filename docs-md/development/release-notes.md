@@ -24,6 +24,9 @@
 
 ### Pipelines
 
+- Python workers can have a name and a description for people: `label = "Feast worker"`
+  and `description` under `[tool.mageml.worker]` in the worker's `pyproject.toml`. The
+  editor shows them in the worker lists and settings; changing them needs no new prepare.
 - A block whose upstream block returned a Python object that does not read back in its
   environment (a pickle written with other packages) fails with the object's type and what
   to return instead: a table, JSON values or a file, or both blocks in one Python worker.

@@ -13,7 +13,10 @@ import Button from '@oracle/elements/Button';
 import Checkbox from '@oracle/elements/Checkbox';
 import Circle from '@oracle/elements/Circle';
 import DataContract from './DataContract';
-import PythonWorkerStatus, { PythonWorkerType } from '@components/PipelineDetail/Settings/PythonWorker';
+import PythonWorkerStatus, {
+  PythonWorkerType,
+  workerLabel,
+} from '@components/PipelineDetail/Settings/PythonWorker';
 import Resources from './Resources';
 import Flex from '@oracle/components/Flex';
 import FlexContainer, { JUSTIFY_SPACE_BETWEEN_PROPS } from '@oracle/components/FlexContainer';
@@ -876,13 +879,13 @@ function BlockSettings({
             >
               <option value="">
                 {pipeline?.environment?.worker
-                  ? `The pipeline's worker (${pipeline.environment.worker})`
+                  ? `The pipeline's worker (${workerLabel(pythonWorkers.find(w => w.name === pipeline.environment.worker)) || pipeline.environment.worker})`
                   : 'The pipeline\'s (MageML\'s Python)'}
               </option>
               <option value="mage">MageML&apos;s Python</option>
-              {pythonWorkers.map(({ name, prepared }) => (
-                <option key={name} value={name}>
-                  {prepared ? name : `${name} (not prepared)`}
+              {pythonWorkers.map(worker => (
+                <option key={worker.name} value={worker.name}>
+                  {worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} (not prepared)`}
                 </option>
               ))}
             </Select>

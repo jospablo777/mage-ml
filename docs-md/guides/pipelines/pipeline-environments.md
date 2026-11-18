@@ -98,6 +98,10 @@ dependencies = [
   "feast[redis]>=0.50",
   "pyarrow",
 ]
+
+[tool.mageml.worker]
+label = "Feast worker"                       # how the editor names it
+description = "Online features from Feast; pandas 2"
 ```
 
 ```bash
@@ -124,7 +128,9 @@ blocks:
     python_worker: mage          # MageML's own Python
 ```
 
-- The worker's name is its `[project].name`, compared without case, `-`, `_` or `.`.
+- The worker's name is its `[project].name`, compared without case, `-`, `_` or `.`;
+  YAML uses it. `label` and `description` under `[tool.mageml.worker]` are what the editor
+  shows ("Feast worker (feast)"); changing them does not prepare the worker again.
   `.python-version` in its folder sets the Python version; MageML's is the default.
 - Prepare is explicit: a run never installs packages. A block whose worker is not
   prepared for its current `pyproject.toml` and `uv.lock` fails with the command to run,

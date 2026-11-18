@@ -367,6 +367,34 @@ class NamedWorkerTest(DBTestCase):
         Path(transform.file_path).write_text(textwrap.dedent(WORKER_TRANSFORM))
         return Pipeline.get(pipeline.uuid, repo_path=self.repo_path), load.uuid, transform.uuid
 
+    def test_a_worker_has_the_name_and_description_people_give_it(self):
+        folder = self.worker('feast', lock=False)
+        before = environments.named_workers(self.repo_path)['feast']
+        self.assertEqual((before.label, before.display_name), (None, 'feast'))
+        pyproject = folder / 'pyproject.toml'
+        pyproject.write_text(pyproject.read_text() + textwrap.dedent('''
+            [tool.mageml.worker]
+            label = "Feast worker"
+            description = "Feature retrieval with Feast; pandas 2"
+            combine = false
+        '''))
+        worker = environments.named_workers(self.repo_path)['feast']
+        self.assertEqual(
+            (worker.label, worker.description, worker.combine, worker.display_name),
+            ('Feast worker', 'Feature retrieval with Feast; pandas 2', False, 'Feast worker'),
+        )
+        # Naming it is not a change of packages: the prepared environment stays valid.
+        self.assertEqual(worker.digest, before.digest)
+        [described] = environments.describe_workers(self.repo_path)
+        self.assertEqual((described['name'], described['label']), ('feast', 'Feast worker'))
+
+    def test_the_digest_of_a_worker_without_mageml_settings_is_unchanged(self):
+        # Workers prepared before labels existed keep their environments.
+        text = b'[project]\nname = "x"\n\n[tool.uv]\nindex-url = "https://example.com"\n'
+        self.assertEqual(environments.environment_bytes(text), text)
+        named = text + b'\n[tool.mageml.worker]\nlabel = "X"\n'
+        self.assertEqual(environments.environment_bytes(named), text)
+
     def test_a_block_runs_in_its_prepared_worker_and_passes_a_frame_to_mages_python(self):
         self.worker()
         pipeline, load, transform = self.pipeline(load_worker='Legacy')

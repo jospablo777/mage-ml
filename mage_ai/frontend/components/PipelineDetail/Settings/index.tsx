@@ -13,7 +13,7 @@ import FusionVerification from './FusionVerification';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
-import PythonWorkerStatus, { PythonWorkerType } from './PythonWorker';
+import PythonWorkerStatus, { PythonWorkerType, workerLabel } from './PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
 import SetupSection, { SetupSectionRow } from '@components/shared/SetupSection';
 import Spacing from '@oracle/elements/Spacing';
@@ -384,9 +384,9 @@ function PipelineSettings({
             })),
             options: [
               { label: 'MageML\'s Python', value: '' },
-              ...workers.map(({ name, prepared }) => ({
-                label: prepared ? name : `${name} (not prepared)`,
-                value: name,
+              ...workers.map(worker => ({
+                label: worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} (not prepared)`,
+                value: worker.name,
               })),
             ],
             value: pipelineAttributes?.environment?.worker || '',

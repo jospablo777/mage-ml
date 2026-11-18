@@ -22,15 +22,32 @@ export type PythonWorkerJobType = {
 };
 
 export type PythonWorkerType = {
+  // False when its pyproject.toml keeps it apart from other workers.
+  combine?: boolean;
   definition?: string;
   dependencies?: string[];
+  // [tool.mageml.worker] in its pyproject.toml.
+  description?: string;
   job?: PythonWorkerJobType;
+  // The name people gave it ("Feast worker"), or its alias.
+  label?: string;
   locked?: boolean;
   name: string;
   packages?: string[];
   prepared?: boolean;
   python?: string;
 };
+
+// How a worker is shown: its label, with its alias when they differ ("Feast worker
+// (feast)"), as YAML names the alias.
+export function workerLabel(worker?: PythonWorkerType): string {
+  if (!worker) {
+    return '';
+  }
+  return worker.label && worker.label !== worker.name
+    ? `${worker.label} (${worker.name})`
+    : worker.name;
+}
 
 const LogStyle = styled.pre`
   border-radius: ${BORDER_RADIUS_SMALL}px;
@@ -100,6 +117,7 @@ function PythonWorkerStatus({
 
   return (
     <Spacing mt={1}>
+      {worker.description && <Text small>{worker.description}</Text>}
       <Text muted small>
         {worker.definition} · Python {worker.python}
         {worker.dependencies?.length >= 1 && ` · ${worker.dependencies.join(', ')}`}
@@ -125,7 +143,7 @@ function PythonWorkerStatus({
               onClick={() => prepare({ python_worker: { name: worker.name } })}
               small
             >
-              Prepare {worker.name}
+              Prepare {workerLabel(worker)}
             </Button>
             <Spacing ml={1} />
             <Text muted xsmall>

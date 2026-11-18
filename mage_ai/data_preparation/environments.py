@@ -109,12 +109,21 @@ def normalized_alias(name: str) -> str:
 
 @dataclass(frozen=True)
 class NamedWorker:
-    """A Python worker: a uv project in python_workers/<folder>/, prepared with its lock."""
+    """A Python worker: a uv project in python_workers/<folder>/, prepared with its lock.
+    Its pyproject.toml may name it for people, under [tool.mageml.worker]: label ("Feast
+    worker"), description, and combine = false to keep it apart from other workers."""
 
     alias: str
     definition: str
     python: str
     digest: str
+    label: Optional[str] = None
+    description: Optional[str] = None
+    combine: bool = True
+
+    @property
+    def display_name(self) -> str:
+        return self.label or self.alias
 
     @property
     def identity(self) -> str:
@@ -157,7 +166,8 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
     for folder in sorted(p for p in root.iterdir() if (p / 'pyproject.toml').is_file()):
         relative = f'{WORKERS_DIR}/{folder.name}'
         try:
-            project = tomllib.loads((folder / 'pyproject.toml').read_text()).get('project') or {}
+            parsed = tomllib.loads((folder / 'pyproject.toml').read_text())
+            project = parsed.get('project') or {}
         except (OSError, tomllib.TOMLDecodeError) as error:
             raise PipelineEnvironmentError(
                 f'{relative}/pyproject.toml cannot be read: {error}'
@@ -170,15 +180,40 @@ def named_workers(repo_path: str) -> Dict[str, NamedWorker]:
             )
         lock = folder / 'uv.lock'
         digest = hashlib.sha256()
-        digest.update((folder / 'pyproject.toml').read_bytes())
+        digest.update(environment_bytes((folder / 'pyproject.toml').read_bytes()))
         digest.update(lock.read_bytes() if lock.is_file() else b'')
         version_file = folder / '.python-version'
         python = (version_file.read_text().strip() if version_file.is_file()
                   else f'{sys.version_info.major}.{sys.version_info.minor}')
+        settings = (((parsed.get('tool') or {}).get('mageml') or {}).get('worker') or {})
+        label = settings.get('label')
+        description = settings.get('description')
         workers[alias] = NamedWorker(
             alias=alias, definition=str(folder), python=python, digest=digest.hexdigest(),
+            label=str(label).strip() or None if label else None,
+            description=str(description).strip() or None if description else None,
+            combine=settings.get('combine', True) is not False,
         )
     return workers
+
+
+def environment_bytes(pyproject: bytes) -> bytes:
+    """A worker's pyproject.toml without its [tool.mageml...] tables, which name and
+    describe it for people: changing them does not rebuild the environment. Unchanged for
+    a file without them."""
+    lines = pyproject.splitlines(keepends=True)
+    kept, skipping = [], False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(b'['):
+            skipping = stripped.startswith(b'[tool.mageml')
+            if skipping:
+                # The blank lines that set the table apart go with it.
+                while kept and not kept[-1].strip():
+                    kept.pop()
+        if not skipping:
+            kept.append(line)
+    return b''.join(kept)
 
 
 def worker_selection(block) -> Optional[str]:
@@ -486,6 +521,9 @@ def describe_workers(repo_path: str) -> List[Dict]:
         project = tomllib.loads((folder / 'pyproject.toml').read_text()).get('project') or {}
         entry = dict(
             name=alias,
+            label=worker.display_name,
+            description=worker.description,
+            combine=worker.combine,
             definition=worker.relative_definition(),
             python=worker.python,
             dependencies=list(project.get('dependencies') or []),

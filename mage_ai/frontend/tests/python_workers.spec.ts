@@ -4,9 +4,9 @@ import { MageApi } from './api';
 import { expect, test } from './base';
 
 /*
- * Python workers in the pipeline settings: the project's workers are listed, one is chosen
- * for the pipeline's Python blocks, Prepare builds it from its uv.lock, and a run's blocks
- * run in it.
+ * Python workers in the pipeline settings: the project's workers are listed by the names
+ * people gave them, one is chosen for the pipeline's Python blocks, Prepare builds it from
+ * its uv.lock, and a run's blocks run in it.
  */
 
 const SUFFIX = Date.now().toString(36);
@@ -18,7 +18,13 @@ name = "${WORKER}"
 version = "0"
 requires-python = ">=3.12"
 dependencies = []
+
+[tool.mageml.worker]
+label = "Tools worker"
+description = "Plain Python for the e2e test"
 `;
+// How the pages name it: its label, with the alias YAML uses.
+const SHOWN = `Tools worker (${WORKER})`;
 const LOCK = `version = 1
 revision = 3
 requires-python = ">=3.12"
@@ -64,10 +70,12 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
     .filter({ has: page.getByText('Python worker', { exact: true }) })
     .filter({ has: page.locator('select') })
     .last();
+  await expect(row.locator('option', { hasText: SHOWN })).toHaveCount(1);
   await row.locator('select').selectOption(WORKER);
+  await expect(page.getByText('Plain Python for the e2e test', { exact: true })).toBeVisible();
   // Without a lock it cannot be prepared, and says what to do.
   await expect(page.getByText(`It has no uv.lock: run uv lock in ${FOLDER}`)).toBeVisible();
-  await expect(page.getByRole('button', { name: `Prepare ${WORKER}` })).toBeDisabled();
+  await expect(page.getByRole('button', { name: `Prepare ${SHOWN}` })).toBeDisabled();
   await page.getByRole('button', { name: 'Save pipeline settings' }).click();
   await expect.poll(async () => (
     await api.call('GET', `pipelines/${pipelineUUID}`)
@@ -76,7 +84,7 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
   // Locked, the page prepares it and shows what uv printed.
   await api.writeFile(FOLDER, 'uv.lock', LOCK);
   await page.reload();
-  await page.getByRole('button', { name: `Prepare ${WORKER}` }).click();
+  await page.getByRole('button', { name: `Prepare ${SHOWN}` }).click();
   await expect(page.getByText(/Prepared: \d+ packages from its uv.lock/)).toBeVisible({
     timeout: 120_000,
   });
