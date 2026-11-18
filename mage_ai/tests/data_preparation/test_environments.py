@@ -937,18 +937,24 @@ class NewWorkerTest(DBTestCase):
         ).execute())
 
     def test_a_worker_from_a_template_is_written_locked_and_prepared(self):
+        import subprocess
+
+        from mage_ai.data_preparation import python_workers
+
         steps = []
 
-        def fake_run(command, log):
+        def fake_lock(command, **kwargs):
+            # Locked in a scratch folder before the worker exists (python_workers.create).
             steps.append(command[1])
-            log('Resolved 12 packages')
             folder = Path(command[-1])
+            self.assertFalse(str(folder).startswith(self.repo_path))
             (folder / 'uv.lock').write_text('version = 1\n')
+            return subprocess.CompletedProcess(command, 0, '', '')
 
         def fake_prepare(worker, log=print):
             steps.append(f'prepare {worker.alias} {worker.label}')
 
-        with patch.object(environments, '_run', side_effect=fake_run), \
+        with patch.object(python_workers.subprocess, 'run', side_effect=fake_lock), \
                 patch.object(environments, 'prepare', side_effect=fake_prepare):
             started = self.call(dict(name='Feast', template='feast', label='Online features'))
             for _ in range(100):

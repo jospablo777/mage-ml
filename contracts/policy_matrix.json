@@ -1576,7 +1576,7 @@
     ["python_workers", "read", "detail", [0, 1, 2], {"owner admin editor viewer": ["changes", "combine", "definition", "dependencies", "description", "digest", "job", "label", "locked", "name", "notes", "packages", "prepared", "python", "security", "size_bytes", "used_by"]}],
     ["python_workers", "read", "list", [0, 1, 2], {"owner admin editor viewer": ["changes", "combine", "definition", "dependencies", "description", "digest", "job", "label", "locked", "name", "notes", "packages", "prepared", "python", "security", "size_bytes", "used_by"]}],
     ["python_workers", "read", "update", [0, 1, 2], {"owner admin editor viewer": ["changes", "combine", "definition", "dependencies", "description", "digest", "job", "label", "locked", "name", "notes", "packages", "prepared", "python", "security", "size_bytes", "used_by"]}],
-    ["python_workers", "write", "create", [0, 1, 2], {"admin editor": ["combine", "description", "label", "name", "pipeline_uuid", "template"], "owner": ["combine", "dependencies", "description", "label", "name", "pipeline_uuid", "python", "template"]}],
+    ["python_workers", "write", "create", [0, 1, 2], {"owner admin editor": ["combine", "dependencies", "description", "label", "name", "pipeline_uuid", "python", "template"]}],
     ["python_workers", "write", "delete", [0, 1, 2], {"owner": ["combine", "dependencies", "description", "label", "name", "pipeline_uuid", "python", "template"]}],
     ["python_workers", "write", "detail", [0, 1, 2], {"owner": ["combine", "dependencies", "description", "label", "name", "pipeline_uuid", "python", "template"]}],
     ["python_workers", "write", "list", [0, 1, 2], {"owner": ["combine", "dependencies", "description", "label", "name", "pipeline_uuid", "python", "template"]}],

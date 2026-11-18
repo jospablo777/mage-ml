@@ -94,6 +94,30 @@ class PythonWorkersTest(DBTestCase):
         [six] = python_workers.detail(self.repo_path, 'tools')['packages']
         self.assertEqual((six['name'], six['version'], six['declared']), ('six', '1.16.0', True))
 
+    def test_a_new_worker_exists_only_once_uv_locked_its_packages(self):
+        folder = Path(self.repo_path, environments.WORKERS_DIR, 'scoring')
+        self.addCleanup(shutil.rmtree, folder, True)
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'so no worker was added'):
+            python_workers.create(self.repo_path, 'scoring', dependencies=['six==99.0'])
+        self.assertFalse(folder.exists())
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError,
+                                    'not a package requirement'):
+            python_workers.create(self.repo_path, 'scoring', dependencies=['six=='])
+
+        created = python_workers.create(
+            self.repo_path, 'Scoring', label='Scoring worker', dependencies=['six==1.16.0'],
+            python='3.12',
+        )
+        self.assertEqual(created['name'], 'scoring')
+        self.assertEqual(sorted(p.name for p in folder.iterdir()),
+                         ['.python-version', 'pyproject.toml', 'uv.lock'])
+        worker = environments.named_workers(self.repo_path)['scoring']
+        self.assertEqual((worker.label, worker.python), ('Scoring worker', '3.12'))
+        self.assertIn('name = "mageml-worker-scoring"', (folder / 'pyproject.toml').read_text())
+        with self.assertRaisesRegex(environments.PipelineEnvironmentError, 'exists already'):
+            python_workers.create(self.repo_path, 'scoring', dependencies=['six==1.16.0'])
+
     def test_packages_change_only_when_uv_locks_them(self):
         folder = self.worker()
         before = {n: (folder / n).read_text() for n in ('pyproject.toml', 'uv.lock')}

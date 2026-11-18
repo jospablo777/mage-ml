@@ -54,15 +54,28 @@ class PythonWorkerResource(GenericResource):
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))
             template = 'combined'
-        elif template:
+        elif template or payload.get('dependencies') is not None:
+            import asyncio
+
+            from mage_ai.data_preparation import python_workers
+
+            dependencies = payload.get('dependencies')
+            if dependencies is not None and (
+                not isinstance(dependencies, list) or
+                not all(isinstance(d, str) for d in dependencies)
+            ):
+                raise ApiError(dict(code=400, message='dependencies is a list of requirements.'))
             try:
-                environments.new_worker(
-                    repo_path, name, template,
+                created = await asyncio.to_thread(
+                    python_workers.create, repo_path, name, template or 'empty',
                     label=payload.get('label') or None,
                     description=payload.get('description') or None,
+                    dependencies=dependencies,
+                    python=payload.get('python') or None,
                 )
             except environments.PipelineEnvironmentError as error:
                 raise ApiError(dict(code=400, message=str(error)))
+            return cls(dict(name=created['name'], job=created['job']), user, **kwargs)
         try:
             job = environments.start_prepare(repo_path, name, lock=bool(template))
         except environments.PipelineEnvironmentError as error:

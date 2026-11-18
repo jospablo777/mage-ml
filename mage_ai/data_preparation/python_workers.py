@@ -175,6 +175,72 @@ def _worker(repo_path: str, alias: str):
     return worker
 
 
+# ---- adding a worker: locked before it exists --------------------------------------------
+
+
+def create(
+    repo_path: str,
+    name: str,
+    template: str = 'empty',
+    label: Optional[str] = None,
+    description: Optional[str] = None,
+    dependencies: Optional[List[str]] = None,
+    python: Optional[str] = None,
+) -> Dict:
+    """
+    Adds a worker: its pyproject.toml from a template (its packages replaced by
+    dependencies when given), locked by uv in a scratch folder, and only then
+    python_workers/<name>/ with both files, prepared in the background. A package that does
+    not resolve leaves no worker behind.
+    """
+    import tomlkit
+
+    if dependencies is not None:
+        dependencies = _check_requirements(dependencies)
+    with tempfile.TemporaryDirectory(prefix='mage_new_worker_') as directory:
+        scratch = Path(directory)
+        # new_worker checks the name and the template, and writes the pyproject.toml.
+        folder = environments.new_worker(str(scratch), name, template, label=label,
+                                         description=description)
+        if environments.normalized_alias(name) in environments.named_workers(repo_path):
+            raise PipelineEnvironmentError(f'A Python worker named {folder.name} exists already.')
+        document = tomlkit.parse((folder / 'pyproject.toml').read_text())
+        if dependencies is not None:
+            array = tomlkit.array()
+            array.multiline(True)
+            for dependency in dependencies:
+                array.append(dependency)
+            document['project']['dependencies'] = array
+        if python:
+            python = python.strip()
+            if not python.replace('.', '').isdigit():
+                raise PipelineEnvironmentError(
+                    f'"{python}" is not a Python version, such as 3.12.')
+            document['project']['requires-python'] = f'>={python}'
+            (folder / '.python-version').write_text(f'{python}\n')
+        (folder / 'pyproject.toml').write_text(tomlkit.dumps(document))
+        result = subprocess.run(
+            [environments._uv(), 'lock', '--project', str(folder)],
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode != 0:
+            reason = ('uv could not reach the package index.'
+                      if environments._offline(result.stderr)
+                      else environments._resolver_reason(result.stderr))
+            raise PipelineEnvironmentError(
+                f'uv could not lock these packages, so no worker was added: {reason}')
+        target = Path(repo_path) / environments.WORKERS_DIR / folder.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            raise PipelineEnvironmentError(f'{environments.WORKERS_DIR}/{folder.name} exists '
+                                           'already.')
+        # Within the project's file system in one step: the worker appears complete.
+        staging = target.with_name(f'.{folder.name}.{os.getpid()}.new')
+        shutil.copytree(folder, staging)
+        os.replace(staging, target)
+    return dict(name=folder.name, job=environments.start_prepare(repo_path, folder.name))
+
+
 # ---- changing a worker: locked in a copy first -------------------------------------------
 
 
