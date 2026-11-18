@@ -206,6 +206,10 @@ function BlockSettings({
     const name = choice === 'mage' ? null : (choice || pipeline?.environment?.worker);
     return name ? pythonWorkers.find(w => w.name === name) : null;
   }, [blockAttributes?.configuration?.python_worker, pipeline, pythonWorkers]);
+  const defaultWorker = pipeline?.environment?.worker;
+  const defaultWorkerLabel = defaultWorker
+    ? workerLabel(pythonWorkers.find(w => w.name === defaultWorker)) || defaultWorker
+    : 'MageML\'s Python';
   const [editCustomExecutorType, setEditCustomExecutorType] = useState<boolean>(false);
   const [showNewBlockVariable, setShowNewBlockVariable] = useState<boolean>(false);
 
@@ -571,6 +575,54 @@ function BlockSettings({
           )}
         </Spacing>
 
+        {BlockLanguageEnum.PYTHON === language && [
+          BlockTypeEnum.CUSTOM,
+          BlockTypeEnum.DATA_EXPORTER,
+          BlockTypeEnum.DATA_LOADER,
+          BlockTypeEnum.TRANSFORMER,
+        ].includes(blockType) && (
+          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
+            <Headline level={5}>Where this block runs</Headline>
+            <Spacing mb={1} />
+            <Select
+              aria-label="Where this block runs"
+              onChange={e => setBlockAttributes(prev => ({
+                ...prev,
+                configuration: {
+                  ...prev?.configuration,
+                  python_worker: e.target.value || null,
+                },
+              }))}
+              primary
+              value={blockAttributes?.configuration?.python_worker || ''}
+            >
+              <option value="">
+                {`The pipeline's default: ${defaultWorkerLabel}`}
+              </option>
+              <option value="mage">MageML&apos;s Python (built in)</option>
+              {pythonWorkers.map(worker => (
+                <option key={worker.name} value={worker.name}>
+                  {worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`}
+                </option>
+              ))}
+            </Select>
+            <Spacing mb={1} />
+            <Text muted small>
+              Run it in a Python worker when it needs packages, or versions of them, that
+              MageML&apos;s Python does not have. Its output reaches the next block as a
+              table, whatever runs that one. Add workers or see where every block runs in the
+              pipeline&apos;s settings.
+            </Text>
+            {!!selectedPythonWorker && (
+              <PythonWorkerStatus
+                key={selectedPythonWorker.name}
+                onPrepared={() => reloadPythonWorkers()}
+                worker={selectedPythonWorker}
+              />
+            )}
+          </Spacing>
+        )}
+
         {/*
           TODO: we can’t allow this entry point for now because this requires passing in a property
           called setContent which is a set state function in each code block. That function is
@@ -854,55 +906,6 @@ function BlockSettings({
             </Spacing>
           </Spacing>
         </Spacing>
-
-        {BlockLanguageEnum.PYTHON === language && [
-          BlockTypeEnum.CUSTOM,
-          BlockTypeEnum.DATA_EXPORTER,
-          BlockTypeEnum.DATA_LOADER,
-          BlockTypeEnum.TRANSFORMER,
-        ].includes(blockType) && (
-          <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>
-            <Headline level={5}>Python worker</Headline>
-            <Spacing mb={1} />
-            <Select
-              label="Where this block runs"
-              monospace
-              onChange={e => setBlockAttributes(prev => ({
-                ...prev,
-                configuration: {
-                  ...prev?.configuration,
-                  python_worker: e.target.value || null,
-                },
-              }))}
-              primary
-              value={blockAttributes?.configuration?.python_worker || ''}
-            >
-              <option value="">
-                {pipeline?.environment?.worker
-                  ? `The pipeline's worker (${workerLabel(pythonWorkers.find(w => w.name === pipeline.environment.worker)) || pipeline.environment.worker})`
-                  : 'The pipeline\'s (MageML\'s Python)'}
-              </option>
-              <option value="mage">MageML&apos;s Python</option>
-              {pythonWorkers.map(worker => (
-                <option key={worker.name} value={worker.name}>
-                  {worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} (not prepared)`}
-                </option>
-              ))}
-            </Select>
-            <Spacing mb={1} />
-            <Text muted small>
-              A Python worker is a named environment in python_workers/&lt;name&gt;/, a uv
-              project with its uv.lock. Tables pass between workers as Arrow.
-            </Text>
-            {!!selectedPythonWorker && (
-              <PythonWorkerStatus
-                key={selectedPythonWorker.name}
-                onPrepared={() => reloadPythonWorkers()}
-                worker={selectedPythonWorker}
-              />
-            )}
-          </Spacing>
-        )}
 
         {showBlockRunTimeout && (
           <Spacing mb={UNITS_BETWEEN_SECTIONS} px={PADDING_UNITS}>

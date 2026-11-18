@@ -60,8 +60,10 @@ import Spinner from '@oracle/components/Spinner';
 import Text from '@oracle/elements/Text';
 import TextInput from '@oracle/elements/Inputs/TextInput';
 import Tooltip from '@oracle/components/Tooltip';
+import WorkerChip from './WorkerChip';
 import UpstreamBlockSettings from './UpstreamBlockSettings';
 import api from '@api';
+import { blockPythonWorker } from '@utils/models/pythonWorker';
 import buildAutocompleteProvider from '@components/CodeEditor/autocomplete';
 import useCodeBlockComponents from '@components/CodeBlockV2/useCodeBlockComponents';
 import usePrevious from '@utils/usePrevious';
@@ -2521,6 +2523,19 @@ df = get_variable('${pipelineUUID}', '${blockUUID}', 'output_0')`;
                             >
                               {blockUUID}
                             </Link>
+                          )}
+
+                          {!!blockPythonWorker(block, pipeline) && (
+                            <>
+                              <Spacing mr={1} />
+                              <WorkerChip
+                                onClick={() => {
+                                  setSelected(true);
+                                  openSidekickView?.(ViewKeyEnum.BLOCK_SETTINGS);
+                                }}
+                                worker={blockPythonWorker(block, pipeline)}
+                              />
+                            </>
                           )}
                         </FlexContainer>
 

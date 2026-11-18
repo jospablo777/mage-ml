@@ -3,7 +3,6 @@ import { useMutation } from 'react-query';
 import styled from 'styled-components';
 
 import Button from '@oracle/elements/Button';
-import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
 import api from '@api';
@@ -67,10 +66,13 @@ const LogStyle = styled.pre`
 `;
 
 // The worker a pipeline's Python blocks run in, and Prepare when it is not prepared yet.
+// Compact: only the prepare, for a worker named next to it already.
 function PythonWorkerStatus({
+  compact,
   onPrepared,
   worker,
 }: {
+  compact?: boolean;
   onPrepared: () => void;
   worker: PythonWorkerType;
 }) {
@@ -125,11 +127,13 @@ function PythonWorkerStatus({
 
   return (
     <Spacing mt={1}>
-      {worker.description && <Text small>{worker.description}</Text>}
-      <Text muted small>
-        {worker.definition} · Python {worker.python}
-        {worker.dependencies?.length >= 1 && ` · ${worker.dependencies.join(', ')}`}
-      </Text>
+      {!compact && worker.description && <Text small>{worker.description}</Text>}
+      {!compact && (
+        <Text muted small>
+          {worker.definition} · Python {worker.python}
+          {worker.dependencies?.length >= 1 && ` · ${worker.dependencies.join(', ')}`}
+        </Text>
+      )}
       {!worker.locked && (
         <Text small warning>
           It has no uv.lock: run uv lock in {worker.definition} and commit it.
@@ -142,7 +146,8 @@ function PythonWorkerStatus({
       )}
       {!worker.prepared && (
         <Spacing mt={1}>
-          <FlexContainer alignItems="center">
+          {!compact && <Text small warning>Not prepared: its blocks fail until it is.</Text>}
+          <Spacing mt={compact ? 0 : 1}>
             <Button
               compact
               disabled={running || !worker.locked}
@@ -153,12 +158,12 @@ function PythonWorkerStatus({
             >
               Prepare {workerLabel(worker)}
             </Button>
-            <Spacing ml={1} />
+          </Spacing>
+          {!compact && (
             <Text muted xsmall>
-              Not prepared for its current pyproject.toml and uv.lock: its blocks fail until
-              it is. Prepare installs its locked packages on the server (uv sync --locked).
+              Installs the packages its uv.lock pins, on this server (uv sync --locked).
             </Text>
-          </FlexContainer>
+          )}
         </Spacing>
       )}
       {(job?.problems || []).map(problem => (

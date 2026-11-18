@@ -30,6 +30,10 @@
 
 ### Pipelines
 
+- Where each Python block runs is visible: its block in the editor shows its worker
+  ("Feast worker", or "Feast worker · not prepared" while it would fail), the dependency
+  graph names it, and the pipeline's settings list every Python block with where it runs
+  and whether that worker is ready. A block's settings put the choice first.
 - Python workers can have a name and a description for people: `label = "Feast worker"`
   and `description` under `[tool.mageml.worker]` in the worker's `pyproject.toml`. The
   editor shows them in the worker lists and settings; changing them needs no new prepare.

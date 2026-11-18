@@ -29,6 +29,8 @@ type SetupSectionRowProps = {
   invalid?: boolean;
   large?: boolean;
   selectInput?: InputType & {
+    // A label above the select, for a choice the row's title does not name.
+    labelFixed?: string;
     options: {
       label?: string;
       value: any;

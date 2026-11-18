@@ -67,7 +67,7 @@ test.afterAll(async () => {
 test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) => {
   await page.goto(`/pipelines/${pipelineUUID}/settings`);
   const row = page.locator('div')
-    .filter({ has: page.getByText('Python worker', { exact: true }) })
+    .filter({ has: page.getByText('Where Python blocks run', { exact: true }) })
     .filter({ has: page.locator('select') })
     .last();
   await expect(row.locator('option', { hasText: SHOWN })).toHaveCount(1);
@@ -81,13 +81,26 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
     await api.call('GET', `pipelines/${pipelineUUID}`)
   ).pipeline.environment).toEqual({ worker: WORKER });
 
+  // The page says where each block runs, and that it fails until the worker is prepared.
+  await page.reload();
+  const blockRow = page.locator('tr').filter({ hasText: LOADER });
+  await expect(blockRow).toContainText('Tools worker');
+  await expect(blockRow).toContainText('the pipeline\'s default');
+  await expect(blockRow).toContainText('Not prepared');
+  // So does the block in the editor.
+  await page.goto(`/pipelines/${pipelineUUID}/edit`);
+  await expect(page.getByRole('button', { name: 'Python worker: Tools worker · not prepared' }))
+    .toBeVisible();
+
   // Locked, the page prepares it and shows what uv printed.
   await api.writeFile(FOLDER, 'uv.lock', LOCK);
-  await page.reload();
+  await page.goto(`/pipelines/${pipelineUUID}/settings`);
   await page.getByRole('button', { name: `Prepare ${SHOWN}` }).click();
   await expect(page.getByText(/Prepared: \d+ packages from its uv.lock/)).toBeVisible({
     timeout: 120_000,
   });
+  await page.goto(`/pipelines/${pipelineUUID}/edit`);
+  await expect(page.getByRole('button', { name: 'Python worker: Tools worker' })).toBeVisible();
 
   const run = await api.runOnce(pipelineUUID, `worker_${SUFFIX}`);
   expect(run.status).toBe('completed');
@@ -146,7 +159,16 @@ test('two workers with the same versions combine into one for a pipeline', async
     });
   }
   try {
+    // The API's answer first: when it is not "same", the failure says what it was.
+    const { python_worker_combination: answer, error } = await api.call(
+      'POST', 'python_worker_combinations', { python_worker_combination: { workers: pair } },
+    );
+    expect(answer?.state, JSON.stringify(answer || error)).toBe('same');
     await page.goto(`/pipelines/${uuid}/settings`);
+    // The blocks' own workers are not prepared: each is prepared from here too.
+    for (const worker of pair) {
+      await expect(page.getByRole('button', { name: `Prepare ${worker}` })).toBeEnabled();
+    }
     await expect(page.getByText(/can run as one worker with the same package versions/))
       .toBeVisible({ timeout: 60_000 });
     await page.getByText('Show what each worker installs', { exact: true }).click();

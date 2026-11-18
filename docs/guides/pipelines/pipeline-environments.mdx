@@ -138,9 +138,13 @@ mage workers assign feast my_pipeline --chain online_features   # its whole chai
 mage workers assign mage my_pipeline --blocks score             # MageML's own Python
 ```
 
-In the editor, the pipeline's **Settings** has **Python worker**, which lists the
-project's workers and prepares the chosen one with **Prepare**, showing what uv prints;
-each block's settings have **Python worker** too. In `metadata.yaml`, a block selects its
+In the editor, the pipeline's **Settings** has **Where Python blocks run**: the default
+worker for the pipeline's Python blocks, prepared with **Prepare** (uv's output on the
+page), and a table of every Python block with where it runs and whether that worker is
+ready; a worker a block chose that is not prepared has its **Prepare** there too. Each
+block's settings start with **Where this block runs**, and a block in a worker
+shows it in its header (with "not prepared" while it would fail); the dependency graph
+names it too. In `metadata.yaml`, a block selects its
 worker in its configuration; a pipeline selects one for all its Python blocks, and a block
 can still choose MageML's own Python with `mage`:
 

@@ -7,6 +7,7 @@ import BlockType, {
 import PipelineType, { PipelineTypeEnum } from '@interfaces/PipelineType';
 import { BORDER_WIDTH } from './index.style';
 import { PADDING_UNITS, UNIT } from '@oracle/styles/units/spacing';
+import { blockPythonWorker } from '@utils/models/pythonWorker';
 import { buildTags } from '@components/CodeBlock/utils';
 import { fusionStagePositions, fusionStageText } from '@utils/models/fusion';
 import { getModelAttributes } from '@utils/models/dbt';
@@ -58,10 +59,12 @@ function blockTagsTextWithoutStage(block: BlockType): string {
   return ABBREV_BLOCK_LANGUAGE_MAPPING[block?.language] || '';
 }
 
-// With block fusion on, a block of a chain names its stage, so the graph shows which
-// blocks run together.
+// A Python block in a named worker names it, and with block fusion on a block of a chain
+// names its stage, so the graph shows where each block runs and which run together.
 export function blockTagsText(block: BlockType, pipeline?: PipelineType): string {
-  const text = blockTagsTextWithoutStage(block);
+  const worker = blockPythonWorker(block, pipeline);
+  const base = blockTagsTextWithoutStage(block);
+  const text = worker ? [base, worker].filter(Boolean).join(' · ') : base;
   const stage = fusionStageText(fusionStagePositions(pipeline)?.[block?.uuid]);
   if (!stage) {
     return text;

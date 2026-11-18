@@ -13,6 +13,7 @@ import FusionVerification from './FusionVerification';
 import Headline from '@oracle/elements/Headline';
 import Link from '@oracle/elements/Link';
 import PipelineType, { ConcurrencyConfigRunLimitReachedActionEnum } from '@interfaces/PipelineType';
+import BlockWorkers from './BlockWorkers';
 import NewPythonWorker from './NewPythonWorker';
 import WorkerCombination from './WorkerCombination';
 import PythonWorkerStatus, { PythonWorkerType, workerLabel } from './PythonWorker';
@@ -373,17 +374,46 @@ function PipelineSettings({
           description={(
             <>
               <Text muted small>
-                A named environment in python_workers/&lt;name&gt;/ (a uv project with its
-                uv.lock) for the Python data loaders, transformers, data exporters and custom
-                blocks. A block can choose another with python_worker in its configuration.
+                A block that needs packages MageML&apos;s Python does not have, or other
+                versions of them, runs in a Python worker: an environment of its own.
+                Choose the default for this pipeline&apos;s Python blocks here; a block can
+                choose its own in its settings. A block whose worker is not prepared fails
+                until it is.
               </Text>
               {!workers.length && (
                 <Text muted small>
-                  This project has no Python workers yet: add one from a template below, or
-                  a uv project in python_workers/&lt;name&gt;/ with its uv.lock.
+                  This project has no Python workers yet: add one from a template below.
                 </Text>
               )}
-              <WorkerCombination pipelineUUID={pipelineUUID} workers={usedWorkers} />
+              <BlockWorkers
+                blocks={blocks}
+                defaultWorker={pipelineAttributes?.environment?.worker}
+                workers={workers}
+              />
+              {!!pipelineAttributes?.environment?.worker && (
+                <PythonWorkerStatus
+                  key={pipelineAttributes?.environment?.worker}
+                  onPrepared={() => reloadWorkers()}
+                  worker={workers.find(w => w.name === pipelineAttributes?.environment?.worker)}
+                />
+              )}
+              {/* The blocks' own workers that are not prepared, prepared from here too. */}
+              {workers
+                .filter(worker => !worker.prepared && usedWorkers.includes(worker.name)
+                  && worker.name !== pipelineAttributes?.environment?.worker)
+                .map(worker => (
+                  <PythonWorkerStatus
+                    compact
+                    key={worker.name}
+                    onPrepared={() => reloadWorkers()}
+                    worker={worker}
+                  />
+                ))}
+              <WorkerCombination
+                labels={Object.fromEntries(workers.map(worker => [worker.name, worker.label]))}
+                pipelineUUID={pipelineUUID}
+                workers={usedWorkers}
+              />
               <NewPythonWorker
                 onAdded={(name) => {
                   reloadWorkers();
@@ -393,17 +423,10 @@ function PipelineSettings({
                   }));
                 }}
               />
-              {!!pipelineAttributes?.environment?.worker && (
-                <PythonWorkerStatus
-                  key={pipelineAttributes?.environment?.worker}
-                  onPrepared={() => reloadWorkers()}
-                  worker={workers.find(w => w.name === pipelineAttributes?.environment?.worker)}
-                />
-              )}
             </>
           )}
           selectInput={{
-            monospace: true,
+            labelFixed: 'Default for this pipeline',
             onChange: e => setPipelineAttributes(prev => ({
               ...prev,
               environment: e.target.value
@@ -411,21 +434,26 @@ function PipelineSettings({
                 : { ...prev?.environment, worker: undefined },
             })),
             options: [
-              { label: 'MageML\'s Python', value: '' },
+              { label: 'MageML\'s Python (built in)', value: '' },
               ...workers.map(worker => ({
-                label: worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} (not prepared)`,
+                label: worker.prepared ? workerLabel(worker) : `${workerLabel(worker)} · not prepared`,
                 value: worker.name,
               })),
             ],
             value: pipelineAttributes?.environment?.worker || '',
           }}
-          title="Python worker"
+          title="Where Python blocks run"
         />
 
         {!pipelineAttributes?.environment?.worker && (
         <SetupSectionRow
           description={(
             <>
+              <Text muted small>
+                The older way to give this pipeline&apos;s Python blocks other packages:
+                every block shares the environment. A Python worker (above) is chosen block
+                by block, prepared ahead and exported with services.
+              </Text>
               <Text muted small>
                 The Python data loaders, transformers, data exporters and custom blocks run
                 in a virtual environment with the packages this file lists, instead of

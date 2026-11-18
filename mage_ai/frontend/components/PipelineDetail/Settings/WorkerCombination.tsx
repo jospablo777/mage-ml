@@ -55,7 +55,8 @@ function list(names: string[]): string {
 
 // Whether the Python workers a pipeline uses can run as one, said in one line; opened, what
 // each installs, what combining changes, its trade-off, and Combine into one worker.
-function WorkerCombination({ pipelineUUID, workers }: {
+function WorkerCombination({ labels, pipelineUUID, workers }: {
+  labels?: { [worker: string]: string };
   pipelineUUID: string;
   workers: string[];
 }) {
@@ -98,7 +99,7 @@ function WorkerCombination({ pipelineUUID, workers }: {
     return null;
   }
 
-  const names = workers.map(w => result?.names?.[w] || w);
+  const names = workers.map(w => result?.names?.[w] || labels?.[w] || w);
   const changeCount = Object.values(result?.changes || {})
     .reduce((sum, changes) => sum + changes.length, 0);
   const headline = {
