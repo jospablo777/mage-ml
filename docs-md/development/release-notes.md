@@ -58,6 +58,10 @@
   lock such an old release asks first ("uv would lock feast 0.20.0 from April 2022, 4
   years old; the newest is 0.68.0...") and changes nothing until confirmed; versions that
   cannot go together are refused in one sentence naming the package and the line.
+- **MageML (default)** heads the Workers page: MageML's own Python, where every block
+  without a worker runs, with its Python, main packages and the uv command that changes
+  it for the way MageML is installed (a uv project, a uv tool, the Docker image). The app
+  shows it and does not change it: it is the environment the server runs in.
 - Built images are measured by part after a build (base image, Python packages, each
   worker, the MageML runtime, models, project code), with the change since the build
   before; `mage service build --image` and `mage export service --build` print it.

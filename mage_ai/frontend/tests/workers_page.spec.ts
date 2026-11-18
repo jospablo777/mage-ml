@@ -158,3 +158,18 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   const { python_workers: workers } = await api.call('GET', 'python_workers');
   expect(workers.map(w => w.name)).not.toContain(NAME);
 });
+
+test('MageML\'s own Python is shown with how to change it, and the app does not change it',
+  async ({ page }) => {
+    await page.goto('/workers/mage');
+    await expect(page.getByText('MageML (default)', { exact: true })).toBeVisible();
+    await expect(page.getByText('Change it with uv, then restart MageML')).toBeVisible();
+    await expect(page.getByLabel('Commands')).toContainText('uv add scikit-learn');
+    await expect(page.getByRole('table', { name: 'Main packages' })).toContainText('pandas');
+
+    await expect(api.call('PUT', 'python_workers/mage', {
+      python_worker: { dependencies: ['six'] },
+    })).rejects.toThrow(/change it with uv in a terminal/);
+    await expect(api.call('DELETE', 'python_workers/mage')).rejects.toThrow(
+      /change it with uv in a terminal/);
+  });

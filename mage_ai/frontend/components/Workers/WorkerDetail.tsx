@@ -10,6 +10,7 @@ import Checkbox from '@oracle/elements/Checkbox';
 import ErrorCallout from './ErrorCallout';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
+import BuiltinWorker from './BuiltinWorker';
 import OlderReleases from './OlderReleases';
 import PackageEditor, { normalName } from './PackageEditor';
 import WorkerFiles from './WorkerFiles';
@@ -566,6 +567,9 @@ function WorkerDetail({ name }: { name: string }) {
   }
   if (!worker) {
     return <Spinner />;
+  }
+  if (worker.builtin) {
+    return <BuiltinWorker worker={worker} />;
   }
 
   const state = workerState(worker);

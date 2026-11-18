@@ -4,6 +4,13 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.settings.repo import get_repo_path
 
+# Why MageML's own Python is not changed from the app (python_workers.mageml_environment).
+BUILTIN_CHANGE = (
+    "MageML's own Python is the environment the server runs in: change it with uv in a "
+    'terminal (uv add, in the project MageML is installed in), then restart MageML. For the '
+    'packages of some blocks, add a worker instead.'
+)
+
 
 class PythonWorkerResource(GenericResource):
     """
@@ -89,6 +96,9 @@ class PythonWorkerResource(GenericResource):
     async def member(cls, pk, user, **kwargs) -> 'PythonWorkerResource':
         from mage_ai.data_preparation import environments, python_workers
 
+        if pk in environments.BUILTIN_WORKERS:
+            # MageML's own Python: shown, changed with uv in a terminal.
+            return cls(python_workers.mageml_environment(), user, **kwargs)
         try:
             worker = python_workers.detail(get_repo_path(user=user), pk)
         except environments.PipelineEnvironmentError as error:
@@ -108,6 +118,8 @@ class PythonWorkerResource(GenericResource):
 
         from mage_ai.data_preparation import environments, python_workers
 
+        if self.model.get('builtin'):
+            raise ApiError(dict(code=400, message=BUILTIN_CHANGE))
         dependencies = payload.get('dependencies')
         if dependencies is not None and (
             not isinstance(dependencies, list) or
@@ -147,6 +159,8 @@ class PythonWorkerResource(GenericResource):
         """DELETE /api/python_workers/<name>: refused while a block runs in it."""
         from mage_ai.data_preparation import environments, python_workers
 
+        if self.model.get('builtin'):
+            raise ApiError(dict(code=400, message=BUILTIN_CHANGE))
         try:
             python_workers.delete(get_repo_path(user=self.current_user), self.model['name'])
         except environments.PipelineEnvironmentError as error:

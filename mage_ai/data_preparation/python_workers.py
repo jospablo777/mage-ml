@@ -44,6 +44,75 @@ def server_platform() -> str:
     return 'linux-aarch64' if machine in ('aarch64', 'arm64') else 'linux-x86_64'
 
 
+# The packages shown for MageML's own Python, the ones blocks most often care about.
+MAGEML_PACKAGES = ('mage-ml', 'pandas', 'polars', 'pyarrow', 'numpy', 'scikit-learn',
+                   'sqlalchemy', 'mlflow')
+
+
+def mageml_environment() -> Dict:
+    """
+    MageML's own Python, the default worker: where it comes from and how to change it. Read
+    only in the app on purpose: changing it means uv syncing the environment the server runs
+    in, which can leave a running process with half of a package's files, or pin a version
+    MageML cannot start with, and then the page to undo it is gone; in a Docker image the
+    change is lost on restart. So the page says how to change it with uv, then restart, and
+    that a worker is the place for the packages of some blocks.
+    """
+    import importlib.metadata
+
+    prefix = Path(sys.prefix)
+    project = None
+    for folder in (prefix.parent, Path.cwd()):
+        candidate = folder / 'pyproject.toml'
+        try:
+            text = candidate.read_text()
+        except OSError:
+            continue
+        if 'mage-ml' in text or 'mage_ml' in text or 'mage-ai' in text:
+            project = candidate
+            break
+    if Path('/.dockerenv').exists() or str(prefix) == '/opt/mage':
+        kind = 'docker'
+    elif project is not None:
+        kind = 'project'
+    elif f'{os.sep}uv{os.sep}tools{os.sep}' in str(prefix):
+        kind = 'uv_tool'
+    else:
+        kind = 'environment'
+    example = 'scikit-learn'
+    if kind == 'project':
+        folder = str(project.parent)
+        commands = [f'cd "{folder}"', f'uv add {example}', f'uv remove {example}',
+                    'uv lock --upgrade-package pandas && uv sync']
+    elif kind == 'uv_tool':
+        commands = [f'uv tool install mage-ml --with {example} --reinstall']
+    elif kind == 'docker':
+        commands = ['# In your own Dockerfile, from the MageML image you run:',
+                    f'RUN uv pip install --python {sys.executable} {example}']
+    else:
+        commands = [f'uv pip install --python {sys.executable} {example}']
+    # By name: a package can be listed twice (an egg-info next to its installed copy).
+    versions = {}
+    for distribution in importlib.metadata.distributions():
+        name = (distribution.metadata.get('Name') or '').lower().replace('_', '-')
+        if name:
+            versions.setdefault(name, distribution.version)
+    count = len(versions)
+    packages = [dict(name=n, version=versions[n]) for n in MAGEML_PACKAGES if n in versions]
+    return dict(
+        name='mage',
+        builtin=True,
+        label='MageML (default)',
+        python=f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}',
+        prefix=str(prefix),
+        project=str(project) if project else None,
+        kind=kind,
+        commands=commands,
+        package_count=count,
+        main_packages=packages,
+    )
+
+
 def usage(repo_path: str) -> Dict[str, List[Dict]]:
     """
     The pipelines whose Python blocks run in each worker, from their metadata.yaml (blocks

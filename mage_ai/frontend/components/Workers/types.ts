@@ -35,6 +35,14 @@ export type PackageChangeType = {
 };
 
 export type WorkerType = {
+  // MageML's own Python (name mage): shown read only, with how to change it.
+  builtin?: boolean;
+  commands?: string[];
+  kind?: 'docker' | 'environment' | 'project' | 'uv_tool';
+  main_packages?: { name: string; version: string }[];
+  package_count?: number;
+  prefix?: string;
+  project?: string;
   changes?: PackageChangeType[];
   combine?: boolean;
   // A save that would lock these below their newest release: nothing changed yet.

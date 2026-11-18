@@ -479,3 +479,39 @@ class PythonWorkersTest(DBTestCase):
             call(viewer, OperationType.DELETE, 'python_workers', 'tools')['error']['code'], 403)
         call(editor, OperationType.DELETE, 'python_workers', 'tools')
         self.assertFalse(folder.exists())
+
+
+class MagemlEnvironmentTest(unittest.TestCase):
+    """MageML's own Python is shown with how to change it, for the way it is installed."""
+
+    def environment(self, prefix, cwd=None):
+        with patch.object(python_workers.sys, 'prefix', str(prefix)), \
+                patch.object(python_workers.Path, 'cwd', return_value=Path(cwd or prefix)):
+            return python_workers.mageml_environment()
+
+    def test_a_uv_project_is_changed_with_uv_add_in_its_folder(self):
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        (project / 'pyproject.toml').write_text(
+            '[project]\nname = "shop"\ndependencies = ["mage-ml[postgres]"]\n')
+
+        found = self.environment(project / '.venv')
+
+        self.assertEqual((found['name'], found['builtin'], found['kind']), ('mage', True,
+                                                                          'project'))
+        self.assertEqual(found['project'], str(project / 'pyproject.toml'))
+        self.assertEqual(found['commands'][:2], [f'cd "{project}"', 'uv add scikit-learn'])
+        names = [p['name'] for p in found['main_packages']]
+        self.assertIn('pandas', names)
+        self.assertEqual(len(names), len(set(names)), 'each package once')
+
+    def test_a_uv_tool_and_another_environment_say_their_own_command(self):
+        tool = Path(tempfile.mkdtemp()) / 'uv' / 'tools' / 'mage-ml'
+        elsewhere = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, elsewhere, True)
+
+        self.assertEqual(self.environment(tool, cwd=elsewhere)['commands'],
+                         ['uv tool install mage-ml --with scikit-learn --reinstall'])
+        other = self.environment(elsewhere / 'env', cwd=elsewhere)
+        self.assertEqual(other['kind'], 'environment')
+        self.assertTrue(other['commands'][0].startswith('uv pip install --python '))

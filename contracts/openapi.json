@@ -4842,11 +4842,17 @@
    },
    "PythonWorker": {
     "properties": {
+     "builtin": {
+      "type": "null"
+     },
      "changes": {
       "type": "null"
      },
      "combine": {
       "type": "boolean"
+     },
+     "commands": {
+      "type": "null"
      },
      "confirm": {
       "type": "null"
@@ -4871,11 +4877,17 @@
      "job": {
       "type": "null"
      },
+     "kind": {
+      "type": "null"
+     },
      "label": {
       "type": "null"
      },
      "locked": {
       "type": "boolean"
+     },
+     "main_packages": {
+      "type": "null"
      },
      "memory_limit": {
       "type": "null"
@@ -4886,12 +4898,21 @@
      "notes": {
       "type": "null"
      },
+     "package_count": {
+      "type": "null"
+     },
      "packages": {
       "items": {},
       "type": "array"
      },
+     "prefix": {
+      "type": "null"
+     },
      "prepared": {
       "type": "boolean"
+     },
+     "project": {
+      "type": "null"
      },
      "pyproject": {
       "type": [

@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { useEffect, useMemo, useState } from 'react';
+import NextLink from 'next/link';
 import { useRouter } from 'next/router';
 
 import Button from '@oracle/elements/Button';
@@ -74,6 +75,8 @@ function Workers() {
       w => w.job?.state === 'running') ? POLL_MS : 0,
   });
   const workers: WorkerType[] = useMemo(() => data?.python_workers || [], [data]);
+  const { data: dataMage } = api.python_workers.detail('mage', {}, { revalidateOnFocus: false });
+  const mage: WorkerType = dataMage?.python_worker;
   const attention = workers.filter(needsAttention).length;
   const disk = workers.reduce((sum, w) => sum + (w.size_bytes || 0), 0);
   const open = (name: string) => router.push('/workers/[worker]', `/workers/${name}`);
@@ -125,6 +128,8 @@ function Workers() {
               Every Python block runs in MageML&apos;s Python until you add a worker. Add one
               when a block needs a library MageML does not ship, or another version of one it
               does: Feast, an MLflow model, scikit-learn and ONNX Runtime for scoring.
+              MageML&apos;s own Python is changed with uv in a terminal:{' '}
+              <NextLink href="/workers/mage" passHref><Link inline>see how</Link></NextLink>.
             </Text>
             <Spacing mt={2} />
             <Button onClick={() => setAdding(true)} primary>Add the first worker</Button>
@@ -172,6 +177,38 @@ function Workers() {
                   </tr>
                 </thead>
                 <tbody>
+                  {mage && (
+                    <RowLinkStyle
+                      aria-label="Open MageML (default)"
+                      onClick={() => open('mage')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          open('mage');
+                        }
+                      }}
+                      role="link"
+                      tabIndex={0}
+                    >
+                      <td>
+                        <Text bold>{mage.label}</Text>
+                        <MonoStyle><Text inline muted small>mage</Text></MonoStyle>
+                      </td>
+                      <td><Text small>{mage.python}</Text></td>
+                      <td>
+                        <Text small>
+                          {(mage.main_packages || []).slice(1, 4).map(p => p.name).join(', ')}
+                          {' '}and {Math.max((mage.package_count || 0) - 3, 0)} more
+                        </Text>
+                      </td>
+                      <td><Text muted small>In MageML&apos;s environment</Text></td>
+                      <td><Text small>Blocks without a worker</Text></td>
+                      <td title="The server runs in it">
+                        <PillStyle tone="positive">Runs MageML</PillStyle>
+                      </td>
+                      <td><Text muted small>Changed with uv</Text></td>
+                    </RowLinkStyle>
+                  )}
                   {workers.map((worker) => {
                     const state = workerState(worker);
                     const security = securityState(worker.security);

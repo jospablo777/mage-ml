@@ -168,6 +168,28 @@ background and are kept for 12 hours per lock.
   <img className="hidden dark:block" src="/images/screenshots/workers-security.dark.png" alt="A worker's security: requests 2.31.0 with three advisories, fixed in 2.33.0, and Fix vulnerabilities" />
 </Frame>
 
+## MageML's own Python, the default worker
+
+A block that chooses no worker runs in MageML's own Python: the environment MageML is
+installed in, such as the uv project where you ran `uv add mage-ml`. The Workers page shows
+it first, as **MageML (default)**, with its Python, its main packages and how it was
+installed, but does not change it. It is the environment the server runs in: a change
+while MageML runs can leave it with half of a package's files, and a version MageML cannot
+start with (pandas, pyarrow, SQLAlchemy) leaves no page to undo it.
+
+Change it with uv in a terminal, then restart MageML:
+
+| MageML installed | Add a package |
+| --- | --- |
+| In a uv project (`uv add mage-ml`) | `uv add scikit-learn` in that project's folder |
+| As a uv tool | `uv tool install mage-ml --with scikit-learn --reinstall` |
+| From the Docker image | `RUN uv pip install --python /opt/mage/bin/python scikit-learn` in your own image built from it |
+| In another environment | `uv pip install --python <its python> scikit-learn` |
+
+Its page in the app shows the command for the way this server's MageML is installed. For
+packages only some blocks need, or versions that clash with MageML's (Feast with pandas 2,
+an older MLflow), add a worker instead: MageML's own packages then never change.
+
 ## How it works
 
 <Frame>
