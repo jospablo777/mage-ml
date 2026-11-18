@@ -71,6 +71,8 @@ dependencies = [
   "sqlparse>=0.6,<1",
   "terminado>=0.18.1",
   "thefuzz>=0.22.1",
+  # Python workers' pyproject.toml, edited from the Workers page with its comments kept.
+  "tomlkit>=0.13",
   "tornado>=6.5.9",
   "typer>=0.18",
   "typing_extensions>=4.13.2",

@@ -32,9 +32,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
-from packaging.version import InvalidVersion, Version
-
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+# The rules the Workers page uses too.
+from mage_ai.shared.vulnerabilities import (  # noqa: E402
+    compatible,
+    first_fix,
+    fix_target,
+    version_key,
+)
+
 AUDIT_SCRIPT = ROOT / 'scripts' / 'audit_dependencies.sh'
 FRONTEND = ROOT / 'mage_ai' / 'frontend'
 NO_FIX_NPM = '<0.0.0'
@@ -69,41 +77,14 @@ def accepted_advisories() -> Set[str]:
     return set(re.findall(r'--ignore(?:-until-fixed)? ((?:GHSA|PYSEC|RUSTSEC|CVE)-[\w-]+)', text))
 
 
-def version_key(value: str):
-    try:
-        return Version(value)
-    except InvalidVersion:
-        return Version('0')
-
-
 def lower_bounds(requirement: str) -> List[str]:
     """The versions a range such as '>=1.2.3, <2' or '^1.4.2 || >=2.0.1' starts at."""
     return re.findall(r'(?:>=|\^|~|=)\s*v?(\d+(?:\.\d+)*)', requirement)
 
 
-def compatible(version: str) -> Tuple[int, ...]:
-    """The semver line a version belongs to: 1.4.2 -> (1,), 0.39.4 -> (0, 39)."""
-    release = version_key(version).release
-    return release[:1] if release[:1] != (0,) else release[:2]
-
-
-def first_fix(current: str, candidates: Iterable[str]) -> Optional[str]:
-    """The smallest fixed version above current, preferring one in current's line."""
-    newer = sorted(
-        {c for c in candidates if version_key(c) > version_key(current)}, key=version_key,
-    )
-    if not newer:
-        return None
-    same_line = [c for c in newer if compatible(c) == compatible(current)]
-    return (same_line or newer)[0]
-
-
 def target(finding: Finding) -> Optional[str]:
     """The smallest version that fixes every advisory with a fixed release."""
-    current = finding.version.split(', ')[0]
-    fixes = [first_fix(current, versions) for versions in finding.fixed_in.values()]
-    fixes = [f for f in fixes if f]
-    return max(fixes, key=version_key) if fixes else None
+    return fix_target(finding.version.split(', ')[0], finding.fixed_in)
 
 
 def unfixable(finding: Finding) -> Set[str]:
