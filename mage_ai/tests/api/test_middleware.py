@@ -23,6 +23,9 @@ class Echo(OAuthMiddleware):
         error = self.request.error
         self.write(dict(error=error and error['type'], user=bool(self.request.current_user)))
 
+    def post(self):
+        self.get()
+
 
 class MiddlewareTest(AsyncHTTPTestCase, DBTestCase):
     def setUp(self):
@@ -36,7 +39,23 @@ class MiddlewareTest(AsyncHTTPTestCase, DBTestCase):
         self.addCleanup(patcher.stop)
 
     def get_app(self):
-        return Application([(r'/echo', Echo)])
+        return Application([(r'/echo', Echo), (r'/api/sessions', Echo)])
+
+    def test_signing_in_with_another_servers_token_is_not_refused(self):
+        # The browser kept the token of a server that ran on the same address before; the
+        # sign-in answered 401 "Invalid OAuth token" until the cookie was cleared.
+        for headers in (
+            {'Cookie': 'oauth_token=eyJhbGciOiJIUzI1NiJ9.e30.bad'},
+            {'OAUTH-TOKEN': 'not-a-token-this-server-made'},
+        ):
+            with self.subTest(headers=headers):
+                headers = {'X-API-KEY': OAUTH2_APPLICATION_CLIENT_ID, **headers}
+                signing_in = self.fetch('/api/sessions', method='POST', body='{}',
+                                        headers=headers)
+                self.assertEqual(json.loads(signing_in.body),
+                                 dict(error=None, user=False))
+                anything_else = self.fetch('/echo', headers=headers)
+                self.assertEqual(anything_else.code, 401, anything_else.body)
 
     def test_a_cookie_that_does_not_decode_is_an_invalid_token(self):
         for cookie in ('oauth_token=not-a-jwt', 'oauth_token=eyJhbGciOiJIUzI1NiJ9.e30.bad'):

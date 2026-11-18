@@ -122,6 +122,13 @@ class OAuthMiddleware(RequestHandler):
                         )
                     should_check = True
 
+                # Signing in with a token another server made (the same address, its
+                # database reset) or an expired one: the sign-in is for that, so it is not
+                # refused; every other request still is.
+                signing_in = (self.request.method == 'POST'
+                              and self.request.path.rstrip('/').endswith('/api/sessions'))
+                if should_check and signing_in and not (oauth_token and valid):
+                    should_check = False
                 if should_check:
                     if oauth_token:
                         if valid:
