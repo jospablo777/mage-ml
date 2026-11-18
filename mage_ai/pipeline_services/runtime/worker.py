@@ -87,20 +87,63 @@ def _module(name: str):
     return sys.modules.get(name)
 
 
-def _has_python_objects(frame) -> bool:
-    """Whether an object column holds dicts, lists, sets, tuples or UUIDs."""
+# Written in an Arrow file's schema metadata: the positions of the frame's columns that
+# held Python lists, which pandas would read back as NumPy arrays.
+LIST_COLUMNS_KEY = b'mageml.list_columns'
+# A DatetimeIndex's frequency ("D", "h"), which Arrow does not keep.
+INDEX_FREQ_KEY = b'mageml.index_freq'
+_PLAIN = (bool, int, float, str, type(None))
+
+
+def _plain_list(item) -> bool:
+    """A list Arrow keeps: of plain values or of such lists. The first item stands for the
+    rest, so a wide list (an embedding) costs one check; mixed items fail in Arrow."""
+    while isinstance(item, list):
+        if not item:
+            return True
+        item = item[0]
+    return isinstance(item, _PLAIN)
+
+
+def _python_objects(frame) -> Tuple[bool, List[int]]:
+    """
+    Whether an object column holds values Arrow changes (dicts, sets, tuples, UUIDs, lists
+    of those), and the positions of the columns of lists Arrow keeps.
+    """
     import uuid
 
     import pandas as pd
 
-    kinds = (dict, list, tuple, set, uuid.UUID)
+    kinds = (dict, tuple, set, uuid.UUID)
+    lists = []
     for position, dtype in enumerate(frame.dtypes):
         if not pd.api.types.is_object_dtype(dtype):
             continue
+        has_list = False
         for item in frame.iloc[:, position].array:
             if isinstance(item, kinds):
-                return True
-    return False
+                return True, []
+            if isinstance(item, list):
+                if not _plain_list(item):
+                    return True, []
+                has_list = True
+            elif has_list and item is not None:
+                # Lists and other values in one column: Arrow would refuse or change them.
+                return True, []
+        if has_list:
+            lists.append(position)
+    return False, lists
+
+
+def _python_lists(value):
+    """A list cell as the block returned it: Arrow reads it back as a NumPy array."""
+    if value is None:
+        return None
+    if hasattr(value, 'tolist'):
+        value = value.tolist()
+    if isinstance(value, list):
+        return [_python_lists(item) if hasattr(item, 'tolist') else item for item in value]
+    return value
 
 
 def write_output(value: Any, directory: str, index: int) -> Dict:
@@ -136,15 +179,27 @@ def write_output(value: Any, directory: str, index: int) -> Dict:
 
         frame = value.to_frame() if isinstance(value, pd.Series) else value
         try:
-            if _has_python_objects(frame):
+            changed, lists = _python_objects(frame)
+            if changed:
                 raise pa_module.ArrowInvalid('object columns that Arrow changes')
             table = pa_module.Table.from_pandas(frame, preserve_index=None)
+            extra = {}
+            if lists:
+                extra[LIST_COLUMNS_KEY] = json.dumps(lists).encode()
+            # Arrow keeps a DatetimeIndex's values, not its frequency.
+            if getattr(frame.index, 'freqstr', None):
+                extra[INDEX_FREQ_KEY] = frame.index.freqstr.encode()
+            if extra:
+                table = table.replace_schema_metadata({**(table.schema.metadata or {}), **extra})
         except (
             pa_module.ArrowInvalid, pa_module.ArrowTypeError, pa_module.ArrowNotImplementedError,
+            # Duplicate column names.
+            ValueError,
         ):
             # Object columns that Arrow cannot hold or would change (UUIDs come back as
-            # bytes, dicts gain the keys of other rows, lists become arrays) keep the frame
-            # as it is in a pickle.
+            # bytes, dicts gain the keys of other rows) keep the frame as it is in a pickle.
+            # Lists of plain values go as Arrow lists: a pickle reads back only with the same
+            # pandas, so another worker's pandas could not read them.
             path = base + '.pickle'
             with open(path, 'wb') as file:
                 pickle.dump(value, file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -168,9 +223,18 @@ def write_output(value: Any, directory: str, index: int) -> Dict:
             json.dump(value, file)
         return dict(kind='json', path=path)
     path = base + '.pickle'
-    with open(path, 'wb') as file:
-        pickle.dump(value, file, protocol=pickle.HIGHEST_PROTOCOL)
-    return dict(kind='pickle', path=path, type=f'{type(value).__module__}.{type(value).__name__}')
+    kind = f'{type(value).__module__}.{type(value).__name__}'
+    try:
+        with open(path, 'wb') as file:
+            pickle.dump(value, file, protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception as error:
+        raise BlockError(
+            'output',
+            f'The block returned a {kind}, which cannot leave its process ({error}). '
+            f'{PICKLE_ALTERNATIVES}.',
+            traceback.format_exc(),
+        )
+    return dict(kind='pickle', path=path, type=kind)
 
 
 def _write_ipc(table, path: str) -> None:
@@ -273,10 +337,30 @@ def read_input(record: Dict) -> Any:
         import geopandas
 
         return geopandas.read_parquet(path)
-    if origin == 'polars':
+    # A table reaches a block in what its Python has: a Python worker may have pandas and
+    # not Polars, or the other way round.
+    has = {name: _installed(name) for name in ('pandas', 'polars', 'pyarrow')}
+    if origin == 'polars' and has['polars']:
         import polars as pl
 
         return pl.read_ipc(path) if fmt == 'ipc' else pl.read_parquet(path)
+    if not has['pyarrow'] or (origin != 'arrow' and not has['pandas']):
+        if has['polars'] and fmt == 'ipc':
+            import polars as pl
+
+            _note(f'The upstream block returned a {_ORIGINS.get(origin, origin)} table; this '
+                  'Python has no pandas with pyarrow, so it arrives as a Polars DataFrame.')
+            frame = pl.read_ipc(path)
+            return frame.to_series(0) if origin == 'pandas_series' else frame
+        present = _listed([name for name, ok in has.items() if ok])
+        raise BlockError(
+            'input',
+            f'An upstream block returned a {_ORIGINS.get(origin, origin)} table, which reaches '
+            'this block as Arrow, and this Python cannot read it: it has '
+            f'{present or "none of pandas, pyarrow and polars"}. '
+            'Add pandas and pyarrow, or polars, to the dependencies of the Python worker this '
+            'block runs in and lock it again.',
+        )
     import pyarrow as pa
 
     if fmt == 'ipc':
@@ -290,10 +374,52 @@ def read_input(record: Dict) -> Any:
         table = pq.read_table(path)
     if origin == 'arrow':
         return table
+    if origin == 'polars':
+        _note('The upstream block returned a Polars table; this Python has no Polars, so it '
+              'arrives as a pandas DataFrame.')
+        return table.to_pandas()
     frame = _to_pandas(table)
+    lists = json.loads((table.schema.metadata or {}).get(LIST_COLUMNS_KEY) or b'[]')
+    for position in lists:
+        column = frame.iloc[:, position]
+        frame.isetitem(position, column.__class__(
+            [_python_lists(item) for item in column.array], index=column.index,
+            name=column.name, dtype=object,
+        ))
+    freq = (table.schema.metadata or {}).get(INDEX_FREQ_KEY)
+    if freq:
+        try:
+            frame.index.freq = freq.decode()
+        except (TypeError, ValueError):
+            pass
     if origin == 'pandas_series':
         return frame.iloc[:, 0]
     return frame
+
+
+_ORIGINS = dict(arrow='Arrow', pandas='pandas', pandas_series='pandas', polars='Polars')
+
+
+def _installed(name: str) -> bool:
+    if name in sys.modules:
+        return sys.modules[name] is not None
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _listed(names: List[str]) -> str:
+    if len(names) <= 1:
+        return ''.join(names)
+    return f'{", ".join(names[:-1])} and {names[-1]}'
+
+
+def _note(message: str) -> None:
+    """A line in the block's log, where people look when a value is not what they expect."""
+    print(message, file=sys.stderr, flush=True)
 
 
 # ---- blocks -------------------------------------------------------------------------
@@ -373,10 +499,12 @@ def _run_tests(block: Dict, results: List[Dict]) -> None:
     if failed:
         for t in failed:
             print(f"FAIL: {t['name']} (block: {block['uuid']}): {t['message']}", flush=True)
+        # With each test's message: an assertion's text is what says what went wrong.
         raise BlockError(
             'test',
             f"{len(failed)} of {len(results)} tests failed: "
-            + ', '.join(t['name'] for t in failed),
+            + '; '.join(f"{t['name']} ({t['message']})" if t.get('message') else t['name']
+                        for t in failed),
         )
     if results:
         print(f'{len(results)}/{len(results)} tests passed.', flush=True)

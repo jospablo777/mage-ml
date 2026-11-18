@@ -94,6 +94,85 @@ class OutputsTest(WorkerTestCase):
         back = worker.read_input(self.write(frame))
         pd.testing.assert_frame_equal(back, frame)
 
+    def test_columns_of_lists_cross_as_arrow_and_come_back_as_lists(self):
+        # Tags and embeddings: as a pickle, a worker with another pandas could not read them.
+        frame = pd.DataFrame({
+            'id': [1, 2, 3],
+            'tags': [['a', 'b'], None, []],
+            'embedding': [[0.5, 1.5], [2.5, 3.5], [4.5, 5.5]],
+            'nested': [[[1], [2, 3]], [[4]], None],
+        })
+        record = self.write(frame)
+        self.assertEqual((record['kind'], record['format']), ('frame', 'ipc'))
+        back = worker.read_input(record)
+        pd.testing.assert_frame_equal(back, frame)
+        self.assertIs(type(back['embedding'][0]), list)
+        self.assertIs(type(back['embedding'][0][0]), float)
+        self.assertIs(type(back['nested'][0][1]), list)
+
+    def test_lists_arrow_would_change_stay_a_pickle_and_arrays_stay_arrays(self):
+        for name, column in (
+            ('dicts', [[{'a': 1}], [{'b': 2}]]),
+            ('mixed', [['a', 1], ['b', 2]]),
+            ('lists_and_strings', [['a'], 'b']),
+        ):
+            record = self.write(pd.DataFrame({'x': column}), name)
+            self.assertEqual(record['kind'], 'pickle', name)
+            self.assertEqual(worker.read_input(record)['x'].tolist(), column)
+        arrays = pd.DataFrame({'x': [np.array([1.5, 2.5]), np.array([3.5])]})
+        back = worker.read_input(self.write(arrays, 'arrays'))
+        self.assertIsInstance(back['x'][0], np.ndarray)
+
+    def test_tables_arrow_refuses_or_changes_still_cross(self):
+        # Arrow refuses duplicate names with a ValueError, which stopped the block.
+        duplicated = pd.DataFrame([[1, 2]], columns=['a', 'a'])
+        record = self.write(duplicated, 'duplicated')
+        self.assertEqual(record['kind'], 'pickle')
+        pd.testing.assert_frame_equal(worker.read_input(record), duplicated)
+        # Arrow keeps a DatetimeIndex's values, not its frequency.
+        daily = pd.DataFrame({'a': [1, 2]},
+                             index=pd.date_range('2026-01-01', periods=2, tz='Europe/Madrid'))
+        back = worker.read_input(self.write(daily, 'daily'))
+        pd.testing.assert_frame_equal(back, daily)
+        self.assertEqual(back.index.freqstr, 'D')
+
+    def test_a_value_that_cannot_leave_its_process_says_what_to_return(self):
+        with self.assertRaises(worker.BlockError) as raised:
+            self.write((i for i in range(3)), 'generator')
+        self.assertEqual(raised.exception.phase, 'output')
+        self.assertIn('The block returned a builtins.generator, which cannot leave its process',
+                      str(raised.exception))
+        self.assertIn('Return a table (pandas or Polars)', str(raised.exception))
+
+    def test_a_table_reaches_a_python_without_its_library_as_what_it_has(self):
+        from unittest.mock import patch
+
+        polars_record = self.write(pl.DataFrame({'x': [1, 2]}), 'polars')
+        pandas_record = self.write(pd.DataFrame({'x': [1, 2]}), 'pandas')
+        series_record = self.write(pd.Series([1, 2], name='x'), 'series')
+        with patch.dict('sys.modules', {'polars': None}), \
+                patch('sys.stderr', new_callable=io.StringIO) as log:
+            back = worker.read_input(polars_record)
+        self.assertIsInstance(back, pd.DataFrame)
+        self.assertEqual(back['x'].tolist(), [1, 2])
+        self.assertIn('arrives as a pandas DataFrame', log.getvalue())
+
+        with patch.dict('sys.modules', {'pandas': None}), \
+                patch('sys.stderr', new_callable=io.StringIO) as log:
+            back = worker.read_input(pandas_record)
+            series = worker.read_input(series_record)
+        self.assertIsInstance(back, pl.DataFrame)
+        self.assertEqual(back['x'].to_list(), [1, 2])
+        self.assertIsInstance(series, pl.Series)
+        self.assertIn('arrives as a Polars DataFrame', log.getvalue())
+
+        with patch.dict('sys.modules', {'pyarrow': None, 'polars': None}), \
+                self.assertRaises(worker.BlockError) as raised:
+            worker.read_input(pandas_record)
+        self.assertEqual(raised.exception.phase, 'input')
+        self.assertIn('this Python cannot read it: it has pandas. Add pandas and pyarrow, '
+                      'or polars, to the dependencies', str(raised.exception))
+
     def test_other_values_choose_a_format_that_keeps_them(self):
         array = np.arange(6).reshape(2, 3)
         record = self.write(array, 'np')
