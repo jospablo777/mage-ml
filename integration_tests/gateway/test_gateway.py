@@ -183,18 +183,19 @@ def test_the_gateway_adds_under_two_milliseconds_at_p95(ports, signed_in):
     gateway, server = ports
     session = signed_in
 
-    def timings(port):
-        url = f'http://127.0.0.1:{port}/api/status'
-        for _ in range(20):
-            session.get(url, timeout=30)
-        result = []
-        for _ in range(300):
-            start = time.perf_counter()
-            session.get(url, timeout=30).raise_for_status()
-            result.append((time.perf_counter() - start) * 1000)
-        return result
+    def timed(port):
+        start = time.perf_counter()
+        session.get(f'http://127.0.0.1:{port}/api/status', timeout=30).raise_for_status()
+        return (time.perf_counter() - start) * 1000
 
-    direct, through = timings(server), timings(gateway)
+    for _ in range(20):
+        timed(server), timed(gateway)
+    # Alternated, so a busy moment on the machine slows both alike: measured one after the
+    # other, a noisy second batch read as gateway time (I-467).
+    direct, through = [], []
+    for _ in range(300):
+        direct.append(timed(server))
+        through.append(timed(gateway))
     p95 = statistics.quantiles(through, n=20)[-1] - statistics.quantiles(direct, n=20)[-1]
     median = statistics.median(through) - statistics.median(direct)
     print(f'gateway adds {median:.2f} ms at the median, {p95:.2f} ms at p95')
