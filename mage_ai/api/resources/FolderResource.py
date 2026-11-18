@@ -29,11 +29,19 @@ class FolderResource(GenericResource):
 
     @classmethod
     def member(cls, pk, user, **kwargs):
-        path = add_absolute_path(urllib.parse.unquote(pk))
+        relative = urllib.parse.unquote(pk)
+        # A folder that does not exist has no absolute path from add_absolute_path; its
+        # place in the project still answers whether it is there.
+        path = add_absolute_path(relative) or full_path(relative)
         return cls(dict(path=path), user, **kwargs)
 
     def delete(self, **kwargs):
         self.check_folder_is_in_project(self.path)
+        if not os.path.isdir(self.path):
+            # It answered 500 (a TypeError on the missing path).
+            error = ApiError.RESOURCE_NOT_FOUND.copy()
+            error.update(message=f'There is no folder at {self.path}.')
+            raise ApiError(error)
         return shutil.rmtree(self.path)
 
     def update(self, payload, **kwargs):

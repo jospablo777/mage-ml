@@ -164,3 +164,18 @@ build_delete_endpoint_tests(
         ('mage_ai.api.resources.FolderResource.ensure_file_is_in_project', lambda _x: True),
     ],
 )
+
+
+class MissingFolderTest(BaseAPIEndpointTest):
+    async def test_deleting_a_folder_that_is_not_there_answers_not_found(self):
+        from mage_ai.api.operations.base import BaseOperation
+        from mage_ai.api.operations.constants import OperationType
+
+        # It answered 500, a TypeError on the folder's missing absolute path.
+        with patch('mage_ai.api.policies.BasePolicy.REQUIRE_USER_AUTHENTICATION', 0):
+            response = await BaseOperation(
+                action=OperationType.DELETE, pk=urllib.parse.quote('python_workers/gone'),
+                resource='folders', user=None,
+            ).execute()
+        self.assertEqual(response['error']['code'], 404, response)
+        self.assertIn('There is no folder at', response['error']['message'])
