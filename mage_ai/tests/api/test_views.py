@@ -361,3 +361,64 @@ for config in [
             resource_pk=resource_pk,
         ),
     )
+
+
+class RequestTransactionTest(AsyncDBTestCase):
+    """
+    I-466: a request that only read left its transaction open on the server thread, and
+    SQLite kept serving that thread the snapshot it began with: the runs page showed a run
+    as running two minutes after it completed. Each request now ends its transaction.
+    """
+
+    async def test_a_read_does_not_leave_the_thread_on_an_old_snapshot(self):
+        from mage_ai.orchestration.db import db_connection
+        from mage_ai.orchestration.db.models.schedules import PipelineRun
+        from mage_ai.tests.factory import (
+            create_pipeline_run_with_schedule,
+            create_pipeline_with_blocks,
+        )
+
+        pipeline = create_pipeline_with_blocks(self.faker.unique.name(), self.repo_path)
+        run = create_pipeline_run_with_schedule(
+            pipeline_uuid=pipeline.uuid, status=PipelineRun.PipelineRunStatus.RUNNING,
+        )
+        run_id = run.id
+        db_connection.session.commit()
+
+        class Reading:
+            async def execute(self):
+                status = PipelineRun.get_by_id(run_id).status
+                return dict(pipeline_run=dict(status=str(status)))
+
+        with patch('mage_ai.api.views.BaseOperation', lambda *args, **kwargs: Reading()):
+            await execute_operation(build_handler(CustomRequest(method='GET')),
+                                    resource='pipeline_runs', pk=run_id)
+        self.assertFalse(db_connection.session().in_transaction())
+
+        # Another process (the scheduler) completes the run.
+        engine = db_connection.session().get_bind()
+        with engine.begin() as other:
+            other.exec_driver_sql(
+                "UPDATE pipeline_run SET status = 'COMPLETED' WHERE id = ?", (run_id,))
+        self.assertEqual(PipelineRun.get_by_id(run_id).status,
+                         PipelineRun.PipelineRunStatus.COMPLETED)
+
+    async def test_a_failed_request_rolls_back_what_it_did_not_commit(self):
+        from mage_ai.orchestration.db import db_connection
+
+        class Failing:
+            async def execute(self):
+                db_connection.session.execute(text_sql('SELECT 1'))
+                raise RuntimeError('broken')
+
+        with patch('mage_ai.api.views.BaseOperation', lambda *args, **kwargs: Failing()):
+            with self.assertRaises(RuntimeError):
+                await execute_operation(build_handler(CustomRequest(method='GET')),
+                                        resource='pipeline_runs', pk=1)
+        self.assertFalse(db_connection.session().in_transaction())
+
+
+def text_sql(statement):
+    from sqlalchemy import text
+
+    return text(statement)

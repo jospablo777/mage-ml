@@ -13,6 +13,27 @@ from mage_ai.shared.dates import utc_now
 from mage_ai.shared.parsers import encode_complex
 
 
+def _end_transaction(commit: bool) -> None:
+    """
+    Ends the request's database transaction (I-466). A request that only read left it open
+    on the server's thread, and SQLite kept serving that thread the snapshot it began with,
+    so pages showed a completed run as running. A failed request rolls back what it did not
+    commit.
+    """
+    from mage_ai.orchestration.db import db_connection
+
+    session = db_connection.session
+    if session is None or not session().in_transaction():
+        return
+    try:
+        if commit:
+            session.commit()
+        else:
+            session.rollback()
+    except Exception:
+        session.rollback()
+
+
 async def execute_operation(
     handler,
     resource: str,
@@ -63,7 +84,9 @@ async def execute_operation(
             user=request.current_user,
         )
         response = await base_operation.execute()
+        _end_transaction(commit=True)
     except Exception as err:
+        _end_transaction(commit=False)
         __log_error(
             request,
             err,
