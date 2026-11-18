@@ -1011,6 +1011,19 @@ class WorkersCommandTest(unittest.TestCase):
         self.assertEqual(environments.worker_selection(block('features')), 'features')
         self.assertEqual(environments.worker_selection(block('other')), 'other')
 
+    def test_workers_from_the_empty_template_are_shown_by_their_names(self):
+        # The Empty template labeled each one "Python worker": two in a list looked the same.
+        project = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, project, True)
+        for name in ('tools', 'reports'):
+            folder = environments.new_worker(str(project), name, 'empty')
+            self.assertNotIn('label =', (folder / 'pyproject.toml').read_text())
+        environments.new_worker(str(project), 'scoring', 'empty', label='Scoring')
+
+        workers = environments.named_workers(str(project))
+        self.assertEqual(sorted(w.display_name for w in workers.values()),
+                         ['Scoring', 'reports', 'tools'])
+
     def test_a_worker_named_like_the_package_it_needs_is_written_and_checked(self):
         project = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, project, True)

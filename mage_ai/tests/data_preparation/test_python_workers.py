@@ -189,6 +189,73 @@ class PythonWorkersTest(DBTestCase):
         self.assertNotIn('\x1b', str(raised.exception))
         self.assertEqual(environments.plain('\x1b[1m\x1b[31merror\x1b[39m\x1b[0m: no'), 'error: no')
 
+    def releases(self, latest='1.17.0'):
+        from mage_ai.data_preparation import package_index
+
+        return patch.object(package_index, 'releases', return_value=dict(
+            name='six', latest=latest, versions=['1.17.0', '1.16.0', '1.15.0'],
+            prereleases=[], uploaded={'1.16.0': '2021-05-05T14:18:17Z'},
+        ))
+
+    def test_a_package_the_other_packages_keep_old_is_named_with_why(self):
+        # As feast and pandas 3: the newest feast needs pandas<3, so uv locks feast 0.20.0
+        # from 2022, whose pandas>=1 was written before pandas 3. Here a constraint holds six.
+        folder = self.worker(dependencies=('six',))
+        with (folder / 'pyproject.toml').open('a') as file:
+            file.write('\n[tool.uv]\nconstraint-dependencies = ["six<1.17"]\n')
+        subprocess.run(['uv', 'lock', '--project', str(folder)], check=True,
+                       capture_output=True)
+
+        with self.releases():
+            report = python_workers.held_back(self.repo_path, 'tools')
+
+        self.assertEqual(report['state'], 'held')
+        [package] = report['packages']
+        self.assertEqual((package['package'], package['locked'], package['latest'],
+                          package['state'], package['behind']),
+                         ('six', '1.16.0', '1.17.0', 'held', 1))
+        self.assertEqual(package['locked_uploaded'], '2021-05-05T14:18:17Z')
+        self.assertIn('six<1.17', package['uv_reason'])
+        self.assertTrue(package['reason'].startswith('six 1.17.0 does not fit: Because'))
+        worker = environments.named_workers(self.repo_path)['tools']
+        self.assertEqual(python_workers.cached_held_back(worker), ['six'])
+        self.assertEqual(python_workers.overview(self.repo_path)[0]['held_back'], ['six'])
+
+    def test_a_package_only_locked_before_its_newest_release_is_behind(self):
+        self.worker(dependencies=('six',), upgrade_package='six==1.16.0')
+
+        with self.releases():
+            report = python_workers.held_back(self.repo_path, 'tools')
+
+        self.assertEqual(report['state'], 'current')
+        self.assertEqual([(p['package'], p['state']) for p in report['packages']],
+                         [('six', 'behind')])
+
+    def test_a_package_pinned_below_its_newest_release_is_kept_as_asked(self):
+        self.worker(dependencies=('six==1.16.0',))
+
+        with self.releases():
+            report = python_workers.held_back(self.repo_path, 'tools')
+
+        self.assertEqual((report['state'], report['packages']), ('current', []))
+
+    def test_why_names_what_the_newest_release_needs_and_the_line_that_rules_it_out(self):
+        uv_reason = (
+            'Because only feast<0.69.0.dev156 is available and feast==0.68.0 depends on '
+            'pandas>=1.4.3,<3, we can conclude that feast>=0.68.0 depends on pandas>=1.4.3,<3. '
+            'And because your project depends on feast>=0.68.0 and pandas==3.1.1, we can '
+            "conclude that your project's requirements are unsatisfiable.")
+        listed = ['pyarrow', 'feast>=0.68.0', 'pandas==3.1.1']
+
+        self.assertEqual(
+            python_workers._held_reason('feast', '0.68.0', uv_reason, listed),
+            'feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1.')
+        self.assertEqual(
+            python_workers._held_reason(
+                'feast', '0.68.0', 'Because feast==0.68.0 depends on Python>=3.15 and ...',
+                listed),
+            'feast 0.68.0 needs Python>=3.15, and the worker runs another Python.')
+
     def test_a_memory_limit_is_set_checked_and_cleared(self):
         folder = self.worker()
         python_workers.update(self.repo_path, 'tools', memory='3 GiB')

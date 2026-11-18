@@ -808,8 +808,9 @@ def describe_workers(repo_path: str) -> List[Dict]:
 # Starting points for a new Python worker: a name for people, what it is for, and the
 # packages it starts with. Tables cross between workers as Arrow, so each has pyarrow.
 WORKER_TEMPLATES = {
+    # No label: each worker from it is shown by its name, not all as "Python worker".
     'empty': dict(
-        label='Python worker', description='Your own packages', dependencies=['pyarrow'],
+        label=None, description='Your own packages', dependencies=['pyarrow'],
     ),
     'feast': dict(
         label='Feast worker',
@@ -870,8 +871,9 @@ def new_worker(
         f'dependencies = [{dependencies}]\n'
         '\n'
         '[tool.mageml.worker]\n'
-        f'label = {json.dumps(label or chosen["label"])}\n'
-        f'description = {json.dumps(description or chosen["description"])}\n'
+        + (f'label = {json.dumps(label or chosen["label"])}\n'
+           if label or chosen['label'] else '')
+        + f'description = {json.dumps(description or chosen["description"])}\n'
     )
     return folder
 

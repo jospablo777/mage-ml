@@ -108,7 +108,7 @@ function NewWorker({ onCancel, onCreated, workers }: {
   const choose = (chosen: WorkerTemplateType) => {
     setTemplate(chosen);
     setName(SUGGESTED_NAMES[chosen.id] || chosen.id);
-    setLabel(chosen.label);
+    setLabel(chosen.label || '');
     setPackages(chosen.dependencies);
     setError(null);
   };
@@ -186,6 +186,7 @@ function NewWorker({ onCancel, onCreated, workers }: {
             <TextInput
               aria-label="Display name"
               onChange={e => setLabel(e.target.value)}
+              placeholder={name || 'Its name'}
               value={label}
             />
             <Spacing mt={1}>

@@ -55,6 +55,8 @@ function packagesText(worker: WorkerType): string {
     : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
 }
 
+const HELD_BACK_HINT = 'Locked below their newest release, which does not fit the other packages';
+
 // The Workers page: every Python worker of the project, whether it can run blocks, how much
 // it installs, where it is used and whether it has known vulnerabilities; New worker.
 function Workers() {
@@ -207,6 +209,11 @@ function Workers() {
                           {worker.security?.fixable > 0 && (
                             <Text muted xsmall>
                               {plural(worker.security.fixable, 'package')} can be fixed
+                            </Text>
+                          )}
+                          {worker.held_back?.length > 0 && (
+                            <Text title={HELD_BACK_HINT} warning xsmall>
+                              {worker.held_back.join(', ')} held back
                             </Text>
                           )}
                         </td>

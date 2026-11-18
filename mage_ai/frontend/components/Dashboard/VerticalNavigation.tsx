@@ -224,14 +224,15 @@ function VerticalNavigation({
     project,
     projectPlatformActivated,
   } = useProject();
-  // Workers that need attention (not prepared, or with known vulnerabilities) show as a
-  // count on Workers, from any page.
+  // Workers that need attention (not prepared, with known vulnerabilities, or with a package
+  // held back) show as a count on Workers, from any page.
   const { data: dataWorkers } = api.python_workers.list({}, {
     refreshInterval: 5 * 60 * 1000,
     revalidateOnFocus: false,
   });
   const workersAttention = useMemo(() => (dataWorkers?.python_workers || []).filter(
-    w => !w.prepared || w.security?.state === 'vulnerable').length, [dataWorkers]);
+    w => !w.prepared || w.security?.state === 'vulnerable' || w.held_back?.length > 0,
+  ).length, [dataWorkers]);
   const defaultNavItems = useMemo(() => DEFAULT_NAV_ITEMS({
     featureEnabled,
     project,

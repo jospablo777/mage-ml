@@ -61,8 +61,9 @@ asks for:
 - **Python**: MageML's by default; uv installs another one when the worker needs it.
 - **Packages**: type them in **Add packages**, several at once, as you would in
   `pyproject.toml`: `mlflow==2.8.1 pandas scikit-learn>=1.5`. Each package gets a version
-  picker with its releases from the package index: **Latest** (the default: the newest
-  release when it is locked), a release, or a range such as `>=3.15,<4`.
+  picker with its releases from the package index: **Newest that fits** (the default: the
+  newest release that fits the other packages, chosen when it is locked), a release, or a
+  range such as `>=3.15,<4`.
 
 <Frame>
   <img className="block dark:hidden" src="/images/screenshots/workers-new.light.png" alt="New worker: templates, name, display name, Python, and the packages with a version each" />
@@ -93,6 +94,28 @@ The **pyproject.toml** tab shows the file itself, for what the package list does
 extras, environment markers, a `[tool.uv]` index or source. Saving it is locked in a copy
 first like any change; a file that is not TOML, or that names the project like one of its
 packages, is refused with the reason. **Show uv.lock** shows the lock uv wrote, read only.
+
+#### Packages held back
+
+A package without a version gets the newest release **that fits the other packages**, and
+uv finds one by going back through older releases. An old release often lists ranges
+written before today's versions existed, so it can lock and still break. For example, with
+`pandas==3.1.1` and `feast`, the newest Feast (0.68.0) needs `pandas<3`, so uv locks Feast
+0.20.0 from 2022, whose `pandas>=1.0.0` allows pandas 3.
+
+The page checks each listed package whose lock is below its newest release by locking a
+copy with the newest one required. When that does not lock, the package shows **Held
+back** with what the newest release needs and the line that rules it out:
+
+```text
+Held back at 0.20.0 (April 2022), 68 releases behind 0.68.0
+feast 0.68.0 needs pandas>=1.4.3,<3, and the worker lists pandas==3.1.1.
+```
+
+The worker gets a **held back** badge, and Workers in the left navigation counts it.
+Change the line that rules the newest release out (here `pandas<3`), or choose **Keep
+0.20.0** to pin the old release on purpose. When the newest release does lock, the package
+is only behind, and **Check for updates** moves it.
 
 <Frame>
   <img className="block dark:hidden" src="/images/screenshots/workers-pyproject.light.png" alt="A worker's pyproject.toml in the editor, with Save and prepare" />
@@ -212,6 +235,8 @@ take 4.0 seconds; there, copying the inputs and outputs as Arrow files is the co
   `mage_ai.io` imports of block templates) need theirs: the compile check warns, and the
   error names the package to add.
 - Dynamic and replicated blocks run in MageML's Python; compiling refuses them in a worker.
+- A lock that resolves is not proof the packages work together: an old release can allow
+  versions it never ran with. Watch for **Held back** packages, and run the blocks.
 - The run's variables reach a worker block as JSON values; others are left out.
 - Checking versions and vulnerabilities reads the package index and OSV; on a server
   without the internet, set `UV_DEFAULT_INDEX` to your index.

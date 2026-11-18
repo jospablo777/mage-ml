@@ -4861,6 +4861,10 @@
      "digest": {
       "type": "string"
      },
+     "held_back": {
+      "items": {},
+      "type": "array"
+     },
      "job": {
       "type": "null"
      },
@@ -4943,6 +4947,17 @@
     },
     "type": "object"
    },
+   "PythonWorkerHeldPackage": {
+    "properties": {
+     "checked_at": {},
+     "id": {},
+     "name": {},
+     "packages": {},
+     "reason": {},
+     "state": {}
+    },
+    "type": "object"
+   },
    "PythonWorkerTemplate": {
     "properties": {
      "dependencies": {
@@ -4958,7 +4973,10 @@
       "type": "string"
      },
      "label": {
-      "type": "string"
+      "type": [
+       "null",
+       "string"
+      ]
      }
     },
     "type": "object"
@@ -16258,6 +16276,42 @@
     ]
    }
   },
+  "/api/python_worker_held_packages/{id}": {
+   "get": {
+    "operationId": "detail_python_worker_held_packages",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "properties": {
+          "python_worker_held_package": {
+           "$ref": "#/components/schemas/PythonWorkerHeldPackage"
+          }
+         },
+         "type": "object"
+        }
+       }
+      },
+      "description": "OK; an error is {\"error\": {\"code\", \"message\", \"type\"}} with 200."
+     }
+    },
+    "summary": "detail python_worker_held_packages",
+    "tags": [
+     "python_worker_held_packages"
+    ]
+   },
+   "parameters": [
+    {
+     "in": "path",
+     "name": "id",
+     "required": true,
+     "schema": {
+      "type": "string"
+     }
+    }
+   ]
+  },
   "/api/python_worker_templates": {
    "get": {
     "operationId": "list_python_worker_templates",
@@ -21630,6 +21684,12 @@
    ],
    "schema": "PythonWorkerCombination"
   },
+  "python_worker_held_packages": {
+   "operations": [
+    "detail"
+   ],
+   "schema": "PythonWorkerHeldPackage"
+  },
   "python_worker_templates": {
    "operations": [
     "list"
@@ -21996,6 +22056,7 @@
   "python_packages": "no list or detail reached",
   "python_worker_audits": "no list or detail reached",
   "python_worker_combinations": "no list or detail reached",
+  "python_worker_held_packages": "no list or detail reached",
   "python_worker_updates": "no list or detail reached",
   "role_permissions": "get /api/role_permissions: error 403: The list action is disabled for role_permissions.",
   "run_records": "no list or detail reached",

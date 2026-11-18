@@ -10,7 +10,9 @@ SIMPLE = {
     'name': 'mlflow',
     'versions': ['2.8.1', '3.15.0', '3.16.0rc1', '3.16.0', '3.15.1'],
     'files': [
-        {'filename': 'mlflow-2.8.1-py3-none-any.whl', 'yanked': False},
+        {'filename': 'mlflow-2.8.1-py3-none-any.whl', 'yanked': False,
+         'upload-time': '2023-11-09T10:00:00Z'},
+        {'filename': 'mlflow-2.8.1.tar.gz', 'yanked': False, 'upload-time': '2023-11-09T09:58:00Z'},
         {'filename': 'mlflow-3.15.1-py3-none-any.whl', 'yanked': 'broken metadata'},
         {'filename': 'mlflow-3.15.1.tar.gz', 'yanked': True},
         {'filename': 'mlflow-3.16.0-py3-none-any.whl', 'yanked': False},
@@ -39,6 +41,8 @@ class PackageIndexTest(TestCase):
         self.assertEqual(found['versions'], ['3.16.0', '3.15.0', '2.8.1'])
         self.assertEqual(found['latest'], '3.16.0')
         self.assertEqual(found['prereleases'], ['3.16.0rc1'])
+        # PEP 700: each version's first upload, where the index says.
+        self.assertEqual(found['uploaded'], {'2.8.1': '2023-11-09T09:58:00Z'})
         self.assertEqual(self.requests, [('https://pypi.org/simple/mlflow/',
                                           'application/vnd.pypi.simple.v1+json')],
                          'one request: the answer is kept')

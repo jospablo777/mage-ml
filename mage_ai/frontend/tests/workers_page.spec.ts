@@ -6,7 +6,8 @@ import { expect, test } from './base';
 /*
  * The Workers page, from the home page's left navigation: a worker is created with its
  * packages and versions, prepared, its packages changed (a change that does not lock
- * changes nothing and says why), renamed, and deleted.
+ * changes nothing and says why), a package held below its newest release named with why,
+ * renamed, and deleted.
  */
 
 const SUFFIX = Date.now().toString(36);
@@ -87,6 +88,28 @@ test('a worker is created, changed and deleted from the Workers page', async ({ 
   await page.getByRole('button', { name: 'Discard changes' }).click();
   await page.getByText('Show uv.lock', { exact: true }).click();
   await expect(page.getByText('requires-python', { exact: false }).last()).toBeVisible();
+
+  // A package the other requirements keep below its newest release (feast with pandas 3
+  // locks feast 0.20.0 from 2022): here a constraint holds six at 1.16.0. The page says so,
+  // with why, instead of calling it the latest.
+  const { python_worker: current } = await api.call('GET', `python_workers/${NAME}`);
+  await api.call('PUT', `python_workers/${NAME}`, {
+    python_worker: {
+      pyproject: `${current.pyproject}\n[tool.uv]\nconstraint-dependencies = ["six<1.17"]\n`,
+    },
+  });
+  await page.reload();
+  await expect(page.getByText('Held back at 1.16.0')).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText('1 package held back')).toBeVisible();
+  await expect(page.getByLabel('Version of six').locator('option').first())
+    .toHaveText('Newest that fits (1.16.0 locked)');
+  await page.getByRole('button', { name: 'Keep 1.16.0' }).click();
+  await expect(page.getByLabel('Version of six')).toHaveValue('1.16.0');
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await api.call('PUT', `python_workers/${NAME}`, {
+    python_worker: { pyproject: current.pyproject },
+  });
+  await page.reload();
 
   await page.getByRole('button', { name: /^Used by/ }).click();
   await expect(page.getByText('No block runs in it yet.')).toBeVisible();

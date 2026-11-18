@@ -73,6 +73,8 @@ export const PIPELINE_SERVICE_MODELS: 'pipeline_service_models' = 'pipeline_serv
 export const PYTHON_WORKERS: 'python_workers' = 'python_workers';
 export const PYTHON_WORKER_COMBINATIONS: 'python_worker_combinations' = 'python_worker_combinations';
 export const PYTHON_WORKER_AUDITS: 'python_worker_audits' = 'python_worker_audits';
+export const PYTHON_WORKER_HELD_PACKAGES: 'python_worker_held_packages' =
+  'python_worker_held_packages';
 export const PYTHON_WORKER_UPDATES: 'python_worker_updates' = 'python_worker_updates';
 export const PYTHON_WORKER_TEMPLATES: 'python_worker_templates' = 'python_worker_templates';
 export const PYTHON_PACKAGES: 'python_packages' = 'python_packages';
@@ -197,6 +199,7 @@ const RESOURCES_PAIRS_ARRAY: any[][] = [
   [PYTHON_WORKERS],
   [PYTHON_WORKER_COMBINATIONS],
   [PYTHON_WORKER_AUDITS],
+  [PYTHON_WORKER_HELD_PACKAGES],
   [PYTHON_WORKER_UPDATES],
   [PYTHON_WORKER_TEMPLATES],
   [PYTHON_PACKAGES],

@@ -9,6 +9,7 @@ class PythonWorkerPresenter(BasePresenter):
         'dependencies',
         'description',
         'digest',
+        'held_back',
         'job',
         'label',
         'locked',

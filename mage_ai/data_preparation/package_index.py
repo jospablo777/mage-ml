@@ -43,8 +43,9 @@ def _shown(url: str) -> str:
 def releases(name: str) -> Dict:
     """
     The package's releases, newest first, without yanked ones: {name, latest, versions,
-    prereleases}. latest is the newest final release, the one uv picks for a requirement
-    without a version. Kept for CACHE_SECONDS.
+    prereleases, uploaded}. latest is the newest final release, the one uv picks for a
+    requirement without a version when the other packages allow it; uploaded is each
+    version's first upload (PEP 700), where the index says. Kept for CACHE_SECONDS.
     """
     package = canonicalize_name(name or '')
     if not package or not re.fullmatch(r'[a-z0-9][a-z0-9._-]*', package):
@@ -99,11 +100,17 @@ def _summarize(package: str, payload: Dict) -> Dict:
             continue
     parsed.sort(reverse=True)
     finals = [text for version, text in parsed if not version.is_prerelease]
+    uploaded = {}
+    for version, files in by_version.items():
+        times = sorted(f['upload-time'] for f in files if isinstance(f.get('upload-time'), str))
+        if times:
+            uploaded[version] = times[0]
     return dict(
         name=payload.get('name') or package,
         latest=finals[0] if finals else (parsed[0][1] if parsed else None),
         versions=finals,
         prereleases=[text for version, text in parsed if version.is_prerelease][:20],
+        uploaded=uploaded,
     )
 
 

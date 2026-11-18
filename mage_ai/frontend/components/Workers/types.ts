@@ -40,6 +40,10 @@ export type WorkerType = {
   definition?: string;
   dependencies?: string[];
   description?: string;
+  // Changes with its pyproject.toml and uv.lock.
+  digest?: string;
+  // The packages it lists that the last check found held back (held_packages).
+  held_back?: string[];
   job?: PythonWorkerJobType;
   label?: string;
   locked?: boolean;
@@ -95,5 +99,27 @@ export type WorkerTemplateType = {
   dependencies: string[];
   description: string;
   id: string;
-  label: string;
+  label?: string;
+};
+
+// A listed package uv locked below its newest release (python_workers.held_back): held when
+// the newest does not fit the other packages, behind when an update would bring it.
+export type HeldPackageType = {
+  // Releases newer than the locked one.
+  behind?: number;
+  latest: string;
+  locked: string;
+  locked_uploaded?: string;
+  package: string;
+  reason: string;
+  state: 'held' | 'behind';
+  uv_reason?: string;
+};
+
+export type WorkerHeldPackagesType = {
+  checked_at?: number;
+  name: string;
+  packages: HeldPackageType[];
+  reason?: string;
+  state: 'held' | 'current' | 'unchecked';
 };

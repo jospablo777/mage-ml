@@ -10,6 +10,7 @@ import api from '@api';
 import dark from '@oracle/styles/themes/dark';
 import { Close } from '@oracle/icons';
 import { FieldLabel, MonoStyle } from './shared';
+import { HeldPackageType } from './types';
 import { UNIT } from '@oracle/styles/units/spacing';
 
 // A requirement as people write it: name, extras, version: "feast[redis]>=0.50".
@@ -31,9 +32,19 @@ export function requirementText({ extras, name, spec }: RequirementType): string
   return `${name}${extras}${spec}`;
 }
 
+// A package's name as uv.lock and the package index write it: feast_SDK is feast-sdk.
+export function normalName(value: string): string {
+  return (value || '').toLowerCase().replace(/[-_.]+/g, '-');
+}
+
 function sameName(a: string, b: string): boolean {
-  const normal = (value: string) => value.toLowerCase().replace(/[-_.]+/g, '-');
-  return normal(a) === normal(b);
+  return normalName(a) === normalName(b);
+}
+
+function monthOf(iso: string): string {
+  const date = iso ? new Date(iso) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleDateString('en', { month: 'long', year: 'numeric' }) : null;
 }
 
 // Names people type that are not the package to install: an import name (cv2), a
@@ -104,9 +115,12 @@ const RemoveStyle = styled.button`
   padding: ${UNIT / 2}px;
 `;
 
-// One package: its name, its version (Latest, a release, or a range) and whether the
-// package index knows it.
-function PackageRow({ onChange, onRemove, requirement }: {
+// One package: its name, its version (Latest, a release, or a range), whether the package
+// index knows it and, once locked, the version uv chose: below the newest release when the
+// newest does not fit the other packages.
+function PackageRow({ held, locked, onChange, onRemove, requirement }: {
+  held?: HeldPackageType;
+  locked?: string;
   onChange: (requirement: RequirementType) => void;
   onRemove: () => void;
   requirement: RequirementType;
@@ -131,6 +145,34 @@ function PackageRow({ onChange, onRemove, requirement }: {
         {found && !missing && pinned && versions.length > 0 && !versions.includes(pinned) && (
           <Text warning xsmall>{pinned} is not a release of {found.name}.</Text>
         )}
+        {held?.state === 'held' && !requirement.spec && (
+          <Spacing mt={0.5}>
+            <Text warning xsmall>
+              Held back at {held.locked}
+              {monthOf(held.locked_uploaded) ? ` (${monthOf(held.locked_uploaded)})` : ''}
+              {held.behind ? `, ${held.behind} releases behind ${held.latest}` : `; ${held.latest} is out`}
+            </Text>
+            <Text muted xsmall>{held.reason}</Text>
+            {held.uv_reason && (
+              <details>
+                <summary><Text inline muted xsmall>uv&apos;s explanation</Text></summary>
+                <Text muted xsmall>{held.uv_reason}</Text>
+              </details>
+            )}
+            <Spacing mt={0.5}>
+              <Button
+                compact
+                onClick={() => onChange({ ...requirement, spec: `==${held.locked}` })}
+                small
+              >
+                Keep {held.locked}
+              </Button>
+            </Spacing>
+          </Spacing>
+        )}
+        {held?.state === 'behind' && !requirement.spec && (
+          <Text muted xsmall>{held.locked} locked; {held.reason}</Text>
+        )}
       </div>
       <div>
         <Select
@@ -148,7 +190,11 @@ function PackageRow({ onChange, onRemove, requirement }: {
           value={choice}
         >
           <option value={LATEST}>
-            {found?.latest ? `Latest (${found.latest} today)` : 'Latest'}
+            {/* uv picks the newest release that fits the other packages: once locked, say
+                which one it was. */}
+            {locked
+              ? `Newest that fits (${locked} locked)`
+              : found?.latest ? `Newest that fits (${found.latest} today)` : 'Newest that fits'}
           </option>
           <option value={CUSTOM}>A version range...</option>
           {pinned && !versions.includes(pinned) && !custom && (
@@ -179,7 +225,10 @@ function PackageRow({ onChange, onRemove, requirement }: {
 
 // A worker's packages: each with its version, Latest unless one is chosen. Adding takes
 // what people type, several at once: "mlflow==2.8 pandas scikit-learn>=1.5".
-function PackageEditor({ onChange, value }: {
+function PackageEditor({ held, locked, onChange, value }: {
+  // By normalName: the packages held below their newest release, and each locked version.
+  held?: { [name: string]: HeldPackageType };
+  locked?: { [name: string]: string };
   onChange: (requirements: string[]) => void;
   value: string[];
 }) {
@@ -231,8 +280,9 @@ function PackageEditor({ onChange, value }: {
       </div>
       <Spacing mt={1}>
         <Text muted xsmall>
-          Several at once, separated by spaces. Without a version a package gets the latest
-          release when it is locked; pick a version or a range below to keep it there.
+          Several at once, separated by spaces. Without a version a package gets the newest
+          release that fits the other packages; pick a version or a range below to keep it
+          there.
         </Text>
         {notes.map(note => <Text info key={note} xsmall>{note}</Text>)}
         {problems.map(problem => <Text danger key={problem} xsmall>{problem}</Text>)}
@@ -244,7 +294,9 @@ function PackageEditor({ onChange, value }: {
         )}
         {requirements.map((requirement, index) => (
           <PackageRow
+            held={held?.[normalName(requirement.name)]}
             key={requirement.name}
+            locked={locked?.[normalName(requirement.name)]}
             onChange={(changed) => {
               const next = [...requirements];
               next[index] = changed;

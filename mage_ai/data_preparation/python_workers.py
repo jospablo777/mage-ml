@@ -136,6 +136,7 @@ def overview(repo_path: str) -> List[Dict]:
             size_bytes=size,
             used_by=used.get(alias, []),
             security=cached_audit(worker),
+            held_back=cached_held_back(worker),
         )
         workers.append(item)
     return workers
@@ -625,8 +626,9 @@ def audit(repo_path: str, alias: str, refresh: bool = False) -> Dict:
 
 
 def audit_stale_in_background(repo_path: str) -> None:
-    """Checks, one at a time in a thread, the workers whose last check is missing or old,
-    so the Workers page and its badge are current without waiting on uv."""
+    """Checks, one at a time in a thread, the workers whose last security check or held-back
+    check is missing or old, so the Workers page and its badge are current without waiting
+    on uv."""
     key = str(Path(repo_path).resolve())
     with _audits_lock:
         running = _audits_running.get(key)
@@ -635,14 +637,177 @@ def audit_stale_in_background(repo_path: str) -> None:
 
         def run():
             for alias, worker in environments.named_workers(repo_path).items():
+                if _lock_text(worker) is None:
+                    continue
                 cached = cached_audit(worker)
                 if cached.get('state') == 'unchecked' or cached.get('stale'):
-                    if _lock_text(worker) is not None:
-                        audit(repo_path, alias)
+                    audit(repo_path, alias)
+                # Read from its cache when fresh; a new lock is checked once.
+                try:
+                    held_back(repo_path, alias)
+                except PipelineEnvironmentError:
+                    pass
 
         thread = threading.Thread(target=run, daemon=True, name='worker-audits')
         _audits_running[key] = thread
         thread.start()
+
+
+# ---- packages held back ------------------------------------------------------------------
+
+# Checked at most this many listed packages per lock: each is one uv lock.
+HELD_BACK_CHECKS = 10
+
+
+def _held_back_path(lock: str, pyproject: str) -> Path:
+    return (environments.environments_dir() / 'held_back'
+            / f'{_digest(lock + pyproject)[:32]}.json')
+
+
+def held_back(repo_path: str, alias: str, refresh: bool = False) -> Dict:
+    """
+    The listed packages locked below their newest release although their own line allows
+    it: uv chose an older release because the newest does not fit the other packages (or
+    the worker's Python). With an old release whose requirements were written before the
+    other package's new major version (feast 0.20.0 lists pandas>=1 and locks with pandas 3;
+    feast 0.68.0 needs pandas<3) the lock resolves and the code breaks, so each is named
+    with why: uv's answer when a copy is locked with the newest release required. A package
+    whose newest release locks is only behind (an update brings it). Kept per lock and
+    pyproject.toml for AUDIT_SECONDS.
+    """
+    import tomlkit
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+
+    from mage_ai.data_preparation import package_index
+
+    worker = _worker(repo_path, alias)
+    lock = _lock_text(worker)
+    if lock is None:
+        return dict(name=worker.alias, state='unchecked', packages=[],
+                    reason='The worker has no uv.lock yet.')
+    pyproject = (Path(worker.definition) / 'pyproject.toml').read_text()
+    path = _held_back_path(lock, pyproject)
+    if not refresh:
+        try:
+            report = json.loads(path.read_text())
+            if time.time() - report['checked_at'] <= AUDIT_SECONDS:
+                return dict(report, name=worker.alias)
+        except (OSError, ValueError, KeyError):
+            pass
+    locked = {
+        canonicalize_name(p['name']): p['version']
+        for p in json.loads(_lock_packages(lock, worker))
+    }
+    document = tomlkit.parse(pyproject)
+    listed = list(document.get('project', {}).get('dependencies') or [])
+    candidates, unreachable = [], []
+    for index, line in enumerate(listed):
+        try:
+            requirement = Requirement(str(line))
+        except InvalidRequirement:
+            continue
+        name = canonicalize_name(requirement.name)
+        version = locked.get(name)
+        if requirement.url or requirement.marker or not version:
+            continue
+        try:
+            found = package_index.releases(name)
+        except package_index.PackageIndexError:
+            unreachable.append(name)
+            continue
+        latest = found.get('latest')
+        try:
+            behind = latest and Version(version) < Version(latest)
+        except InvalidVersion:
+            continue
+        # A line that leaves the newest release out keeps the package where it was asked.
+        if behind and requirement.specifier.contains(latest, prereleases=True):
+            candidates.append((index, requirement, name, version, found))
+    packages = []
+    for index, requirement, name, version, found in candidates[:HELD_BACK_CHECKS]:
+        latest = found['latest']
+        extras = f'[{",".join(sorted(requirement.extras))}]' if requirement.extras else ''
+        trial = tomlkit.parse(pyproject)
+        trial['project']['dependencies'][index] = f'{requirement.name}{extras}>={latest}'
+        entry = dict(
+            package=name, locked=version, latest=latest,
+            locked_uploaded=(found.get('uploaded') or {}).get(version),
+            behind=(found['versions'].index(version) if version in found['versions'] else None),
+        )
+        try:
+            _locked_copy(worker, tomlkit.dumps(trial))
+        except PipelineEnvironmentError as error:
+            text = str(error)
+            if 'could not reach the package index' in text:
+                unreachable.append(name)
+                continue
+            uv_reason = text.split('\n\n')[0].split('nothing changed: ', 1)[-1]
+            entry.update(state='held', uv_reason=uv_reason,
+                         reason=_held_reason(name, latest, uv_reason, listed))
+        else:
+            entry.update(state='behind', reason=(
+                f'{latest} fits the other packages: check for updates to move to it.'))
+        packages.append(entry)
+    report = dict(
+        state='held' if any(p['state'] == 'held' for p in packages) else 'current',
+        checked_at=time.time(),
+        packages=packages,
+    )
+    if unreachable:
+        report['reason'] = ('The package index could not be reached for '
+                            + ', '.join(unreachable) + '.')
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write(path, json.dumps(report))
+    return dict(report, name=worker.alias)
+
+
+def cached_held_back(worker) -> List[str]:
+    """The packages the last check of the worker's lock found held back; none unchecked."""
+    lock = _lock_text(worker)
+    if lock is None:
+        return []
+    try:
+        pyproject = (Path(worker.definition) / 'pyproject.toml').read_text()
+        report = json.loads(_held_back_path(lock, pyproject).read_text())
+    except (OSError, ValueError):
+        return []
+    return [p['package'] for p in report.get('packages') or [] if p.get('state') == 'held']
+
+
+def _lock_packages(lock: str, worker) -> str:
+    import column_atlas_native
+
+    return column_atlas_native.worker_lock_packages(lock, server_platform(), worker.python)
+
+
+def _held_reason(name: str, latest: str, uv_reason: str, listed: List[str]) -> str:
+    """
+    Why the newest release of a package does not fit, in one sentence: what it needs and the
+    listed package that rules it out, from uv's explanation ("feast==0.68.0 depends on
+    pandas>=1.4.3,<3"); uv's own sentence when it says something else.
+    """
+    import re
+
+    from packaging.utils import canonicalize_name
+
+    text = ' '.join(uv_reason.split())
+    needs = re.search(
+        rf'{re.escape(name)}=={re.escape(latest)} depends on ([A-Za-z0-9_.\-\[\]]+)'
+        r'((?:[<>=!~]=?[^,\s]+)(?:,[<>=!~]=?[^,\s]+)*)', text, re.IGNORECASE)
+    if not needs:
+        return f'{name} {latest} does not fit: {uv_reason}'
+    other, spec = needs.group(1), needs.group(2).rstrip('.,')
+    sentence = f'{name} {latest} needs {other}{spec}'
+    if other.lower() == 'python':
+        return sentence + ', and the worker runs another Python.'
+    for line in listed:
+        line_name = environments._requirement_name(str(line)) or ''
+        if canonicalize_name(line_name) == canonicalize_name(other):
+            return sentence + f', and the worker lists {line}.'
+    return sentence + ', which another package rules out.'
 
 
 # ---- removing a worker ------------------------------------------------------------------

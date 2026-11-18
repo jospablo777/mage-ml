@@ -50,6 +50,16 @@
   pandas and pyarrow on macOS). `MAGE_WARM_WORKERS=0` turns it off.
 - Exports are reproducible: with `SOURCE_DATE_EPOCH` set, the same sources give the same
   page lists two exports made in the same second newest first.
+- A worker's package that uv locked below its newest release because the newest does not
+  fit the other packages shows as **Held back**, with what the newest needs and the line
+  that rules it out: `feast` with `pandas==3.1.1` locked Feast 0.20.0 from 2022 (its
+  `pandas>=1` allows pandas 3), and the version picker called it Latest. The picker now
+  says **Newest that fits** and the locked version.
+- Built images are measured by part after a build (base image, Python packages, each
+  worker, the MageML runtime, models, project code), with the change since the build
+  before; `mage service build --image` and `mage export service --build` print it.
+- uv's messages no longer show color escape codes when the server runs with
+  `FORCE_COLOR`, and a `pyproject.toml` without a project name says so.
 - A Python worker can have a memory limit (`memory = "4 GiB"`, or its settings): a block
   over it is stopped and says how much it used, instead of taking the server's memory.
   Workers no longer get MageML's own credentials (its database URL, signing keys, sign-in

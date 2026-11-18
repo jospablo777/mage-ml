@@ -10,7 +10,7 @@ import Checkbox from '@oracle/elements/Checkbox';
 import ErrorCallout from './ErrorCallout';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Link from '@oracle/elements/Link';
-import PackageEditor from './PackageEditor';
+import PackageEditor, { normalName } from './PackageEditor';
 import WorkerFiles from './WorkerFiles';
 import PythonWorkerStatus from '@components/PipelineDetail/Settings/PythonWorker';
 import Select from '@oracle/elements/Inputs/Select';
@@ -34,8 +34,10 @@ import {
   workerState,
 } from './shared';
 import {
+  HeldPackageType,
   LockedPackageType,
   WorkerAuditType,
+  WorkerHeldPackagesType,
   WorkerType,
   WorkerUpdateType,
 } from './types';
@@ -508,6 +510,21 @@ function WorkerDetail({ name }: { name: string }) {
     }
   }, [declared, draft, worker]);
 
+  // Asked again whenever its pyproject.toml or uv.lock changes: each is a new lock to check.
+  const { data: dataHeld } = api.python_worker_held_packages.detail(
+    worker?.locked ? name : null,
+    {},
+    { revalidateOnFocus: false },
+    { key: `python_worker_held_packages/${name}/${worker?.digest}` },
+  );
+  const heldReport: WorkerHeldPackagesType = dataHeld?.python_worker_held_package;
+  const held = useMemo(() => Object.fromEntries((heldReport?.packages || []).map(
+    (p: HeldPackageType) => [normalName(p.package), p])), [heldReport]);
+  const locked = useMemo(() => Object.fromEntries(
+    ((worker?.packages || []) as LockedPackageType[]).map(p => [normalName(p.name), p.version]),
+  ), [worker]);
+  const heldCount = (heldReport?.packages || []).filter(p => p.state === 'held').length;
+
   const [savePackages, { isLoading: saving }] = useMutation(
     api.python_workers.useUpdate(name),
     {
@@ -567,6 +584,17 @@ function WorkerDetail({ name }: { name: string }) {
           <PillsStyle>
             <PillStyle title={state.hint} tone={state.tone}>{state.label}</PillStyle>
             <PillStyle tone={security.tone}>{security.label}</PillStyle>
+            {heldCount > 0 && (
+              <PillStyle
+                onClick={() => setTab('packages')}
+                role="button"
+                style={{ cursor: 'pointer' }}
+                title="Locked below their newest release, which does not fit the other packages"
+                tone="warning"
+              >
+                {plural(heldCount, 'package')} held back
+              </PillStyle>
+            )}
             <PillStyle tone="muted">Python {worker.python}</PillStyle>
             <PillStyle tone="muted">{formatBytes(worker.size_bytes)}</PillStyle>
             <PillStyle tone="muted">{usageText(worker.used_by)}</PillStyle>
@@ -628,7 +656,8 @@ function WorkerDetail({ name }: { name: string }) {
                 first: if they do not fit together nothing changes.
               </Text>
               <Spacing mt={2}>
-                <PackageEditor onChange={setDraft} value={draft || []} />
+                <PackageEditor held={held} locked={locked} onChange={setDraft}
+                  value={draft || []} />
               </Spacing>
               {error && (
                 <Spacing mt={2}><ErrorCallout message={error} title="Not saved" /></Spacing>
