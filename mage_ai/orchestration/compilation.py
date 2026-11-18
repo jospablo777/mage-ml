@@ -20,11 +20,13 @@ until a block whose own output is needed (plans.output_needed) or another connec
 profile.
 """
 import logging
+import os
 import re
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 # Seconds a save waits for more saves before compiling, so typing does not compile.
@@ -289,7 +291,139 @@ def _check_python(pipeline, unit: Unit) -> None:
             )
     if errors:
         raise CompileError('\n\n'.join(errors))
+    unit.warnings.extend(_missing_imports(pipeline, unit.block_uuids))
     unit.state = 'checked'
+
+
+def _imported(tree) -> List[str]:
+    """The top-level modules a block imports, but those inside a try: an import there may
+    be optional, as when a block falls back to another library."""
+    import ast
+
+    found = []
+
+    def visit(node, guarded):
+        for child in ast.iter_child_nodes(node):
+            inside = guarded or isinstance(child, ast.Try)
+            if isinstance(child, ast.Import) and not guarded:
+                found.extend(alias.name.split('.')[0] for alias in child.names)
+            elif isinstance(child, ast.ImportFrom) and not guarded and not child.level:
+                found.append((child.module or '').split('.')[0])
+            visit(child, inside)
+
+    visit(tree, False)
+    return [m for m in dict.fromkeys(found) if m]
+
+
+# Prints, as JSON, the modules given that this Python cannot import.
+_FIND_SPECS = (
+    'import importlib.util, json, sys\n'
+    'print(json.dumps([m for m in sys.argv[1:] if importlib.util.find_spec(m) is None]))'
+)
+
+
+def _absent(python: Optional[str], modules: List[str], repo_path: str) -> List[str]:
+    """The modules an interpreter cannot import (MageML's own when python is None)."""
+    import importlib.util
+    import json
+    import subprocess
+
+    if not modules:
+        return []
+    if python is None:
+        return [m for m in modules if importlib.util.find_spec(m) is None]
+    path = os.pathsep.join([repo_path, os.path.dirname(repo_path)])
+    try:
+        result = subprocess.run(
+            [python, '-I', '-c', _FIND_SPECS, *modules], capture_output=True, text=True,
+            timeout=30, env=dict(os.environ, PYTHONPATH=path),
+        )
+        return json.loads(result.stdout) if result.returncode == 0 else []
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+
+
+def _missing_imports(pipeline, uuids: List[str]) -> List[str]:
+    """
+    Each Python block's imports its environment does not have: its Python worker, or
+    MageML's own Python. Warnings, not errors (an import may be optional); each names the
+    workers that have the module and the two ways to fix it.
+    """
+    import ast
+    import sys
+
+    from mage_ai.data_preparation import environments
+
+    repo_path = pipeline.repo_path
+    try:
+        workers = environments.named_workers(repo_path)
+    except environments.PipelineEnvironmentError:
+        return []
+    project = {p.stem for p in Path(repo_path).iterdir()} | {Path(repo_path).name}
+    # Where each block runs: a worker's alias, or None for MageML's Python.
+    needs: Dict[Optional[str], Dict[str, List[str]]] = {}
+    for uuid in uuids:
+        block = pipeline.get_block(uuid)
+        try:
+            tree = ast.parse(_code(block))
+        except SyntaxError:
+            continue
+        selection = environments.worker_selection(block)
+        if selection not in (None, 'mage') and selection not in workers:
+            continue
+        if selection is None and getattr(pipeline, 'environment', None):
+            # A requirements environment of the pipeline: built at run time.
+            continue
+        alias = None if selection in (None, 'mage') else selection
+        modules = [
+            m for m in _imported(tree)
+            if m not in sys.stdlib_module_names and m not in project
+            and m not in ('mage_ai', '__future__')
+        ]
+        if modules:
+            needs.setdefault(alias, {})[uuid] = modules
+
+    def interpreter(alias):
+        return None if alias is None else str(workers[alias].python_executable)
+
+    def name(alias):
+        return "MageML's Python" if alias is None else \
+            f'{workers[alias].display_name} ({alias})'
+
+    warnings = []
+    absent_in: Dict[Optional[str], set] = {}
+    for alias, blocks in needs.items():
+        if alias is not None and not workers[alias].prepared:
+            continue
+        wanted = sorted({m for modules in blocks.values() for m in modules})
+        absent_in[alias] = set(_absent(interpreter(alias), wanted, repo_path))
+    missing_anywhere = sorted(set().union(*absent_in.values())) if absent_in else []
+    # Where the missing modules can be found: MageML's Python and each prepared worker.
+    found_in: Dict[str, List[str]] = {m: [] for m in missing_anywhere}
+    if missing_anywhere:
+        candidates = [None] + [a for a, w in workers.items() if w.prepared]
+        for alias in candidates:
+            absent = set(_absent(interpreter(alias), missing_anywhere, repo_path))
+            for module in missing_anywhere:
+                if module not in absent:
+                    found_in[module].append(alias)
+    for alias, blocks in needs.items():
+        for uuid, modules in blocks.items():
+            for module in modules:
+                if module not in absent_in.get(alias, ()):
+                    continue
+                others = [name(a) for a in found_in.get(module, []) if a != alias]
+                where = f'; {", ".join(others)} has it' if others else ''
+                choose = ' or choose that worker for the block' if others else ''
+                if alias is None:
+                    fix = f'install it in the project (requirements.txt){choose}'
+                else:
+                    fix = (f'add it to {workers[alias].relative_definition()}/pyproject.toml '
+                           f'and run uv lock{choose}')
+                warnings.append(
+                    f'{uuid} imports {module}, which {name(alias)} does not have{where}: {fix}.'
+                )
+    return warnings
 
 
 # Parses each file given; prints "<path>\t<message>" for each that does not parse, with

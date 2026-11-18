@@ -326,3 +326,74 @@ class CompilationTest(DBTestCase):
 
         with patch.dict('os.environ', {'MAGE_COMPILE_ON_START': 'off'}):
             self.assertIsNone(compilation.compile_active_pipelines(self.repo_path))
+
+
+IMPORTS = '''
+import json
+import pandas as pd
+import missing_package_for_compile_test
+from {project}.utils import helper
+
+try:
+    import optional_package_for_compile_test
+except ImportError:
+    optional_package_for_compile_test = None
+
+
+@data_loader
+def load(*args, **kwargs):
+    return pd.DataFrame({{'a': [1]}})
+'''
+
+
+class ImportCheckTest(DBTestCase):
+    """Compiling checks each Python block's imports in the environment it runs in."""
+
+    def pipeline(self, configuration=None):
+        pipeline = Pipeline.create(self._testMethodName, repo_path=self.repo_path)
+        self.addCleanup(pipeline.delete)
+        block = Block.create(f'{self._testMethodName}_load', 'data_loader', self.repo_path,
+                             language='python', configuration=configuration)
+        Path(block.file_path).write_text(textwrap.dedent(
+            IMPORTS.format(project=Path(self.repo_path).name)))
+        pipeline.add_block(block)
+        return Pipeline.get(pipeline.uuid, repo_path=self.repo_path), block.uuid
+
+    def test_an_import_mageml_python_lacks_is_a_warning_and_the_rest_pass(self):
+        pipeline, uuid = self.pipeline()
+        warnings = compilation._missing_imports(pipeline, [uuid])
+        self.assertEqual(warnings, [
+            f'{uuid} imports missing_package_for_compile_test, which MageML\'s Python does not '
+            'have: install it in the project (requirements.txt).',
+        ])
+
+    def test_a_worker_without_the_module_names_the_one_that_has_it(self):
+        from types import SimpleNamespace
+
+        from mage_ai.data_preparation import environments
+
+        def worker(alias, label):
+            return SimpleNamespace(
+                alias=alias, label=label, display_name=label, prepared=True,
+                python_executable=Path(f'/envs/{alias}/bin/python'),
+                relative_definition=lambda: f'python_workers/{alias}',
+            )
+
+        workers = dict(feast=worker('feast', 'Feast worker'),
+                       inference=worker('inference', 'ML inference worker'))
+
+        def absent(python, modules, repo_path):
+            if python == '/envs/inference/bin/python':
+                return []
+            return [m for m in modules if m.endswith('_compile_test')]
+
+        pipeline, uuid = self.pipeline(configuration=dict(python_worker='feast'))
+        with patch.object(environments, 'named_workers', return_value=workers), \
+                patch.object(compilation, '_absent', side_effect=absent):
+            warnings = compilation._missing_imports(pipeline, [uuid])
+        self.assertEqual(warnings, [
+            f'{uuid} imports missing_package_for_compile_test, which Feast worker (feast) does '
+            'not have; ML inference worker (inference) has it: add it to '
+            'python_workers/feast/pyproject.toml and run uv lock or choose that worker for '
+            'the block.',
+        ])

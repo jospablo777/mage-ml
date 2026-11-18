@@ -27,6 +27,15 @@
 - Python workers can have a name and a description for people: `label = "Feast worker"`
   and `description` under `[tool.mageml.worker]` in the worker's `pyproject.toml`. The
   editor shows them in the worker lists and settings; changing them needs no new prepare.
+- Add a Python worker from a template (Feast, MLflow, ML inference, Polars, or empty): `mage
+  workers new <name> --template feast`, or **Add a Python worker** in the pipeline's
+  settings. It is written, locked with uv and prepared, with uv's output on the page.
+- `mage workers assign feast <pipeline> --chain <block>` moves every block of a chain (or
+  `--blocks a,b`) to a Python worker at once.
+- Compiling checks each Python block's imports in the environment it runs in (its Python
+  worker, or MageML's Python) and warns about a module that is not there, naming the
+  workers that have it: "score imports onnxruntime, which Feast worker (feast) does not
+  have; ML inference worker (inference) has it". Imports inside `try` are left alone.
 - A block whose upstream block returned a Python object that does not read back in its
   environment (a pickle written with other packages) fails with the object's type and what
   to return instead: a table, JSON values or a file, or both blocks in one Python worker.
