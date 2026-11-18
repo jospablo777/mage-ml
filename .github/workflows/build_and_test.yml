@@ -380,7 +380,10 @@ jobs:
           print(" ".join(names))' > /tmp/r-sysdeps
           # rv builds a package from source when the binary repository has no build of its
           # version (curl 8.0.0 on 2026-11-18), and sysdeps did not list curl's headers.
-          echo libcurl4-openssl-dev >> /tmp/r-sysdeps
+          # Headers of R packages that build from source when their binary is missing:
+          # curl, and systemfonts and textshaping (fontconfig, freetype, harfbuzz, fribidi).
+          echo libcurl4-openssl-dev libfontconfig1-dev libfreetype6-dev libharfbuzz-dev \
+            libfribidi-dev libpng-dev libtiff-dev libjpeg-dev >> /tmp/r-sysdeps
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
           sudo apt-get update
           sudo apt-get install -y $(cat /tmp/r-sysdeps)

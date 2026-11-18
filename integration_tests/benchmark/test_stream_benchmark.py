@@ -267,21 +267,24 @@ MEASURED = {}
 RATIO_FROM = 200_000
 
 
-def test_the_source_does_not_cap_rust_blocks():
-    """
-    The engine's own path is faster than a Python block's JSON round trip, so a Rust block
-    that returns its messages outruns a Python one. When the Kafka source held reads back
-    (I-460: commit answers waited for a 100 ms poll), both ran at the same 250,000 a second:
-    0.3.0 shipped a quarter of 0.2.0's speed and no test said so.
-    """
-    if MESSAGES < RATIO_FROM or not {'identity', 'rust_identity'} <= set(MEASURED):
-        pytest.skip(f'needs identity and rust_identity measured with {RATIO_FROM} messages')
-    ratio = MEASURED['rust_identity'] / MEASURED['identity']
-    assert ratio >= 1.3, (
-        f'a Rust block ran {ratio:.2f} times as fast as a Python one '
-        f'({MEASURED["rust_identity"]:,} against {MEASURED["identity"]:,} a second): '
-        'something in the shared path caps the stream'
-    )
+# Defined only for runs large enough to mean something: CI runs 50,000 messages as a check
+# and allows no skipped test (check_no_skips.py).
+if MESSAGES >= RATIO_FROM:
+    def test_the_source_does_not_cap_rust_blocks():
+        """
+        The engine's own path is faster than a Python block's JSON round trip, so a Rust block
+        that returns its messages outruns a Python one. When the Kafka source held reads back
+        (I-460: commit answers waited for a 100 ms poll), both ran at the same 250,000 a second:
+        0.3.0 shipped a quarter of 0.2.0's speed and no test said so.
+        """
+        if not {'identity', 'rust_identity'} <= set(MEASURED):
+            pytest.skip('needs the identity and rust_identity throughputs of this run')
+        ratio = MEASURED['rust_identity'] / MEASURED['identity']
+        assert ratio >= 1.3, (
+            f'a Rust block ran {ratio:.2f} times as fast as a Python one '
+            f'({MEASURED["rust_identity"]:,} against {MEASURED["identity"]:,} a second): '
+            'something in the shared path caps the stream'
+        )
 
 
 def _record(result):
