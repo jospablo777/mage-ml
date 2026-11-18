@@ -414,6 +414,49 @@ class NamedWorkerTest(DBTestCase):
         self.assertNotIn('python_worker', pipeline.get_block(load).configuration or {})
         self.assertEqual(pipeline.get_block(transform).configuration['python_worker'], 'mage')
 
+    def test_workers_combine_with_the_same_versions_with_changes_or_not_at_all(self):
+        environments._combine_cache.clear()
+        self.worker('old-six', dependencies=['six==1.16.0'])
+        # Not named packaging: a project cannot depend on itself.
+        self.worker('pack-tools', dependencies=['packaging==24.1', 'six==1.16.0'])
+        self.worker('any-six', dependencies=['six>=1.16'])
+        self.worker('new-six', dependencies=['six==1.17.0'])
+
+        same = environments.combine_check(self.repo_path, ['old-six', 'pack-tools'])
+        self.assertEqual(same['state'], 'same')
+        # six, which both install, once.
+        self.assertGreater(same['saved_bytes'], 0)
+        self.assertEqual(same['saved_bytes'], same['sizes']['old-six'])
+        self.assertEqual(same['combined_size'] + same['saved_bytes'], sum(same['sizes'].values()))
+
+        changes = environments.combine_check(self.repo_path, ['old-six', 'any-six'])
+        self.assertEqual(changes['state'], 'changes')
+        self.assertEqual(changes['changes']['any-six'],
+                         [dict(package='six', **{'from': '1.17.0', 'to': '1.16.0'})])
+        self.assertEqual(changes['changes']['old-six'], [])
+
+        conflict = environments.combine_check(self.repo_path, ['old-six', 'new-six'])
+        self.assertEqual(conflict['state'], 'conflict')
+        self.assertIn('six==1.16.0', conflict['reason'])
+        self.assertIn('unsatisfiable', conflict['reason'])
+
+        # Answers are kept by the locks: the same question again runs no resolution.
+        with patch.object(environments.subprocess, 'run', side_effect=AssertionError):
+            self.assertEqual(
+                environments.combine_check(self.repo_path, ['pack-tools', 'old-six'])['state'],
+                'same',
+            )
+
+    def test_a_worker_kept_apart_is_not_combined(self):
+        environments._combine_cache.clear()
+        folder = self.worker('gpu', dependencies=['six==1.16.0'])
+        self.worker('tools', dependencies=['six==1.16.0'])
+        pyproject = folder / 'pyproject.toml'
+        pyproject.write_text(pyproject.read_text() + '\n[tool.mageml.worker]\ncombine = false\n')
+        result = environments.combine_check(self.repo_path, ['gpu', 'tools'])
+        self.assertEqual((result['state'], result['reason']),
+                         ('kept_apart', 'gpu says combine = false.'))
+
     def test_the_digest_of_a_worker_without_mageml_settings_is_unchanged(self):
         # Workers prepared before labels existed keep their environments.
         text = b'[project]\nname = "x"\n\n[tool.uv]\nindex-url = "https://example.com"\n'

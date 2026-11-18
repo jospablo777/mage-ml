@@ -9,3 +9,4 @@ pub mod protocol;
 pub mod redact;
 pub mod run_rules;
 pub mod time;
+pub mod workers;

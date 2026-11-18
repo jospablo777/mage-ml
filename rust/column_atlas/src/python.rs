@@ -290,10 +290,53 @@ fn plan_pipeline(input: String) -> PyResult<String> {
     mage_service_core::plan::plan_json(&input).map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
+/// What a Python worker's uv.lock installs on a platform ("linux-x86_64", "linux-aarch64",
+/// "macos-arm64") for CPython `python` ("3.12"): JSON {bytes, built}.
+#[pyfunction]
+fn worker_lock_size(lock: String, platform: String, python: String) -> PyResult<String> {
+    use mage_service_core::workers::{Lock, Platform};
+
+    let platform: Platform = serde_json::from_value(serde_json::Value::String(platform))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("platform: {e}")))?;
+    let lock =
+        Lock::parse(&lock).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    json(&lock.size(platform, &python))
+}
+
+/// What several Python workers' uv.lock files install as one environment on a platform: a
+/// package they share at one version counts once. JSON {bytes, built}.
+#[pyfunction]
+fn worker_locks_size(locks: Vec<String>, platform: String, python: String) -> PyResult<String> {
+    use mage_service_core::workers::{combined_size, Lock, Platform};
+
+    let platform: Platform = serde_json::from_value(serde_json::Value::String(platform))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("platform: {e}")))?;
+    let locks = locks
+        .iter()
+        .map(|text| Lock::parse(text))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    json(&combined_size(&locks, platform, &python))
+}
+
+/// The packages whose version a combined resolution (`name==version` lines) changes in a
+/// worker's uv.lock: JSON list of {package, from, to}.
+#[pyfunction]
+fn worker_lock_changes(lock: String, resolved: String) -> PyResult<String> {
+    use mage_service_core::workers::{changes, Lock};
+
+    let lock =
+        Lock::parse(&lock).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    json(&changes(&lock, &resolved))
+}
+
 #[pymodule]
 fn column_atlas_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(log_window, module)?)?;
     module.add_function(wrap_pyfunction!(plan_pipeline, module)?)?;
+    module.add_function(wrap_pyfunction!(worker_lock_size, module)?)?;
+    module.add_function(wrap_pyfunction!(worker_locks_size, module)?)?;
+    module.add_function(wrap_pyfunction!(worker_lock_changes, module)?)?;
     module.add_function(wrap_pyfunction!(log_search, module)?)?;
     #[cfg(feature = "postgres")]
     {

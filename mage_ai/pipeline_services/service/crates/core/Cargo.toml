@@ -11,3 +11,5 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Python workers' uv.lock files (workers.rs).
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }

@@ -30,6 +30,7 @@ decorators, its upstream outputs and variables come in as Arrow, JSON or pickle 
 its outputs and test results go back the same way and Mage stores them as for any
 block. Everything the block prints reaches its logs as it runs.
 """
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -276,11 +277,21 @@ def _uv() -> str:
 
 
 def _uv_version() -> str:
+    """uv's version, asked once per uv binary: every worker's identity includes it."""
+    try:
+        uv = _uv()
+        return _uv_version_of(uv, os.stat(uv).st_mtime_ns)
+    except (OSError, PipelineEnvironmentError):
+        return 'unknown'
+
+
+@functools.lru_cache(maxsize=8)
+def _uv_version_of(uv: str, modified: int) -> str:
     try:
         return subprocess.run(
-            [_uv(), '--version'], capture_output=True, text=True, timeout=30,
+            [uv, '--version'], capture_output=True, text=True, timeout=30,
         ).stdout.strip()
-    except (OSError, subprocess.SubprocessError, PipelineEnvironmentError):
+    except (OSError, subprocess.SubprocessError):
         return 'unknown'
 
 
@@ -650,6 +661,131 @@ def assign_worker(pipeline, block_uuids: List[str], alias: Optional[str]) -> Lis
         block.update(dict(configuration=configuration))
         changed.append(block.uuid)
     return changed
+
+
+# Answers of combine_check by the workers' identities: a resolution takes seconds and the
+# answer holds as long as the locks do.
+_combine_cache: Dict[Tuple, Dict] = {}
+_combine_lock = threading.Lock()
+
+
+def combine_check(repo_path: str, aliases: List[str]) -> Dict:
+    """
+    Whether the Python workers can run as one environment (WORKERS_V2.md, merging):
+
+    - same: their packages resolve together at the versions their locks hold;
+    - changes: they resolve together if some packages change version (changes, per worker);
+    - conflict: they do not (reason, uv's explanation in a line);
+    - kept_apart: a worker says combine = false;
+    - unchecked: uv could not reach the package index (reason).
+
+    Sizes are what each lock installs on Linux x86-64, and what the workers install together
+    when their versions are the same.
+    """
+    import tempfile
+    import tomllib
+
+    import column_atlas_native
+
+    workers = named_workers(repo_path)
+    chosen = []
+    for alias in dict.fromkeys(normalized_alias(a) for a in aliases):
+        worker = workers.get(alias)
+        if worker is None:
+            raise PipelineEnvironmentError(f'There is no Python worker {alias}.')
+        if not (Path(worker.definition) / 'uv.lock').is_file():
+            raise PipelineEnvironmentError(
+                f'Python worker {alias} has no uv.lock: run uv lock in '
+                f'{worker.relative_definition()}.'
+            )
+        chosen.append(worker)
+    if len(chosen) < 2:
+        raise PipelineEnvironmentError('Name two Python workers or more to combine.')
+    key = tuple(sorted((w.alias, w.digest, w.python) for w in chosen)) + (_uv_version(),)
+    with _combine_lock:
+        if key in _combine_cache:
+            return dict(_combine_cache[key])
+
+    names = {w.alias: w.display_name for w in chosen}
+    locks = {w.alias: (Path(w.definition) / 'uv.lock').read_text() for w in chosen}
+    sizes = {
+        alias: json.loads(column_atlas_native.worker_lock_size(text, 'linux-x86_64',
+                                                               chosen[0].python))['bytes']
+        for alias, (text) in locks.items()
+        for w in [next(x for x in chosen if x.alias == alias)]
+    }
+    result = dict(workers=[w.alias for w in chosen], names=names, sizes=sizes)
+    kept = [w for w in chosen if not w.combine]
+    if kept:
+        result.update(state='kept_apart', reason=(
+            f'{", ".join(w.display_name for w in kept)} '
+            f'{"says" if len(kept) == 1 else "say"} combine = false.'
+        ))
+    elif len({w.python for w in chosen}) > 1:
+        result.update(state='conflict', reason='They use different Python versions: ' + ', '.join(
+            f'{w.display_name} {w.python}' for w in chosen) + '.')
+    else:
+        uv = _uv()
+        with tempfile.TemporaryDirectory(prefix='mage_combine_') as directory:
+            folder = Path(directory)
+            requirements, constraints = [], []
+            for worker in chosen:
+                project = tomllib.loads(
+                    (Path(worker.definition) / 'pyproject.toml').read_text()).get('project') or {}
+                requirements += project.get('dependencies') or []
+                exported = subprocess.run(
+                    [uv, 'export', '--frozen', '--no-hashes', '--no-emit-project', '--quiet',
+                     '--project', worker.definition],
+                    capture_output=True, text=True, timeout=120,
+                )
+                path = folder / f'{worker.alias}.txt'
+                path.write_text(exported.stdout)
+                constraints += ['-c', str(path)]
+            (folder / 'combined.in').write_text('\n'.join(dict.fromkeys(requirements)) + '\n')
+            compile_ = [uv, 'pip', 'compile', '--quiet', '--universal', '--python-version',
+                        chosen[0].python, str(folder / 'combined.in'), '-o',
+                        str(folder / 'combined.txt')]
+            pinned = subprocess.run(compile_ + constraints, capture_output=True, text=True,
+                                    timeout=300)
+            if pinned.returncode == 0:
+                result.update(state='same', changes={})
+            else:
+                free = subprocess.run(compile_, capture_output=True, text=True, timeout=300)
+                if free.returncode == 0:
+                    resolved = (folder / 'combined.txt').read_text()
+                    result.update(state='changes', changes={
+                        alias: json.loads(column_atlas_native.worker_lock_changes(text, resolved))
+                        for alias, text in locks.items()
+                    })
+                elif _offline(free.stderr):
+                    result.update(state='unchecked', reason=(
+                        'uv could not reach the package index to check them.'))
+                else:
+                    result.update(state='conflict', reason=_resolver_reason(free.stderr))
+    if result['state'] == 'same':
+        combined = json.loads(column_atlas_native.worker_locks_size(
+            list(locks.values()), 'linux-x86_64', chosen[0].python))['bytes']
+        result.update(combined_size=combined, saved_bytes=max(0, sum(sizes.values()) - combined))
+    if result['state'] != 'unchecked':
+        with _combine_lock:
+            _combine_cache[key] = dict(result)
+    return result
+
+
+def _offline(stderr: str) -> bool:
+    text = stderr.lower()
+    return any(s in text for s in ('failed to fetch', 'error sending request', 'dns error',
+                                   'network is unreachable', 'offline'))
+
+
+def _resolver_reason(stderr: str) -> str:
+    """uv's explanation of a conflict, in one line: its first 'Because ...' sentence."""
+    lines = [line.strip(' │╰─▶×') for line in stderr.splitlines()]
+    text = ' '.join(line for line in lines if line)
+    start = text.find('Because')
+    reason = text[start:] if start >= 0 else text
+    end = reason.find('unsatisfiable')
+    return (reason[:end + len('unsatisfiable')] + '.') if end >= 0 else reason[:400]
 
 
 def start_prepare(repo_path: str, alias: str, lock: bool = False) -> Dict:
