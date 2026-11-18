@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Security
+
+- lettre 0.11.24 in the engine (email alerts of exported services): 0.11.23 had six
+  advisories published on 2026-11-18.
+
 ### Behavior changes to check before upgrading
 
 - Consecutive Rust blocks with different connection profiles no longer compile into one

@@ -62,13 +62,17 @@ rust_audit() {
   # crate's TLS needs it to read MYSQL_SSL_CA; the SDK's mysql feature only.
   # webpki-roots 0.26.11 (RUSTSEC-2026-0381) has no fixed 0.26 release: it re-exports
   # webpki-roots 1.x, which is 1.0.10, the fixed roots (async-nats > tokio-websockets).
+  # chrono unmaintained (RUSTSEC-2026-0543), and through it chrono-tz (RUSTSEC-2026-0555)
+  # and humantime (RUSTSEC-2026-0542), 2026-11-18: notices, no known vulnerability. Polars
+  # 0.55.2 and object_store depend on chrono; MageML's own uses can move to jiff.
   local lock
   for lock in $(git ls-files '*Cargo.lock'); do
     echo "== Rust: $lock"
     cargo audit --file "$lock" --deny warnings \
       --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 \
       --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2025-0134 \
-      --ignore RUSTSEC-2026-0381 || status=1
+      --ignore RUSTSEC-2026-0381 \
+      --ignore RUSTSEC-2026-0543 --ignore RUSTSEC-2026-0555 --ignore RUSTSEC-2026-0542 || status=1
   done
 }
 
