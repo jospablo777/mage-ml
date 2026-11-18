@@ -84,9 +84,21 @@ test('a pipeline runs its Python blocks in a prepared worker', async ({ page }) 
   // The page says where each block runs, and that it fails until the worker is prepared.
   await page.reload();
   const blockRow = page.locator('tr').filter({ hasText: LOADER });
-  await expect(blockRow).toContainText('Tools worker');
-  await expect(blockRow).toContainText('the pipeline\'s default');
+  await expect(page.getByLabel(`Where ${LOADER} runs`)).toHaveValue('');
+  await expect(blockRow).toContainText('Default: Tools worker');
   await expect(blockRow).toContainText('Not prepared');
+  // The table chooses where a block runs, saved with the settings.
+  const blockWorker = async () => (await api.call('GET', `pipelines/${pipelineUUID}`))
+    .pipeline.blocks.find(block => block.uuid === LOADER).configuration?.python_worker ?? null;
+  const save = page.getByRole('button', { name: 'Save pipeline settings' });
+  await page.getByLabel(`Where ${LOADER} runs`).selectOption('mage');
+  await expect(blockRow).toContainText('Ready');
+  await save.click();
+  await expect.poll(blockWorker).toBe('mage');
+  await page.getByLabel(`Where ${LOADER} runs`).selectOption('');
+  await expect(blockRow).toContainText('Not prepared');
+  await save.click();
+  await expect.poll(blockWorker).toBe(null);
   // So does the block in the editor.
   await page.goto(`/pipelines/${pipelineUUID}/edit`);
   await expect(page.getByRole('button', { name: 'Python worker: Tools worker · not prepared' }))

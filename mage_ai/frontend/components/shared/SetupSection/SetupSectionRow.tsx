@@ -25,6 +25,8 @@ interface InputType {
 type SetupSectionRowProps = {
   children?: any;
   description?: any | string;
+  // Below the row, the row's full width: for content wider than the description.
+  footer?: any;
   inputFlex?: number;
   invalid?: boolean;
   large?: boolean;
@@ -48,6 +50,7 @@ type SetupSectionRowProps = {
 function SetupSectionRow({
   children,
   description,
+  footer,
   inputFlex = 3,
   invalid,
   large = true,
@@ -154,6 +157,8 @@ function SetupSectionRow({
           )}
         </Flex>
       </FlexContainer>
+
+      {footer}
     </div>
   );
 }

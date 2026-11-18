@@ -21,7 +21,7 @@ function PipelineSettings({
   const router = useRouter();
   const [errors, setErrors] = useState<ErrorsType>(null);
   const pipelineUUID = pipelineProp?.uuid;
-  const { data } = api.pipelines.detail(pipelineUUID);
+  const { data, mutate: fetchPipeline } = api.pipelines.detail(pipelineUUID);
   const pipeline = {
     ...data?.pipeline,
     ...pipelineProp,
@@ -38,6 +38,9 @@ function PipelineSettings({
 
               if (pipelineUUID !== uuid) {
                 window.location.href = `${router?.basePath}/pipelines/${uuid}/settings`;
+              } else {
+                // The blocks' workers and what follows from them, as saved.
+                fetchPipeline();
               }
             }
           },

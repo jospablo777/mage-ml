@@ -1,3 +1,4 @@
+import styled from 'styled-components';
 import {
   useCallback,
   useEffect,
@@ -34,6 +35,7 @@ import {
 } from '@storage/constants';
 import {
   PADDING_UNITS,
+  UNIT,
   UNITS_BETWEEN_ITEMS_IN_SECTIONS,
   UNITS_BETWEEN_SECTIONS,
 } from '@oracle/styles/units/spacing';
@@ -48,6 +50,13 @@ type PipelineSettingsProps = {
   pipeline: PipelineType;
   updatePipeline: (pipeline: PipelineType) => void;
 };
+
+// The section's tools under its row: wider than the description column, narrower than
+// the page.
+const FooterStyle = styled.div`
+  margin-top: ${UNIT}px;
+  max-width: ${UNIT * 100}px;
+`;
 
 function PipelineSettings({
   isPipelineUpdating,
@@ -100,6 +109,9 @@ function PipelineSettings({
   }, [blocks, pipeline, workers]);
 
   const [pipelineAttributesTouched, setPipelineAttributesTouched] = useState<boolean>(false);
+  // Where Python blocks run, chosen in the blocks' table and saved with the settings:
+  // block UUID to its python_worker ('' for the pipeline's default).
+  const [blockWorkers, setBlockWorkers] = useState<{ [block: string]: string }>({});
 
   const [editCustomExecutorType, setEditCustomExecutorType] = useState<boolean>(false);
   const [pipelineAttributes, setPipelineAttributesState] = useState<PipelineType>(null);
@@ -385,9 +397,18 @@ function PipelineSettings({
                   This project has no Python workers yet: add one from a template below.
                 </Text>
               )}
+            </>
+          )}
+          footer={(
+            <FooterStyle>
               <BlockWorkers
                 blocks={blocks}
+                choices={blockWorkers}
                 defaultWorker={pipelineAttributes?.environment?.worker}
+                onChoose={(block, worker) => {
+                  setPipelineAttributesTouched(true);
+                  setBlockWorkers(prev => ({ ...prev, [block]: worker }));
+                }}
                 workers={workers}
               />
               {!!pipelineAttributes?.environment?.worker && (
@@ -423,7 +444,7 @@ function PipelineSettings({
                   }));
                 }}
               />
-            </>
+            </FooterStyle>
           )}
           selectInput={{
             labelFixed: 'Default for this pipeline',
@@ -846,6 +867,19 @@ function PipelineSettings({
               name: pipelineAttributes?.name,
               retry_config: pipelineAttributes?.retry_config,
               block_fusion: pipelineAttributes?.block_fusion || null,
+              // Only the blocks whose worker changed. null, not a missing key: an empty
+              // configuration would not be saved.
+              blocks: blocks
+                .filter(block => block.uuid in blockWorkers
+                  && (blockWorkers[block.uuid] || null)
+                    !== (block?.configuration?.python_worker || null))
+                .map(block => ({
+                  configuration: {
+                    ...block?.configuration,
+                    python_worker: blockWorkers[block.uuid] || null,
+                  },
+                  uuid: block.uuid,
+                })),
               keep_block_outputs: !!pipelineAttributes?.keep_block_outputs,
               run_pipeline_in_one_process: pipelineAttributes?.run_pipeline_in_one_process,
               settings: pipelineAttributes?.settings,

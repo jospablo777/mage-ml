@@ -137,8 +137,8 @@ mage workers assign mage my_pipeline --blocks score             # MageML's own P
 
 In the editor, the pipeline's **Settings** has **Where Python blocks run**: the default
 worker for the pipeline's Python blocks, prepared with **Prepare** (uv's output on the
-page), and a table of every Python block with where it runs and whether that worker is
-ready; a worker a block chose that is not prepared has its **Prepare** there too. Each
+page), and a table of every Python block with where it runs, which changes it for any of
+them, and whether that worker is ready; a worker a block chose that is not prepared has its **Prepare** there too. Each
 block's settings start with **Where this block runs**, and a block in a worker
 shows it in its header (with "not prepared" while it would fail); the dependency graph
 names it too. In `metadata.yaml`, a block selects its
