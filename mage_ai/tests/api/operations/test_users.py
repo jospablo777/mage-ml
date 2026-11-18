@@ -27,12 +27,17 @@ class UserOperationTests(BaseApiTestCase):
         self.assertEqual(User.get_by_id(response['user']['id']).email, email)
 
     async def test_execute_create_unauthorized(self):
+        user = create_user()
+        # The users other tests left: test_execute_create's only when it ran first, in the
+        # same process.
+        count = User.query.count()
+
         async def _func():
             await self.base_test_execute_create(dict(
                 email=self.faker.email(),
                 password='water_lightning',
                 password_confirmation='water_lightning',
-            ), user=create_user(), after_create_count=3, before_create_count=2)
+            ), user=user, after_create_count=count + 1, before_create_count=count)
 
         await self.assertRaisesAsync(Exception, _func)
 
